@@ -3,7 +3,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.sendWelcomeEmail = exports.sendPasswordResetEmail = exports.sendOtpEmail = void 0;
 const resend_1 = require("resend");
 const resend = new resend_1.Resend(process.env.RESEND_API_KEY);
-const FROM_EMAIL = process.env.RESEND_FROM_EMAIL || 'noreply@homeease.com';
+const FROM_EMAIL = process.env.RESEND_FROM_EMAIL || 'onboarding@resend.dev';
 const sendOtpEmail = async (email, otp) => {
     await resend.emails.send({
         from: FROM_EMAIL,
