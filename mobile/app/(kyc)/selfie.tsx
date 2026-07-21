@@ -22,6 +22,12 @@ export default function SelfieScreen() {
   const [compressing, setCompressing] = useState(false);
   const isWorker = user?.role === "worker";
 
+  // Clients only need ID + selfie; workers continue on to
+  // clearances/certifications, resume, then the contract.
+  const stepperSteps = isWorker
+    ? ["ID", "Selfie", "Certifications", "Resume", "Contract"]
+    : ["ID", "Selfie", "Contract"];
+
   useEffect(() => {
     if (!permission) {
       requestPermission();
@@ -80,7 +86,7 @@ export default function SelfieScreen() {
 
   const handleContinue = () => {
     if (isWorker) {
-      router.push("/(kyc)/certifications");
+      router.push("/(kyc)/documents");
     } else {
       router.push("/(kyc)/contract");
     }
@@ -187,11 +193,7 @@ export default function SelfieScreen() {
         className="flex-1"
         contentContainerStyle={{ paddingHorizontal: 24, paddingBottom: 40 }}
       >
-        <StepperHorizontal
-          steps={["ID", "Selfie", "Certs", "Resume"]}
-          currentStep={1}
-        />
-        <Text className="text-text-secondary text-sm mb-4">Step 2 of 4</Text>
+        <StepperHorizontal steps={stepperSteps} currentStep={1} />
 
         {capturedUri ? (
           // Show the actual captured photo

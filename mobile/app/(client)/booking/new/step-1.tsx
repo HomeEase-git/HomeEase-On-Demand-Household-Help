@@ -1,4 +1,4 @@
-import React, { useState, useRef, useMemo } from "react";
+import React, { useState, useRef, useMemo, useEffect } from "react";
 import { View, Text, ScrollView, Pressable, Alert } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
@@ -7,6 +7,7 @@ import ScreenHeader from "../../../../components/ui/ScreenHeader";
 import StepperHorizontal from "../../../../components/steppers/StepperHorizontal";
 import InputField from "../../../../components/ui/InputField";
 import PrimaryButton from "../../../../components/ui/PrimaryButton";
+import OutlinedButton from "../../../../components/ui/OutlinedButton";
 import PriceBreakdownCard from "../../../../components/ui/PriceBreakdown";
 import AddOnsSelector from "../../../../components/ui/AddOnsSelector";
 import ServiceTypePickerBottomSheet from "../../../../components/bottom-sheets/ServiceTypePickerBottomSheet";
@@ -20,6 +21,7 @@ import {
 import { calculatePriceBreakdown } from "../../../../utils/pricing";
 import type { BottomSheetHandle } from "../../../../components/bottom-sheets/BottomSheetWrapper";
 import { colors } from "../../../../constants";
+import InvalidationBanner from "../../../../components/ui/InvalidationBanner";
 
 export default function BookingStep1Screen() {
   const router = useRouter();
@@ -31,6 +33,29 @@ export default function BookingStep1Screen() {
   const [selectedAddOns, setSelectedAddOns] = useState<string[]>([]);
   const addressSet = !!draft.address;
   const serviceSheetRef = useRef<BottomSheetHandle | null>(null);
+
+  // Hydrate local state from draft on mount and whenever draft changes
+  useEffect(() => {
+    setCategory(draft.category);
+    setDescription(draft.description);
+    setSelectedAddOns(draft.selectedAddOnIds || []);
+
+    // Resolve selectedTask from draft.selectedTaskId
+    if (draft.selectedTaskId && draft.category) {
+      const config = serviceConfigs.find(
+        (c) => c.categoryName.toLowerCase() === draft.category?.toLowerCase(),
+      );
+      const task = config?.tasks.find((t) => t.id === draft.selectedTaskId);
+      setSelectedTask(task || null);
+    } else {
+      setSelectedTask(null);
+    }
+  }, [
+    draft.category,
+    draft.description,
+    draft.selectedTaskId,
+    draft.selectedAddOnIds,
+  ]);
 
   // Find matching service config for the selected category
   const serviceConfig = useMemo(() => {
@@ -61,13 +86,19 @@ export default function BookingStep1Screen() {
     return calculatePriceBreakdown(selectedTask.basePrice, 1, addOnTotal, 0);
   }, [selectedTask, serviceConfig, selectedAddOns]);
 
-  const estimatedPrice =
-    selectedTask && serviceConfig
-      ? computeEstimatedPrice(selectedTask, selectedAddOns, serviceConfig)
-      : 0;
+  // Guard: if entrySource is worker_profile or book_again and category doesn't resolve,
+  // show error and prevent navigation (prevents silent data corruption)
+  const unresolvableCategory =
+    (draft.entrySource === "worker_profile" ||
+      draft.entrySource === "book_again") &&
+    category &&
+    !serviceConfig;
 
   const canNext =
-    category && addressSet && (!serviceConfig || selectedTask !== null);
+    category &&
+    addressSet &&
+    (!serviceConfig || selectedTask !== null) &&
+    !unresolvableCategory;
 
   return (
     <SafeAreaView className="flex-1 bg-primary-white">
@@ -80,6 +111,26 @@ export default function BookingStep1Screen() {
           steps={["Service", "Schedule", "Payment"]}
           currentStep={0}
         />
+        <InvalidationBanner />
+        {unresolvableCategory && (
+          <View className="bg-error/10 border border-error/30 rounded-2xl p-4 mb-4 flex-row items-start">
+            <Ionicons
+              name="alert-circle"
+              size={20}
+              color={colors.error}
+              style={{ marginTop: 2, marginRight: 8 }}
+            />
+            <View className="flex-1">
+              <Text className="text-error font-bold text-sm">
+                Booking unavailable
+              </Text>
+              <Text className="text-error text-xs mt-1">
+                The service could not be matched to a bookable category. Please
+                start a new booking.
+              </Text>
+            </View>
+          </View>
+        )}
         <Text className="text-primary font-bold text-lg mt-4">
           Service Details
         </Text>
@@ -208,38 +259,55 @@ export default function BookingStep1Screen() {
           </Text>
         </Pressable>
 
-        {draft.workerId && (
-          <>
-            <Text className="text-text-secondary text-sm mb-1 mt-4">
-              Selected Worker
-            </Text>
-            {(() => {
-              const selectedWorker = workers.find(
-                (w) => w.id === draft.workerId,
-              );
-              return selectedWorker ? (
-                <View className="bg-card rounded-xl p-4 flex-row items-center mt-2">
-                  <Ionicons
-                    name="person-circle"
-                    size={32}
-                    color={colors.text.muted}
-                  />
-                  <View className="ml-3 flex-1">
-                    <Text className="text-primary font-semibold">
-                      {selectedWorker.name}
-                    </Text>
-                    <Text className="text-text-secondary text-xs">
-                      {selectedWorker.service}
-                    </Text>
+        <View className="mt-4">
+          <Text className="text-text-secondary text-sm mb-1">
+            Preferred Worker
+          </Text>
+          <View className="bg-card rounded-2xl p-4">
+            {draft.workerId ? (
+              (() => {
+                const selectedWorker = workers.find(
+                  (w) => w.id === draft.workerId,
+                );
+                return selectedWorker ? (
+                  <View className="flex-row items-center justify-between">
+                    <View className="flex-1">
+                      <Text className="text-primary font-semibold">
+                        {selectedWorker.name}
+                      </Text>
+                      <Text className="text-text-secondary text-xs">
+                        {selectedWorker.service} · ₱{selectedWorker.rate}/hr
+                      </Text>
+                    </View>
+                    <OutlinedButton
+                      label="Change"
+                      onPress={() => {
+                        if (draft.workerLocked) {
+                          Alert.alert(
+                            "Worker Locked",
+                            "This worker was selected from their profile or a previous booking and can't be changed from here. Please go back to change the service or booking.",
+                          );
+                          return;
+                        }
+                        router.push("/(client)/booking/select-worker");
+                      }}
+                    />
                   </View>
-                  <Pressable onPress={() => setDraft({ workerId: null })}>
-                    <Text className="text-accent text-sm">Change</Text>
-                  </Pressable>
-                </View>
-              ) : null;
-            })()}
-          </>
-        )}
+                ) : null;
+              })()
+            ) : (
+              <View>
+                <Text className="text-text-secondary text-sm mb-3">
+                  Please choose a specific worker for your booking.
+                </Text>
+                <OutlinedButton
+                  label="Choose a Worker"
+                  onPress={() => router.push("/(client)/booking/select-worker")}
+                />
+              </View>
+            )}
+          </View>
+        </View>
 
         <View className="mt-8">
           <PrimaryButton

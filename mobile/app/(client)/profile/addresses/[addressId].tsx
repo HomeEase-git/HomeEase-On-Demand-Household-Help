@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { View, Text, ScrollView, Alert, Pressable } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
@@ -8,33 +8,84 @@ import InputField from "../../../../components/ui/InputField";
 import PrimaryButton from "../../../../components/ui/PrimaryButton";
 import OutlinedButton from "../../../../components/ui/OutlinedButton";
 import { colors } from "../../../../constants";
+import { addressStorage } from "../../../../utils/storage";
+import * as api from "../../../../services/api";
 
 const LABEL_OPTIONS = ["Home", "Work", "Other"];
-
-const EXISTING_ADDRESSES: Record<string, { label: string; address: string }> = {
-  addr1: { label: "Home", address: "123 Rizal St., Hagonoy, Bulacan" },
-  addr2: { label: "Work", address: "456 Main Ave., Manila" },
-};
 
 export default function AddressEditScreen() {
   const router = useRouter();
   const { addressId } = useLocalSearchParams<{ addressId: string }>();
   const isNew = addressId === "new";
-  const existing = !isNew && addressId ? EXISTING_ADDRESSES[addressId] : null;
 
-  const [label, setLabel] = useState(existing?.label ?? "Home");
-  const [address, setAddress] = useState(existing?.address ?? "");
+  const [label, setLabel] = useState("Home");
+  const [street, setStreet] = useState("");
+  const [city, setCity] = useState("");
+  const [state, setState] = useState("");
+  const [zipCode, setZipCode] = useState("");
+  const [saving, setSaving] = useState(false);
 
-  const handleSave = () => {
-    if (!address.trim()) {
-      Alert.alert("Error", "Please enter an address.");
+  useEffect(() => {
+    const loadExisting = async () => {
+      if (!addressId || isNew) return;
+      const existing = await addressStorage.get(addressId);
+      if (existing) {
+        setLabel(existing.label ?? "Home");
+        setStreet(existing.street ?? "");
+        setCity(existing.city ?? "");
+        setState(existing.state ?? "");
+        setZipCode(existing.zipCode ?? "");
+      }
+    };
+
+    loadExisting();
+  }, [addressId, isNew]);
+
+  const handleSave = async () => {
+    if (!street.trim() || !city.trim() || !state.trim() || !zipCode.trim()) {
+      Alert.alert("Error", "Please fill in all address fields.");
       return;
     }
-    Alert.alert(
-      "Success",
-      isNew ? "Address added successfully." : "Address updated successfully.",
-      [{ text: "OK", onPress: () => router.back() }],
-    );
+
+    setSaving(true);
+    try {
+      if (isNew) {
+        const result = await api.addAddress({
+          label,
+          street,
+          city,
+          state,
+          zipCode,
+        });
+        await addressStorage.create({
+          label,
+          address: `${street}, ${city}, ${state} ${zipCode}`,
+        });
+      } else if (addressId) {
+        const result = await api.updateAddress(addressId, {
+          label,
+          street,
+          city,
+          state,
+          zipCode,
+        });
+        await addressStorage.update(addressId, {
+          label,
+          address: `${street}, ${city}, ${state} ${zipCode}`,
+        });
+      }
+
+      Alert.alert(
+        "Success",
+        isNew ? "Address added successfully." : "Address updated successfully.",
+        [{ text: "OK", onPress: () => router.back() }],
+      );
+    } catch (error) {
+      console.error("Address save error:", error);
+      Alert.alert("Error", "Unable to save address right now.");
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
@@ -62,29 +113,41 @@ export default function AddressEditScreen() {
           ))}
         </View>
 
-        <View className="w-full h-48 bg-card-dark rounded-2xl items-center justify-center mb-4">
-          <Ionicons
-            name="map-outline"
-            size={40}
-            color={colors.accent.DEFAULT}
-          />
-          <Text className="text-text-muted text-xs mt-2">
-            Map integration coming soon
-          </Text>
-        </View>
+        <InputField
+          label="Street Address"
+          value={street}
+          onChangeText={setStreet}
+          placeholder="e.g., 123 Rizal Street"
+        />
 
         <InputField
-          label="Full Address"
-          value={address}
-          onChangeText={setAddress}
-          placeholder="Street, Barangay, City, Province"
-          multiline
+          label="City"
+          value={city}
+          onChangeText={setCity}
+          placeholder="e.g., Manila"
+        />
+
+        <InputField
+          label="State/Province"
+          value={state}
+          onChangeText={setState}
+          placeholder="e.g., Bulacan"
+        />
+
+        <InputField
+          label="ZIP Code"
+          value={zipCode}
+          onChangeText={setZipCode}
+          placeholder="e.g., 1234"
+          keyboardType="number-pad"
         />
 
         <View className="gap-3 mt-2">
           <PrimaryButton
             label={isNew ? "Add Address" : "Save Changes"}
             fullWidth
+            loading={saving}
+            disabled={saving}
             onPress={handleSave}
           />
           <OutlinedButton label="Cancel" onPress={() => router.back()} />

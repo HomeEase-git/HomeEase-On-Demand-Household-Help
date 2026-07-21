@@ -1,5 +1,5 @@
-import React, { useState } from "react";
-import { View, Text, FlatList, Pressable } from "react-native";
+import React, { useEffect, useState } from "react";
+import { View, Text, FlatList, Pressable, Alert } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
@@ -7,6 +7,7 @@ import ScreenHeader from "../../../../components/ui/ScreenHeader";
 import CertificationCard from "../../../../components/cards/CertificationCard";
 import EmptyState from "../../../../components/feedback/EmptyState";
 import { colors } from "../../../../constants";
+import { certificationStorage } from "../../../../utils/storage";
 
 type Cert = {
   id: string;
@@ -17,37 +18,52 @@ type Cert = {
   status: string;
 };
 
-const INITIAL_CERTS: Cert[] = [
-  {
-    id: "cert1",
-    name: "Plumbing License",
-    issuer: "PRC",
-    issueDate: "2020-01-01",
-    expiryDate: "2025-01-01",
-    status: "Verified",
-  },
-  {
-    id: "cert2",
-    name: "Safety Training",
-    issuer: "TESDA",
-    issueDate: "2021-06-01",
-    expiryDate: "2024-06-01",
-    status: "Verified",
-  },
-];
-
 export default function CertificationsScreen() {
   const router = useRouter();
-  const [certs, setCerts] = useState<Cert[]>(INITIAL_CERTS);
+  const [certs, setCerts] = useState<Cert[]>([]);
+  const [loading, setLoading] = useState(true);
 
-  const handleDelete = (id: string) => {
-    setCerts((prev) => prev.filter((c) => c.id !== id));
+  const loadCerts = async () => {
+    setLoading(true);
+    const stored = await certificationStorage.list();
+    setCerts(stored);
+    setLoading(false);
+  };
+
+  useEffect(() => {
+    loadCerts();
+  }, []);
+
+  const handleDelete = async (id: string) => {
+    Alert.alert(
+      "Delete certification?",
+      "This will remove the certification from your profile.",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Delete",
+          style: "destructive",
+          onPress: async () => {
+            const ok = await certificationStorage.remove(id);
+            if (ok) {
+              setCerts((prev) => prev.filter((c) => c.id !== id));
+            } else {
+              Alert.alert("Error", "Unable to delete certification right now.");
+            }
+          },
+        },
+      ],
+    );
   };
 
   return (
     <SafeAreaView className="flex-1 bg-primary-white">
       <ScreenHeader title="My Certifications" showBack />
-      {certs.length === 0 ? (
+      {loading ? (
+        <View className="flex-1 items-center justify-center">
+          <Text className="text-text-secondary">Loading certifications...</Text>
+        </View>
+      ) : certs.length === 0 ? (
         <EmptyState
           title="No certifications yet"
           subtitle="Add your professional certifications to build client trust."

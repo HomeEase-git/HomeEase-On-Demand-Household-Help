@@ -79,55 +79,117 @@ export const createBooking = async (req: AuthRequest, res: Response) => {
       }
     }
 
-    const booking = await prisma.booking.create({
-      data: {
-        clientId: req.user.userId,
-        workerId,
-        serviceTaskId: serviceTaskId ?? null,
-        serviceType: serviceType ?? 'GENERAL',
-        description: description ?? '',
-        location,
-        city: city ?? '',
-        scheduledDate: new Date(scheduledDate),
-        estimatedPrice,
-        notes,
-        status: 'PENDING',
-      },
-      include: {
-        client: {
-          select: { id: true, fullName: true, email: true },
-        },
-        worker: {
-          select: { id: true, fullName: true, email: true },
-        },
-        serviceTask: true,
-      },
-    });
+    // Server-side validation for scheduledTime if provided
+    const HHMM_REGEX = /^([01]\d|2[0-3]):[0-5]\d$/;
+    const scheduledTime = req.body.scheduledTime;
+    if (scheduledTime && !HHMM_REGEX.test(scheduledTime)) {
+      return res.status(400).json(errorResponse(400, 'scheduledTime must be in HH:mm 24h format'));
+    }
 
-    // Create notification for worker
-    // NotificationType: BOOKING_REQUEST is the correct enum value
-    await prisma.notification.create({
-      data: {
-        userId: workerId,
-        type: 'BOOKING_REQUEST',
-        title: 'New Booking Request',
-        message: `${booking.client.fullName} has requested your service`,
-        relatedId: booking.id,
-      },
-    });
+    if (!req.user?.userId) {
+      return res.status(401).json(errorResponse(401, 'Unauthorized'));
+    }
 
-    return res.status(201).json({
-      success: true,
-      message: 'Booking created successfully',
-      data: {
-        id: booking.id,
-        clientName: booking.client.fullName,
-        workerName: booking.worker.fullName,
-        status: booking.status,
-        scheduledDate: booking.scheduledDate,
-        estimatedPrice: booking.estimatedPrice,
-      },
-    });
+    const userId = req.user?.userId;
+    if (!userId) {
+      return res.status(401).json(errorResponse(401, 'Unauthorized'));
+    }
+
+    // Wrap availability check + insert in a transaction to avoid race conditions
+    try {
+      const booking = await prisma.$transaction(async (tx: any) => {
+        // Re-fetch worker profile inside transaction
+        const workerProfile = await tx.workerProfile.findUnique({ where: { userId: workerId } });
+        if (!workerProfile) throw new Error('Worker not found');
+        if (!workerProfile.isAvailable) throw new Error('Worker not available');
+
+        // Check for slot conflicts (same worker, same date, same time)
+        const existing = await tx.booking.findFirst({
+          where: {
+            workerId,
+            scheduledDate: new Date(scheduledDate),
+            scheduledTime: scheduledTime ?? null,
+            // consider only bookings that block the slot
+            status: { in: ['PENDING', 'ACCEPTED', 'IN_PROGRESS', 'QUOTE_SUBMITTED', 'QUOTE_APPROVED'] },
+          },
+        });
+
+        if (existing) {
+          throw new Error('Slot not available');
+        }
+
+        // Insert booking (include tip if provided)
+        const tipVal = typeof req.body.tip === 'number' ? req.body.tip : 0;
+        const created = await tx.booking.create({
+          data: {
+            clientId: userId,
+            workerId,
+            serviceTaskId: serviceTaskId ?? null,
+            serviceType: serviceType ?? 'GENERAL',
+            description: description ?? '',
+            location,
+            city: city ?? '',
+            scheduledDate: new Date(scheduledDate),
+            scheduledTime: scheduledTime ?? null,
+            estimatedPrice,
+            tip: tipVal,
+            notes,
+            status: 'PENDING',
+          },
+          include: {
+            client: { select: { id: true, fullName: true, email: true } },
+            worker: { select: { id: true, fullName: true, email: true } },
+            serviceTask: true,
+          },
+        });
+
+        // Persist add-ons if provided
+        const addOns = Array.isArray(req.body.addOns) ? req.body.addOns : [];
+        if (addOns.length > 0) {
+          const mapped = addOns.map((a: any) => ({ bookingId: created.id, name: a.name || a.id || 'Add-on', price: typeof a.price === 'number' ? a.price : 0 }));
+          await tx.bookingAddOn.createMany({ data: mapped });
+        }
+
+        return created;
+      });
+
+      // Create notification for worker
+      await prisma.notification.create({
+        data: {
+          userId: workerId,
+          type: 'BOOKING_REQUEST',
+          title: 'New Booking Request',
+          message: `${booking.client.fullName} has requested your service`,
+          relatedId: booking.id,
+        },
+      });
+
+      return res.status(201).json({
+        success: true,
+        message: 'Booking created successfully',
+        data: {
+          id: booking.id,
+          clientName: booking.client.fullName,
+          workerName: booking.worker.fullName,
+          status: booking.status,
+          scheduledDate: booking.scheduledDate,
+          scheduledTime: booking.scheduledTime,
+          estimatedPrice: booking.estimatedPrice,
+        },
+      });
+    } catch (txErr: any) {
+      if (txErr.message === 'Slot not available') {
+        return res.status(409).json(errorResponse(409, 'Slot no longer available'));
+      }
+      if (txErr.message === 'Worker not found' || txErr.message === 'Worker not available') {
+        return res.status(404).json(errorResponse(404, txErr.message));
+      }
+      // Prisma unique constraint code
+      if (txErr.code === 'P2002') {
+        return res.status(409).json(errorResponse(409, 'Slot no longer available'));
+      }
+      throw txErr;
+    }
   } catch (error) {
     console.error('Error creating booking:', error);
     return res.status(500).json(errorResponse(500, 'Failed to create booking'));

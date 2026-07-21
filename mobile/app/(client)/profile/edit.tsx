@@ -6,6 +6,7 @@ import ScreenHeader from "../../../components/ui/ScreenHeader";
 import InputField from "../../../components/ui/InputField";
 import PrimaryButton from "../../../components/ui/PrimaryButton";
 import { useAuthStore } from "../../../store/authStore";
+import * as api from "../../../services/api";
 
 export default function EditProfileScreen() {
   const router = useRouter();
@@ -30,12 +31,15 @@ export default function EditProfileScreen() {
     }
     setLoading(true);
     try {
-      if (user) {
-        setUser({ ...user, name });
-      }
+      const updatedUser = await api.updateUserProfile({
+        fullName: name.trim(),
+        phone: phone.trim(),
+      });
+      setUser(updatedUser);
       Alert.alert("Success", "Profile updated");
       router.back();
     } catch (err) {
+      console.error("Update profile error:", err);
       Alert.alert("Error", "Failed to update profile");
     } finally {
       setLoading(false);

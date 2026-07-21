@@ -16,7 +16,8 @@ export default function MyBookingsScreen() {
   const router = useRouter();
   const [activeTab, setActiveTab] = useState<(typeof TABS)[number]>("Pending");
   const [loading, setLoading] = useState(false);
-  const { bookings } = useBookingStore();
+  const bookings = useBookingStore((s) => s.bookings);
+  const clearDraft = useBookingStore((s) => s.clearDraft);
 
   useFocusEffect(
     React.useCallback(() => {
@@ -72,16 +73,13 @@ export default function MyBookingsScreen() {
               ? "Create a booking to get started"
               : `No ${activeTab.toLowerCase()} bookings`
           }
-          actionLabel={
-            activeTab === "Pending" || activeTab === "Completed"
-              ? activeTab === "Pending"
-                ? "New Booking"
-                : "Book Again"
-              : undefined
-          }
+          actionLabel={activeTab === "Pending" ? "New Booking" : undefined}
           onAction={
-            activeTab === "Pending" || activeTab === "Completed"
-              ? () => router.push("/(client)/booking/new/step-1")
+            activeTab === "Pending"
+              ? () => {
+                  clearDraft();
+                  router.push("/(client)/booking/new/step-1");
+                }
               : undefined
           }
         />
@@ -102,7 +100,10 @@ export default function MyBookingsScreen() {
       {activeTab === "Pending" && (
         <Pressable
           className="absolute bottom-6 right-6 w-14 h-14 bg-accent rounded-full items-center justify-center"
-          onPress={() => router.push("/(client)/booking/new/step-1")}
+          onPress={() => {
+            clearDraft();
+            router.push("/(client)/booking/new/step-1");
+          }}
         >
           <Ionicons name="add" size={28} color={colors.white} />
         </Pressable>

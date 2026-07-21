@@ -2,24 +2,36 @@ import React, { useState, useRef, useMemo } from "react";
 import { View, Text, ScrollView, Alert, Pressable } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
+// eslint-disable-next-line import/no-named-as-default
 import ScreenHeader from "../../../../components/ui/ScreenHeader";
+// eslint-disable-next-line import/no-named-as-default
 import StepperHorizontal from "../../../../components/steppers/StepperHorizontal";
+// eslint-disable-next-line import/no-named-as-default
 import PrimaryButton from "../../../../components/ui/PrimaryButton";
+// eslint-disable-next-line import/no-named-as-default
 import InputField from "../../../../components/ui/InputField";
 import PriceBreakdownCard from "../../../../components/ui/PriceBreakdown";
-import { useBookingStore } from "../../../../store/bookingStore";
 import {
-  calculatePriceBreakdown,
-  getTipSuggestions,
-} from "../../../../utils/pricing";
+  useBookingStore,
+  type BookingState,
+} from "../../../../store/bookingStore";
+import { calculatePriceBreakdown } from "../../../../utils/pricing";
+import { validateDraftForSubmit } from "../../../../utils/bookingValidation";
+// eslint-disable-next-line import/no-named-as-default
 import PaymentMethodBottomSheet from "../../../../components/bottom-sheets/PaymentMethodBottomSheet";
+// eslint-disable-next-line import/no-named-as-default
 import GenericConfirmationModal from "../../../../components/modals/GenericConfirmationModal";
+import * as api from "../../../../services/api";
+import { serviceConfigs } from "../../../../constants/serviceData";
 import type { BottomSheetHandle } from "../../../../components/bottom-sheets/BottomSheetWrapper";
 
 export default function BookingStep3Screen() {
   const router = useRouter();
-  const draft = useBookingStore((s) => s.draft);
-  const setDraft = useBookingStore((s) => s.setDraft);
+  const draft = useBookingStore((s: BookingState) => s.draft);
+  const setDraft = useBookingStore((s: BookingState) => s.setDraft);
+  const setBookingCreated = useBookingStore(
+    (s: BookingState) => s.setBookingCreated,
+  );
   const [paymentMethod, setPaymentMethod] = useState<string | null>(
     draft.paymentMethod,
   );
@@ -51,17 +63,68 @@ export default function BookingStep3Screen() {
     setConfirmVisible(true);
   };
 
+  const validation = validateDraftForSubmit(draft);
+
   const onConfirm = async () => {
     setConfirmVisible(false);
+
+    if (!draft.workerId) {
+      Alert.alert(
+        "Error",
+        "Missing worker information. Please go back and select a worker.",
+      );
+      return;
+    }
+    if (!draft.selectedTaskId) {
+      Alert.alert(
+        "Error",
+        "Missing service information. Please go back and select a service.",
+      );
+      return;
+    }
+
     setLoading(true);
     try {
-      // Save the final payment method to the store
       setDraft({ paymentMethod });
 
-      // Navigate to success screen
+      // Create booking with correct API field names
+      const bookingData = {
+        workerId: draft.workerId,
+        serviceTaskId: draft.selectedTaskId,
+        location: draft.address || "",
+        city: draft.city || "",
+        scheduledDate: draft.date || new Date().toISOString().split("T")[0],
+        scheduledTime: draft.time || "",
+        description: draft.description || draft.category || "",
+        notes: draft.notes || draft.instructions || "",
+        estimatedPrice: draft.estimatedPrice || 0,
+        tip: tipAmount || 0,
+        addOns: (() => {
+          if (!draft.selectedAddOnIds || !draft.category) return [];
+          const cfg = serviceConfigs.find(
+            (c) =>
+              c.categoryName.toLowerCase() ===
+              (draft.category || "").toLowerCase(),
+          );
+          if (!cfg) return [];
+          return draft.selectedAddOnIds.map((id: string) => {
+            const ao = cfg.addOns.find((a) => a.id === id);
+            return ao
+              ? { id: ao.id, name: ao.name, price: ao.price }
+              : { id, name: id, price: 0 };
+          });
+        })(),
+      };
+
+      const response = await api.createBooking(bookingData);
+
+      // Update booking store
+      setBookingCreated(response);
+
       router.push("/(client)/booking/success");
     } catch (err) {
-      Alert.alert("Error", "Failed to process booking");
+      console.error("Booking creation error:", err);
+      Alert.alert("Error", "Failed to create booking. Please try again.");
     } finally {
       setLoading(false);
     }
@@ -78,6 +141,31 @@ export default function BookingStep3Screen() {
           steps={["Service", "Schedule", "Payment"]}
           currentStep={2}
         />
+        {!validation.ok && (
+          <View className="bg-yellow-100 rounded-xl p-3 mb-4">
+            <Text className="text-yellow-900 font-semibold">
+              Booking incomplete
+            </Text>
+            {validation.errors.map((e) => (
+              <Text key={e} className="text-yellow-900 text-sm">
+                - {e}
+              </Text>
+            ))}
+            <View className="mt-2 flex-row gap-2">
+              <Pressable
+                onPress={() => router.push("/(client)/booking/new/step-1")}
+              >
+                <Text className="text-accent">Go to Step 1</Text>
+              </Pressable>
+              <Pressable
+                onPress={() => router.push("/(client)/booking/new/step-2")}
+              >
+                <Text className="text-accent">Go to Step 2</Text>
+              </Pressable>
+            </View>
+          </View>
+        )}
+
         <View className="bg-card rounded-2xl p-4 mt-4">
           <Text className="text-primary font-bold mb-2">Summary</Text>
           <Text className="text-text-secondary text-sm">
@@ -178,9 +266,9 @@ export default function BookingStep3Screen() {
 
         <View className="mt-8">
           <PrimaryButton
-            label="Confirm Booking"
+            label="Submit booking request"
             fullWidth
-            disabled={!paymentMethod || loading}
+            disabled={!paymentMethod || loading || !validation.ok}
             loading={loading}
             onPress={() => {
               if (!paymentMethod) {
@@ -201,9 +289,9 @@ export default function BookingStep3Screen() {
       />
       <GenericConfirmationModal
         visible={confirmVisible}
-        title="Confirm booking?"
-        message="You are about to confirm this booking and proceed to payment."
-        confirmLabel="Confirm"
+        title="Submit booking request"
+        message="You are about to submit a booking request. Payment will not be charged at this time."
+        confirmLabel="Submit Request"
         cancelLabel="Cancel"
         onConfirm={onConfirm}
         onCancel={() => setConfirmVisible(false)}

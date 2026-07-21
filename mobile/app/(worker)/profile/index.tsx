@@ -10,6 +10,7 @@ import { colors } from "../../../constants";
 
 const MENU = [
   { label: "Edit Profile", path: "/(worker)/profile/edit" },
+  { label: "Digital ID", path: "/(worker)/profile/digital-id" },
   { label: "My Skills & Services", path: "/(worker)/profile/skills" },
   { label: "Set Availability", path: "/(worker)/profile/availability" },
   { label: "My Certifications", path: "/(worker)/profile/certifications" },

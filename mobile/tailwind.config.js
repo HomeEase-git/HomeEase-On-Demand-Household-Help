@@ -44,6 +44,10 @@ module.exports = {
         completed: "#10B981",
         cancelled: "#EF4444",
         divider: "#E5E7EB",
+        // ADDITIONAL COLORS
+        banner1: "#FFE2BC",
+        banner2: "#D1F7E0",
+        banner3: "#E0E0E0",
       },
     },
   },

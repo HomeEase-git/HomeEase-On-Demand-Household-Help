@@ -31,8 +31,9 @@ export default function WorkerHomeScreen() {
       <ScrollView
         className="flex-1"
         contentContainerStyle={{ paddingBottom: 24 }}
+        stickyHeaderIndices={[0]}
       >
-        <View className="flex-row items-center justify-between px-4 pt-2 pb-2">
+        <View className="flex-row items-center justify-between px-4 pt-2 pb-2 bg-primary-white z-10">
           <Text className="text-primary text-xl font-bold">HomeEase</Text>
           <Pressable
             className="p-2"
@@ -136,7 +137,7 @@ export default function WorkerHomeScreen() {
           <SectionHeader title="Quick Actions" />
           <View className="flex-row flex-wrap gap-3 mt-2">
             <Pressable
-              className="flex-1 min-w-[140] bg-blue-900/50 rounded-xl p-4"
+              className="flex-1 min-w-[140] bg-primary/25 border-2 border-primary rounded-xl p-4"
               onPress={() => router.push("/(worker)/profile/availability")}
             >
               <Ionicons
@@ -149,7 +150,7 @@ export default function WorkerHomeScreen() {
               </Text>
             </Pressable>
             <Pressable
-              className="flex-1 min-w-[140] bg-green-900/50 rounded-xl p-4"
+              className="flex-1 min-w-[140] bg-green-100 border-2 border-primary rounded-xl p-4"
               onPress={() => router.push("/(worker)/earnings")}
             >
               <Ionicons
@@ -162,7 +163,7 @@ export default function WorkerHomeScreen() {
               </Text>
             </Pressable>
             <Pressable
-              className="flex-1 min-w-[140] bg-orange-900/50 rounded-xl p-4"
+              className="flex-1 min-w-[140] bg-orange-100 border-2 border-primary rounded-xl p-4"
               onPress={() => router.push("/(worker)/profile/certifications")}
             >
               <Ionicons
@@ -175,7 +176,7 @@ export default function WorkerHomeScreen() {
               </Text>
             </Pressable>
             <Pressable
-              className="flex-1 min-w-[140] bg-purple-900/50 rounded-xl p-4"
+              className="flex-1 min-w-[140] bg-purple-100 border-2 border-primary rounded-xl p-4"
               onPress={() => router.push("/(worker)/profile")}
             >
               <Ionicons

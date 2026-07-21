@@ -56,7 +56,14 @@ export const colors = {
 
   // ===== DIVIDERS & SEPARATORS =====
   // Used for lines, borders, and visual separation
-  divider: '#E5E7EB'      // Light Gray - Divider color - borders, separators, bottom sheets
+  divider: '#E5E7EB',      // Light Gray - Divider color - borders, separators, bottom sheets
+
+  // ===== ADDITIONAL COLORS =====
+  // Used for additional UI elements and states
+  banner1: '#FFE2BC', // Light Peach - Promo banner 1 background
+  banner2: '#D1F7E0', // Light Mint - Promo banner 2 background
+  banner3: '#E0E0E0', // Light Gray - Promo banner 3 background
+
 } as const;
 
 export type AppColors = typeof colors;

@@ -1,5 +1,5 @@
 import React from "react";
-import { View, Text, ScrollView, Pressable } from "react-native";
+import { View, Text, ScrollView, Pressable, Alert } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter, useLocalSearchParams } from "expo-router";
@@ -13,6 +13,10 @@ import {
   workerDocuments,
 } from "../../../../constants/dummyData";
 import { useBookingStore } from "../../../../store/bookingStore";
+import {
+  mapServiceToCategory,
+  isExactCategoryMatch,
+} from "../../../../utils/categoryMapping";
 import { colors } from "../../../../constants";
 
 const MOCK_REVIEWS = [
@@ -193,9 +197,20 @@ export default function WorkerProfileScreen() {
           label="Book Now"
           fullWidth
           onPress={() => {
+            if (!isExactCategoryMatch(worker.service)) {
+              Alert.alert(
+                "Booking unavailable",
+                "This worker's service type couldn't be matched to a bookable category. Please try again later or contact support.",
+              );
+              return;
+            }
+
+            const normalizedCategory = mapServiceToCategory(worker.service);
             setDraft({
-              category: worker.service,
+              category: normalizedCategory,
               workerId: worker.id,
+              workerLocked: true,
+              entrySource: "worker_profile",
             });
             router.push("/(client)/booking/new/step-1");
           }}

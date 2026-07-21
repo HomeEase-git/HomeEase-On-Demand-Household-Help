@@ -209,3 +209,56 @@ describe('Error Handling System', () => {
     });
   });
 });
+
+describe('Axios-specific normalization', () => {
+  test('classifies axios timeout (ECONNABORTED) as timeout and retryable', () => {
+    const axiosLikeError = {
+      isAxiosError: true,
+      code: 'ECONNABORTED',
+      message: 'timeout',
+      response: undefined,
+    } as unknown;
+
+    const result = normalizeError(axiosLikeError);
+    expect(result.type).toBe('timeout');
+    expect(result.isRetryable).toBe(true);
+  });
+
+  test('classifies axios cancelled (ERR_CANCELED) as timeout and retryable', () => {
+    const axiosLikeError = {
+      isAxiosError: true,
+      code: 'ERR_CANCELED',
+      message: 'canceled',
+      response: undefined,
+    } as unknown;
+
+    const result = normalizeError(axiosLikeError);
+    expect(result.type).toBe('timeout');
+    expect(result.isRetryable).toBe(true);
+  });
+
+  test('classifies axios 500 as server and retryable', () => {
+    const axiosLikeError = {
+      isAxiosError: true,
+      message: 'server error',
+      response: { status: 502, data: { message: 'Bad gateway' } },
+    } as unknown;
+
+    const result = normalizeError(axiosLikeError);
+    expect(result.type).toBe('server');
+    expect(result.statusCode).toBe(502);
+    expect(result.isRetryable).toBe(true);
+  });
+
+  test('classifies axios 401 as auth and not retryable', () => {
+    const axiosLikeError = {
+      isAxiosError: true,
+      message: 'unauthorized',
+      response: { status: 401, data: { message: 'Unauthorized' } },
+    } as unknown;
+
+    const result = normalizeError(axiosLikeError);
+    expect(result.type).toBe('auth');
+    expect(result.isRetryable).toBe(false);
+  });
+});

@@ -180,16 +180,6 @@ export default function SignInScreen() {
           onPress={() => router.push("/role-selection")}
           disabled={loading}
         />
-
-        <View className="mt-8 p-4 bg-blue-50 rounded-lg">
-          <View className="flex-row items-start">
-            <Ionicons name="information-circle" size={20} color="#4B5FD6" />
-            <Text className="text-xs text-text-secondary ml-2 flex-1">
-              Demo credentials: Use any valid email and password. No actual
-              authentication required.
-            </Text>
-          </View>
-        </View>
       </ScrollView>
     </SafeAreaView>
   );

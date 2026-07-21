@@ -26,6 +26,7 @@
     "allowSyntheticDefaultImports": true,
     "ignoreDeprecations": "6.0",
     "baseUrl": "./src",
+    "types": ["node"],
     "paths": {
       "@/*": ["./*"],
       "@controllers/*": ["./controllers/*"],

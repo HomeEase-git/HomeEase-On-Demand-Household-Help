@@ -28,70 +28,7 @@ const getResponseMessage = (data: unknown, fallback: string): string => {
  * Classify axios errors into standard API errors
  */
 export function classifyAxiosError(error: unknown): ApiError {
-  if (axios.isAxiosError(error)) {
-    // Network error (no response)
-    if (!error.response) {
-      if (error.code === 'ECONNABORTED') {
-        return {
-          type: 'timeout',
-          message: 'Request timed out',
-          userMessage: 'The request took too long. Please try again.',
-          isRetryable: true,
-        };
-      }
-
-      if (!error.message) {
-        return {
-          type: 'network',
-          message: 'Network error',
-          userMessage: 'Unable to connect. Please check your internet connection.',
-          isRetryable: true,
-        };
-      }
-
-      return {
-        type: 'network',
-        message: error.message,
-        userMessage: 'Connection error. Please check your internet and try again.',
-        isRetryable: true,
-      };
-    }
-
-    // Server error (5xx)
-    if (error.response.status >= 500) {
-      return {
-        type: 'server',
-        message: getResponseMessage(error.response.data, 'Server error'),
-        statusCode: error.response.status,
-        userMessage: 'Server error. Please try again later.',
-        isRetryable: true,
-      };
-    }
-
-    // Authentication error (401, 403)
-    if (error.response.status === 401 || error.response.status === 403) {
-      return {
-        type: 'auth',
-        message: 'Authentication failed',
-        statusCode: error.response.status,
-        userMessage: 'Your session has expired. Please log in again.',
-        isRetryable: false,
-      };
-    }
-
-    // Validation error (4xx)
-    if (error.response.status >= 400 && error.response.status < 500) {
-      const message = getResponseMessage(error.response.data, 'Invalid request');
-      return {
-        type: 'validation',
-        message,
-        statusCode: error.response.status,
-        userMessage: message,
-        isRetryable: false,
-      };
-    }
-  }
-
+  // Delegate to the central normalizer so axios handling is consistent
   return normalizeError(error);
 }
 

@@ -18,9 +18,9 @@ import type { BottomSheetHandle } from "../../../components/bottom-sheets/Bottom
 import { colors } from "../../../constants";
 
 const PROMO_BANNERS = [
-  { title: "20% Off Cleaning!", color: colors.warning },
-  { title: "New Workers Near You!", color: colors.success },
-  { title: "Book Now, Pay Later!", color: colors.divider },
+  { title: "20% Off Cleaning!", color: colors.banner1 },
+  { title: "New Workers Near You!", color: colors.banner2 },
+  { title: "Book Now, Pay Later!", color: colors.banner3 },
 ];
 
 export default function ClientHomeScreen() {

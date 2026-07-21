@@ -91,7 +91,13 @@ export const bookings = [
     date: '2026-02-20',
     status: 'Completed',
     amount: 600,
-    paymentMethod: 'Maya'
+    paymentMethod: 'Maya',
+    address: '123 Sample Street, Makati City',
+    time: '10:30',
+    workerId: 'w2',
+    category: 'Electrical',
+    selectedTaskId: 'e2',
+    selectedAddOnIds: ['ea2', 'ea3']
   },
   {
     id: 'BK-004',

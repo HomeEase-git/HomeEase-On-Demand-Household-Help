@@ -1,40 +1,77 @@
-import React, { useState } from "react";
-import { View, Text, ScrollView, Pressable, Alert } from "react-native";
+import React, { useEffect, useState } from "react";
+import { View, Text, ScrollView, Alert } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
+import * as DocumentPicker from "expo-document-picker";
 import ScreenHeader from "../../components/ui/ScreenHeader";
 import StepperHorizontal from "../../components/steppers/StepperHorizontal";
-import UploadCard from "../../components/ui/UploadCard";
 import PrimaryButton from "../../components/ui/PrimaryButton";
 import OutlinedButton from "../../components/ui/OutlinedButton";
-import ErrorBanner from "../../components/ui/ErrorBanner";
-import { useImageUpload } from "../../hooks/useImageUpload";
-import { colors } from "../../constants";
+import UploadCard from "../../components/ui/UploadCard";
+import { useAuthStore } from "../../store/authStore";
 
+// Worker-only screen — clients never reach this (selfie.tsx sends
+// them straight to the contract), but guard against direct navigation.
 export default function ResumeScreen() {
   const router = useRouter();
-  const resumeUpload = useImageUpload();
+  const user = useAuthStore((s) => s.user);
+  const isWorker = user?.role === "worker";
+  const [resumeFile, setResumeFile] = useState<{
+    uri: string | null;
+    name: string | null;
+  }>({
+    uri: null,
+    name: null,
+  });
   const [uploading, setUploading] = useState(false);
 
-  const handlePickResume = async () => {
+  useEffect(() => {
+    if (!isWorker) {
+      router.replace("/(kyc)/contract");
+    }
+  }, [isWorker, router]);
+
+  if (!isWorker) {
+    return null;
+  }
+
+  const handleUploadResume = async () => {
+    if (uploading) {
+      return;
+    }
+
     setUploading(true);
     try {
-      const result = await resumeUpload.pickFromGallery();
-      if (result) {
-        Alert.alert("Success", "Resume uploaded and compressed");
+      const result = await DocumentPicker.getDocumentAsync({
+        type: ["application/pdf"],
+        copyToCacheDirectory: true,
+      });
+
+      if (result.canceled) {
+        return;
       }
+
+      const document = result.assets?.[0];
+      if (!document?.uri) {
+        Alert.alert("Upload failed", "We could not access the selected file.");
+        return;
+      }
+
+      setResumeFile({
+        uri: document.uri,
+        name: document.name || "resume.pdf",
+      });
+      Alert.alert("Success", "Resume uploaded successfully.");
+    } catch (error) {
+      console.error("Resume upload error", error);
+      Alert.alert(
+        "Upload failed",
+        "We could not upload your resume. Please try again.",
+      );
     } finally {
       setUploading(false);
     }
   };
-
-  const bulletPoints = [
-    "Work experience and employment history",
-    "Relevant skills and certifications",
-    "Educational background",
-    "Years of experience in your trade",
-  ];
 
   return (
     <SafeAreaView className="flex-1 bg-primary-white">
@@ -44,87 +81,49 @@ export default function ResumeScreen() {
         contentContainerStyle={{ paddingHorizontal: 24, paddingBottom: 40 }}
       >
         <StepperHorizontal
-          steps={["ID", "Selfie", "Certs", "Resume"]}
+          steps={["ID", "Selfie", "Documents", "Resume", "Contract"]}
           currentStep={3}
         />
-        <Text className="text-text-secondary text-sm mb-4">Step 4 of 4</Text>
+        <Text className="text-text-secondary text-sm mb-4">
+          Resume upload is required for workers and must be a PDF file.
+        </Text>
 
         <View className="bg-card rounded-xl p-4 mb-6">
-          <Text className="text-primary font-bold mb-2">
+          <Text className="text-primary font-semibold mb-2">
             Why we need your resume
           </Text>
           <Text className="text-text-secondary text-sm">
             Your resume helps clients understand your experience, skills, and
-            professional background. It will be visible on your public profile.
+            professional background. It will be used for verification and
+            profile completion.
           </Text>
         </View>
 
-        <ErrorBanner
-          message={resumeUpload.error}
-          onDismiss={resumeUpload.clearError}
-        />
-        <UploadCard
-          label="Tap to upload your resume (PDF or image)"
-          onPress={handlePickResume}
-          preview={resumeUpload.uri ? "Resume uploaded" : undefined}
-        />
-
-        {resumeUpload.uri && resumeUpload.compressionRatio && (
-          <Text className="text-xs text-text-secondary mt-1 ml-2">
-            Compressed by {resumeUpload.compressionRatio}%
-          </Text>
-        )}
-
-        <View className="mt-4 mb-6">
-          <Text className="text-text-secondary text-sm font-semibold mb-2">
-            Your resume should include:
-          </Text>
-          {bulletPoints.map((point, index) => (
-            <View key={index} className="flex-row items-start mb-2">
-              <Ionicons
-                name="checkmark-circle"
-                size={16}
-                color={colors.success}
-                style={{ marginTop: 2 }}
-              />
-              <Text className="text-text-secondary text-sm ml-2 flex-1">
-                {point}
-              </Text>
-            </View>
-          ))}
+        <View className="mb-6">
+          <UploadCard
+            label="Upload Resume"
+            subtitle="Select a PDF file from your device."
+            required
+            preview={
+              resumeFile.uri ? resumeFile.name || "Resume uploaded" : undefined
+            }
+            onPress={handleUploadResume}
+            disabled={uploading}
+          />
         </View>
 
-        <PrimaryButton
-          label="Submit for Verification"
-          disabled={!resumeUpload.uri}
-          loading={uploading}
-          fullWidth
-          onPress={() => router.push("/(kyc)/contract")}
-        />
-        <View className="mt-3">
+        <View className="gap-3 mt-2">
+          <PrimaryButton
+            label="Continue"
+            fullWidth
+            disabled={!resumeFile.uri || uploading}
+            onPress={() => router.push("/(kyc)/contract")}
+          />
           <OutlinedButton
             label="Skip for Now"
             onPress={() => router.push("/(kyc)/contract")}
           />
         </View>
-        <Pressable
-          className="mt-4 items-center"
-          onPress={() => router.push("/(worker)/profile/resume-preview")}
-        >
-          <View className="flex-row items-center">
-            <Ionicons
-              name="sparkles-outline"
-              size={16}
-              color={colors.accent.DEFAULT}
-            />
-            <Text className="text-accent text-sm ml-1 font-semibold">
-              Preview AI Analysis Result
-            </Text>
-          </View>
-          <Text className="text-text-muted text-xs mt-1 text-center">
-            See how AI will parse your resume
-          </Text>
-        </Pressable>
       </ScrollView>
     </SafeAreaView>
   );

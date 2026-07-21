@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { View, Text, FlatList, Pressable, Modal, Alert } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
@@ -9,6 +9,7 @@ import InputField from "../../../../components/ui/InputField";
 import PrimaryButton from "../../../../components/ui/PrimaryButton";
 import OutlinedButton from "../../../../components/ui/OutlinedButton";
 import { colors } from "../../../../constants";
+import { skillStorage } from "../../../../utils/storage";
 
 type Skill = {
   id: string;
@@ -17,21 +18,24 @@ type Skill = {
   rate: number;
 };
 
-const INITIAL_SKILLS: Skill[] = [
-  { id: "s1", name: "Pipe Repair", category: "Plumbing", rate: 250 },
-  { id: "s2", name: "Installation", category: "Plumbing", rate: 300 },
-  { id: "s3", name: "Drain Cleaning", category: "Plumbing", rate: 280 },
-];
-
 export default function SkillsScreen() {
   const router = useRouter();
-  const [skills, setSkills] = useState<Skill[]>(INITIAL_SKILLS);
+  const [skills, setSkills] = useState<Skill[]>([]);
   const [showModal, setShowModal] = useState(false);
   const [skillName, setSkillName] = useState("");
   const [skillCategory, setSkillCategory] = useState("");
   const [skillRate, setSkillRate] = useState("");
 
-  const handleAddSkill = () => {
+  useEffect(() => {
+    const loadSkills = async () => {
+      const stored = await skillStorage.list();
+      setSkills(stored);
+    };
+
+    loadSkills();
+  }, []);
+
+  const handleAddSkill = async () => {
     if (!skillName.trim() || !skillCategory.trim() || !skillRate.trim()) {
       Alert.alert("Error", "Please fill in all fields.");
       return;
@@ -41,13 +45,14 @@ export default function SkillsScreen() {
       Alert.alert("Error", "Please enter a valid rate.");
       return;
     }
-    const newSkill: Skill = {
-      id: String(Date.now()),
+    const newSkill = await skillStorage.create({
       name: skillName.trim(),
       category: skillCategory.trim(),
       rate,
-    };
-    setSkills((prev) => [...prev, newSkill]);
+    });
+    if (newSkill) {
+      setSkills((prev) => [...prev, newSkill]);
+    }
     setSkillName("");
     setSkillCategory("");
     setSkillRate("");
@@ -60,7 +65,12 @@ export default function SkillsScreen() {
       {
         text: "Delete",
         style: "destructive",
-        onPress: () => setSkills((prev) => prev.filter((s) => s.id !== id)),
+        onPress: async () => {
+          const ok = await skillStorage.remove(id);
+          if (ok) {
+            setSkills((prev) => prev.filter((s) => s.id !== id));
+          }
+        },
       },
     ]);
   };

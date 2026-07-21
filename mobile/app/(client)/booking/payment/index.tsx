@@ -4,12 +4,14 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import PrimaryButton from "../../../../components/ui/PrimaryButton";
 import OutlinedButton from "../../../../components/ui/OutlinedButton";
-import { useBookingStore } from "../../../../store/bookingStore";
+import * as api from "../../../../services/api";
+import { serviceConfigs } from "../../../../constants/serviceData";
+import { useBookingStore, type Booking } from "../../../../store/bookingStore";
 
 export default function PaymentScreen() {
   const router = useRouter();
   const draft = useBookingStore((s) => s.draft);
-  const processPayment = useBookingStore((s) => s.processPayment);
+  const setBookingCreated = useBookingStore((s) => s.setBookingCreated);
   const [accountValue, setAccountValue] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
@@ -54,12 +56,50 @@ export default function PaymentScreen() {
 
     try {
       setSubmitting(true);
-      await processPayment(method, total);
+
+      if (!draft.workerId || !draft.selectedTaskId || !draft.date) {
+        Alert.alert(
+          "Booking error",
+          "Incomplete booking details. Please return and finish your booking.",
+        );
+        router.back();
+        return;
+      }
+
+      const addOns = (draft.selectedAddOnIds || []).flatMap((id) => {
+        const category = serviceConfigs.find(
+          (c) =>
+            c.categoryName.toLowerCase() ===
+            (draft.category || "").toLowerCase(),
+        );
+        const found = category?.addOns.find((a) => a.id === id);
+        return found
+          ? [{ id: found.id, name: found.name, price: found.price }]
+          : [];
+      });
+
+      const bookingPayload = {
+        workerId: draft.workerId,
+        serviceTaskId: draft.selectedTaskId,
+        location: draft.address || "",
+        city: draft.city || "",
+        scheduledDate: draft.date,
+        scheduledTime: draft.time || "",
+        description: draft.description || draft.category || "",
+        notes: draft.notes || draft.instructions || "",
+        estimatedPrice: draft.estimatedPrice || 0,
+        tip: draft.tip || 0,
+        addOns,
+      };
+
+      const response = await api.createBooking(bookingPayload);
+      setBookingCreated(response as Booking);
       router.replace("/(client)/booking/payment/success");
     } catch (e) {
+      console.error("Payment/create booking failed:", e);
       Alert.alert(
         "Payment failed",
-        "Unable to process your payment. Please try again.",
+        "Unable to complete your booking. Please try again.",
       );
       router.replace("/(client)/booking/payment/failed");
     } finally {

@@ -10,8 +10,12 @@ import PrimaryButton from "../../../../components/ui/PrimaryButton";
 import OutlinedButton from "../../../../components/ui/OutlinedButton";
 import DangerButton from "../../../../components/ui/DangerButton";
 import PriceBreakdownCard from "../../../../components/ui/PriceBreakdown";
-import { useBookingStore } from "../../../../store/bookingStore";
+import {
+  useBookingStore,
+  type BookingState,
+} from "../../../../store/bookingStore";
 import { calculatePriceBreakdown } from "../../../../utils/pricing";
+import { isExactCategoryMatch } from "../../../../utils/categoryMapping";
 import type { StatusType } from "../../../../components/ui/StatusBadge";
 import { colors } from "../../../../constants";
 import { workers } from "../../../../constants/dummyData";
@@ -19,7 +23,8 @@ import { workers } from "../../../../constants/dummyData";
 export default function BookingDetailScreen() {
   const router = useRouter();
   const { bookingId } = useLocalSearchParams<{ bookingId: string }>();
-  const { bookings, updateBookingStatus } = useBookingStore();
+  const { bookings, updateBookingStatus, prefillFromBooking } =
+    useBookingStore();
   const booking = bookings.find((b) => b.id === bookingId);
 
   if (!booking) {
@@ -391,6 +396,23 @@ export default function BookingDetailScreen() {
                   params: { bookingId: booking.id },
                 })
               }
+            />
+          )}
+          {isCompleted && (
+            <PrimaryButton
+              label="Book Again"
+              fullWidth
+              onPress={() => {
+                if (!isExactCategoryMatch(booking.service)) {
+                  Alert.alert(
+                    "Booking unavailable",
+                    "This booking's service type couldn't be matched to a bookable category. Please try a different booking or contact support.",
+                  );
+                  return;
+                }
+                prefillFromBooking(booking);
+                router.push("/(client)/booking/new/step-1");
+              }}
             />
           )}
           {isCompleted && (

@@ -9,6 +9,8 @@
  * - Retry strategies
  */
 
+import axios from 'axios';
+
 export type ApiErrorType = 'network' | 'validation' | 'server' | 'timeout' | 'unknown' | 'auth';
 
 export type ApiError = {
@@ -107,6 +109,83 @@ export function normalizeError(error: unknown): ApiError {
         isRetryable: false,
       };
     }
+  }
+
+  // Handle axios errors so retry logic can see axios-specific details
+  try {
+    if (axios.isAxiosError(error)) {
+      const axiosErr: any = error;
+
+      // No response -> network or timeout
+      if (!axiosErr.response) {
+        // Axios uses ECONNABORTED for timeout and ERR_CANCELED for AbortController cancellation
+        if (axiosErr.code === 'ECONNABORTED' || axiosErr.code === 'ERR_CANCELED') {
+          return {
+            type: 'timeout',
+            message: axiosErr.message || 'Request timeout',
+            originalError: axiosErr,
+            userMessage: 'The request took too long. Please try again.',
+            isRetryable: true,
+          };
+        }
+
+        return {
+          type: 'network',
+          message: axiosErr.message || 'Network error',
+          originalError: axiosErr,
+          userMessage: 'Unable to connect. Please check your internet connection.',
+          isRetryable: true,
+        };
+      }
+
+      const statusCode = axiosErr.response?.status;
+      const respMessage = axiosErr.response?.data?.message || axiosErr.message || 'API error';
+
+      if (statusCode === 401 || statusCode === 403) {
+        return {
+          type: 'auth',
+          message: respMessage,
+          statusCode,
+          originalError: axiosErr,
+          userMessage: 'You are not authorized to perform this action.',
+          isRetryable: false,
+        };
+      }
+
+      if (statusCode >= 500) {
+        return {
+          type: 'server',
+          message: respMessage,
+          statusCode,
+          originalError: axiosErr,
+          userMessage: 'Something went wrong on our side. Please try again later.',
+          isRetryable: true,
+        };
+      }
+
+      if (statusCode >= 400) {
+        return {
+          type: 'validation',
+          message: respMessage,
+          statusCode,
+          originalError: axiosErr,
+          userMessage: respMessage,
+          isRetryable: false,
+        };
+      }
+
+      // Fallback for other statuses
+      return {
+        type: 'unknown',
+        message: respMessage,
+        statusCode,
+        originalError: axiosErr,
+        userMessage: respMessage,
+        isRetryable: false,
+      };
+    }
+  } catch (_) {
+    // ignore any errors while trying to classify axios errors
   }
 
   // Handle Error instances

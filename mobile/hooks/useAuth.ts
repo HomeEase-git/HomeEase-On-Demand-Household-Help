@@ -60,9 +60,9 @@ export function useAuth() {
       store.setToken(response.token);
       
       // Send OTP email for clients
-      if (response.role === 'client') {
-        await sendOtpEmail(userData.email);
-      }
+      // if (response.role === 'client') {
+      //   await sendOtpEmail(userData.email);
+      // }
       
       return { success: true, data: response };
     } catch (err) {

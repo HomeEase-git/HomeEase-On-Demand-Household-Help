@@ -79,6 +79,10 @@ enum KycDocumentType {
   SELFIE
   RESUME
   CERTIFICATION
+  NBI_CLEARANCE
+  BARANGAY_CLEARANCE
+  POLICE_CLEARANCE
+  CEDULA
 }
 
 enum KycDocumentStatus {
@@ -389,6 +393,7 @@ model Booking {
 
   // Scheduling
   scheduledDate  DateTime
+  scheduledTime  String?
   completionDate DateTime?
 
   // Status
@@ -431,6 +436,7 @@ model Booking {
   @@index([workerId, status])
   @@index([scheduledDate])
   @@index([status])
+  @@unique([workerId, scheduledDate, scheduledTime], name: "worker_slot_unique")
 }
 
 model BookingAddOn {

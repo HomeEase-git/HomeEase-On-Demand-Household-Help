@@ -408,9 +408,24 @@ export const validateSubmitKYCDocument = (
   next: NextFunction
 ) => {
   const { documentType, documentUrl } = req.body;
+  const allowedDocumentTypes = [
+    'GOVERNMENT_ID_FRONT',
+    'GOVERNMENT_ID_BACK',
+    'SELFIE',
+    'RESUME',
+    'CERTIFICATION',
+    'NBI_CLEARANCE',
+    'BARANGAY_CLEARANCE',
+    'POLICE_CLEARANCE',
+    'CEDULA',
+  ];
   
   if (!documentType || typeof documentType !== 'string') {
     return res.status(400).json(errorResponse(400, 'documentType is required and must be a string'));
+  }
+
+  if (!allowedDocumentTypes.includes(documentType)) {
+    return res.status(400).json(errorResponse(400, 'documentType is not supported'));
   }
   
   if (!documentUrl || typeof documentUrl !== 'string') {
