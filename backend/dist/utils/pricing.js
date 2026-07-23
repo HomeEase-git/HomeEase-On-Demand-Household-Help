@@ -1,18 +1,19 @@
 "use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.formatPrice = exports.validatePriceBreakdown = exports.getPriceBreakdown = exports.calculatePlatformProfit = exports.calculateWorkerPayout = exports.calculateWithholdingTax = exports.calculateCommission = void 0;
 /**
  * Pricing utilities for commission, tax, and payout calculations
  * This mirrors the logic in mobile/utils/pricing.ts to ensure both sides agree
  */
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.formatPrice = exports.validatePriceBreakdown = exports.getPriceBreakdown = exports.calculatePlatformProfit = exports.calculateWorkerPayout = exports.calculateWithholdingTax = exports.calculateCommission = void 0;
+const pricing_1 = require("@config/pricing");
 /**
  * Platform commission percentage (takes a cut of each transaction)
  */
-const COMMISSION_PERCENTAGE = 10; // 10% goes to platform
+const COMMISSION_PERCENTAGE = pricing_1.COMMISSION_RATE * 100; // Convert to percentage
 /**
  * Withholding tax percentage for workers (tax compliance)
  */
-const WITHHOLDING_TAX_PERCENTAGE = 5; // 5% withholding tax
+const WITHHOLDING_TAX_PERCENTAGE = pricing_1.WITHHOLDING_TAX_RATE * 100; // Convert to percentage
 /**
  * Calculate the commission amount
  * Commission is calculated on the subtotal (labor + materials)

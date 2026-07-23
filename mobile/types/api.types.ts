@@ -82,7 +82,12 @@ export interface Booking {
   time?: string;
   status: BookingStatus;
   amount: number;
-  paymentMethod: string;
+  payment?: {
+    methodType?: string;
+    accountIdentifier?: string;
+    status?: string;
+    totalAmount?: number;
+  };
   address?: string;
   description?: string;
   notes?: string;
@@ -103,9 +108,11 @@ export interface CreateBookingRequest {
   time: string;
   address: string;
   workerId?: string;
-  paymentMethod: string;
   tip?: number;
   estimatedPrice: number;
+  estimatedDurationHours?: number;
+  inspectionFeeCharged?: boolean;
+  inspectionFeeAmount?: number;
 }
 
 export interface RescheduleBookingRequest {
@@ -132,15 +139,27 @@ export interface Worker {
   avatar?: string;
 }
 
+export interface Certification {
+  id: string;
+  title: string;
+  issuer: string;
+  issueDate: string;
+  expiryDate?: string | null;
+  documentUrl: string;
+  verificationStatus: string;
+  rejectionReason?: string | null;
+  reviewedAt?: string | null;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
 export interface WorkerDetail extends Worker {
   bio: string;
-  yearsOfExperience: number;
-  certifications: string[];
-  skills: string[];
-  responseTime: string;
+  serviceAreaRadius: number;
+  certifications: Certification[];
+  resumeParseResult: ParsedResume | null;
   completedJobs: number;
   joinDate: string;
-  serviceArea: string[];
 }
 
 export interface WorkerFilters {
@@ -376,11 +395,14 @@ export interface WorkerReceivedReview {
 }
 
 export interface ParsedResume {
-  skills: string[];
-  yearsOfExperience: number;
-  masteryLevel: string;
-  certifications: string[];
-  summary: string;
+  rawText?: string | null;
+  parsedSkills: string[];
+  yearsOfExperience?: number | null;
+  masteryLevel?: string | null;
+  tradeCategory?: string | null;
+  summary?: string | null;
+  parsedAt?: string;
+  modelUsed?: string;
 }
 
 // ============================================================================

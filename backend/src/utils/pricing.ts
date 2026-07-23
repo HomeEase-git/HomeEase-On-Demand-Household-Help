@@ -2,6 +2,7 @@
  * Pricing utilities for commission, tax, and payout calculations
  * This mirrors the logic in mobile/utils/pricing.ts to ensure both sides agree
  */
+import { COMMISSION_RATE, WITHHOLDING_TAX_RATE } from '@config/pricing';
 
 export interface PriceBreakdown {
   subtotal: number;
@@ -19,12 +20,12 @@ export interface PriceBreakdown {
 /**
  * Platform commission percentage (takes a cut of each transaction)
  */
-const COMMISSION_PERCENTAGE = 10; // 10% goes to platform
+const COMMISSION_PERCENTAGE = COMMISSION_RATE * 100; // Convert to percentage
 
 /**
  * Withholding tax percentage for workers (tax compliance)
  */
-const WITHHOLDING_TAX_PERCENTAGE = 5; // 5% withholding tax
+const WITHHOLDING_TAX_PERCENTAGE = WITHHOLDING_TAX_RATE * 100; // Convert to percentage
 
 /**
  * Calculate the commission amount

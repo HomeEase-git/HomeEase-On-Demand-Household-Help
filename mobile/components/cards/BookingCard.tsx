@@ -12,7 +12,9 @@ type Booking = {
   date: string;
   status: string;
   amount: number;
-  paymentMethod: string;
+  payment?: {
+    methodType?: string;
+  };
 };
 
 type Props = {
@@ -37,7 +39,10 @@ export const BookingCard: React.FC<Props> = ({ booking, onPress }) => {
         <Text className="text-primary font-bold">{booking.service}</Text>
         <Text className="text-primary text-xs">{booking.worker}</Text>
         <Text className="text-text-secondary text-xs">
-          {booking.date} · {booking.paymentMethod}
+          {booking.date}
+          {booking.payment?.methodType
+            ? ` · ${booking.payment.methodType}`
+            : ""}
         </Text>
       </View>
       <View className="items-end">

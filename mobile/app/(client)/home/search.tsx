@@ -1,11 +1,11 @@
-import React, { useState, useRef } from "react";
+import React, { useState, useRef, useEffect } from "react";
 import { View, Text, FlatList, Pressable, Alert } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import SearchBar from "../../../components/ui/SearchBar";
 import WorkerCard from "../../../components/cards/WorkerCard";
 import EmptyState from "../../../components/feedback/EmptyState";
-import { workers } from "../../../constants/dummyData";
+import { searchWorkers } from "../../../services/api";
 import FilterSortBottomSheet from "../../../components/bottom-sheets/FilterSortBottomSheet";
 import type { BottomSheetHandle } from "../../../components/bottom-sheets/BottomSheetWrapper";
 import LoadingSkeleton from "../../../components/feedback/LoadingSkeleton";
@@ -15,31 +15,52 @@ export default function SearchScreen() {
   const router = useRouter();
   const [query, setQuery] = useState("");
   const [searching, setSearching] = useState(false);
+  const [results, setResults] = useState<any[]>([]);
+  const [error, setError] = useState<string | null>(null);
   const filterRef = useRef<BottomSheetHandle | null>(null);
   const recentSearches = useSearchStore((s) => s.recentSearches);
   const addSearch = useSearchStore((s) => s.addSearch);
   const clearSearches = useSearchStore((s) => s.clearSearches);
 
-  const normalizedQuery = query.trim().toLowerCase();
-  const filtered = normalizedQuery
-    ? workers.filter(
-        (w) =>
-          w.name.toLowerCase().includes(normalizedQuery) ||
-          w.service.toLowerCase().includes(normalizedQuery),
-      )
-    : [];
+  useEffect(() => {
+    let active = true;
+    const queryText = query.trim();
+
+    if (!queryText) {
+      setResults([]);
+      setSearching(false);
+      setError(null);
+      return;
+    }
+
+    setSearching(true);
+    setError(null);
+
+    searchWorkers({ query: queryText, page: 1 })
+      .then((response) => {
+        if (!active) return;
+        setResults(response.data ?? []);
+      })
+      .catch(() => {
+        if (!active) return;
+        setError("Unable to search workers. Please try again.");
+        setResults([]);
+      })
+      .finally(() => {
+        if (!active) return;
+        setSearching(false);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [query]);
 
   const handleChangeQuery = (text: string) => {
     setQuery(text);
-    if (!text.trim()) {
-      setSearching(false);
-      return;
+    if (text.trim()) {
+      addSearch(text.trim());
     }
-    setSearching(true);
-    addSearch(text.trim());
-    setTimeout(() => {
-      setSearching(false);
-    }, 400);
   };
 
   const handleClearRecent = () => {
@@ -93,14 +114,18 @@ export default function SearchScreen() {
       {searching ? (
         <LoadingSkeleton />
       ) : query.trim() ? (
-        filtered.length === 0 ? (
+        error ? (
+          <View className="px-4 py-6">
+            <Text className="text-error">{error}</Text>
+          </View>
+        ) : results.length === 0 ? (
           <EmptyState
             title="No workers found"
             subtitle={`No results for "${query}"`}
           />
         ) : (
           <FlatList
-            data={filtered}
+            data={results}
             keyExtractor={(item) => item.id}
             contentContainerStyle={{ padding: 16, paddingBottom: 24 }}
             renderItem={({ item }) => (

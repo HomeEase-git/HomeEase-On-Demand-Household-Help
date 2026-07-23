@@ -21,7 +21,7 @@ export default function TransactionsScreen() {
       id: `TXN-${b.id}`,
       bookingId: b.id,
       amount: b.amount,
-      method: b.paymentMethod,
+      method: b.payment?.methodType ?? "Unknown",
       status: "Completed",
       date: b.date,
     }));

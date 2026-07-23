@@ -1,12 +1,7 @@
 // prisma/seed.ts
 //
-// Run with: npx prisma db seed
-// Requires: npm install -D @faker-js/faker   (bcrypt should already be a dependency)
-//
-// NOTE: Depending on your Prisma version, the `"prisma": { "seed": "..." }`
-// config block may need to live in package.json OR in prisma.config.ts
-// (you already hit this split with the `url` property in schema.prisma).
-// Check whichever file currently holds your seed command config.
+// Run with: npx prisma db seed   (from the backend folder)
+// Requires: @faker-js/faker, bcryptjs, @prisma/adapter-pg, pg
 
 import "dotenv/config";
 import {
@@ -17,6 +12,7 @@ import {
   KycDocumentStatus,
   ContractType,
   BookingStatus,
+  QuoteStatus,
   PaymentStatus,
   EscrowStatus,
   PaymentMethodType,
@@ -122,6 +118,11 @@ const CATEGORIES = [
   },
 ];
 
+const SKILL_POOL = [
+  "Hand tools", "Power tools", "Customer service", "Blueprint reading",
+  "Safety compliance", "Team supervision", "Inventory management",
+];
+
 function phoneNumber() {
   return "09" + faker.string.numeric(9);
 }
@@ -141,6 +142,7 @@ async function clearData() {
   await prisma.resumeParseResult.deleteMany();
   await prisma.certification.deleteMany();
   await prisma.kycDocument.deleteMany();
+  await prisma.verificationRequest.deleteMany();
   await prisma.savedPaymentMethod.deleteMany();
   await prisma.serviceTask.deleteMany();
   await prisma.authToken.deleteMany();
@@ -246,6 +248,9 @@ async function createWorker(
           totalReviews: faker.number.int({ min: 0, max: 40 }),
           isAvailable: true,
           maxConcurrentJobs: faker.helpers.arrayElement([1, 2, 3]),
+          activeJobCount: 0,
+          availableDays: [1, 2, 3, 4, 5],
+          serviceAreaRadius: faker.helpers.arrayElement([15, 20, 30]),
           city,
           state: "Philippines",
           address: faker.location.streetAddress(),
@@ -266,21 +271,32 @@ async function createWorker(
     KycDocumentType.GOVERNMENT_ID_FRONT,
     KycDocumentType.GOVERNMENT_ID_BACK,
     KycDocumentType.SELFIE,
-    KycDocumentType.CERTIFICATION,
     KycDocumentType.RESUME,
+    KycDocumentType.NBI_CLEARANCE,
   ];
 
-  for (const type of docTypes) {
-    await prisma.kycDocument.create({
-      data: {
-        userId: user.id,
-        documentType: type,
-        fileUrl: `https://example-storage.dev/kyc/${user.id}/${type.toLowerCase()}.jpg`,
-        status: docStatus,
-        reviewedAt: isApproved ? faker.date.recent({ days: 10 }) : null,
+  await prisma.verificationRequest.create({
+    data: {
+      userId: user.id,
+      type: "WORKER_ONBOARDING",
+      status: kycStatus,
+      reviewedAt: isApproved ? faker.date.recent({ days: 10 }) : null,
+      aiStatus: isApproved ? "MATCH" : null,
+      aiConfidence: isApproved
+        ? faker.number.float({ min: 0.85, max: 0.99, fractionDigits: 2 })
+        : null,
+      documents: {
+        create: docTypes.map((type) => ({
+          documentType: type,
+          fileUrl: `https://example-storage.dev/kyc/${user.id}/${type.toLowerCase()}.jpg`,
+          fileName: `${type.toLowerCase()}.jpg`,
+          mimeType: "image/jpeg",
+          status: docStatus,
+          reviewedAt: isApproved ? faker.date.recent({ days: 10 }) : null,
+        })),
       },
-    });
-  }
+    },
+  });
 
   await prisma.certification.create({
     data: {
@@ -290,6 +306,19 @@ async function createWorker(
       issueDate: faker.date.past({ years: 3 }),
       documentUrl: `https://example-storage.dev/certifications/${user.id}.pdf`,
       verificationStatus: docStatus,
+      reviewedAt: isApproved ? faker.date.recent({ days: 10 }) : null,
+    },
+  });
+
+  await prisma.resumeParseResult.create({
+    data: {
+      workerProfileId: user.workerProfile!.id,
+      rawText: faker.lorem.paragraphs(2),
+      parsedSkills: [category.name, ...faker.helpers.arrayElements(SKILL_POOL, 2)],
+      yearsOfExperience: faker.number.int({ min: 1, max: 15 }),
+      masteryLevel: faker.helpers.arrayElement(["Beginner", "Intermediate", "Expert"]),
+      tradeCategory: category.name,
+      summary: faker.lorem.sentence(15),
     },
   });
 
@@ -309,22 +338,42 @@ async function createBookingsAndPayments(
   workers: Awaited<ReturnType<typeof createWorker>>[],
   serviceTypes: Awaited<ReturnType<typeof createServiceTypes>>
 ) {
-  const statuses: BookingStatus[] = [
+  // Every status gets at least one booking so every UI screen state has
+  // something real to render, plus extra randomized ones on top.
+  const allStatuses: BookingStatus[] = [
     BookingStatus.PENDING,
     BookingStatus.ACCEPTED,
+    BookingStatus.REJECTED,
     BookingStatus.IN_PROGRESS,
+    BookingStatus.QUOTE_SUBMITTED,
+    BookingStatus.QUOTE_APPROVED,
+    BookingStatus.DISPUTED,
     BookingStatus.COMPLETED,
     BookingStatus.CANCELLED,
   ];
+  const extraRandomCount = 6;
+  const statusQueue = [
+    ...allStatuses,
+    ...Array.from({ length: extraRandomCount }, () =>
+      faker.helpers.arrayElement(allStatuses)
+    ),
+  ];
   const timeSlots = ["09:00 AM", "01:00 PM", "03:30 PM", "05:00 PM"];
 
-  for (let i = 0; i < 15; i++) {
+  for (const status of statusQueue) {
     const client = faker.helpers.arrayElement(clients);
     const worker = faker.helpers.arrayElement(workers);
     const serviceType = faker.helpers.arrayElement(serviceTypes);
     const task = faker.helpers.arrayElement(serviceType.tasks);
-    const status = faker.helpers.arrayElement(statuses);
     const estimatedPrice = task.basePrice;
+
+    const isQuoteFlow =
+      status === BookingStatus.QUOTE_SUBMITTED ||
+      status === BookingStatus.QUOTE_APPROVED ||
+      status === BookingStatus.DISPUTED;
+
+    const laborCost = isQuoteFlow ? estimatedPrice * 0.6 : null;
+    const materialsCost = isQuoteFlow ? estimatedPrice * 0.4 : null;
 
     let booking;
     try {
@@ -340,35 +389,56 @@ async function createBookingsAndPayments(
           scheduledTime: faker.helpers.arrayElement(timeSlots),
           status,
           estimatedPrice,
+          tip: status === BookingStatus.COMPLETED
+            ? faker.helpers.arrayElement([0, 50, 100])
+            : 0,
+          quoteStatus: isQuoteFlow
+            ? status === BookingStatus.QUOTE_SUBMITTED
+              ? QuoteStatus.SUBMITTED
+              : status === BookingStatus.QUOTE_APPROVED
+              ? QuoteStatus.APPROVED
+              : QuoteStatus.DISPUTED
+            : null,
+          laborCost,
+          materialsCost,
+          quotedAt: isQuoteFlow ? faker.date.recent({ days: 5 }) : null,
+          quoteNotes: isQuoteFlow ? faker.lorem.sentence(8) : null,
+          approvedAt: status === BookingStatus.QUOTE_APPROVED ? faker.date.recent({ days: 2 }) : null,
+          disputeReason: status === BookingStatus.DISPUTED ? faker.lorem.sentence(10) : null,
+          finalPrice: status === BookingStatus.COMPLETED ? estimatedPrice : null,
+          completionDate: status === BookingStatus.COMPLETED ? faker.date.recent({ days: 3 }) : null,
           location: faker.location.streetAddress(),
           city: faker.helpers.arrayElement(CITIES),
         },
       });
     } catch {
-      // Skip on rare worker/date/time collisions (worker_slot_unique constraint)
+      // Skip rare worker/date/time collisions (worker_slot_unique constraint)
       continue;
     }
 
     if (status === BookingStatus.COMPLETED) {
       const subtotal = estimatedPrice;
+      const tip = booking.tip ?? 0;
       const commissionRate = 0.1;
       const withholdingTaxRate = 0.05;
       const commissionAmount = subtotal * commissionRate;
       const withholdingTaxAmount = subtotal * withholdingTaxRate;
-      const workerPayout = subtotal - commissionAmount - withholdingTaxAmount;
+      const workerPayout = subtotal - commissionAmount - withholdingTaxAmount + tip;
 
       await prisma.payment.create({
         data: {
           bookingId: booking.id,
           subtotal,
+          tip,
           commissionRate,
           commissionAmount,
           withholdingTaxRate,
           withholdingTaxAmount,
           workerPayout,
-          totalAmount: subtotal,
+          totalAmount: subtotal + tip,
           status: PaymentStatus.COMPLETED,
           escrowStatus: EscrowStatus.RELEASED,
+          releasedAt: faker.date.recent({ days: 2 }),
           methodType: PaymentMethodType.CASH,
         },
       });

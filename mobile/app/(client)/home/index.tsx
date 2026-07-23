@@ -1,5 +1,12 @@
 import React, { useRef, useState, useEffect } from "react";
-import { View, Text, ScrollView, Pressable, FlatList } from "react-native";
+import {
+  View,
+  Text,
+  ScrollView,
+  Pressable,
+  FlatList,
+  ActivityIndicator,
+} from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
@@ -9,7 +16,7 @@ import { PromoBanner } from "../../../components/ui/PromoBanner";
 import { CategoryCard } from "../../../components/cards/CategoryCard";
 import { WorkerCard } from "../../../components/cards/WorkerCard";
 import { NotificationBadge } from "../../../components/ui/NotificationBadge";
-import { workers, categories } from "../../../constants/dummyData";
+import { getServiceTypes, getWorkers } from "../../../services/api";
 import { useNotificationStore } from "../../../store/notificationStore";
 import { useAuthStore } from "../../../store/authStore";
 import { FilterSortBottomSheet } from "../../../components/bottom-sheets/FilterSortBottomSheet";
@@ -23,20 +30,105 @@ const PROMO_BANNERS = [
   { title: "Book Now, Pay Later!", color: colors.banner3 },
 ];
 
+type ServiceCategory = {
+  id: string;
+  name: string;
+  count: number;
+};
+
+type HomeWorker = {
+  id: string;
+  name: string;
+  service: string;
+  rating: number;
+  reviews: number;
+  rate: number;
+  basePrice: number | null;
+  status: "available" | "unavailable";
+  avatar: string | null;
+};
+
+function normalizeHomeWorker(worker: any): HomeWorker {
+  const rate =
+    typeof worker.basePrice === "number"
+      ? worker.basePrice
+      : typeof worker.rate === "number"
+        ? worker.rate
+        : 0;
+
+  const status: "available" | "unavailable" =
+    worker.status === "unavailable" || worker.status === "busy"
+      ? "unavailable"
+      : "available";
+
+  return {
+    id: worker.id,
+    name: worker.name,
+    service: worker.service ?? "General service",
+    rating: Number(worker.rating ?? 0),
+    reviews: Number(worker.reviews ?? 0),
+    rate,
+    basePrice:
+      typeof worker.basePrice === "number"
+        ? worker.basePrice
+        : typeof worker.rate === "number"
+          ? worker.rate
+          : null,
+    status,
+    avatar: worker.avatar ?? null,
+  };
+}
+
 export default function ClientHomeScreen() {
   const router = useRouter();
   const unreadCount = useNotificationStore((s) => s.unreadCount);
   const filterRef = useRef<BottomSheetHandle | null>(null);
   const [loading, setLoading] = useState(true);
+  const [serviceCategories, setServiceCategories] = useState<ServiceCategory[]>(
+    [],
+  );
+  const [workers, setWorkers] = useState<HomeWorker[]>([]);
+  const [error, setError] = useState<string | null>(null);
   const user = useAuthStore((s) => s.user);
 
   const firstName = user?.name?.split(" ")[0] ?? "there";
 
   useEffect(() => {
-    const timer = setTimeout(() => {
-      setLoading(false);
-    }, 800);
-    return () => clearTimeout(timer);
+    let active = true;
+
+    async function loadHomeData() {
+      setLoading(true);
+      setError(null);
+      try {
+        const [serviceTypes, workersResponse] = await Promise.all([
+          getServiceTypes(),
+          getWorkers({ limit: 3 }),
+        ]);
+
+        if (!active) return;
+
+        setServiceCategories(
+          serviceTypes.map((serviceType: any) => ({
+            id: serviceType.name.toLowerCase().replace(/\s+/g, "-"),
+            name: serviceType.name,
+            count: serviceType.tasks?.length ?? 0,
+          })),
+        );
+
+        setWorkers((workersResponse.data ?? []).map(normalizeHomeWorker));
+      } catch (err) {
+        if (!active) return;
+        setError("Unable to load home content. Please try again.");
+      } finally {
+        if (!active) return;
+        setLoading(false);
+      }
+    }
+
+    loadHomeData();
+    return () => {
+      active = false;
+    };
   }, []);
 
   return (
@@ -116,7 +208,7 @@ export default function ClientHomeScreen() {
                 onActionPress={() => router.push("/(client)/category")}
               />
               <FlatList
-                data={categories}
+                data={serviceCategories}
                 horizontal
                 showsHorizontalScrollIndicator={false}
                 keyExtractor={(item) => item.id}

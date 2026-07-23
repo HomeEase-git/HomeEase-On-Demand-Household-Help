@@ -5,6 +5,7 @@ export type StatusType =
   | "Pending"
   | "Accepted"
   | "Active"
+  | "Ongoing"
   | "InProgress"
   | "QuoteSubmitted"
   | "QuoteApproved"
@@ -32,6 +33,10 @@ export const StatusBadge: React.FC<Props> = ({ status }) => {
     case "Accepted":
       containerClass += " bg-blue-500/20";
       textClass += " text-blue-400";
+      break;
+    case "Declined":
+      containerClass += " bg-error/20";
+      textClass += " text-error";
       break;
     case "Active":
     case "InProgress":
@@ -70,6 +75,7 @@ export const StatusBadge: React.FC<Props> = ({ status }) => {
     QuoteSubmitted: "Quote Submitted",
     QuoteApproved: "Quote Approved",
     Pending: "Pending",
+    Declined: "Declined",
     "Pending KYC": "Pending KYC",
   };
 

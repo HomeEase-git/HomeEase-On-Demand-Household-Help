@@ -9,6 +9,7 @@ import PrimaryButton from "../../components/ui/PrimaryButton";
 import OutlinedButton from "../../components/ui/OutlinedButton";
 import UploadCard from "../../components/ui/UploadCard";
 import { useAuthStore } from "../../store/authStore";
+import { submitKycDocument } from "../../services/api";
 
 // Worker-only screen — clients never reach this (selfie.tsx sends
 // them straight to the contract), but guard against direct navigation.
@@ -24,6 +25,7 @@ export default function ResumeScreen() {
     name: null,
   });
   const [uploading, setUploading] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
     if (!isWorker) {
@@ -57,11 +59,23 @@ export default function ResumeScreen() {
         return;
       }
 
-      setResumeFile({
-        uri: document.uri,
-        name: document.name || "resume.pdf",
-      });
-      Alert.alert("Success", "Resume uploaded successfully.");
+      try {
+        setSubmitting(true);
+        await submitKycDocument("resume", document.uri);
+        setResumeFile({
+          uri: document.uri,
+          name: document.name || "resume.pdf",
+        });
+        Alert.alert("Success", "Resume uploaded successfully.");
+      } catch (error) {
+        console.error("KYC resume submit error", error);
+        Alert.alert(
+          "Upload failed",
+          "We could not submit your resume. Please try again.",
+        );
+      } finally {
+        setSubmitting(false);
+      }
     } catch (error) {
       console.error("Resume upload error", error);
       Alert.alert(
@@ -108,7 +122,7 @@ export default function ResumeScreen() {
               resumeFile.uri ? resumeFile.name || "Resume uploaded" : undefined
             }
             onPress={handleUploadResume}
-            disabled={uploading}
+            disabled={uploading || submitting}
           />
         </View>
 
@@ -116,7 +130,7 @@ export default function ResumeScreen() {
           <PrimaryButton
             label="Continue"
             fullWidth
-            disabled={!resumeFile.uri || uploading}
+            disabled={!resumeFile.uri || uploading || submitting}
             onPress={() => router.push("/(kyc)/contract")}
           />
           <OutlinedButton

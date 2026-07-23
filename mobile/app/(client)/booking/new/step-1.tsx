@@ -1,5 +1,12 @@
 import React, { useState, useRef, useMemo, useEffect } from "react";
-import { View, Text, ScrollView, Pressable, Alert } from "react-native";
+import {
+  View,
+  Text,
+  ScrollView,
+  Pressable,
+  Alert,
+  ActivityIndicator,
+} from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
@@ -12,16 +19,29 @@ import PriceBreakdownCard from "../../../../components/ui/PriceBreakdown";
 import AddOnsSelector from "../../../../components/ui/AddOnsSelector";
 import ServiceTypePickerBottomSheet from "../../../../components/bottom-sheets/ServiceTypePickerBottomSheet";
 import { useBookingStore } from "../../../../store/bookingStore";
-import { workers } from "../../../../constants/dummyData";
-import {
-  serviceConfigs,
-  type ServiceTask,
-  type ServiceConfig,
-} from "../../../../constants/serviceData";
+import { serviceConfigs } from "../../../../constants/serviceData";
+import { getServiceTypes } from "../../../../services/api";
 import { calculatePriceBreakdown } from "../../../../utils/pricing";
 import type { BottomSheetHandle } from "../../../../components/bottom-sheets/BottomSheetWrapper";
 import { colors } from "../../../../constants";
 import InvalidationBanner from "../../../../components/ui/InvalidationBanner";
+
+type ServiceTask = {
+  id: string;
+  name: string;
+  description?: string | null;
+  basePrice: number;
+  durationHours: number;
+};
+
+type ServiceType = {
+  id: string;
+  name: string;
+  description?: string | null;
+  basePrice: number;
+  isActive: boolean;
+  tasks: ServiceTask[];
+};
 
 export default function BookingStep1Screen() {
   const router = useRouter();
@@ -29,23 +49,85 @@ export default function BookingStep1Screen() {
   const setDraft = useBookingStore((s) => s.setDraft);
   const [category, setCategory] = useState<string | null>(draft.category);
   const [description, setDescription] = useState(draft.description);
+  const [serviceTypes, setServiceTypes] = useState<ServiceType[]>([]);
+  const [selectedServiceTypeId, setSelectedServiceTypeId] = useState<
+    string | null
+  >(null);
   const [selectedTask, setSelectedTask] = useState<ServiceTask | null>(null);
   const [selectedAddOns, setSelectedAddOns] = useState<string[]>([]);
+  const [loadingServices, setLoadingServices] = useState(false);
+  const [serviceError, setServiceError] = useState<string | null>(null);
   const addressSet = !!draft.address;
   const serviceSheetRef = useRef<BottomSheetHandle | null>(null);
 
-  // Hydrate local state from draft on mount and whenever draft changes
+  const selectedServiceType = useMemo(() => {
+    if (selectedServiceTypeId) {
+      return (
+        serviceTypes.find((type) => type.id === selectedServiceTypeId) ?? null
+      );
+    }
+    return (
+      serviceTypes.find(
+        (type) => type.name.toLowerCase() === category?.toLowerCase(),
+      ) ?? null
+    );
+  }, [selectedServiceTypeId, category, serviceTypes]);
+
+  const addOnConfig = useMemo(() => {
+    if (!category) return null;
+    return serviceConfigs.find(
+      (config) => config.categoryName.toLowerCase() === category.toLowerCase(),
+    );
+  }, [category]);
+
   useEffect(() => {
-    setCategory(draft.category);
+    let active = true;
+
+    async function loadServiceTypes() {
+      setLoadingServices(true);
+      setServiceError(null);
+
+      try {
+        const types = await getServiceTypes();
+        if (!active) return;
+        setServiceTypes(types);
+      } catch (error) {
+        if (!active) return;
+        setServiceError("Unable to load services. Please try again.");
+      } finally {
+        if (!active) return;
+        setLoadingServices(false);
+      }
+    }
+
+    loadServiceTypes();
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  useEffect(() => {
     setDescription(draft.description);
     setSelectedAddOns(draft.selectedAddOnIds || []);
 
-    // Resolve selectedTask from draft.selectedTaskId
-    if (draft.selectedTaskId && draft.category) {
-      const config = serviceConfigs.find(
-        (c) => c.categoryName.toLowerCase() === draft.category?.toLowerCase(),
+    if (draft.category && serviceTypes.length) {
+      const matchedType = serviceTypes.find(
+        (type) => type.name.toLowerCase() === draft.category?.toLowerCase(),
       );
-      const task = config?.tasks.find((t) => t.id === draft.selectedTaskId);
+      if (matchedType) {
+        setSelectedServiceTypeId(matchedType.id);
+      }
+    }
+
+    if (draft.selectedTaskId && serviceTypes.length) {
+      const matchedType =
+        selectedServiceType ||
+        serviceTypes.find(
+          (type) => type.name.toLowerCase() === draft.category?.toLowerCase(),
+        );
+      const task = matchedType?.tasks.find(
+        (t) => t.id === draft.selectedTaskId,
+      );
       setSelectedTask(task || null);
     } else {
       setSelectedTask(null);
@@ -55,49 +137,39 @@ export default function BookingStep1Screen() {
     draft.description,
     draft.selectedTaskId,
     draft.selectedAddOnIds,
+    serviceTypes,
+    selectedServiceType,
   ]);
 
-  // Find matching service config for the selected category
-  const serviceConfig = useMemo(() => {
-    if (!category) return null;
-    return serviceConfigs.find(
-      (config) => config.categoryName.toLowerCase() === category.toLowerCase(),
-    );
-  }, [category]);
-
-  // Compute estimated price using utility
   const computeEstimatedPrice = (
     task: ServiceTask,
     addOnIds: string[],
-    config: ServiceConfig,
+    addOnSource: (typeof serviceConfigs)[0],
   ) => {
-    const addOnTotal = config.addOns
+    const addOnTotal = addOnSource.addOns
       .filter((a) => addOnIds.includes(a.id))
       .reduce((sum, a) => sum + a.price, 0);
     return task.basePrice + addOnTotal;
   };
 
-  // Get full price breakdown
   const priceBreakdown = useMemo(() => {
-    if (!selectedTask || !serviceConfig) return null;
-    const addOnTotal = serviceConfig.addOns
+    if (!selectedTask || !selectedServiceType || !addOnConfig) return null;
+    const addOnTotal = addOnConfig.addOns
       .filter((a) => selectedAddOns.includes(a.id))
       .reduce((sum, a) => sum + a.price, 0);
     return calculatePriceBreakdown(selectedTask.basePrice, 1, addOnTotal, 0);
-  }, [selectedTask, serviceConfig, selectedAddOns]);
+  }, [selectedTask, selectedServiceType, selectedAddOns, addOnConfig]);
 
-  // Guard: if entrySource is worker_profile or book_again and category doesn't resolve,
-  // show error and prevent navigation (prevents silent data corruption)
   const unresolvableCategory =
     (draft.entrySource === "worker_profile" ||
       draft.entrySource === "book_again") &&
     category &&
-    !serviceConfig;
+    !selectedServiceType;
 
   const canNext =
     category &&
     addressSet &&
-    (!serviceConfig || selectedTask !== null) &&
+    (!selectedServiceType || selectedTask !== null) &&
     !unresolvableCategory;
 
   return (
@@ -112,6 +184,7 @@ export default function BookingStep1Screen() {
           currentStep={0}
         />
         <InvalidationBanner />
+
         {unresolvableCategory && (
           <View className="bg-error/10 border border-error/30 rounded-2xl p-4 mb-4 flex-row items-start">
             <Ionicons
@@ -131,6 +204,7 @@ export default function BookingStep1Screen() {
             </View>
           </View>
         )}
+
         <Text className="text-primary font-bold text-lg mt-4">
           Service Details
         </Text>
@@ -149,14 +223,26 @@ export default function BookingStep1Screen() {
           <Ionicons name="chevron-down" size={20} color={colors.text.muted} />
         </Pressable>
 
-        {/* Task Selection */}
-        {serviceConfig && (
+        {loadingServices ? (
+          <View className="py-6 items-center">
+            <ActivityIndicator size="small" />
+            <Text className="text-text-secondary mt-2">
+              Loading services...
+            </Text>
+          </View>
+        ) : serviceError ? (
+          <View className="py-6 items-center">
+            <Text className="text-error">{serviceError}</Text>
+          </View>
+        ) : null}
+
+        {selectedServiceType && (
           <>
             <Text className="text-text-secondary text-sm mb-1 mt-3">
               Select Task
             </Text>
             <ScrollView horizontal={false} className="flex-1">
-              {serviceConfig.tasks.map((task) => (
+              {selectedServiceType.tasks.map((task) => (
                 <Pressable
                   key={task.id}
                   className={`bg-card rounded-xl p-3 mb-2 flex-row items-center ${
@@ -165,13 +251,18 @@ export default function BookingStep1Screen() {
                       : "border-2 border-transparent"
                   }`}
                   onPress={() => {
-                    setSelectedTask(task);
+                    const selected = selectedServiceType.tasks.find(
+                      (t) => t.id === task.id,
+                    );
+                    if (!selected) return;
+
+                    setSelectedTask(selected);
                     setDraft({
-                      selectedTaskId: task.id,
+                      selectedTaskId: selected.id,
                       estimatedPrice: computeEstimatedPrice(
-                        task,
+                        selected,
                         selectedAddOns,
-                        serviceConfig,
+                        addOnConfig ?? serviceConfigs[0],
                       ),
                     });
                   }}
@@ -198,11 +289,10 @@ export default function BookingStep1Screen() {
           </>
         )}
 
-        {/* Add-ons Selection */}
-        {serviceConfig && selectedTask && (
+        {selectedServiceType && selectedTask && addOnConfig && (
           <View className="mt-3">
             <AddOnsSelector
-              addOns={serviceConfig.addOns}
+              addOns={addOnConfig.addOns}
               selectedIds={selectedAddOns}
               onSelectionChange={(updated) => {
                 setSelectedAddOns(updated);
@@ -211,7 +301,7 @@ export default function BookingStep1Screen() {
                   estimatedPrice: computeEstimatedPrice(
                     selectedTask,
                     updated,
-                    serviceConfig,
+                    addOnConfig,
                   ),
                 });
               }}
@@ -220,7 +310,6 @@ export default function BookingStep1Screen() {
           </View>
         )}
 
-        {/* Price Estimate Card */}
         {priceBreakdown && (
           <View className="mt-3">
             <PriceBreakdownCard breakdown={priceBreakdown} detailed={false} />
@@ -265,36 +354,30 @@ export default function BookingStep1Screen() {
           </Text>
           <View className="bg-card rounded-2xl p-4">
             {draft.workerId ? (
-              (() => {
-                const selectedWorker = workers.find(
-                  (w) => w.id === draft.workerId,
-                );
-                return selectedWorker ? (
-                  <View className="flex-row items-center justify-between">
-                    <View className="flex-1">
-                      <Text className="text-primary font-semibold">
-                        {selectedWorker.name}
-                      </Text>
-                      <Text className="text-text-secondary text-xs">
-                        {selectedWorker.service} · ₱{selectedWorker.rate}/hr
-                      </Text>
-                    </View>
-                    <OutlinedButton
-                      label="Change"
-                      onPress={() => {
-                        if (draft.workerLocked) {
-                          Alert.alert(
-                            "Worker Locked",
-                            "This worker was selected from their profile or a previous booking and can't be changed from here. Please go back to change the service or booking.",
-                          );
-                          return;
-                        }
-                        router.push("/(client)/booking/select-worker");
-                      }}
-                    />
-                  </View>
-                ) : null;
-              })()
+              <View className="flex-row items-center justify-between">
+                <View className="flex-1">
+                  <Text className="text-primary font-semibold">
+                    {draft.workerName ?? "Selected worker"}
+                  </Text>
+                  <Text className="text-text-secondary text-xs">
+                    Worker selected for this booking
+                  </Text>
+                </View>
+
+                <OutlinedButton
+                  label="Change"
+                  onPress={() => {
+                    if (draft.workerLocked) {
+                      Alert.alert(
+                        "Worker Locked",
+                        "This worker was selected from their profile or a previous booking and can't be changed from here. Please go back to change the service or booking.",
+                      );
+                      return;
+                    }
+                    router.push("/(client)/booking/select-worker");
+                  }}
+                />
+              </View>
             ) : (
               <View>
                 <Text className="text-text-secondary text-sm mb-3">
@@ -319,7 +402,7 @@ export default function BookingStep1Screen() {
                 Alert.alert(
                   "Error",
                   "Please select category and address" +
-                    (serviceConfig ? " and task" : ""),
+                    (selectedServiceType ? " and task" : ""),
                 );
                 return;
               }
@@ -329,12 +412,14 @@ export default function BookingStep1Screen() {
           />
         </View>
       </ScrollView>
+
       <ServiceTypePickerBottomSheet
         innerRef={serviceSheetRef}
-        onSelect={(name) => {
+        onSelect={(name, id) => {
           setCategory(name);
           setSelectedTask(null);
           setSelectedAddOns([]);
+          setSelectedServiceTypeId(id);
           setDraft({
             category: name,
             selectedTaskId: null,

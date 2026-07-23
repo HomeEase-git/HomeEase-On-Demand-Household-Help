@@ -3,6 +3,7 @@ import prisma from '@config/database';
 import { errorResponse } from '@utils/errorResponse';
 import type { JwtPayload } from '@/types/index';
 import { getPriceBreakdown, calculateCommission, calculateWithholdingTax } from '../utils/pricing';
+import { COMMISSION_RATE, WITHHOLDING_TAX_RATE } from '@config/pricing';
 
 interface AuthRequest extends Request {
   user?: JwtPayload;
@@ -14,7 +15,7 @@ interface AuthRequest extends Request {
  *
  * Schema notes:
  *  - Payment has no clientId/workerId — ownership is accessed via booking relation
- *  - Payment.methodType is required (PaymentMethodType enum); default to CASH until PayMongo is wired
+ *  - Payment.methodType is required (PaymentMethodType enum)
  *  - totalAmount is required on Payment
  *  - Booking quote data is inline (laborCost, materialsCost); addOns use `price` field
  */
@@ -26,6 +27,54 @@ export const createPayment = async (req: AuthRequest, res: Response) => {
 
     const bookingId = req.params.bookingId as string;
     const currentUserId = req.user.userId;
+    const validPaymentMethodTypes = ['GCASH', 'MAYA', 'CARD', 'BANK_TRANSFER', 'CASH'] as const;
+    const rawMethodType = typeof req.body?.methodType === 'string' ? req.body.methodType.trim() : '';
+    const paymentMethodId = typeof req.body?.paymentMethodId === 'string' ? req.body.paymentMethodId.trim() : '';
+    const requestAccountIdentifier = typeof req.body?.accountIdentifier === 'string' ? req.body.accountIdentifier.trim() : '';
+    const paymongoPaymentId = typeof req.body?.paymongoPaymentId === 'string' ? req.body.paymongoPaymentId.trim() : null;
+    const paymongoSourceId = typeof req.body?.paymongoSourceId === 'string' ? req.body.paymongoSourceId.trim() : null;
+
+    let methodType: (typeof validPaymentMethodTypes)[number] | null = null;
+    let accountIdentifier: string | null = null;
+
+    if (paymentMethodId) {
+      const savedMethod = await prisma.savedPaymentMethod.findUnique({
+        where: { id: paymentMethodId },
+        include: { clientProfile: true },
+      });
+
+      if (!savedMethod) {
+        return res.status(404).json(errorResponse(404, 'Payment method not found'));
+      }
+
+      if (savedMethod.clientProfile.userId !== currentUserId) {
+        return res.status(403).json(errorResponse(403, 'Payment method does not belong to this user'));
+      }
+
+      methodType = savedMethod.type;
+      accountIdentifier = savedMethod.accountIdentifier ?? (requestAccountIdentifier || null);
+
+      if (rawMethodType && rawMethodType !== methodType) {
+        return res.status(400).json(
+          errorResponse(400, `Payment method type mismatch: expected ${savedMethod.type}, got ${rawMethodType}`)
+        );
+      }
+    } else {
+      if (!rawMethodType) {
+        return res.status(400).json(
+          errorResponse(400, 'methodType is required and must be one of: GCASH, MAYA, CARD, BANK_TRANSFER, CASH')
+        );
+      }
+
+      if (!validPaymentMethodTypes.includes(rawMethodType as (typeof validPaymentMethodTypes)[number])) {
+        return res.status(400).json(
+          errorResponse(400, `Invalid methodType "${rawMethodType}". Allowed values: GCASH, MAYA, CARD, BANK_TRANSFER, CASH`)
+        );
+      }
+
+      methodType = rawMethodType as (typeof validPaymentMethodTypes)[number];
+      accountIdentifier = requestAccountIdentifier || null;
+    }
 
     const booking = await prisma.booking.findUnique({
       where: { id: bookingId },
@@ -65,23 +114,30 @@ export const createPayment = async (req: AuthRequest, res: Response) => {
     const subtotal = hasQuote
       ? (booking.laborCost ?? 0) + (booking.materialsCost ?? 0) + addonsCost
       : booking.estimatedPrice + addonsCost;
+    const tip = booking.tip ?? 0;
 
     const commission = calculateCommission(subtotal);
     const withholdingTax = calculateWithholdingTax(subtotal);
-    const workerPayout = subtotal - commission - withholdingTax;
-    const totalAmount = subtotal; // client pays subtotal; commission/tax deducted from worker payout
+    const workerPayout = subtotal - commission - withholdingTax + tip;
+    const totalAmount = subtotal + tip;
 
     const payment = await prisma.payment.create({
       data: {
         bookingId,
         subtotal,
+        tip,
+        commissionRate: COMMISSION_RATE,
         commissionAmount: commission,
+        withholdingTaxRate: WITHHOLDING_TAX_RATE,
         withholdingTaxAmount: withholdingTax,
         workerPayout,
         totalAmount,
         status: 'PENDING',
         escrowStatus: 'HELD',
-        methodType: 'CASH', // default until PayMongo is integrated in Sprint 3
+        methodType: methodType as any,
+        accountIdentifier,
+        paymongoPaymentId,
+        paymongoSourceId,
       },
     });
 
@@ -136,7 +192,7 @@ export const getPaymentDetail = async (req: AuthRequest, res: Response) => {
       return res.status(403).json(errorResponse(403, 'You do not have permission to view this payment'));
     }
 
-    const breakdown = getPriceBreakdown(payment.subtotal, 0, 0);
+    const breakdown = getPriceBreakdown(payment.subtotal, payment.tip, 0);
 
     return res.status(200).json({
       success: true,
@@ -145,7 +201,7 @@ export const getPaymentDetail = async (req: AuthRequest, res: Response) => {
         id: payment.id,
         bookingId: payment.bookingId,
         clientName: payment.booking.client.fullName,
-        workerName: payment.booking.worker.fullName,
+        workerName: payment.booking.worker?.fullName ?? null,
         serviceName: payment.booking.serviceTask?.name ?? payment.booking.serviceType,
         status: payment.status,
         escrowStatus: payment.escrowStatus,
@@ -224,7 +280,7 @@ export const listMyPayments = async (req: AuthRequest, res: Response) => {
       service: p.booking.serviceTask?.name ?? p.booking.serviceType,
       otherParty:
         currentRole === 'CLIENT'
-          ? p.booking.worker.fullName
+          ? p.booking.worker?.fullName ?? null
           : p.booking.client.fullName,
       amount: currentRole === 'CLIENT' ? p.subtotal : p.workerPayout,
       status: p.status,
@@ -301,15 +357,18 @@ export const releaseEscrow = async (req: AuthRequest, res: Response) => {
     });
 
     // Notify worker — schema has PAYMENT_RECEIVED (no PAYMENT_RELEASED)
-    await prisma.notification.create({
-      data: {
-        userId: payment.booking.workerId,
-        type: 'PAYMENT_RECEIVED',
-        title: 'Payment Released',
-        message: `₱${payment.workerPayout} has been released to your account`,
-        relatedId: payment.bookingId,
-      },
-    });
+    // booking.workerId is nullable — skip if the booking has no assigned worker
+    if (payment.booking.workerId) {
+      await prisma.notification.create({
+        data: {
+          userId: payment.booking.workerId,
+          type: 'PAYMENT_RECEIVED',
+          title: 'Payment Released',
+          message: `₱${payment.workerPayout} has been released to your account`,
+          relatedId: payment.bookingId,
+        },
+      });
+    }
 
     return res.status(200).json({
       success: true,
@@ -372,16 +431,18 @@ export const refundPayment = async (req: AuthRequest, res: Response) => {
       },
     });
 
-    // Notify worker — schema has no PAYMENT_REFUNDED; use PAYMENT_RECEIVED as closest
-    await prisma.notification.create({
-      data: {
-        userId: payment.booking.workerId,
-        type: 'PAYMENT_REFUNDED',
-        title: 'Payment Refunded',
-        message: `Payment has been refunded: ${reason}`,
-        relatedId: payment.bookingId,
-      },
-    });
+    // Notify worker (booking.workerId is nullable — skip if unassigned)
+    if (payment.booking.workerId) {
+      await prisma.notification.create({
+        data: {
+          userId: payment.booking.workerId,
+          type: 'PAYMENT_REFUNDED',
+          title: 'Payment Refunded',
+          message: `Payment has been refunded: ${reason}`,
+          relatedId: payment.bookingId,
+        },
+      });
+    }
 
     return res.status(200).json({
       success: true,

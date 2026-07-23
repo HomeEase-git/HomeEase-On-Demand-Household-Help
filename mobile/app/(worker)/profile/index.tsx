@@ -110,11 +110,11 @@ export default function WorkerProfileScreen() {
           </View>
         </View>
 
-        <View className="bg-card rounded-2xl mx-4 mt-3 overflow-hidden">
+        <View className="bg-blue-100 rounded-2xl mx-4 mt-3 overflow-hidden">
           {MENU.map((item) => (
             <Pressable
               key={item.label}
-              className="flex-row items-center py-4 px-4 border-b border-divider last:border-0"
+              className="flex-row items-center py-4 px-4 border-b border-white last:border-0"
               onPress={() => router.push(item.path as any)}
             >
               <Text className="text-primary flex-1">{item.label}</Text>

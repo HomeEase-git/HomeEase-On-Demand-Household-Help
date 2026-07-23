@@ -7,13 +7,14 @@ exports.handlePayMongoWebhook = exports.createPaymentIntent = exports.refundPaym
 const database_1 = __importDefault(require("@config/database"));
 const errorResponse_1 = require("@utils/errorResponse");
 const pricing_1 = require("../utils/pricing");
+const pricing_2 = require("@config/pricing");
 /**
  * POST /api/payments/:bookingId
  * Create Payment once booking is completed/approved
  *
  * Schema notes:
  *  - Payment has no clientId/workerId — ownership is accessed via booking relation
- *  - Payment.methodType is required (PaymentMethodType enum); default to CASH until PayMongo is wired
+ *  - Payment.methodType is required (PaymentMethodType enum)
  *  - totalAmount is required on Payment
  *  - Booking quote data is inline (laborCost, materialsCost); addOns use `price` field
  */
@@ -24,6 +25,41 @@ const createPayment = async (req, res) => {
         }
         const bookingId = req.params.bookingId;
         const currentUserId = req.user.userId;
+        const validPaymentMethodTypes = ['GCASH', 'MAYA', 'CARD', 'BANK_TRANSFER', 'CASH'];
+        const rawMethodType = typeof req.body?.methodType === 'string' ? req.body.methodType.trim() : '';
+        const paymentMethodId = typeof req.body?.paymentMethodId === 'string' ? req.body.paymentMethodId.trim() : '';
+        const requestAccountIdentifier = typeof req.body?.accountIdentifier === 'string' ? req.body.accountIdentifier.trim() : '';
+        const paymongoPaymentId = typeof req.body?.paymongoPaymentId === 'string' ? req.body.paymongoPaymentId.trim() : null;
+        const paymongoSourceId = typeof req.body?.paymongoSourceId === 'string' ? req.body.paymongoSourceId.trim() : null;
+        let methodType = null;
+        let accountIdentifier = null;
+        if (paymentMethodId) {
+            const savedMethod = await database_1.default.savedPaymentMethod.findUnique({
+                where: { id: paymentMethodId },
+                include: { clientProfile: true },
+            });
+            if (!savedMethod) {
+                return res.status(404).json((0, errorResponse_1.errorResponse)(404, 'Payment method not found'));
+            }
+            if (savedMethod.clientProfile.userId !== currentUserId) {
+                return res.status(403).json((0, errorResponse_1.errorResponse)(403, 'Payment method does not belong to this user'));
+            }
+            methodType = savedMethod.type;
+            accountIdentifier = savedMethod.accountIdentifier ?? (requestAccountIdentifier || null);
+            if (rawMethodType && rawMethodType !== methodType) {
+                return res.status(400).json((0, errorResponse_1.errorResponse)(400, `Payment method type mismatch: expected ${savedMethod.type}, got ${rawMethodType}`));
+            }
+        }
+        else {
+            if (!rawMethodType) {
+                return res.status(400).json((0, errorResponse_1.errorResponse)(400, 'methodType is required and must be one of: GCASH, MAYA, CARD, BANK_TRANSFER, CASH'));
+            }
+            if (!validPaymentMethodTypes.includes(rawMethodType)) {
+                return res.status(400).json((0, errorResponse_1.errorResponse)(400, `Invalid methodType "${rawMethodType}". Allowed values: GCASH, MAYA, CARD, BANK_TRANSFER, CASH`));
+            }
+            methodType = rawMethodType;
+            accountIdentifier = requestAccountIdentifier || null;
+        }
         const booking = await database_1.default.booking.findUnique({
             where: { id: bookingId },
             include: {
@@ -56,21 +92,28 @@ const createPayment = async (req, res) => {
         const subtotal = hasQuote
             ? (booking.laborCost ?? 0) + (booking.materialsCost ?? 0) + addonsCost
             : booking.estimatedPrice + addonsCost;
+        const tip = booking.tip ?? 0;
         const commission = (0, pricing_1.calculateCommission)(subtotal);
         const withholdingTax = (0, pricing_1.calculateWithholdingTax)(subtotal);
-        const workerPayout = subtotal - commission - withholdingTax;
-        const totalAmount = subtotal; // client pays subtotal; commission/tax deducted from worker payout
+        const workerPayout = subtotal - commission - withholdingTax + tip;
+        const totalAmount = subtotal + tip;
         const payment = await database_1.default.payment.create({
             data: {
                 bookingId,
                 subtotal,
+                tip,
+                commissionRate: pricing_2.COMMISSION_RATE,
                 commissionAmount: commission,
+                withholdingTaxRate: pricing_2.WITHHOLDING_TAX_RATE,
                 withholdingTaxAmount: withholdingTax,
                 workerPayout,
                 totalAmount,
                 status: 'PENDING',
                 escrowStatus: 'HELD',
-                methodType: 'CASH', // default until PayMongo is integrated in Sprint 3
+                methodType: methodType,
+                accountIdentifier,
+                paymongoPaymentId,
+                paymongoSourceId,
             },
         });
         return res.status(201).json({
@@ -118,7 +161,7 @@ const getPaymentDetail = async (req, res) => {
             payment.booking.workerId !== currentUserId) {
             return res.status(403).json((0, errorResponse_1.errorResponse)(403, 'You do not have permission to view this payment'));
         }
-        const breakdown = (0, pricing_1.getPriceBreakdown)(payment.subtotal, 0, 0);
+        const breakdown = (0, pricing_1.getPriceBreakdown)(payment.subtotal, payment.tip, 0);
         return res.status(200).json({
             success: true,
             message: 'Payment details retrieved successfully',
@@ -126,7 +169,7 @@ const getPaymentDetail = async (req, res) => {
                 id: payment.id,
                 bookingId: payment.bookingId,
                 clientName: payment.booking.client.fullName,
-                workerName: payment.booking.worker.fullName,
+                workerName: payment.booking.worker?.fullName ?? null,
                 serviceName: payment.booking.serviceTask?.name ?? payment.booking.serviceType,
                 status: payment.status,
                 escrowStatus: payment.escrowStatus,
@@ -197,7 +240,7 @@ const listMyPayments = async (req, res) => {
             bookingId: p.bookingId,
             service: p.booking.serviceTask?.name ?? p.booking.serviceType,
             otherParty: currentRole === 'CLIENT'
-                ? p.booking.worker.fullName
+                ? p.booking.worker?.fullName ?? null
                 : p.booking.client.fullName,
             amount: currentRole === 'CLIENT' ? p.subtotal : p.workerPayout,
             status: p.status,
@@ -264,15 +307,18 @@ const releaseEscrow = async (req, res) => {
             },
         });
         // Notify worker — schema has PAYMENT_RECEIVED (no PAYMENT_RELEASED)
-        await database_1.default.notification.create({
-            data: {
-                userId: payment.booking.workerId,
-                type: 'PAYMENT_RECEIVED',
-                title: 'Payment Released',
-                message: `₱${payment.workerPayout} has been released to your account`,
-                relatedId: payment.bookingId,
-            },
-        });
+        // booking.workerId is nullable — skip if the booking has no assigned worker
+        if (payment.booking.workerId) {
+            await database_1.default.notification.create({
+                data: {
+                    userId: payment.booking.workerId,
+                    type: 'PAYMENT_RECEIVED',
+                    title: 'Payment Released',
+                    message: `₱${payment.workerPayout} has been released to your account`,
+                    relatedId: payment.bookingId,
+                },
+            });
+        }
         return res.status(200).json({
             success: true,
             message: 'Escrow released successfully',
@@ -328,16 +374,18 @@ const refundPayment = async (req, res) => {
                 status: 'REFUNDED',
             },
         });
-        // Notify worker — schema has no PAYMENT_REFUNDED; use PAYMENT_RECEIVED as closest
-        await database_1.default.notification.create({
-            data: {
-                userId: payment.booking.workerId,
-                type: 'PAYMENT_REFUNDED',
-                title: 'Payment Refunded',
-                message: `Payment has been refunded: ${reason}`,
-                relatedId: payment.bookingId,
-            },
-        });
+        // Notify worker (booking.workerId is nullable — skip if unassigned)
+        if (payment.booking.workerId) {
+            await database_1.default.notification.create({
+                data: {
+                    userId: payment.booking.workerId,
+                    type: 'PAYMENT_REFUNDED',
+                    title: 'Payment Refunded',
+                    message: `Payment has been refunded: ${reason}`,
+                    relatedId: payment.bookingId,
+                },
+            });
+        }
         return res.status(200).json({
             success: true,
             message: 'Payment refunded successfully',

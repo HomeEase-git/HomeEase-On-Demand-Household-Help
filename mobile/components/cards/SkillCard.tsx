@@ -18,7 +18,7 @@ type Props = {
 
 export const SkillCard: React.FC<Props> = ({ skill, onEdit, onDelete }) => {
   return (
-    <View className="bg-card border-2 border-primaryrounded-2xl p-4 mb-3 flex-row items-center">
+    <View className="bg-card border-2 border-primary shadow-md rounded-2xl p-4 mb-3 flex-row items-center">
       <View className="flex-1">
         <Text className="text-primary font-bold">{skill.name}</Text>
         <View className="bg-accent/20 rounded-full px-2 py-0.5 self-start mt-1">

@@ -13,8 +13,9 @@ export default function PaymentSuccessScreen() {
   const booking = useBookingStore((s) => s.selectedBooking);
 
   const amountLabel = booking ? `₱${booking.amount.toFixed(2)}` : "₱400.00";
+  const paymentLabel = booking?.payment?.methodType ?? "Payment pending";
   const referenceLabel = booking
-    ? `${booking.id} · ${booking.paymentMethod}`
+    ? `${booking.id} · ${paymentLabel}`
     : "TXN-004 · GCash";
 
   return (

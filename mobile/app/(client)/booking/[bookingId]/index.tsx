@@ -307,9 +307,9 @@ export default function BookingDetailScreen() {
           <View className="flex-row items-center">
             <Ionicons
               name={
-                booking.paymentMethod === "Cash"
+                booking.payment?.methodType === "CASH"
                   ? "wallet"
-                  : booking.paymentMethod === "Maya"
+                  : booking.payment?.methodType === "MAYA"
                     ? "card"
                     : "phone-portrait"
               }
@@ -317,7 +317,7 @@ export default function BookingDetailScreen() {
               color={colors.accent.DEFAULT}
             />
             <Text className="text-primary font-semibold ml-3">
-              {booking.paymentMethod}
+              {booking.payment?.methodType ?? "Payment pending"}
             </Text>
           </View>
         </View>

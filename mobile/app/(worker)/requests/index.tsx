@@ -6,7 +6,7 @@ import RequestCard from "../../../components/cards/RequestCard";
 import EmptyState from "../../../components/feedback/EmptyState";
 import { useWorkerStore } from "../../../store/workerStore";
 
-const TABS = ["Pending"] as const;
+const TABS = ["Pending", "Accepted", "Declined"] as const;
 
 export default function RequestsScreen() {
   const router = useRouter();

@@ -40,6 +40,7 @@ exports.deleteAccount = exports.acceptContract = exports.submitKYCDocument = exp
 const bcrypt = __importStar(require("bcryptjs"));
 const database_1 = __importDefault(require("@config/database"));
 const errorResponse_1 = require("@utils/errorResponse");
+const profilePersistence_1 = require("@utils/profilePersistence");
 /**
  * GET /api/users/me
  * Get current user profile
@@ -86,12 +87,8 @@ const updateUserProfile = async (req, res) => {
         if (!req.user) {
             return res.status(401).json((0, errorResponse_1.errorResponse)(401, 'Not authenticated'));
         }
-        const { fullName, phone } = req.body;
-        const updateData = {};
-        if (fullName !== undefined)
-            updateData.fullName = fullName;
-        if (phone !== undefined)
-            updateData.phone = phone;
+        const { fullName, phone, avatar } = req.body;
+        const updateData = (0, profilePersistence_1.buildUserProfileUpdateData)({ fullName, phone, avatar });
         const updated = await database_1.default.user.update({
             where: { id: req.user.userId },
             data: updateData,
@@ -462,8 +459,9 @@ const getKYCDocuments = async (req, res) => {
         if (!req.user) {
             return res.status(401).json((0, errorResponse_1.errorResponse)(401, 'Not authenticated'));
         }
+        // KycDocument has no userId field — it hangs off VerificationRequest
         const documents = await database_1.default.kycDocument.findMany({
-            where: { userId: req.user.userId },
+            where: { verificationRequest: { userId: req.user.userId } },
             orderBy: { createdAt: 'desc' },
         });
         return res.status(200).json({
@@ -487,9 +485,27 @@ const submitKYCDocument = async (req, res) => {
             return res.status(401).json((0, errorResponse_1.errorResponse)(401, 'Not authenticated'));
         }
         const { documentType, documentUrl } = req.body;
+        // KycDocument has no userId field — it must belong to a VerificationRequest.
+        // Reuse the user's open request if one exists, otherwise start a new one.
+        let verificationRequest = await database_1.default.verificationRequest.findFirst({
+            where: {
+                userId: req.user.userId,
+                status: { in: ['PENDING', 'SUBMITTED'] },
+            },
+            orderBy: { submittedAt: 'desc' },
+        });
+        if (!verificationRequest) {
+            verificationRequest = await database_1.default.verificationRequest.create({
+                data: {
+                    userId: req.user.userId,
+                    type: 'WORKER_ONBOARDING',
+                    status: 'PENDING',
+                },
+            });
+        }
         const document = await database_1.default.kycDocument.create({
             data: {
-                userId: req.user.userId,
+                verificationRequestId: verificationRequest.id,
                 documentType,
                 fileUrl: documentUrl,
                 status: 'PENDING',

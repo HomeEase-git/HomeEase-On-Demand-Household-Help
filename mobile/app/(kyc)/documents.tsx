@@ -9,6 +9,7 @@ import StepperHorizontal from "../../components/steppers/StepperHorizontal";
 import UploadCard from "../../components/ui/UploadCard";
 import PrimaryButton from "../../components/ui/PrimaryButton";
 import { useAuthStore } from "../../store/authStore";
+import { submitKycDocument } from "../../services/api";
 import {
   documentRequirements,
   isDocumentTypeAllowed,
@@ -52,6 +53,7 @@ export default function DocumentsScreen() {
   const isWorker = user?.role === "worker";
   const [documents, setDocuments] = useState(initialDocuments);
   const [uploadingKey, setUploadingKey] = useState<KycDocumentKey | null>(null);
+  const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
     if (!isWorker) {
@@ -103,6 +105,8 @@ export default function DocumentsScreen() {
         return;
       }
 
+      setSubmitting(true);
+      await submitKycDocument(key, document.uri);
       setDocuments((prev) => ({
         ...prev,
         [key]: {
@@ -122,6 +126,7 @@ export default function DocumentsScreen() {
         "We could not process that file. Please try again.",
       );
     } finally {
+      setSubmitting(false);
       setUploadingKey(null);
     }
   };
@@ -141,7 +146,7 @@ export default function DocumentsScreen() {
           required={requirement.required}
           preview={preview}
           onPress={() => handleUpload(key)}
-          disabled={uploadingKey === key}
+          disabled={uploadingKey === key || submitting}
         />
       </View>
     );
@@ -184,8 +189,10 @@ export default function DocumentsScreen() {
           <PrimaryButton
             label="Continue"
             fullWidth
-            disabled={missingRequired.length > 0 || uploadingKey !== null}
-            loading={uploadingKey !== null}
+            disabled={
+              missingRequired.length > 0 || uploadingKey !== null || submitting
+            }
+            loading={uploadingKey !== null || submitting}
             onPress={() => router.push("/(kyc)/resume")}
           />
         </View>

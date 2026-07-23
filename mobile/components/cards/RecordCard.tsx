@@ -21,6 +21,8 @@ type Props = {
 
 export const RecordCard: React.FC<Props> = ({ record, onPress }) => {
   const isCompleted = record.status === "Completed";
+  const isCancelled = record.status === "Cancelled";
+  const isOngoing = record.status === "Ongoing";
 
   return (
     <Pressable
@@ -38,10 +40,18 @@ export const RecordCard: React.FC<Props> = ({ record, onPress }) => {
       <View className="items-end">
         <Text
           className={
-            isCompleted ? "text-success font-bold" : "text-error font-bold"
+            isCompleted
+              ? "text-success font-bold"
+              : isOngoing
+                ? "text-accent font-bold"
+                : "text-error font-bold"
           }
         >
-          {isCompleted ? `+₱${record.amount}` : "Cancelled"}
+          {isCompleted
+            ? `+₱${record.amount}`
+            : isOngoing
+              ? `₱${record.amount}`
+              : "Cancelled"}
         </Text>
         <StatusBadge status={record.status as StatusType} />
       </View>

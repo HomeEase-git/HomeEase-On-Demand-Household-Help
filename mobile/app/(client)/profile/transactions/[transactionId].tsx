@@ -37,7 +37,7 @@ export default function TransactionDetailScreen() {
     id: `TXN-${booking.id}`,
     bookingId: booking.id,
     amount: booking.amount,
-    method: booking.paymentMethod,
+    method: booking.payment?.methodType ?? "Unknown",
     status: "Completed",
     date: new Date(booking.date).toLocaleDateString("en-PH", {
       year: "numeric",

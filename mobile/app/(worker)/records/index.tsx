@@ -22,11 +22,21 @@ const RECORDS = [
     amount: 500,
     status: "Cancelled",
   },
+  {
+    id: "rec3",
+    client: "Anna Cruz",
+    service: "Aircon Maintenance",
+    date: "2026-03-05",
+    amount: 650,
+    status: "Ongoing",
+  },
 ];
 
 export default function RecordsScreen() {
   const router = useRouter();
-  const [tab, setTab] = useState<"Completed" | "Cancelled">("Completed");
+  const [tab, setTab] = useState<"Completed" | "Cancelled" | "Ongoing">(
+    "Completed",
+  );
   const filtered = RECORDS.filter((r) => r.status === tab);
 
   const handleRecordPress = useCallback(
@@ -60,6 +70,20 @@ export default function RecordsScreen() {
               }
             >
               Completed
+            </Text>
+          </Pressable>
+          <Pressable
+            className={`px-3 py-2 rounded-xl ${tab === "Ongoing" ? "bg-accent" : "bg-card"}`}
+            onPress={() => setTab("Ongoing")}
+          >
+            <Text
+              className={
+                tab === "Ongoing"
+                  ? "text-white font-semibold text-sm"
+                  : "text-text-secondary text-sm"
+              }
+            >
+              Ongoing
             </Text>
           </Pressable>
           <Pressable

@@ -6,6 +6,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.getWorkerCapacity = exports.addServiceTypes = exports.updateWorkerProfile = exports.updateAvailability = exports.getWorkerReviews = exports.getWorkerDetail = exports.searchWorkers = void 0;
 const database_1 = __importDefault(require("@config/database"));
 const errorResponse_1 = require("@utils/errorResponse");
+const profilePersistence_1 = require("@utils/profilePersistence");
 /**
  * GET /api/workers
  * Search/list workers with filters
@@ -113,17 +114,32 @@ const getWorkerDetail = async (req, res) => {
         const workerId = req.params.workerId;
         const worker = await database_1.default.workerProfile.findUnique({
             where: { userId: workerId },
-            include: {
+            select: {
+                id: true,
+                userId: true,
+                bio: true,
+                rating: true,
+                totalReviews: true,
+                isAvailable: true,
+                serviceAreaRadius: true,
+                activeJobCount: true,
+                availableDays: true,
+                address: true,
+                city: true,
+                state: true,
+                zipCode: true,
+                kycStatus: true,
+                kycSubmittedAt: true,
+                kycApprovedAt: true,
+                resumeUrl: true,
+                maxConcurrentJobs: true,
                 user: {
                     select: {
                         id: true,
                         fullName: true,
                         email: true,
                         phone: true,
-                        avatar: true, // was: profileImage
-                        kycDocuments: {
-                            where: { status: 'APPROVED' },
-                        },
+                        avatar: true,
                     },
                 },
                 serviceTypes: true,
@@ -131,7 +147,7 @@ const getWorkerDetail = async (req, res) => {
                     orderBy: { createdAt: 'desc' },
                 },
                 certifications: true,
-                resumeParseResult: true, // skills/yearsOfExperience/masteryLevel live here
+                resumeParseResult: true,
             },
         });
         if (!worker) {
@@ -150,16 +166,20 @@ const getWorkerDetail = async (req, res) => {
                 rating: worker.rating,
                 serviceAreaRadius: worker.serviceAreaRadius,
                 address: worker.address,
+                city: worker.city,
+                state: worker.state,
+                zipCode: worker.zipCode,
                 isAvailable: worker.isAvailable,
                 availableDays: worker.availableDays,
-                // ResumeParseResult fields (null-safe — may not exist yet)
-                skills: worker.resumeParseResult?.parsedSkills ?? [],
-                yearsOfExperience: worker.resumeParseResult?.yearsOfExperience ?? null,
-                masteryLevel: worker.resumeParseResult?.masteryLevel ?? null,
-                // Relations
-                services: worker.serviceTypes,
+                kycStatus: worker.kycStatus,
+                kycSubmittedAt: worker.kycSubmittedAt,
+                kycApprovedAt: worker.kycApprovedAt,
+                resumeUrl: worker.resumeUrl,
+                // Nested relations matching Prisma schema
+                resumeParseResult: worker.resumeParseResult,
                 certifications: worker.certifications,
-                verificationStatus: worker.user.kycDocuments.length > 0 ? 'VERIFIED' : 'PENDING',
+                services: worker.serviceTypes,
+                verificationStatus: worker.kycStatus === 'APPROVED' ? 'VERIFIED' : 'PENDING',
                 reviewCount: worker.reviews.length,
                 activeJobCount: worker.activeJobCount,
                 maxConcurrentJobs: worker.maxConcurrentJobs,
@@ -291,14 +311,28 @@ const updateWorkerProfile = async (req, res) => {
         if (!req.user) {
             return res.status(401).json((0, errorResponse_1.errorResponse)(401, 'Not authenticated'));
         }
-        const { bio, serviceAreaRadius, address } = req.body;
-        const updateData = {};
-        if (bio !== undefined)
-            updateData.bio = bio;
+        const { bio, serviceAreaRadius, address, city, state, zipCode, kycStatus, kycSubmittedAt, kycApprovedAt, resumeUrl, yearsOfExperience, serviceArea, } = req.body;
+        const updateData = {
+            ...(0, profilePersistence_1.buildWorkerProfileUpdateData)({ bio, yearsOfExperience, serviceArea }),
+        };
         if (serviceAreaRadius !== undefined)
             updateData.serviceAreaRadius = serviceAreaRadius;
         if (address !== undefined)
             updateData.address = address;
+        if (city !== undefined)
+            updateData.city = city;
+        if (state !== undefined)
+            updateData.state = state;
+        if (zipCode !== undefined)
+            updateData.zipCode = zipCode;
+        if (kycStatus !== undefined)
+            updateData.kycStatus = kycStatus;
+        if (kycSubmittedAt !== undefined)
+            updateData.kycSubmittedAt = kycSubmittedAt;
+        if (kycApprovedAt !== undefined)
+            updateData.kycApprovedAt = kycApprovedAt;
+        if (resumeUrl !== undefined)
+            updateData.resumeUrl = resumeUrl;
         const updated = await database_1.default.workerProfile.update({
             where: { userId: req.user.userId },
             data: updateData,
@@ -310,6 +344,13 @@ const updateWorkerProfile = async (req, res) => {
                 bio: updated.bio,
                 serviceAreaRadius: updated.serviceAreaRadius,
                 address: updated.address,
+                city: updated.city,
+                state: updated.state,
+                zipCode: updated.zipCode,
+                kycStatus: updated.kycStatus,
+                kycSubmittedAt: updated.kycSubmittedAt,
+                kycApprovedAt: updated.kycApprovedAt,
+                resumeUrl: updated.resumeUrl,
             },
         });
     }

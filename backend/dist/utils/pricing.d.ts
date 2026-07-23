@@ -1,7 +1,3 @@
-/**
- * Pricing utilities for commission, tax, and payout calculations
- * This mirrors the logic in mobile/utils/pricing.ts to ensure both sides agree
- */
 export interface PriceBreakdown {
     subtotal: number;
     commissionAmount: number;

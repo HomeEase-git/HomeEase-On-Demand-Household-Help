@@ -40,7 +40,7 @@ const createBooking = async (req, res) => {
         if (!req.user || req.user.role !== 'CLIENT') {
             return res.status(403).json((0, errorResponse_1.errorResponse)(403, 'Only clients can create bookings'));
         }
-        const { workerId, serviceTaskId, serviceType, description, location, city, scheduledDate, estimatedPrice, notes, } = req.body;
+        const { workerId, serviceTaskId, serviceType, description, location, city, scheduledDate, estimatedPrice, notes, estimatedDurationHours, inspectionFeeCharged, inspectionFeeAmount, } = req.body;
         // Verify worker exists and is available
         const worker = await database_1.default.workerProfile.findUnique({
             where: { userId: workerId },
@@ -60,53 +60,125 @@ const createBooking = async (req, res) => {
                 return res.status(404).json((0, errorResponse_1.errorResponse)(404, 'Service task not found'));
             }
         }
-        const booking = await database_1.default.booking.create({
-            data: {
-                clientId: req.user.userId,
-                workerId,
-                serviceTaskId: serviceTaskId ?? null,
-                serviceType: serviceType ?? 'GENERAL',
-                description: description ?? '',
-                location,
-                city: city ?? '',
-                scheduledDate: new Date(scheduledDate),
-                estimatedPrice,
-                notes,
-                status: 'PENDING',
-            },
-            include: {
-                client: {
-                    select: { id: true, fullName: true, email: true },
+        // Server-side validation for scheduledTime if provided
+        const HHMM_REGEX = /^([01]\d|2[0-3]):[0-5]\d$/;
+        const scheduledTime = req.body.scheduledTime;
+        if (scheduledTime && !HHMM_REGEX.test(scheduledTime)) {
+            return res.status(400).json((0, errorResponse_1.errorResponse)(400, 'scheduledTime must be in HH:mm 24h format'));
+        }
+        const estimatedDurationHoursVal = typeof estimatedDurationHours === 'number' && estimatedDurationHours >= 0
+            ? estimatedDurationHours
+            : undefined;
+        const inspectionFeeAmountVal = typeof inspectionFeeAmount === 'number' && inspectionFeeAmount >= 0
+            ? inspectionFeeAmount
+            : undefined;
+        const inspectionFeeChargedVal = inspectionFeeAmountVal != null && inspectionFeeAmountVal > 0
+            ? true
+            : Boolean(inspectionFeeCharged);
+        if (!req.user?.userId) {
+            return res.status(401).json((0, errorResponse_1.errorResponse)(401, 'Unauthorized'));
+        }
+        const userId = req.user?.userId;
+        if (!userId) {
+            return res.status(401).json((0, errorResponse_1.errorResponse)(401, 'Unauthorized'));
+        }
+        // Wrap availability check + insert in a transaction to avoid race conditions
+        try {
+            const booking = await database_1.default.$transaction(async (tx) => {
+                // Re-fetch worker profile inside transaction
+                const workerProfile = await tx.workerProfile.findUnique({ where: { userId: workerId } });
+                if (!workerProfile)
+                    throw new Error('Worker not found');
+                if (!workerProfile.isAvailable)
+                    throw new Error('Worker not available');
+                // Check for slot conflicts (same worker, same date, same time)
+                const existing = await tx.booking.findFirst({
+                    where: {
+                        workerId,
+                        scheduledDate: new Date(scheduledDate),
+                        scheduledTime: scheduledTime ?? null,
+                        // consider only bookings that block the slot
+                        status: { in: ['PENDING', 'ACCEPTED', 'IN_PROGRESS', 'QUOTE_SUBMITTED', 'QUOTE_APPROVED'] },
+                    },
+                });
+                if (existing) {
+                    throw new Error('Slot not available');
+                }
+                // Insert booking (include tip if provided)
+                const tipVal = typeof req.body.tip === 'number' ? req.body.tip : 0;
+                const created = await tx.booking.create({
+                    data: {
+                        clientId: userId,
+                        workerId,
+                        serviceTaskId: serviceTaskId ?? null,
+                        serviceType: serviceType ?? 'GENERAL',
+                        description: description ?? '',
+                        location,
+                        city: city ?? '',
+                        scheduledDate: new Date(scheduledDate),
+                        scheduledTime: scheduledTime ?? null,
+                        estimatedDurationHours: estimatedDurationHoursVal ?? null,
+                        estimatedPrice,
+                        tip: tipVal,
+                        notes,
+                        inspectionFeeCharged: inspectionFeeChargedVal,
+                        inspectionFeeAmount: inspectionFeeAmountVal ?? null,
+                        status: 'PENDING',
+                    },
+                    include: {
+                        client: { select: { id: true, fullName: true, email: true } },
+                        worker: { select: { id: true, fullName: true, email: true } },
+                        serviceTask: true,
+                    },
+                });
+                // Persist add-ons if provided
+                const addOns = Array.isArray(req.body.addOns) ? req.body.addOns : [];
+                if (addOns.length > 0) {
+                    const mapped = addOns.map((a) => ({ bookingId: created.id, name: a.name || a.id || 'Add-on', price: typeof a.price === 'number' ? a.price : 0 }));
+                    await tx.bookingAddOn.createMany({ data: mapped });
+                }
+                return created;
+            });
+            // Create notification for worker
+            await database_1.default.notification.create({
+                data: {
+                    userId: workerId,
+                    type: 'BOOKING_REQUEST',
+                    title: 'New Booking Request',
+                    message: `${booking.client.fullName} has requested your service`,
+                    relatedId: booking.id,
                 },
-                worker: {
-                    select: { id: true, fullName: true, email: true },
+            });
+            return res.status(201).json({
+                success: true,
+                message: 'Booking created successfully',
+                data: {
+                    id: booking.id,
+                    clientName: booking.client.fullName,
+                    workerName: booking.worker.fullName,
+                    status: booking.status,
+                    scheduledDate: booking.scheduledDate,
+                    scheduledTime: booking.scheduledTime,
+                    estimatedPrice: booking.estimatedPrice,
+                    estimatedDurationHours: booking.estimatedDurationHours,
+                    inspectionFeeCharged: booking.inspectionFeeCharged,
+                    inspectionFeeAmount: booking.inspectionFeeAmount,
                 },
-                serviceTask: true,
-            },
-        });
-        // Create notification for worker
-        // NotificationType: BOOKING_REQUEST is the correct enum value
-        await database_1.default.notification.create({
-            data: {
-                userId: workerId,
-                type: 'BOOKING_REQUEST',
-                title: 'New Booking Request',
-                message: `${booking.client.fullName} has requested your service`,
-                relatedId: booking.id,
-            },
-        });
-        return res.status(201).json({
-            success: true,
-            message: 'Booking created successfully',
-            data: {
-                id: booking.id,
-                clientName: booking.client.fullName,
-                workerName: booking.worker.fullName,
-                status: booking.status,
-                scheduledDate: booking.scheduledDate,
-                estimatedPrice: booking.estimatedPrice,
-            },
-        });
+            });
+        }
+        catch (txErr) {
+            if (txErr.message === 'Slot not available') {
+                return res.status(409).json((0, errorResponse_1.errorResponse)(409, 'Slot no longer available'));
+            }
+            if (txErr.message === 'Worker not found' || txErr.message === 'Worker not available') {
+                return res.status(404).json((0, errorResponse_1.errorResponse)(404, txErr.message));
+            }
+            // Prisma unique constraint code
+            if (txErr.code === 'P2002') {
+                return res.status(409).json((0, errorResponse_1.errorResponse)(409, 'Slot no longer available'));
+            }
+            throw txErr;
+        }
     }
     catch (error) {
         console.error('Error creating booking:', error);
@@ -197,6 +269,7 @@ const getBookingDetail = async (req, res) => {
                 client: { select: { id: true, fullName: true, email: true, phone: true } },
                 worker: { select: { id: true, fullName: true, email: true, phone: true } },
                 serviceTask: true,
+                payment: { select: { methodType: true, accountIdentifier: true, status: true, totalAmount: true } },
                 // Quote data lives inline on Booking (laborCost, materialsCost, etc.)
                 addOns: true, // schema relation is addOns (capital O)
                 review: true,
@@ -228,6 +301,17 @@ const getBookingDetail = async (req, res) => {
                 scheduledDate: booking.scheduledDate,
                 estimatedPrice: booking.estimatedPrice,
                 finalPrice,
+                estimatedDurationHours: booking.estimatedDurationHours,
+                inspectionFeeCharged: booking.inspectionFeeCharged,
+                inspectionFeeAmount: booking.inspectionFeeAmount,
+                payment: booking.payment
+                    ? {
+                        methodType: booking.payment.methodType,
+                        accountIdentifier: booking.payment.accountIdentifier,
+                        status: booking.payment.status,
+                        totalAmount: booking.payment.totalAmount,
+                    }
+                    : null,
                 quote: hasQuote
                     ? {
                         laborCost: booking.laborCost,
@@ -545,16 +629,18 @@ const approveQuote = async (req, res) => {
                 finalPrice: booking.laborCost + booking.materialsCost,
             },
         });
-        // Notify worker
-        await database_1.default.notification.create({
-            data: {
-                userId: booking.workerId,
-                type: 'QUOTE_APPROVED',
-                title: 'Quote Approved',
-                message: 'Client has approved your quote',
-                relatedId: id,
-            },
-        });
+        // Notify worker (workerId is nullable on Booking — skip if unassigned)
+        if (booking.workerId) {
+            await database_1.default.notification.create({
+                data: {
+                    userId: booking.workerId,
+                    type: 'QUOTE_APPROVED',
+                    title: 'Quote Approved',
+                    message: 'Client has approved your quote',
+                    relatedId: id,
+                },
+            });
+        }
         return res.status(200).json({
             success: true,
             message: 'Quote approved successfully',
@@ -607,16 +693,18 @@ const disputeQuote = async (req, res) => {
                 disputeReason: reason,
             },
         });
-        // Notify worker
-        await database_1.default.notification.create({
-            data: {
-                userId: booking.workerId,
-                type: 'QUOTE_DISPUTED',
-                title: 'Quote Disputed',
-                message: `Client has disputed your quote: ${reason}`,
-                relatedId: id,
-            },
-        });
+        // Notify worker (workerId is nullable on Booking — skip if unassigned)
+        if (booking.workerId) {
+            await database_1.default.notification.create({
+                data: {
+                    userId: booking.workerId,
+                    type: 'QUOTE_DISPUTED',
+                    title: 'Quote Disputed',
+                    message: `Client has disputed your quote: ${reason}`,
+                    relatedId: id,
+                },
+            });
+        }
         return res.status(200).json({
             success: true,
             message: 'Quote disputed successfully',
@@ -749,18 +837,20 @@ const cancelBooking = async (req, res) => {
                 notes: reason, // schema has no cancelReason; storing in notes
             },
         });
-        // Notify the other party
+        // Notify the other party (workerId may be null if booking is unassigned)
         const notificationUserId = booking.clientId === req.user.userId ? booking.workerId : booking.clientId;
-        await database_1.default.notification.create({
-            data: {
-                userId: notificationUserId,
-                // No BOOKING_CANCELLED in schema; BOOKING_REJECTED is the closest
-                type: 'BOOKING_CANCELLED',
-                title: 'Booking Cancelled',
-                message: `Booking has been cancelled: ${reason}`,
-                relatedId: id,
-            },
-        });
+        if (notificationUserId) {
+            await database_1.default.notification.create({
+                data: {
+                    userId: notificationUserId,
+                    // No BOOKING_CANCELLED in schema; BOOKING_REJECTED is the closest
+                    type: 'BOOKING_CANCELLED',
+                    title: 'Booking Cancelled',
+                    message: `Booking has been cancelled: ${reason}`,
+                    relatedId: id,
+                },
+            });
+        }
         return res.status(200).json({
             success: true,
             message: 'Booking cancelled successfully',
@@ -804,18 +894,20 @@ const rescheduleBooking = async (req, res) => {
                 scheduledDate: new Date(newDate),
             },
         });
-        // Notify the other party
+        // Notify the other party (workerId may be null if booking is unassigned)
         const notificationUserId = booking.clientId === req.user.userId ? booking.workerId : booking.clientId;
-        await database_1.default.notification.create({
-            data: {
-                userId: notificationUserId,
-                // No BOOKING_RESCHEDULED in schema; BOOKING_ACCEPTED is closest
-                type: 'BOOKING_RESCHEDULED',
-                title: 'Booking Rescheduled',
-                message: `Booking has been rescheduled to ${newDate}`,
-                relatedId: id,
-            },
-        });
+        if (notificationUserId) {
+            await database_1.default.notification.create({
+                data: {
+                    userId: notificationUserId,
+                    // No BOOKING_RESCHEDULED in schema; BOOKING_ACCEPTED is closest
+                    type: 'BOOKING_RESCHEDULED',
+                    title: 'Booking Rescheduled',
+                    message: `Booking has been rescheduled to ${newDate}`,
+                    relatedId: id,
+                },
+            });
+        }
         return res.status(200).json({
             success: true,
             message: 'Booking rescheduled successfully',
@@ -911,6 +1003,11 @@ const submitReview = async (req, res) => {
         }
         if (booking.status !== 'COMPLETED') {
             return res.status(409).json((0, errorResponse_1.errorResponse)(409, 'Can only review completed bookings'));
+        }
+        // A completed booking must have an assigned worker, but workerId is
+        // nullable on Booking — narrow it before using it as a lookup key.
+        if (!booking.workerId) {
+            return res.status(409).json((0, errorResponse_1.errorResponse)(409, 'Booking has no assigned worker'));
         }
         // Review model uses clientId (not reviewerId), and workerId references WorkerProfile.id
         // First resolve the WorkerProfile id from the worker's userId

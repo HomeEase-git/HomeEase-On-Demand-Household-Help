@@ -24,6 +24,13 @@ export type Quote = {
   submittedAt: string;
 };
 
+export type BookingPayment = {
+  methodType: string;
+  accountIdentifier?: string;
+  status?: string;
+  totalAmount?: number;
+};
+
 export type Booking = {
   id: string;
   service: string;
@@ -31,7 +38,7 @@ export type Booking = {
   date: string;
   status: BookingStatus;
   amount: number;
-  paymentMethod: string;
+  payment?: BookingPayment;
   rating?: number;
   reviewText?: string;
   quote?: Quote;

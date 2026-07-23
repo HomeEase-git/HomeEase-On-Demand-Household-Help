@@ -19,7 +19,7 @@ export const SearchBar: React.FC<Props> = ({
   onFilterPress,
 }) => {
   const content = (
-    <View className="flex-row items-center bg-primary-white border border-card-light rounded-full px-4 py-3">
+    <View className="flex-row items-center bg-gray-100 border border-primary-light rounded-full px-4 py-3">
       <Ionicons name="search-outline" size={20} color={colors.text.muted} />
       {onPress ? (
         <Text className="flex-1 ml-3 text-primary text-sm">{placeholder}</Text>

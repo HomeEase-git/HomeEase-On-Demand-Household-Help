@@ -251,17 +251,6 @@ export default function SignUpScreen() {
               <Text className="text-error text-xs">{passwordError}</Text>
             </View>
           ) : null}
-          <Pressable
-            className="absolute right-3 top-10"
-            onPress={() => setShowPassword(!showPassword)}
-            disabled={loading}
-          >
-            <Ionicons
-              name={showPassword ? "eye-off" : "eye"}
-              size={20}
-              color="#666"
-            />
-          </Pressable>
         </View>
 
         {/* Confirm Password */}
@@ -283,17 +272,6 @@ export default function SignUpScreen() {
               <Text className="text-error text-xs">{confirmPasswordError}</Text>
             </View>
           ) : null}
-          <Pressable
-            className="absolute right-3 top-10"
-            onPress={() => setShowConfirmPassword(!showConfirmPassword)}
-            disabled={loading}
-          >
-            <Ionicons
-              name={showConfirmPassword ? "eye-off" : "eye"}
-              size={20}
-              color="#666"
-            />
-          </Pressable>
         </View>
 
         {/* Terms Checkbox */}

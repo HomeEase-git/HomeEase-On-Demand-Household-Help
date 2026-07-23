@@ -9,6 +9,11 @@ export type Booking = {
   time?: string;
   status: BookingStatus;
   amount: number;
-  paymentMethod: string;
+  payment?: {
+    methodType?: string;
+    accountIdentifier?: string;
+    status?: string;
+    totalAmount?: number;
+  };
   address?: string;
 };

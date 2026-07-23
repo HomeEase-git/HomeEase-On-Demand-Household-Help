@@ -1,7 +1,10 @@
-import axios, { AxiosRequestConfig } from 'axios';
+import axios, { AxiosRequestConfig, isAxiosError } from 'axios';
 import { config } from '../constants/config';
 import { authStorage } from '../utils/storage';
 import { AbortableRequest } from '../utils/apiErrorHandling';
+import { KycDocumentKey } from '../utils/kycDocumentConfig';
+import { mapKycDocumentType } from '../utils/kycDocumentTypeMap';
+import type { WorkerDetail } from "../types/api.types";
 import {
   bookings as dummyBookings,
   workers as dummyWorkers,
@@ -9,6 +12,17 @@ import {
   transactions as dummyTransactions,
   workerTransactions as dummyWorkerTransactions,
 } from "../constants/dummyData";
+
+type NormalizedWorkerListItem = {
+  id: string;
+  name: string;
+  service: string;
+  rating: number;
+  reviews: number;
+  basePrice: number | null;
+  status: string;
+  avatar: string | null;
+};
 
 // ============================================================================
 // API CLIENT SETUP
@@ -66,7 +80,7 @@ const createApiClient = (): ApiClient => {
       console.log('[API ←] ERROR response data:', JSON.stringify(error.response?.data));
 
       try {
-        if (axios.isAxiosError(error)) {
+        if (isAxiosError(error)) {
           const status = error.response?.status;
           if (status === 401 || status === 403) {
             // Clear stored auth (token + user) so app reacts to unauthorized state
@@ -288,6 +302,9 @@ export async function createBooking(details: {
   estimatedPrice: number;
   tip?: number;
   addOns?: { id?: string; name: string; price: number }[];
+  estimatedDurationHours?: number;
+  inspectionFeeCharged?: boolean;
+  inspectionFeeAmount?: number;
 }) {
   try {
     const response = await api.post('/bookings', {
@@ -302,6 +319,9 @@ export async function createBooking(details: {
       estimatedPrice: details.estimatedPrice,
       tip: details.tip || 0,
       addOns: details.addOns || [],
+      estimatedDurationHours: details.estimatedDurationHours,
+      inspectionFeeCharged: details.inspectionFeeCharged,
+      inspectionFeeAmount: details.inspectionFeeAmount,
     });
     return response;
   } catch (error) {
@@ -363,47 +383,99 @@ export async function getWorkers(filters?: {
   page?: number;
   limit?: number;
 }) {
-  await delay(350);
-  let results = [...dummyWorkers];
+  try {
+    const params: Record<string, string | number> = {};
 
-  if (filters?.category) {
-    results = results.filter((w) => w.service.toLowerCase().includes(filters.category!.toLowerCase()));
-  }
-  if (filters?.minRating) {
-    results = results.filter((w) => w.rating >= filters.minRating!);
-  }
-  if (filters?.maxPrice) {
-    results = results.filter((w) => (w.rate || 500) <= filters.maxPrice!);
-  }
+    if (filters?.category) params.category = filters.category;
+    if (filters?.minRating !== undefined) params.minRating = filters.minRating;
+    if (filters?.maxPrice !== undefined) params.maxPrice = filters.maxPrice;
+    if (filters?.page) params.page = filters.page;
+    if (filters?.limit) params.limit = filters.limit;
 
-  const page = filters?.page || 1;
-  const limit = filters?.limit || 10;
-  const start = (page - 1) * limit;
-  const end = start + limit;
+    const response = await api.get('/workers', { params });
+
+    const workers = Array.isArray(response?.workers) ? response.workers : [];
+    const normalized = workers.map(normalizeWorkerListItem);
+
+    return {
+      data: normalized,
+      total: response?.pagination?.total ?? normalized.length,
+      page: response?.pagination?.page ?? filters?.page ?? 1,
+      limit: response?.pagination?.limit ?? filters?.limit ?? 10,
+    };
+  } catch (error) {
+    console.error("Get workers error:", error);
+    throw error;
+  }
+}
+
+function normalizeWorkerListItem(worker: any): NormalizedWorkerListItem {
+  const rawStatus = String(worker.status ?? "available").toLowerCase();
+  const normalizedStatus =
+    rawStatus === "busy" || rawStatus === "unavailable"
+      ? "unavailable"
+      : "available";
 
   return {
-    data: results.slice(start, end),
-    total: results.length,
-    page,
-    limit,
+    id: worker.id ?? worker.userId ?? "",
+    name: worker.name ?? worker.fullName ?? worker.user?.fullName ?? "Unnamed worker",
+    service:
+      worker.service ??
+      worker.serviceType ??
+      worker.serviceTypes?.[0]?.name ??
+      "General service",
+    rating: Number(worker.rating ?? 0),
+    reviews: Number(worker.reviews ?? worker.reviewCount ?? 0),
+    basePrice:
+      typeof worker.basePrice === "number"
+        ? worker.basePrice
+        : typeof worker.rate === "number"
+          ? worker.rate
+          : null,
+    status: normalizedStatus,
+    avatar: worker.avatar ?? worker.user?.avatar ?? null,
   };
 }
 
-export async function getWorkerDetail(workerId: string) {
-  await delay(350);
+export async function getWorkerDetail(workerId: string): Promise<WorkerDetail | null> {
+    await delay(350);
   const worker = dummyWorkers.find((w) => w.id === workerId);
   if (!worker) return null;
 
   return {
     ...worker,
+    status: worker.status === "available" ? "available" : "busy",
     bio: "Licensed professional with 5+ years of experience in plumbing services. Specializing in residential and commercial work.",
-    yearsOfExperience: 5,
-    certifications: ["Plumbing License", "Safety Training"],
-    skills: ["Pipe Repair", "Installation", "Maintenance"],
-    responseTime: "Usually responds within 1 hour",
+    serviceAreaRadius: 10,
+    resumeParseResult: {
+      parsedSkills: ["Pipe Repair", "Installation", "Maintenance"],
+      yearsOfExperience: 5,
+      masteryLevel: "Advanced",
+      tradeCategory: "Plumbing",
+      summary: "Experienced plumber specializing in residential and commercial work.",
+    },
+    certifications: [
+      {
+        id: "cert1",
+        title: "Plumbing License",
+        issuer: "TESDA",
+        issueDate: "2021-01-15",
+        expiryDate: null,
+        documentUrl: "https://example.com/cert1.pdf",
+        verificationStatus: "VERIFIED",
+      },
+      {
+        id: "cert2",
+        title: "Safety Training",
+        issuer: "DOLE",
+        issueDate: "2022-03-10",
+        expiryDate: null,
+        documentUrl: "https://example.com/cert2.pdf",
+        verificationStatus: "VERIFIED",
+      },
+    ],
     completedJobs: 234,
     joinDate: "2021-03-15",
-    serviceArea: ["Central Luzon", "Metro Manila"],
   };
 }
 
@@ -445,6 +517,7 @@ export async function searchWorkers(filters: {
 }
 
 export async function getWorkerReviews(workerId: string) {
+  void workerId;
   await delay(300);
   return [
     {
@@ -470,6 +543,14 @@ export async function getWorkerReviews(workerId: string) {
 // PAYMENT METHODS - CLIENT
 // ============================================================================
 
+export const paymentMethodTypeMap: Record<string, string> = {
+  card: 'CARD',
+  gcash: 'GCASH',
+  maya: 'MAYA',
+  bank: 'BANK_TRANSFER',
+  cash: 'CASH',
+};
+
 export async function getPaymentMethods() {
   try {
     const response = await api.get('/users/me/payment-methods');
@@ -486,8 +567,10 @@ export async function addPaymentMethod(data: {
   label?: string;
 }) {
   try {
+    const normalizedType = paymentMethodTypeMap[data.type.toLowerCase()] ?? data.type.toUpperCase();
+
     const response = await api.post('/users/me/payment-methods', {
-      type: data.type.toUpperCase(),
+      type: normalizedType,
       accountIdentifier: data.accountIdentifier,
       label: data.label,
     });
@@ -649,7 +732,7 @@ export async function submitReview(
 ) {
   await delay(400);
   return {
-    id: "rev-" + Math.random().toString(36).substr(2, 6),
+    id: "rev-" + Math.random().toString(36).slice(2, 8),
     bookingId,
     rating,
     comment,
@@ -774,11 +857,12 @@ export async function acceptJobRequest(requestId: string) {
     success: true,
     message: "Job request accepted",
     requestId,
-    bookingId: "BK-" + Math.random().toString(36).substr(2, 6).toUpperCase(),
+    bookingId: "BK-" + Math.random().toString(36).slice(2, 8).toUpperCase(),
   };
 }
 
 export async function declineJobRequest(requestId: string, reason?: string) {
+  void reason;
   await delay(350);
   return {
     success: true,
@@ -834,7 +918,7 @@ export async function getWorkerRecords(status?: string) {
 export async function requestWithdrawal(amount: number, method: string) {
   await delay(500);
   return {
-    id: "wd-" + Math.random().toString(36).substr(2, 6),
+    id: "wd-" + Math.random().toString(36).slice(2, 8),
     amount,
     method,
     status: "Pending",
@@ -944,7 +1028,32 @@ export async function updateUserProfile(data: {
   }
 }
 
+export async function submitKycDocument(documentKey: KycDocumentKey, documentUrl: string) {
+  try {
+    const response = await api.post('/users/me/kyc-documents', {
+      documentType: mapKycDocumentType(documentKey),
+      documentUrl,
+    });
+    return response;
+  } catch (error) {
+    console.error('Submit KYC document error:', error);
+    throw error;
+  }
+}
+
+export async function getKycDocuments() {
+  try {
+    const response = await api.get('/users/me/kyc-documents');
+    return Array.isArray(response) ? response : [];
+  } catch (error) {
+    console.error('Get KYC documents error:', error);
+    throw error;
+  }
+}
+
 export async function changePassword(currentPassword: string, newPassword: string) {
+  void currentPassword;
+  void newPassword;
   await delay(400);
   return {
     success: true,
@@ -962,6 +1071,7 @@ export async function updateNotificationPreferences(preferences: Record<string, 
 }
 
 export async function deleteAccount(password: string) {
+  void password;
   await delay(500);
   return {
     success: true,
@@ -1003,4 +1113,14 @@ export async function getWorkerBlockedDates(workerId: string) {
   // unique
   const unique = Array.from(new Set(dates));
   return { dates: unique };
+}
+
+export async function getServiceTypes() {
+  try {
+    const response = await api.get('/services');
+    return Array.isArray(response) ? response : [];
+  } catch (error) {
+    console.error('Get service types error:', error);
+    throw error;
+  }
 }

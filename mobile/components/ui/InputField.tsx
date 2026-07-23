@@ -38,7 +38,7 @@ export const InputField = forwardRef<TextInput, Props>(
       <View className="mb-4">
         <Text className="text-primary text-sm mb-1">{label}</Text>
         <View
-          className={`flex-row items-center bg-white border border-card rounded-xl px-4 ${
+          className={`flex-row items-center bg-gray-100 border border-primary-light rounded-xl px-4 ${
             multiline ? "py-3" : "py-1.5"
           } ${!editable ? "opacity-60 bg-card-dark" : ""}`}
         >

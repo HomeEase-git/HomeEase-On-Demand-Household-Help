@@ -1,5 +1,9 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
+// ============================================================================
+// UNIFIED SCHEMA
+// Merges: web app schema (AI-assisted verification pipeline) +
+//         mobile app schema (marketplace booking/quote/escrow/payment engine)
+// See accompanying notes for merge decisions and open questions.
+// ============================================================================
 
 generator client {
   provider = "prisma-client-js"
@@ -7,6 +11,7 @@ generator client {
 
 datasource db {
   provider = "postgresql"
+  // Connection URLs now live in prisma.config.ts (Prisma ORM 7+)
 }
 
 // ============================================================================
@@ -113,6 +118,9 @@ enum NotificationType {
   QUOTE_SUBMITTED
   QUOTE_APPROVED
   QUOTE_DISPUTED
+  VERIFICATION_SUBMITTED
+  VERIFICATION_APPROVED
+  VERIFICATION_REJECTED
 }
 
 // ============================================================================
@@ -120,34 +128,36 @@ enum NotificationType {
 // ============================================================================
 
 model User {
-  id         String  @id @default(cuid())
-  email      String  @unique
-  phone      String?
-  password   String
-  fullName   String
-  role       Role
-  isVerified Boolean @default(false)
-  avatar     String?
+  id       String  @id @default(cuid())
+  email    String  @unique
+  phone    String?
+  password String
+  fullName String
+  role     Role
+
+  isVerified              Boolean @default(false) // basic email/phone verification, not KYC
+  avatar                  String?
   notificationPreferences Json?
 
+  // Soft delete
   isDeleted Boolean   @default(false)
   deletedAt DateTime?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  clientProfile       ClientProfile?
-  workerProfile       WorkerProfile?
-  addresses           UserAddress[]
-  sentMessages        Message[]           @relation("sender")
-  receivedMessages    Message[]           @relation("receiver")
-  bookingsAsClient    Booking[]           @relation("client")
-  bookingsAsWorker    Booking[]           @relation("worker")
-  reviews             Review[]
-  notifications       Notification[]
-  authTokens          AuthToken[]
-  kycDocuments        KycDocument[]
-  contractAcceptances ContractAcceptance[]
+  clientProfile        ClientProfile?
+  workerProfile        WorkerProfile?
+  addresses            UserAddress[]
+  sentMessages         Message[]             @relation("sender")
+  receivedMessages     Message[]             @relation("receiver")
+  bookingsAsClient     Booking[]             @relation("client")
+  bookingsAsWorker     Booking[]             @relation("worker")
+  reviews              Review[]
+  notifications        Notification[]
+  authTokens           AuthToken[]
+  verificationRequests VerificationRequest[]
+  contractAcceptances  ContractAcceptance[]
 
   @@index([email])
   @@index([role])
@@ -195,14 +205,17 @@ model AuthToken {
 // ============================================================================
 
 model ClientProfile {
-  id     String  @id @default(cuid())
-  userId String  @unique
-  user   User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id     String @id @default(cuid())
+  userId String @unique
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  address  String?
-  city     String?
-  state    String?
-  zipCode  String?
+  address String?
+  city    String?
+  state   String?
+  zipCode String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   // Relations
   paymentMethods SavedPaymentMethod[]
@@ -216,15 +229,15 @@ model WorkerProfile {
   user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   bio          String?
-  rating       Float   @default(5.0)
-  totalReviews Int     @default(0)
+  rating       Float @default(5.0)
+  totalReviews Int   @default(0)
 
   // Availability & Capacity
-  isAvailable        Boolean @default(true)
-  maxConcurrentJobs  Int     @default(2)
-  activeJobCount     Int     @default(0)
-  availableDays      Int[]   @default([1, 2, 3, 4, 5]) // 0=Sun, 1=Mon ... 6=Sat
-  serviceAreaRadius  Int     @default(30) // in kilometers
+  isAvailable       Boolean @default(true)
+  maxConcurrentJobs Int     @default(2)
+  activeJobCount    Int     @default(0)
+  availableDays     Int[]   @default([1, 2, 3, 4, 5]) // 0=Sun, 1=Mon ... 6=Sat
+  serviceAreaRadius Int     @default(30) // in kilometers
 
   // Location
   address String?
@@ -232,13 +245,16 @@ model WorkerProfile {
   state   String?
   zipCode String?
 
-  // KYC
+  // KYC — denormalized snapshot; source of truth is VerificationRequest
   kycStatus      KYCStatus @default(PENDING)
   kycSubmittedAt DateTime?
   kycApprovedAt  DateTime?
 
   // Resume file URL (raw file)
   resumeUrl String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   // Relations
   serviceTypes      ServiceType[]
@@ -252,28 +268,63 @@ model WorkerProfile {
 }
 
 // ============================================================================
-// KYC & DOCUMENTS
+// KYC & VERIFICATION
+// Web's AI-review pipeline (VerificationRequest) now acts as the umbrella
+// submission; each document previously modeled separately in mobile's flat
+// KycDocument now hangs off the request it was submitted for, so the AI
+// fields (aiStatus/aiSummary/aiConfidence) apply to the whole submission and
+// every document in it is traceable back to that review.
 // ============================================================================
 
-model KycDocument {
+model VerificationRequest {
   id     String @id @default(cuid())
   userId String
   user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
 
+  type                String // e.g. "WORKER_ONBOARDING", "CERTIFICATION_ADD", "REVERIFICATION"
+  status              KYCStatus @default(PENDING)
+  rejectionReason     String?
+  adminOverrideReason String?
+  reviewedById        String?
+  reviewedAt          DateTime?
+
+  // AI-assisted review (carried over from web schema)
+  aiStatus     String?
+  aiSummary    String?
+  aiConfidence Float?
+  aiError      String?
+  aiReviewedAt DateTime?
+
+  submittedAt DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  documents KycDocument[]
+
+  @@index([status])
+  @@index([userId])
+}
+
+model KycDocument {
+  id                     String              @id @default(cuid())
+  verificationRequestId  String
+  verificationRequest    VerificationRequest @relation(fields: [verificationRequestId], references: [id], onDelete: Cascade)
+
   documentType KycDocumentType
+  fileName     String?
+  originalName String?
   fileUrl      String
   fileSize     Int?
   mimeType     String?
 
   status          KycDocumentStatus @default(PENDING)
   rejectionReason String?
-  reviewedBy      String?
+  reviewedById    String?
   reviewedAt      DateTime?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  @@index([userId, documentType])
+  @@index([verificationRequestId, documentType])
   @@index([status])
 }
 
@@ -289,8 +340,8 @@ model ResumeParseResult {
   tradeCategory     String?
   summary           String?
 
-  parsedAt   DateTime @default(now())
-  modelUsed  String   @default("claude-sonnet-4-6")
+  parsedAt  DateTime @default(now())
+  modelUsed String   @default("claude-sonnet-4-6")
 
   @@index([workerProfileId])
 }
@@ -308,8 +359,8 @@ model Certification {
 
   // Verification tracking
   verificationStatus KycDocumentStatus @default(PENDING)
-  rejectionReason    String?
-  reviewedAt         DateTime?
+  rejectionReason     String?
+  reviewedAt          DateTime?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -359,11 +410,11 @@ model ServiceTask {
   serviceTypeId String
   serviceType   ServiceType @relation(fields: [serviceTypeId], references: [id], onDelete: Cascade)
 
-  name            String
-  description     String?
-  basePrice       Float
-  durationHours   Float
-  isActive        Boolean @default(true)
+  name          String
+  description   String?
+  basePrice     Float
+  durationHours Float
+  isActive      Boolean @default(true)
 
   // Relations
   bookings Booking[]
@@ -378,18 +429,19 @@ model ServiceTask {
 model Booking {
   id String @id @default(cuid())
 
-  // Parties
+  // Parties — workerId is nullable to support open/unassigned marketplace
+  // requests (web's behavior) that later get claimed or matched to a worker.
   clientId String
-  client   User   @relation("client", fields: [clientId], references: [id], onDelete: Cascade)
-  workerId String
-  worker   User   @relation("worker", fields: [workerId], references: [id], onDelete: Cascade)
+  client   User    @relation("client", fields: [clientId], references: [id], onDelete: Cascade)
+  workerId String?
+  worker   User?   @relation("worker", fields: [workerId], references: [id], onDelete: Cascade)
 
   // Service
-  serviceType             String
-  serviceTaskId           String?
-  serviceTask             ServiceTask? @relation(fields: [serviceTaskId], references: [id])
-  description             String
-  estimatedDurationHours  Float?
+  serviceType            String
+  serviceTaskId          String?
+  serviceTask            ServiceTask? @relation(fields: [serviceTaskId], references: [id])
+  description            String
+  estimatedDurationHours Float?
 
   // Scheduling
   scheduledDate  DateTime
@@ -401,7 +453,7 @@ model Booking {
 
   // Pricing — initial estimate
   estimatedPrice Float
-  tip            Float?  @default(0)
+  tip            Float? @default(0)
 
   // Quote lifecycle
   quoteStatus   QuoteStatus?
@@ -428,14 +480,15 @@ model Booking {
   updatedAt DateTime @updatedAt
 
   // Relations
-  payment  Payment?
-  review   Review?
-  addOns   BookingAddOn[]
+  payment Payment?
+  review  Review?
+  addOns  BookingAddOn[]
 
   @@index([clientId, status])
   @@index([workerId, status])
   @@index([scheduledDate])
   @@index([status])
+  // NOTE: only enforceable while workerId is set — see merge notes.
   @@unique([workerId, scheduledDate, scheduledTime], name: "worker_slot_unique")
 }
 
@@ -460,8 +513,8 @@ model Payment {
   booking   Booking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
 
   // Amounts
-  subtotal     Float
-  tip          Float  @default(0)
+  subtotal Float
+  tip      Float @default(0)
 
   // Commission
   commissionRate   Float @default(0.10)
@@ -487,8 +540,8 @@ model Payment {
   paymongoSourceId  String?
 
   // Payment method used
-  methodType         PaymentMethodType
-  accountIdentifier  String? // masked GCash number, last 4 of card, etc.
+  methodType        PaymentMethodType
+  accountIdentifier String? // masked GCash number, last 4 of card, etc.
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -504,9 +557,9 @@ model SavedPaymentMethod {
   clientProfile   ClientProfile @relation(fields: [clientProfileId], references: [id], onDelete: Cascade)
 
   type              PaymentMethodType
-  accountIdentifier String?  // masked — last 4 digits or masked phone number
-  label             String?  // e.g. "My GCash", "Work Card"
-  isDefault         Boolean  @default(false)
+  accountIdentifier String? // masked — last 4 digits or masked phone number
+  label             String? // e.g. "My GCash", "Work Card"
+  isDefault         Boolean @default(false)
 
   createdAt DateTime @default(now())
 
@@ -528,7 +581,7 @@ model Review {
   clientId String
   client   User   @relation(fields: [clientId], references: [id], onDelete: Cascade)
 
-  rating  Float   // 1.0 to 5.0
+  rating  Float // 1.0 to 5.0
   comment String?
 
   createdAt DateTime @default(now())

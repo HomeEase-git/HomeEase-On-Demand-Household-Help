@@ -12,7 +12,7 @@ type Worker = {
   rate: number;
   rating: number;
   reviews: number;
-  status: "available" | "unavailable";
+  status: string;
 };
 
 type Props = {
@@ -23,7 +23,8 @@ type Props = {
 export const WorkerCard: React.FC<Props> = ({ worker, onPress }) => {
   const { isAtCapacity, activeJobCount } = useWorkerCapacity(worker.name);
 
-  const isUnavailable = worker.status === "unavailable" || isAtCapacity;
+  const isUnavailable =
+    worker.status === "unavailable" || worker.status === "busy" || isAtCapacity;
 
   return (
     <Pressable

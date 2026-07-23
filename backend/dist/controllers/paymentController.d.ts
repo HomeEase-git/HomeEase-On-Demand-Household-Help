@@ -9,7 +9,7 @@ interface AuthRequest extends Request {
  *
  * Schema notes:
  *  - Payment has no clientId/workerId — ownership is accessed via booking relation
- *  - Payment.methodType is required (PaymentMethodType enum); default to CASH until PayMongo is wired
+ *  - Payment.methodType is required (PaymentMethodType enum)
  *  - totalAmount is required on Payment
  *  - Booking quote data is inline (laborCost, materialsCost); addOns use `price` field
  */

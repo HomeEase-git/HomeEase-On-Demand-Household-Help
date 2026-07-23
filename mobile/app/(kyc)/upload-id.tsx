@@ -9,6 +9,7 @@ import StepperHorizontal from "../../components/steppers/StepperHorizontal";
 import UploadCard from "../../components/ui/UploadCard";
 import PrimaryButton from "../../components/ui/PrimaryButton";
 import { useAuthStore } from "../../store/authStore";
+import { submitKycDocument } from "../../services/api";
 import {
   documentRequirements,
   isDocumentTypeAllowed,
@@ -53,7 +54,7 @@ export default function UploadIdScreen() {
     ? ["ID", "Selfie", "Documents", "Resume", "Contract"]
     : ["ID", "Selfie", "Contract"];
 
-  const applyAsset = (
+  const applyAsset = async (
     key: KycDocumentKey,
     uri: string,
     mimeType: string,
@@ -67,11 +68,20 @@ export default function UploadIdScreen() {
       return;
     }
 
-    setDocuments((prev) => ({
-      ...prev,
-      [key]: { uri, mimeType, name },
-    }));
-    Alert.alert("Success", "Government ID uploaded successfully.");
+    try {
+      await submitKycDocument(key, uri);
+      setDocuments((prev) => ({
+        ...prev,
+        [key]: { uri, mimeType, name },
+      }));
+      Alert.alert("Success", "Government ID uploaded successfully.");
+    } catch (error) {
+      console.error("KYC document submit error", error);
+      Alert.alert(
+        "Upload failed",
+        "We could not submit your ID document. Please try again.",
+      );
+    }
   };
 
   const captureFromCamera = async (key: KycDocumentKey) => {
@@ -96,7 +106,7 @@ export default function UploadIdScreen() {
       }
 
       const asset = result.assets[0];
-      applyAsset(
+      await applyAsset(
         key,
         asset.uri,
         asset.mimeType || "image/jpeg",
@@ -137,7 +147,7 @@ export default function UploadIdScreen() {
       }
 
       const asset = result.assets[0];
-      applyAsset(
+      await applyAsset(
         key,
         asset.uri,
         asset.mimeType || "image/jpeg",
@@ -171,7 +181,7 @@ export default function UploadIdScreen() {
         return;
       }
 
-      applyAsset(
+      await applyAsset(
         key,
         document.uri,
         document.mimeType || "image/jpeg",

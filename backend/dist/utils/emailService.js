@@ -5,7 +5,7 @@ const resend_1 = require("resend");
 const resend = new resend_1.Resend(process.env.RESEND_API_KEY);
 const FROM_EMAIL = process.env.RESEND_FROM_EMAIL || 'onboarding@resend.dev';
 const sendOtpEmail = async (email, otp) => {
-    await resend.emails.send({
+    const { data, error } = await resend.emails.send({
         from: FROM_EMAIL,
         to: email,
         subject: 'Your HomeEase Verification Code',
@@ -19,11 +19,16 @@ const sendOtpEmail = async (email, otp) => {
       </div>
     `,
     });
+    if (error) {
+        console.error('[Resend] Failed to send OTP email:', error);
+        throw new Error(`Failed to send OTP email: ${error.message}`);
+    }
+    console.log('[Resend] OTP email sent:', data?.id);
 };
 exports.sendOtpEmail = sendOtpEmail;
 const sendPasswordResetEmail = async (email, token) => {
     const resetUrl = `${process.env.APP_URL}/reset-password?token=${token}&email=${encodeURIComponent(email)}`;
-    await resend.emails.send({
+    const { data, error } = await resend.emails.send({
         from: FROM_EMAIL,
         to: email,
         subject: 'Reset Your HomeEase Password',
@@ -37,10 +42,15 @@ const sendPasswordResetEmail = async (email, token) => {
       </div>
     `,
     });
+    if (error) {
+        console.error('[Resend] Failed to send password reset email:', error);
+        throw new Error(`Failed to send password reset email: ${error.message}`);
+    }
+    console.log('[Resend] Password reset email sent:', data?.id);
 };
 exports.sendPasswordResetEmail = sendPasswordResetEmail;
 const sendWelcomeEmail = async (email, fullName) => {
-    await resend.emails.send({
+    const { data, error } = await resend.emails.send({
         from: FROM_EMAIL,
         to: email,
         subject: 'Welcome to HomeEase',
@@ -52,6 +62,11 @@ const sendWelcomeEmail = async (email, fullName) => {
       </div>
     `,
     });
+    if (error) {
+        console.error('[Resend] Failed to send welcome email:', error);
+        throw new Error(`Failed to send welcome email: ${error.message}`);
+    }
+    console.log('[Resend] Welcome email sent:', data?.id);
 };
 exports.sendWelcomeEmail = sendWelcomeEmail;
 //# sourceMappingURL=emailService.js.map

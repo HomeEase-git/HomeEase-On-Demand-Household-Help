@@ -238,7 +238,15 @@ export const jobRequests = [
     service: 'Plumbing',
     date: '2026-03-02',
     amount: 500,
-    status: 'Pending'
+    status: 'Accepted'
+  },
+  {
+    id: 'BK-003',
+    client: 'Rica Hernandez',
+    service: 'Electrical Repair',
+    date: '2026-03-03',
+    amount: 650,
+    status: 'Declined'
   }
 ] as const;
 

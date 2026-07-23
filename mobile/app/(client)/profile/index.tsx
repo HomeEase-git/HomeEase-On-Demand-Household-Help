@@ -59,7 +59,7 @@ export default function ClientProfileScreen() {
               <Ionicons name="person" size={40} color={colors.white} />
             </View>
             <Pressable
-              className="absolute bottom-0 left-14 w-8 h-8 bg-card-light rounded-full items-center justify-center"
+              className="absolute bottom-0 left-14 w-8 h-8 bg-primary rounded-full items-center justify-center"
               onPress={() => imageSheetRef.current?.expand()}
             >
               <Ionicons name="camera" size={16} color={colors.white} />
@@ -93,12 +93,12 @@ export default function ClientProfileScreen() {
         {MENU_GROUPS.map((group, gi) => (
           <View
             key={gi}
-            className="bg-card rounded-2xl mx-4 mt-3 overflow-hidden"
+            className="bg-blue-100 rounded-2xl mx-4 mt-3 overflow-hidden"
           >
             {group.map((item) => (
               <Pressable
                 key={item.label}
-                className="flex-row items-center py-4 px-4 border-b border-divider last:border-0"
+                className="flex-row items-center py-4 px-4 border-b border-white last:border-0"
                 onPress={() => router.push(item.path as any)}
               >
                 <Text className="text-primary flex-1">{item.label}</Text>
@@ -112,7 +112,7 @@ export default function ClientProfileScreen() {
           </View>
         ))}
 
-        <View className="bg-card rounded-2xl mx-4 mt-3 overflow-hidden">
+        <View className="bg-error/25 rounded-2xl mx-4 mt-3 overflow-hidden">
           <Pressable
             className="flex-row items-center py-4 px-4"
             onPress={() => setLogoutVisible(true)}

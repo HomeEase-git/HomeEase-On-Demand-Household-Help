@@ -136,17 +136,6 @@ export default function SignInScreen() {
               <Text className="text-error text-xs">{passwordError}</Text>
             </View>
           )}
-          <Pressable
-            className="absolute right-3 top-10"
-            onPress={() => setShowPassword(!showPassword)}
-            disabled={loading}
-          >
-            <Ionicons
-              name={showPassword ? "eye-off" : "eye"}
-              size={20}
-              color="#666"
-            />
-          </Pressable>
         </View>
 
         <Pressable

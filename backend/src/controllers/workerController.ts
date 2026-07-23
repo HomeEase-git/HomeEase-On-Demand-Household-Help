@@ -122,17 +122,32 @@ export const getWorkerDetail = async (req: AuthRequest, res: Response) => {
 
     const worker = await prisma.workerProfile.findUnique({
       where: { userId: workerId },
-      include: {
+      select: {
+        id: true,
+        userId: true,
+        bio: true,
+        rating: true,
+        totalReviews: true,
+        isAvailable: true,
+        serviceAreaRadius: true,
+        activeJobCount: true,
+        availableDays: true,
+        address: true,
+        city: true,
+        state: true,
+        zipCode: true,
+        kycStatus: true,
+        kycSubmittedAt: true,
+        kycApprovedAt: true,
+        resumeUrl: true,
+        maxConcurrentJobs: true,
         user: {
           select: {
             id: true,
             fullName: true,
             email: true,
             phone: true,
-            avatar: true,          // was: profileImage
-            kycDocuments: {        // kycDocuments belongs to User, not WorkerProfile
-              where: { status: 'APPROVED' },
-            },
+            avatar: true,
           },
         },
         serviceTypes: true,
@@ -140,7 +155,7 @@ export const getWorkerDetail = async (req: AuthRequest, res: Response) => {
           orderBy: { createdAt: 'desc' },
         },
         certifications: true,
-        resumeParseResult: true,   // skills/yearsOfExperience/masteryLevel live here
+        resumeParseResult: true,
       },
     });
 
@@ -161,16 +176,20 @@ export const getWorkerDetail = async (req: AuthRequest, res: Response) => {
         rating: worker.rating,
         serviceAreaRadius: worker.serviceAreaRadius,
         address: worker.address,
+        city: worker.city,
+        state: worker.state,
+        zipCode: worker.zipCode,
         isAvailable: worker.isAvailable,
         availableDays: worker.availableDays,
-        // ResumeParseResult fields (null-safe — may not exist yet)
-        skills: worker.resumeParseResult?.parsedSkills ?? [],
-        yearsOfExperience: worker.resumeParseResult?.yearsOfExperience ?? null,
-        masteryLevel: worker.resumeParseResult?.masteryLevel ?? null,
-        // Relations
-        services: worker.serviceTypes,
+        kycStatus: worker.kycStatus,
+        kycSubmittedAt: worker.kycSubmittedAt,
+        kycApprovedAt: worker.kycApprovedAt,
+        resumeUrl: worker.resumeUrl,
+        // Nested relations matching Prisma schema
+        resumeParseResult: worker.resumeParseResult,
         certifications: worker.certifications,
-        verificationStatus: worker.user.kycDocuments.length > 0 ? 'VERIFIED' : 'PENDING',
+        services: worker.serviceTypes,
+        verificationStatus: worker.kycStatus === 'APPROVED' ? 'VERIFIED' : 'PENDING',
         reviewCount: worker.reviews.length,
         activeJobCount: worker.activeJobCount,
         maxConcurrentJobs: worker.maxConcurrentJobs,
@@ -243,6 +262,10 @@ export const getWorkerReviews = async (req: AuthRequest, res: Response) => {
         avatar: review.client.avatar,
       },
       serviceType: review.booking?.serviceTask?.name || 'Service',
+      // Added so the frontend can link "view booking" from a review without
+      // fabricating an id — booking was already fetched above, just wasn't
+      // surfaced in the formatted output.
+      bookingId: review.booking?.id ?? null,
       createdAt: review.createdAt,
     }));
 
@@ -309,12 +332,30 @@ export const updateWorkerProfile = async (req: AuthRequest, res: Response) => {
       return res.status(401).json(errorResponse(401, 'Not authenticated'));
     }
 
-    const { bio, serviceAreaRadius, address } = req.body;
+    const {
+      bio,
+      serviceAreaRadius,
+      address,
+      city,
+      state,
+      zipCode,
+      kycStatus,
+      kycSubmittedAt,
+      kycApprovedAt,
+      resumeUrl,
+    } = req.body;
 
     const updateData: any = {};
     if (bio !== undefined) updateData.bio = bio;
     if (serviceAreaRadius !== undefined) updateData.serviceAreaRadius = serviceAreaRadius;
     if (address !== undefined) updateData.address = address;
+    if (city !== undefined) updateData.city = city;
+    if (state !== undefined) updateData.state = state;
+    if (zipCode !== undefined) updateData.zipCode = zipCode;
+    if (kycStatus !== undefined) updateData.kycStatus = kycStatus;
+    if (kycSubmittedAt !== undefined) updateData.kycSubmittedAt = kycSubmittedAt;
+    if (kycApprovedAt !== undefined) updateData.kycApprovedAt = kycApprovedAt;
+    if (resumeUrl !== undefined) updateData.resumeUrl = resumeUrl;
 
     const updated = await prisma.workerProfile.update({
       where: { userId: req.user.userId },
@@ -328,6 +369,13 @@ export const updateWorkerProfile = async (req: AuthRequest, res: Response) => {
         bio: updated.bio,
         serviceAreaRadius: updated.serviceAreaRadius,
         address: updated.address,
+        city: updated.city,
+        state: updated.state,
+        zipCode: updated.zipCode,
+        kycStatus: updated.kycStatus,
+        kycSubmittedAt: updated.kycSubmittedAt,
+        kycApprovedAt: updated.kycApprovedAt,
+        resumeUrl: updated.resumeUrl,
       },
     });
   } catch (error) {

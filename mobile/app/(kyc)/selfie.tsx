@@ -9,6 +9,7 @@ import StepperHorizontal from "../../components/steppers/StepperHorizontal";
 import PrimaryButton from "../../components/ui/PrimaryButton";
 import OutlinedButton from "../../components/ui/OutlinedButton";
 import { useAuthStore } from "../../store/authStore";
+import { submitKycDocument } from "../../services/api";
 import { compressImage } from "../../utils/imageCompressor";
 import { colors } from "../../constants/colors";
 
@@ -20,6 +21,7 @@ export default function SelfieScreen() {
   const [cameraActive, setCameraActive] = useState(false);
   const [capturedUri, setCapturedUri] = useState<string | null>(null);
   const [compressing, setCompressing] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
   const isWorker = user?.role === "worker";
 
   // Clients only need ID + selfie; workers continue on to
@@ -60,8 +62,10 @@ export default function SelfieScreen() {
       });
       if (photo?.uri) {
         // Automatically compress the captured selfie
+        let selfieUri = photo.uri;
         try {
           const compressed = await compressImage(photo.uri, 1200, 0.7);
+          selfieUri = compressed.uri;
           setCapturedUri(compressed.uri);
           Alert.alert(
             "Selfie Captured",
@@ -74,7 +78,20 @@ export default function SelfieScreen() {
           setCapturedUri(photo.uri);
           console.error("Compression failed, using original:", err);
         }
-        setCameraActive(false);
+
+        try {
+          setSubmitting(true);
+          await submitKycDocument("selfie", selfieUri);
+        } catch (error) {
+          console.error("KYC selfie submit error", error);
+          Alert.alert(
+            "Submission failed",
+            "We could not upload your selfie. Please try again.",
+          );
+        } finally {
+          setSubmitting(false);
+          setCameraActive(false);
+        }
       }
     } catch (err) {
       Alert.alert("Error", "Failed to capture photo. Please try again.");
@@ -276,6 +293,7 @@ export default function SelfieScreen() {
             <PrimaryButton
               label="Continue"
               fullWidth
+              disabled={submitting}
               onPress={handleContinue}
             />
             <OutlinedButton label="Retake Photo" onPress={handleRetake} />

@@ -6,6 +6,7 @@ import bookingRoutes from '@routes/bookings';
 import paymentRoutes from '@routes/payments';
 import userRoutes from '@routes/users';
 import messageRoutes from '@routes/messages';
+import serviceRoutes from '@routes/services';
 import { errorHandler } from '@middleware/errorHandler';
 
 const app = express();
@@ -32,6 +33,7 @@ app.use('/api/bookings', bookingRoutes);
 app.use('/api/payments', paymentRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/messages', messageRoutes);
+app.use('/api/services', serviceRoutes);
 
 // Health check
 app.get('/health', (_req, res) => {

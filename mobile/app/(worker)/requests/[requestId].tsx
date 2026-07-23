@@ -9,14 +9,17 @@ import PrimaryButton from "../../../components/ui/PrimaryButton";
 import OutlinedButton from "../../../components/ui/OutlinedButton";
 import GenericConfirmationModal from "../../../components/modals/GenericConfirmationModal";
 import { useWorkerStore } from "../../../store/workerStore";
-import { jobRequests, workerActiveJobs } from "../../../constants/dummyData";
+import { workerActiveJobs } from "../../../constants/dummyData";
 import { colors } from "../../../constants";
+import StatusBadge from "../../../components/ui/StatusBadge";
 
 export default function RequestDetailScreen() {
   const router = useRouter();
   const { requestId } = useLocalSearchParams<{ requestId: string }>();
   const updateRequestStatus = useWorkerStore((s) => s.updateRequestStatus);
-  const request = jobRequests.find((r) => r.id === requestId);
+  const request = useWorkerStore((s) =>
+    s.jobRequests.find((r) => r.id === requestId),
+  );
   const [declineVisible, setDeclineVisible] = useState(false);
 
   if (!request) {
@@ -119,6 +122,11 @@ export default function RequestDetailScreen() {
           })()}
         </View>
 
+        <View className="bg-card rounded-2xl p-4 mb-3">
+          <Text className="text-primary font-bold mb-2">Status</Text>
+          <StatusBadge status={request.status as any} />
+        </View>
+
         {/* Location */}
         <View className="bg-card rounded-2xl p-4 mb-3">
           <Text className="text-primary font-bold mb-2">Location</Text>
@@ -170,19 +178,28 @@ export default function RequestDetailScreen() {
         </View>
 
         {/* Action buttons */}
-        <View className="flex-row gap-3 mt-4">
-          <OutlinedButton
-            label="Decline"
-            onPress={() => setDeclineVisible(true)}
-          />
-          <View className="flex-1">
-            <PrimaryButton
-              label="Accept Job"
-              fullWidth
-              onPress={handleAccept}
+        {request.status === "Pending" ? (
+          <View className="flex-row gap-3 mt-4">
+            <OutlinedButton
+              label="Decline"
+              onPress={() => setDeclineVisible(true)}
             />
+            <View className="flex-1">
+              <PrimaryButton
+                label="Accept Job"
+                fullWidth
+                onPress={handleAccept}
+              />
+            </View>
           </View>
-        </View>
+        ) : (
+          <View className="bg-card rounded-2xl p-4 mt-4">
+            <Text className="text-primary font-bold mb-2">Request Status</Text>
+            <Text className="text-text-secondary text-sm">
+              This job request is {request.status.toLowerCase()}.
+            </Text>
+          </View>
+        )}
       </ScrollView>
 
       <GenericConfirmationModal

@@ -1,17 +1,23 @@
-import React from "react";
+import React, { useEffect, useState } from "react";
 import { View, Text, Pressable, ScrollView } from "react-native";
 import BottomSheetWrapper, { BottomSheetHandle } from "./BottomSheetWrapper";
-import { categories } from "../../constants/dummyData";
+import { getServiceTypes } from "../../services/api";
 
 type Props = {
   innerRef: React.RefObject<BottomSheetHandle | null>;
-  onSelect: (name: string) => void;
+  onSelect: (name: string, id: string) => void;
 };
 
 export const ServiceTypePickerBottomSheet: React.FC<Props> = ({
   innerRef,
   onSelect,
 }) => {
+  const [services, setServices] = useState<{ id: string; name: string }[]>([]);
+
+  useEffect(() => {
+    getServiceTypes().then(setServices).catch(console.error);
+  }, []);
+
   return (
     <BottomSheetWrapper
       innerRef={innerRef}
@@ -19,16 +25,13 @@ export const ServiceTypePickerBottomSheet: React.FC<Props> = ({
       title="Select service"
     >
       <ScrollView className="max-h-64">
-        {categories.map((c) => (
+        {services.map((service) => (
           <Pressable
-            key={c.id}
+            key={service.id}
             className="bg-card-light rounded-xl py-4 px-4 mb-2"
-            onPress={() => onSelect(c.name)}
+            onPress={() => onSelect(service.name, service.id)}
           >
-            <Text className="text-primary font-semibold">{c.name}</Text>
-            <Text className="text-primary text-xs">
-              {c.count} workers available
-            </Text>
+            <Text className="text-primary font-semibold">{service.name}</Text>
           </Pressable>
         ))}
       </ScrollView>

@@ -54,6 +54,9 @@ export const createBooking = async (req: AuthRequest, res: Response) => {
       scheduledDate,
       estimatedPrice,
       notes,
+      estimatedDurationHours,
+      inspectionFeeCharged,
+      inspectionFeeAmount,
     } = req.body;
 
     // Verify worker exists and is available
@@ -85,6 +88,19 @@ export const createBooking = async (req: AuthRequest, res: Response) => {
     if (scheduledTime && !HHMM_REGEX.test(scheduledTime)) {
       return res.status(400).json(errorResponse(400, 'scheduledTime must be in HH:mm 24h format'));
     }
+
+    const estimatedDurationHoursVal =
+      typeof estimatedDurationHours === 'number' && estimatedDurationHours >= 0
+        ? estimatedDurationHours
+        : undefined;
+    const inspectionFeeAmountVal =
+      typeof inspectionFeeAmount === 'number' && inspectionFeeAmount >= 0
+        ? inspectionFeeAmount
+        : undefined;
+    const inspectionFeeChargedVal =
+      inspectionFeeAmountVal != null && inspectionFeeAmountVal > 0
+        ? true
+        : Boolean(inspectionFeeCharged);
 
     if (!req.user?.userId) {
       return res.status(401).json(errorResponse(401, 'Unauthorized'));
@@ -131,9 +147,12 @@ export const createBooking = async (req: AuthRequest, res: Response) => {
             city: city ?? '',
             scheduledDate: new Date(scheduledDate),
             scheduledTime: scheduledTime ?? null,
+            estimatedDurationHours: estimatedDurationHoursVal ?? null,
             estimatedPrice,
             tip: tipVal,
             notes,
+            inspectionFeeCharged: inspectionFeeChargedVal,
+            inspectionFeeAmount: inspectionFeeAmountVal ?? null,
             status: 'PENDING',
           },
           include: {
@@ -175,6 +194,9 @@ export const createBooking = async (req: AuthRequest, res: Response) => {
           scheduledDate: booking.scheduledDate,
           scheduledTime: booking.scheduledTime,
           estimatedPrice: booking.estimatedPrice,
+          estimatedDurationHours: booking.estimatedDurationHours,
+          inspectionFeeCharged: booking.inspectionFeeCharged,
+          inspectionFeeAmount: booking.inspectionFeeAmount,
         },
       });
     } catch (txErr: any) {
@@ -287,6 +309,7 @@ export const getBookingDetail = async (req: AuthRequest, res: Response) => {
         client: { select: { id: true, fullName: true, email: true, phone: true } },
         worker: { select: { id: true, fullName: true, email: true, phone: true } },
         serviceTask: true,
+        payment: { select: { methodType: true, accountIdentifier: true, status: true, totalAmount: true } },
         // Quote data lives inline on Booking (laborCost, materialsCost, etc.)
         addOns: true,  // schema relation is addOns (capital O)
         review: true,
@@ -322,6 +345,17 @@ export const getBookingDetail = async (req: AuthRequest, res: Response) => {
         scheduledDate: booking.scheduledDate,
         estimatedPrice: booking.estimatedPrice,
         finalPrice,
+        estimatedDurationHours: booking.estimatedDurationHours,
+        inspectionFeeCharged: booking.inspectionFeeCharged,
+        inspectionFeeAmount: booking.inspectionFeeAmount,
+        payment: booking.payment
+          ? {
+              methodType: booking.payment.methodType,
+              accountIdentifier: booking.payment.accountIdentifier,
+              status: booking.payment.status,
+              totalAmount: booking.payment.totalAmount,
+            }
+          : null,
         quote: hasQuote
           ? {
               laborCost: booking.laborCost,
@@ -680,16 +714,18 @@ export const approveQuote = async (req: AuthRequest, res: Response) => {
       },
     });
 
-    // Notify worker
-    await prisma.notification.create({
-      data: {
-        userId: booking.workerId,
-        type: 'QUOTE_APPROVED',
-        title: 'Quote Approved',
-        message: 'Client has approved your quote',
-        relatedId: id,
-      },
-    });
+    // Notify worker (workerId is nullable on Booking — skip if unassigned)
+    if (booking.workerId) {
+      await prisma.notification.create({
+        data: {
+          userId: booking.workerId,
+          type: 'QUOTE_APPROVED',
+          title: 'Quote Approved',
+          message: 'Client has approved your quote',
+          relatedId: id,
+        },
+      });
+    }
 
     return res.status(200).json({
       success: true,
@@ -750,16 +786,18 @@ export const disputeQuote = async (req: AuthRequest, res: Response) => {
       },
     });
 
-    // Notify worker
-    await prisma.notification.create({
-      data: {
-        userId: booking.workerId,
-        type: 'QUOTE_DISPUTED',
-        title: 'Quote Disputed',
-        message: `Client has disputed your quote: ${reason}`,
-        relatedId: id,
-      },
-    });
+    // Notify worker (workerId is nullable on Booking — skip if unassigned)
+    if (booking.workerId) {
+      await prisma.notification.create({
+        data: {
+          userId: booking.workerId,
+          type: 'QUOTE_DISPUTED',
+          title: 'Quote Disputed',
+          message: `Client has disputed your quote: ${reason}`,
+          relatedId: id,
+        },
+      });
+    }
 
     return res.status(200).json({
       success: true,
@@ -909,20 +947,22 @@ export const cancelBooking = async (req: AuthRequest, res: Response) => {
       },
     });
 
-    // Notify the other party
+    // Notify the other party (workerId may be null if booking is unassigned)
     const notificationUserId =
       booking.clientId === req.user.userId ? booking.workerId : booking.clientId;
 
-    await prisma.notification.create({
-      data: {
-        userId: notificationUserId,
-        // No BOOKING_CANCELLED in schema; BOOKING_REJECTED is the closest
-        type: 'BOOKING_CANCELLED',
-        title: 'Booking Cancelled',
-        message: `Booking has been cancelled: ${reason}`,
-        relatedId: id,
-      },
-    });
+    if (notificationUserId) {
+      await prisma.notification.create({
+        data: {
+          userId: notificationUserId,
+          // No BOOKING_CANCELLED in schema; BOOKING_REJECTED is the closest
+          type: 'BOOKING_CANCELLED',
+          title: 'Booking Cancelled',
+          message: `Booking has been cancelled: ${reason}`,
+          relatedId: id,
+        },
+      });
+    }
 
     return res.status(200).json({
       success: true,
@@ -972,20 +1012,22 @@ export const rescheduleBooking = async (req: AuthRequest, res: Response) => {
       },
     });
 
-    // Notify the other party
+    // Notify the other party (workerId may be null if booking is unassigned)
     const notificationUserId =
       booking.clientId === req.user.userId ? booking.workerId : booking.clientId;
 
-    await prisma.notification.create({
-      data: {
-        userId: notificationUserId,
-        // No BOOKING_RESCHEDULED in schema; BOOKING_ACCEPTED is closest
-        type: 'BOOKING_RESCHEDULED',
-        title: 'Booking Rescheduled',
-        message: `Booking has been rescheduled to ${newDate}`,
-        relatedId: id,
-      },
-    });
+    if (notificationUserId) {
+      await prisma.notification.create({
+        data: {
+          userId: notificationUserId,
+          // No BOOKING_RESCHEDULED in schema; BOOKING_ACCEPTED is closest
+          type: 'BOOKING_RESCHEDULED',
+          title: 'Booking Rescheduled',
+          message: `Booking has been rescheduled to ${newDate}`,
+          relatedId: id,
+        },
+      });
+    }
 
     return res.status(200).json({
       success: true,
@@ -1092,6 +1134,12 @@ export const submitReview = async (req: AuthRequest, res: Response) => {
 
     if (booking.status !== 'COMPLETED') {
       return res.status(409).json(errorResponse(409, 'Can only review completed bookings'));
+    }
+
+    // A completed booking must have an assigned worker, but workerId is
+    // nullable on Booking — narrow it before using it as a lookup key.
+    if (!booking.workerId) {
+      return res.status(409).json(errorResponse(409, 'Booking has no assigned worker'));
     }
 
     // Review model uses clientId (not reviewerId), and workerId references WorkerProfile.id

@@ -92,16 +92,6 @@ export default function ResetPasswordScreen() {
             secureTextEntry={!showPassword}
             editable={!loading}
           />
-          <Pressable
-            className="absolute right-3 top-10"
-            onPress={() => setShowPassword(!showPassword)}
-          >
-            <Ionicons
-              name={showPassword ? "eye-off" : "eye"}
-              size={20}
-              color="#666"
-            />
-          </Pressable>
         </View>
 
         <View className="mb-4">

@@ -25,7 +25,7 @@ const validateUpdateAvailability = (req, res, next) => {
 };
 exports.validateUpdateAvailability = validateUpdateAvailability;
 const validateUpdateWorkerProfile = (req, res, next) => {
-    const { bio, serviceAreaRadius, address } = req.body;
+    const { bio, serviceAreaRadius, address, city, state, zipCode, kycStatus, kycSubmittedAt, kycApprovedAt, resumeUrl, } = req.body;
     if (bio !== undefined && typeof bio !== 'string') {
         return res.status(400).json((0, errorResponse_1.errorResponse)(400, 'bio must be a string'));
     }
@@ -36,6 +36,28 @@ const validateUpdateWorkerProfile = (req, res, next) => {
     }
     if (address !== undefined && typeof address !== 'string') {
         return res.status(400).json((0, errorResponse_1.errorResponse)(400, 'address must be a string'));
+    }
+    if (city !== undefined && typeof city !== 'string') {
+        return res.status(400).json((0, errorResponse_1.errorResponse)(400, 'city must be a string'));
+    }
+    if (state !== undefined && typeof state !== 'string') {
+        return res.status(400).json((0, errorResponse_1.errorResponse)(400, 'state must be a string'));
+    }
+    if (zipCode !== undefined && typeof zipCode !== 'string') {
+        return res.status(400).json((0, errorResponse_1.errorResponse)(400, 'zipCode must be a string'));
+    }
+    const allowedKycStatuses = ['PENDING', 'SUBMITTED', 'APPROVED', 'REJECTED'];
+    if (kycStatus !== undefined && !allowedKycStatuses.includes(kycStatus)) {
+        return res.status(400).json((0, errorResponse_1.errorResponse)(400, 'kycStatus must be one of PENDING, SUBMITTED, APPROVED, or REJECTED'));
+    }
+    if (kycSubmittedAt !== undefined && isNaN(new Date(kycSubmittedAt).getTime())) {
+        return res.status(400).json((0, errorResponse_1.errorResponse)(400, 'kycSubmittedAt must be a valid date'));
+    }
+    if (kycApprovedAt !== undefined && isNaN(new Date(kycApprovedAt).getTime())) {
+        return res.status(400).json((0, errorResponse_1.errorResponse)(400, 'kycApprovedAt must be a valid date'));
+    }
+    if (resumeUrl !== undefined && typeof resumeUrl !== 'string') {
+        return res.status(400).json((0, errorResponse_1.errorResponse)(400, 'resumeUrl must be a string'));
     }
     return next();
 };
@@ -53,7 +75,7 @@ const validateAddServiceTypes = (req, res, next) => {
 exports.validateAddServiceTypes = validateAddServiceTypes;
 // Booking validators
 const validateCreateBooking = (req, res, next) => {
-    const { workerId, serviceTaskId, location, scheduledDate, scheduledTime, estimatedPrice } = req.body;
+    const { workerId, serviceTaskId, location, scheduledDate, scheduledTime, estimatedPrice, estimatedDurationHours, inspectionFeeCharged, inspectionFeeAmount, } = req.body;
     if (!workerId || typeof workerId !== 'string') {
         return res.status(400).json((0, errorResponse_1.errorResponse)(400, 'workerId is required and must be a string'));
     }
@@ -71,6 +93,19 @@ const validateCreateBooking = (req, res, next) => {
     }
     if (typeof estimatedPrice !== 'number' || estimatedPrice <= 0) {
         return res.status(400).json((0, errorResponse_1.errorResponse)(400, 'estimatedPrice must be a positive number'));
+    }
+    if (estimatedDurationHours !== undefined) {
+        if (typeof estimatedDurationHours !== 'number' || estimatedDurationHours < 0) {
+            return res.status(400).json((0, errorResponse_1.errorResponse)(400, 'estimatedDurationHours must be a non-negative number'));
+        }
+    }
+    if (inspectionFeeCharged !== undefined && typeof inspectionFeeCharged !== 'boolean') {
+        return res.status(400).json((0, errorResponse_1.errorResponse)(400, 'inspectionFeeCharged must be a boolean'));
+    }
+    if (inspectionFeeAmount !== undefined) {
+        if (typeof inspectionFeeAmount !== 'number' || inspectionFeeAmount < 0) {
+            return res.status(400).json((0, errorResponse_1.errorResponse)(400, 'inspectionFeeAmount must be a non-negative number'));
+        }
     }
     return next();
 };
@@ -146,11 +181,15 @@ const validateRescheduleBooking = (req, res, next) => {
     return next();
 };
 exports.validateRescheduleBooking = validateRescheduleBooking;
+const validPaymentMethodTypes = ['GCASH', 'MAYA', 'CARD', 'BANK_TRANSFER', 'CASH'];
 // Payment validators
 const validateAddPaymentMethod = (req, res, next) => {
     const { type, accountIdentifier } = req.body;
     if (!type || typeof type !== 'string') {
         return res.status(400).json((0, errorResponse_1.errorResponse)(400, 'type is required and must be a string'));
+    }
+    if (!validPaymentMethodTypes.includes(type.toUpperCase())) {
+        return res.status(400).json((0, errorResponse_1.errorResponse)(400, `Invalid type "${type}". Allowed values: GCASH, MAYA, CARD, BANK_TRANSFER, CASH`));
     }
     if (!accountIdentifier || typeof accountIdentifier !== 'string') {
         return res.status(400).json((0, errorResponse_1.errorResponse)(400, 'accountIdentifier is required and must be a string'));

@@ -465,8 +465,9 @@ export const getKYCDocuments = async (req: AuthRequest, res: Response) => {
       return res.status(401).json(errorResponse(401, 'Not authenticated'));
     }
     
+    // KycDocument has no userId field — it hangs off VerificationRequest
     const documents = await prisma.kycDocument.findMany({
-      where: { userId: req.user.userId },
+      where: { verificationRequest: { userId: req.user.userId } },
       orderBy: { createdAt: 'desc' },
     });
     
@@ -491,10 +492,30 @@ export const submitKYCDocument = async (req: AuthRequest, res: Response) => {
     }
     
     const { documentType, documentUrl } = req.body;
-    
+
+    // KycDocument has no userId field — it must belong to a VerificationRequest.
+    // Reuse the user's open request if one exists, otherwise start a new one.
+    let verificationRequest = await prisma.verificationRequest.findFirst({
+      where: {
+        userId: req.user.userId,
+        status: { in: ['PENDING', 'SUBMITTED'] },
+      },
+      orderBy: { submittedAt: 'desc' },
+    });
+
+    if (!verificationRequest) {
+      verificationRequest = await prisma.verificationRequest.create({
+        data: {
+          userId: req.user.userId,
+          type: 'WORKER_ONBOARDING',
+          status: 'PENDING',
+        },
+      });
+    }
+
     const document = await prisma.kycDocument.create({
       data: {
-        userId: req.user.userId,
+        verificationRequestId: verificationRequest.id,
         documentType,
         fileUrl: documentUrl,
         status: 'PENDING',
