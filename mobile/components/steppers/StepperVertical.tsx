@@ -43,7 +43,7 @@ export const StepperVertical: React.FC<Props> = ({ steps }) => {
               className={
                 step.status === "pending"
                   ? "text-text-muted text-sm"
-                  : "text-primary text-sm font-semibold"
+                  : "text-brand text-sm font-semibold"
               }
             >
               {step.label}

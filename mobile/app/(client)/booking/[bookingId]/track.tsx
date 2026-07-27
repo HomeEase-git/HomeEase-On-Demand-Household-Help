@@ -1,5 +1,5 @@
 import React from "react";
-import { View, Text, Pressable, Alert } from "react-native";
+import { View, Text, Pressable, Alert, Linking } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter, useLocalSearchParams } from "expo-router";
@@ -16,7 +16,7 @@ export default function TrackBookingScreen() {
 
   if (!booking) {
     return (
-      <SafeAreaView className="flex-1 bg-primary-white">
+      <SafeAreaView className="flex-1 bg-white">
         <ScreenHeader title="Track Service" showBack />
         <View className="flex-1 items-center justify-center">
           <Text className="text-text-secondary">Booking not found</Text>
@@ -53,7 +53,7 @@ export default function TrackBookingScreen() {
         : colors.warning;
 
   return (
-    <SafeAreaView className="flex-1 bg-primary-white">
+    <SafeAreaView className="flex-1 bg-white">
       <ScreenHeader title="Track Service" showBack />
       <View className="px-4 mt-2">
         <View className="flex-row justify-between mb-6">
@@ -117,7 +117,7 @@ export default function TrackBookingScreen() {
             <Ionicons name="person-circle" size={40} color={colors.white} />
           </View>
           <View className="flex-1">
-            <Text className="text-primary font-bold">{booking.worker}</Text>
+            <Text className="text-text-primary font-bold">{booking.worker}</Text>
             <Text
               className="text-sm font-semibold"
               style={{ color: statusColor }}
@@ -126,13 +126,27 @@ export default function TrackBookingScreen() {
             </Text>
           </View>
           <Pressable
-            onPress={() => router.push("/(client)/inbox/chat/c1")}
+            onPress={() => {
+              if (!booking.workerId) {
+                Alert.alert("Unavailable", "This worker cannot be messaged yet.");
+                return;
+              }
+              router.push(`/(client)/inbox/chat/${booking.workerId}`);
+            }}
             className="bg-accent rounded-full p-2 mr-2"
           >
             <Ionicons name="chatbubble" size={20} color={colors.white} />
           </Pressable>
           <Pressable
-            onPress={() => Alert.alert("Calling...", "Feature coming soon")}
+            onPress={() => {
+              if (!booking.workerPhone) {
+                Alert.alert("No phone number", "This worker has no phone number on file.");
+                return;
+              }
+              Linking.openURL(`tel:${booking.workerPhone}`).catch(() =>
+                Alert.alert("Error", "Could not open the phone dialer."),
+              );
+            }}
             className="bg-accent rounded-full p-2"
           >
             <Ionicons name="call" size={20} color={colors.white} />

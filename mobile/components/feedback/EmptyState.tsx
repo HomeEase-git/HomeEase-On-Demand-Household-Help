@@ -24,11 +24,11 @@ export const EmptyState: React.FC<Props> = ({
       <View className="w-20 h-20 rounded-full bg-card items-center justify-center mb-4">
         <Ionicons name={icon} size={32} color={colors.text.muted} />
       </View>
-      <Text className="text-primary font-semibold text-base text-center">
+      <Text className="text-text-primary font-semibold text-base text-center">
         {title}
       </Text>
       {subtitle && (
-        <Text className="text-primary text-sm text-center mt-1">
+        <Text className="text-text-secondary text-sm text-center mt-1">
           {subtitle}
         </Text>
       )}

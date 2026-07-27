@@ -1,42 +1,63 @@
 import { create } from "zustand";
-import { jobRequests as dummyJobRequests } from "../constants/dummyData";
+import { API_STATUS_MAP, type BookingStatus } from "./bookingStore";
 
-export type JobRequestStatus =
-  | "Pending"
-  | "Accepted"
-  | "Completed"
-  | "Declined";
-
-export type JobRequest = {
+export type WorkerJob = {
   id: string;
-  client: string;
+  clientName: string;
+  clientId: string | null;
+  clientPhone: string | null;
   service: string;
-  date: string;
-  amount: number;
-  status: JobRequestStatus;
+  status: BookingStatus;
+  scheduledDate: string;
+  estimatedPrice: number;
+  finalPrice: number | null;
+  rating: number | null;
 };
+
+// Shape returned by GET /bookings (services/api.ts getBookings()) for a worker
+export type ApiWorkerBooking = {
+  id: string;
+  clientName: string;
+  clientId: string | null;
+  clientPhone: string | null;
+  service: string;
+  status: string;
+  scheduledDate: string;
+  estimatedPrice: number;
+  finalPrice: number | null;
+  rating: number | null;
+};
+
+export function mapApiJob(b: ApiWorkerBooking): WorkerJob {
+  return {
+    id: b.id,
+    clientName: b.clientName,
+    clientId: b.clientId ?? null,
+    clientPhone: b.clientPhone ?? null,
+    service: b.service,
+    status: API_STATUS_MAP[b.status] ?? "Pending",
+    scheduledDate: b.scheduledDate,
+    estimatedPrice: b.estimatedPrice,
+    finalPrice: b.finalPrice ?? null,
+    rating: b.rating ?? null,
+  };
+}
 
 type WorkerState = {
   available: boolean;
-  jobRequests: JobRequest[];
-  toggleAvailability: () => void;
-  updateRequestStatus: (id: string, status: JobRequestStatus) => void;
+  jobs: WorkerJob[];
+  setAvailable: (available: boolean) => void;
+  setJobs: (jobs: WorkerJob[]) => void;
+  updateJobStatus: (id: string, status: BookingStatus) => void;
 };
 
 export const useWorkerStore = create<WorkerState>((set) => ({
   available: true,
-  jobRequests: dummyJobRequests.map((req) => ({
-    ...req,
-    status: req.status as JobRequestStatus,
-  })),
-  toggleAvailability: () =>
+  jobs: [],
+  setAvailable: (available) => set({ available }),
+  setJobs: (jobs) => set({ jobs }),
+  updateJobStatus: (id, status) =>
     set((state) => ({
-      available: !state.available,
-    })),
-  updateRequestStatus: (id, status) =>
-    set((state) => ({
-      jobRequests: state.jobRequests.map((r) =>
-        r.id === id ? { ...r, status } : r,
-      ),
+      jobs: state.jobs.map((j) => (j.id === id ? { ...j, status } : j)),
     })),
 }));

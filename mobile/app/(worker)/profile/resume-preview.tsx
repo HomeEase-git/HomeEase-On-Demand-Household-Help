@@ -11,6 +11,7 @@ import {
   useWorkerProfileStore,
   type WorkerProfileState,
 } from "../../../store/workerProfileStore";
+import { colors } from "../../../constants";
 
 const PARSED_RESUME = {
   name: "Dominic Paulo R. Dela Cruz",
@@ -102,7 +103,7 @@ export default function ResumePreviewScreen() {
   };
 
   return (
-    <SafeAreaView className="flex-1 bg-primary-white">
+    <SafeAreaView className="flex-1 bg-white">
       <ScreenHeader title="Resume Analysis" showBack />
       <ScrollView
         className="flex-1"
@@ -111,36 +112,36 @@ export default function ResumePreviewScreen() {
         {/* AI Header */}
         <View className="bg-accent rounded-2xl p-4 mb-4">
           <View className="flex-row items-center">
-            <Ionicons name="sparkles" size={24} color="#FFFFFF" />
-            <Text className="text-primary font-bold text-base ml-2">
+            <Ionicons name="sparkles" size={24} color={colors.white} />
+            <Text className="text-text-primary font-bold text-base ml-2">
               AI-Powered Resume Analysis
             </Text>
           </View>
-          <Text className="text-primary/70 text-xs mt-1">
+          <Text className="text-brand/70 text-xs mt-1">
             Powered by Claude AI · Analyzed just now
           </Text>
-          <View className="bg-primary/20 rounded-xl p-3 mt-3 flex-row items-center justify-between">
-            <Text className="text-primary text-sm">Overall Match Score</Text>
-            <Text className="text-primary font-bold text-2xl">92%</Text>
+          <View className="bg-brand/20 rounded-xl p-3 mt-3 flex-row items-center justify-between">
+            <Text className="text-brand text-sm">Overall Match Score</Text>
+            <Text className="text-text-primary font-bold text-2xl">92%</Text>
           </View>
         </View>
 
         {/* Profile Overview */}
         <View className="bg-card rounded-2xl p-4 mb-4">
-          <Text className="text-primary font-bold text-base mb-3">
+          <Text className="text-text-primary font-bold text-base mb-3">
             Profile Overview
           </Text>
           <View className="flex-row items-center">
             <View className="w-16 h-16 bg-accent/20 rounded-full items-center justify-center mr-4">
-              <Ionicons name="person-circle" size={48} color="#4B5FD6" />
+              <Ionicons name="person-circle" size={48} color={colors.brand.DEFAULT} />
             </View>
             <View className="flex-1">
-              <Text className="text-primary font-bold text-lg">
+              <Text className="text-text-primary font-bold text-lg">
                 {PARSED_RESUME.name}
               </Text>
               <Text className="text-accent text-sm">{PARSED_RESUME.trade}</Text>
               <View className="mt-1 flex-row items-center">
-                <Ionicons name="time-outline" size={14} color="#A0A8D0" />
+                <Ionicons name="time-outline" size={14} color={colors.text.muted} />
                 <Text className="text-text-secondary text-xs ml-1">
                   {PARSED_RESUME.yearsOfExperience} years experience
                 </Text>
@@ -150,7 +151,7 @@ export default function ResumePreviewScreen() {
           <View className="mt-3 flex-row items-center justify-between bg-card-dark rounded-xl p-3">
             <View>
               <Text className="text-text-secondary text-xs">Mastery Level</Text>
-              <Text className="text-primary font-bold text-base mt-0.5">
+              <Text className="text-text-primary font-bold text-base mt-0.5">
                 {PARSED_RESUME.masteryLevel}
               </Text>
             </View>
@@ -163,7 +164,7 @@ export default function ResumePreviewScreen() {
 
         {/* Skills */}
         <View className="bg-card rounded-2xl p-4 mb-4">
-          <Text className="text-primary font-bold text-base mb-3">
+          <Text className="text-text-primary font-bold text-base mb-3">
             Extracted Skills
           </Text>
           {PARSED_RESUME.skills.map((skill, index) => {
@@ -177,7 +178,7 @@ export default function ResumePreviewScreen() {
                     : ""
                 }`}
               >
-                <Text className="text-primary text-sm flex-1">
+                <Text className="text-brand text-sm flex-1">
                   {skill.name}
                 </Text>
                 <View className={`${lc.bg} rounded-full px-2 py-0.5`}>
@@ -192,7 +193,7 @@ export default function ResumePreviewScreen() {
 
         {/* Experience */}
         <View className="bg-card rounded-2xl p-4 mb-4">
-          <Text className="text-primary font-bold text-base mb-3">
+          <Text className="text-text-primary font-bold text-base mb-3">
             Work Experience
           </Text>
           {PARSED_RESUME.experience.map((entry, index) => (
@@ -204,7 +205,7 @@ export default function ResumePreviewScreen() {
             >
               <View className="w-2 h-2 rounded-full bg-accent mt-1.5 mr-3 flex-shrink-0" />
               <View className="flex-1">
-                <Text className="text-primary font-semibold text-sm">
+                <Text className="text-brand font-semibold text-sm">
                   {entry.role}
                 </Text>
                 <Text className="text-text-secondary text-xs">
@@ -220,7 +221,7 @@ export default function ResumePreviewScreen() {
 
         {/* Education */}
         <View className="bg-card rounded-2xl p-4 mb-4">
-          <Text className="text-primary font-bold text-base mb-3">
+          <Text className="text-text-primary font-bold text-base mb-3">
             Education & Training
           </Text>
           {PARSED_RESUME.education.map((entry, index) => (
@@ -230,9 +231,9 @@ export default function ResumePreviewScreen() {
                 index < PARSED_RESUME.education.length - 1 ? "mb-3" : ""
               }`}
             >
-              <Ionicons name="school-outline" size={16} color="#4B5FD6" />
+              <Ionicons name="school-outline" size={16} color={colors.brand.DEFAULT} />
               <View className="flex-1 ml-3">
-                <Text className="text-primary font-semibold text-sm">
+                <Text className="text-brand font-semibold text-sm">
                   {entry.degree}
                 </Text>
                 <Text className="text-text-secondary text-xs">
@@ -248,7 +249,7 @@ export default function ResumePreviewScreen() {
 
         {/* Certifications */}
         <View className="bg-card rounded-2xl p-4 mb-4">
-          <Text className="text-primary font-bold text-base mb-3">
+          <Text className="text-text-primary font-bold text-base mb-3">
             Certifications
           </Text>
           {PARSED_RESUME.certifications.map((cert, index) => (
@@ -258,8 +259,8 @@ export default function ResumePreviewScreen() {
                 index < PARSED_RESUME.certifications.length - 1 ? "mb-2" : ""
               }`}
             >
-              <Ionicons name="checkmark-circle" size={16} color="#4CAF50" />
-              <Text className="text-primary text-sm ml-2">{cert}</Text>
+              <Ionicons name="checkmark-circle" size={16} color={colors.success} />
+              <Text className="text-brand text-sm ml-2">{cert}</Text>
             </View>
           ))}
         </View>
@@ -268,7 +269,7 @@ export default function ResumePreviewScreen() {
         <View className="gap-3 mt-2">
           {isSaved ? (
             <View className="bg-success/10 border border-success rounded-2xl p-4 items-center">
-              <Ionicons name="checkmark-circle" size={24} color="#4CAF50" />
+              <Ionicons name="checkmark-circle" size={24} color={colors.success} />
               <Text className="text-success font-semibold mt-2">
                 Profile data already applied
               </Text>

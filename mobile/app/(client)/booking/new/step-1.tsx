@@ -173,7 +173,7 @@ export default function BookingStep1Screen() {
     !unresolvableCategory;
 
   return (
-    <SafeAreaView className="flex-1 bg-primary-white">
+    <SafeAreaView className="flex-1 bg-white">
       <ScreenHeader title="Book a Service" showBack />
       <ScrollView
         className="flex-1"
@@ -205,7 +205,7 @@ export default function BookingStep1Screen() {
           </View>
         )}
 
-        <Text className="text-primary font-bold text-lg mt-4">
+        <Text className="text-text-primary font-bold text-lg mt-4">
           Service Details
         </Text>
 
@@ -215,7 +215,7 @@ export default function BookingStep1Screen() {
         >
           <Text
             className={
-              category ? "text-primary font-semibold" : "text-text-muted"
+              category ? "text-brand font-semibold" : "text-text-muted"
             }
           >
             {category ?? "Select service category"}
@@ -268,7 +268,7 @@ export default function BookingStep1Screen() {
                   }}
                 >
                   <View className="flex-1">
-                    <Text className="text-primary font-semibold">
+                    <Text className="text-brand font-semibold">
                       {task.name}
                     </Text>
                     <Text className="text-text-secondary text-xs mt-0.5">
@@ -340,7 +340,7 @@ export default function BookingStep1Screen() {
           <Text
             className={
               addressSet
-                ? "text-primary ml-3 flex-1"
+                ? "text-brand ml-3 flex-1"
                 : "text-text-muted ml-3 flex-1"
             }
           >
@@ -356,7 +356,7 @@ export default function BookingStep1Screen() {
             {draft.workerId ? (
               <View className="flex-row items-center justify-between">
                 <View className="flex-1">
-                  <Text className="text-primary font-semibold">
+                  <Text className="text-brand font-semibold">
                     {draft.workerName ?? "Selected worker"}
                   </Text>
                   <Text className="text-text-secondary text-xs">

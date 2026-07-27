@@ -1,5 +1,5 @@
 import React, { useRef } from "react";
-import { View, Text, ScrollView, Pressable } from "react-native";
+import { View, Text, ScrollView, Pressable, Image, Alert, ActivityIndicator } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
@@ -9,7 +9,8 @@ import LogoutConfirmationModal from "../../../components/modals/LogoutConfirmati
 import { useState } from "react";
 import type { BottomSheetHandle } from "../../../components/bottom-sheets/BottomSheetWrapper";
 import { useAuthStore } from "../../../store/authStore";
-import { colors } from "../../../constants";
+import { colors, cardShadow } from "../../../constants";
+import { uploadAvatar, updateUserProfile } from "../../../services/api";
 
 const MENU_GROUPS = [
   [
@@ -41,31 +42,68 @@ export default function ClientProfileScreen() {
   const router = useRouter();
   const imageSheetRef = useRef<BottomSheetHandle | null>(null);
   const [logoutVisible, setLogoutVisible] = useState(false);
+  const [uploadingAvatar, setUploadingAvatar] = useState(false);
   const user = useAuthStore((s) => s.user);
+  const setUser = useAuthStore((s) => s.setUser);
   const logout = useAuthStore((s) => s.logout);
 
   const displayName = user?.name ?? "Guest";
   const displayEmail = user?.email ?? "";
 
+  const handleAvatarSelected = async (uri: string) => {
+    if (!user) return;
+    setUploadingAvatar(true);
+    try {
+      const { url } = await uploadAvatar(uri);
+      const updated = await updateUserProfile({ avatar: url });
+      setUser({ ...user, avatar: updated.avatar });
+    } catch (error) {
+      console.error("Avatar upload error", error);
+      Alert.alert(
+        "Upload failed",
+        "We could not update your profile picture. Please try again.",
+      );
+    } finally {
+      setUploadingAvatar(false);
+    }
+  };
+
   return (
-    <SafeAreaView className="flex-1 bg-primary-white">
+    <SafeAreaView className="flex-1 bg-white">
       <ScrollView
         className="flex-1"
         contentContainerStyle={{ paddingBottom: 24 }}
       >
-        <View className="bg-card rounded-2xl p-5 mx-4 mt-4">
+        <View className="bg-card rounded-2xl p-5 mx-4 mt-4" style={cardShadow}>
           <View className="flex-row items-center">
-            <View className="w-20 h-20 bg-accent rounded-full items-center justify-center">
-              <Ionicons name="person" size={40} color={colors.white} />
+            <View className="w-20 h-20 bg-accent rounded-full items-center justify-center overflow-hidden">
+              {user?.avatar ? (
+                <Image
+                  source={{ uri: user.avatar }}
+                  style={{ width: 80, height: 80 }}
+                  resizeMode="cover"
+                />
+              ) : (
+                <Ionicons name="person" size={40} color={colors.white} />
+              )}
+              {uploadingAvatar && (
+                <View
+                  className="absolute inset-0 bg-black/40 items-center justify-center"
+                  style={{ width: 80, height: 80 }}
+                >
+                  <ActivityIndicator color={colors.white} />
+                </View>
+              )}
             </View>
             <Pressable
-              className="absolute bottom-0 left-14 w-8 h-8 bg-primary rounded-full items-center justify-center"
+              className="absolute bottom-0 left-14 w-8 h-8 bg-brand rounded-full items-center justify-center"
               onPress={() => imageSheetRef.current?.expand()}
+              disabled={uploadingAvatar}
             >
               <Ionicons name="camera" size={16} color={colors.white} />
             </Pressable>
             <View className="ml-4 flex-1">
-              <Text className="text-primary font-bold text-xl">
+              <Text className="text-text-primary font-bold text-xl">
                 {displayName}
               </Text>
               <Text className="text-text-secondary text-sm">
@@ -93,15 +131,16 @@ export default function ClientProfileScreen() {
         {MENU_GROUPS.map((group, gi) => (
           <View
             key={gi}
-            className="bg-blue-100 rounded-2xl mx-4 mt-3 overflow-hidden"
+            className="bg-card rounded-2xl mx-4 mt-3 overflow-hidden"
+            style={cardShadow}
           >
             {group.map((item) => (
               <Pressable
                 key={item.label}
-                className="flex-row items-center py-4 px-4 border-b border-white last:border-0"
+                className="flex-row items-center py-4 px-4 border-b border-divider last:border-0"
                 onPress={() => router.push(item.path as any)}
               >
-                <Text className="text-primary flex-1">{item.label}</Text>
+                <Text className="text-text-primary flex-1">{item.label}</Text>
                 <Ionicons
                   name="chevron-forward"
                   size={20}
@@ -112,13 +151,13 @@ export default function ClientProfileScreen() {
           </View>
         ))}
 
-        <View className="bg-error/25 rounded-2xl mx-4 mt-3 overflow-hidden">
+        <View className="bg-error/10 rounded-2xl mx-4 mt-3 overflow-hidden">
           <Pressable
             className="flex-row items-center py-4 px-4"
             onPress={() => setLogoutVisible(true)}
           >
             <Text className="text-error flex-1 font-semibold">Log Out</Text>
-            <Ionicons name="chevron-forward" size={20} color="#EF4444" />
+            <Ionicons name="chevron-forward" size={20} color={colors.error} />
           </Pressable>
           <Pressable
             className="flex-row items-center py-4 px-4 border-t border-divider"
@@ -127,13 +166,13 @@ export default function ClientProfileScreen() {
             <Text className="text-error flex-1 font-semibold">
               Delete Account
             </Text>
-            <Ionicons name="chevron-forward" size={20} color="#EF4444" />
+            <Ionicons name="chevron-forward" size={20} color={colors.error} />
           </Pressable>
         </View>
       </ScrollView>
       <ImageSourcePickerBottomSheet
         innerRef={imageSheetRef}
-        onSelect={() => {}}
+        onSelect={handleAvatarSelected}
       />
       <LogoutConfirmationModal
         visible={logoutVisible}

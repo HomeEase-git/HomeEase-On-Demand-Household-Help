@@ -45,9 +45,9 @@ export const PaymentMethodBottomSheet: React.FC<Props> = ({
           <View
             className={`w-10 h-10 rounded-full items-center justify-center ${m.bg}`}
           >
-            <Text className="text-primary font-bold">{m.icon}</Text>
+            <Text className="text-text-primary font-bold">{m.icon}</Text>
           </View>
-          <Text className="text-primary font-semibold ml-3">{m.label}</Text>
+          <Text className="text-brand font-semibold ml-3">{m.label}</Text>
         </Pressable>
       ))}
       <View className="mt-4">

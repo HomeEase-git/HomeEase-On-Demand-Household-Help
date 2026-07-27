@@ -11,7 +11,7 @@ export default function PaymentFailedScreen() {
   const router = useRouter();
 
   return (
-    <SafeAreaView className="flex-1 bg-primary-white items-center justify-center px-8">
+    <SafeAreaView className="flex-1 bg-white items-center justify-center px-8">
       <View className="w-32 h-32 bg-error/20 rounded-full items-center justify-center mb-8">
         <Ionicons name="close-circle" size={80} color={colors.error} />
       </View>

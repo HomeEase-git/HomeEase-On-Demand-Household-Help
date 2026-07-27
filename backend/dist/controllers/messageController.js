@@ -6,6 +6,8 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.getUnreadCount = exports.markConversationRead = exports.sendMessage = exports.getConversationThread = exports.getConversations = void 0;
 const database_1 = __importDefault(require("@config/database"));
 const errorResponse_1 = require("@utils/errorResponse");
+const notify_1 = require("@utils/notify");
+const socket_1 = require("../socket");
 /**
  * GET /api/messages/conversations
  * Get derived conversation list (latest message from each unique sender/receiver pair)
@@ -31,10 +33,10 @@ const getConversations = async (req, res) => {
             },
             include: {
                 sender: {
-                    select: { id: true, fullName: true, avatar: true }, // schema field is `avatar`, not `profileImage`
+                    select: { id: true, fullName: true, avatar: true, phone: true }, // schema field is `avatar`, not `profileImage`
                 },
                 receiver: {
-                    select: { id: true, fullName: true, avatar: true },
+                    select: { id: true, fullName: true, avatar: true, phone: true },
                 },
             },
             orderBy: { createdAt: 'desc' },
@@ -51,6 +53,7 @@ const getConversations = async (req, res) => {
                     userId: otherUser.id,
                     userName: otherUser.fullName,
                     userImage: otherUser.avatar,
+                    userPhone: otherUser.phone,
                     lastMessage: msg.content,
                     lastMessageTime: msg.createdAt,
                     unreadCount: !msg.isRead && msg.receiverId === currentUserId ? 1 : 0,
@@ -106,10 +109,10 @@ const getConversationThread = async (req, res) => {
                 },
                 include: {
                     sender: {
-                        select: { id: true, fullName: true, avatar: true },
+                        select: { id: true, fullName: true, avatar: true, phone: true },
                     },
                     receiver: {
-                        select: { id: true, fullName: true, avatar: true },
+                        select: { id: true, fullName: true, avatar: true, phone: true },
                     },
                 },
                 orderBy: { createdAt: 'desc' },
@@ -163,7 +166,7 @@ const sendMessage = async (req, res) => {
         if (!req.user) {
             return res.status(401).json((0, errorResponse_1.errorResponse)(401, 'Not authenticated'));
         }
-        const { receiverId, content } = req.body;
+        const { receiverId, content, imageUrl } = req.body;
         const currentUserId = req.user.userId;
         // Verify receiver exists
         const receiver = await database_1.default.user.findUnique({
@@ -176,28 +179,34 @@ const sendMessage = async (req, res) => {
             data: {
                 senderId: currentUserId,
                 receiverId,
-                content,
+                content: content ?? '',
+                imageUrl: imageUrl ?? null,
                 isRead: false,
             },
             include: {
                 sender: {
-                    select: { id: true, fullName: true, avatar: true },
+                    select: { id: true, fullName: true, avatar: true, phone: true },
                 },
                 receiver: {
-                    select: { id: true, fullName: true, avatar: true },
+                    select: { id: true, fullName: true, avatar: true, phone: true },
                 },
             },
         });
-        // Create notification for receiver
-        await database_1.default.notification.create({
-            data: {
-                userId: receiverId,
-                type: 'MESSAGE_RECEIVED',
-                title: `Message from ${message.sender.fullName}`,
-                message: content.substring(0, 100),
-                relatedId: message.id,
-            },
+        // Create notification for receiver and push it live
+        await (0, notify_1.notifyUser)({
+            userId: receiverId,
+            type: 'MESSAGE_RECEIVED',
+            title: `Message from ${message.sender.fullName}`,
+            message: imageUrl ? '📷 Sent an image' : content.substring(0, 100),
+            relatedId: message.id,
         });
+        // Push the new message live to the receiver, if connected
+        try {
+            (0, socket_1.getIO)().to(receiverId).emit('message:new', message);
+        }
+        catch {
+            // Socket.IO may not be initialized (e.g. scripts/tests) — safe to ignore
+        }
         return res.status(201).json({
             success: true,
             message: 'Message sent successfully',

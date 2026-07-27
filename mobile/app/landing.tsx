@@ -9,7 +9,7 @@ export default function LandingScreen() {
   const router = useRouter();
 
   return (
-    <SafeAreaView className="flex-1 bg-primary-white">
+    <SafeAreaView className="flex-1 bg-white">
       <ScrollView
         className="flex-1"
         contentContainerStyle={{
@@ -19,7 +19,7 @@ export default function LandingScreen() {
         }}
       >
         <View className="px-4">
-          <View className="w-full h-64 bg-primary-white border border-card items-center justify-center rounded-3xl">
+          <View className="w-full h-64 bg-white border border-card items-center justify-center rounded-3xl">
             <Image
               source={require("../assets/images/logo/home_ease-logo.png")}
               style={{ width: 200, height: 200, resizeMode: "contain" }}

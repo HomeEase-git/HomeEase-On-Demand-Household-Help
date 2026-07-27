@@ -9,13 +9,13 @@ export default function TermsConditionsScreen() {
   const router = useRouter();
 
   return (
-    <SafeAreaView className="flex-1 bg-primary-white">
+    <SafeAreaView className="flex-1 bg-white">
       <ScreenHeader title="Terms & Conditions" showBack />
       <ScrollView
         className="flex-1"
         contentContainerStyle={{ paddingHorizontal: 24, paddingVertical: 16 }}
       >
-        <Text className="text-primary text-2xl font-bold mb-6">
+        <Text className="text-text-primary text-2xl font-bold mb-6">
           Terms and Conditions
         </Text>
 
@@ -118,7 +118,7 @@ export default function TermsConditionsScreen() {
 function Section({ title, content }: { title: string; content: string }) {
   return (
     <View className="mb-6">
-      <Text className="text-primary text-base font-bold mb-2">{title}</Text>
+      <Text className="text-text-primary text-base font-bold mb-2">{title}</Text>
       <Text className="text-text-secondary text-sm leading-6">{content}</Text>
     </View>
   );

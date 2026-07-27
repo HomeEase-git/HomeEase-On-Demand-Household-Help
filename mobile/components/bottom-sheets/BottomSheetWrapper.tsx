@@ -114,12 +114,12 @@ const BottomSheetWrapper: React.FC<Props> = ({
           <View className="px-4 pb-8 pt-3">
             {title && (
               <View className="flex-row items-center justify-between mb-4">
-                <Text className="text-primary font-bold text-lg">{title}</Text>
+                <Text className="text-text-primary font-bold text-lg">{title}</Text>
                 <Pressable onPress={close}>
                   <Ionicons
                     name="close"
                     size={24}
-                    color={colors.primary.DEFAULT}
+                    color={colors.brand.DEFAULT}
                   />
                 </Pressable>
               </View>
@@ -143,7 +143,7 @@ const styles = StyleSheet.create({
   },
   sheet: {
     backgroundColor: colors.card.DEFAULT,
-    borderColor: colors.primary.DEFAULT,
+    borderColor: colors.brand.DEFAULT,
     borderWidth: 2,
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,

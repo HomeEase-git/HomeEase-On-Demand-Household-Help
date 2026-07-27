@@ -7,6 +7,7 @@ import OtpInput from "../../components/ui/OtpInput";
 import PrimaryButton from "../../components/ui/PrimaryButton";
 import { useAuthStore } from "../../store/authStore";
 import { verifyOtp, sendOtpEmail } from "../../services/api";
+import { colors } from "../../constants";
 
 const COUNTDOWN_SECONDS = 60;
 
@@ -87,23 +88,23 @@ export default function OtpVerificationScreen() {
   };
 
   return (
-    <SafeAreaView className="flex-1 bg-primary-white">
+    <SafeAreaView className="flex-1 bg-white">
       <ScrollView
         className="flex-1"
         contentContainerStyle={{ paddingHorizontal: 24, paddingTop: 16 }}
         keyboardShouldPersistTaps="handled"
       >
         <View className="w-16 h-16 bg-blue-100 rounded-full items-center justify-center mb-6">
-          <Ionicons name="mail" size={32} color="#4B5FD6" />
+          <Ionicons name="mail" size={32} color={colors.brand.DEFAULT} />
         </View>
 
-        <Text className="text-primary text-2xl font-bold">
+        <Text className="text-text-primary text-2xl font-bold">
           Verify Your Email
         </Text>
         <Text className="text-text-secondary mt-2 mb-2">
           We sent a 6-digit code to
         </Text>
-        <Text className="text-primary font-semibold mb-6">
+        <Text className="text-brand font-semibold mb-6">
           {maskEmail(email)}
         </Text>
 
@@ -131,14 +132,14 @@ export default function OtpVerificationScreen() {
           ) : (
             <Text className="text-text-muted text-sm">
               Resend code in{" "}
-              <Text className="font-semibold text-primary">{countdown}s</Text>
+              <Text className="font-semibold text-brand">{countdown}s</Text>
             </Text>
           )}
         </View>
 
         <View className="mt-8 p-4 bg-blue-50 rounded-lg">
           <View className="flex-row items-start">
-            <Ionicons name="information-circle" size={20} color="#4B5FD6" />
+            <Ionicons name="information-circle" size={20} color={colors.brand.DEFAULT} />
             <Text className="text-xs text-text-secondary ml-2 flex-1">
               Didn&apos;t receive the code? Check your spam folder or wait a
               moment before requesting a new code.

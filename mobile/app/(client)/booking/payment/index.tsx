@@ -7,6 +7,7 @@ import OutlinedButton from "../../../../components/ui/OutlinedButton";
 import * as api from "../../../../services/api";
 import { serviceConfigs } from "../../../../constants/serviceData";
 import { useBookingStore, type Booking } from "../../../../store/bookingStore";
+import { colors } from "../../../../constants";
 
 export default function PaymentScreen() {
   const router = useRouter();
@@ -28,18 +29,27 @@ export default function PaymentScreen() {
             ? "Cash"
             : null;
 
-  const BASE_AMOUNT = 400;
+  const baseAmount = draft.estimatedPrice || 0;
   const TAX_RATE = 0.12;
-  const taxAmount = parseFloat((BASE_AMOUNT * TAX_RATE).toFixed(2));
-  const serviceFee = parseFloat((BASE_AMOUNT * 0.1).toFixed(2));
+  const taxAmount = parseFloat((baseAmount * TAX_RATE).toFixed(2));
+  const serviceFee = parseFloat((baseAmount * 0.1).toFixed(2));
   const tip = draft.tip ?? 0;
   const total = parseFloat(
-    (BASE_AMOUNT + taxAmount + serviceFee + tip).toFixed(2),
+    (baseAmount + taxAmount + serviceFee + tip).toFixed(2),
   );
 
   const handleSubmit = async () => {
     if (!method) {
       Alert.alert("Payment method", "Please select a payment method first.");
+      router.back();
+      return;
+    }
+
+    if (!baseAmount) {
+      Alert.alert(
+        "Booking error",
+        "Missing service price. Please return and finish your booking.",
+      );
       router.back();
       return;
     }
@@ -93,7 +103,28 @@ export default function PaymentScreen() {
       };
 
       const response = await api.createBooking(bookingPayload);
-      setBookingCreated(response as Booking);
+
+      // The API only returns a partial payload (id, clientName, workerName,
+      // scheduledDate, ...) - normalize it into the shape the store/UI expect
+      // (date, worker, service, amount) before saving, otherwise screens that
+      // read booking.amount/date directly (payment success, booking detail) crash.
+      const createdBooking: Booking = {
+        id: response.id,
+        service: draft.category || "Service",
+        worker: response.workerName ?? "Unassigned",
+        workerId: draft.workerId ?? undefined,
+        date: response.scheduledDate ?? bookingPayload.scheduledDate,
+        time: response.scheduledTime || undefined,
+        address: draft.address || undefined,
+        status: "Pending",
+        amount: total,
+        payment: { methodType: method ?? "CASH" },
+        category: draft.category ?? undefined,
+        selectedTaskId: draft.selectedTaskId ?? undefined,
+        selectedAddOnIds: draft.selectedAddOnIds,
+      };
+
+      setBookingCreated(createdBooking);
       router.replace("/(client)/booking/payment/success");
     } catch (e) {
       console.error("Payment/create booking failed:", e);
@@ -108,15 +139,15 @@ export default function PaymentScreen() {
   };
 
   return (
-    <SafeAreaView className="flex-1 bg-primary-white">
+    <SafeAreaView className="flex-1 bg-white">
       <ScrollView
         className="flex-1"
         contentContainerStyle={{ padding: 24, paddingBottom: 40 }}
       >
-        <Text className="text-primary text-2xl font-bold mb-4">Payment</Text>
+        <Text className="text-text-primary text-2xl font-bold mb-4">Payment</Text>
 
         <View className="bg-card rounded-2xl p-4 mb-4">
-          <Text className="text-primary font-semibold mb-1">
+          <Text className="text-brand font-semibold mb-1">
             Booking Summary
           </Text>
           <Text className="text-text-secondary text-sm">
@@ -131,27 +162,27 @@ export default function PaymentScreen() {
           <View className="mt-3">
             <View className="flex-row justify-between items-center mb-1">
               <Text className="text-text-secondary text-sm">Subtotal</Text>
-              <Text className="text-primary text-sm">₱{BASE_AMOUNT}.00</Text>
+              <Text className="text-brand text-sm">₱{baseAmount}.00</Text>
             </View>
             <View className="flex-row justify-between items-center mb-1">
               <Text className="text-text-secondary text-sm">VAT (12%)</Text>
-              <Text className="text-primary text-sm">₱{taxAmount}</Text>
+              <Text className="text-brand text-sm">₱{taxAmount}</Text>
             </View>
             <View className="flex-row justify-between items-center mb-1">
               <Text className="text-text-secondary text-sm">
                 Platform Fee (10%)
               </Text>
-              <Text className="text-primary text-sm">₱{serviceFee}</Text>
+              <Text className="text-brand text-sm">₱{serviceFee}</Text>
             </View>
             {tip > 0 && (
               <View className="flex-row justify-between items-center mb-1">
                 <Text className="text-text-secondary text-sm">Tip</Text>
-                <Text className="text-primary text-sm">₱{tip}.00</Text>
+                <Text className="text-brand text-sm">₱{tip}.00</Text>
               </View>
             )}
             <View className="border-b border-divider my-2" />
             <View className="flex-row justify-between items-center">
-              <Text className="text-primary font-bold text-base">Total</Text>
+              <Text className="text-text-primary font-bold text-base">Total</Text>
               <Text className="text-accent font-bold text-lg">₱{total}</Text>
             </View>
           </View>
@@ -159,23 +190,23 @@ export default function PaymentScreen() {
 
         <View className="bg-card rounded-2xl p-4 mb-4">
           <Text className="text-text-secondary text-sm">Payment Method</Text>
-          <Text className="text-primary font-semibold mt-1">
+          <Text className="text-brand font-semibold mt-1">
             {methodLabel ?? "Not selected"}
           </Text>
         </View>
 
         {method === "gcash" && (
           <View className="bg-card rounded-2xl p-4 mb-4">
-            <Text className="text-primary font-semibold mb-2">
+            <Text className="text-brand font-semibold mb-2">
               GCash Details
             </Text>
             <Text className="text-text-secondary text-xs mb-2">
               Enter the mobile number linked to your GCash account.
             </Text>
             <TextInput
-              className="bg-card-dark rounded-xl px-3 py-2 text-primary"
+              className="bg-card-dark rounded-xl px-3 py-2 text-brand"
               placeholder="09XXXXXXXXX"
-              placeholderTextColor="#6B7280"
+              placeholderTextColor={colors.text.secondary}
               keyboardType="phone-pad"
               value={accountValue}
               onChangeText={setAccountValue}
@@ -185,16 +216,16 @@ export default function PaymentScreen() {
 
         {method === "maya" && (
           <View className="bg-card rounded-2xl p-4 mb-4">
-            <Text className="text-primary font-semibold mb-2">
+            <Text className="text-brand font-semibold mb-2">
               Maya Details
             </Text>
             <Text className="text-text-secondary text-xs mb-2">
               Enter the mobile number linked to your Maya account.
             </Text>
             <TextInput
-              className="bg-card-dark rounded-xl px-3 py-2 text-primary"
+              className="bg-card-dark rounded-xl px-3 py-2 text-brand"
               placeholder="09XXXXXXXXX"
-              placeholderTextColor="#6B7280"
+              placeholderTextColor={colors.text.secondary}
               keyboardType="phone-pad"
               value={accountValue}
               onChangeText={setAccountValue}
@@ -204,7 +235,7 @@ export default function PaymentScreen() {
 
         {method === "bank" && (
           <View className="bg-card rounded-2xl p-4 mb-4">
-            <Text className="text-primary font-semibold mb-2">
+            <Text className="text-brand font-semibold mb-2">
               Bank Transfer Details
             </Text>
             <Text className="text-text-secondary text-xs mb-2">
@@ -212,9 +243,9 @@ export default function PaymentScreen() {
               transfer.
             </Text>
             <TextInput
-              className="bg-card-dark rounded-xl px-3 py-2 text-primary"
+              className="bg-card-dark rounded-xl px-3 py-2 text-brand"
               placeholder="Reference / Account Number"
-              placeholderTextColor="#6B7280"
+              placeholderTextColor={colors.text.secondary}
               value={accountValue}
               onChangeText={setAccountValue}
             />
@@ -223,7 +254,7 @@ export default function PaymentScreen() {
 
         {method === "cash" && (
           <View className="bg-card rounded-2xl p-4 mb-4">
-            <Text className="text-primary font-semibold mb-2">
+            <Text className="text-brand font-semibold mb-2">
               Cash Payment
             </Text>
             <Text className="text-text-secondary text-xs">

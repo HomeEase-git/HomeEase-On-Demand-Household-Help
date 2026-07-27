@@ -54,7 +54,7 @@ export default function PostServiceScreen() {
 
   if (!booking) {
     return (
-      <SafeAreaView className="flex-1 bg-primary-white">
+      <SafeAreaView className="flex-1 bg-white">
         <ScreenHeader title="Service Complete" showBack />
         <View className="flex-1 items-center justify-center">
           <Text className="text-text-secondary">Booking not found</Text>
@@ -99,7 +99,7 @@ export default function PostServiceScreen() {
   };
 
   return (
-    <SafeAreaView className="flex-1 bg-primary-white">
+    <SafeAreaView className="flex-1 bg-white">
       <ScreenHeader title="Service Complete" showBack />
       <ScrollView
         contentContainerStyle={{ padding: 16, paddingBottom: 80 }}
@@ -114,7 +114,7 @@ export default function PostServiceScreen() {
               color={colors.success}
             />
           </View>
-          <Text className="text-primary font-bold text-xl text-center">
+          <Text className="text-text-primary font-bold text-xl text-center">
             Service Completed
           </Text>
           <Text className="text-text-secondary text-sm mt-2 text-center">
@@ -124,7 +124,7 @@ export default function PostServiceScreen() {
 
         {/* Timeline */}
         <View className="bg-card rounded-2xl p-4 mb-4">
-          <Text className="text-primary font-bold mb-4">Service Timeline</Text>
+          <Text className="text-text-primary font-bold mb-4">Service Timeline</Text>
           {TIMELINE_EVENTS.map((event, index) => (
             <View key={event.status}>
               <View className="flex-row">
@@ -142,7 +142,7 @@ export default function PostServiceScreen() {
                   )}
                 </View>
                 <View className="flex-1 pb-4">
-                  <Text className="text-primary font-semibold">
+                  <Text className="text-brand font-semibold">
                     {event.label}
                   </Text>
                   <Text className="text-text-secondary text-xs mt-1">
@@ -156,7 +156,7 @@ export default function PostServiceScreen() {
 
         {/* Rating Section */}
         <View className="bg-card rounded-2xl p-4 mb-4">
-          <Text className="text-primary font-bold mb-3">
+          <Text className="text-text-primary font-bold mb-3">
             Rate Your Experience
           </Text>
           <View className="flex-row justify-center gap-3 mb-4">
@@ -201,7 +201,7 @@ export default function PostServiceScreen() {
           <View className="flex-row items-center justify-between mb-3">
             <View className="flex-row items-center gap-2">
               <Ionicons name="gift" size={20} color={colors.accent.DEFAULT} />
-              <Text className="text-primary font-bold">Add a Tip</Text>
+              <Text className="text-text-primary font-bold">Add a Tip</Text>
             </View>
             <Text className="text-text-secondary text-xs">Optional</Text>
           </View>

@@ -1,57 +1,112 @@
 import React, { useState, useRef, useEffect } from "react";
-import { View, Text, FlatList, TextInput, Pressable } from "react-native";
+import { View, Text, FlatList, TextInput, Pressable, Linking, Alert } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter, useLocalSearchParams } from "expo-router";
 import ChatBubbleSent from "../../../../components/chat/ChatBubbleSent";
 import ChatBubbleReceived from "../../../../components/chat/ChatBubbleReceived";
-import { conversations } from "../../../../constants/dummyData";
 import ImageSourcePickerBottomSheet from "../../../../components/bottom-sheets/ImageSourcePickerBottomSheet";
 import type { BottomSheetHandle } from "../../../../components/bottom-sheets/BottomSheetWrapper";
-import { useMessageStore, type Message } from "../../../../store/messageStore";
+import { useMessageStore } from "../../../../store/messageStore";
+import { useAuthStore } from "../../../../store/authStore";
+import * as api from "../../../../services/api";
+
+function formatTime(iso: string) {
+  return new Date(iso).toLocaleTimeString("en-US", {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
 
 export default function ChatScreen() {
   const router = useRouter();
-  const { chatId } = useLocalSearchParams<{ chatId: string }>();
+  const { chatId: userId } = useLocalSearchParams<{ chatId: string }>();
   const [input, setInput] = useState("");
+  const [sending, setSending] = useState(false);
   const imageSheetRef = useRef<BottomSheetHandle | null>(null);
+  const currentUserId = useAuthStore((s) => s.user?.id);
+
   const messages = useMessageStore((s) =>
-    chatId ? (s.messagesByConversation[chatId] ?? []) : [],
+    userId ? (s.messagesByUser[userId] ?? []) : [],
   );
-  const sendMessage = useMessageStore((s) => s.sendMessage);
-  const addIncomingMessage = useMessageStore((s) => s.addIncomingMessage);
-  const typing = useMessageStore((s) =>
-    chatId ? s.typingByConversation[chatId] : false,
+  const conversation = useMessageStore((s) =>
+    s.conversations.find((c) => c.userId === userId),
   );
-  const markTyping = useMessageStore((s) => s.markTyping);
-
-  const conversation = conversations.find((c) => c.id === chatId);
-
-  const send = () => {
-    if (!input.trim()) return;
-    if (!chatId) return;
-    const text = input.trim();
-    sendMessage(chatId, text);
-    setInput("");
-
-    // Simulate worker typing and auto-reply
-    markTyping(chatId, true);
-    setTimeout(() => {
-      markTyping(chatId, false);
-      addIncomingMessage(chatId, "Sige po, confirmed!");
-    }, 2000);
-  };
+  const setMessages = useMessageStore((s) => s.setMessages);
+  const appendMessage = useMessageStore((s) => s.appendMessage);
+  const markConversationRead = useMessageStore((s) => s.markConversationRead);
 
   useEffect(() => {
-    if (!chatId) return;
-    // Ensure we clear typing state when leaving
+    if (!userId) return;
+    let active = true;
+
+    api
+      .getConversationThread(userId)
+      .then((thread) => {
+        if (active) setMessages(userId, thread);
+      })
+      .catch((error) => console.error("Load conversation thread error:", error));
+
     return () => {
-      markTyping(chatId, false);
+      active = false;
     };
-  }, [chatId, markTyping]);
+  }, [userId, setMessages]);
+
+  // Reactively mark the thread read whenever it changes (initial load or a
+  // live message pushed in over the socket while this screen is open).
+  useEffect(() => {
+    if (!userId) return;
+    const hasUnreadIncoming = messages.some(
+      (m) => m.receiverId === currentUserId && m.isRead === false,
+    );
+    if (!hasUnreadIncoming) return;
+
+    api
+      .markMessagesAsRead(userId)
+      .then(() => markConversationRead(userId))
+      .catch((error) => console.error("Mark messages read error:", error));
+  }, [userId, messages, currentUserId, markConversationRead]);
+
+  const send = async () => {
+    if (!input.trim() || !userId || sending) return;
+    const text = input.trim();
+    setInput("");
+    setSending(true);
+    try {
+      const message = await api.sendMessage(userId, text);
+      appendMessage(userId, message);
+    } catch (error) {
+      console.error("Send message error:", error);
+      setInput(text);
+    } finally {
+      setSending(false);
+    }
+  };
+
+  const sendImage = async (uri: string) => {
+    if (!userId) return;
+    try {
+      const { url } = await api.uploadChatImage(uri);
+      const message = await api.sendMessage(userId, "", url);
+      appendMessage(userId, message);
+    } catch (error) {
+      console.error("Send image error:", error);
+      Alert.alert("Error", "Failed to send image. Please try again.");
+    }
+  };
+
+  const call = () => {
+    if (!conversation?.phone) {
+      Alert.alert("No phone number", "This contact has no phone number on file.");
+      return;
+    }
+    Linking.openURL(`tel:${conversation.phone}`).catch(() =>
+      Alert.alert("Error", "Could not open the phone dialer."),
+    );
+  };
 
   return (
-    <SafeAreaView className="flex-1 bg-primary-white" edges={["top"]}>
+    <SafeAreaView className="flex-1 bg-white" edges={["top"]}>
       <View className="flex-row items-center px-4 py-3 border-b border-divider">
         <Pressable onPress={() => router.back()} className="mr-2">
           <Ionicons name="chevron-back" size={24} color="#FFFFFF" />
@@ -63,15 +118,12 @@ export default function ChatScreen() {
           <Ionicons name="person-circle" size={32} color="#A0A8D0" />
         </Pressable>
         <View className="flex-1">
-          <Text className="text-primary font-bold">
+          <Text className="text-text-primary font-bold">
             {conversation?.name ?? "Chat"}
           </Text>
-          <Text className="text-success text-xs">
-            {typing ? "Typing..." : "Online"}
-          </Text>
         </View>
-        <Pressable>
-          <Ionicons name="videocam-outline" size={24} color="#FFFFFF" />
+        <Pressable onPress={call}>
+          <Ionicons name="call-outline" size={22} color="#FFFFFF" />
         </Pressable>
       </View>
 
@@ -80,10 +132,18 @@ export default function ChatScreen() {
         keyExtractor={(item) => item.id}
         contentContainerStyle={{ padding: 16, paddingBottom: 8 }}
         renderItem={({ item }) =>
-          item.isSent ? (
-            <ChatBubbleSent message={item.text} timestamp={item.time} />
+          item.senderId === currentUserId ? (
+            <ChatBubbleSent
+              message={item.content}
+              imageUrl={item.imageUrl}
+              timestamp={formatTime(item.createdAt)}
+            />
           ) : (
-            <ChatBubbleReceived message={item.text} timestamp={item.time} />
+            <ChatBubbleReceived
+              message={item.content}
+              imageUrl={item.imageUrl}
+              timestamp={formatTime(item.createdAt)}
+            />
           )
         }
       />
@@ -96,7 +156,7 @@ export default function ChatScreen() {
           <Ionicons name="attach-outline" size={24} color="#A0A8D0" />
         </Pressable>
         <TextInput
-          className="flex-1 bg-card rounded-full px-4 py-2 text-primary max-h-24"
+          className="flex-1 bg-card rounded-full px-4 py-2 text-brand max-h-24"
           placeholder="Message..."
           placeholderTextColor="#6B7299"
           value={input}
@@ -109,7 +169,7 @@ export default function ChatScreen() {
       </View>
       <ImageSourcePickerBottomSheet
         innerRef={imageSheetRef}
-        onSelect={() => {}}
+        onSelect={sendImage}
       />
     </SafeAreaView>
   );

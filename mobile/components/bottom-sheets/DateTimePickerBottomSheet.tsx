@@ -27,7 +27,7 @@ export const DateTimePickerBottomSheet: React.FC<Props> = ({
       snapPoints={["40%"]}
       title={mode === "date" ? "Select date" : "Select time"}
     >
-      <Text className="text-primary mb-4">
+      <Text className="text-brand mb-4">
         {mode === "date"
           ? "Pick a date (use DateTimePicker in production)"
           : "Pick a time"}
@@ -36,7 +36,7 @@ export const DateTimePickerBottomSheet: React.FC<Props> = ({
         className="bg-card-light rounded-xl p-4 mb-4"
         onPress={() => setValue(mode === "date" ? "2026-03-07" : "10:00")}
       >
-        <Text className="text-primary">{value}</Text>
+        <Text className="text-brand">{value}</Text>
       </Pressable>
       <PrimaryButton label="Confirm" fullWidth onPress={handleConfirm} />
     </BottomSheetWrapper>

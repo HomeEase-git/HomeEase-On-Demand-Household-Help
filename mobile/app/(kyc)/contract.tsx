@@ -112,7 +112,7 @@ export default function ContractScreen() {
   };
 
   return (
-    <SafeAreaView className="flex-1 bg-primary-white">
+    <SafeAreaView className="flex-1 bg-white">
       <ScreenHeader
         title={isWorker ? "Service Contract" : "User Agreement"}
         showBack
@@ -127,7 +127,7 @@ export default function ContractScreen() {
         >
           {contractSections.map((section, index) => (
             <View key={index}>
-              <Text className="text-primary font-bold text-base mb-2">
+              <Text className="text-text-primary font-bold text-base mb-2">
                 {section.heading}
               </Text>
               <Text className="text-text-secondary text-sm mb-4">
@@ -161,7 +161,7 @@ export default function ContractScreen() {
               }}
             >
               {accepted && (
-                <Text className="text-primary text-xs font-bold">✓</Text>
+                <Text className="text-text-primary text-xs font-bold">✓</Text>
               )}
             </View>
             <Text className="text-text-secondary text-sm flex-1">

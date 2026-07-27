@@ -15,6 +15,7 @@ export declare const validateAddAddon: (req: Request, res: Response, next: NextF
 export declare const validateAddReview: (req: Request, res: Response, next: NextFunction) => void | Response<any, Record<string, any>>;
 export declare const validateRescheduleBooking: (req: Request, res: Response, next: NextFunction) => void | Response<any, Record<string, any>>;
 export declare const validateAddPaymentMethod: (req: Request, res: Response, next: NextFunction) => void | Response<any, Record<string, any>>;
+export declare const validateUpdatePaymentMethod: (req: Request, res: Response, next: NextFunction) => void | Response<any, Record<string, any>>;
 export declare const validateReleaseEscrow: (_req: Request, _res: Response, next: NextFunction) => void;
 export declare const validateRefundPayment: (req: Request, res: Response, next: NextFunction) => void | Response<any, Record<string, any>>;
 export declare const validateUpdateUserProfile: (req: Request, res: Response, next: NextFunction) => void | Response<any, Record<string, any>>;

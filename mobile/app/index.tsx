@@ -15,7 +15,7 @@ export default function SplashScreen() {
   }, [router]);
 
   return (
-    <SafeAreaView className="flex-1 bg-primary-white items-center justify-center">
+    <SafeAreaView className="flex-1 bg-white items-center justify-center">
       <View className="items-center">
         <View className="w-32 h-32 items-center justify-center">
           <Image
@@ -23,7 +23,7 @@ export default function SplashScreen() {
             style={{ width: 200, height: 200, resizeMode: "contain" }}
           />
         </View>
-        {/* <Text className="text-primary text-3xl font-bold mt-6">HomeEase</Text>
+        {/* <Text className="text-text-primary text-3xl font-bold mt-6">HomeEase</Text>
         <Text className="text-text-secondary text-sm mt-1">
           On-Demand Household Help
         </Text> */}

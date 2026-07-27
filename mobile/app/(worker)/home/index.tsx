@@ -1,40 +1,82 @@
-import React from "react";
-import { View, Text, ScrollView, Pressable } from "react-native";
+import React, { useCallback, useState } from "react";
+import { View, Text, ScrollView, Pressable, Alert } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { useFocusEffect } from "@react-navigation/native";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import SectionHeader from "../../../components/ui/SectionHeader";
 import RequestCard from "../../../components/cards/RequestCard";
 import NotificationBadge from "../../../components/ui/NotificationBadge";
-import { useWorkerStore } from "../../../store/workerStore";
+import { useWorkerStore, mapApiJob, type ApiWorkerBooking } from "../../../store/workerStore";
 import { useAuthStore } from "../../../store/authStore";
 import { useNotificationStore } from "../../../store/notificationStore";
+import * as api from "../../../services/api";
 import { colors } from "../../../constants";
+
+const todayStr = () => new Date().toISOString().slice(0, 10);
 
 export default function WorkerHomeScreen() {
   const router = useRouter();
   const available = useWorkerStore((s) => s.available);
-  const toggleAvailability = useWorkerStore((s) => s.toggleAvailability);
-  const jobRequests = useWorkerStore((s) => s.jobRequests);
+  const setAvailable = useWorkerStore((s) => s.setAvailable);
+  const jobs = useWorkerStore((s) => s.jobs);
+  const setJobs = useWorkerStore((s) => s.setJobs);
   const user = useAuthStore((s) => s.user);
   const unreadCount = useNotificationStore((s) => s.unreadCount);
+  const [togglingAvailability, setTogglingAvailability] = useState(false);
 
   const firstName = user?.name?.split(" ")[0] ?? "Worker";
-  const pending = jobRequests.filter((r) => r.status === "Pending");
-  const todayCount = jobRequests.length;
-  const todayEarnings = jobRequests
-    .filter((r) => r.status === "Completed")
-    .reduce((sum, r) => sum + r.amount, 0);
+  const pending = jobs.filter((j) => j.status === "Pending");
+  const today = todayStr();
+  const todayJobs = jobs.filter((j) => j.scheduledDate?.slice(0, 10) === today);
+  const todayEarnings = jobs
+    .filter((j) => j.status === "Completed" && j.scheduledDate?.slice(0, 10) === today)
+    .reduce((sum, j) => sum + (j.finalPrice ?? j.estimatedPrice), 0);
+
+  const load = useCallback(async () => {
+    if (!user?.id) return;
+    try {
+      const [bookings, detail] = await Promise.all([
+        api.getBookings(),
+        api.getWorkerDetail(user.id),
+      ]);
+      setJobs((bookings as ApiWorkerBooking[]).map(mapApiJob));
+      if (detail) setAvailable(detail.isAvailable);
+    } catch (error) {
+      console.error("Load worker home error:", error);
+    }
+  }, [user?.id, setJobs, setAvailable]);
+
+  useFocusEffect(
+    useCallback(() => {
+      load();
+    }, [load]),
+  );
+
+  const handleToggleAvailability = async () => {
+    if (togglingAvailability) return;
+    const next = !available;
+    setTogglingAvailability(true);
+    try {
+      const result = await api.updateAvailability(next);
+      setAvailable(result.isAvailable ?? next);
+    } catch (error) {
+      console.error("Toggle availability error:", error);
+      Alert.alert("Error", "Failed to update availability.");
+    } finally {
+      setTogglingAvailability(false);
+    }
+  };
 
   return (
-    <SafeAreaView className="flex-1 bg-primary-white" edges={["top"]}>
+    <SafeAreaView className="flex-1 bg-white" edges={["top"]}>
       <ScrollView
         className="flex-1"
         contentContainerStyle={{ paddingBottom: 24 }}
         stickyHeaderIndices={[0]}
       >
-        <View className="flex-row items-center justify-between px-4 pt-2 pb-2 bg-primary-white z-10">
-          <Text className="text-primary text-xl font-bold">HomeEase</Text>
+        <View className="flex-row items-center justify-between px-4 pt-2 pb-2 bg-white z-10">
+          <Text className="text-text-primary text-xl font-bold">HomeEase</Text>
           <Pressable
             className="p-2"
             onPress={() => router.push("/(worker)/inbox")}
@@ -42,14 +84,14 @@ export default function WorkerHomeScreen() {
             <Ionicons
               name="notifications-outline"
               size={24}
-              color={colors.primary.dark}
+              color={colors.brand.dark}
             />
             <NotificationBadge count={unreadCount} />
           </Pressable>
         </View>
 
         <View className="bg-card rounded-2xl p-5 mx-4 mt-4">
-          <Text className="text-primary font-bold text-xl">
+          <Text className="text-text-primary font-bold text-xl">
             Hello, {firstName}! 👋
           </Text>
           <Text className="text-text-secondary text-sm mt-1">
@@ -63,17 +105,18 @@ export default function WorkerHomeScreen() {
               available ? "bg-success" : "bg-error"
             }`}
           />
-          <Text className="text-primary font-bold flex-1">
+          <Text className="text-text-primary font-bold flex-1">
             I&apos;m {available ? "Available" : "Unavailable"}
           </Text>
           <Pressable
             className={`w-12 h-7 rounded-full ${
               available ? "bg-accent" : "bg-card-dark"
             }`}
-            onPress={toggleAvailability}
+            onPress={handleToggleAvailability}
+            disabled={togglingAvailability}
           >
             <View
-              className={`w-5 h-5 rounded-full bg-primary-white mt-1 ${
+              className={`w-5 h-5 rounded-full bg-white mt-1 ${
                 available ? "ml-6" : "ml-1"
               }`}
             />
@@ -89,7 +132,7 @@ export default function WorkerHomeScreen() {
 
         <View className="flex-row mx-4 mt-3 gap-2">
           <View className="flex-1 bg-card rounded-xl p-3 items-center">
-            <Text className="text-accent font-bold text-2xl">{todayCount}</Text>
+            <Text className="text-accent font-bold text-2xl">{todayJobs.length}</Text>
             <Text className="text-text-secondary text-xs">
               Today&apos;s Jobs
             </Text>
@@ -123,11 +166,18 @@ export default function WorkerHomeScreen() {
           ) : (
             pending
               .slice(0, 2)
-              .map((req) => (
+              .map((job) => (
                 <RequestCard
-                  key={req.id}
-                  request={req}
-                  onPress={() => router.push(`/(worker)/requests/${req.id}`)}
+                  key={job.id}
+                  request={{
+                    id: job.id,
+                    client: job.clientName,
+                    service: job.service,
+                    date: job.scheduledDate,
+                    amount: job.finalPrice ?? job.estimatedPrice,
+                    status: job.status,
+                  }}
+                  onPress={() => router.push(`/(worker)/requests/${job.id}`)}
                 />
               ))
           )}
@@ -137,20 +187,20 @@ export default function WorkerHomeScreen() {
           <SectionHeader title="Quick Actions" />
           <View className="flex-row flex-wrap gap-3 mt-2">
             <Pressable
-              className="flex-1 min-w-[140] bg-primary/25 border-2 border-primary rounded-xl p-4"
+              className="flex-1 min-w-[140] bg-brand/25 border-2 border-brand rounded-xl p-4"
               onPress={() => router.push("/(worker)/profile/availability")}
             >
               <Ionicons
                 name="calendar-outline"
                 size={24}
-                color={colors.primary.DEFAULT}
+                color={colors.brand.DEFAULT}
               />
-              <Text className="text-primary font-semibold mt-2">
+              <Text className="text-brand font-semibold mt-2">
                 Set Availability
               </Text>
             </Pressable>
             <Pressable
-              className="flex-1 min-w-[140] bg-green-100 border-2 border-primary rounded-xl p-4"
+              className="flex-1 min-w-[140] bg-green-100 border-2 border-brand rounded-xl p-4"
               onPress={() => router.push("/(worker)/earnings")}
             >
               <Ionicons
@@ -158,12 +208,12 @@ export default function WorkerHomeScreen() {
                 size={24}
                 color={colors.success}
               />
-              <Text className="text-primary font-semibold mt-2">
+              <Text className="text-brand font-semibold mt-2">
                 My Earnings
               </Text>
             </Pressable>
             <Pressable
-              className="flex-1 min-w-[140] bg-orange-100 border-2 border-primary rounded-xl p-4"
+              className="flex-1 min-w-[140] bg-orange-100 border-2 border-brand rounded-xl p-4"
               onPress={() => router.push("/(worker)/profile/certifications")}
             >
               <Ionicons
@@ -171,20 +221,20 @@ export default function WorkerHomeScreen() {
                 size={24}
                 color={colors.warning}
               />
-              <Text className="text-primary font-semibold mt-2">
+              <Text className="text-brand font-semibold mt-2">
                 Certifications
               </Text>
             </Pressable>
             <Pressable
-              className="flex-1 min-w-[140] bg-purple-100 border-2 border-primary rounded-xl p-4"
+              className="flex-1 min-w-[140] bg-purple-100 border-2 border-brand rounded-xl p-4"
               onPress={() => router.push("/(worker)/profile")}
             >
               <Ionicons
                 name="person-outline"
                 size={24}
-                color={colors.primary.light}
+                color={colors.brand.light}
               />
-              <Text className="text-primary font-semibold mt-2">
+              <Text className="text-brand font-semibold mt-2">
                 View Profile
               </Text>
             </Pressable>

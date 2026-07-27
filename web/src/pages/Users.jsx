@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useCallback } from 'react'
 import { Link } from 'react-router-dom'
 import PageHeader from '../components/common/PageHeader'
 import SearchBar from '../components/common/SearchBar'
@@ -6,101 +6,116 @@ import FilterTabs from '../components/common/FilterTabs'
 import SectionCard from '../components/common/SectionCard'
 import Pagination from '../components/common/Pagination'
 import Badge from '../components/common/Badge'
+import LoadingState from '../components/common/LoadingState'
+import ErrorState from '../components/common/ErrorState'
+import { useListQuery } from '../hooks/useListQuery'
+import { fetchClients } from '../services/users'
 
-// Clients only for this page
-const CLIENTS = [
-  {
-    id: '#1001',
-    name: 'Maria Santos',
-    email: 'maria.s@email.com',
-    phone: '0917 123 4567',
-    status: 'active',
-    bookings: 12,
-    spent: '₱4,240',
-  },
-  {
-    id: '#1003',
-    name: 'Ana Reyes',
-    email: 'ana.r@email.com',
-    phone: '0919 345 6789',
-    status: 'active',
-    bookings: 5,
-    spent: '₱1,890',
-  },
-  {
-    id: '#1004',
-    name: 'Pedro Garcia',
-    email: 'pedro.g@email.com',
-    phone: '0920 456 7890',
-    status: 'active',
-    bookings: 3,
-    spent: '₱1,240',
-  },
-]
+const STATUS_MAP = { All: 'all', Active: 'active', Suspended: 'suspended' }
 
 export default function Users() {
-  const [filterTab, setFilterTab] = useState('All')
+  const fetchFn = useCallback(
+    (params) =>
+      fetchClients({
+        page: params.page || 1,
+        limit: 10,
+        search: params.search || '',
+        status: STATUS_MAP[params.statusTab] || 'all',
+      }),
+    []
+  )
 
-  const filteredClients = CLIENTS.filter((u) => {
-    if (filterTab === 'Active') return u.status === 'active'
-    if (filterTab === 'Suspended') return u.status === 'suspended'
-    return true
+  const {
+    data: clients,
+    meta,
+    params,
+    loading,
+    error,
+    reload,
+    setSearch,
+    setFilter,
+    goToPage,
+  } = useListQuery(fetchFn, {
+    initialParams: { page: 1, statusTab: 'All' },
   })
 
   return (
     <>
       <PageHeader title="Client List" subtitle="All registered clients" />
       <div className="toolbar">
-        <SearchBar placeholder="Search by name, email, or phone..." />
-        <FilterTabs tabs={['All', 'Active', 'Suspended']} activeTab={filterTab} onTabChange={setFilterTab} />
+        <SearchBar
+          placeholder="Search by name, email, or phone..."
+          value={params.search || ''}
+          onChange={setSearch}
+        />
+        <FilterTabs
+          tabs={['All', 'Active', 'Suspended']}
+          activeTab={params.statusTab || 'All'}
+          onTabChange={(tab) => setFilter('statusTab', tab)}
+        />
       </div>
       <SectionCard>
-        <div className="table-wrap">
-          <table className="table">
-            <thead>
-              <tr>
-                <th>User ID</th>
-                <th>Name</th>
-                <th>Email</th>
-                <th>Phone</th>
-                <th>Status</th>
-                <th>Bookings</th>
-                <th>Total Spent</th>
-                <th>Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filteredClients.map((user) => (
-                <tr key={user.id}>
-                  <td>{user.id}</td>
-                  <td>{user.name}</td>
-                  <td>{user.email}</td>
-                  <td>{user.phone}</td>
-                  <td>
-                    <Badge variant={user.status === 'active' ? 'active' : 'suspended'}>{user.status}</Badge>
-                  </td>
-                  <td>{user.bookings}</td>
-                  <td>{user.spent}</td>
-                  <td>
-                    <div className="row-actions">
-                      <Link to="/users/client/1001" className="action-btn view" title="View">
-                        <i className="fas fa-eye" />
-                      </Link>
-                      <button type="button" className="action-btn delete" title="Suspend">
-                        <i className="fas fa-trash" />
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-        <Pagination
-          info={`Showing ${filteredClients.length} of ${CLIENTS.length} clients`}
-          hasPrev={false}
-          hasNext={false}
-        />
+        {loading && <LoadingState message="Loading clients..." />}
+        {error && <ErrorState message={error} onRetry={reload} />}
+        {!loading && !error && (
+          <>
+            <div className="table-wrap">
+              <table className="table">
+                <thead>
+                  <tr>
+                    <th>User ID</th>
+                    <th>Name</th>
+                    <th>Email</th>
+                    <th>Phone</th>
+                    <th>Status</th>
+                    <th>Bookings</th>
+                    <th>Total Spent</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {clients.length === 0 ? (
+                    <tr>
+                      <td colSpan={8} style={{ textAlign: 'center', color: 'var(--text-muted)' }}>
+                        No clients found.
+                      </td>
+                    </tr>
+                  ) : (
+                    clients.map((user) => (
+                      <tr key={user.id}>
+                        <td>{user.displayId}</td>
+                        <td>{user.name}</td>
+                        <td>{user.email}</td>
+                        <td>{user.phone}</td>
+                        <td>
+                          <Badge variant={user.status === 'active' ? 'active' : 'suspended'}>
+                            {user.status}
+                          </Badge>
+                        </td>
+                        <td>{user.bookings}</td>
+                        <td>{user.spent}</td>
+                        <td>
+                          <div className="row-actions">
+                            <Link to={`/users/client/${user.id}`} className="action-btn view" title="View">
+                              <i className="fas fa-eye" />
+                            </Link>
+                          </div>
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+            <Pagination
+              info={`Showing ${clients.length} of ${meta.total} clients`}
+              hasPrev={meta.hasPrev}
+              hasNext={meta.hasNext}
+              onPrev={() => goToPage(meta.page - 1)}
+              onNext={() => goToPage(meta.page + 1)}
+            />
+          </>
+        )}
       </SectionCard>
     </>
   )

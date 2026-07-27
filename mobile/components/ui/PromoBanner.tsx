@@ -52,9 +52,9 @@ export const PromoBanner: React.FC<Props> = ({ banners }) => {
             className="rounded-2xl h-40 justify-center px-6 mr-4"
             style={{ width: CARD_WIDTH, backgroundColor: item.color }}
           >
-            <Text className="text-primary font-bold text-xl">{item.title}</Text>
+            <Text className="text-text-primary font-bold text-xl">{item.title}</Text>
             {item.subtitle && (
-              <Text className="text-primary/80 text-sm mt-1">
+              <Text className="text-brand/80 text-sm mt-1">
                 {item.subtitle}
               </Text>
             )}

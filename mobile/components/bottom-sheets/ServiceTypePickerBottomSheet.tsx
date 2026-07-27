@@ -31,7 +31,7 @@ export const ServiceTypePickerBottomSheet: React.FC<Props> = ({
             className="bg-card-light rounded-xl py-4 px-4 mb-2"
             onPress={() => onSelect(service.name, service.id)}
           >
-            <Text className="text-primary font-semibold">{service.name}</Text>
+            <Text className="text-brand font-semibold">{service.name}</Text>
           </Pressable>
         ))}
       </ScrollView>

@@ -16,6 +16,19 @@ export type BookingStatus =
   | 'Completed'
   | 'Cancelled';
 
+// Backend BookingStatus enum -> store's friendly status values
+export const API_STATUS_MAP: Record<string, BookingStatus> = {
+  PENDING: 'Pending',
+  ACCEPTED: 'Accepted',
+  REJECTED: 'Cancelled',
+  IN_PROGRESS: 'InProgress',
+  QUOTE_SUBMITTED: 'QuoteSubmitted',
+  QUOTE_APPROVED: 'QuoteApproved',
+  DISPUTED: 'Disputed',
+  COMPLETED: 'Completed',
+  CANCELLED: 'Cancelled',
+};
+
 export type Quote = {
   laborCost: number;
   materialsCost: number;
@@ -45,6 +58,7 @@ export type Booking = {
   address?: string;
   time?: string;
   workerId?: string;
+  workerPhone?: string;
   category?: string;
   selectedTaskId?: string;
   selectedAddOnIds?: string[];

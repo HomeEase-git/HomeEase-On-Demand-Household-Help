@@ -86,7 +86,7 @@ export default function PaymentMethodsScreen() {
   };
 
   return (
-    <SafeAreaView className="flex-1 bg-primary-white">
+    <SafeAreaView className="flex-1 bg-white">
       <ScreenHeader title="Payment Methods" showBack />
       {loading ? (
         <View className="flex-1 items-center justify-center">

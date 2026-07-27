@@ -19,18 +19,18 @@ export const ScreenHeader: React.FC<Props> = ({
   const router = useRouter();
 
   return (
-    <View className="bg-primary-white pt-4 pb-3 px-4 flex-row items-center">
+    <View className="bg-white pt-4 pb-3 px-4 flex-row items-center">
       {showBack ? (
         <Pressable
           className="w-10 h-10 rounded-full items-center justify-center mr-2"
           onPress={() => router.back()}
         >
-          <Ionicons name="chevron-back" size={22} color={colors.white} />
+          <Ionicons name="chevron-back" size={22} color={colors.text.primary} />
         </Pressable>
       ) : (
         <View className="w-10 mr-2" />
       )}
-      <Text className="flex-1 text-primary font-bold text-lg text-center">
+      <Text className="flex-1 text-text-primary font-bold text-lg text-center">
         {title}
       </Text>
       {rightIcon ? (
@@ -38,7 +38,7 @@ export const ScreenHeader: React.FC<Props> = ({
           className="w-10 h-10 rounded-full items-center justify-center ml-2"
           onPress={onRightPress}
         >
-          <Ionicons name={rightIcon} size={22} color={colors.white} />
+          <Ionicons name={rightIcon} size={22} color={colors.text.primary} />
         </Pressable>
       ) : (
         <View className="w-10 ml-2" />

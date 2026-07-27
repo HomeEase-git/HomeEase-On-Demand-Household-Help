@@ -307,7 +307,7 @@ export const addressStorage = {
     }
   },
 
-  async create(payload: { label: string; address: string; isDefault?: boolean }) {
+  async create(payload: { label: string; address: string; lat?: number; lng?: number; isDefault?: boolean }) {
     try {
       const addresses = await this.list();
       const item = {
@@ -325,7 +325,7 @@ export const addressStorage = {
     }
   },
 
-  async update(id: string, updates: Partial<{ label: string; address: string; isDefault: boolean }>) {
+  async update(id: string, updates: Partial<{ label: string; address: string; lat: number; lng: number; isDefault: boolean }>) {
     try {
       const addresses = await this.list();
       const next = addresses.map((item: any) =>
@@ -335,6 +335,35 @@ export const addressStorage = {
       return next.find((item: any) => item.id === id) ?? null;
     } catch (error) {
       console.error('Error updating address:', error);
+      return null;
+    }
+  },
+
+  // Writes/merges an entry keyed by an externally-supplied id (the real
+  // backend-returned address id), so the local lat/lng cache stays linked to
+  // the same address the backend knows about instead of drifting to its own id.
+  async upsert(id: string, payload: { label: string; address: string; lat?: number; lng?: number; isDefault?: boolean }) {
+    try {
+      const addresses = await this.list();
+      const idx = addresses.findIndex((item: any) => item.id === id);
+
+      if (idx === -1) {
+        const item = {
+          id,
+          ...payload,
+          isDefault: payload.isDefault ?? false,
+          createdAt: new Date().toISOString(),
+        };
+        await writeStoredValue(STORAGE_KEYS.ADDRESSES, [...addresses, item]);
+        return item;
+      }
+
+      const next = [...addresses];
+      next[idx] = { ...next[idx], ...payload, updatedAt: new Date().toISOString() };
+      await writeStoredValue(STORAGE_KEYS.ADDRESSES, next);
+      return next[idx];
+    } catch (error) {
+      console.error('Error upserting address:', error);
       return null;
     }
   },

@@ -13,39 +13,39 @@ export default function WorkerPrivacySettingsScreen() {
   const [usage, setUsage] = useState(false);
 
   return (
-    <SafeAreaView className="flex-1 bg-primary-white">
+    <SafeAreaView className="flex-1 bg-white">
       <ScreenHeader title="Privacy Settings" showBack />
       <ScrollView contentContainerStyle={{ padding: 24 }}>
         <View className="bg-card rounded-2xl overflow-hidden">
           <View className="flex-row justify-between items-center py-4 px-4 border-b border-divider">
-            <Text className="text-primary">Show Profile</Text>
+            <Text className="text-brand">Show Profile</Text>
             <Switch
               value={showProfile}
               onValueChange={setShowProfile}
-              trackColor={{ false: "#2A3080", true: colors.primary.DEFAULT }}
+              trackColor={{ false: colors.toggleOff, true: colors.brand.DEFAULT }}
               thumbColor={colors.white}
             />
           </View>
           <View className="flex-row justify-between items-center py-4 px-4 border-b border-divider">
-            <Text className="text-primary">Location Access</Text>
+            <Text className="text-brand">Location Access</Text>
             <Switch
               value={location}
               onValueChange={setLocation}
-              trackColor={{ false: "#2A3080", true: colors.primary.DEFAULT }}
+              trackColor={{ false: colors.toggleOff, true: colors.brand.DEFAULT }}
               thumbColor={colors.white}
             />
           </View>
           <View className="flex-row justify-between items-center py-4 px-4 border-b border-divider">
-            <Text className="text-primary">Share Usage Data</Text>
+            <Text className="text-brand">Share Usage Data</Text>
             <Switch
               value={usage}
               onValueChange={setUsage}
-              trackColor={{ false: "#2A3080", true: colors.primary.DEFAULT }}
+              trackColor={{ false: colors.toggleOff, true: colors.brand.DEFAULT }}
               thumbColor={colors.white}
             />
           </View>
           <View className="py-4 px-4 border-b border-divider">
-            <Text className="text-primary">Download My Data</Text>
+            <Text className="text-brand">Download My Data</Text>
             <Text className="text-text-muted text-xs mt-1">
               Export your data
             </Text>

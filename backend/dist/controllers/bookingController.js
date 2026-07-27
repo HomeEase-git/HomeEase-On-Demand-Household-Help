@@ -6,6 +6,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.submitReview = exports.addAddon = exports.rescheduleBooking = exports.cancelBooking = exports.completeBooking = exports.disputeQuote = exports.approveQuote = exports.submitQuote = exports.startBooking = exports.declineBooking = exports.acceptBooking = exports.getBookingDetail = exports.listBookings = exports.createBooking = void 0;
 const database_1 = __importDefault(require("@config/database"));
 const errorResponse_1 = require("@utils/errorResponse");
+const notify_1 = require("@utils/notify");
 /**
  * Status transition map: defines valid state transitions
  *
@@ -140,14 +141,12 @@ const createBooking = async (req, res) => {
                 return created;
             });
             // Create notification for worker
-            await database_1.default.notification.create({
-                data: {
-                    userId: workerId,
-                    type: 'BOOKING_REQUEST',
-                    title: 'New Booking Request',
-                    message: `${booking.client.fullName} has requested your service`,
-                    relatedId: booking.id,
-                },
+            await (0, notify_1.notifyUser)({
+                userId: workerId,
+                type: 'BOOKING_REQUEST',
+                title: 'New Booking Request',
+                message: `${booking.client.fullName} has requested your service`,
+                relatedId: booking.id,
             });
             return res.status(201).json({
                 success: true,
@@ -213,9 +212,10 @@ const listBookings = async (req, res) => {
             database_1.default.booking.findMany({
                 where: whereClause,
                 include: {
-                    client: { select: { id: true, fullName: true, avatar: true } },
-                    worker: { select: { id: true, fullName: true, avatar: true } },
+                    client: { select: { id: true, fullName: true, avatar: true, phone: true } },
+                    worker: { select: { id: true, fullName: true, avatar: true, phone: true } },
                     serviceTask: { select: { id: true, name: true } },
+                    review: { select: { rating: true } },
                 },
                 orderBy: { createdAt: 'desc' },
                 skip,
@@ -226,12 +226,17 @@ const listBookings = async (req, res) => {
         const formattedBookings = bookings.map((b) => ({
             id: b.id,
             clientName: b.client.fullName,
-            workerName: b.worker.fullName,
+            clientId: b.client.id,
+            clientPhone: b.client.phone,
+            workerName: b.worker?.fullName ?? null,
+            workerId: b.worker?.id ?? null,
+            workerPhone: b.worker?.phone ?? null,
             service: b.serviceTask?.name ?? b.serviceType,
             status: b.status,
             scheduledDate: b.scheduledDate,
             estimatedPrice: b.estimatedPrice,
             finalPrice: b.finalPrice,
+            rating: b.review?.rating ?? null,
         }));
         return res.status(200).json({
             success: true,
@@ -299,6 +304,7 @@ const getBookingDetail = async (req, res) => {
                 status: booking.status,
                 location: booking.location,
                 scheduledDate: booking.scheduledDate,
+                scheduledTime: booking.scheduledTime,
                 estimatedPrice: booking.estimatedPrice,
                 finalPrice,
                 estimatedDurationHours: booking.estimatedDurationHours,
@@ -318,6 +324,7 @@ const getBookingDetail = async (req, res) => {
                         materialsCost: booking.materialsCost,
                         notes: booking.quoteNotes,
                         status: booking.quoteStatus,
+                        quotedAt: booking.quotedAt,
                     }
                     : null,
                 addOns: booking.addOns,
@@ -383,14 +390,12 @@ const acceptBooking = async (req, res) => {
                 return updated;
             });
             // Create notification for client
-            await database_1.default.notification.create({
-                data: {
-                    userId: result.clientId,
-                    type: 'BOOKING_ACCEPTED',
-                    title: 'Booking Accepted',
-                    message: 'Your booking has been accepted',
-                    relatedId: result.id,
-                },
+            await (0, notify_1.notifyUser)({
+                userId: result.clientId,
+                type: 'BOOKING_ACCEPTED',
+                title: 'Booking Accepted',
+                message: 'Your booking has been accepted',
+                relatedId: result.id,
             });
             return res.status(200).json({
                 success: true,
@@ -453,14 +458,12 @@ const declineBooking = async (req, res) => {
             data: { status: 'PENDING' },
         });
         // Notify client
-        await database_1.default.notification.create({
-            data: {
-                userId: updated.clientId,
-                type: 'BOOKING_REJECTED',
-                title: 'Booking Declined',
-                message: 'The worker has declined your booking request',
-                relatedId: id,
-            },
+        await (0, notify_1.notifyUser)({
+            userId: updated.clientId,
+            type: 'BOOKING_REJECTED',
+            title: 'Booking Declined',
+            message: 'The worker has declined your booking request',
+            relatedId: id,
         });
         return res.status(200).json({
             success: true,
@@ -505,15 +508,13 @@ const startBooking = async (req, res) => {
             data: { status: 'IN_PROGRESS' },
         });
         // Notify client
-        await database_1.default.notification.create({
-            data: {
-                userId: updated.clientId,
-                // No BOOKING_STARTED in schema; BOOKING_ACCEPTED is the closest available
-                type: 'BOOKING_ACCEPTED',
-                title: 'Service Started',
-                message: 'The worker has started your service',
-                relatedId: id,
-            },
+        await (0, notify_1.notifyUser)({
+            userId: updated.clientId,
+            // No BOOKING_STARTED in schema; BOOKING_ACCEPTED is the closest available
+            type: 'BOOKING_ACCEPTED',
+            title: 'Service Started',
+            message: 'The worker has started your service',
+            relatedId: id,
         });
         return res.status(200).json({
             success: true,
@@ -568,14 +569,12 @@ const submitQuote = async (req, res) => {
             },
         });
         // Notify client
-        await database_1.default.notification.create({
-            data: {
-                userId: booking.clientId,
-                type: 'QUOTE_SUBMITTED',
-                title: 'Quote Submitted',
-                message: 'Worker has submitted a quote for your booking',
-                relatedId: id,
-            },
+        await (0, notify_1.notifyUser)({
+            userId: booking.clientId,
+            type: 'QUOTE_SUBMITTED',
+            title: 'Quote Submitted',
+            message: 'Worker has submitted a quote for your booking',
+            relatedId: id,
         });
         return res.status(201).json({
             success: true,
@@ -631,14 +630,12 @@ const approveQuote = async (req, res) => {
         });
         // Notify worker (workerId is nullable on Booking — skip if unassigned)
         if (booking.workerId) {
-            await database_1.default.notification.create({
-                data: {
-                    userId: booking.workerId,
-                    type: 'QUOTE_APPROVED',
-                    title: 'Quote Approved',
-                    message: 'Client has approved your quote',
-                    relatedId: id,
-                },
+            await (0, notify_1.notifyUser)({
+                userId: booking.workerId,
+                type: 'QUOTE_APPROVED',
+                title: 'Quote Approved',
+                message: 'Client has approved your quote',
+                relatedId: id,
             });
         }
         return res.status(200).json({
@@ -695,14 +692,12 @@ const disputeQuote = async (req, res) => {
         });
         // Notify worker (workerId is nullable on Booking — skip if unassigned)
         if (booking.workerId) {
-            await database_1.default.notification.create({
-                data: {
-                    userId: booking.workerId,
-                    type: 'QUOTE_DISPUTED',
-                    title: 'Quote Disputed',
-                    message: `Client has disputed your quote: ${reason}`,
-                    relatedId: id,
-                },
+            await (0, notify_1.notifyUser)({
+                userId: booking.workerId,
+                type: 'QUOTE_DISPUTED',
+                title: 'Quote Disputed',
+                message: `Client has disputed your quote: ${reason}`,
+                relatedId: id,
             });
         }
         return res.status(200).json({
@@ -769,14 +764,12 @@ const completeBooking = async (req, res) => {
                 return updated;
             });
             // Notify client
-            await database_1.default.notification.create({
-                data: {
-                    userId: booking.clientId,
-                    type: 'BOOKING_COMPLETED',
-                    title: 'Service Completed',
-                    message: 'The service has been completed',
-                    relatedId: id,
-                },
+            await (0, notify_1.notifyUser)({
+                userId: booking.clientId,
+                type: 'BOOKING_COMPLETED',
+                title: 'Service Completed',
+                message: 'The service has been completed',
+                relatedId: id,
             });
             return res.status(200).json({
                 success: true,
@@ -840,15 +833,13 @@ const cancelBooking = async (req, res) => {
         // Notify the other party (workerId may be null if booking is unassigned)
         const notificationUserId = booking.clientId === req.user.userId ? booking.workerId : booking.clientId;
         if (notificationUserId) {
-            await database_1.default.notification.create({
-                data: {
-                    userId: notificationUserId,
-                    // No BOOKING_CANCELLED in schema; BOOKING_REJECTED is the closest
-                    type: 'BOOKING_CANCELLED',
-                    title: 'Booking Cancelled',
-                    message: `Booking has been cancelled: ${reason}`,
-                    relatedId: id,
-                },
+            await (0, notify_1.notifyUser)({
+                userId: notificationUserId,
+                // No BOOKING_CANCELLED in schema; BOOKING_REJECTED is the closest
+                type: 'BOOKING_CANCELLED',
+                title: 'Booking Cancelled',
+                message: `Booking has been cancelled: ${reason}`,
+                relatedId: id,
             });
         }
         return res.status(200).json({
@@ -897,15 +888,13 @@ const rescheduleBooking = async (req, res) => {
         // Notify the other party (workerId may be null if booking is unassigned)
         const notificationUserId = booking.clientId === req.user.userId ? booking.workerId : booking.clientId;
         if (notificationUserId) {
-            await database_1.default.notification.create({
-                data: {
-                    userId: notificationUserId,
-                    // No BOOKING_RESCHEDULED in schema; BOOKING_ACCEPTED is closest
-                    type: 'BOOKING_RESCHEDULED',
-                    title: 'Booking Rescheduled',
-                    message: `Booking has been rescheduled to ${newDate}`,
-                    relatedId: id,
-                },
+            await (0, notify_1.notifyUser)({
+                userId: notificationUserId,
+                // No BOOKING_RESCHEDULED in schema; BOOKING_ACCEPTED is closest
+                type: 'BOOKING_RESCHEDULED',
+                title: 'Booking Rescheduled',
+                message: `Booking has been rescheduled to ${newDate}`,
+                relatedId: id,
             });
         }
         return res.status(200).json({
@@ -954,14 +943,12 @@ const addAddon = async (req, res) => {
             },
         });
         // Notify client — no ADDON_ADDED type; use MESSAGE_RECEIVED as proxy
-        await database_1.default.notification.create({
-            data: {
-                userId: booking.clientId,
-                type: 'ADDON_ADDED',
-                title: 'Additional Service Added',
-                message: `${name} has been added (₱${price})`,
-                relatedId: id,
-            },
+        await (0, notify_1.notifyUser)({
+            userId: booking.clientId,
+            type: 'ADDON_ADDED',
+            title: 'Additional Service Added',
+            message: `${name} has been added (₱${price})`,
+            relatedId: id,
         });
         return res.status(201).json({
             success: true,
@@ -1040,14 +1027,12 @@ const submitReview = async (req, res) => {
             },
         });
         // Notify worker — use REVIEW_RECEIVED (not NEW_REVIEW)
-        await database_1.default.notification.create({
-            data: {
-                userId: booking.workerId,
-                type: 'REVIEW_RECEIVED',
-                title: 'New Review',
-                message: `You received a ${rating}-star review`, // booking.client not included — avoid referencing it here
-                relatedId: id,
-            },
+        await (0, notify_1.notifyUser)({
+            userId: booking.workerId,
+            type: 'REVIEW_RECEIVED',
+            title: 'New Review',
+            message: `You received a ${rating}-star review`, // booking.client not included — avoid referencing it here
+            relatedId: id,
         });
         return res.status(201).json({
             success: true,

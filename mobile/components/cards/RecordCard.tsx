@@ -3,7 +3,7 @@ import { View, Text, Pressable } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import StatusBadge from "../ui/StatusBadge";
 import type { StatusType } from "../ui/StatusBadge";
-import { colors } from "../../constants";
+import { colors, cardShadow } from "../../constants";
 
 type Record = {
   id: string;
@@ -26,15 +26,16 @@ export const RecordCard: React.FC<Props> = ({ record, onPress }) => {
 
   return (
     <Pressable
-      className="bg-card border-2 border-primary rounded-2xl p-4 mb-3 flex-row items-center"
+      className="bg-card rounded-2xl p-4 mb-3 flex-row items-center"
+      style={cardShadow}
       onPress={onPress}
     >
       <View className="w-12 h-12 bg-card-light rounded-full items-center justify-center mr-3">
         <Ionicons name="person-circle" size={40} color={colors.text.muted} />
       </View>
       <View className="flex-1">
-        <Text className="text-primary font-bold">{record.client}</Text>
-        <Text className="text-primary text-xs">{record.service}</Text>
+        <Text className="text-text-primary font-bold">{record.client}</Text>
+        <Text className="text-text-secondary text-xs">{record.service}</Text>
         <Text className="text-text-muted text-xs">{record.date}</Text>
       </View>
       <View className="items-end">

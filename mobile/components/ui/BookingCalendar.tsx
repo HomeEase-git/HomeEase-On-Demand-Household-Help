@@ -102,7 +102,7 @@ export default function BookingCalendar({
             justifyContent: "center",
           }}
         >
-          <Text style={{ color: colors.primary.DEFAULT, fontSize: 16 }}>‹</Text>
+          <Text style={{ color: colors.brand.DEFAULT, fontSize: 16 }}>‹</Text>
         </Pressable>
         <Text
           style={{
@@ -124,7 +124,7 @@ export default function BookingCalendar({
             justifyContent: "center",
           }}
         >
-          <Text style={{ color: colors.primary.DEFAULT, fontSize: 16 }}>›</Text>
+          <Text style={{ color: colors.brand.DEFAULT, fontSize: 16 }}>›</Text>
         </Pressable>
       </View>
 
@@ -169,10 +169,10 @@ export default function BookingCalendar({
                   justifyContent: "center",
                   borderRadius: 99,
                   backgroundColor: isSelected
-                    ? colors.primary.DEFAULT
+                    ? colors.brand.DEFAULT
                     : "transparent",
                   borderWidth: isToday && !isSelected ? 1.5 : 0,
-                  borderColor: colors.primary.DEFAULT,
+                  borderColor: colors.brand.DEFAULT,
                   opacity: disabled ? 0.3 : 1,
                 }}
               >

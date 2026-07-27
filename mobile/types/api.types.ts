@@ -158,8 +158,12 @@ export interface WorkerDetail extends Worker {
   serviceAreaRadius: number;
   certifications: Certification[];
   resumeParseResult: ParsedResume | null;
-  completedJobs: number;
-  joinDate: string;
+  skills: string[];
+  activeJobCount: number;
+  verificationStatus: string;
+  isAvailable: boolean;
+  availableDays: string[];
+  maxConcurrentJobs: number;
 }
 
 export interface WorkerFilters {

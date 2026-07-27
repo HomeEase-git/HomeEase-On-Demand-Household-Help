@@ -1,33 +1,47 @@
-import { Link } from 'react-router-dom'
+import { Link, Navigate, useParams } from 'react-router-dom'
 import PageHeader from '../components/common/PageHeader'
 import SubNav from '../components/common/SubNav'
 import Badge from '../components/common/Badge'
+import LoadingState from '../components/common/LoadingState'
+import ErrorState from '../components/common/ErrorState'
+import { useDetailQuery } from '../hooks/useListQuery'
+import { fetchBookingById } from '../services/bookings'
 
 const SUB_NAV = [
   { to: '/bookings', label: 'All Bookings' },
-  
-]
-
-const DETAILS = [
-  { label: 'Booking ID', value: '#B201' },
-  { label: 'Client', value: 'Maria Santos' },
-  { label: 'Worker', value: 'Juan Dela Cruz' },
-  { label: 'Service', value: 'Plumbing Repair' },
-  { label: 'Date & Time', value: 'Mar 1, 2025, 2:00 PM' },
-  { label: 'Status', value: <Badge variant="approved">Completed</Badge> },
-  { label: 'Amount', value: '₱450' },
+  { to: '/bookings/dispute', label: 'Booking Dispute' },
 ]
 
 export default function BookingDetail() {
+  const { id } = useParams()
+  const { data: booking, loading, error, reload } = useDetailQuery(fetchBookingById, id)
+
+  if (loading) return <LoadingState message="Loading booking..." />
+  if (error) return <ErrorState message={error} onRetry={reload} />
+  if (!booking) return <Navigate to="/bookings" replace />
+
+  const details = [
+    { label: 'Booking ID', value: booking.displayId },
+    { label: 'Client', value: booking.client },
+    { label: 'Worker', value: booking.worker },
+    { label: 'Service', value: booking.service },
+    { label: 'Date & Time', value: booking.date },
+    {
+      label: 'Status',
+      value: <Badge variant={booking.status === 'Completed' ? 'approved' : 'pending'}>{booking.status}</Badge>,
+    },
+    { label: 'Amount', value: booking.amount },
+  ]
+
   return (
     <>
       <PageHeader
         title="Booking Detail"
-        subtitle="Booking #B201"
+        subtitle={`Booking ${booking.displayId}`}
         actions={<Link to="/bookings" className="btn btn-outline">Back</Link>}
       />
       <div className="detail-grid">
-        {DETAILS.map(({ label, value }) => (
+        {details.map(({ label, value }) => (
           <div key={label} className="detail-block">
             <label>{label}</label>
             <div className="value">{value}</div>

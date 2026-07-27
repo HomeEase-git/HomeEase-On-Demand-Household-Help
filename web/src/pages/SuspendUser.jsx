@@ -1,8 +1,41 @@
-import { Link } from 'react-router-dom'
+import { useMemo, useState } from 'react'
+import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import PageHeader from '../components/common/PageHeader'
 import SectionCard from '../components/common/SectionCard'
+import { updateUserStatus } from '../services/users'
 
 export default function SuspendUser() {
+  const [searchParams] = useSearchParams()
+  const navigate = useNavigate()
+  const [reason, setReason] = useState('Violation of terms')
+  const [notes, setNotes] = useState('')
+  const [isSubmitting, setIsSubmitting] = useState(false)
+  const [error, setError] = useState('')
+  const [success, setSuccess] = useState('')
+
+  const userId = useMemo(() => searchParams.get('userId') || '', [searchParams])
+
+  const handleSubmit = async () => {
+    if (!userId) {
+      setError('No user selected.')
+      return
+    }
+
+    setIsSubmitting(true)
+    setError('')
+    setSuccess('')
+
+    try {
+      await updateUserStatus(userId, 'SUSPENDED', reason, notes)
+      setSuccess('User suspended successfully.')
+      window.setTimeout(() => navigate('/users'), 800)
+    } catch (err) {
+      setError(err.message || 'Unable to suspend user.')
+    } finally {
+      setIsSubmitting(false)
+    }
+  }
+
   return (
     <>
       <PageHeader
@@ -17,7 +50,11 @@ export default function SuspendUser() {
         </p>
         <div style={{ marginBottom: '1rem' }}>
           <label style={{ display: 'block', fontSize: '0.875rem', marginBottom: '0.5rem' }}>Reason</label>
-          <select style={{ width: '100%', padding: '0.5rem', border: '1px solid var(--border)', borderRadius: 8, fontSize: '0.9375rem' }}>
+          <select
+            value={reason}
+            onChange={(e) => setReason(e.target.value)}
+            style={{ width: '100%', padding: '0.5rem', border: '1px solid var(--border)', borderRadius: 8, fontSize: '0.9375rem' }}
+          >
             <option>Violation of terms</option>
             <option>Fraudulent activity</option>
             <option>Harassment</option>
@@ -26,10 +63,19 @@ export default function SuspendUser() {
         </div>
         <div style={{ marginBottom: '1rem' }}>
           <label style={{ display: 'block', fontSize: '0.875rem', marginBottom: '0.5rem' }}>Notes (optional)</label>
-          <textarea rows={3} style={{ width: '100%', padding: '0.5rem', border: '1px solid var(--border)', borderRadius: 8, fontSize: '0.9375rem' }} />
+          <textarea
+            rows={3}
+            value={notes}
+            onChange={(e) => setNotes(e.target.value)}
+            style={{ width: '100%', padding: '0.5rem', border: '1px solid var(--border)', borderRadius: 8, fontSize: '0.9375rem' }}
+          />
         </div>
+        {error && <div className="form-error" style={{ marginBottom: '1rem' }}>{error}</div>}
+        {success && <div className="form-success" style={{ marginBottom: '1rem' }}>{success}</div>}
         <div style={{ display: 'flex', gap: '0.5rem' }}>
-          <button type="button" className="btn btn-danger">Suspend User</button>
+          <button type="button" className="btn btn-danger" onClick={handleSubmit} disabled={isSubmitting}>
+            {isSubmitting ? 'Processing...' : 'Suspend User'}
+          </button>
           <Link to="/users" className="btn btn-outline">Cancel</Link>
         </div>
       </SectionCard>

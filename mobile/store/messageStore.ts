@@ -1,99 +1,89 @@
 import { create } from "zustand";
-import { conversations as DummyConversations } from "../constants/dummyData";
 
 export type Message = {
   id: string;
-  conversationId: string;
-  text: string;
-  isSent: boolean;
-  time: string;
+  senderId: string;
+  receiverId: string;
+  content: string;
+  imageUrl?: string | null;
+  isRead?: boolean;
+  createdAt: string;
 };
 
 export type Conversation = {
-  id: string;
+  userId: string;
   name: string;
+  avatar: string | null;
+  phone?: string | null;
   lastMessage: string;
-  time: string;
+  lastMessageTime: string;
   unread: number;
 };
 
 type MessageState = {
   conversations: Conversation[];
-  messagesByConversation: Record<string, Message[]>;
-  typingByConversation: Record<string, boolean>;
-  sendMessage: (conversationId: string, text: string) => void;
-  addIncomingMessage: (conversationId: string, text: string) => void;
-  markTyping: (conversationId: string, typing: boolean) => void;
+  messagesByUser: Record<string, Message[]>;
+  setConversations: (conversations: Conversation[]) => void;
+  setMessages: (userId: string, messages: Message[]) => void;
+  appendMessage: (userId: string, message: Message) => void;
+  markConversationRead: (userId: string) => void;
+  receiveMessage: (currentUserId: string, message: Message) => void;
 };
 
-export const useMessageStore = create<MessageState>((set, get) => ({
-  conversations: DummyConversations.map((conversation) => ({ ...conversation })),
-  messagesByConversation: {},
-  typingByConversation: {},
-  sendMessage: (conversationId, text) => {
-    const trimmed = text.trim();
-    if (!trimmed) return;
+export const useMessageStore = create<MessageState>((set) => ({
+  conversations: [],
+  messagesByUser: {},
 
-    const now = new Date();
-    const time = now.toLocaleTimeString("en-US", {
-      hour: "2-digit",
-      minute: "2-digit",
-    });
-    const id = String(now.getTime());
+  setConversations: (conversations) => set({ conversations }),
 
-    set((state) => {
-      const existing = state.messagesByConversation[conversationId] ?? [];
-      const updatedConversation = state.conversations.map((c) =>
-        c.id === conversationId ? { ...c, lastMessage: trimmed, time } : c,
-      );
-
-      return {
-        conversations: updatedConversation,
-        messagesByConversation: {
-          ...state.messagesByConversation,
-          [conversationId]: [
-            ...existing,
-            { id, conversationId, text: trimmed, isSent: true, time },
-          ],
-        },
-      };
-    });
-  },
-  addIncomingMessage: (conversationId, text) => {
-    const trimmed = text.trim();
-    if (!trimmed) return;
-
-    const now = new Date();
-    const time = now.toLocaleTimeString("en-US", {
-      hour: "2-digit",
-      minute: "2-digit",
-    });
-    const id = `r-${now.getTime()}`;
-
-    set((state) => {
-      const existing = state.messagesByConversation[conversationId] ?? [];
-      const updatedConversation = state.conversations.map((c) =>
-        c.id === conversationId ? { ...c, lastMessage: trimmed, time } : c,
-      );
-
-      return {
-        conversations: updatedConversation,
-        messagesByConversation: {
-          ...state.messagesByConversation,
-          [conversationId]: [
-            ...existing,
-            { id, conversationId, text: trimmed, isSent: false, time },
-          ],
-        },
-      };
-    });
-  },
-  markTyping: (conversationId, typing) =>
+  setMessages: (userId, messages) =>
     set((state) => ({
-      typingByConversation: {
-        ...state.typingByConversation,
-        [conversationId]: typing,
-      },
+      messagesByUser: { ...state.messagesByUser, [userId]: messages },
     })),
-}));
 
+  appendMessage: (userId, message) =>
+    set((state) => {
+      const existing = state.messagesByUser[userId] ?? [];
+      const updatedConversations = state.conversations.map((c) =>
+        c.userId === userId
+          ? { ...c, lastMessage: message.content, lastMessageTime: message.createdAt }
+          : c,
+      );
+      return {
+        messagesByUser: { ...state.messagesByUser, [userId]: [...existing, message] },
+        conversations: updatedConversations,
+      };
+    }),
+
+  markConversationRead: (userId) =>
+    set((state) => ({
+      conversations: state.conversations.map((c) =>
+        c.userId === userId ? { ...c, unread: 0 } : c,
+      ),
+    })),
+
+  receiveMessage: (currentUserId, message) =>
+    set((state) => {
+      const otherUserId =
+        message.senderId === currentUserId ? message.receiverId : message.senderId;
+      const existing = state.messagesByUser[otherUserId] ?? [];
+      const alreadyHave = existing.some((m) => m.id === message.id);
+      const messagesByUser = alreadyHave
+        ? state.messagesByUser
+        : { ...state.messagesByUser, [otherUserId]: [...existing, message] };
+
+      const isIncoming = message.receiverId === currentUserId;
+      const conversations = state.conversations.map((c) =>
+        c.userId === otherUserId
+          ? {
+              ...c,
+              lastMessage: message.content || (message.imageUrl ? "📷 Image" : c.lastMessage),
+              lastMessageTime: message.createdAt,
+              unread: isIncoming ? c.unread + 1 : c.unread,
+            }
+          : c,
+      );
+
+      return { messagesByUser, conversations };
+    }),
+}));

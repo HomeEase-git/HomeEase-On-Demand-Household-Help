@@ -5,13 +5,7 @@ import { AbortableRequest } from '../utils/apiErrorHandling';
 import { KycDocumentKey } from '../utils/kycDocumentConfig';
 import { mapKycDocumentType } from '../utils/kycDocumentTypeMap';
 import type { WorkerDetail } from "../types/api.types";
-import {
-  bookings as dummyBookings,
-  workers as dummyWorkers,
-  conversations as dummyConversations,
-  transactions as dummyTransactions,
-  workerTransactions as dummyWorkerTransactions,
-} from "../constants/dummyData";
+import type { LatLng } from "../utils/geo";
 
 type NormalizedWorkerListItem = {
   id: string;
@@ -362,14 +356,33 @@ export async function rescheduleBooking(bookingId: string, newDate: string, newT
 }
 
 export async function cancelBooking(bookingId: string, reason?: string) {
-  await delay(350);
-  return {
-    id: bookingId,
-    status: "Cancelled",
-    reason: reason || "User requested cancellation",
-    refundAmount: 450,
-    message: "Booking cancelled. Refund will be processed within 3-5 business days.",
-  };
+  try {
+    const response = await api.patch(`/bookings/${bookingId}/cancel`, { reason });
+    return response;
+  } catch (error) {
+    console.error('Cancel booking error:', error);
+    throw error;
+  }
+}
+
+export async function approveQuote(bookingId: string) {
+  try {
+    const response = await api.patch(`/bookings/${bookingId}/quote/approve`);
+    return response;
+  } catch (error) {
+    console.error('Approve quote error:', error);
+    throw error;
+  }
+}
+
+export async function disputeQuote(bookingId: string, reason: string) {
+  try {
+    const response = await api.patch(`/bookings/${bookingId}/quote/dispute`, { reason });
+    return response;
+  } catch (error) {
+    console.error('Dispute quote error:', error);
+    throw error;
+  }
 }
 
 // ============================================================================
@@ -438,105 +451,138 @@ function normalizeWorkerListItem(worker: any): NormalizedWorkerListItem {
 }
 
 export async function getWorkerDetail(workerId: string): Promise<WorkerDetail | null> {
-    await delay(350);
-  const worker = dummyWorkers.find((w) => w.id === workerId);
-  if (!worker) return null;
+  try {
+    const response = await api.get(`/workers/${workerId}`);
+    const service = response.services?.[0]?.name ?? "General service";
+    const skills = response.resumeParseResult?.parsedSkills?.length
+      ? response.resumeParseResult.parsedSkills
+      : [service];
 
-  return {
-    ...worker,
-    status: worker.status === "available" ? "available" : "busy",
-    bio: "Licensed professional with 5+ years of experience in plumbing services. Specializing in residential and commercial work.",
-    serviceAreaRadius: 10,
-    resumeParseResult: {
-      parsedSkills: ["Pipe Repair", "Installation", "Maintenance"],
-      yearsOfExperience: 5,
-      masteryLevel: "Advanced",
-      tradeCategory: "Plumbing",
-      summary: "Experienced plumber specializing in residential and commercial work.",
-    },
-    certifications: [
-      {
-        id: "cert1",
-        title: "Plumbing License",
-        issuer: "TESDA",
-        issueDate: "2021-01-15",
-        expiryDate: null,
-        documentUrl: "https://example.com/cert1.pdf",
-        verificationStatus: "VERIFIED",
-      },
-      {
-        id: "cert2",
-        title: "Safety Training",
-        issuer: "DOLE",
-        issueDate: "2022-03-10",
-        expiryDate: null,
-        documentUrl: "https://example.com/cert2.pdf",
-        verificationStatus: "VERIFIED",
-      },
-    ],
-    completedJobs: 234,
-    joinDate: "2021-03-15",
-  };
+    return {
+      id: response.id,
+      name: response.name,
+      service,
+      rating: Number(response.rating ?? 0),
+      reviews: Number(response.reviewCount ?? 0),
+      rate: typeof response.services?.[0]?.basePrice === "number" ? response.services[0].basePrice : undefined,
+      status: response.isAvailable ? "available" : "busy",
+      avatar: response.avatar ?? undefined,
+      bio: response.bio ?? "",
+      serviceAreaRadius: response.serviceAreaRadius ?? 0,
+      certifications: response.certifications ?? [],
+      resumeParseResult: response.resumeParseResult ?? null,
+      skills,
+      activeJobCount: Number(response.activeJobCount ?? 0),
+      verificationStatus: response.verificationStatus ?? "PENDING",
+      isAvailable: Boolean(response.isAvailable),
+      availableDays: Array.isArray(response.availableDays) ? response.availableDays : [],
+      maxConcurrentJobs: Number(response.maxConcurrentJobs ?? 0),
+    };
+  } catch (error) {
+    if (isAxiosError(error) && error.response?.status === 404) return null;
+    console.error('Get worker detail error:', error);
+    throw error;
+  }
 }
 
 export async function searchWorkers(filters: {
   query?: string;
   categoryId?: string;
   minRating?: number;
+  availableOnly?: boolean;
+  sortBy?: "rating" | "priceLow" | "priceHigh" | "nearest";
+  origin?: LatLng;
+  radiusKm?: number;
   page?: number;
 }) {
-  await delay(400);
-  let results = [...dummyWorkers];
+  try {
+    const params: Record<string, string | number> = { limit: 50 };
+    if (filters.categoryId) params.category = filters.categoryId;
+    if (filters.minRating !== undefined) params.minRating = filters.minRating;
 
-  const q = filters.query?.toLowerCase().trim();
-  if (q) {
-    results = results.filter(
-      (w) =>
-        w.name.toLowerCase().includes(q) ||
-        w.service.toLowerCase().includes(q)
-    );
+    const response = await api.get('/workers', { params });
+    const rawWorkers: any[] = Array.isArray(response?.workers) ? response.workers : [];
+
+    let results: Array<NormalizedWorkerListItem & { rate: number }> = rawWorkers.map((w: any) => {
+      const item = normalizeWorkerListItem(w);
+      return { ...item, rate: item.basePrice ?? 0 };
+    });
+
+    const q = filters.query?.toLowerCase().trim();
+    if (q) {
+      results = results.filter(
+        (w) =>
+          w.name.toLowerCase().includes(q) ||
+          w.service.toLowerCase().includes(q)
+      );
+    }
+
+    if (filters.availableOnly) {
+      results = results.filter((w) => w.status === "available");
+    }
+
+    // The backend doesn't return worker coordinates, so "nearest" sort and
+    // radius filtering aren't possible here — falls back to rating sort.
+    if (filters.sortBy === "priceLow") {
+      results = [...results].sort((a, b) => a.rate - b.rate);
+    } else if (filters.sortBy === "priceHigh") {
+      results = [...results].sort((a, b) => b.rate - a.rate);
+    } else {
+      results = [...results].sort((a, b) => b.rating - a.rating);
+    }
+
+    const page = filters.page || 1;
+    const limit = 10;
+    const start = (page - 1) * limit;
+
+    return {
+      data: results.slice(start, start + limit),
+      total: results.length,
+      page,
+    };
+  } catch (error) {
+    console.error("Search workers error:", error);
+    throw error;
   }
-
-  if (filters?.categoryId) {
-    results = results.filter((w) => w.service.toLowerCase().includes(filters.categoryId!.toLowerCase()));
-  }
-
-  if (filters?.minRating) {
-    results = results.filter((w) => w.rating >= filters.minRating!);
-  }
-
-  const page = filters?.page || 1;
-  const limit = 10;
-  const start = (page - 1) * limit;
-
-  return {
-    data: results.slice(start, start + limit),
-    total: results.length,
-    page,
-  };
 }
 
-export async function getWorkerReviews(workerId: string) {
-  void workerId;
-  await delay(300);
-  return [
-    {
-      id: "r1",
-      clientName: "Maria Santos",
-      rating: 5,
-      comment: "Excellent service, very professional and on time!",
-      date: "2026-02-28",
-      bookingId: "BK-001",
-    },
-    {
-      id: "r2",
-      clientName: "Juan Dela Cruz",
-      rating: 4,
-      comment: "Good work, would definitely book again.",
-      date: "2026-02-20",
-      bookingId: "BK-002",
-    },
-  ];
+export async function getWorkerReviews(workerId: string, limit = 50) {
+  try {
+    const response = await api.get(`/workers/${workerId}/reviews`, { params: { limit } });
+    const reviews = (response.reviews ?? []).map((r: any) => ({
+      id: r.id,
+      clientName: r.reviewer?.name ?? "Client",
+      rating: Number(r.rating ?? 0),
+      comment: r.comment ?? "",
+      date: r.createdAt,
+      bookingId: r.bookingId,
+    }));
+
+    // Star distribution isn't provided by the backend — approximated from
+    // the fetched page of reviews, not an exact server-side aggregate.
+    const counts = [0, 0, 0, 0, 0]; // counts[0] = 1-star ... counts[4] = 5-star
+    reviews.forEach((r: { rating: number }) => {
+      const idx = Math.min(5, Math.max(1, Math.round(r.rating))) - 1;
+      counts[idx] += 1;
+    });
+    const total = reviews.length || 1;
+    const distribution: Record<number, number> = {
+      5: Math.round((counts[4] / total) * 100),
+      4: Math.round((counts[3] / total) * 100),
+      3: Math.round((counts[2] / total) * 100),
+      2: Math.round((counts[1] / total) * 100),
+      1: Math.round((counts[0] / total) * 100),
+    };
+
+    return {
+      reviews,
+      pagination: response.pagination,
+      distribution,
+    };
+  } catch (error) {
+    console.error('Get worker reviews error:', error);
+    throw error;
+  }
 }
 
 // ============================================================================
@@ -577,6 +623,16 @@ export async function addPaymentMethod(data: {
     return response;
   } catch (error) {
     console.error('Add payment method error:', error);
+    throw error;
+  }
+}
+
+export async function updatePaymentMethod(methodId: string, data: { label: string }) {
+  try {
+    const response = await api.patch(`/users/me/payment-methods/${methodId}`, data);
+    return response;
+  } catch (error) {
+    console.error('Update payment method error:', error);
     throw error;
   }
 }
@@ -685,31 +741,56 @@ export async function setDefaultAddress(addressId: string) {
 // TRANSACTIONS - CLIENT
 // ============================================================================
 
-export async function getTransactions(page?: number) {
-  await delay(300);
-  const limit = 10;
-  const start = ((page || 1) - 1) * limit;
-  return {
-    data: dummyTransactions.slice(start, start + limit),
-    total: dummyTransactions.length,
-    page: page || 1,
-  };
+function titleCaseStatus(status: string) {
+  return status.charAt(0).toUpperCase() + status.slice(1).toLowerCase();
 }
 
-export async function getTransactionDetail(transactionId: string) {
-  await delay(250);
-  const txn = dummyTransactions.find((t) => t.id === transactionId);
-  if (!txn) return null;
-  return {
-    ...txn,
-    breakdown: {
-      servicePrice: 600,
-      tax: 0,
-      tip: 0,
-      total: 600,
-    },
-    booking: dummyBookings.find((b) => b.id === txn.bookingId),
-  };
+export async function getTransactions(page?: number) {
+  try {
+    const response = await api.get('/payments', {
+      params: page ? { page } : {},
+    });
+    const payments = response.payments ?? [];
+    return {
+      data: payments.map((p: any) => ({
+        id: p.id,
+        bookingId: p.bookingId,
+        amount: p.amount,
+        method: p.methodType,
+        status: titleCaseStatus(p.status ?? "Pending"),
+        date: p.createdAt,
+      })),
+      total: response.pagination?.total ?? payments.length,
+      page: response.pagination?.page ?? page ?? 1,
+    };
+  } catch (error) {
+    console.error('Get transactions error:', error);
+    throw error;
+  }
+}
+
+export async function getTransactionDetail(bookingId: string) {
+  try {
+    const response = await api.get(`/payments/${bookingId}`);
+    return {
+      id: response.id,
+      bookingId: response.bookingId,
+      clientName: response.clientName,
+      workerName: response.workerName,
+      serviceName: response.serviceName,
+      status: titleCaseStatus(response.status ?? "Pending"),
+      escrowStatus: response.escrowStatus,
+      method: response.methodType,
+      amount: response.priceBreakdown?.total,
+      breakdown: response.priceBreakdown,
+      date: response.createdAt,
+      transactionId: response.transactionId,
+    };
+  } catch (error) {
+    if (isAxiosError(error) && error.response?.status === 404) return null;
+    console.error('Get transaction detail error:', error);
+    throw error;
+  }
 }
 
 export async function downloadReceipt(transactionId: string) {
@@ -730,33 +811,38 @@ export async function submitReview(
   rating: number,
   comment: string,
 ) {
-  await delay(400);
-  return {
-    id: "rev-" + Math.random().toString(36).slice(2, 8),
-    bookingId,
-    rating,
-    comment,
-    createdAt: new Date().toISOString(),
-  };
+  try {
+    const response = await api.post(`/bookings/${bookingId}/review`, { rating, comment });
+    return response;
+  } catch (error) {
+    console.error('Submit review error:', error);
+    throw error;
+  }
 }
 
 export async function getMyReviews(page?: number) {
-  await delay(300);
-  return {
-    data: [
-      {
-        id: "rev1",
-        workerName: "Juan Dela Cruz",
-        workerId: "w1",
-        rating: 5,
-        comment: "Excellent plumbing work!",
-        bookingId: "BK-001",
-        date: "2026-02-28",
-      },
-    ],
-    total: 1,
-    page: page || 1,
-  };
+  try {
+    const response = await api.get('/users/me/reviews', {
+      params: page ? { page } : {},
+    });
+    const reviews = response.reviews ?? [];
+    return {
+      data: reviews.map((r: any) => ({
+        id: r.id,
+        workerName: r.workerName,
+        workerId: r.workerId,
+        rating: r.rating,
+        comment: r.comment ?? "",
+        bookingId: r.bookingId,
+        date: r.createdAt,
+      })),
+      total: response.pagination?.total ?? reviews.length,
+      page: response.pagination?.page ?? page ?? 1,
+    };
+  } catch (error) {
+    console.error('Get my reviews error:', error);
+    throw error;
+  }
 }
 
 // ============================================================================
@@ -764,240 +850,232 @@ export async function getMyReviews(page?: number) {
 // ============================================================================
 
 export async function getConversations() {
-  await delay(300);
-  return dummyConversations;
+  try {
+    const response = await api.get('/messages/conversations');
+    const conversations = response.conversations ?? [];
+    return conversations.map((c: any) => ({
+      userId: c.userId,
+      name: c.userName,
+      avatar: c.userImage ?? null,
+      phone: c.userPhone ?? null,
+      lastMessage: c.lastMessage,
+      lastMessageTime: c.lastMessageTime,
+      unread: c.unreadCount ?? 0,
+    }));
+  } catch (error) {
+    console.error('Get conversations error:', error);
+    throw error;
+  }
 }
 
-export async function getConversationDetail(conversationId: string) {
-  await delay(300);
-  return {
-    id: conversationId,
-    participantName: "Juan Dela Cruz",
-    participantAvatar: null,
-    messages: [
-      { id: "m1", text: "Hi, when can you come?", sender: "other", timestamp: "10:30 AM" },
-      { id: "m2", text: "I can be there around 2 PM", sender: "me", timestamp: "10:31 AM" },
-      { id: "m3", text: "Perfect! See you then", sender: "other", timestamp: "10:32 AM" },
-    ],
-  };
+export async function getConversationThread(userId: string, page?: number) {
+  try {
+    const response = await api.get(`/messages/conversations/${userId}`, {
+      params: page ? { page } : {},
+    });
+    return response.messages ?? [];
+  } catch (error) {
+    console.error('Get conversation thread error:', error);
+    throw error;
+  }
 }
 
-export async function sendMessage(conversationId: string, text: string) {
-  await delay(400);
-  return {
-    id: "msg-" + Date.now(),
-    conversationId,
-    text,
-    sender: "me",
-    timestamp: new Date().toISOString(),
-  };
+export async function sendMessage(receiverId: string, content: string, imageUrl?: string) {
+  try {
+    const response = await api.post('/messages', { receiverId, content, imageUrl });
+    return response;
+  } catch (error) {
+    console.error('Send message error:', error);
+    throw error;
+  }
 }
 
-export async function markMessagesAsRead(conversationId: string) {
-  await delay(250);
-  return { success: true, conversationId };
+export async function markMessagesAsRead(userId: string) {
+  try {
+    const response = await api.patch(`/messages/conversations/${userId}/read`);
+    return { success: true, updatedCount: response.updatedCount };
+  } catch (error) {
+    console.error('Mark messages as read error:', error);
+    throw error;
+  }
+}
+
+export async function uploadChatImage(uri: string): Promise<{ url: string }> {
+  try {
+    const filename = uri.split('/').pop() ?? `chat-${Date.now()}.jpg`;
+    const match = /\.(\w+)$/.exec(filename);
+    const ext = match ? match[1].toLowerCase() : 'jpg';
+    const mimeType = ext === 'png' ? 'image/png' : ext === 'webp' ? 'image/webp' : 'image/jpeg';
+
+    const formData = new FormData();
+    formData.append('image', {
+      uri,
+      name: filename,
+      type: mimeType,
+    } as any);
+
+    const response = await api.post('/messages/upload-image', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+    return response;
+  } catch (error) {
+    console.error('Upload chat image error:', error);
+    throw error;
+  }
+}
+
+// ============================================================================
+// NOTIFICATIONS
+// ============================================================================
+
+export async function getNotifications(page?: number) {
+  try {
+    const response = await api.get('/notifications', {
+      params: page ? { page } : {},
+    });
+    return response.notifications ?? [];
+  } catch (error) {
+    console.error('Get notifications error:', error);
+    throw error;
+  }
+}
+
+export async function markNotificationRead(id: string) {
+  try {
+    const response = await api.patch(`/notifications/${id}/read`);
+    return response;
+  } catch (error) {
+    console.error('Mark notification read error:', error);
+    throw error;
+  }
+}
+
+export async function markAllNotificationsRead() {
+  try {
+    const response = await api.patch('/notifications/read-all');
+    return { success: true, updatedCount: response.updatedCount };
+  } catch (error) {
+    console.error('Mark all notifications read error:', error);
+    throw error;
+  }
+}
+
+export async function getUnreadNotificationCount() {
+  try {
+    const response = await api.get('/notifications/unread-count');
+    return response.unreadCount ?? 0;
+  } catch (error) {
+    console.error('Get unread notification count error:', error);
+    throw error;
+  }
 }
 
 // ============================================================================
 // WORKER ENDPOINTS
 // ============================================================================
 
-export async function getJobRequests(status?: string) {
-  await delay(350);
-  const jobRequests = [
-    {
-      id: "jr1",
-      clientName: "Maria Santos",
-      clientRating: 4.8,
-      service: "Plumbing Repair",
-      date: "2026-03-15",
-      time: "2:00 PM",
-      estimatedPrice: 500,
-      status: "Pending",
-      description: "Leaking faucet in kitchen",
-    },
-    {
-      id: "jr2",
-      clientName: "Juan Dela Cruz",
-      clientRating: 4.5,
-      service: "Pipe Installation",
-      date: "2026-03-16",
-      time: "10:00 AM",
-      estimatedPrice: 1500,
-      status: "Pending",
-      description: "New water line installation",
-    },
-  ];
-
-  if (!status) return jobRequests;
-  return jobRequests.filter((j) => j.status === status);
+export async function acceptBooking(bookingId: string) {
+  try {
+    const response = await api.patch(`/bookings/${bookingId}/accept`);
+    return response;
+  } catch (error) {
+    console.error('Accept booking error:', error);
+    throw error;
+  }
 }
 
-export async function getJobRequestDetail(requestId: string) {
-  await delay(300);
-  return {
-    id: requestId,
-    clientName: "Maria Santos",
-    clientRating: 4.8,
-    clientReviews: 45,
-    clientAvatar: null,
-    service: "Plumbing Repair",
-    date: "2026-03-15",
-    time: "2:00 PM",
-    estimatedPrice: 500,
-    address: "123 Rizal St., Hagonoy, Bulacan",
-    description: "Leaking faucet in kitchen. Also check water pressure issues.",
-    status: "Pending",
-  };
+export async function declineBooking(bookingId: string, reason?: string) {
+  try {
+    const response = await api.patch(`/bookings/${bookingId}/decline`, { reason });
+    return response;
+  } catch (error) {
+    console.error('Decline booking error:', error);
+    throw error;
+  }
 }
 
-export async function acceptJobRequest(requestId: string) {
-  await delay(400);
-  return {
-    success: true,
-    message: "Job request accepted",
-    requestId,
-    bookingId: "BK-" + Math.random().toString(36).slice(2, 8).toUpperCase(),
-  };
+export async function startBooking(bookingId: string) {
+  try {
+    const response = await api.patch(`/bookings/${bookingId}/start`);
+    return response;
+  } catch (error) {
+    console.error('Start booking error:', error);
+    throw error;
+  }
 }
 
-export async function declineJobRequest(requestId: string, reason?: string) {
-  void reason;
-  await delay(350);
-  return {
-    success: true,
-    message: "Job request declined",
-    requestId,
-  };
+export async function submitQuote(
+  bookingId: string,
+  data: { laborCost: number; materialsCost: number; notes?: string },
+) {
+  try {
+    const response = await api.post(`/bookings/${bookingId}/quote`, data);
+    return response;
+  } catch (error) {
+    console.error('Submit quote error:', error);
+    throw error;
+  }
 }
 
-export async function markJobComplete(bookingId: string) {
-  await delay(400);
-  return {
-    success: true,
-    message: "Job marked as complete",
-    bookingId,
-  };
+export async function completeBooking(bookingId: string) {
+  try {
+    const response = await api.patch(`/bookings/${bookingId}/complete`);
+    return response;
+  } catch (error) {
+    console.error('Complete booking error:', error);
+    throw error;
+  }
 }
 
-export async function getEarnings() {
-  await delay(300);
-  return {
-    totalBalance: 15420.50,
-    availableBalance: 10240.00,
-    pendingBalance: 5180.50,
-    monthlyEarnings: 4500.00,
-    totalEarnings: 45200.00,
-    completedJobs: 234,
-  };
+export async function updateAvailability(isAvailable?: boolean, availableDays?: string[]) {
+  try {
+    const response = await api.patch('/workers/me/availability', {
+      isAvailable,
+      availableDays,
+    });
+    return response;
+  } catch (error) {
+    console.error('Update availability error:', error);
+    throw error;
+  }
 }
 
-export async function getWorkerTransactions(page?: number) {
-  await delay(300);
-  const limit = 10;
-  const start = ((page || 1) - 1) * limit;
-  return {
-    data: dummyWorkerTransactions.slice(start, start + limit),
-    total: dummyWorkerTransactions.length,
-    page: page || 1,
-  };
+export async function updateWorkerProfileDetails(data: {
+  bio?: string;
+  serviceAreaRadius?: number;
+  address?: string;
+  city?: string;
+  state?: string;
+  zipCode?: string;
+  resumeUrl?: string;
+}) {
+  try {
+    const response = await api.patch('/workers/me/profile', data);
+    return response;
+  } catch (error) {
+    console.error('Update worker profile error:', error);
+    throw error;
+  }
 }
 
-export async function getWorkerRecords(status?: string) {
-  await delay(350);
-  const records = dummyBookings.map((b) => ({
-    ...b,
-    clientName: b.worker,
-    completionDate: "2026-02-28",
-  }));
-
-  if (!status) return records;
-  return records.filter((r) => r.status === status);
-}
-
-export async function requestWithdrawal(amount: number, method: string) {
-  await delay(500);
-  return {
-    id: "wd-" + Math.random().toString(36).slice(2, 8),
-    amount,
-    method,
-    status: "Pending",
-    requestedAt: new Date().toISOString(),
-    expectedDate: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString(),
-    message: "Withdrawal requested. Funds will be transferred within 3-5 business days.",
-  };
-}
-
-export async function getWorkerReviewsReceived(page?: number) {
-  await delay(300);
-  return {
-    data: [
-      {
-        id: "wr1",
-        clientName: "Maria Santos",
-        rating: 5,
-        comment: "Professional and reliable!",
-        bookingId: "BK-001",
-        date: "2026-02-28",
-      },
-    ],
-    total: 156,
-    page: page || 1,
-    averageRating: 4.8,
-  };
-}
-
-export async function updateWorkerSkills(skills: { name: string; level: string }[]) {
-  await delay(350);
-  return {
-    success: true,
-    skills,
-    message: "Skills updated successfully",
-  };
-}
-
-export async function getWorkerSkills() {
-  await delay(250);
-  return [
-    { id: "s1", name: "Plumbing", level: "Expert" },
-    { id: "s2", name: "Electrical", level: "Intermediate" },
-  ];
-}
-
-export async function getResumeParsed() {
-  await delay(400);
-  return {
-    skills: ["Plumbing", "Electrical Basics", "Customer Service"],
-    yearsOfExperience: 8,
-    masteryLevel: "Advanced",
-    certifications: ["Plumbing License", "Safety Training"],
-    summary: "Experienced plumber with 8 years of hands-on expertise in residential and commercial plumbing work.",
-  };
+export async function getWorkerCapacity() {
+  try {
+    const response = await api.get('/workers/me/capacity');
+    return response;
+  } catch (error) {
+    console.error('Get worker capacity error:', error);
+    throw error;
+  }
 }
 
 // ============================================================================
 // PROFILE ENDPOINTS
 // ============================================================================
 
-export async function updateProfile(data: {
-  name?: string;
-  phone?: string;
-  email?: string;
-  bio?: string;
-  yearsOfExperience?: number;
-  serviceArea?: string;
-}) {
-  await delay(400);
-  return {
-    success: true,
-    message: "Profile updated successfully",
-    ...data,
-  };
-}
-
 export async function updateUserProfile(data: {
   fullName?: string;
   phone?: string;
+  avatar?: string;
   bio?: string;
   yearsOfExperience?: number;
   serviceArea?: string;
@@ -1006,6 +1084,7 @@ export async function updateUserProfile(data: {
     const payload: any = {};
     if (data.fullName) payload.fullName = data.fullName;
     if (data.phone) payload.phone = data.phone;
+    if (data.avatar) payload.avatar = data.avatar;
     if (data.bio) payload.bio = data.bio;
     if (data.yearsOfExperience) payload.yearsOfExperience = data.yearsOfExperience;
     if (data.serviceArea) payload.serviceArea = data.serviceArea;
@@ -1017,6 +1096,7 @@ export async function updateUserProfile(data: {
       fullName: response.fullName,
       email: response.email,
       phone: response.phone,
+      avatar: response.avatar,
       role: response.role?.toLowerCase() || 'client',
       bio: response.bio,
       yearsOfExperience: response.yearsOfExperience,
@@ -1024,6 +1104,58 @@ export async function updateUserProfile(data: {
     };
   } catch (error) {
     console.error('Update user profile error:', error);
+    throw error;
+  }
+}
+
+export async function uploadAvatar(uri: string): Promise<{ url: string }> {
+  try {
+    const filename = uri.split('/').pop() ?? `avatar-${Date.now()}.jpg`;
+    const match = /\.(\w+)$/.exec(filename);
+    const ext = match ? match[1].toLowerCase() : 'jpg';
+    const mimeType = ext === 'png' ? 'image/png' : ext === 'webp' ? 'image/webp' : 'image/jpeg';
+
+    const formData = new FormData();
+    formData.append('avatar', {
+      uri,
+      name: filename,
+      type: mimeType,
+    } as any);
+
+    const response = await api.post('/users/me/avatar', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+    return response;
+  } catch (error) {
+    console.error('Upload avatar error:', error);
+    throw error;
+  }
+}
+
+export async function uploadKycFile(
+  documentKey: KycDocumentKey,
+  uri: string,
+  mimeType?: string | null,
+): Promise<{ url: string }> {
+  try {
+    const filename = uri.split('/').pop() ?? `${documentKey}-${Date.now()}`;
+    const resolvedMimeType =
+      mimeType || (filename.toLowerCase().endsWith('.pdf') ? 'application/pdf' : 'image/jpeg');
+
+    const formData = new FormData();
+    formData.append('file', {
+      uri,
+      name: filename,
+      type: resolvedMimeType,
+    } as any);
+    formData.append('documentType', mapKycDocumentType(documentKey));
+
+    const response = await api.post('/users/me/kyc-documents/upload', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+    return response;
+  } catch (error) {
+    console.error('Upload KYC file error:', error);
     throw error;
   }
 }
@@ -1052,31 +1184,72 @@ export async function getKycDocuments() {
 }
 
 export async function changePassword(currentPassword: string, newPassword: string) {
-  void currentPassword;
-  void newPassword;
-  await delay(400);
-  return {
-    success: true,
-    message: "Password changed successfully",
-  };
+  try {
+    const response = await api.post('/users/me/change-password', {
+      currentPassword,
+      newPassword,
+    });
+    return {
+      success: true,
+      message: response.message || "Password changed successfully",
+    };
+  } catch (error) {
+    console.error('Change password error:', error);
+    throw error;
+  }
 }
 
-export async function updateNotificationPreferences(preferences: Record<string, boolean>) {
-  await delay(350);
-  return {
-    success: true,
-    preferences,
-    message: "Notification preferences updated",
-  };
+export async function getUserProfile() {
+  try {
+    const response = await api.get('/users/me');
+    return {
+      id: response.id,
+      name: response.fullName || response.name,
+      fullName: response.fullName,
+      email: response.email,
+      phone: response.phone,
+      role: response.role?.toLowerCase() || 'client',
+      bio: response.bio,
+      yearsOfExperience: response.yearsOfExperience,
+      serviceArea: response.serviceArea,
+      notificationPreferences: response.notificationPreferences || null,
+    };
+  } catch (error) {
+    console.error('Get user profile error:', error);
+    throw error;
+  }
+}
+
+export async function updateNotificationPreferences(preferences: {
+  bookingUpdates?: boolean;
+  messages?: boolean;
+  promotions?: boolean;
+  systemNotifications?: boolean;
+}) {
+  try {
+    const response = await api.patch('/users/me/notification-preferences', preferences);
+    return {
+      success: true,
+      preferences: response,
+      message: "Notification preferences updated",
+    };
+  } catch (error) {
+    console.error('Update notification preferences error:', error);
+    throw error;
+  }
 }
 
 export async function deleteAccount(password: string) {
-  void password;
-  await delay(500);
-  return {
-    success: true,
-    message: "Account deletion request submitted. You will receive a confirmation email.",
-  };
+  try {
+    const response = await api.delete('/users/me', { data: { password } });
+    return {
+      success: true,
+      message: response.message || "Account deleted successfully",
+    };
+  } catch (error) {
+    console.error('Delete account error:', error);
+    throw error;
+  }
 }
 
 // ============================================================================
@@ -1088,31 +1261,25 @@ function delay(ms: number) {
 }
 
 export async function getWorkerAvailability(workerId: string, date: string): Promise<{ occupied: string[] }> {
-  // Simple mocked availability: map workerId -> worker name then check dummy bookings for that date
-  await delay(200);
-  const workerRec = dummyWorkers.find((w) => w.id === workerId);
-  if (!workerRec) return { occupied: [] };
-  const workerName = workerRec.name;
-  const workerBookings = dummyBookings.filter((b) => b.worker === workerName && b.date === date);
-  const occupied = workerBookings.flatMap((b) => {
-    if ('time' in b && typeof b.time === 'string' && b.time) {
-      return [b.time];
-    }
-    return [];
-  });
-  return { occupied };
+  try {
+    const response = await api.get(`/workers/${workerId}/availability`, {
+      params: { date },
+    });
+    return { occupied: response.occupied ?? [] };
+  } catch (error) {
+    console.error('Get worker availability error:', error);
+    throw error;
+  }
 }
 
 export async function getWorkerBlockedDates(workerId: string) {
-  // Return list of dates where the worker already has any booking
-  await delay(200);
-  const workerRec = dummyWorkers.find((w) => w.id === workerId);
-  if (!workerRec) return { dates: [] };
-  const workerName = workerRec.name;
-  const dates = dummyBookings.filter((b) => b.worker === workerName).map((b) => b.date);
-  // unique
-  const unique = Array.from(new Set(dates));
-  return { dates: unique };
+  try {
+    const response = await api.get(`/workers/${workerId}/blocked-dates`);
+    return { dates: response.dates ?? [] };
+  } catch (error) {
+    console.error('Get worker blocked dates error:', error);
+    throw error;
+  }
 }
 
 export async function getServiceTypes() {

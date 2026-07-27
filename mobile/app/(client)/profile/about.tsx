@@ -10,13 +10,13 @@ export default function AboutScreen() {
   const router = useRouter();
 
   return (
-    <SafeAreaView className="flex-1 bg-primary-white">
+    <SafeAreaView className="flex-1 bg-white">
       <ScreenHeader title="About HomeEase" showBack />
       <ScrollView contentContainerStyle={{ padding: 24, alignItems: "center" }}>
         <View className="w-20 h-20 bg-accent rounded-2xl items-center justify-center mb-4">
           <Ionicons name="home" size={48} color={colors.white} />
         </View>
-        <Text className="text-primary text-xl font-bold">HomeEase</Text>
+        <Text className="text-text-primary text-xl font-bold">HomeEase</Text>
         <Text className="text-text-secondary">On-Demand Household Help</Text>
         <Text className="text-text-muted text-sm mt-1">Version 1.0.0</Text>
         <Text className="text-text-secondary text-center mt-6">

@@ -2,7 +2,7 @@ import React from "react";
 import { View, Text } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import StarRating from "../ui/StarRating";
-import { colors } from "../../constants";
+import { colors, cardShadow } from "../../constants";
 
 type Review = {
   id: string;
@@ -18,21 +18,21 @@ type Props = {
 
 export const ReviewCard: React.FC<Props> = ({ review }) => {
   return (
-    <View className="bg-card border-2 border-primary rounded-2xl p-4 mb-3">
+    <View className="bg-card rounded-2xl p-4 mb-3" style={cardShadow}>
       <View className="flex-row items-center">
         {/* TODO: Replace with reviewer profile photo */}
         <View className="w-10 h-10 bg-card-light rounded-full items-center justify-center mr-3">
           <Ionicons name="person" size={20} color={colors.text.muted} />
         </View>
         <View className="flex-1">
-          <Text className="text-primary font-semibold">
+          <Text className="text-text-primary font-semibold">
             {review.authorName}
           </Text>
           <Text className="text-text-muted text-xs">{review.date}</Text>
         </View>
         <StarRating rating={review.rating} size={14} />
       </View>
-      <Text className="text-primary text-sm mt-2">{review.comment}</Text>
+      <Text className="text-text-secondary text-sm mt-2">{review.comment}</Text>
     </View>
   );
 };

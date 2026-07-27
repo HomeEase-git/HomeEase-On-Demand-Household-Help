@@ -24,10 +24,10 @@ export const TransactionItem: React.FC<Props> = ({ transaction, onPress }) => {
       onPress={onPress}
     >
       <View className="flex-1">
-        <Text className="text-primary text-xs">
+        <Text className="text-text-muted text-xs">
           {transaction.id} · {transaction.date}
         </Text>
-        <Text className="text-primary font-semibold mt-0.5">
+        <Text className="text-text-primary font-semibold mt-0.5">
           Booking {transaction.bookingId}
         </Text>
       </View>

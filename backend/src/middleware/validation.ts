@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import { errorResponse } from '../utils/errorResponse';
+import { KYC_DOCUMENT_TYPES } from '../utils/kycDocumentTypes';
 
 /**
  * Validates that required fields are present and returns 400 if missing.
@@ -319,6 +320,20 @@ export const validateAddPaymentMethod = (
   return next();
 };
 
+export const validateUpdatePaymentMethod = (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  const { label } = req.body;
+
+  if (label === undefined || typeof label !== 'string' || !label.trim()) {
+    return res.status(400).json(errorResponse(400, 'label is required and must be a non-empty string'));
+  }
+
+  return next();
+};
+
 export const validateReleaseEscrow = (
   _req: Request,
   _res: Response,
@@ -482,23 +497,12 @@ export const validateSubmitKYCDocument = (
   next: NextFunction
 ) => {
   const { documentType, documentUrl } = req.body;
-  const allowedDocumentTypes = [
-    'GOVERNMENT_ID_FRONT',
-    'GOVERNMENT_ID_BACK',
-    'SELFIE',
-    'RESUME',
-    'CERTIFICATION',
-    'NBI_CLEARANCE',
-    'BARANGAY_CLEARANCE',
-    'POLICE_CLEARANCE',
-    'CEDULA',
-  ];
-  
+
   if (!documentType || typeof documentType !== 'string') {
     return res.status(400).json(errorResponse(400, 'documentType is required and must be a string'));
   }
 
-  if (!allowedDocumentTypes.includes(documentType)) {
+  if (!(KYC_DOCUMENT_TYPES as readonly string[]).includes(documentType)) {
     return res.status(400).json(errorResponse(400, 'documentType is not supported'));
   }
   
@@ -533,19 +537,18 @@ export const validateSendMessage = (
   res: Response,
   next: NextFunction
 ) => {
-  const { receiverId, content } = req.body;
-  
+  const { receiverId, content, imageUrl } = req.body;
+
   if (!receiverId || typeof receiverId !== 'string') {
     return res.status(400).json(errorResponse(400, 'receiverId is required and must be a string'));
   }
-  
-  if (!content || typeof content !== 'string') {
-    return res.status(400).json(errorResponse(400, 'content is required and must be a string'));
+
+  const hasContent = typeof content === 'string' && content.trim().length > 0;
+  const hasImage = typeof imageUrl === 'string' && imageUrl.trim().length > 0;
+
+  if (!hasContent && !hasImage) {
+    return res.status(400).json(errorResponse(400, 'Either content or imageUrl is required'));
   }
-  
-  if (content.trim().length === 0) {
-    return res.status(400).json(errorResponse(400, 'content cannot be empty'));
-  }
-  
+
   return next();
 };

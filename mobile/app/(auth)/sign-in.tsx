@@ -79,7 +79,7 @@ export default function SignInScreen() {
   };
 
   return (
-    <SafeAreaView className="flex-1 bg-primary-white">
+    <SafeAreaView className="flex-1 bg-white">
       <ScrollView
         className="flex-1"
         contentContainerStyle={{ paddingHorizontal: 24, paddingBottom: 40 }}
@@ -92,7 +92,7 @@ export default function SignInScreen() {
           />
         </View>
 
-        <Text className="text-primary text-2xl font-bold mt-4">
+        <Text className="text-text-primary text-2xl font-bold mt-4">
           Welcome Back
         </Text>
         <Text className="text-text-secondary mb-6">Sign in to continue</Text>

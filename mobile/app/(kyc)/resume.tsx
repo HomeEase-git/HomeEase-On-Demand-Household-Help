@@ -9,7 +9,7 @@ import PrimaryButton from "../../components/ui/PrimaryButton";
 import OutlinedButton from "../../components/ui/OutlinedButton";
 import UploadCard from "../../components/ui/UploadCard";
 import { useAuthStore } from "../../store/authStore";
-import { submitKycDocument } from "../../services/api";
+import { submitKycDocument, uploadKycFile } from "../../services/api";
 
 // Worker-only screen — clients never reach this (selfie.tsx sends
 // them straight to the contract), but guard against direct navigation.
@@ -61,7 +61,8 @@ export default function ResumeScreen() {
 
       try {
         setSubmitting(true);
-        await submitKycDocument("resume", document.uri);
+        const { url } = await uploadKycFile("resume", document.uri, document.mimeType);
+        await submitKycDocument("resume", url);
         setResumeFile({
           uri: document.uri,
           name: document.name || "resume.pdf",
@@ -88,7 +89,7 @@ export default function ResumeScreen() {
   };
 
   return (
-    <SafeAreaView className="flex-1 bg-primary-white">
+    <SafeAreaView className="flex-1 bg-white">
       <ScreenHeader title="Upload Resume" showBack />
       <ScrollView
         className="flex-1"
@@ -103,7 +104,7 @@ export default function ResumeScreen() {
         </Text>
 
         <View className="bg-card rounded-xl p-4 mb-6">
-          <Text className="text-primary font-semibold mb-2">
+          <Text className="text-brand font-semibold mb-2">
             Why we need your resume
           </Text>
           <Text className="text-text-secondary text-sm">

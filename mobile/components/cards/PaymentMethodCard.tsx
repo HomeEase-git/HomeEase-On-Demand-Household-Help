@@ -1,7 +1,7 @@
 import React from "react";
 import { View, Text, Pressable, Alert } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { colors } from "../../constants";
+import { colors, cardShadow } from "../../constants";
 
 type PaymentMethod = {
   id: string;
@@ -69,14 +69,14 @@ export const PaymentMethodCard: React.FC<Props> = ({
   };
 
   return (
-    <View className="bg-card border-2 border-primary rounded-2xl p-4 mb-3">
+    <View className="bg-card rounded-2xl p-4 mb-3" style={cardShadow}>
       <View className="flex-row items-start">
         <View className="w-12 h-12 bg-accent/20 rounded-lg items-center justify-center mr-3">
           <Ionicons name={getIcon()} size={24} color={colors.accent.DEFAULT} />
         </View>
         <View className="flex-1">
           <View className="flex-row items-center gap-2">
-            <Text className="text-primary font-bold">{getDisplayLabel()}</Text>
+            <Text className="text-text-primary font-bold">{getDisplayLabel()}</Text>
             {isDefault && (
               <View className="bg-success/20 rounded-full px-2 py-0.5">
                 <Text className="text-success text-xs font-semibold">
@@ -104,7 +104,7 @@ export const PaymentMethodCard: React.FC<Props> = ({
           </Pressable>
         )}
         <Pressable onPress={onEdit} className="p-2">
-          <Ionicons name="pencil-outline" size={20} color={colors.white} />
+          <Ionicons name="pencil-outline" size={20} color={colors.text.muted} />
         </Pressable>
         <Pressable onPress={handleDelete} className="p-2">
           <Ionicons name="trash-outline" size={20} color={colors.error} />

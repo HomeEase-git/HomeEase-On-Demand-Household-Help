@@ -42,7 +42,7 @@ export default function CertificationDetailScreen() {
 
   if (!cert) {
     return (
-      <SafeAreaView className="flex-1 bg-primary-white">
+      <SafeAreaView className="flex-1 bg-white">
         <ScreenHeader title="Certification Details" showBack />
         <View className="flex-1 items-center justify-center">
           <Text className="text-text-secondary">Not found</Text>
@@ -71,14 +71,14 @@ export default function CertificationDetailScreen() {
   };
 
   return (
-    <SafeAreaView className="flex-1 bg-primary-white">
+    <SafeAreaView className="flex-1 bg-white">
       <ScreenHeader title="Certification Details" showBack />
       <View className="px-4 py-6">
         <View className="w-full h-48 bg-card-dark rounded-2xl items-center justify-center mb-4">
           <Ionicons
             name="document-text"
             size={60}
-            color={colors.primary.DEFAULT}
+            color={colors.brand.DEFAULT}
           />
           <Text className="text-text-secondary mt-2">Document Preview</Text>
           <Text className="text-text-muted text-xs mt-1">
@@ -87,7 +87,7 @@ export default function CertificationDetailScreen() {
         </View>
 
         <View className="bg-card rounded-2xl p-4 mb-4">
-          <Text className="text-primary font-bold text-lg">{cert.name}</Text>
+          <Text className="text-text-primary font-bold text-lg">{cert.name}</Text>
           <Text className="text-text-secondary text-sm mt-1">
             {cert.issuer}
           </Text>

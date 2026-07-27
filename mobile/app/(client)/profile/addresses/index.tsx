@@ -79,7 +79,7 @@ export default function AddressesScreen() {
   };
 
   return (
-    <SafeAreaView className="flex-1 bg-primary-white">
+    <SafeAreaView className="flex-1 bg-white">
       <ScreenHeader title="My Addresses" showBack />
       {loading ? (
         <View className="flex-1 items-center justify-center">

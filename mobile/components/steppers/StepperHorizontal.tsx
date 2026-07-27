@@ -40,7 +40,7 @@ export const StepperHorizontal: React.FC<Props> = ({ steps, currentStep }) => {
               </View>
               <Text
                 className={`text-xs mt-1 ${
-                  isActive ? "text-primary" : "text-text-muted"
+                  isActive ? "text-brand" : "text-text-muted"
                 }`}
                 numberOfLines={1}
               >

@@ -20,21 +20,21 @@ const slides = [
   {
     id: "1",
     icon: "home" as const,
-    iconColor: colors.primary.DEFAULT,
+    iconColor: colors.brand.DEFAULT,
     title: "Welcome to HomeEase",
     subtitle: "Your home, our care.",
   },
   {
     id: "2",
     icon: "calendar" as const,
-    iconColor: colors.primary.DEFAULT,
+    iconColor: colors.brand.DEFAULT,
     title: "Book in Minutes",
     subtitle: "Choose a service, pick a worker, done.",
   },
   {
     id: "3",
     icon: "shield-checkmark" as const,
-    iconColor: colors.primary.DEFAULT,
+    iconColor: colors.brand.DEFAULT,
     title: "Trusted Professionals",
     subtitle: "All workers are verified and rated.",
   },
@@ -63,7 +63,7 @@ export default function OnboardingScreen() {
   };
 
   return (
-    <SafeAreaView className="flex-1 bg-primary-white">
+    <SafeAreaView className="flex-1 bg-white">
       <Pressable
         className="absolute top-10 right-4 z-10 py-2 px-3"
         onPress={() => router.replace("/role-selection?intent=signup")}

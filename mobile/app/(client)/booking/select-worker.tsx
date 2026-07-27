@@ -60,7 +60,7 @@ function WorkerSelectItem({
     >
       <View className="flex-row items-center justify-between">
         <View className="flex-1">
-          <Text className="text-primary font-bold">{item.name}</Text>
+          <Text className="text-text-primary font-bold">{item.name}</Text>
           <Text className="text-text-secondary text-xs mt-1">
             {item.service}
           </Text>
@@ -157,7 +157,7 @@ export default function SelectWorkerScreen() {
   };
 
   return (
-    <SafeAreaView className="flex-1 bg-primary-white" edges={["top"]}>
+    <SafeAreaView className="flex-1 bg-white" edges={["top"]}>
       <ScreenHeader title="Select a Worker" showBack />
 
       <View className="px-4 flex-1">
@@ -174,7 +174,7 @@ export default function SelectWorkerScreen() {
             {!selectedId && <View className="w-3 h-3 rounded-full bg-accent" />}
           </View>
           <View className="flex-1">
-            <Text className="text-primary font-semibold">
+            <Text className="text-brand font-semibold">
               Any Available Worker
             </Text>
             <Text className="text-text-secondary text-xs mt-0.5">

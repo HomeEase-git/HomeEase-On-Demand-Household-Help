@@ -1,6 +1,8 @@
 import { Request, Response } from 'express';
 import prisma from '@config/database';
 import { errorResponse } from '@utils/errorResponse';
+import { notifyUser } from '@utils/notify';
+import { writeAuditLog } from '@utils/auditLog';
 import type { JwtPayload } from '@/types/index';
 import { getPriceBreakdown, calculateCommission, calculateWithholdingTax } from '../utils/pricing';
 import { COMMISSION_RATE, WITHHOLDING_TAX_RATE } from '@config/pricing';
@@ -205,6 +207,7 @@ export const getPaymentDetail = async (req: AuthRequest, res: Response) => {
         serviceName: payment.booking.serviceTask?.name ?? payment.booking.serviceType,
         status: payment.status,
         escrowStatus: payment.escrowStatus,
+        methodType: payment.methodType,
         priceBreakdown: breakdown,
         createdAt: payment.createdAt,
         updatedAt: payment.updatedAt,
@@ -285,6 +288,7 @@ export const listMyPayments = async (req: AuthRequest, res: Response) => {
       amount: currentRole === 'CLIENT' ? p.subtotal : p.workerPayout,
       status: p.status,
       escrowStatus: p.escrowStatus,
+      methodType: p.methodType,
       createdAt: p.createdAt,
     }));
 
@@ -359,14 +363,12 @@ export const releaseEscrow = async (req: AuthRequest, res: Response) => {
     // Notify worker — schema has PAYMENT_RECEIVED (no PAYMENT_RELEASED)
     // booking.workerId is nullable — skip if the booking has no assigned worker
     if (payment.booking.workerId) {
-      await prisma.notification.create({
-        data: {
-          userId: payment.booking.workerId,
-          type: 'PAYMENT_RECEIVED',
-          title: 'Payment Released',
-          message: `₱${payment.workerPayout} has been released to your account`,
-          relatedId: payment.bookingId,
-        },
+      await notifyUser({
+        userId: payment.booking.workerId,
+        type: 'PAYMENT_RECEIVED',
+        title: 'Payment Released',
+        message: `₱${payment.workerPayout} has been released to your account`,
+        relatedId: payment.bookingId,
       });
     }
 
@@ -389,10 +391,6 @@ export const releaseEscrow = async (req: AuthRequest, res: Response) => {
 /**
  * POST /api/payments/:id/refund
  * Refund payment: escrow → REFUNDED
- *
- * Schema notes:
- *  - Payment has no refundReason or refundedAt fields
- *  - Store reason in a notification; use updatedAt as timestamp proxy
  */
 export const refundPayment = async (req: AuthRequest, res: Response) => {
   try {
@@ -422,25 +420,24 @@ export const refundPayment = async (req: AuthRequest, res: Response) => {
       return res.status(409).json(errorResponse(409, `Cannot refund escrow with status ${payment.escrowStatus}`));
     }
 
-    // schema has no refundReason / refundedAt on Payment
     const updated = await prisma.payment.update({
       where: { id },
       data: {
         escrowStatus: 'REFUNDED',
         status: 'REFUNDED',
+        refundReason: typeof reason === 'string' && reason.trim() ? reason.trim() : null,
+        refundedAt: new Date(),
       },
     });
 
     // Notify worker (booking.workerId is nullable — skip if unassigned)
     if (payment.booking.workerId) {
-      await prisma.notification.create({
-        data: {
-          userId: payment.booking.workerId,
-          type: 'PAYMENT_REFUNDED',
-          title: 'Payment Refunded',
-          message: `Payment has been refunded: ${reason}`,
-          relatedId: payment.bookingId,
-        },
+      await notifyUser({
+        userId: payment.booking.workerId,
+        type: 'PAYMENT_REFUNDED',
+        title: 'Payment Refunded',
+        message: `Payment has been refunded: ${reason}`,
+        relatedId: payment.bookingId,
       });
     }
 
@@ -451,7 +448,7 @@ export const refundPayment = async (req: AuthRequest, res: Response) => {
         id: updated.id,
         escrowStatus: updated.escrowStatus,
         status: updated.status,
-        refundedAt: updated.updatedAt, // proxy — schema has no refundedAt
+        refundedAt: updated.refundedAt,
         refundAmount: updated.subtotal,
       },
     });
@@ -496,6 +493,15 @@ export const createPaymentIntent = async (req: AuthRequest, res: Response) => {
     });
   } catch (error) {
     console.error('Error creating payment intent:', error);
+    await writeAuditLog({
+      actorId: req.user?.userId,
+      actorName: req.user?.email,
+      actorRole: req.user?.role,
+      action: 'PAYMENT_INTENT_ERROR',
+      category: 'SYSTEM_ERROR',
+      level: 'ERROR',
+      message: `Payment intent creation failed: ${error instanceof Error ? error.message : 'unknown error'}`,
+    });
     return res.status(500).json(errorResponse(500, 'Failed to create payment intent'));
   }
 };
@@ -519,6 +525,12 @@ export const handlePayMongoWebhook = async (req: Request, res: Response) => {
     });
   } catch (error) {
     console.error('Error handling webhook:', error);
+    await writeAuditLog({
+      action: 'PAYMONGO_WEBHOOK_ERROR',
+      category: 'SYSTEM_ERROR',
+      level: 'ERROR',
+      message: `PayMongo webhook handling failed: ${error instanceof Error ? error.message : 'unknown error'}`,
+    });
     return res.status(500).json({
       success: false,
       message: 'Failed to handle webhook',

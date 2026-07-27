@@ -77,20 +77,20 @@ export const ImageSourcePickerBottomSheet: React.FC<Props> = ({
         disabled={loading}
         onPress={openCamera}
       >
-        <Text className="text-primary font-semibold">Take Photo</Text>
+        <Text className="text-brand font-semibold">Take Photo</Text>
       </Pressable>
       <Pressable
         className="bg-card-light rounded-xl py-4 px-4"
         disabled={loading}
         onPress={openGallery}
       >
-        <Text className="text-primary font-semibold">Choose from Gallery</Text>
+        <Text className="text-brand font-semibold">Choose from Gallery</Text>
       </Pressable>
       <Pressable
         className="py-4 mt-2"
         onPress={() => innerRef.current?.close()}
       >
-        <Text className="text-primary text-center">Cancel</Text>
+        <Text className="text-brand text-center">Cancel</Text>
       </Pressable>
     </BottomSheetWrapper>
   );

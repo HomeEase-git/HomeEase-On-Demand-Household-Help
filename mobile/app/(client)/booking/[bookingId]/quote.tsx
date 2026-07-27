@@ -9,6 +9,7 @@ import PrimaryButton from "../../../../components/ui/PrimaryButton";
 import DangerButton from "../../../../components/ui/DangerButton";
 import OutlinedButton from "../../../../components/ui/OutlinedButton";
 import { useBookingStore } from "../../../../store/bookingStore";
+import { approveQuote as apiApproveQuote, disputeQuote as apiDisputeQuote } from "../../../../services/api";
 import { colors } from "../../../../constants";
 
 export default function QuoteReviewScreen() {
@@ -25,7 +26,7 @@ export default function QuoteReviewScreen() {
 
   if (!booking || !quote) {
     return (
-      <SafeAreaView className="flex-1 bg-primary-white">
+      <SafeAreaView className="flex-1 bg-white">
         <ScreenHeader title="Review Quote" showBack />
         <View className="flex-1 items-center justify-center">
           <Ionicons
@@ -53,7 +54,7 @@ export default function QuoteReviewScreen() {
           onPress: async () => {
             setLoading(true);
             try {
-              await new Promise((res) => setTimeout(res, 600));
+              await apiApproveQuote(booking.id);
               approveQuote(booking.id);
               Alert.alert(
                 "Quote Approved",
@@ -65,6 +66,9 @@ export default function QuoteReviewScreen() {
                   },
                 ],
               );
+            } catch (error) {
+              console.error("Approve quote error:", error);
+              Alert.alert("Error", "Failed to approve quote. Please try again.");
             } finally {
               setLoading(false);
             }
@@ -81,26 +85,29 @@ export default function QuoteReviewScreen() {
     }
     setLoading(true);
     try {
-      await new Promise((res) => setTimeout(res, 600));
+      await apiDisputeQuote(booking.id, disputeReason);
       disputeQuote(booking.id, disputeReason);
       Alert.alert(
         "Dispute Submitted",
         "Our support team will review the quote and contact both parties.",
         [{ text: "OK", onPress: () => router.back() }],
       );
+    } catch (error) {
+      console.error("Dispute quote error:", error);
+      Alert.alert("Error", "Failed to submit dispute. Please try again.");
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <SafeAreaView className="flex-1 bg-primary-white">
+    <SafeAreaView className="flex-1 bg-white">
       <ScreenHeader title="Review Quote" showBack />
       <ScrollView contentContainerStyle={{ padding: 24, paddingBottom: 40 }}>
         {/* Booking summary */}
         <View className="bg-card rounded-2xl p-4 mb-4">
           <Text className="text-text-secondary text-xs mb-1">Booking</Text>
-          <Text className="text-primary font-bold">{booking.service}</Text>
+          <Text className="text-text-primary font-bold">{booking.service}</Text>
           <Text className="text-text-secondary text-sm mt-1">
             Worker: {booking.worker}
           </Text>
@@ -145,7 +152,7 @@ export default function QuoteReviewScreen() {
         {/* Quote card */}
         <View className="bg-card rounded-2xl p-4 mb-4">
           <View className="flex-row items-center justify-between mb-3">
-            <Text className="text-primary font-bold text-base">
+            <Text className="text-text-primary font-bold text-base">
               Worker&apos;s Quote
             </Text>
             <Text className="text-text-muted text-xs">
@@ -160,7 +167,7 @@ export default function QuoteReviewScreen() {
 
           <View className="flex-row justify-between py-2 border-b border-divider">
             <Text className="text-text-secondary text-sm">Labor</Text>
-            <Text className="text-primary font-semibold">
+            <Text className="text-brand font-semibold">
               ₱{quote.laborCost.toFixed(2)}
             </Text>
           </View>
@@ -168,14 +175,14 @@ export default function QuoteReviewScreen() {
           {quote.materialsCost > 0 && (
             <View className="flex-row justify-between py-2 border-b border-divider">
               <Text className="text-text-secondary text-sm">Materials</Text>
-              <Text className="text-primary font-semibold">
+              <Text className="text-brand font-semibold">
                 ₱{quote.materialsCost.toFixed(2)}
               </Text>
             </View>
           )}
 
           <View className="flex-row justify-between py-3">
-            <Text className="text-primary font-bold">Total</Text>
+            <Text className="text-text-primary font-bold">Total</Text>
             <Text className="text-accent font-bold text-xl">
               ₱{quote.totalAmount.toFixed(2)}
             </Text>
@@ -186,7 +193,7 @@ export default function QuoteReviewScreen() {
               <Text className="text-text-secondary text-xs font-semibold mb-1">
                 Worker&apos;s notes
               </Text>
-              <Text className="text-primary text-sm">{quote.notes}</Text>
+              <Text className="text-brand text-sm">{quote.notes}</Text>
             </View>
           ) : null}
         </View>
@@ -197,7 +204,7 @@ export default function QuoteReviewScreen() {
             <Ionicons
               name="information-circle-outline"
               size={18}
-              color="#4B5FD6"
+              color={colors.brand.DEFAULT}
             />
             <Text className="text-text-secondary text-xs ml-2 flex-1">
               Payment will only be processed after you approve this quote and

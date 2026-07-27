@@ -47,7 +47,7 @@ export default function EditProfileScreen() {
   };
 
   return (
-    <SafeAreaView className="flex-1 bg-primary-white">
+    <SafeAreaView className="flex-1 bg-white">
       <ScreenHeader title="Edit Profile" showBack />
       <ScrollView contentContainerStyle={{ padding: 24 }}>
         <InputField

@@ -3,6 +3,7 @@ import { View, Text, ScrollView, Alert } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
+import { isAxiosError } from "axios";
 import ScreenHeader from "../../../components/ui/ScreenHeader";
 import InputField from "../../../components/ui/InputField";
 import DangerButton from "../../../components/ui/DangerButton";
@@ -10,14 +11,17 @@ import OutlinedButton from "../../../components/ui/OutlinedButton";
 import GenericConfirmationModal from "../../../components/modals/GenericConfirmationModal";
 import { useAuthStore } from "../../../store/authStore";
 import { colors } from "../../../constants";
+import * as api from "../../../services/api";
 
 export default function DeleteAccountScreen() {
   const router = useRouter();
   const logout = useAuthStore((s) => s.logout);
   const [confirmText, setConfirmText] = useState("");
+  const [password, setPassword] = useState("");
   const [modalVisible, setModalVisible] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
-  const canDelete = confirmText === "DELETE";
+  const canDelete = confirmText === "DELETE" && password.length > 0;
 
   const handleDelete = () => {
     setModalVisible(true);
@@ -25,20 +29,28 @@ export default function DeleteAccountScreen() {
 
   const onConfirmDelete = async () => {
     setModalVisible(false);
+    setDeleting(true);
     try {
+      await api.deleteAccount(password);
       logout();
       Alert.alert(
         "Account deleted",
         "Your account has been permanently deleted",
       );
       router.replace("/landing");
-    } catch (err) {
-      Alert.alert("Error", "Failed to delete account");
+    } catch (error) {
+      const message =
+        isAxiosError(error) && error.response?.status === 401
+          ? "Password is incorrect"
+          : "Failed to delete account";
+      Alert.alert("Error", message);
+    } finally {
+      setDeleting(false);
     }
   };
 
   return (
-    <SafeAreaView className="flex-1 bg-primary-white">
+    <SafeAreaView className="flex-1 bg-white">
       <ScreenHeader title="Delete Account" showBack />
       <ScrollView contentContainerStyle={{ padding: 24 }}>
         <View className="items-center mb-6">
@@ -64,11 +76,18 @@ export default function DeleteAccountScreen() {
           placeholder="DELETE"
           label="Confirmation"
         />
+        <InputField
+          value={password}
+          onChangeText={setPassword}
+          placeholder="Your password"
+          label="Password"
+          secureTextEntry
+        />
         <View className="gap-3 mt-6">
           <DangerButton
-            label="Delete My Account"
+            label={deleting ? "Deleting..." : "Delete My Account"}
             fullWidth
-            disabled={!canDelete}
+            disabled={!canDelete || deleting}
             onPress={handleDelete}
           />
           <OutlinedButton label="Cancel" onPress={() => router.back()} />

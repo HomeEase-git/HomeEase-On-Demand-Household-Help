@@ -4,22 +4,45 @@ import BottomSheetWrapper, { BottomSheetHandle } from "./BottomSheetWrapper";
 import PrimaryButton from "../ui/PrimaryButton";
 import { categories } from "../../constants/dummyData";
 
+export type SortOption = "rating" | "priceLow" | "priceHigh" | "nearest";
+
+export type SearchFilters = {
+  sort: SortOption;
+  availableOnly: boolean;
+};
+
+const DEFAULT_FILTERS: SearchFilters = { sort: "rating", availableOnly: false };
+
 type Props = {
   innerRef: React.RefObject<BottomSheetHandle | null>;
-  onApply: () => void;
+  value?: SearchFilters;
+  onApply?: (filters: SearchFilters) => void;
+  showNearest?: boolean;
 };
 
 export const FilterSortBottomSheet: React.FC<Props> = ({
   innerRef,
+  value = DEFAULT_FILTERS,
   onApply,
+  showNearest = false,
 }) => {
-  const [sort, setSort] = useState<"rating" | "priceLow" | "priceHigh">(
-    "rating",
-  );
-  const [availableOnly, setAvailableOnly] = useState(false);
+  const [sort, setSort] = useState<SortOption>(value.sort);
+  const [availableOnly, setAvailableOnly] = useState(value.availableOnly);
+
+  React.useEffect(() => {
+    setSort(value.sort);
+    setAvailableOnly(value.availableOnly);
+  }, [value.sort, value.availableOnly]);
 
   const handleApply = () => {
-    onApply();
+    onApply?.({ sort, availableOnly });
+    innerRef.current?.close();
+  };
+
+  const handleReset = () => {
+    setSort("rating");
+    setAvailableOnly(false);
+    onApply?.({ sort: "rating", availableOnly: false });
     innerRef.current?.close();
   };
 
@@ -29,12 +52,13 @@ export const FilterSortBottomSheet: React.FC<Props> = ({
       snapPoints={["60%"]}
       title="Filter & Sort"
     >
-      <Text className="text-primary text-sm mb-2">Sort by</Text>
-      <View className="flex-row gap-2 mb-4">
+      <Text className="text-brand text-sm mb-2">Sort by</Text>
+      <View className="flex-row flex-wrap gap-2 mb-4">
         {[
           { value: "rating" as const, label: "Rating" },
           { value: "priceLow" as const, label: "Price Low-High" },
           { value: "priceHigh" as const, label: "Price High-Low" },
+          ...(showNearest ? [{ value: "nearest" as const, label: "Nearest (10km)" }] : []),
         ].map((opt) => (
           <Pressable
             key={opt.value}
@@ -45,7 +69,7 @@ export const FilterSortBottomSheet: React.FC<Props> = ({
           >
             <Text
               className={
-                sort === opt.value ? "text-white font-semibold" : "text-primary"
+                sort === opt.value ? "text-white font-semibold" : "text-brand"
               }
             >
               {opt.label}
@@ -54,7 +78,7 @@ export const FilterSortBottomSheet: React.FC<Props> = ({
         ))}
       </View>
       <View className="flex-row items-center justify-between mb-6">
-        <Text className="text-primary">Available only</Text>
+        <Text className="text-brand">Available only</Text>
         <Pressable
           className={`w-12 h-7 rounded-full ${
             availableOnly ? "bg-accent" : "bg-card-light"
@@ -69,8 +93,8 @@ export const FilterSortBottomSheet: React.FC<Props> = ({
         </Pressable>
       </View>
       <PrimaryButton label="Apply" fullWidth onPress={handleApply} />
-      <Pressable className="mt-3" onPress={() => innerRef.current?.close()}>
-        <Text className="text-primary text-center">Reset</Text>
+      <Pressable className="mt-3" onPress={handleReset}>
+        <Text className="text-brand text-center">Reset</Text>
       </Pressable>
     </BottomSheetWrapper>
   );

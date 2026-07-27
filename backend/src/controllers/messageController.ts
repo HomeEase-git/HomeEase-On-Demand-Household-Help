@@ -1,6 +1,8 @@
 import { Request, Response } from 'express';
 import prisma from '@config/database';
 import { errorResponse } from '@utils/errorResponse';
+import { notifyUser } from '@utils/notify';
+import { getIO } from '../socket';
 import type { JwtPayload } from '@/types/index';
 
 interface AuthRequest extends Request {
@@ -36,10 +38,10 @@ export const getConversations = async (req: AuthRequest, res: Response) => {
       },
       include: {
         sender: {
-          select: { id: true, fullName: true, avatar: true }, // schema field is `avatar`, not `profileImage`
+          select: { id: true, fullName: true, avatar: true, phone: true }, // schema field is `avatar`, not `profileImage`
         },
         receiver: {
-          select: { id: true, fullName: true, avatar: true },
+          select: { id: true, fullName: true, avatar: true, phone: true },
         },
       },
       orderBy: { createdAt: 'desc' },
@@ -59,6 +61,7 @@ export const getConversations = async (req: AuthRequest, res: Response) => {
           userId: otherUser.id,
           userName: otherUser.fullName,
           userImage: otherUser.avatar,
+          userPhone: otherUser.phone,
           lastMessage: msg.content,
           lastMessageTime: msg.createdAt,
           unreadCount: !msg.isRead && msg.receiverId === currentUserId ? 1 : 0,
@@ -119,10 +122,10 @@ export const getConversationThread = async (req: AuthRequest, res: Response) => 
         },
         include: {
           sender: {
-            select: { id: true, fullName: true, avatar: true },
+            select: { id: true, fullName: true, avatar: true, phone: true },
           },
           receiver: {
-            select: { id: true, fullName: true, avatar: true },
+            select: { id: true, fullName: true, avatar: true, phone: true },
           },
         },
         orderBy: { createdAt: 'desc' },
@@ -178,7 +181,7 @@ export const sendMessage = async (req: AuthRequest, res: Response) => {
       return res.status(401).json(errorResponse(401, 'Not authenticated'));
     }
 
-    const { receiverId, content } = req.body;
+    const { receiverId, content, imageUrl } = req.body;
     const currentUserId = req.user.userId;
 
     // Verify receiver exists
@@ -194,29 +197,35 @@ export const sendMessage = async (req: AuthRequest, res: Response) => {
       data: {
         senderId: currentUserId,
         receiverId,
-        content,
+        content: content ?? '',
+        imageUrl: imageUrl ?? null,
         isRead: false,
       },
       include: {
         sender: {
-          select: { id: true, fullName: true, avatar: true },
+          select: { id: true, fullName: true, avatar: true, phone: true },
         },
         receiver: {
-          select: { id: true, fullName: true, avatar: true },
+          select: { id: true, fullName: true, avatar: true, phone: true },
         },
       },
     });
 
-    // Create notification for receiver
-    await prisma.notification.create({
-      data: {
-        userId: receiverId,
-        type: 'MESSAGE_RECEIVED',
-        title: `Message from ${message.sender.fullName}`,
-        message: content.substring(0, 100),
-        relatedId: message.id,
-      },
+    // Create notification for receiver and push it live
+    await notifyUser({
+      userId: receiverId,
+      type: 'MESSAGE_RECEIVED',
+      title: `Message from ${message.sender.fullName}`,
+      message: imageUrl ? '📷 Sent an image' : content.substring(0, 100),
+      relatedId: message.id,
     });
+
+    // Push the new message live to the receiver, if connected
+    try {
+      getIO().to(receiverId).emit('message:new', message);
+    } catch {
+      // Socket.IO may not be initialized (e.g. scripts/tests) — safe to ignore
+    }
 
     return res.status(201).json({
       success: true,

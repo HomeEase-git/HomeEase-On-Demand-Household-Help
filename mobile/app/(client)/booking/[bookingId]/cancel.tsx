@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { View, Text, ScrollView, Pressable } from "react-native";
+import { View, Text, ScrollView, Pressable, Alert } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter, useLocalSearchParams } from "expo-router";
@@ -9,6 +9,7 @@ import OutlinedButton from "../../../../components/ui/OutlinedButton";
 import DangerButton from "../../../../components/ui/DangerButton";
 import GenericConfirmationModal from "../../../../components/modals/GenericConfirmationModal";
 import { useBookingStore } from "../../../../store/bookingStore";
+import { cancelBooking } from "../../../../services/api";
 import { colors } from "../../../../constants";
 
 const REASONS = [
@@ -26,28 +27,38 @@ export default function CancelBookingScreen() {
   const [reason, setReason] = useState<string | null>(null);
   const [otherText, setOtherText] = useState("");
   const [confirmVisible, setConfirmVisible] = useState(false);
+  const [loading, setLoading] = useState(false);
 
   const booking = bookings.find((b) => b.id === bookingId);
 
   const canConfirm =
     !!reason && (reason !== "Other" || otherText.trim().length > 0);
 
-  const handleConfirmCancel = () => {
+  const handleConfirmCancel = async () => {
     setConfirmVisible(false);
+    if (!bookingId) return;
 
-    if (bookingId) {
+    const finalReason = reason === "Other" ? otherText.trim() : reason ?? "";
+
+    setLoading(true);
+    try {
+      await cancelBooking(bookingId, finalReason);
       updateBookingStatus(bookingId, "Cancelled");
+      Alert.alert(
+        "Booking Cancelled",
+        "Your booking has been cancelled successfully.",
+        [{ text: "OK", onPress: () => router.replace("/(client)/booking") }],
+      );
+    } catch (error) {
+      console.error("Cancel booking error:", error);
+      Alert.alert("Error", "Failed to cancel booking. Please try again.");
+    } finally {
+      setLoading(false);
     }
-
-    require("react-native").Alert.alert(
-      "Booking Cancelled",
-      "Your booking has been cancelled successfully.",
-      [{ text: "OK", onPress: () => router.replace("/(client)/booking") }],
-    );
   };
 
   return (
-    <SafeAreaView className="flex-1 bg-primary-white">
+    <SafeAreaView className="flex-1 bg-white">
       <ScreenHeader title="Cancel Booking" showBack />
       <ScrollView
         className="flex-1"
@@ -63,7 +74,7 @@ export default function CancelBookingScreen() {
 
         {booking && (
           <View className="bg-card rounded-2xl p-4 mb-4">
-            <Text className="text-primary font-bold">{booking.service}</Text>
+            <Text className="text-text-primary font-bold">{booking.service}</Text>
             <Text className="text-text-secondary text-sm mt-1">
               {booking.worker} · {booking.date} · ₱{booking.amount}
             </Text>
@@ -89,10 +100,10 @@ export default function CancelBookingScreen() {
               }`}
             >
               {reason === r && (
-                <View className="w-2 h-2 rounded-full bg-primary-white" />
+                <View className="w-2 h-2 rounded-full bg-white" />
               )}
             </View>
-            <Text className="text-primary">{r}</Text>
+            <Text className="text-brand">{r}</Text>
           </Pressable>
         ))}
 
@@ -112,9 +123,9 @@ export default function CancelBookingScreen() {
           <OutlinedButton label="Keep Booking" onPress={() => router.back()} />
           <View className="flex-1">
             <DangerButton
-              label="Cancel Booking"
+              label={loading ? "Cancelling..." : "Cancel Booking"}
               fullWidth
-              disabled={!canConfirm}
+              disabled={!canConfirm || loading}
               onPress={() => setConfirmVisible(true)}
             />
           </View>

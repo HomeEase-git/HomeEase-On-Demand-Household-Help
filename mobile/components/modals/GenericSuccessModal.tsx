@@ -21,7 +21,7 @@ export const GenericSuccessModal: React.FC<Props> = ({
       <View className="items-center mb-4">
         <Ionicons name="checkmark-circle" size={48} color={colors.success} />
       </View>
-      <Text className="text-primary font-bold text-lg text-center">
+      <Text className="text-text-primary font-bold text-lg text-center">
         {title}
       </Text>
       <View className="mt-6">

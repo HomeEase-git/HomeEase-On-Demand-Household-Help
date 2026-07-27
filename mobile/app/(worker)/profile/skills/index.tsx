@@ -76,7 +76,7 @@ export default function SkillsScreen() {
   };
 
   return (
-    <SafeAreaView className="flex-1 bg-primary-white">
+    <SafeAreaView className="flex-1 bg-white">
       <ScreenHeader title="Skills & Services" showBack />
       <FlatList
         data={skills}
@@ -114,9 +114,9 @@ export default function SkillsScreen() {
 
       <Modal visible={showModal} transparent animationType="slide">
         <View className="flex-1 bg-black/40 justify-end">
-          <View className="bg-primary-white rounded-t-3xl p-6 pb-8">
+          <View className="bg-white rounded-t-3xl p-6 pb-8">
             <View className="flex-row justify-between items-center mb-6">
-              <Text className="text-primary text-xl font-bold">Add Skill</Text>
+              <Text className="text-text-primary text-xl font-bold">Add Skill</Text>
               <Pressable onPress={() => setShowModal(false)}>
                 <Ionicons name="close" size={24} color={colors.text.primary} />
               </Pressable>

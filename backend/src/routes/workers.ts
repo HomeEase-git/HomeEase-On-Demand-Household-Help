@@ -3,6 +3,8 @@ import {
   searchWorkers,
   getWorkerDetail,
   getWorkerReviews,
+  getWorkerAvailability,
+  getWorkerBlockedDates,
   updateAvailability,
   updateWorkerProfile,
   addServiceTypes,
@@ -22,6 +24,8 @@ const router = Router();
 router.get('/', searchWorkers);
 router.get('/:workerId', getWorkerDetail);
 router.get('/:workerId/reviews', getWorkerReviews);
+router.get('/:workerId/availability', getWorkerAvailability);
+router.get('/:workerId/blocked-dates', getWorkerBlockedDates);
 
 // Protected routes (auth + worker only)
 router.patch(

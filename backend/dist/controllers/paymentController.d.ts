@@ -34,10 +34,6 @@ export declare const releaseEscrow: (req: AuthRequest, res: Response) => Promise
 /**
  * POST /api/payments/:id/refund
  * Refund payment: escrow → REFUNDED
- *
- * Schema notes:
- *  - Payment has no refundReason or refundedAt fields
- *  - Store reason in a notification; use updatedAt as timestamp proxy
  */
 export declare const refundPayment: (req: AuthRequest, res: Response) => Promise<Response<any, Record<string, any>>>;
 /**

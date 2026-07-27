@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { View, Text, Pressable, Modal, ScrollView } from "react-native";
 import { TimeHHmm, isValidHHmm } from "../../utils/time";
+import { colors } from "../../constants";
 
 type Props = {
   value: TimeHHmm | null;
@@ -87,17 +88,17 @@ export default function TimeSlotPicker({
         onPress={() => setIsOpen(true)}
         style={{
           borderWidth: 1,
-          borderColor: "#D1D5DB",
+          borderColor: colors.divider,
           borderRadius: 12,
           paddingVertical: 14,
           paddingHorizontal: 14,
-          backgroundColor: "#FFFFFF",
+          backgroundColor: colors.white,
         }}
       >
-        <Text style={{ fontSize: 14, fontWeight: "600", color: "#111827" }}>
+        <Text style={{ fontSize: 14, fontWeight: "600", color: colors.neutral[900] }}>
           {preview}
         </Text>
-        <Text style={{ fontSize: 12, color: "#6B7280", marginTop: 4 }}>
+        <Text style={{ fontSize: 12, color: colors.text.secondary, marginTop: 4 }}>
           Tap to choose a time
         </Text>
       </Pressable>
@@ -112,7 +113,7 @@ export default function TimeSlotPicker({
         >
           <View
             style={{
-              backgroundColor: "#FFFFFF",
+              backgroundColor: colors.white,
               borderTopLeftRadius: 24,
               borderTopRightRadius: 24,
               padding: 20,
@@ -127,12 +128,12 @@ export default function TimeSlotPicker({
               }}
             >
               <Text
-                style={{ fontSize: 18, fontWeight: "700", color: "#111827" }}
+                style={{ fontSize: 18, fontWeight: "700", color: colors.neutral[900] }}
               >
                 Select time
               </Text>
               <Pressable onPress={() => setIsOpen(false)}>
-                <Text style={{ color: "#2563EB", fontWeight: "600" }}>
+                <Text style={{ color: colors.brand.DEFAULT, fontWeight: "600" }}>
                   Cancel
                 </Text>
               </Pressable>
@@ -144,7 +145,7 @@ export default function TimeSlotPicker({
                   style={{
                     fontSize: 12,
                     fontWeight: "600",
-                    color: "#6B7280",
+                    color: colors.text.secondary,
                     marginBottom: 6,
                   }}
                 >
@@ -166,12 +167,12 @@ export default function TimeSlotPicker({
                             borderRadius: 10,
                             marginBottom: 6,
                             alignItems: "center",
-                            backgroundColor: selected ? "#2563EB" : "#F9FAFB",
+                            backgroundColor: selected ? colors.brand.DEFAULT : colors.card.light,
                           }}
                         >
                           <Text
                             style={{
-                              color: selected ? "#FFFFFF" : "#111827",
+                              color: selected ? colors.white : colors.neutral[900],
                               fontWeight: selected ? "700" : "500",
                             }}
                           >
@@ -189,7 +190,7 @@ export default function TimeSlotPicker({
                   style={{
                     fontSize: 12,
                     fontWeight: "600",
-                    color: "#6B7280",
+                    color: colors.text.secondary,
                     marginBottom: 6,
                   }}
                 >
@@ -210,12 +211,12 @@ export default function TimeSlotPicker({
                           borderRadius: 10,
                           marginBottom: 6,
                           alignItems: "center",
-                          backgroundColor: selected ? "#2563EB" : "#F9FAFB",
+                          backgroundColor: selected ? colors.brand.DEFAULT : colors.card.light,
                         }}
                       >
                         <Text
                           style={{
-                            color: selected ? "#FFFFFF" : "#111827",
+                            color: selected ? colors.white : colors.neutral[900],
                             fontWeight: selected ? "700" : "500",
                           }}
                         >
@@ -232,7 +233,7 @@ export default function TimeSlotPicker({
                   style={{
                     fontSize: 12,
                     fontWeight: "600",
-                    color: "#6B7280",
+                    color: colors.text.secondary,
                     marginBottom: 6,
                   }}
                 >
@@ -253,12 +254,12 @@ export default function TimeSlotPicker({
                           borderRadius: 10,
                           marginBottom: 6,
                           alignItems: "center",
-                          backgroundColor: selected ? "#2563EB" : "#F9FAFB",
+                          backgroundColor: selected ? colors.brand.DEFAULT : colors.card.light,
                         }}
                       >
                         <Text
                           style={{
-                            color: selected ? "#FFFFFF" : "#111827",
+                            color: selected ? colors.white : colors.neutral[900],
                             fontWeight: selected ? "700" : "500",
                           }}
                         >
@@ -275,12 +276,12 @@ export default function TimeSlotPicker({
               onPress={confirmSelection}
               style={{
                 borderRadius: 12,
-                backgroundColor: "#2563EB",
+                backgroundColor: colors.brand.DEFAULT,
                 paddingVertical: 12,
                 alignItems: "center",
               }}
             >
-              <Text style={{ color: "#FFFFFF", fontWeight: "700" }}>Done</Text>
+              <Text style={{ color: colors.white, fontWeight: "700" }}>Done</Text>
             </Pressable>
           </View>
         </View>

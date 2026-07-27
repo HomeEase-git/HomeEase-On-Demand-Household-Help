@@ -3,7 +3,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.logout = exports.refreshToken = exports.resetPassword = exports.forgotPassword = exports.resendOtp = exports.verifyOtpHandler = exports.sendOtp = exports.login = exports.signup = void 0;
+exports.logout = exports.refreshToken = exports.resetPassword = exports.forgotPassword = exports.resendOtp = exports.verifyOtpHandler = exports.sendOtp = exports.getMe = exports.login = exports.signup = void 0;
 const database_1 = __importDefault(require("@config/database"));
 const passwordHash_1 = require("@utils/passwordHash");
 const jwt_1 = require("@utils/jwt");
@@ -69,10 +69,16 @@ const signup = async (req, res) => {
             }
             return createdUser;
         });
-        // Generate and send OTP
+        // Generate and send OTP — the account is already created at this point,
+        // so a failed email send shouldn't turn a successful signup into a 500.
         const otp = (0, otpService_1.generateOtp)();
         await (0, otpService_1.storeOtp)(user.id, otp);
-        await (0, emailService_1.sendOtpEmail)(email, otp);
+        try {
+            await (0, emailService_1.sendOtpEmail)(email, otp);
+        }
+        catch (emailError) {
+            console.error('Failed to send OTP email during signup:', emailError);
+        }
         const token = (0, jwt_1.generateToken)({ userId: user.id, email: user.email, role: user.role });
         const refreshToken = crypto_1.default.randomBytes(40).toString('hex');
         await (0, otpService_1.storeRefreshToken)(user.id, refreshToken);
@@ -115,6 +121,14 @@ const login = async (req, res) => {
         if (!isPasswordValid) {
             return res.status(401).json((0, errorResponse_1.errorResponse)(401, 'Invalid credentials'));
         }
+        if (user.status !== 'ACTIVE') {
+            const message = user.status === 'SUSPENDED'
+                ? 'This account has been suspended. Contact support for assistance.'
+                : user.status === 'BANNED'
+                    ? 'This account has been banned.'
+                    : 'This account no longer exists.';
+            return res.status(403).json((0, errorResponse_1.errorResponse)(403, message));
+        }
         const token = (0, jwt_1.generateToken)({ userId: user.id, email: user.email, role: user.role });
         const refreshToken = crypto_1.default.randomBytes(40).toString('hex');
         await (0, otpService_1.storeRefreshToken)(user.id, refreshToken);
@@ -139,6 +153,36 @@ const login = async (req, res) => {
     }
 };
 exports.login = login;
+// ============================================================================
+// GET /api/auth/me
+// ============================================================================
+const getMe = async (req, res) => {
+    try {
+        if (!req.user) {
+            return res.status(401).json((0, errorResponse_1.errorResponse)(401, 'Not authenticated'));
+        }
+        const user = await database_1.default.user.findUnique({ where: { id: req.user.userId } });
+        if (!user) {
+            return res.status(404).json((0, errorResponse_1.errorResponse)(404, 'User not found'));
+        }
+        return res.json({
+            success: true,
+            data: {
+                id: user.id,
+                name: user.fullName,
+                email: user.email,
+                phone: user.phone,
+                role: user.role,
+                isVerified: user.isVerified,
+            },
+        });
+    }
+    catch (error) {
+        console.error('Get me error:', error);
+        return res.status(500).json((0, errorResponse_1.errorResponse)(500, 'Internal server error'));
+    }
+};
+exports.getMe = getMe;
 // ============================================================================
 // OTP
 // ============================================================================
@@ -191,7 +235,13 @@ const verifyOtpHandler = async (req, res) => {
             where: { id: user.id },
             data: { isVerified: true },
         });
-        await (0, emailService_1.sendWelcomeEmail)(email, user.fullName);
+        // Verification already succeeded — a failed welcome email shouldn't undo that.
+        try {
+            await (0, emailService_1.sendWelcomeEmail)(email, user.fullName);
+        }
+        catch (emailError) {
+            console.error('Failed to send welcome email after OTP verification:', emailError);
+        }
         const token = (0, jwt_1.generateToken)({ userId: user.id, email: user.email, role: user.role });
         return res.json({
             success: true,
@@ -248,7 +298,14 @@ const forgotPassword = async (req, res) => {
         }
         const token = (0, otpService_1.generateResetToken)();
         await (0, otpService_1.storePasswordResetToken)(user.id, token);
-        await (0, emailService_1.sendPasswordResetEmail)(email, token);
+        // Must not let a failed send produce a different response than the
+        // "email not registered" path above — that would leak account existence.
+        try {
+            await (0, emailService_1.sendPasswordResetEmail)(email, token);
+        }
+        catch (emailError) {
+            console.error('Failed to send password reset email:', emailError);
+        }
         return res.json({
             success: true,
             message: 'If that email is registered, a reset link has been sent',

@@ -20,6 +20,18 @@ export declare const getWorkerDetail: (req: AuthRequest, res: Response) => Promi
  */
 export declare const getWorkerReviews: (req: AuthRequest, res: Response) => Promise<Response<any, Record<string, any>>>;
 /**
+ * GET /api/workers/:workerId/availability?date=YYYY-MM-DD
+ * Returns the booked time slots for a worker on a specific date, so the
+ * client's booking calendar can disable them.
+ */
+export declare const getWorkerAvailability: (req: AuthRequest, res: Response) => Promise<Response<any, Record<string, any>>>;
+/**
+ * GET /api/workers/:workerId/blocked-dates
+ * Returns dates (within the next 90 days, matching the client calendar's
+ * booking window) where the worker already has at least one active booking.
+ */
+export declare const getWorkerBlockedDates: (req: AuthRequest, res: Response) => Promise<Response<any, Record<string, any>>>;
+/**
  * PATCH /api/workers/me/availability
  * Toggle isAvailable and set availableDays (worker only)
  */

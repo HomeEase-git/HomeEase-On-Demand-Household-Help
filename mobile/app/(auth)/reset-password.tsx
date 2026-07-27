@@ -7,6 +7,7 @@ import ScreenHeader from "../../components/ui/ScreenHeader";
 import InputField from "../../components/ui/InputField";
 import PrimaryButton from "../../components/ui/PrimaryButton";
 import { resetPassword } from "../../services/api";
+import { colors } from "../../constants";
 
 const requirements = [
   {
@@ -71,14 +72,14 @@ export default function ResetPasswordScreen() {
   };
 
   return (
-    <SafeAreaView className="flex-1 bg-primary-white">
+    <SafeAreaView className="flex-1 bg-white">
       <ScreenHeader title="Reset Password" showBack />
       <ScrollView
         className="flex-1"
         contentContainerStyle={{ paddingHorizontal: 24, paddingTop: 16 }}
         keyboardShouldPersistTaps="handled"
       >
-        <Text className="text-primary text-2xl font-bold">Reset Password</Text>
+        <Text className="text-text-primary text-2xl font-bold">Reset Password</Text>
         <Text className="text-text-secondary mt-2 mb-6">
           Create a strong password to secure your account.
         </Text>
@@ -127,7 +128,7 @@ export default function ResetPasswordScreen() {
                     r.test(newPassword) ? "checkmark-circle" : "ellipse-outline"
                   }
                   size={16}
-                  color={r.test(newPassword) ? "#4CAF50" : "#999"}
+                  color={r.test(newPassword) ? colors.success : colors.text.muted}
                 />
                 <Text
                   className={`text-xs ${
@@ -164,7 +165,7 @@ export default function ResetPasswordScreen() {
 
         {confirmPassword && newPassword !== confirmPassword && (
           <View className="flex-row items-center gap-2 mb-4 p-3 bg-error/10 rounded-lg">
-            <Ionicons name="alert-circle" size={16} color="#F44336" />
+            <Ionicons name="alert-circle" size={16} color={colors.error} />
             <Text className="text-error text-xs flex-1">
               Passwords do not match
             </Text>

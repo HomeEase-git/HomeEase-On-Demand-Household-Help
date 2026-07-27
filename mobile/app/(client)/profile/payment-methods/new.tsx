@@ -60,10 +60,10 @@ export default function AddPaymentMethodScreen() {
   ];
 
   return (
-    <SafeAreaView className="flex-1 bg-primary-white">
+    <SafeAreaView className="flex-1 bg-white">
       <ScreenHeader title="Add Payment Method" showBack />
       <ScrollView contentContainerStyle={{ padding: 24 }}>
-        <Text className="text-primary text-sm mb-2 font-semibold">
+        <Text className="text-brand text-sm mb-2 font-semibold">
           Payment Type
         </Text>
         <View className="flex-row flex-wrap gap-2 mb-4">

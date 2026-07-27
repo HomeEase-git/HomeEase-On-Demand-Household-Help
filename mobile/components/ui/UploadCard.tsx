@@ -30,7 +30,7 @@ export const UploadCard: React.FC<Props> = ({
       <View className="flex-row items-start justify-between">
         <View className="flex-1">
           <View className="flex-row items-center mb-1">
-            <Text className="text-primary text-sm font-semibold flex-1">
+            <Text className="text-brand text-sm font-semibold flex-1">
               {label}
             </Text>
             {required ? (
@@ -63,7 +63,7 @@ export const UploadCard: React.FC<Props> = ({
       </View>
 
       {preview ? (
-        <Text className="text-primary text-sm mt-3" numberOfLines={2}>
+        <Text className="text-brand text-sm mt-3" numberOfLines={2}>
           {preview}
         </Text>
       ) : null}

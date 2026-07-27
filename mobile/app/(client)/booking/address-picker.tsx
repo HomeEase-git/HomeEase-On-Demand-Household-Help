@@ -1,20 +1,33 @@
 import React, { useCallback, useEffect, useState } from "react";
-import { ActivityIndicator, Alert, Pressable, Text, View } from "react-native";
+import {
+  ActivityIndicator,
+  Alert,
+  Pressable,
+  ScrollView,
+  Text,
+  View,
+} from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
-import { WebView } from "react-native-webview";
 import ScreenHeader from "../../../components/ui/ScreenHeader";
 import SearchBar from "../../../components/ui/SearchBar";
 import PrimaryButton from "../../../components/ui/PrimaryButton";
+import LeafletMap from "../../../components/ui/LeafletMap";
 import { useBookingStore } from "../../../store/bookingStore";
-
-type PlaceResult = {
-  formatted_address: string;
-  geometry: {
-    location: { lat: number; lng: number };
-  };
-};
+import { colors } from "../../../constants";
+import { addressStorage } from "../../../utils/storage";
+import {
+  geocodeAddress,
+  reverseGeocode,
+  fetchRoute,
+  type LatLng,
+  type RouteResult,
+} from "../../../utils/geo";
+import {
+  getCurrentPosition,
+  LocationPermissionDeniedError,
+} from "../../../services/location";
 
 const DEFAULT_LOCATION = {
   lat: 14.5995,
@@ -22,44 +35,12 @@ const DEFAULT_LOCATION = {
   address: "Manila, Philippines",
 };
 
-const getMapEmbedUrl = (address?: string, lat?: number, lng?: number) => {
-  const query = address
-    ? encodeURIComponent(address)
-    : `${lat ?? DEFAULT_LOCATION.lat},${lng ?? DEFAULT_LOCATION.lng}`;
-
-  const apiKey = process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY;
-  if (apiKey) {
-    return `https://www.google.com/maps/embed/v1/place?key=${apiKey}&q=${query}`;
-  }
-
-  return `https://www.google.com/maps?q=${query}&output=embed`;
-};
-
-const geocodeAddress = async (address: string): Promise<PlaceResult | null> => {
-  const normalized = address.trim();
-  if (!normalized) return null;
-
-  const apiKey = process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY;
-  if (!apiKey) {
-    return {
-      formatted_address: normalized,
-      geometry: {
-        location: { lat: DEFAULT_LOCATION.lat, lng: DEFAULT_LOCATION.lng },
-      },
-    };
-  }
-
-  const response = await fetch(
-    `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(
-      normalized,
-    )}&key=${apiKey}`,
-  );
-
-  const data = await response.json();
-  const firstResult = data?.results?.[0];
-  if (!firstResult) return null;
-
-  return firstResult as PlaceResult;
+type SavedAddress = {
+  id: string;
+  label: string;
+  address: string;
+  lat: number;
+  lng: number;
 };
 
 export default function AddressPickerScreen() {
@@ -71,11 +52,17 @@ export default function AddressPickerScreen() {
   const [selectedAddress, setSelectedAddress] = useState(
     draftAddress ?? DEFAULT_LOCATION.address,
   );
-  const [selectedLocation, setSelectedLocation] = useState({
+  const [selectedLocation, setSelectedLocation] = useState<LatLng>({
     lat: DEFAULT_LOCATION.lat,
     lng: DEFAULT_LOCATION.lng,
   });
   const [loading, setLoading] = useState(false);
+
+  const [currentLocation, setCurrentLocation] = useState<LatLng | null>(null);
+  const [locatingMe, setLocatingMe] = useState(false);
+  const [route, setRoute] = useState<RouteResult | null>(null);
+  const [routeLoading, setRouteLoading] = useState(false);
+  const [savedAddresses, setSavedAddresses] = useState<SavedAddress[]>([]);
 
   const resolveAddress = useCallback(async (address: string) => {
     setLoading(true);
@@ -109,6 +96,53 @@ export default function AddressPickerScreen() {
     }
   }, [draftAddress, resolveAddress]);
 
+  // Best-effort: silently pick up the device location if permission is
+  // already granted, so a route can be drawn without the user having to ask.
+  useEffect(() => {
+    getCurrentPosition()
+      .then(setCurrentLocation)
+      .catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    const loadSaved = async () => {
+      const stored = await addressStorage.list();
+      const withCoords = (stored as any[]).filter(
+        (item) => typeof item.lat === "number" && typeof item.lng === "number",
+      );
+      setSavedAddresses(withCoords as SavedAddress[]);
+    };
+    loadSaved();
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+
+    if (!currentLocation) {
+      setRoute(null);
+      return;
+    }
+
+    setRouteLoading(true);
+    fetchRoute(currentLocation, selectedLocation)
+      .then((result) => {
+        if (!active) return;
+        setRoute(result);
+      })
+      .catch(() => {
+        if (!active) return;
+        setRoute(null);
+      })
+      .finally(() => {
+        if (!active) return;
+        setRouteLoading(false);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [currentLocation, selectedLocation]);
+
   const handleSearch = () => {
     if (!searchQuery.trim()) {
       Alert.alert("Search required", "Please enter an address or landmark.");
@@ -117,19 +151,47 @@ export default function AddressPickerScreen() {
     void resolveAddress(searchQuery);
   };
 
+  const handleUseCurrentLocation = async () => {
+    setLocatingMe(true);
+    try {
+      const position = await getCurrentPosition();
+      setCurrentLocation(position);
+      setSelectedLocation(position);
+      const address = await reverseGeocode(position.lat, position.lng);
+      const resolved = address ?? "Current location";
+      setSelectedAddress(resolved);
+      setSearchQuery(resolved);
+    } catch (error) {
+      if (error instanceof LocationPermissionDeniedError) {
+        Alert.alert(
+          "Location permission needed",
+          "Enable location access to use your current location.",
+        );
+      } else {
+        Alert.alert("Location unavailable", "Unable to get your current location right now.");
+      }
+    } finally {
+      setLocatingMe(false);
+    }
+  };
+
+  const handleSelectSaved = (item: SavedAddress) => {
+    setSelectedAddress(item.address);
+    setSelectedLocation({ lat: item.lat, lng: item.lng });
+    setSearchQuery(item.address);
+  };
+
   const handleConfirm = () => {
-    setDraft({ address: selectedAddress });
+    setDraft({
+      address: selectedAddress,
+      lat: selectedLocation.lat,
+      lng: selectedLocation.lng,
+    });
     router.back();
   };
 
-  const mapUrl = getMapEmbedUrl(
-    selectedAddress,
-    selectedLocation.lat,
-    selectedLocation.lng,
-  );
-
   return (
-    <SafeAreaView className="flex-1 bg-primary-white" edges={["top"]}>
+    <SafeAreaView className="flex-1 bg-white" edges={["top"]}>
       <ScreenHeader title="Set Location" showBack />
 
       <View className="px-4 mt-2">
@@ -138,48 +200,82 @@ export default function AddressPickerScreen() {
           value={searchQuery}
           onChangeText={setSearchQuery}
         />
-        <Pressable
-          className="self-start mt-2 flex-row items-center"
-          onPress={handleSearch}
-        >
-          <Ionicons name="search-outline" size={16} color="#4B5FD6" />
-          <Text className="ml-2 text-accent font-semibold">
-            Search this address
-          </Text>
-        </Pressable>
+        <View className="flex-row items-center justify-between mt-2">
+          <Pressable
+            className="flex-row items-center"
+            onPress={handleSearch}
+          >
+            <Ionicons name="search-outline" size={16} color={colors.brand.DEFAULT} />
+            <Text className="ml-2 text-accent font-semibold">
+              Search this address
+            </Text>
+          </Pressable>
+
+          <Pressable
+            className="flex-row items-center"
+            onPress={handleUseCurrentLocation}
+            disabled={locatingMe}
+          >
+            {locatingMe ? (
+              <ActivityIndicator size="small" color={colors.accent.DEFAULT} />
+            ) : (
+              <Ionicons name="locate" size={16} color={colors.accent.DEFAULT} />
+            )}
+            <Text className="ml-2 text-accent font-semibold">
+              Use current location
+            </Text>
+          </Pressable>
+        </View>
       </View>
+
+      {savedAddresses.length > 0 && (
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          className="mt-3"
+          contentContainerStyle={{ paddingHorizontal: 16, gap: 8 }}
+        >
+          {savedAddresses.map((item) => (
+            <Pressable
+              key={item.id}
+              className="bg-card-light rounded-full px-4 py-2 flex-row items-center"
+              onPress={() => handleSelectSaved(item)}
+            >
+              <Ionicons name="bookmark-outline" size={14} color={colors.brand.DEFAULT} />
+              <Text className="ml-2 text-brand text-sm">{item.label}</Text>
+            </Pressable>
+          ))}
+        </ScrollView>
+      )}
 
       <View className="flex-1 mx-4 mt-4 rounded-2xl overflow-hidden border border-card-light">
         {loading ? (
           <View className="flex-1 items-center justify-center bg-card">
-            <ActivityIndicator size="large" color="#4B5FD6" />
+            <ActivityIndicator size="large" color={colors.brand.DEFAULT} />
             <Text className="text-text-secondary mt-3">Loading map...</Text>
           </View>
         ) : (
-          <>
-            <WebView
-              source={{ uri: mapUrl }}
-              style={{ flex: 1 }}
-              originWhitelist={["*"]}
-              javaScriptEnabled
-              domStorageEnabled
-              startInLoadingState
-              renderLoading={() => (
-                <View className="flex-1 items-center justify-center bg-card">
-                  <ActivityIndicator size="large" color="#4B5FD6" />
-                </View>
-              )}
-            />
-            <View className="absolute self-center top-1/2 -mt-6">
-              <Ionicons name="location" size={48} color="#EF4444" />
-            </View>
-          </>
+          <LeafletMap
+            destination={selectedLocation}
+            destinationLabel={selectedAddress}
+            currentLocation={currentLocation}
+            routeCoordinates={route?.coordinates}
+          />
         )}
       </View>
 
       <View className="bg-card p-4 mx-4 mt-4 rounded-2xl mb-4">
         <Text className="text-text-secondary text-xs">Selected Location</Text>
-        <Text className="text-primary font-bold mt-1">{selectedAddress}</Text>
+        <Text className="text-text-primary font-bold mt-1">{selectedAddress}</Text>
+
+        {routeLoading ? (
+          <Text className="text-text-muted text-xs mt-1">Calculating route...</Text>
+        ) : route ? (
+          <Text className="text-text-muted text-xs mt-1">
+            {route.distanceKm.toFixed(1)} km · {Math.round(route.durationMin)} min drive
+          </Text>
+        ) : null}
+
         <PrimaryButton
           label="Confirm This Location"
           fullWidth

@@ -6,6 +6,7 @@ import { useRouter, useLocalSearchParams } from "expo-router";
 import PrimaryButton from "../../components/ui/PrimaryButton";
 import OutlinedButton from "../../components/ui/OutlinedButton";
 import { verifyEmail } from "../../services/api";
+import { colors } from "../../constants";
 
 export default function VerifyEmailScreen() {
   const router = useRouter();
@@ -56,7 +57,7 @@ export default function VerifyEmailScreen() {
 
   if (verified) {
     return (
-      <SafeAreaView className="flex-1 bg-primary-white">
+      <SafeAreaView className="flex-1 bg-white">
         <ScrollView
           className="flex-1"
           contentContainerStyle={{
@@ -67,10 +68,10 @@ export default function VerifyEmailScreen() {
           }}
         >
           <View className="w-24 h-24 bg-success/20 rounded-full items-center justify-center mb-8">
-            <Ionicons name="checkmark-circle" size={56} color="#4CAF50" />
+            <Ionicons name="checkmark-circle" size={56} color={colors.success} />
           </View>
 
-          <Text className="text-primary text-2xl font-bold text-center mb-2">
+          <Text className="text-text-primary text-2xl font-bold text-center mb-2">
             Email Verified!
           </Text>
 
@@ -90,7 +91,7 @@ export default function VerifyEmailScreen() {
   }
 
   return (
-    <SafeAreaView className="flex-1 bg-primary-white">
+    <SafeAreaView className="flex-1 bg-white">
       <ScrollView
         className="flex-1"
         contentContainerStyle={{
@@ -101,10 +102,10 @@ export default function VerifyEmailScreen() {
         }}
       >
         <View className="w-24 h-24 bg-blue-100 rounded-full items-center justify-center mb-8">
-          <Ionicons name="mail" size={56} color="#4B5FD6" />
+          <Ionicons name="mail" size={56} color={colors.brand.DEFAULT} />
         </View>
 
-        <Text className="text-primary text-2xl font-bold text-center mb-2">
+        <Text className="text-text-primary text-2xl font-bold text-center mb-2">
           Verify Your Email
         </Text>
 
@@ -114,7 +115,7 @@ export default function VerifyEmailScreen() {
 
         <View className="w-full bg-blue-50 p-4 rounded-lg mb-8">
           <View className="flex-row items-start gap-3">
-            <Ionicons name="information-circle" size={20} color="#4B5FD6" />
+            <Ionicons name="information-circle" size={20} color={colors.brand.DEFAULT} />
             <Text className="text-text-secondary text-sm flex-1">
               Click the link in your email to verify your account. The link will
               expire in 24 hours.

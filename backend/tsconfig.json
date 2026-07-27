@@ -34,7 +34,10 @@
       "@middleware/*": ["./middleware/*"],
       "@utils/*": ["./utils/*"],
       "@types/*": ["./types/*"],
-      "@config/*": ["./config/*"]
+      "@config/*": ["./config/*"],
+      "@queues/*": ["./queues/*"],
+      "@workers/*": ["./workers/*"],
+      "@services/*": ["./services/*"]
     }
   },
   "include": ["src/**/*"],

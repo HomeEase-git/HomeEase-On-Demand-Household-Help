@@ -289,6 +289,85 @@ export const getWorkerReviews = async (req: AuthRequest, res: Response) => {
 };
 
 /**
+ * GET /api/workers/:workerId/availability?date=YYYY-MM-DD
+ * Returns the booked time slots for a worker on a specific date, so the
+ * client's booking calendar can disable them.
+ */
+export const getWorkerAvailability = async (req: AuthRequest, res: Response) => {
+  try {
+    const workerId = req.params.workerId as string;
+    const { date } = req.query;
+
+    if (!date || typeof date !== 'string') {
+      return res.status(400).json(errorResponse(400, 'date query parameter is required'));
+    }
+
+    const dayStart = new Date(`${date}T00:00:00.000Z`);
+    const dayEnd = new Date(`${date}T23:59:59.999Z`);
+
+    const bookings = await prisma.booking.findMany({
+      where: {
+        workerId,
+        scheduledDate: { gte: dayStart, lte: dayEnd },
+        status: { notIn: ['CANCELLED', 'REJECTED'] },
+      },
+      select: { scheduledTime: true },
+    });
+
+    const occupied = bookings
+      .map((b) => b.scheduledTime)
+      .filter((t): t is string => !!t);
+
+    return res.status(200).json({
+      success: true,
+      message: 'Worker availability retrieved successfully',
+      data: { occupied },
+    });
+  } catch (error) {
+    console.error('Error fetching worker availability:', error);
+    return res.status(500).json(errorResponse(500, 'Failed to fetch worker availability'));
+  }
+};
+
+/**
+ * GET /api/workers/:workerId/blocked-dates
+ * Returns dates (within the next 90 days, matching the client calendar's
+ * booking window) where the worker already has at least one active booking.
+ */
+export const getWorkerBlockedDates = async (req: AuthRequest, res: Response) => {
+  try {
+    const workerId = req.params.workerId as string;
+
+    const today = new Date();
+    today.setUTCHours(0, 0, 0, 0);
+    const horizon = new Date(today);
+    horizon.setUTCDate(horizon.getUTCDate() + 90);
+
+    const bookings = await prisma.booking.findMany({
+      where: {
+        workerId,
+        scheduledDate: { gte: today, lte: horizon },
+        status: { notIn: ['CANCELLED', 'REJECTED'] },
+      },
+      select: { scheduledDate: true },
+    });
+
+    const dates = Array.from(
+      new Set(bookings.map((b) => b.scheduledDate.toISOString().slice(0, 10)))
+    );
+
+    return res.status(200).json({
+      success: true,
+      message: 'Worker blocked dates retrieved successfully',
+      data: { dates },
+    });
+  } catch (error) {
+    console.error('Error fetching worker blocked dates:', error);
+    return res.status(500).json(errorResponse(500, 'Failed to fetch worker blocked dates'));
+  }
+};
+
+/**
  * PATCH /api/workers/me/availability
  * Toggle isAvailable and set availableDays (worker only)
  */

@@ -1,19 +1,42 @@
 import React, { useState, useCallback } from "react";
 import { View, Text, FlatList, Pressable } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { useFocusEffect } from "@react-navigation/native";
 import { useRouter } from "expo-router";
 import RequestCard from "../../../components/cards/RequestCard";
 import EmptyState from "../../../components/feedback/EmptyState";
-import { useWorkerStore } from "../../../store/workerStore";
+import { LoadingSkeleton } from "../../../components/feedback/LoadingSkeleton";
+import { useWorkerStore, mapApiJob, type ApiWorkerBooking } from "../../../store/workerStore";
+import * as api from "../../../services/api";
 
-const TABS = ["Pending", "Accepted", "Declined"] as const;
+const TABS = ["Pending", "Accepted"] as const;
 
 export default function RequestsScreen() {
   const router = useRouter();
-  const jobRequests = useWorkerStore((s) => s.jobRequests);
+  const jobs = useWorkerStore((s) => s.jobs);
+  const setJobs = useWorkerStore((s) => s.setJobs);
   const [tab, setTab] = useState<(typeof TABS)[number]>("Pending");
+  const [loading, setLoading] = useState(true);
 
-  const filtered = jobRequests.filter((r) => r.status === tab);
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const bookings = await api.getBookings();
+      setJobs((bookings as ApiWorkerBooking[]).map(mapApiJob));
+    } catch (error) {
+      console.error("Load job requests error:", error);
+    } finally {
+      setLoading(false);
+    }
+  }, [setJobs]);
+
+  useFocusEffect(
+    useCallback(() => {
+      load();
+    }, [load]),
+  );
+
+  const filtered = jobs.filter((j) => j.status === tab);
 
   const handleRequestPress = useCallback(
     (id: string) => {
@@ -23,16 +46,26 @@ export default function RequestsScreen() {
   );
 
   const renderItem = useCallback(
-    ({ item }: { item: (typeof jobRequests)[number] }) => (
-      <RequestCard request={item} onPress={() => handleRequestPress(item.id)} />
+    ({ item }: { item: (typeof filtered)[number] }) => (
+      <RequestCard
+        request={{
+          id: item.id,
+          client: item.clientName,
+          service: item.service,
+          date: item.scheduledDate,
+          amount: item.finalPrice ?? item.estimatedPrice,
+          status: item.status,
+        }}
+        onPress={() => handleRequestPress(item.id)}
+      />
     ),
     [handleRequestPress],
   );
 
   return (
-    <SafeAreaView className="flex-1 bg-primary-white">
+    <SafeAreaView className="flex-1 bg-white">
       <View className="px-4 pt-4 pb-2">
-        <Text className="text-primary text-2xl font-bold">Job Requests</Text>
+        <Text className="text-text-primary text-2xl font-bold">Job Requests</Text>
         <View className="flex-row gap-2 mt-3">
           {TABS.map((t) => (
             <Pressable
@@ -53,7 +86,9 @@ export default function RequestsScreen() {
           ))}
         </View>
       </View>
-      {filtered.length === 0 ? (
+      {loading ? (
+        <LoadingSkeleton type="booking" count={4} />
+      ) : filtered.length === 0 ? (
         <EmptyState title="No requests yet" />
       ) : (
         <FlatList

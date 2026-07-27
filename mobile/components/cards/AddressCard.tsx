@@ -1,7 +1,7 @@
 import React from "react";
 import { View, Text, Pressable, Alert } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { colors } from "../../constants";
+import { colors, cardShadow } from "../../constants";
 
 type Address = {
   id: string;
@@ -35,21 +35,21 @@ export const AddressCard: React.FC<Props> = ({
   };
 
   return (
-    <View className="bg-card border-2 border-primary rounded-2xl p-4 mb-3 flex-row items-start">
-      <Ionicons name="location-outline" size={24} color={colors.white} />
+    <View className="bg-card rounded-2xl p-4 mb-3 flex-row items-start" style={cardShadow}>
+      <Ionicons name="location-outline" size={24} color={colors.text.muted} />
       <View className="flex-1 ml-3">
         <View className="flex-row items-center gap-2">
-          <Text className="text-primary font-bold">{address.label}</Text>
+          <Text className="text-text-primary font-bold">{address.label}</Text>
           {isDefault && (
             <View className="bg-accent rounded-full px-2 py-0.5">
-              <Text className="text-primary text-xs">Default</Text>
+              <Text className="text-white text-xs">Default</Text>
             </View>
           )}
         </View>
-        <Text className="text-primary text-sm mt-1">{address.address}</Text>
+        <Text className="text-text-secondary text-sm mt-1">{address.address}</Text>
       </View>
       <Pressable onPress={onEdit} className="p-2">
-        <Ionicons name="pencil-outline" size={20} color={colors.white} />
+        <Ionicons name="pencil-outline" size={20} color={colors.text.muted} />
       </Pressable>
       <Pressable onPress={handleDelete} className="p-2">
         <Ionicons name="trash-outline" size={20} color={colors.error} />

@@ -13,6 +13,7 @@ import InputField from "../../../../components/ui/InputField";
 import PriceBreakdownCard from "../../../../components/ui/PriceBreakdown";
 import {
   useBookingStore,
+  type Booking,
   type BookingState,
 } from "../../../../store/bookingStore";
 import { calculatePriceBreakdown } from "../../../../utils/pricing";
@@ -118,8 +119,27 @@ export default function BookingStep3Screen() {
 
       const response = await api.createBooking(bookingData);
 
+      // The API only returns a partial payload (id, clientName, workerName,
+      // scheduledDate, ...) - normalize it into the shape the store/UI expect
+      // (date, worker, service, amount) before saving, otherwise the booking
+      // detail screen renders with missing fields and crashes on an invalid date.
+      const createdBooking: Booking = {
+        id: response.id,
+        service: draft.category || "Service",
+        worker: response.workerName ?? "Unassigned",
+        workerId: draft.workerId ?? undefined,
+        date: response.scheduledDate ?? bookingData.scheduledDate,
+        time: response.scheduledTime || undefined,
+        address: draft.address || undefined,
+        status: "Pending",
+        amount: response.estimatedPrice ?? draft.estimatedPrice ?? 0,
+        category: draft.category ?? undefined,
+        selectedTaskId: draft.selectedTaskId ?? undefined,
+        selectedAddOnIds: draft.selectedAddOnIds,
+      };
+
       // Update booking store
-      setBookingCreated(response);
+      setBookingCreated(createdBooking);
 
       router.push("/(client)/booking/success");
     } catch (err) {
@@ -131,7 +151,7 @@ export default function BookingStep3Screen() {
   };
 
   return (
-    <SafeAreaView className="flex-1 bg-primary-white">
+    <SafeAreaView className="flex-1 bg-white">
       <ScreenHeader title="Review & Payment" showBack />
       <ScrollView
         className="flex-1"
@@ -167,7 +187,7 @@ export default function BookingStep3Screen() {
         )}
 
         <View className="bg-card rounded-2xl p-4 mt-4">
-          <Text className="text-primary font-bold mb-2">Summary</Text>
+          <Text className="text-text-primary font-bold mb-2">Summary</Text>
           <Text className="text-text-secondary text-sm">
             Service: {draft.category}
           </Text>
@@ -188,7 +208,7 @@ export default function BookingStep3Screen() {
         >
           <Text
             className={
-              paymentLabel ? "text-primary font-semibold" : "text-text-muted"
+              paymentLabel ? "text-brand font-semibold" : "text-text-muted"
             }
           >
             {paymentLabel ?? "Select payment method"}

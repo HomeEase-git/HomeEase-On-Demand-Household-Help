@@ -25,7 +25,7 @@ export default function WorkerHelpSupportScreen() {
   const [expanded, setExpanded] = useState<number | null>(null);
 
   return (
-    <SafeAreaView className="flex-1 bg-primary-white">
+    <SafeAreaView className="flex-1 bg-white">
       <ScreenHeader title="Help & Support" showBack />
       <ScrollView contentContainerStyle={{ padding: 24 }}>
         <SearchBar placeholder="Search FAQ..." />
@@ -37,7 +37,7 @@ export default function WorkerHelpSupportScreen() {
               onPress={() => setExpanded(expanded === i ? null : i)}
             >
               <View className="flex-row justify-between items-center">
-                <Text className="text-primary font-semibold flex-1">
+                <Text className="text-brand font-semibold flex-1">
                   {item.q}
                 </Text>
                 <Text className="text-accent">
@@ -56,7 +56,7 @@ export default function WorkerHelpSupportScreen() {
           className="bg-card rounded-xl p-4 mt-4"
           onPress={() => router.push("/(worker)/profile/contact-us")}
         >
-          <Text className="text-primary font-semibold">Contact Us</Text>
+          <Text className="text-brand font-semibold">Contact Us</Text>
         </Pressable>
       </ScrollView>
     </SafeAreaView>

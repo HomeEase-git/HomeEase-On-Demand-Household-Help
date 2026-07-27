@@ -1,6 +1,7 @@
 import React from "react";
 import { View, Text, Pressable } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
+import { colors } from "../../constants";
 
 type Notification = {
   id: string;
@@ -22,10 +23,10 @@ export const NotificationItem: React.FC<Props> = ({
 }) => {
   const iconColor =
     notification.type === "booking"
-      ? "#4B5FD6"
+      ? colors.brand.DEFAULT
       : notification.type === "payment"
-        ? "#4CAF50"
-        : "#F59E0B";
+        ? colors.success
+        : colors.warning;
 
   return (
     <Pressable
@@ -51,8 +52,8 @@ export const NotificationItem: React.FC<Props> = ({
         />
       </View>
       <View className="flex-1">
-        <Text className="text-primary font-bold">{notification.title}</Text>
-        <Text className="text-primary text-sm" numberOfLines={2}>
+        <Text className="text-text-primary font-bold">{notification.title}</Text>
+        <Text className="text-text-secondary text-sm" numberOfLines={2}>
           {notification.body}
         </Text>
         <Text className="text-text-muted text-xs mt-1">

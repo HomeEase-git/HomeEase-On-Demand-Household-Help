@@ -23,57 +23,58 @@ export default function RoleSelectionScreen() {
   };
 
   return (
-    <SafeAreaView className="flex-1 bg-primary-white" edges={["top", "bottom"]}>
-      <ScrollView
-        className="flex-1"
-        contentContainerStyle={{
-          paddingHorizontal: 24,
-          paddingTop: 24,
-          paddingBottom: 40,
-        }}
-      >
-        <Text className="text-primary text-3xl font-bold text-center mb-10">
+    <SafeAreaView className="flex-1 bg-white" edges={["top", "bottom"]}>
+      <View className="flex-1 px-6 pt-6 pb-6">
+        <Text className="text-text-primary text-3xl font-bold text-center mb-6">
           Select Your Role
         </Text>
 
-        {/* Client Option */}
-        <Pressable
-          className="bg-card-light border-2 border-primary rounded-2xl p-6 mb-6 items-center"
-          onPress={() => handleRoleSelect("client")}
-        >
-          {/* TODO: Replace with client illustration */}
-          <View className="items-center mb-4">
-            <View className="w-40 h-40 bg-card rounded-full items-center justify-center">
-              <Image source={icons.client} style={{ width: 80, height: 80 }} />
+        <View className="flex-1">
+          {/* Client Option */}
+          <Pressable
+            className="flex-1 bg-card-light border-2 border-brand rounded-2xl p-6 mb-3 items-center justify-center"
+            onPress={() => handleRoleSelect("client")}
+          >
+            {/* TODO: Replace with client illustration */}
+            <View className="items-center mb-4">
+              <View className="w-40 h-40 bg-card rounded-full items-center justify-center">
+                <Image
+                  source={icons.client}
+                  style={{ width: 80, height: 80 }}
+                />
+              </View>
             </View>
-          </View>
-          <Text className="text-primary font-bold text-xl text-center">
-            Client
-          </Text>
-          <Text className="text-text-secondary text-center mt-1">
-            I need home services
-          </Text>
-        </Pressable>
+            <Text className="text-text-primary font-bold text-xl text-center">
+              Client
+            </Text>
+            <Text className="text-text-secondary text-center mt-1">
+              I need home services
+            </Text>
+          </Pressable>
 
-        {/* Worker Option */}
-        <Pressable
-          className="bg-card-light border-2 border-accent rounded-2xl p-6 items-center"
-          onPress={() => handleRoleSelect("worker")}
-        >
-          {/* TODO: Replace with worker illustration */}
-          <View className="items-center mb-4">
-            <View className="w-40 h-40 bg-card rounded-full items-center justify-center">
-              <Image source={icons.worker} style={{ width: 80, height: 80 }} />
+          {/* Worker Option */}
+          <Pressable
+            className="flex-1 bg-card-light border-2 border-accent rounded-2xl p-6 mt-3 items-center justify-center"
+            onPress={() => handleRoleSelect("worker")}
+          >
+            {/* TODO: Replace with worker illustration */}
+            <View className="items-center mb-4">
+              <View className="w-40 h-40 bg-card rounded-full items-center justify-center">
+                <Image
+                  source={icons.worker}
+                  style={{ width: 80, height: 80 }}
+                />
+              </View>
             </View>
-          </View>
-          <Text className="text-accent font-bold text-xl text-center">
-            Service Worker
-          </Text>
-          <Text className="text-text-secondary text-center mt-1">
-            I offer home services
-          </Text>
-        </Pressable>
-      </ScrollView>
+            <Text className="text-accent font-bold text-xl text-center">
+              Service Worker
+            </Text>
+            <Text className="text-text-secondary text-center mt-1">
+              I offer home services
+            </Text>
+          </Pressable>
+        </View>
+      </View>
     </SafeAreaView>
   );
 }

@@ -29,8 +29,8 @@ export const ConversationItem: React.FC<Props> = ({
         <Ionicons name="person-circle" size={40} color={colors.text.muted} />
       </View>
       <View className="flex-1">
-        <Text className="text-primary font-bold">{conversation.name}</Text>
-        <Text className="text-primary text-sm" numberOfLines={1}>
+        <Text className="text-text-primary font-bold">{conversation.name}</Text>
+        <Text className="text-text-secondary text-sm" numberOfLines={1}>
           {conversation.lastMessage}
         </Text>
       </View>
@@ -38,7 +38,7 @@ export const ConversationItem: React.FC<Props> = ({
         <Text className="text-text-muted text-xs">{conversation.time}</Text>
         {conversation.unread > 0 && (
           <View className="min-w-[20] h-5 rounded-full bg-accent items-center justify-center mt-1 px-1.5">
-            <Text className="text-primary text-xs font-bold">
+            <Text className="text-white text-xs font-bold">
               {conversation.unread}
             </Text>
           </View>

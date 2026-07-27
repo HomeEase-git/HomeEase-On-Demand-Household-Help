@@ -19,7 +19,7 @@ export default function PaymentSuccessScreen() {
     : "TXN-004 · GCash";
 
   return (
-    <SafeAreaView className="flex-1 bg-primary-white items-center justify-center px-8">
+    <SafeAreaView className="flex-1 bg-white items-center justify-center px-8">
       <View className="w-32 h-32 bg-success/20 rounded-full items-center justify-center mb-8">
         <Ionicons name="checkmark-circle" size={80} color={colors.success} />
       </View>
@@ -28,7 +28,7 @@ export default function PaymentSuccessScreen() {
       </Text>
       <View className="bg-card rounded-2xl p-4 w-full mt-6">
         <Text className="text-text-secondary text-sm">{amountLabel}</Text>
-        <Text className="text-primary font-semibold">{referenceLabel}</Text>
+        <Text className="text-brand font-semibold">{referenceLabel}</Text>
         <Text className="text-text-muted text-xs mt-1">Mar 6, 2026</Text>
       </View>
       <View className="w-full mt-8 gap-3">

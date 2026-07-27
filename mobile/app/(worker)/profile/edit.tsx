@@ -1,4 +1,4 @@
-import React, { useState, useRef } from "react";
+import React, { useEffect, useState, useRef } from "react";
 import { View, ScrollView, Alert, TextInput, Text, Switch } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
@@ -19,11 +19,28 @@ export default function WorkerEditProfileScreen() {
   const [name, setName] = useState(user?.name ?? "");
   const [phone, setPhone] = useState(user?.phone ?? "");
   const [email] = useState(user?.email ?? "");
-  const [bio, setBio] = useState(
-    "Licensed professional with years of experience.",
-  );
+  const [bio, setBio] = useState("");
   const [years, setYears] = useState("");
-  const [area, setArea] = useState("Central Luzon");
+  const [areaRadius, setAreaRadius] = useState("");
+
+  useEffect(() => {
+    let active = true;
+    async function loadWorkerDetail() {
+      if (!user?.id) return;
+      try {
+        const detail = await api.getWorkerDetail(user.id);
+        if (!active || !detail) return;
+        setBio(detail.bio ?? "");
+        setAreaRadius(detail.serviceAreaRadius ? String(detail.serviceAreaRadius) : "");
+      } catch (error) {
+        console.error("Load worker detail for edit error:", error);
+      }
+    }
+    loadWorkerDetail();
+    return () => {
+      active = false;
+    };
+  }, [user?.id]);
   const [digitalIdEnabled, setDigitalIdEnabled] = useState(
     savedDigitalId?.enabled ?? false,
   );
@@ -55,9 +72,11 @@ export default function WorkerEditProfileScreen() {
       const updatedUser = await api.updateUserProfile({
         fullName: name.trim(),
         phone: phone.trim(),
+      });
+
+      await api.updateWorkerProfileDetails({
         bio: bio.trim(),
-        yearsOfExperience: parseInt(years) || 0,
-        serviceArea: area.trim(),
+        serviceAreaRadius: parseInt(areaRadius, 10) || undefined,
       });
 
       setUser(updatedUser);
@@ -79,7 +98,7 @@ export default function WorkerEditProfileScreen() {
   };
 
   return (
-    <SafeAreaView className="flex-1 bg-primary-white">
+    <SafeAreaView className="flex-1 bg-white">
       <ScreenHeader title="Edit Profile" showBack />
       <ScrollView contentContainerStyle={{ padding: 24 }}>
         <InputField
@@ -125,9 +144,10 @@ export default function WorkerEditProfileScreen() {
         />
         <InputField
           ref={areaRef}
-          label="Service Area"
-          value={area}
-          onChangeText={setArea}
+          label="Service Area Radius (km)"
+          value={areaRadius}
+          onChangeText={setAreaRadius}
+          keyboardType="number-pad"
           returnKeyType="done"
           onSubmitEditing={handleSubmit}
         />
@@ -135,7 +155,7 @@ export default function WorkerEditProfileScreen() {
         <View className="bg-card-light rounded-2xl p-4 mb-5">
           <View className="flex-row items-start justify-between mb-3">
             <View className="flex-1 mr-3">
-              <Text className="text-primary font-semibold">Digital ID</Text>
+              <Text className="text-brand font-semibold">Digital ID</Text>
               <Text className="text-text-secondary text-sm mt-1">
                 Enable a shareable identity card for clients.
               </Text>

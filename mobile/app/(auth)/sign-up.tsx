@@ -152,14 +152,14 @@ export default function SignUpScreen() {
   };
 
   return (
-    <SafeAreaView className="flex-1 bg-primary-white">
+    <SafeAreaView className="flex-1 bg-white">
       <ScrollView
         className="flex-1"
         contentContainerStyle={{ paddingHorizontal: 24, paddingBottom: 40 }}
         keyboardShouldPersistTaps="handled"
       >
         <View className="pt-4 pb-2">
-          <Text className="text-primary text-2xl font-bold">
+          <Text className="text-text-primary text-2xl font-bold">
             Create Account
           </Text>
           <Text className="text-text-secondary mt-1">
@@ -286,7 +286,7 @@ export default function SignUpScreen() {
             }`}
           >
             {acceptedTerms && (
-              <Text className="text-primary text-xs font-bold">✓</Text>
+              <Text className="text-text-primary text-xs font-bold">✓</Text>
             )}
           </View>
           <Text className="text-text-secondary text-sm flex-1">

@@ -10,6 +10,8 @@ const router = (0, express_1.Router)();
 router.get('/', workerController_1.searchWorkers);
 router.get('/:workerId', workerController_1.getWorkerDetail);
 router.get('/:workerId/reviews', workerController_1.getWorkerReviews);
+router.get('/:workerId/availability', workerController_1.getWorkerAvailability);
+router.get('/:workerId/blocked-dates', workerController_1.getWorkerBlockedDates);
 // Protected routes (auth + worker only)
 router.patch('/me/availability', auth_1.authMiddleware, (0, role_1.restrictTo)('WORKER'), validation_1.validateUpdateAvailability, workerController_1.updateAvailability);
 router.patch('/me/profile', auth_1.authMiddleware, (0, role_1.restrictTo)('WORKER'), validation_1.validateUpdateWorkerProfile, workerController_1.updateWorkerProfile);

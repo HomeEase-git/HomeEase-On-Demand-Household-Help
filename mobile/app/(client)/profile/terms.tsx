@@ -8,23 +8,23 @@ export default function TermsScreen() {
   const router = useRouter();
 
   return (
-    <SafeAreaView className="flex-1 bg-primary-white">
+    <SafeAreaView className="flex-1 bg-white">
       <ScreenHeader title="Terms and Conditions" showBack />
       <ScrollView contentContainerStyle={{ padding: 24 }}>
-        <Text className="text-primary font-bold text-lg mb-2">
+        <Text className="text-text-primary font-bold text-lg mb-2">
           1. Acceptance
         </Text>
         <Text className="text-text-secondary text-sm mb-4">
           By using HomeEase you agree to these terms. Please read them
           carefully.
         </Text>
-        <Text className="text-primary font-bold text-lg mb-2">2. Services</Text>
+        <Text className="text-text-primary font-bold text-lg mb-2">2. Services</Text>
         <Text className="text-text-secondary text-sm mb-4">
           HomeEase is a platform connecting clients with home service workers.
           We do not employ workers directly. Bookings are agreements between you
           and the worker.
         </Text>
-        <Text className="text-primary font-bold text-lg mb-2">
+        <Text className="text-text-primary font-bold text-lg mb-2">
           3. Booking & Payment
         </Text>
         <Text className="text-text-secondary text-sm mb-4">

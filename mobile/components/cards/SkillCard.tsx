@@ -1,7 +1,7 @@
 import React from "react";
 import { View, Text, Pressable } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { colors } from "../../constants";
+import { colors, cardShadow } from "../../constants";
 
 type Skill = {
   id: string;
@@ -18,9 +18,9 @@ type Props = {
 
 export const SkillCard: React.FC<Props> = ({ skill, onEdit, onDelete }) => {
   return (
-    <View className="bg-card border-2 border-primary shadow-md rounded-2xl p-4 mb-3 flex-row items-center">
+    <View className="bg-card rounded-2xl p-4 mb-3 flex-row items-center" style={cardShadow}>
       <View className="flex-1">
-        <Text className="text-primary font-bold">{skill.name}</Text>
+        <Text className="text-text-primary font-bold">{skill.name}</Text>
         <View className="bg-accent/20 rounded-full px-2 py-0.5 self-start mt-1">
           <Text className="text-accent text-xs">{skill.category}</Text>
         </View>

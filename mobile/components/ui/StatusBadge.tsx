@@ -67,7 +67,7 @@ export const StatusBadge: React.FC<Props> = ({ status }) => {
       break;
     default:
       containerClass += " bg-card-light";
-      textClass += " text-primary";
+      textClass += " text-text-primary";
   }
 
   const displayLabel: Record<string, string> = {

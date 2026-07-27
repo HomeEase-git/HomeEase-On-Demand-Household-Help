@@ -9,7 +9,7 @@ import StepperHorizontal from "../../components/steppers/StepperHorizontal";
 import UploadCard from "../../components/ui/UploadCard";
 import PrimaryButton from "../../components/ui/PrimaryButton";
 import { useAuthStore } from "../../store/authStore";
-import { submitKycDocument } from "../../services/api";
+import { submitKycDocument, uploadKycFile } from "../../services/api";
 import {
   documentRequirements,
   isDocumentTypeAllowed,
@@ -69,7 +69,8 @@ export default function UploadIdScreen() {
     }
 
     try {
-      await submitKycDocument(key, uri);
+      const { url } = await uploadKycFile(key, uri, mimeType);
+      await submitKycDocument(key, url);
       setDocuments((prev) => ({
         ...prev,
         [key]: { uri, mimeType, name },
@@ -233,7 +234,7 @@ export default function UploadIdScreen() {
   };
 
   return (
-    <SafeAreaView className="flex-1 bg-primary-white">
+    <SafeAreaView className="flex-1 bg-white">
       <ScreenHeader title="Upload Government ID" showBack />
       <ScrollView
         className="flex-1"

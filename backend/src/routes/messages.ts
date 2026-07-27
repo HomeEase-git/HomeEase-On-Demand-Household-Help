@@ -6,6 +6,7 @@ import {
   markConversationRead,
   getUnreadCount,
 } from '../controllers/messageController';
+import { chatImageUpload, uploadChatImage } from '../controllers/uploadController';
 import { authMiddleware } from '../middleware/auth';
 import { validateSendMessage } from '../middleware/validation';
 
@@ -25,6 +26,9 @@ router.get('/conversations/:userId', getConversationThread);
 
 // Mark conversation as read
 router.patch('/conversations/:userId/read', markConversationRead);
+
+// Upload a chat image attachment
+router.post('/upload-image', chatImageUpload, uploadChatImage);
 
 // Send message
 router.post('/', validateSendMessage, sendMessage);

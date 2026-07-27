@@ -10,15 +10,24 @@ import * as api from "../../../../services/api";
 export default function EditPaymentMethodScreen() {
   const router = useRouter();
   const { methodId } = useLocalSearchParams<{ methodId: string }>();
-  const [label, setLabel] = useState("My Card");
+  const [label, setLabel] = useState("");
+  const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
   const labelRef = useRef<TextInput>(null);
 
   useEffect(() => {
     const loadMethod = async () => {
-      // Load from API if needed, but label is typically just displayed
       if (!methodId) return;
+      try {
+        const methods = await api.getPaymentMethods();
+        const method = methods.find((m: any) => m.id === methodId);
+        if (method?.label) setLabel(method.label);
+      } catch (error) {
+        console.error("Load payment method error:", error);
+      } finally {
+        setLoading(false);
+      }
     };
 
     loadMethod();
@@ -33,9 +42,7 @@ export default function EditPaymentMethodScreen() {
     setSaving(true);
     try {
       if (methodId) {
-        // Note: The API expects updateAddress, but we're updating payment method
-        // This should be a dedicated payment method update endpoint
-        await api.updateAddress(methodId, { label: label.trim() });
+        await api.updatePaymentMethod(methodId, { label: label.trim() });
       }
       Alert.alert("Success", "Payment method updated");
       router.back();
@@ -48,7 +55,7 @@ export default function EditPaymentMethodScreen() {
   };
 
   return (
-    <SafeAreaView className="flex-1 bg-primary-white">
+    <SafeAreaView className="flex-1 bg-white">
       <ScreenHeader title="Edit Payment Method" showBack />
       <ScrollView contentContainerStyle={{ padding: 24 }}>
         <InputField
@@ -64,7 +71,7 @@ export default function EditPaymentMethodScreen() {
           fullWidth
           onPress={handleSubmit}
           loading={saving}
-          disabled={saving}
+          disabled={saving || loading}
         />
       </ScrollView>
     </SafeAreaView>

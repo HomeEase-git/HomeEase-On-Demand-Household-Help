@@ -89,7 +89,7 @@ export default function BookingStep2Screen() {
   }, [draft.workerId, date]);
 
   return (
-    <SafeAreaView className="flex-1 bg-primary-white">
+    <SafeAreaView className="flex-1 bg-white">
       <ScreenHeader title="Schedule" showBack />
       <ScrollView
         className="flex-1"
@@ -102,7 +102,7 @@ export default function BookingStep2Screen() {
 
         {/* Service summary */}
         <View className="bg-card rounded-2xl p-4 mt-4 mb-2">
-          <Text className="text-primary font-bold mb-2">Service Summary</Text>
+          <Text className="text-text-primary font-bold mb-2">Service Summary</Text>
           <Text className="text-text-secondary text-sm">
             {draft.category ?? "No category selected"}
           </Text>
@@ -114,7 +114,7 @@ export default function BookingStep2Screen() {
         </View>
 
         {/* Calendar */}
-        <Text className="text-primary font-bold text-lg mt-4 mb-3">
+        <Text className="text-text-primary font-bold text-lg mt-4 mb-3">
           Select a date
         </Text>
         <InvalidationBanner />
@@ -128,7 +128,7 @@ export default function BookingStep2Screen() {
           }}
         />
 
-        <Text className="text-primary font-bold text-lg mt-4 mb-3">
+        <Text className="text-text-primary font-bold text-lg mt-4 mb-3">
           Select a time
         </Text>
         <TimeSlotPicker

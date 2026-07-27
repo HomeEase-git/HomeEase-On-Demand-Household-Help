@@ -97,7 +97,7 @@ export default function CategoryDetailScreen() {
   }, [categoryName]);
 
   return (
-    <SafeAreaView className="flex-1 bg-primary-white">
+    <SafeAreaView className="flex-1 bg-white">
       <ScreenHeader
         title={title}
         showBack

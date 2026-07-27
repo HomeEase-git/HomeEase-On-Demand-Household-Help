@@ -9,7 +9,7 @@ export function getStatusColor(status: StatusType): string {
     case 'Accepted':
       return colors.active;
     case 'Active':
-      return colors.primary.DEFAULT;
+      return colors.brand.DEFAULT;
     case 'Completed':
     case 'Credited':
     case 'Verified':

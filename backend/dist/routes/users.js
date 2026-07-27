@@ -22,6 +22,8 @@ router.patch('/me/addresses/:addressId/set-default', userController_1.setDefault
 // Payment method routes
 router.get('/me/payment-methods', userController_1.getPaymentMethods);
 router.post('/me/payment-methods', validation_1.validateAddPaymentMethod, userController_1.addPaymentMethod);
+router.patch('/me/payment-methods/:methodId', validation_1.validateUpdatePaymentMethod, userController_1.updatePaymentMethod);
+router.patch('/me/payment-methods/:methodId/set-default', userController_1.setDefaultPaymentMethod);
 router.delete('/me/payment-methods/:methodId', userController_1.deletePaymentMethod);
 // Notification preferences
 router.patch('/me/notification-preferences', validation_1.validateUpdateNotificationPreferences, userController_1.updateNotificationPreferences);
@@ -30,5 +32,7 @@ router.get('/me/kyc-documents', userController_1.getKYCDocuments);
 router.post('/me/kyc-documents', validation_1.validateSubmitKYCDocument, userController_1.submitKYCDocument);
 // Contract acceptance
 router.post('/me/contract-acceptance', validation_1.validateSubmitContractAcceptance, userController_1.acceptContract);
+// Reviews written by the current client
+router.get('/me/reviews', userController_1.getMyReviews);
 exports.default = router;
 //# sourceMappingURL=users.js.map

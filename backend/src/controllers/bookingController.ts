@@ -1,6 +1,9 @@
 import { Request, Response } from 'express';
 import prisma from '@config/database';
 import { errorResponse } from '@utils/errorResponse';
+import { notifyUser } from '@utils/notify';
+import { writeAuditLog } from '@utils/auditLog';
+import { formatDisplayId } from '@utils/formatters';
 import type { JwtPayload } from '@/types/index';
 
 interface AuthRequest extends Request {
@@ -173,14 +176,12 @@ export const createBooking = async (req: AuthRequest, res: Response) => {
       });
 
       // Create notification for worker
-      await prisma.notification.create({
-        data: {
-          userId: workerId,
-          type: 'BOOKING_REQUEST',
-          title: 'New Booking Request',
-          message: `${booking.client.fullName} has requested your service`,
-          relatedId: booking.id,
-        },
+      await notifyUser({
+        userId: workerId,
+        type: 'BOOKING_REQUEST',
+        title: 'New Booking Request',
+        message: `${booking.client.fullName} has requested your service`,
+        relatedId: booking.id,
       });
 
       return res.status(201).json({
@@ -250,9 +251,10 @@ export const listBookings = async (req: AuthRequest, res: Response) => {
       prisma.booking.findMany({
         where: whereClause,
         include: {
-          client: { select: { id: true, fullName: true, avatar: true } },
-          worker: { select: { id: true, fullName: true, avatar: true } },
+          client: { select: { id: true, fullName: true, avatar: true, phone: true } },
+          worker: { select: { id: true, fullName: true, avatar: true, phone: true } },
           serviceTask: { select: { id: true, name: true } },
+          review: { select: { rating: true } },
         },
         orderBy: { createdAt: 'desc' },
         skip,
@@ -264,12 +266,17 @@ export const listBookings = async (req: AuthRequest, res: Response) => {
     const formattedBookings = bookings.map((b: any) => ({
       id: b.id,
       clientName: b.client.fullName,
-      workerName: b.worker.fullName,
+      clientId: b.client.id,
+      clientPhone: b.client.phone,
+      workerName: b.worker?.fullName ?? null,
+      workerId: b.worker?.id ?? null,
+      workerPhone: b.worker?.phone ?? null,
       service: b.serviceTask?.name ?? b.serviceType,
       status: b.status,
       scheduledDate: b.scheduledDate,
       estimatedPrice: b.estimatedPrice,
       finalPrice: b.finalPrice,
+      rating: b.review?.rating ?? null,
     }));
 
     return res.status(200).json({
@@ -343,6 +350,7 @@ export const getBookingDetail = async (req: AuthRequest, res: Response) => {
         status: booking.status,
         location: booking.location,
         scheduledDate: booking.scheduledDate,
+        scheduledTime: booking.scheduledTime,
         estimatedPrice: booking.estimatedPrice,
         finalPrice,
         estimatedDurationHours: booking.estimatedDurationHours,
@@ -362,6 +370,7 @@ export const getBookingDetail = async (req: AuthRequest, res: Response) => {
               materialsCost: booking.materialsCost,
               notes: booking.quoteNotes,
               status: booking.quoteStatus,
+              quotedAt: booking.quotedAt,
             }
           : null,
         addOns: booking.addOns,
@@ -439,14 +448,12 @@ export const acceptBooking = async (req: AuthRequest, res: Response) => {
       });
 
       // Create notification for client
-      await prisma.notification.create({
-        data: {
-          userId: result.clientId,
-          type: 'BOOKING_ACCEPTED',
-          title: 'Booking Accepted',
-          message: 'Your booking has been accepted',
-          relatedId: result.id,
-        },
+      await notifyUser({
+        userId: result.clientId,
+        type: 'BOOKING_ACCEPTED',
+        title: 'Booking Accepted',
+        message: 'Your booking has been accepted',
+        relatedId: result.id,
       });
 
       return res.status(200).json({
@@ -515,15 +522,23 @@ export const declineBooking = async (req: AuthRequest, res: Response) => {
       data: { status: 'PENDING' },
     });
 
+    await writeAuditLog({
+      actorId: req.user.userId,
+      actorName: req.user.email,
+      actorRole: req.user.role,
+      action: 'BOOKING_DECLINED',
+      category: 'STATUS_CHANGE',
+      message: `Worker declined booking ${formatDisplayId(id)}`,
+      metadata: { bookingId: id, workerId: req.user.userId },
+    });
+
     // Notify client
-    await prisma.notification.create({
-      data: {
-        userId: updated.clientId,
-        type: 'BOOKING_REJECTED',
-        title: 'Booking Declined',
-        message: 'The worker has declined your booking request',
-        relatedId: id,
-      },
+    await notifyUser({
+      userId: updated.clientId,
+      type: 'BOOKING_REJECTED',
+      title: 'Booking Declined',
+      message: 'The worker has declined your booking request',
+      relatedId: id,
     });
 
     return res.status(200).json({
@@ -575,15 +590,13 @@ export const startBooking = async (req: AuthRequest, res: Response) => {
     });
 
     // Notify client
-    await prisma.notification.create({
-      data: {
-        userId: updated.clientId,
-        // No BOOKING_STARTED in schema; BOOKING_ACCEPTED is the closest available
-        type: 'BOOKING_ACCEPTED',
-        title: 'Service Started',
-        message: 'The worker has started your service',
-        relatedId: id,
-      },
+    await notifyUser({
+      userId: updated.clientId,
+      // No BOOKING_STARTED in schema; BOOKING_ACCEPTED is the closest available
+      type: 'BOOKING_ACCEPTED',
+      title: 'Service Started',
+      message: 'The worker has started your service',
+      relatedId: id,
     });
 
     return res.status(200).json({
@@ -645,14 +658,12 @@ export const submitQuote = async (req: AuthRequest, res: Response) => {
     });
 
     // Notify client
-    await prisma.notification.create({
-      data: {
-        userId: booking.clientId,
-        type: 'QUOTE_SUBMITTED',
-        title: 'Quote Submitted',
-        message: 'Worker has submitted a quote for your booking',
-        relatedId: id,
-      },
+    await notifyUser({
+      userId: booking.clientId,
+      type: 'QUOTE_SUBMITTED',
+      title: 'Quote Submitted',
+      message: 'Worker has submitted a quote for your booking',
+      relatedId: id,
     });
 
     return res.status(201).json({
@@ -716,14 +727,12 @@ export const approveQuote = async (req: AuthRequest, res: Response) => {
 
     // Notify worker (workerId is nullable on Booking — skip if unassigned)
     if (booking.workerId) {
-      await prisma.notification.create({
-        data: {
-          userId: booking.workerId,
-          type: 'QUOTE_APPROVED',
-          title: 'Quote Approved',
-          message: 'Client has approved your quote',
-          relatedId: id,
-        },
+      await notifyUser({
+        userId: booking.workerId,
+        type: 'QUOTE_APPROVED',
+        title: 'Quote Approved',
+        message: 'Client has approved your quote',
+        relatedId: id,
       });
     }
 
@@ -788,14 +797,12 @@ export const disputeQuote = async (req: AuthRequest, res: Response) => {
 
     // Notify worker (workerId is nullable on Booking — skip if unassigned)
     if (booking.workerId) {
-      await prisma.notification.create({
-        data: {
-          userId: booking.workerId,
-          type: 'QUOTE_DISPUTED',
-          title: 'Quote Disputed',
-          message: `Client has disputed your quote: ${reason}`,
-          relatedId: id,
-        },
+      await notifyUser({
+        userId: booking.workerId,
+        type: 'QUOTE_DISPUTED',
+        title: 'Quote Disputed',
+        message: `Client has disputed your quote: ${reason}`,
+        relatedId: id,
       });
     }
 
@@ -872,14 +879,12 @@ export const completeBooking = async (req: AuthRequest, res: Response) => {
       });
 
       // Notify client
-      await prisma.notification.create({
-        data: {
-          userId: booking.clientId,
-          type: 'BOOKING_COMPLETED',
-          title: 'Service Completed',
-          message: 'The service has been completed',
-          relatedId: id,
-        },
+      await notifyUser({
+        userId: booking.clientId,
+        type: 'BOOKING_COMPLETED',
+        title: 'Service Completed',
+        message: 'The service has been completed',
+        relatedId: id,
       });
 
       return res.status(200).json({
@@ -952,15 +957,13 @@ export const cancelBooking = async (req: AuthRequest, res: Response) => {
       booking.clientId === req.user.userId ? booking.workerId : booking.clientId;
 
     if (notificationUserId) {
-      await prisma.notification.create({
-        data: {
-          userId: notificationUserId,
-          // No BOOKING_CANCELLED in schema; BOOKING_REJECTED is the closest
-          type: 'BOOKING_CANCELLED',
-          title: 'Booking Cancelled',
-          message: `Booking has been cancelled: ${reason}`,
-          relatedId: id,
-        },
+      await notifyUser({
+        userId: notificationUserId,
+        // No BOOKING_CANCELLED in schema; BOOKING_REJECTED is the closest
+        type: 'BOOKING_CANCELLED',
+        title: 'Booking Cancelled',
+        message: `Booking has been cancelled: ${reason}`,
+        relatedId: id,
       });
     }
 
@@ -1017,15 +1020,13 @@ export const rescheduleBooking = async (req: AuthRequest, res: Response) => {
       booking.clientId === req.user.userId ? booking.workerId : booking.clientId;
 
     if (notificationUserId) {
-      await prisma.notification.create({
-        data: {
-          userId: notificationUserId,
-          // No BOOKING_RESCHEDULED in schema; BOOKING_ACCEPTED is closest
-          type: 'BOOKING_RESCHEDULED',
-          title: 'Booking Rescheduled',
-          message: `Booking has been rescheduled to ${newDate}`,
-          relatedId: id,
-        },
+      await notifyUser({
+        userId: notificationUserId,
+        // No BOOKING_RESCHEDULED in schema; BOOKING_ACCEPTED is closest
+        type: 'BOOKING_RESCHEDULED',
+        title: 'Booking Rescheduled',
+        message: `Booking has been rescheduled to ${newDate}`,
+        relatedId: id,
       });
     }
 
@@ -1080,14 +1081,12 @@ export const addAddon = async (req: AuthRequest, res: Response) => {
     });
 
     // Notify client — no ADDON_ADDED type; use MESSAGE_RECEIVED as proxy
-    await prisma.notification.create({
-      data: {
-        userId: booking.clientId,
-        type: 'ADDON_ADDED',
-        title: 'Additional Service Added',
-        message: `${name} has been added (₱${price})`,
-        relatedId: id,
-      },
+    await notifyUser({
+      userId: booking.clientId,
+      type: 'ADDON_ADDED',
+      title: 'Additional Service Added',
+      message: `${name} has been added (₱${price})`,
+      relatedId: id,
     });
 
     return res.status(201).json({
@@ -1180,14 +1179,12 @@ export const submitReview = async (req: AuthRequest, res: Response) => {
     });
 
     // Notify worker — use REVIEW_RECEIVED (not NEW_REVIEW)
-    await prisma.notification.create({
-      data: {
-        userId: booking.workerId,
-        type: 'REVIEW_RECEIVED',
-        title: 'New Review',
-        message: `You received a ${rating}-star review`, // booking.client not included — avoid referencing it here
-        relatedId: id,
-      },
+    await notifyUser({
+      userId: booking.workerId,
+      type: 'REVIEW_RECEIVED',
+      title: 'New Review',
+      message: `You received a ${rating}-star review`, // booking.client not included — avoid referencing it here
+      relatedId: id,
     });
 
     return res.status(201).json({

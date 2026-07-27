@@ -1,5 +1,5 @@
-import React, { useState } from "react";
-import { View, Text, ScrollView, Alert } from "react-native";
+import React, { useEffect, useState } from "react";
+import { View, Text, ScrollView, Alert, ActivityIndicator } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter, useLocalSearchParams } from "expo-router";
@@ -7,16 +7,40 @@ import ScreenHeader from "../../../../components/ui/ScreenHeader";
 import InputField from "../../../../components/ui/InputField";
 import PrimaryButton from "../../../../components/ui/PrimaryButton";
 import OutlinedButton from "../../../../components/ui/OutlinedButton";
-import { useBookingStore } from "../../../../store/bookingStore";
+import * as api from "../../../../services/api";
 import { colors } from "../../../../constants";
+
+type BookingSummary = {
+  id: string;
+  service: string;
+  scheduledDate: string;
+};
 
 export default function SubmitQuoteScreen() {
   const router = useRouter();
   const { requestId } = useLocalSearchParams<{ requestId: string }>();
-  const { bookings, submitQuote } = useBookingStore();
+  const [booking, setBooking] = useState<BookingSummary | null>(null);
+  const [fetching, setFetching] = useState(true);
 
-  // Worker's perspective — find the booking by ID
-  const booking = bookings.find((b) => b.id === requestId);
+  useEffect(() => {
+    let active = true;
+    async function load() {
+      if (!requestId) return;
+      setFetching(true);
+      try {
+        const detail = await api.getBookingDetail(requestId);
+        if (active) setBooking(detail);
+      } catch (error) {
+        console.error("Load booking for quote error:", error);
+      } finally {
+        if (active) setFetching(false);
+      }
+    }
+    load();
+    return () => {
+      active = false;
+    };
+  }, [requestId]);
 
   const [laborCost, setLaborCost] = useState("");
   const [materialsCost, setMaterialsCost] = useState("");
@@ -29,9 +53,20 @@ export default function SubmitQuoteScreen() {
 
   const canSubmit = labor > 0;
 
+  if (fetching) {
+    return (
+      <SafeAreaView className="flex-1 bg-white">
+        <ScreenHeader title="Submit Quote" showBack />
+        <View className="flex-1 items-center justify-center">
+          <ActivityIndicator size="small" />
+        </View>
+      </SafeAreaView>
+    );
+  }
+
   if (!booking) {
     return (
-      <SafeAreaView className="flex-1 bg-primary-white">
+      <SafeAreaView className="flex-1 bg-white">
         <ScreenHeader title="Submit Quote" showBack />
         <View className="flex-1 items-center justify-center">
           <Text className="text-text-secondary">Booking not found</Text>
@@ -48,14 +83,10 @@ export default function SubmitQuoteScreen() {
 
     setLoading(true);
     try {
-      await new Promise((res) => setTimeout(res, 600));
-
-      submitQuote(booking.id, {
+      await api.submitQuote(booking.id, {
         laborCost: labor,
         materialsCost: materials,
-        totalAmount: total,
         notes: notes.trim(),
-        submittedAt: new Date().toISOString(),
       });
 
       Alert.alert(
@@ -63,21 +94,24 @@ export default function SubmitQuoteScreen() {
         "The client has been notified and will review your quote.",
         [{ text: "OK", onPress: () => router.back() }],
       );
+    } catch (error) {
+      console.error("Submit quote error:", error);
+      Alert.alert("Error", "Failed to submit your quote. Please try again.");
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <SafeAreaView className="flex-1 bg-primary-white">
+    <SafeAreaView className="flex-1 bg-white">
       <ScreenHeader title="Submit Quote" showBack />
       <ScrollView contentContainerStyle={{ padding: 24, paddingBottom: 40 }}>
         {/* Booking Summary */}
         <View className="bg-card rounded-2xl p-4 mb-6">
           <Text className="text-text-secondary text-xs mb-1">Booking</Text>
-          <Text className="text-primary font-bold">{booking.service}</Text>
+          <Text className="text-text-primary font-bold">{booking.service}</Text>
           <Text className="text-text-secondary text-sm mt-1">
-            {booking.date}
+            {booking.scheduledDate}
           </Text>
         </View>
 
@@ -96,7 +130,7 @@ export default function SubmitQuoteScreen() {
         </View>
 
         {/* Cost Inputs */}
-        <Text className="text-primary font-bold mb-4">Cost Breakdown</Text>
+        <Text className="text-text-primary font-bold mb-4">Cost Breakdown</Text>
 
         <InputField
           label="Labor Cost (₱)"

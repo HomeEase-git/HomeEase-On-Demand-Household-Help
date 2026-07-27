@@ -26,16 +26,17 @@ export const getUserProfile = async (req: AuthRequest, res: Response) => {
         email: true,
         phone: true,
         role: true,
+        avatar: true,
         isVerified: true,
         createdAt: true,
         updatedAt: true,
       },
     });
-    
+
     if (!user) {
       return res.status(404).json(errorResponse(404, 'User not found'));
     }
-    
+
     return res.status(200).json({
       success: true,
       message: 'Profile retrieved successfully',
@@ -57,12 +58,13 @@ export const updateUserProfile = async (req: AuthRequest, res: Response) => {
       return res.status(401).json(errorResponse(401, 'Not authenticated'));
     }
     
-    const { fullName, phone } = req.body;
-    
+    const { fullName, phone, avatar } = req.body;
+
     const updateData: any = {};
     if (fullName !== undefined) updateData.fullName = fullName;
     if (phone !== undefined) updateData.phone = phone;
-    
+    if (avatar !== undefined) updateData.avatar = avatar;
+
     const updated = await prisma.user.update({
       where: { id: req.user.userId },
       data: updateData,
@@ -71,6 +73,7 @@ export const updateUserProfile = async (req: AuthRequest, res: Response) => {
         fullName: true,
         email: true,
         phone: true,
+        avatar: true,
       },
     });
     
@@ -377,6 +380,84 @@ export const addPaymentMethod = async (req: AuthRequest, res: Response) => {
 };
 
 /**
+ * PATCH /api/users/me/payment-methods/:methodId
+ */
+export const updatePaymentMethod = async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      return res.status(401).json(errorResponse(401, 'Not authenticated'));
+    }
+
+    const methodId = req.params.methodId as string;
+    const { label } = req.body;
+
+    const method = await prisma.savedPaymentMethod.findUnique({
+      where: { id: methodId },
+      include: { clientProfile: { select: { userId: true } } },
+    });
+
+    if (!method || method.clientProfile.userId !== req.user.userId) {
+      return res.status(403).json(errorResponse(403, 'Cannot update this payment method'));
+    }
+
+    const updated = await prisma.savedPaymentMethod.update({
+      where: { id: methodId },
+      data: { label },
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: 'Payment method updated successfully',
+      data: updated,
+    });
+  } catch (error) {
+    console.error('Error updating payment method:', error);
+    return res.status(500).json(errorResponse(500, 'Failed to update payment method'));
+  }
+};
+
+/**
+ * PATCH /api/users/me/payment-methods/:methodId/set-default
+ */
+export const setDefaultPaymentMethod = async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      return res.status(401).json(errorResponse(401, 'Not authenticated'));
+    }
+
+    const methodId = req.params.methodId as string;
+
+    const method = await prisma.savedPaymentMethod.findUnique({
+      where: { id: methodId },
+      include: { clientProfile: { select: { id: true, userId: true } } },
+    });
+
+    if (!method || method.clientProfile.userId !== req.user.userId) {
+      return res.status(403).json(errorResponse(403, 'Cannot update this payment method'));
+    }
+
+    await prisma.$transaction([
+      prisma.savedPaymentMethod.updateMany({
+        where: { clientProfileId: method.clientProfile.id },
+        data: { isDefault: false },
+      }),
+      prisma.savedPaymentMethod.update({
+        where: { id: methodId },
+        data: { isDefault: true },
+      }),
+    ]);
+
+    return res.status(200).json({
+      success: true,
+      message: 'Default payment method updated',
+    });
+  } catch (error) {
+    console.error('Error setting default payment method:', error);
+    return res.status(500).json(errorResponse(500, 'Failed to set default payment method'));
+  }
+};
+
+/**
  * DELETE /api/users/me/payment-methods/:methodId
  */
 export const deletePaymentMethod = async (req: AuthRequest, res: Response) => {
@@ -597,6 +678,7 @@ export const deleteAccount = async (req: AuthRequest, res: Response) => {
       data: {
         isDeleted: true,
         deletedAt: new Date(),
+        status: 'DELETED',
       },
     });
     
@@ -607,5 +689,70 @@ export const deleteAccount = async (req: AuthRequest, res: Response) => {
   } catch (error) {
     console.error('Error deleting account:', error);
     return res.status(500).json(errorResponse(500, 'Failed to delete account'));
+  }
+};
+
+/**
+ * GET /api/users/me/reviews
+ * Get reviews the current client has written
+ */
+export const getMyReviews = async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      return res.status(401).json(errorResponse(401, 'Not authenticated'));
+    }
+
+    const { page = '1', limit = '10' } = req.query;
+    const pageNum = Math.max(1, parseInt(page as string) || 1);
+    const limitNum = Math.min(100, Math.max(1, parseInt(limit as string) || 10));
+    const skip = (pageNum - 1) * limitNum;
+
+    const [reviews, total] = await Promise.all([
+      prisma.review.findMany({
+        where: { clientId: req.user.userId },
+        include: {
+          booking: {
+            select: {
+              id: true,
+              workerId: true,
+              serviceTask: { select: { name: true } },
+              worker: { select: { fullName: true } },
+            },
+          },
+        },
+        orderBy: { createdAt: 'desc' },
+        skip,
+        take: limitNum,
+      }),
+      prisma.review.count({ where: { clientId: req.user.userId } }),
+    ]);
+
+    const formattedReviews = reviews.map((review) => ({
+      id: review.id,
+      bookingId: review.booking.id,
+      workerId: review.booking.workerId,
+      workerName: review.booking.worker?.fullName ?? 'Worker',
+      serviceType: review.booking.serviceTask?.name ?? 'Service',
+      rating: review.rating,
+      comment: review.comment,
+      createdAt: review.createdAt,
+    }));
+
+    return res.status(200).json({
+      success: true,
+      message: 'Reviews retrieved successfully',
+      data: {
+        reviews: formattedReviews,
+        pagination: {
+          page: pageNum,
+          limit: limitNum,
+          total,
+          pages: Math.ceil(total / limitNum),
+        },
+      },
+    });
+  } catch (error) {
+    console.error('Error fetching my reviews:', error);
+    return res.status(500).json(errorResponse(500, 'Failed to fetch reviews'));
   }
 };

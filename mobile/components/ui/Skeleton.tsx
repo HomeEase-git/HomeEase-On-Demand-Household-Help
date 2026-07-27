@@ -139,7 +139,7 @@ const styles = StyleSheet.create({
     padding: 12,
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: colors.primary.DEFAULT,
+    borderColor: colors.brand.DEFAULT,
   },
   bookingCardHeader: {
     flexDirection: "row",

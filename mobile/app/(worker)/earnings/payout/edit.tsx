@@ -16,7 +16,7 @@ export default function PayoutEditScreen() {
   const [selected, setSelected] = useState("gcash");
 
   return (
-    <SafeAreaView className="flex-1 bg-primary-white">
+    <SafeAreaView className="flex-1 bg-white">
       <ScreenHeader title="Set Payout Method" showBack />
       <ScrollView contentContainerStyle={{ padding: 24 }}>
         {METHODS.map((m) => (
@@ -28,9 +28,9 @@ export default function PayoutEditScreen() {
             onPress={() => setSelected(m.id)}
           >
             <View className="w-10 h-10 bg-card-light rounded-full items-center justify-center mr-3">
-              <Text className="text-primary font-bold">{m.icon}</Text>
+              <Text className="text-text-primary font-bold">{m.icon}</Text>
             </View>
-            <Text className="text-primary font-semibold">{m.label}</Text>
+            <Text className="text-brand font-semibold">{m.label}</Text>
           </Pressable>
         ))}
         <PrimaryButton

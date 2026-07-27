@@ -3,7 +3,7 @@ import { View, Text, Pressable } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import StatusBadge from "../ui/StatusBadge";
 import type { StatusType } from "../ui/StatusBadge";
-import { colors } from "../../constants";
+import { colors, cardShadow } from "../../constants";
 
 type Booking = {
   id: string;
@@ -25,7 +25,8 @@ type Props = {
 export const BookingCard: React.FC<Props> = ({ booking, onPress }) => {
   return (
     <Pressable
-      className="bg-card border-2 border-primary rounded-2xl p-4 mb-3 flex-row items-center"
+      className="bg-card rounded-2xl p-4 mb-3 flex-row items-center"
+      style={cardShadow}
       onPress={onPress}
     >
       <View className="w-10 h-10 bg-accent/20 rounded-full items-center justify-center mr-3">
@@ -36,8 +37,8 @@ export const BookingCard: React.FC<Props> = ({ booking, onPress }) => {
         />
       </View>
       <View className="flex-1">
-        <Text className="text-primary font-bold">{booking.service}</Text>
-        <Text className="text-primary text-xs">{booking.worker}</Text>
+        <Text className="text-text-primary font-bold">{booking.service}</Text>
+        <Text className="text-text-secondary text-xs">{booking.worker}</Text>
         <Text className="text-text-secondary text-xs">
           {booking.date}
           {booking.payment?.methodType

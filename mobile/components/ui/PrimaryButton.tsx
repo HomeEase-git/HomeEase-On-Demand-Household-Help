@@ -19,7 +19,7 @@ export const PrimaryButton: React.FC<Props> = ({
 }) => {
   return (
     <Pressable
-      className={`bg-primary rounded-xl py-4 px-6 items-center justify-center ${
+      className={`bg-brand rounded-xl py-4 px-6 items-center justify-center ${
         fullWidth ? "w-full" : ""
       } ${disabled ? "opacity-50" : ""}`}
       onPress={onPress}

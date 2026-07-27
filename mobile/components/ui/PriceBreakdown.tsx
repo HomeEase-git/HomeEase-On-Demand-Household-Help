@@ -41,7 +41,7 @@ export default function PriceBreakdownCard({
   return (
     <View className="bg-card rounded-2xl p-4">
       <View className="flex-row items-center justify-between mb-3 pb-3 border-b border-card-dark">
-        <Text className="text-primary font-bold text-lg">Price Breakdown</Text>
+        <Text className="text-text-primary font-bold text-lg">Price Breakdown</Text>
         <Ionicons
           name="receipt-outline"
           size={20}
@@ -52,7 +52,7 @@ export default function PriceBreakdownCard({
       {/* Base Price */}
       <View className="flex-row items-center justify-between mb-2">
         <Text className="text-text-secondary text-sm">Service (Base)</Text>
-        <Text className="text-primary font-semibold">
+        <Text className="text-brand font-semibold">
           {formatPrice(breakdown.basePrice)}
         </Text>
       </View>
@@ -64,7 +64,7 @@ export default function PriceBreakdownCard({
             Additional ({breakdown.durationHours - 1}h
             {breakdown.durationHours - 1 > 1 ? "s" : ""})
           </Text>
-          <Text className="text-primary font-semibold">
+          <Text className="text-brand font-semibold">
             {formatPrice(breakdown.durationCost)}
           </Text>
         </View>
@@ -74,7 +74,7 @@ export default function PriceBreakdownCard({
       {breakdown.addOnsTotal > 0 && (
         <View className="flex-row items-center justify-between mb-2">
           <Text className="text-text-secondary text-sm">Add-ons</Text>
-          <Text className="text-primary font-semibold">
+          <Text className="text-brand font-semibold">
             {formatPrice(breakdown.addOnsTotal)}
           </Text>
         </View>
@@ -85,7 +85,7 @@ export default function PriceBreakdownCard({
         <Text className="text-text-secondary text-sm font-semibold">
           Subtotal
         </Text>
-        <Text className="text-primary font-bold">
+        <Text className="text-text-primary font-bold">
           {formatPrice(breakdown.subtotal)}
         </Text>
       </View>
@@ -95,7 +95,7 @@ export default function PriceBreakdownCard({
         <View className="flex-row items-center">
           <Text className="text-text-secondary text-sm">Tax (12%)</Text>
         </View>
-        <Text className="text-primary font-semibold">
+        <Text className="text-brand font-semibold">
           {formatPrice(breakdown.tax)}
         </Text>
       </View>
@@ -113,7 +113,7 @@ export default function PriceBreakdownCard({
             style={{ marginLeft: 4 }}
           />
         </View>
-        <Text className="text-primary font-semibold">
+        <Text className="text-brand font-semibold">
           {formatPrice(breakdown.commission)}
         </Text>
       </View>

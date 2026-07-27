@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from "react";
-import { View, Text, FlatList, TextInput, Pressable } from "react-native";
+import { View, Text, FlatList, TextInput, Pressable, Linking, Alert } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter, useLocalSearchParams } from "expo-router";
@@ -7,76 +7,107 @@ import ChatBubbleSent from "../../../../components/chat/ChatBubbleSent";
 import ChatBubbleReceived from "../../../../components/chat/ChatBubbleReceived";
 import ImageSourcePickerBottomSheet from "../../../../components/bottom-sheets/ImageSourcePickerBottomSheet";
 import type { BottomSheetHandle } from "../../../../components/bottom-sheets/BottomSheetWrapper";
-import { useMessageStore, type Message } from "../../../../store/messageStore";
+import { useMessageStore } from "../../../../store/messageStore";
+import { useAuthStore } from "../../../../store/authStore";
 import { colors } from "../../../../constants";
+import * as api from "../../../../services/api";
 
-// Worker-specific conversations
-const workerConversations = [
-  {
-    id: "c1",
-    name: "Sarah Johnson",
-    lastMessage: "Can you start earlier tomorrow?",
-    time: "2:15 PM",
-    unread: 1,
-  },
-  {
-    id: "c2",
-    name: "Michael Chen",
-    lastMessage: "Great work today! Really satisfied.",
-    time: "Yesterday",
-    unread: 0,
-  },
-  {
-    id: "c3",
-    name: "Emma Wilson",
-    lastMessage: "Confirmed for this Saturday",
-    time: "Mon",
-    unread: 2,
-  },
-];
+function formatTime(iso: string) {
+  return new Date(iso).toLocaleTimeString("en-US", {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
 
 export default function WorkerChatScreen() {
   const router = useRouter();
-  const { id } = useLocalSearchParams<{ id: string }>();
+  const { id: userId } = useLocalSearchParams<{ id: string }>();
   const [input, setInput] = useState("");
+  const [sending, setSending] = useState(false);
   const imageSheetRef = useRef<BottomSheetHandle | null>(null);
+  const currentUserId = useAuthStore((s) => s.user?.id);
+
   const messages = useMessageStore((s) =>
-    id ? (s.messagesByConversation[id] ?? []) : [],
+    userId ? (s.messagesByUser[userId] ?? []) : [],
   );
-  const sendMessage = useMessageStore((s) => s.sendMessage);
-  const addIncomingMessage = useMessageStore((s) => s.addIncomingMessage);
-  const typing = useMessageStore((s) =>
-    id ? s.typingByConversation[id] : false,
+  const conversation = useMessageStore((s) =>
+    s.conversations.find((c) => c.userId === userId),
   );
-  const markTyping = useMessageStore((s) => s.markTyping);
-
-  const conversation = workerConversations.find((c) => c.id === id);
-
-  const send = () => {
-    if (!input.trim()) return;
-    if (!id) return;
-    const text = input.trim();
-    sendMessage(id, text);
-    setInput("");
-
-    // Simulate client typing and auto-reply
-    markTyping(id, true);
-    setTimeout(() => {
-      markTyping(id, false);
-      addIncomingMessage(id, "Thanks po, will proceed!");
-    }, 2000);
-  };
+  const setMessages = useMessageStore((s) => s.setMessages);
+  const appendMessage = useMessageStore((s) => s.appendMessage);
+  const markConversationRead = useMessageStore((s) => s.markConversationRead);
 
   useEffect(() => {
-    if (!id) return;
-    // Ensure we clear typing state when leaving
+    if (!userId) return;
+    let active = true;
+
+    api
+      .getConversationThread(userId)
+      .then((thread) => {
+        if (active) setMessages(userId, thread);
+      })
+      .catch((error) => console.error("Load conversation thread error:", error));
+
     return () => {
-      markTyping(id, false);
+      active = false;
     };
-  }, [id, markTyping]);
+  }, [userId, setMessages]);
+
+  // Reactively mark the thread read whenever it changes (initial load or a
+  // live message pushed in over the socket while this screen is open).
+  useEffect(() => {
+    if (!userId) return;
+    const hasUnreadIncoming = messages.some(
+      (m) => m.receiverId === currentUserId && m.isRead === false,
+    );
+    if (!hasUnreadIncoming) return;
+
+    api
+      .markMessagesAsRead(userId)
+      .then(() => markConversationRead(userId))
+      .catch((error) => console.error("Mark messages read error:", error));
+  }, [userId, messages, currentUserId, markConversationRead]);
+
+  const send = async () => {
+    if (!input.trim() || !userId || sending) return;
+    const text = input.trim();
+    setInput("");
+    setSending(true);
+    try {
+      const message = await api.sendMessage(userId, text);
+      appendMessage(userId, message);
+    } catch (error) {
+      console.error("Send message error:", error);
+      setInput(text);
+    } finally {
+      setSending(false);
+    }
+  };
+
+  const sendImage = async (uri: string) => {
+    if (!userId) return;
+    try {
+      const { url } = await api.uploadChatImage(uri);
+      const message = await api.sendMessage(userId, "", url);
+      appendMessage(userId, message);
+    } catch (error) {
+      console.error("Send image error:", error);
+      Alert.alert("Error", "Failed to send image. Please try again.");
+    }
+  };
+
+  const call = () => {
+    if (!conversation?.phone) {
+      Alert.alert("No phone number", "This contact has no phone number on file.");
+      return;
+    }
+    Linking.openURL(`tel:${conversation.phone}`).catch(() =>
+      Alert.alert("Error", "Could not open the phone dialer."),
+    );
+  };
 
   return (
-    <SafeAreaView className="flex-1 bg-primary-white" edges={["top"]}>
+    <SafeAreaView className="flex-1 bg-white" edges={["top"]}>
       <View className="flex-row items-center px-4 py-3 border-b border-divider">
         <Pressable onPress={() => router.back()} className="mr-2">
           <Ionicons name="chevron-back" size={24} color={colors.white} />
@@ -88,15 +119,12 @@ export default function WorkerChatScreen() {
           <Ionicons name="person-circle" size={32} color={colors.text.muted} />
         </Pressable>
         <View className="flex-1">
-          <Text className="text-primary font-bold">
+          <Text className="text-text-primary font-bold">
             {conversation?.name ?? "Chat"}
           </Text>
-          <Text className="text-success text-xs">
-            {typing ? "Typing..." : "Online"}
-          </Text>
         </View>
-        <Pressable>
-          <Ionicons name="videocam-outline" size={24} color={colors.white} />
+        <Pressable onPress={call}>
+          <Ionicons name="call-outline" size={22} color={colors.white} />
         </Pressable>
       </View>
 
@@ -105,10 +133,18 @@ export default function WorkerChatScreen() {
         keyExtractor={(item) => item.id}
         contentContainerStyle={{ padding: 16, paddingBottom: 8 }}
         renderItem={({ item }) =>
-          item.isSent ? (
-            <ChatBubbleSent message={item.text} timestamp={item.time} />
+          item.senderId === currentUserId ? (
+            <ChatBubbleSent
+              message={item.content}
+              imageUrl={item.imageUrl}
+              timestamp={formatTime(item.createdAt)}
+            />
           ) : (
-            <ChatBubbleReceived message={item.text} timestamp={item.time} />
+            <ChatBubbleReceived
+              message={item.content}
+              imageUrl={item.imageUrl}
+              timestamp={formatTime(item.createdAt)}
+            />
           )
         }
       />
@@ -121,7 +157,7 @@ export default function WorkerChatScreen() {
           <Ionicons name="attach-outline" size={24} color={colors.text.muted} />
         </Pressable>
         <TextInput
-          className="flex-1 bg-card rounded-full px-4 py-2 text-primary max-h-24"
+          className="flex-1 bg-card rounded-full px-4 py-2 text-brand max-h-24"
           placeholder="Message..."
           placeholderTextColor={colors.text.muted}
           value={input}
@@ -134,7 +170,7 @@ export default function WorkerChatScreen() {
       </View>
       <ImageSourcePickerBottomSheet
         innerRef={imageSheetRef}
-        onSelect={() => {}}
+        onSelect={sendImage}
       />
     </SafeAreaView>
   );

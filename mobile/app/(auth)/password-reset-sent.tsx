@@ -23,7 +23,7 @@ export default function PasswordResetSentScreen() {
   };
 
   return (
-    <SafeAreaView className="flex-1 bg-primary-white">
+    <SafeAreaView className="flex-1 bg-white">
       <ScrollView
         className="flex-1"
         contentContainerStyle={{
@@ -34,9 +34,9 @@ export default function PasswordResetSentScreen() {
       >
         <View className="items-center mb-8">
           <View className="w-24 h-24 bg-success/20 rounded-full items-center justify-center mb-6">
-            <Ionicons name="mail-open" size={56} color="#4CAF50" />
+            <Ionicons name="mail-open" size={56} color={colors.success} />
           </View>
-          <Text className="text-primary text-3xl font-bold text-center">
+          <Text className="text-text-primary text-3xl font-bold text-center">
             Check Your Email!
           </Text>
         </View>
@@ -44,13 +44,13 @@ export default function PasswordResetSentScreen() {
         <Text className="text-text-secondary text-center text-lg mb-2">
           We&apos;ve sent a password reset link to
         </Text>
-        <Text className="text-primary text-center font-semibold text-lg mb-6">
+        <Text className="text-brand text-center font-semibold text-lg mb-6">
           {maskEmail(email)}
         </Text>
 
         <View className="bg-blue-50 p-4 rounded-lg mb-6">
           <View className="flex-row items-start gap-3">
-            <Ionicons name="information-circle" size={20} color="#4B5FD6" />
+            <Ionicons name="information-circle" size={20} color={colors.brand.DEFAULT} />
             <Text className="text-text-secondary text-sm flex-1">
               Follow the link in the email to reset your password. The link will
               expire in 24 hours.
@@ -60,7 +60,7 @@ export default function PasswordResetSentScreen() {
 
         <View className="bg-amber-50 p-4 rounded-lg mb-8">
           <View className="flex-row items-start gap-3">
-            <Ionicons name="alert-circle" size={20} color="#FFA500" />
+            <Ionicons name="alert-circle" size={20} color={colors.warning} />
             <View className="flex-1">
               <Text className="text-text-secondary font-semibold text-sm mb-1">
                 Didn&apos;t receive an email?

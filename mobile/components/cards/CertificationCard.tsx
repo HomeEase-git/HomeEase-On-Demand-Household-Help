@@ -3,7 +3,7 @@ import { View, Text, Pressable, Alert } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import StatusBadge from "../ui/StatusBadge";
 import type { StatusType } from "../ui/StatusBadge";
-import { colors } from "../../constants";
+import { colors, cardShadow } from "../../constants";
 
 type Cert = {
   id: string;
@@ -40,14 +40,15 @@ export const CertificationCard: React.FC<Props> = ({
 
   return (
     <Pressable
-      className="bg-card border-2 border-primary rounded-2xl p-4 mb-3"
+      className="bg-card rounded-2xl p-4 mb-3"
+      style={cardShadow}
       onPress={onPress}
     >
       <View className="flex-row justify-between items-start">
-        <Text className="text-primary font-bold flex-1">{cert.name}</Text>
+        <Text className="text-text-primary font-bold flex-1">{cert.name}</Text>
         <StatusBadge status={cert.status as StatusType} />
       </View>
-      <Text className="text-primary text-sm mt-1">{cert.issuer}</Text>
+      <Text className="text-text-secondary text-sm mt-1">{cert.issuer}</Text>
       <Text className="text-text-muted text-xs mt-1">
         {cert.issueDate} – {cert.expiryDate || "No expiry"}
       </Text>

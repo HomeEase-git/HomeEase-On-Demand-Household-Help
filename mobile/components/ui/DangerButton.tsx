@@ -22,7 +22,7 @@ export const DangerButton: React.FC<Props> = ({
       onPress={onPress}
       disabled={disabled}
     >
-      <Text className="text-primary font-semibold">{label}</Text>
+      <Text className="text-white font-semibold">{label}</Text>
     </Pressable>
   );
 };

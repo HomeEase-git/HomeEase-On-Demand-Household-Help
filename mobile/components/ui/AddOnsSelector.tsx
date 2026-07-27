@@ -57,7 +57,7 @@ export default function AddOnsSelector({
     <View>
       <View className="flex-row items-center justify-between mb-3">
         <View>
-          <Text className="text-primary font-bold text-sm">
+          <Text className="text-text-primary font-bold text-sm">
             Add-ons (Optional)
           </Text>
           <Text className="text-text-secondary text-xs mt-1">
@@ -100,7 +100,7 @@ export default function AddOnsSelector({
               {/* Content */}
               <View className="flex-1">
                 <Text
-                  className={`font-semibold ${isSelected ? "text-accent" : "text-primary"}`}
+                  className={`font-semibold ${isSelected ? "text-accent" : "text-brand"}`}
                 >
                   {item.name}
                 </Text>

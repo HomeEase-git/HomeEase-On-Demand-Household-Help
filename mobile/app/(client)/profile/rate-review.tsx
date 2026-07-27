@@ -15,7 +15,7 @@ export default function RateReviewScreen() {
   );
 
   return (
-    <SafeAreaView className="flex-1 bg-primary-white">
+    <SafeAreaView className="flex-1 bg-white">
       <ScreenHeader title="Rate Bookings" showBack />
       {completedWithoutReview.length === 0 ? (
         <EmptyState
@@ -38,7 +38,7 @@ export default function RateReviewScreen() {
               }
             >
               <View className="flex-row justify-between items-center mb-1">
-                <Text className="text-primary font-semibold">
+                <Text className="text-brand font-semibold">
                   {item.service}
                 </Text>
                 <Text className="text-accent text-xs">{item.date}</Text>

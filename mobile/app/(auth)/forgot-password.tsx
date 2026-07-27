@@ -45,14 +45,14 @@ export default function ForgotPasswordScreen() {
   };
 
   return (
-    <SafeAreaView className="flex-1 bg-primary-white">
+    <SafeAreaView className="flex-1 bg-white">
       <ScreenHeader title="Forgot Password" showBack />
       <ScrollView
         className="flex-1"
         contentContainerStyle={{ paddingHorizontal: 24, paddingTop: 16 }}
         keyboardShouldPersistTaps="handled"
       >
-        <Text className="text-primary text-2xl font-bold">
+        <Text className="text-text-primary text-2xl font-bold">
           Forgot Password?
         </Text>
         <Text className="text-text-secondary mt-2 mb-6">

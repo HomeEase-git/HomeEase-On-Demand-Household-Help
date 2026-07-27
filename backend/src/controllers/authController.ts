@@ -4,6 +4,7 @@ import { hashPassword, comparePassword } from '@utils/passwordHash';
 import { generateToken } from '@utils/jwt';
 import { validateEmail, validatePassword, validatePhone, validateOtp } from '@utils/validators';
 import { errorResponse } from '@utils/errorResponse';
+import { writeAuditLog } from '@utils/auditLog';
 import {
   sendOtpEmail,
   sendPasswordResetEmail,
@@ -99,10 +100,15 @@ export const signup = async (req: Request, res: Response) => {
       return createdUser;
     });
 
-    // Generate and send OTP
+    // Generate and send OTP — the account is already created at this point,
+    // so a failed email send shouldn't turn a successful signup into a 500.
     const otp = generateOtp();
     await storeOtp(user.id, otp);
-    await sendOtpEmail(email, otp);
+    try {
+      await sendOtpEmail(email, otp);
+    } catch (emailError) {
+      console.error('Failed to send OTP email during signup:', emailError);
+    }
 
     const token = generateToken({ userId: user.id, email: user.email, role: user.role });
     const refreshToken = crypto.randomBytes(40).toString('hex');
@@ -144,18 +150,52 @@ export const login = async (req: Request, res: Response) => {
     const user = await prisma.user.findUnique({ where: { email } });
 
     if (!user) {
+      await writeAuditLog({
+        action: 'USER_LOGIN_FAILED',
+        category: 'LOGIN',
+        level: 'WARN',
+        message: `Login failed for ${email}: no account found`,
+      });
       return res.status(401).json(errorResponse(401, 'Invalid credentials'));
     }
 
     const isPasswordValid = await comparePassword(password, user.password);
 
     if (!isPasswordValid) {
+      await writeAuditLog({
+        actorId: user.id,
+        actorName: user.fullName,
+        actorRole: user.role,
+        action: 'USER_LOGIN_FAILED',
+        category: 'LOGIN',
+        level: 'WARN',
+        message: `Login failed for ${email}: incorrect password`,
+      });
       return res.status(401).json(errorResponse(401, 'Invalid credentials'));
+    }
+
+    if (user.status !== 'ACTIVE') {
+      const message =
+        user.status === 'SUSPENDED'
+          ? 'This account has been suspended. Contact support for assistance.'
+          : user.status === 'BANNED'
+            ? 'This account has been banned.'
+            : 'This account no longer exists.';
+      return res.status(403).json(errorResponse(403, message));
     }
 
     const token = generateToken({ userId: user.id, email: user.email, role: user.role });
     const refreshToken = crypto.randomBytes(40).toString('hex');
     await storeRefreshToken(user.id, refreshToken);
+
+    await writeAuditLog({
+      actorId: user.id,
+      actorName: user.fullName,
+      actorRole: user.role,
+      action: 'USER_LOGIN_SUCCESS',
+      category: 'LOGIN',
+      message: `${user.fullName} logged in`,
+    });
 
     return res.json({
       success: true,
@@ -173,6 +213,39 @@ export const login = async (req: Request, res: Response) => {
     });
   } catch (error) {
     console.error('Login error:', error);
+    return res.status(500).json(errorResponse(500, 'Internal server error'));
+  }
+};
+
+// ============================================================================
+// GET /api/auth/me
+// ============================================================================
+
+export const getMe = async (req: Request, res: Response) => {
+  try {
+    if (!req.user) {
+      return res.status(401).json(errorResponse(401, 'Not authenticated'));
+    }
+
+    const user = await prisma.user.findUnique({ where: { id: req.user.userId } });
+
+    if (!user) {
+      return res.status(404).json(errorResponse(404, 'User not found'));
+    }
+
+    return res.json({
+      success: true,
+      data: {
+        id: user.id,
+        name: user.fullName,
+        email: user.email,
+        phone: user.phone,
+        role: user.role,
+        isVerified: user.isVerified,
+      },
+    });
+  } catch (error) {
+    console.error('Get me error:', error);
     return res.status(500).json(errorResponse(500, 'Internal server error'));
   }
 };
@@ -244,7 +317,12 @@ export const verifyOtpHandler = async (req: Request, res: Response) => {
       data: { isVerified: true },
     });
 
-    await sendWelcomeEmail(email, user.fullName);
+    // Verification already succeeded — a failed welcome email shouldn't undo that.
+    try {
+      await sendWelcomeEmail(email, user.fullName);
+    } catch (emailError) {
+      console.error('Failed to send welcome email after OTP verification:', emailError);
+    }
 
     const token = generateToken({ userId: user.id, email: user.email, role: user.role });
 
@@ -312,7 +390,14 @@ export const forgotPassword = async (req: Request, res: Response) => {
 
     const token = generateResetToken();
     await storePasswordResetToken(user.id, token);
-    await sendPasswordResetEmail(email, token);
+
+    // Must not let a failed send produce a different response than the
+    // "email not registered" path above — that would leak account existence.
+    try {
+      await sendPasswordResetEmail(email, token);
+    } catch (emailError) {
+      console.error('Failed to send password reset email:', emailError);
+    }
 
     return res.json({
       success: true,

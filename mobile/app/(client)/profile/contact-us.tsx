@@ -23,7 +23,7 @@ export default function ContactUsScreen() {
   };
 
   return (
-    <SafeAreaView className="flex-1 bg-primary-white">
+    <SafeAreaView className="flex-1 bg-white">
       <ScreenHeader title="Contact Us" showBack />
       <ScrollView contentContainerStyle={{ padding: 24 }}>
         <View className="bg-card rounded-2xl p-4 mb-4">
@@ -33,7 +33,7 @@ export default function ContactUsScreen() {
               size={20}
               color={colors.accent.DEFAULT}
             />
-            <Text className="text-primary ml-2">support@homeease.com</Text>
+            <Text className="text-brand ml-2">support@homeease.com</Text>
           </View>
           <View className="flex-row items-center mb-3">
             <Ionicons
@@ -41,7 +41,7 @@ export default function ContactUsScreen() {
               size={20}
               color={colors.accent.DEFAULT}
             />
-            <Text className="text-primary ml-2">(044) 123-4567</Text>
+            <Text className="text-brand ml-2">(044) 123-4567</Text>
           </View>
           <View className="flex-row items-center">
             <Ionicons
@@ -49,7 +49,7 @@ export default function ContactUsScreen() {
               size={20}
               color={colors.accent.DEFAULT}
             />
-            <Text className="text-primary ml-2">Mon-Fri 8AM-5PM</Text>
+            <Text className="text-brand ml-2">Mon-Fri 8AM-5PM</Text>
           </View>
         </View>
         <InputField

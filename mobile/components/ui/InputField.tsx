@@ -36,15 +36,15 @@ export const InputField = forwardRef<TextInput, Props>(
 
     return (
       <View className="mb-4">
-        <Text className="text-primary text-sm mb-1">{label}</Text>
+        <Text className="text-text-secondary text-sm mb-1">{label}</Text>
         <View
-          className={`flex-row items-center bg-gray-100 border border-primary-light rounded-xl px-4 ${
+          className={`flex-row items-center bg-gray-100 border border-divider rounded-xl px-4 ${
             multiline ? "py-3" : "py-1.5"
           } ${!editable ? "opacity-60 bg-card-dark" : ""}`}
         >
           <TextInput
             ref={ref}
-            className={`flex-1 text-primary ${
+            className={`flex-1 text-text-primary ${
               multiline ? "min-h-[80px] text-top" : "h-10"
             }`}
             value={value}

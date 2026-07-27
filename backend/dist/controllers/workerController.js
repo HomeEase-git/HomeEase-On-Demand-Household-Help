@@ -3,10 +3,9 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.getWorkerCapacity = exports.addServiceTypes = exports.updateWorkerProfile = exports.updateAvailability = exports.getWorkerReviews = exports.getWorkerDetail = exports.searchWorkers = void 0;
+exports.getWorkerCapacity = exports.addServiceTypes = exports.updateWorkerProfile = exports.updateAvailability = exports.getWorkerBlockedDates = exports.getWorkerAvailability = exports.getWorkerReviews = exports.getWorkerDetail = exports.searchWorkers = void 0;
 const database_1 = __importDefault(require("@config/database"));
 const errorResponse_1 = require("@utils/errorResponse");
-const profilePersistence_1 = require("@utils/profilePersistence");
 /**
  * GET /api/workers
  * Search/list workers with filters
@@ -248,6 +247,10 @@ const getWorkerReviews = async (req, res) => {
                 avatar: review.client.avatar,
             },
             serviceType: review.booking?.serviceTask?.name || 'Service',
+            // Added so the frontend can link "view booking" from a review without
+            // fabricating an id — booking was already fetched above, just wasn't
+            // surfaced in the formatted output.
+            bookingId: review.booking?.id ?? null,
             createdAt: review.createdAt,
         }));
         return res.status(200).json({
@@ -270,6 +273,76 @@ const getWorkerReviews = async (req, res) => {
     }
 };
 exports.getWorkerReviews = getWorkerReviews;
+/**
+ * GET /api/workers/:workerId/availability?date=YYYY-MM-DD
+ * Returns the booked time slots for a worker on a specific date, so the
+ * client's booking calendar can disable them.
+ */
+const getWorkerAvailability = async (req, res) => {
+    try {
+        const workerId = req.params.workerId;
+        const { date } = req.query;
+        if (!date || typeof date !== 'string') {
+            return res.status(400).json((0, errorResponse_1.errorResponse)(400, 'date query parameter is required'));
+        }
+        const dayStart = new Date(`${date}T00:00:00.000Z`);
+        const dayEnd = new Date(`${date}T23:59:59.999Z`);
+        const bookings = await database_1.default.booking.findMany({
+            where: {
+                workerId,
+                scheduledDate: { gte: dayStart, lte: dayEnd },
+                status: { notIn: ['CANCELLED', 'REJECTED'] },
+            },
+            select: { scheduledTime: true },
+        });
+        const occupied = bookings
+            .map((b) => b.scheduledTime)
+            .filter((t) => !!t);
+        return res.status(200).json({
+            success: true,
+            message: 'Worker availability retrieved successfully',
+            data: { occupied },
+        });
+    }
+    catch (error) {
+        console.error('Error fetching worker availability:', error);
+        return res.status(500).json((0, errorResponse_1.errorResponse)(500, 'Failed to fetch worker availability'));
+    }
+};
+exports.getWorkerAvailability = getWorkerAvailability;
+/**
+ * GET /api/workers/:workerId/blocked-dates
+ * Returns dates (within the next 90 days, matching the client calendar's
+ * booking window) where the worker already has at least one active booking.
+ */
+const getWorkerBlockedDates = async (req, res) => {
+    try {
+        const workerId = req.params.workerId;
+        const today = new Date();
+        today.setUTCHours(0, 0, 0, 0);
+        const horizon = new Date(today);
+        horizon.setUTCDate(horizon.getUTCDate() + 90);
+        const bookings = await database_1.default.booking.findMany({
+            where: {
+                workerId,
+                scheduledDate: { gte: today, lte: horizon },
+                status: { notIn: ['CANCELLED', 'REJECTED'] },
+            },
+            select: { scheduledDate: true },
+        });
+        const dates = Array.from(new Set(bookings.map((b) => b.scheduledDate.toISOString().slice(0, 10))));
+        return res.status(200).json({
+            success: true,
+            message: 'Worker blocked dates retrieved successfully',
+            data: { dates },
+        });
+    }
+    catch (error) {
+        console.error('Error fetching worker blocked dates:', error);
+        return res.status(500).json((0, errorResponse_1.errorResponse)(500, 'Failed to fetch worker blocked dates'));
+    }
+};
+exports.getWorkerBlockedDates = getWorkerBlockedDates;
 /**
  * PATCH /api/workers/me/availability
  * Toggle isAvailable and set availableDays (worker only)
@@ -311,10 +384,10 @@ const updateWorkerProfile = async (req, res) => {
         if (!req.user) {
             return res.status(401).json((0, errorResponse_1.errorResponse)(401, 'Not authenticated'));
         }
-        const { bio, serviceAreaRadius, address, city, state, zipCode, kycStatus, kycSubmittedAt, kycApprovedAt, resumeUrl, yearsOfExperience, serviceArea, } = req.body;
-        const updateData = {
-            ...(0, profilePersistence_1.buildWorkerProfileUpdateData)({ bio, yearsOfExperience, serviceArea }),
-        };
+        const { bio, serviceAreaRadius, address, city, state, zipCode, kycStatus, kycSubmittedAt, kycApprovedAt, resumeUrl, } = req.body;
+        const updateData = {};
+        if (bio !== undefined)
+            updateData.bio = bio;
         if (serviceAreaRadius !== undefined)
             updateData.serviceAreaRadius = serviceAreaRadius;
         if (address !== undefined)

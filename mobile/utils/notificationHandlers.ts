@@ -24,13 +24,15 @@ export function setupNotificationReceivedHandler(): void {
       console.log(`[NotificationHandler] Received: ${payload.type} - ${payload.title}`);
 
       // Update notification store
-      const { addNotification } = useNotificationStore.getState();
-      addNotification({
+      const { receiveNotification } = useNotificationStore.getState();
+      receiveNotification({
         id: notification.request.identifier,
         title: payload.title,
-        body: payload.body,
+        message: payload.body,
         type: payload.type,
+        relatedId: null,
         isRead: false,
+        createdAt: new Date().toISOString(),
       });
 
       // Play sound/haptics

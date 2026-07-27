@@ -6,6 +6,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.handlePayMongoWebhook = exports.createPaymentIntent = exports.refundPayment = exports.releaseEscrow = exports.listMyPayments = exports.getPaymentDetail = exports.createPayment = void 0;
 const database_1 = __importDefault(require("@config/database"));
 const errorResponse_1 = require("@utils/errorResponse");
+const notify_1 = require("@utils/notify");
 const pricing_1 = require("../utils/pricing");
 const pricing_2 = require("@config/pricing");
 /**
@@ -173,6 +174,7 @@ const getPaymentDetail = async (req, res) => {
                 serviceName: payment.booking.serviceTask?.name ?? payment.booking.serviceType,
                 status: payment.status,
                 escrowStatus: payment.escrowStatus,
+                methodType: payment.methodType,
                 priceBreakdown: breakdown,
                 createdAt: payment.createdAt,
                 updatedAt: payment.updatedAt,
@@ -245,6 +247,7 @@ const listMyPayments = async (req, res) => {
             amount: currentRole === 'CLIENT' ? p.subtotal : p.workerPayout,
             status: p.status,
             escrowStatus: p.escrowStatus,
+            methodType: p.methodType,
             createdAt: p.createdAt,
         }));
         return res.status(200).json({
@@ -309,14 +312,12 @@ const releaseEscrow = async (req, res) => {
         // Notify worker — schema has PAYMENT_RECEIVED (no PAYMENT_RELEASED)
         // booking.workerId is nullable — skip if the booking has no assigned worker
         if (payment.booking.workerId) {
-            await database_1.default.notification.create({
-                data: {
-                    userId: payment.booking.workerId,
-                    type: 'PAYMENT_RECEIVED',
-                    title: 'Payment Released',
-                    message: `₱${payment.workerPayout} has been released to your account`,
-                    relatedId: payment.bookingId,
-                },
+            await (0, notify_1.notifyUser)({
+                userId: payment.booking.workerId,
+                type: 'PAYMENT_RECEIVED',
+                title: 'Payment Released',
+                message: `₱${payment.workerPayout} has been released to your account`,
+                relatedId: payment.bookingId,
             });
         }
         return res.status(200).json({
@@ -339,10 +340,6 @@ exports.releaseEscrow = releaseEscrow;
 /**
  * POST /api/payments/:id/refund
  * Refund payment: escrow → REFUNDED
- *
- * Schema notes:
- *  - Payment has no refundReason or refundedAt fields
- *  - Store reason in a notification; use updatedAt as timestamp proxy
  */
 const refundPayment = async (req, res) => {
     try {
@@ -366,24 +363,23 @@ const refundPayment = async (req, res) => {
         if (payment.escrowStatus !== 'HELD') {
             return res.status(409).json((0, errorResponse_1.errorResponse)(409, `Cannot refund escrow with status ${payment.escrowStatus}`));
         }
-        // schema has no refundReason / refundedAt on Payment
         const updated = await database_1.default.payment.update({
             where: { id },
             data: {
                 escrowStatus: 'REFUNDED',
                 status: 'REFUNDED',
+                refundReason: typeof reason === 'string' && reason.trim() ? reason.trim() : null,
+                refundedAt: new Date(),
             },
         });
         // Notify worker (booking.workerId is nullable — skip if unassigned)
         if (payment.booking.workerId) {
-            await database_1.default.notification.create({
-                data: {
-                    userId: payment.booking.workerId,
-                    type: 'PAYMENT_REFUNDED',
-                    title: 'Payment Refunded',
-                    message: `Payment has been refunded: ${reason}`,
-                    relatedId: payment.bookingId,
-                },
+            await (0, notify_1.notifyUser)({
+                userId: payment.booking.workerId,
+                type: 'PAYMENT_REFUNDED',
+                title: 'Payment Refunded',
+                message: `Payment has been refunded: ${reason}`,
+                relatedId: payment.bookingId,
             });
         }
         return res.status(200).json({
@@ -393,7 +389,7 @@ const refundPayment = async (req, res) => {
                 id: updated.id,
                 escrowStatus: updated.escrowStatus,
                 status: updated.status,
-                refundedAt: updated.updatedAt, // proxy — schema has no refundedAt
+                refundedAt: updated.refundedAt,
                 refundAmount: updated.subtotal,
             },
         });

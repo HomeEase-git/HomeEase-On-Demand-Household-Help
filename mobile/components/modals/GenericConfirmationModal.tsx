@@ -30,10 +30,10 @@ export const GenericConfirmationModal: React.FC<Props> = ({
       <View className="items-center mb-4">
         <Ionicons name="warning-outline" size={48} color={colors.warning} />
       </View>
-      <Text className="text-primary font-bold text-lg text-center">
+      <Text className="text-text-primary font-bold text-lg text-center">
         {title}
       </Text>
-      <Text className="text-primary text-center mt-2">{message}</Text>
+      <Text className="text-brand text-center mt-2">{message}</Text>
       <View className="flex-row gap-3 mt-6">
         <OutlinedButton label={cancelLabel} onPress={onCancel} />
         <View className="flex-1">

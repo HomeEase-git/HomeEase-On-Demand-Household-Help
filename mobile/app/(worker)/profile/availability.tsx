@@ -1,9 +1,11 @@
-import React, { useState } from "react";
-import { View, Text, ScrollView, Switch, Alert } from "react-native";
+import React, { useEffect, useState } from "react";
+import { View, Text, ScrollView, Switch, Alert, ActivityIndicator } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import ScreenHeader from "../../../components/ui/ScreenHeader";
 import PrimaryButton from "../../../components/ui/PrimaryButton";
+import { useAuthStore } from "../../../store/authStore";
+import * as api from "../../../services/api";
 import { colors } from "../../../constants/colors";
 
 const DAYS = [
@@ -22,13 +24,70 @@ const TODAY_KEY = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][
 
 export default function AvailabilityScreen() {
   const router = useRouter();
+  const user = useAuthStore((s) => s.user);
   const [schedule, setSchedule] = useState<Record<string, boolean>>(
     Object.fromEntries(DAYS.map(({ key }, i) => [key, i < 5])),
   );
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    async function load() {
+      if (!user?.id) return;
+      setLoading(true);
+      try {
+        const detail = await api.getWorkerDetail(user.id);
+        if (!active || !detail) return;
+        if (detail.availableDays.length > 0) {
+          setSchedule(
+            Object.fromEntries(
+              DAYS.map(({ key }) => [key, detail.availableDays.includes(key)]),
+            ),
+          );
+        }
+      } catch (error) {
+        console.error("Load availability error:", error);
+      } finally {
+        if (active) setLoading(false);
+      }
+    }
+    load();
+    return () => {
+      active = false;
+    };
+  }, [user?.id]);
 
   const toggleDay = (key: string) => {
     setSchedule((s) => ({ ...s, [key]: !s[key] }));
   };
+
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      const availableDays = DAYS.filter(({ key }) => schedule[key]).map(({ key }) => key);
+      // Only update the weekly schedule here — the global on/off toggle lives on the Home screen.
+      await api.updateAvailability(undefined, availableDays);
+      Alert.alert("Saved");
+      router.back();
+    } catch (error) {
+      console.error("Save availability error:", error);
+      Alert.alert("Error", "Failed to save your schedule.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (loading) {
+    return (
+      <SafeAreaView style={{ flex: 1, backgroundColor: colors.surface }}>
+        <ScreenHeader title="Set Availability" showBack />
+        <View style={{ flex: 1, alignItems: "center", justifyContent: "center" }}>
+          <ActivityIndicator size="small" />
+        </View>
+      </SafeAreaView>
+    );
+  }
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.surface }}>
@@ -37,7 +96,7 @@ export default function AvailabilityScreen() {
         {/* Section label */}
         <Text
           style={{
-            color: colors.primary.DEFAULT,
+            color: colors.brand.DEFAULT,
             fontWeight: "700",
             fontSize: 16,
             marginBottom: 4,
@@ -138,7 +197,7 @@ export default function AvailabilityScreen() {
                   onValueChange={() => toggleDay(key)}
                   trackColor={{
                     false: colors.divider,
-                    true: colors.primary.DEFAULT,
+                    true: colors.brand.DEFAULT,
                   }}
                   thumbColor={colors.white}
                 />
@@ -162,10 +221,9 @@ export default function AvailabilityScreen() {
         <PrimaryButton
           label="Save Schedule"
           fullWidth
-          onPress={() => {
-            Alert.alert("Saved");
-            router.back();
-          }}
+          onPress={handleSave}
+          disabled={saving}
+          loading={saving}
         />
       </ScrollView>
     </SafeAreaView>

@@ -11,6 +11,7 @@ import { useBookingStore } from "../../../store/bookingStore";
 export default function BookingSuccessScreen() {
   const router = useRouter();
   const draft = useBookingStore((s) => s.draft);
+  const selectedBooking = useBookingStore((s) => s.selectedBooking);
   const scaleAnim = React.useRef(new Animated.Value(0)).current;
   const opacityAnim = React.useRef(new Animated.Value(0)).current;
 
@@ -38,7 +39,7 @@ export default function BookingSuccessScreen() {
   const referenceNumber = `BK-${Math.random().toString().slice(2, 6).padStart(4, "0")}`;
 
   return (
-    <SafeAreaView className="flex-1 bg-primary-white">
+    <SafeAreaView className="flex-1 bg-white">
       <ScrollView
         className="flex-1"
         contentContainerStyle={{
@@ -66,7 +67,7 @@ export default function BookingSuccessScreen() {
 
         {/* Main Content */}
         <Animated.View style={{ opacity: opacityAnim, width: "100%" }}>
-          <Text className="text-primary text-3xl font-bold text-center mb-2">
+          <Text className="text-text-primary text-3xl font-bold text-center mb-2">
             Booking Confirmed!
           </Text>
 
@@ -101,12 +102,12 @@ export default function BookingSuccessScreen() {
             <Text className="text-text-secondary text-xs mb-1">
               Booking Reference
             </Text>
-            <Text className="text-primary font-bold text-lg mb-3">
+            <Text className="text-text-primary font-bold text-lg mb-3">
               {referenceNumber}
             </Text>
             <View className="border-t border-divider pt-3">
               <Text className="text-text-secondary text-xs mb-1">Service</Text>
-              <Text className="text-primary font-semibold">
+              <Text className="text-brand font-semibold">
                 {draft.category || "Service"}
               </Text>
             </View>
@@ -123,7 +124,13 @@ export default function BookingSuccessScreen() {
         <View className="w-full gap-3">
           <OutlinedButton
             label="Track My Booking"
-            onPress={() => router.push("/(client)/booking/[bookingId]")}
+            onPress={() => {
+              if (selectedBooking) {
+                router.push(`/(client)/booking/${selectedBooking.id}`);
+              } else {
+                router.push("/(client)/booking");
+              }
+            }}
           />
           <PrimaryButton
             label="Go to Home"

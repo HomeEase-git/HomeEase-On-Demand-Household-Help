@@ -8,6 +8,7 @@ type User = {
   name: string;
   email: string;
   phone?: string;
+  avatar?: string;
   role: Role;
 } | null;
 

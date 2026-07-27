@@ -1,44 +1,67 @@
 import { useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { Navigate, useLocation, useNavigate } from 'react-router-dom'
 import SectionCard from '../components/common/SectionCard'
-
-const USERNAME = 'admin'
-const PASSWORD = 'admin123'
+import homeEaseLogo from '../components/Assets/HomeEase Logo.jpg'
+import { useAuth } from '../context/AuthContext'
 
 export default function Login() {
-  const [username, setUsername] = useState('')
+  const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
+  const [isSubmitting, setIsSubmitting] = useState(false)
   const navigate = useNavigate()
+  const location = useLocation()
+  const { login, isAuthenticated, isAdmin, isLoading } = useAuth()
 
-  const handleSubmit = (e) => {
+  const from = location.state?.from || '/dashboard'
+
+  if (!isLoading && isAuthenticated && isAdmin) {
+    return <Navigate to={from} replace />
+  }
+
+  const handleSubmit = async (e) => {
     e.preventDefault()
-    if (username === USERNAME && password === PASSWORD) {
-      setError('')
-      navigate('/dashboard')
-    } else {
-      setError('Invalid username or password')
+    setError('')
+    setIsSubmitting(true)
+
+    try {
+      await login(email.trim(), password)
+      navigate(from, { replace: true })
+    } catch (err) {
+      setError(err.message || 'Login failed')
+    } finally {
+      setIsSubmitting(false)
     }
   }
 
   return (
     <div className="auth-page">
       <SectionCard className="auth-card">
-        <h1 className="page-title" style={{ textAlign: 'center', marginBottom: '0.5rem' }}>
-          Admin Login
+        <div className="auth-logo-wrap">
+          <img src={homeEaseLogo} alt="HomeEase Logo" className="auth-logo" />
+        </div>
+        <h1 className="page-title" style={{ textAlign: 'center', marginBottom: '0.375rem' }}>
+          Welcome back
         </h1>
-        <p className="page-subtitle" style={{ textAlign: 'center', marginBottom: '1.5rem' }}>
-          Sign in to manage HomeEaseAdmin
+        <p className="page-subtitle" style={{ textAlign: 'center', marginBottom: '1.75rem' }}>
+          Sign in to your HomeEase admin account
         </p>
+        {/* {import.meta.env.DEV && (
+          <p className="page-subtitle" style={{ textAlign: 'center', marginBottom: '1rem', color: '#64748b' }}>
+            Dummy admin login: admin@homeeaseadmin.com / Admin1234
+          </p>
+        )} */}
         <form className="auth-form" onSubmit={handleSubmit}>
           <div className="form-field">
-            <label htmlFor="username">Username</label>
+            <label htmlFor="email">Email</label>
             <input
-              id="username"
-              type="text"
-              value={username}
-              onChange={(e) => setUsername(e.target.value)}
-              placeholder="Enter username"
+              id="email"
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              placeholder="Enter Email "
+              autoComplete="email"
+              required
             />
           </div>
           <div className="form-field">
@@ -49,13 +72,23 @@ export default function Login() {
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               placeholder="Enter password"
+              autoComplete="current-password"
+              required
             />
           </div>
           {error && <div className="form-error">{error}</div>}
-          <button type="submit" className="btn btn-primary" style={{ width: '100%', marginTop: '0.5rem' }}>
-            Login
+          <button
+            type="submit"
+            className="btn btn-primary"
+            style={{ width: '100%', marginTop: '0.5rem' }}
+            disabled={isSubmitting}
+          >
+            {isSubmitting ? 'Signing in...' : 'Login'}
           </button>
         </form>
+        {/* <p className="auth-hint">
+          Use the seeded admin account after running the seed-admin script in backend/prisma/seeds.
+        </p> */}
       </SectionCard>
     </div>
   )

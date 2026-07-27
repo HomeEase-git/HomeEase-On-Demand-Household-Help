@@ -61,7 +61,7 @@ export const OtpInput: React.FC<Props> = ({
           ref={(r) => {
             refs.current[index] = r;
           }}
-          className="w-12 h-14 bg-card border border-accent rounded-xl text-primary text-center text-xl"
+          className="w-12 h-14 bg-card border border-accent rounded-xl text-brand text-center text-xl"
           value={inputs[index] || ""}
           onChangeText={(text) => handleChange(text, index)}
           onKeyPress={(e) => handleKeyPress(e, index)}

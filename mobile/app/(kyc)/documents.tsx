@@ -9,7 +9,7 @@ import StepperHorizontal from "../../components/steppers/StepperHorizontal";
 import UploadCard from "../../components/ui/UploadCard";
 import PrimaryButton from "../../components/ui/PrimaryButton";
 import { useAuthStore } from "../../store/authStore";
-import { submitKycDocument } from "../../services/api";
+import { submitKycDocument, uploadKycFile } from "../../services/api";
 import {
   documentRequirements,
   isDocumentTypeAllowed,
@@ -106,7 +106,8 @@ export default function DocumentsScreen() {
       }
 
       setSubmitting(true);
-      await submitKycDocument(key, document.uri);
+      const { url } = await uploadKycFile(key, document.uri, mimeType);
+      await submitKycDocument(key, url);
       setDocuments((prev) => ({
         ...prev,
         [key]: {
@@ -157,7 +158,7 @@ export default function DocumentsScreen() {
   }
 
   return (
-    <SafeAreaView className="flex-1 bg-primary-white">
+    <SafeAreaView className="flex-1 bg-white">
       <ScreenHeader title="Clearances & Documents" showBack />
       <ScrollView
         className="flex-1"
@@ -173,7 +174,7 @@ export default function DocumentsScreen() {
         </Text>
 
         <View className="mb-4">
-          <Text className="text-primary font-semibold mb-2">Clearances</Text>
+          <Text className="text-brand font-semibold mb-2">Clearances</Text>
           {renderUploadCard("nbiClearance")}
           {renderUploadCard("barangayClearance")}
           {renderUploadCard("policeClearance")}
@@ -181,7 +182,7 @@ export default function DocumentsScreen() {
         </View>
 
         <View className="mb-4">
-          <Text className="text-primary font-semibold mb-2">Optional</Text>
+          <Text className="text-brand font-semibold mb-2">Optional</Text>
           {renderUploadCard("certification")}
         </View>
 

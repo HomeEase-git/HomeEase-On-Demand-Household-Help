@@ -14,7 +14,7 @@ export const SectionHeader: React.FC<Props> = ({
 }) => {
   return (
     <View className="flex-row items-center justify-between mb-3">
-      <Text className="text-primary font-bold text-base flex-1">{title}</Text>
+      <Text className="text-text-primary font-bold text-base flex-1">{title}</Text>
       {actionLabel && onActionPress && (
         <Pressable onPress={onActionPress}>
           <Text className="text-accent text-sm font-semibold">

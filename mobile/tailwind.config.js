@@ -5,12 +5,12 @@ module.exports = {
   theme: {
     extend: {
       colors: {
-        // PRIMARY PALETTE - Royal Blue
-        primary: {
+        // BRAND PALETTE - Royal Blue (renamed from `primary` to avoid colliding
+        // with the `text.primary` semantic token — text-primary vs text-brand)
+        brand: {
           DEFAULT: "#4169E1",
           dark: "#2E50B2",
           light: "#6B84F0",
-          white: "#FFFFFF",
         },
         // ACCENT PALETTE - Deep Orange
         accent: {
@@ -18,20 +18,39 @@ module.exports = {
           light: "#FFA950",
           muted: "#E57E1A",
         },
-        // CARD & CONTAINER
+        // CARD & CONTAINER - darkened off the page's white background so cards
+        // read as distinct, elevated surfaces instead of blending into the page
         card: {
-          DEFAULT: "#FFFFFF",
+          DEFAULT: "#F3F4F6",
           light: "#F9FAFB",
-          dark: "#F3F4F6",
+          dark: "#E5E7EB",
         },
         // SURFACE & BACKGROUND
         surface: "#F3F4F6",
         white: "#FFFFFF",
-        // TEXT & TYPOGRAPHY
+        // NEUTRAL GRAY SCALE - single ramp backing text/surface/divider aliases
+        // below, instead of independently-guessed hex values
+        neutral: {
+          50: "#F9FAFB",
+          100: "#F3F4F6",
+          200: "#E5E7EB",
+          300: "#D1D5DB",
+          400: "#9CA3AF",
+          500: "#6B7280",
+          600: "#4B5563",
+          700: "#374151",
+          800: "#1F2937",
+          900: "#111827",
+        },
+        // TEXT & TYPOGRAPHY - `primary` is a dark navy derived from the brand
+        // blue (not pure black) so headings/body carry a subtle brand
+        // undertone; `black` stays available for the rare case true black is
+        // wanted.
         text: {
-          primary: "#000000",
+          primary: "#4169E1",
           secondary: "#6B7280",
           muted: "#9CA3AF",
+          black: "#000000",
         },
         // ACCENT COLORS
         gold: "#FB8B23",
@@ -44,6 +63,8 @@ module.exports = {
         completed: "#10B981",
         cancelled: "#EF4444",
         divider: "#E5E7EB",
+        // Hardcoded "off" track color reused across Switch components
+        toggleOff: "#2A3080",
         // ADDITIONAL COLORS
         banner1: "#FFE2BC",
         banner2: "#D1F7E0",

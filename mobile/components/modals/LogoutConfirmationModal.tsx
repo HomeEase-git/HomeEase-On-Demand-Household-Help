@@ -17,10 +17,10 @@ export const LogoutConfirmationModal: React.FC<Props> = ({
 }) => {
   return (
     <ModalWrapper visible={visible} onClose={onCancel}>
-      <Text className="text-primary font-bold text-lg text-center">
+      <Text className="text-text-primary font-bold text-lg text-center">
         Log out?
       </Text>
-      <Text className="text-primary text-center mt-2">
+      <Text className="text-brand text-center mt-2">
         You will need to sign in again to access your account.
       </Text>
       <View className="flex-row gap-3 mt-6">

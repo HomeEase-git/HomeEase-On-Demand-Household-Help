@@ -1,30 +1,76 @@
-import React, { useState } from "react";
-import { View, Text, ScrollView } from "react-native";
+import React, { useCallback, useState } from "react";
+import { View, Text, ScrollView, Alert, ActivityIndicator } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
+import { useFocusEffect } from "@react-navigation/native";
 import { useRouter, useLocalSearchParams } from "expo-router";
 import ScreenHeader from "../../../components/ui/ScreenHeader";
-import StarRating from "../../../components/ui/StarRating";
 import PrimaryButton from "../../../components/ui/PrimaryButton";
 import OutlinedButton from "../../../components/ui/OutlinedButton";
 import GenericConfirmationModal from "../../../components/modals/GenericConfirmationModal";
 import { useWorkerStore } from "../../../store/workerStore";
-import { workerActiveJobs } from "../../../constants/dummyData";
+import { API_STATUS_MAP } from "../../../store/bookingStore";
+import * as api from "../../../services/api";
 import { colors } from "../../../constants";
 import StatusBadge from "../../../components/ui/StatusBadge";
+
+type BookingDetail = {
+  id: string;
+  client: { id: string; fullName: string; phone: string | null };
+  service: string;
+  status: string;
+  location: string | null;
+  scheduledDate: string;
+  estimatedPrice: number;
+};
 
 export default function RequestDetailScreen() {
   const router = useRouter();
   const { requestId } = useLocalSearchParams<{ requestId: string }>();
-  const updateRequestStatus = useWorkerStore((s) => s.updateRequestStatus);
-  const request = useWorkerStore((s) =>
-    s.jobRequests.find((r) => r.id === requestId),
-  );
+  const updateJobStatus = useWorkerStore((s) => s.updateJobStatus);
+  const [booking, setBooking] = useState<BookingDetail | null>(null);
+  const [capacity, setCapacity] = useState<{ activeJobCount: number; maxConcurrentJobs: number } | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [submitting, setSubmitting] = useState(false);
   const [declineVisible, setDeclineVisible] = useState(false);
 
-  if (!request) {
+  const load = useCallback(async () => {
+    if (!requestId) return;
+    setLoading(true);
+    try {
+      const [detail, cap] = await Promise.all([
+        api.getBookingDetail(requestId),
+        api.getWorkerCapacity(),
+      ]);
+      setBooking(detail);
+      setCapacity(cap);
+    } catch (error) {
+      console.error("Load request detail error:", error);
+    } finally {
+      setLoading(false);
+    }
+  }, [requestId]);
+
+  useFocusEffect(
+    useCallback(() => {
+      load();
+    }, [load]),
+  );
+
+  if (loading) {
     return (
-      <SafeAreaView className="flex-1 bg-primary-white">
+      <SafeAreaView className="flex-1 bg-white">
+        <ScreenHeader title="Job Request" showBack />
+        <View className="flex-1 items-center justify-center">
+          <ActivityIndicator size="small" />
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  if (!booking) {
+    return (
+      <SafeAreaView className="flex-1 bg-white">
         <ScreenHeader title="Job Request" showBack />
         <View className="flex-1 items-center justify-center">
           <Text className="text-text-secondary">Not found</Text>
@@ -33,33 +79,51 @@ export default function RequestDetailScreen() {
     );
   }
 
-  const handleAccept = () => {
-    updateRequestStatus(request.id, "Accepted");
-    require("react-native").Alert.alert(
-      "Job Accepted!",
-      "The client has been notified. You can track the job from the job detail screen.",
-      [
-        {
-          text: "View Job",
-          onPress: () => router.replace(`/(worker)/requests/job/${request.id}`),
-        },
-        { text: "Go Back", onPress: () => router.back() },
-      ],
-    );
+  const status = API_STATUS_MAP[booking.status] ?? "Pending";
+  const activeJobs = capacity?.activeJobCount ?? 0;
+
+  const handleAccept = async () => {
+    if (submitting) return;
+    setSubmitting(true);
+    try {
+      await api.acceptBooking(booking.id);
+      updateJobStatus(booking.id, "Accepted");
+      Alert.alert(
+        "Job Accepted!",
+        "The client has been notified. You can track the job from the job detail screen.",
+        [
+          {
+            text: "View Job",
+            onPress: () => router.replace(`/(worker)/requests/job/${booking.id}`),
+          },
+          { text: "Go Back", onPress: () => router.back() },
+        ],
+      );
+    } catch (error) {
+      console.error("Accept booking error:", error);
+      Alert.alert("Error", "Failed to accept this job. Please try again.");
+    } finally {
+      setSubmitting(false);
+    }
   };
 
-  const handleDeclineConfirm = () => {
+  const handleDeclineConfirm = async () => {
     setDeclineVisible(false);
-    updateRequestStatus(request.id, "Declined");
-    require("react-native").Alert.alert(
-      "Declined",
-      "The job request has been declined.",
-    );
-    router.back();
+    setSubmitting(true);
+    try {
+      await api.declineBooking(booking.id);
+      Alert.alert("Declined", "The job request has been declined.");
+      router.back();
+    } catch (error) {
+      console.error("Decline booking error:", error);
+      Alert.alert("Error", "Failed to decline this job. Please try again.");
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   return (
-    <SafeAreaView className="flex-1 bg-primary-white">
+    <SafeAreaView className="flex-1 bg-white">
       <ScreenHeader title="Job Request" showBack />
       <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 100 }}>
         {/* Client info */}
@@ -72,66 +136,58 @@ export default function RequestDetailScreen() {
             />
           </View>
           <View className="flex-1">
-            <Text className="text-primary font-bold text-lg">
-              {request.client}
+            <Text className="text-text-primary font-bold text-lg">
+              {booking.client.fullName}
             </Text>
-            <StarRating rating={4.5} size={14} />
-            <Text className="text-text-muted text-xs">8 reviews</Text>
-            <View className="bg-success/20 rounded-full px-2 py-0.5 self-start mt-1">
-              <Text className="text-success text-xs">Verified Client</Text>
-            </View>
+            {booking.client.phone ? (
+              <Text className="text-text-secondary text-xs mt-1">
+                {booking.client.phone}
+              </Text>
+            ) : null}
           </View>
         </View>
 
         {/* Service details */}
         <View className="bg-card rounded-2xl p-4 mb-3">
-          <Text className="text-primary font-bold mb-2">Service</Text>
-          <Text className="text-text-secondary text-sm">{request.service}</Text>
+          <Text className="text-text-primary font-bold mb-2">Service</Text>
+          <Text className="text-text-secondary text-sm">{booking.service}</Text>
           <Text className="text-text-muted text-xs mt-2">
-            Date: {request.date} · Estimated duration: 2 hrs
+            Date: {booking.scheduledDate}
           </Text>
         </View>
 
         {/* Workload warning */}
-        <View className="bg-card rounded-2xl p-4 mb-3">
-          <Text className="text-primary font-bold mb-2">
-            Your Current Workload
-          </Text>
-          {(() => {
-            const activeJobs = workerActiveJobs["w1"] || 0;
-            if (activeJobs === 0) {
-              return (
-                <Text className="text-success text-sm">
-                  You have no active jobs. You are free to accept.
-                </Text>
-              );
-            } else if (activeJobs === 1) {
-              return (
-                <Text className="text-warning text-sm">
-                  You have 1 active job currently.
-                </Text>
-              );
-            } else {
-              return (
-                <Text className="text-error text-sm">
-                  You have {activeJobs} active jobs. Consider your capacity
-                  before accepting.
-                </Text>
-              );
-            }
-          })()}
-        </View>
+        {capacity && (
+          <View className="bg-card rounded-2xl p-4 mb-3">
+            <Text className="text-text-primary font-bold mb-2">
+              Your Current Workload
+            </Text>
+            {activeJobs === 0 ? (
+              <Text className="text-success text-sm">
+                You have no active jobs. You are free to accept.
+              </Text>
+            ) : activeJobs >= capacity.maxConcurrentJobs ? (
+              <Text className="text-error text-sm">
+                You have {activeJobs} active jobs and are at capacity.
+              </Text>
+            ) : (
+              <Text className="text-warning text-sm">
+                You have {activeJobs} active job{activeJobs > 1 ? "s" : ""} currently.
+              </Text>
+            )}
+          </View>
+        )}
 
         <View className="bg-card rounded-2xl p-4 mb-3">
-          <Text className="text-primary font-bold mb-2">Status</Text>
-          <StatusBadge status={request.status as any} />
+          <Text className="text-text-primary font-bold mb-2">Status</Text>
+          <StatusBadge status={status as any} />
         </View>
 
         {/* Location */}
         <View className="bg-card rounded-2xl p-4 mb-3">
-          <Text className="text-primary font-bold mb-2">Location</Text>
+          <Text className="text-text-primary font-bold mb-2">Location</Text>
           <Text className="text-text-secondary text-sm">
-            123 Rizal St., Hagonoy, Bulacan
+            {booking.location || "No address provided"}
           </Text>
           <View className="w-full h-32 bg-card-dark rounded-xl mt-3 items-center justify-center">
             <Ionicons
@@ -147,7 +203,7 @@ export default function RequestDetailScreen() {
         <View className="bg-card rounded-2xl p-4 mb-3 items-center">
           <Text className="text-text-secondary text-sm">Offered Price</Text>
           <Text className="text-accent font-bold text-4xl mt-1">
-            ₱{request.amount}.00
+            ₱{booking.estimatedPrice}.00
           </Text>
           <View className="mt-3 bg-card-dark rounded-xl p-3 w-full">
             <Text className="text-text-secondary text-xs font-semibold mb-2">
@@ -156,7 +212,7 @@ export default function RequestDetailScreen() {
             <View className="flex-row justify-between py-1">
               <Text className="text-text-muted text-xs">Client Pays</Text>
               <Text className="text-text-secondary text-xs">
-                ₱{request.amount}.00
+                ₱{booking.estimatedPrice}.00
               </Text>
             </View>
             <View className="flex-row justify-between py-1">
@@ -164,39 +220,42 @@ export default function RequestDetailScreen() {
                 Platform Fee (10%)
               </Text>
               <Text className="text-text-secondary text-xs">
-                -₱{parseFloat((request.amount * 0.1).toFixed(2))}
+                -₱{parseFloat((booking.estimatedPrice * 0.1).toFixed(2))}
               </Text>
             </View>
             <View className="border-b border-divider my-1" />
             <View className="flex-row justify-between py-1">
               <Text className="text-text-muted text-xs">You Receive</Text>
               <Text className="text-success text-xs font-bold">
-                ₱{parseFloat((request.amount * 0.9).toFixed(2))}
+                ₱{parseFloat((booking.estimatedPrice * 0.9).toFixed(2))}
               </Text>
             </View>
           </View>
         </View>
 
         {/* Action buttons */}
-        {request.status === "Pending" ? (
+        {status === "Pending" ? (
           <View className="flex-row gap-3 mt-4">
             <OutlinedButton
               label="Decline"
               onPress={() => setDeclineVisible(true)}
+              disabled={submitting}
             />
             <View className="flex-1">
               <PrimaryButton
                 label="Accept Job"
                 fullWidth
                 onPress={handleAccept}
+                disabled={submitting}
+                loading={submitting}
               />
             </View>
           </View>
         ) : (
           <View className="bg-card rounded-2xl p-4 mt-4">
-            <Text className="text-primary font-bold mb-2">Request Status</Text>
+            <Text className="text-text-primary font-bold mb-2">Request Status</Text>
             <Text className="text-text-secondary text-sm">
-              This job request is {request.status.toLowerCase()}.
+              This job request is {status.toLowerCase()}.
             </Text>
           </View>
         )}

@@ -132,14 +132,14 @@ export default function ClientHomeScreen() {
   }, []);
 
   return (
-    <SafeAreaView className="flex-1 bg-primary-white" edges={["top"]}>
+    <SafeAreaView className="flex-1 bg-white" edges={["top"]}>
       <ScrollView
         className="flex-1"
         contentContainerStyle={{ paddingBottom: 24 }}
         showsVerticalScrollIndicator={false}
       >
         <View className="flex-row items-center justify-between px-4 pt-2 pb-2">
-          <Text className="text-primary text-xl font-bold">HomeEase</Text>
+          <Text className="text-text-primary text-xl font-bold">HomeEase</Text>
           <Pressable
             className="p-2"
             onPress={() => router.push("/(client)/inbox")}
@@ -147,7 +147,7 @@ export default function ClientHomeScreen() {
             <Ionicons
               name="notifications-outline"
               size={24}
-              color={colors.primary.DEFAULT}
+              color={colors.brand.DEFAULT}
             />
             <NotificationBadge count={unreadCount} />
           </Pressable>
@@ -173,7 +173,7 @@ export default function ClientHomeScreen() {
         ) : (
           <>
             <View className="bg-card rounded-2xl p-5 mx-4 mt-4">
-              <Text className="text-primary font-bold text-xl">
+              <Text className="text-text-primary font-bold text-xl">
                 Good morning, {firstName}! 👋
               </Text>
               <View className="flex-row items-center mt-2">

@@ -1,32 +1,48 @@
 import React, { useState } from "react";
-import { View, ScrollView } from "react-native";
+import { View, ScrollView, Alert } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
+import { isAxiosError } from "axios";
 import ScreenHeader from "../../../components/ui/ScreenHeader";
 import InputField from "../../../components/ui/InputField";
 import PrimaryButton from "../../../components/ui/PrimaryButton";
+import * as api from "../../../services/api";
 
 export default function ChangePasswordScreen() {
   const router = useRouter();
   const [current, setCurrent] = useState("");
   const [newPass, setNewPass] = useState("");
   const [confirm, setConfirm] = useState("");
+  const [saving, setSaving] = useState(false);
 
-  const handleUpdate = () => {
+  const handleUpdate = async () => {
     if (!current || !newPass || !confirm) {
-      require("react-native").Alert.alert("Error", "Fill all fields");
+      Alert.alert("Error", "Fill all fields");
       return;
     }
     if (newPass !== confirm) {
-      require("react-native").Alert.alert("Error", "Passwords do not match");
+      Alert.alert("Error", "Passwords do not match");
       return;
     }
-    require("react-native").Alert.alert("Success", "Password updated");
-    router.back();
+
+    setSaving(true);
+    try {
+      await api.changePassword(current, newPass);
+      Alert.alert("Success", "Password updated");
+      router.back();
+    } catch (error) {
+      const message =
+        isAxiosError(error) && error.response?.status === 401
+          ? "Current password is incorrect"
+          : "Unable to update password right now.";
+      Alert.alert("Error", message);
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
-    <SafeAreaView className="flex-1 bg-primary-white">
+    <SafeAreaView className="flex-1 bg-white">
       <ScreenHeader title="Change Password" showBack />
       <ScrollView contentContainerStyle={{ padding: 24 }}>
         <InputField
@@ -51,6 +67,8 @@ export default function ChangePasswordScreen() {
           label="Update Password"
           fullWidth
           onPress={handleUpdate}
+          loading={saving}
+          disabled={saving}
         />
       </ScrollView>
     </SafeAreaView>

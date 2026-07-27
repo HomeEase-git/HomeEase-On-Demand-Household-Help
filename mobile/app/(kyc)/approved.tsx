@@ -14,7 +14,7 @@ export default function KycApprovedScreen() {
     user?.role === "worker" ? "/(worker)/home" : "/(client)/home";
 
   return (
-    <SafeAreaView className="flex-1 bg-primary-white items-center justify-center px-8">
+    <SafeAreaView className="flex-1 bg-white items-center justify-center px-8">
       {/* TODO: Replace with approved/success illustration */}
       <View className="w-32 h-32 bg-success/20 rounded-full items-center justify-center mb-8">
         <Ionicons name="checkmark-circle" size={80} color={colors.success} />

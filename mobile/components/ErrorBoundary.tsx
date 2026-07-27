@@ -73,7 +73,7 @@ export class ErrorBoundary extends React.Component<Props, State> {
   render() {
     if (this.state.hasError && this.state.error) {
       return (
-        <View className="flex-1 bg-primary-white">
+        <View className="flex-1 bg-white">
           <ScrollView
             className="flex-1"
             contentContainerStyle={{
@@ -86,7 +86,7 @@ export class ErrorBoundary extends React.Component<Props, State> {
               <View className="w-16 h-16 rounded-full bg-error/10 items-center justify-center mb-4">
                 <Ionicons name="alert-circle" size={32} color={colors.error} />
               </View>
-              <Text className="text-xl font-bold text-primary mb-2">
+              <Text className="text-xl font-bold text-text-primary mb-2">
                 Oops! Something went wrong
               </Text>
               <Text className="text-text-secondary text-center text-sm">

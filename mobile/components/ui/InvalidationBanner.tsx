@@ -1,6 +1,7 @@
 import React from "react";
 import { View, Text, Pressable } from "react-native";
 import { useBookingStore } from "../../store/bookingStore";
+import { colors } from "../../constants";
 
 export default function InvalidationBanner() {
   const reason = useBookingStore((s) => s.draft.lastInvalidationReason);
@@ -11,15 +12,15 @@ export default function InvalidationBanner() {
   return (
     <View
       style={{
-        backgroundColor: "#FFF4E5",
+        backgroundColor: `${colors.warning}1A`,
         padding: 10,
         borderRadius: 8,
         marginVertical: 8,
       }}
     >
-      <Text style={{ color: "#663C00" }}>{reason}</Text>
+      <Text style={{ color: colors.warning }}>{reason}</Text>
       <Pressable onPress={() => clear()} style={{ marginTop: 8 }}>
-        <Text style={{ color: "#1F6FEB" }}>Dismiss</Text>
+        <Text style={{ color: colors.brand.DEFAULT }}>Dismiss</Text>
       </Pressable>
     </View>
   );

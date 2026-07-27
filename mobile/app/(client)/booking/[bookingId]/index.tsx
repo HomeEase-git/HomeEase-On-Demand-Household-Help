@@ -1,6 +1,7 @@
-import React from "react";
-import { View, Text, ScrollView, Pressable, Alert } from "react-native";
+import React, { useState } from "react";
+import { View, Text, ScrollView, Pressable, Alert, Linking } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { useFocusEffect } from "@react-navigation/native";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter, useLocalSearchParams } from "expo-router";
 import ScreenHeader from "../../../../components/ui/ScreenHeader";
@@ -10,15 +11,90 @@ import PrimaryButton from "../../../../components/ui/PrimaryButton";
 import OutlinedButton from "../../../../components/ui/OutlinedButton";
 import DangerButton from "../../../../components/ui/DangerButton";
 import PriceBreakdownCard from "../../../../components/ui/PriceBreakdown";
+import { LoadingSkeleton } from "../../../../components/feedback/LoadingSkeleton";
 import {
   useBookingStore,
+  type Booking,
   type BookingState,
 } from "../../../../store/bookingStore";
+import { getBookingDetail } from "../../../../services/api";
 import { calculatePriceBreakdown } from "../../../../utils/pricing";
 import { isExactCategoryMatch } from "../../../../utils/categoryMapping";
 import type { StatusType } from "../../../../components/ui/StatusBadge";
 import { colors } from "../../../../constants";
 import { workers } from "../../../../constants/dummyData";
+
+// Backend BookingStatus enum -> store's friendly status values
+const API_STATUS_MAP: Record<string, Booking["status"]> = {
+  PENDING: "Pending",
+  ACCEPTED: "Accepted",
+  REJECTED: "Cancelled",
+  IN_PROGRESS: "InProgress",
+  QUOTE_SUBMITTED: "QuoteSubmitted",
+  QUOTE_APPROVED: "QuoteApproved",
+  DISPUTED: "Disputed",
+  COMPLETED: "Completed",
+  CANCELLED: "Cancelled",
+};
+
+type ApiBookingDetail = {
+  id: string;
+  worker: { id: string; fullName: string; phone?: string | null } | null;
+  service: string;
+  status: string;
+  location: string;
+  scheduledDate: string;
+  scheduledTime: string | null;
+  estimatedPrice: number;
+  finalPrice: number | null;
+  payment: {
+    methodType: string;
+    accountIdentifier: string | null;
+    status: string;
+    totalAmount: number;
+  } | null;
+  quote: {
+    laborCost: number;
+    materialsCost: number;
+    notes: string | null;
+    quotedAt: string | null;
+  } | null;
+  review: { rating: number; comment: string | null } | null;
+};
+
+function mapApiBookingDetail(d: ApiBookingDetail): Booking {
+  return {
+    id: d.id,
+    service: d.service,
+    worker: d.worker?.fullName ?? "Unassigned",
+    workerId: d.worker?.id,
+    workerPhone: d.worker?.phone ?? undefined,
+    date: d.scheduledDate,
+    time: d.scheduledTime ?? undefined,
+    address: d.location,
+    status: API_STATUS_MAP[d.status] ?? "Pending",
+    amount: d.finalPrice ?? d.estimatedPrice,
+    payment: d.payment
+      ? {
+          methodType: d.payment.methodType,
+          accountIdentifier: d.payment.accountIdentifier ?? undefined,
+          status: d.payment.status,
+          totalAmount: d.payment.totalAmount,
+        }
+      : undefined,
+    quote: d.quote
+      ? {
+          laborCost: d.quote.laborCost,
+          materialsCost: d.quote.materialsCost,
+          totalAmount: d.finalPrice ?? 0,
+          notes: d.quote.notes ?? "",
+          submittedAt: d.quote.quotedAt ?? d.scheduledDate,
+        }
+      : undefined,
+    rating: d.review?.rating,
+    reviewText: d.review?.comment ?? undefined,
+  };
+}
 
 export default function BookingDetailScreen() {
   const router = useRouter();
@@ -26,10 +102,44 @@ export default function BookingDetailScreen() {
   const { bookings, updateBookingStatus, prefillFromBooking } =
     useBookingStore();
   const booking = bookings.find((b) => b.id === bookingId);
+  const [loading, setLoading] = useState(true);
+
+  useFocusEffect(
+    React.useCallback(() => {
+      let cancelled = false;
+      (async () => {
+        setLoading(true);
+        try {
+          const data: ApiBookingDetail = await getBookingDetail(bookingId);
+          if (cancelled) return;
+          const mapped = mapApiBookingDetail(data);
+          useBookingStore.setState((s) => ({
+            bookings: [...s.bookings.filter((b) => b.id !== mapped.id), mapped],
+          }));
+        } catch (error) {
+          console.error("Load booking detail error:", error);
+        } finally {
+          if (!cancelled) setLoading(false);
+        }
+      })();
+      return () => {
+        cancelled = true;
+      };
+    }, [bookingId]),
+  );
+
+  if (loading && !booking) {
+    return (
+      <SafeAreaView className="flex-1 bg-white">
+        <ScreenHeader title="Booking Details" showBack />
+        <LoadingSkeleton type="booking" count={1} />
+      </SafeAreaView>
+    );
+  }
 
   if (!booking) {
     return (
-      <SafeAreaView className="flex-1 bg-primary-white">
+      <SafeAreaView className="flex-1 bg-white">
         <ScreenHeader title="Booking Details" showBack />
         <View className="flex-1 items-center justify-center">
           <Ionicons
@@ -103,20 +213,6 @@ export default function BookingDetailScreen() {
   const workerName =
     workers.find((w) => w.id === booking.worker)?.name ?? booking.worker;
 
-  const handleCancel = () => {
-    Alert.alert("Cancel Booking?", "This action cannot be undone.", [
-      { text: "Keep Booking", style: "cancel" },
-      {
-        text: "Cancel Booking",
-        style: "destructive",
-        onPress: () => {
-          updateBookingStatus(booking.id, "Cancelled");
-          router.back();
-        },
-      },
-    ]);
-  };
-
   const handleComplete = () => {
     updateBookingStatus(booking.id, "Completed");
     router.push({
@@ -126,7 +222,7 @@ export default function BookingDetailScreen() {
   };
 
   return (
-    <SafeAreaView className="flex-1 bg-primary-white">
+    <SafeAreaView className="flex-1 bg-white">
       <ScreenHeader title="Booking Details" showBack />
       <ScrollView
         className="flex-1"
@@ -218,7 +314,7 @@ export default function BookingDetailScreen() {
         {/* Service Info */}
         <View className="bg-card rounded-2xl p-4 mb-3">
           <Text className="text-text-secondary text-xs mb-1">Service</Text>
-          <Text className="text-primary font-bold text-lg">
+          <Text className="text-text-primary font-bold text-lg">
             {booking.service}
           </Text>
         </View>
@@ -233,11 +329,17 @@ export default function BookingDetailScreen() {
               <Ionicons name="person" size={24} color={colors.accent.DEFAULT} />
             </View>
             <View className="ml-3 flex-1">
-              <Text className="text-primary font-semibold">{workerName}</Text>
+              <Text className="text-brand font-semibold">{workerName}</Text>
               <Text className="text-text-secondary text-xs">Professional</Text>
             </View>
             <Pressable
-              onPress={() => router.push("/(client)/inbox/chat/c1")}
+              onPress={() => {
+                if (!booking.workerId) {
+                  Alert.alert("Unavailable", "This worker cannot be messaged yet.");
+                  return;
+                }
+                router.push(`/(client)/inbox/chat/${booking.workerId}`);
+              }}
               className="p-2 mr-1"
             >
               <Ionicons
@@ -247,7 +349,15 @@ export default function BookingDetailScreen() {
               />
             </Pressable>
             <Pressable
-              onPress={() => Alert.alert("Calling...", "Feature coming soon")}
+              onPress={() => {
+                if (!booking.workerPhone) {
+                  Alert.alert("No phone number", "This worker has no phone number on file.");
+                  return;
+                }
+                Linking.openURL(`tel:${booking.workerPhone}`).catch(() =>
+                  Alert.alert("Error", "Could not open the phone dialer."),
+                );
+              }}
               className="p-2"
             >
               <Ionicons
@@ -263,7 +373,7 @@ export default function BookingDetailScreen() {
         <View className="bg-card rounded-2xl p-4 mb-3">
           <View className="flex-row items-center mb-2">
             <Ionicons name="calendar" size={16} color={colors.accent.DEFAULT} />
-            <Text className="text-primary font-semibold ml-2">
+            <Text className="text-brand font-semibold ml-2">
               {new Date(booking.date).toLocaleDateString("en-PH", {
                 weekday: "long",
                 year: "numeric",
@@ -275,7 +385,7 @@ export default function BookingDetailScreen() {
           {booking.time && (
             <View className="flex-row items-center mb-2">
               <Ionicons name="time" size={16} color={colors.accent.DEFAULT} />
-              <Text className="text-primary font-semibold ml-2">
+              <Text className="text-brand font-semibold ml-2">
                 {booking.time}
               </Text>
             </View>
@@ -287,7 +397,7 @@ export default function BookingDetailScreen() {
                 size={16}
                 color={colors.accent.DEFAULT}
               />
-              <Text className="text-primary font-semibold ml-2 flex-1">
+              <Text className="text-brand font-semibold ml-2 flex-1">
                 {booking.address}
               </Text>
             </View>
@@ -316,7 +426,7 @@ export default function BookingDetailScreen() {
               size={20}
               color={colors.accent.DEFAULT}
             />
-            <Text className="text-primary font-semibold ml-3">
+            <Text className="text-brand font-semibold ml-3">
               {booking.payment?.methodType ?? "Payment pending"}
             </Text>
           </View>
@@ -324,7 +434,7 @@ export default function BookingDetailScreen() {
 
         {/* Progress Stepper */}
         <View className="bg-card rounded-2xl p-4 mb-3">
-          <Text className="text-primary font-bold mb-3">Booking Progress</Text>
+          <Text className="text-text-primary font-bold mb-3">Booking Progress</Text>
           <StepperVertical steps={steps} />
         </View>
 
@@ -347,7 +457,7 @@ export default function BookingDetailScreen() {
                   ))}
                 </View>
                 {booking.reviewText && (
-                  <Text className="text-primary text-sm mt-1">
+                  <Text className="text-brand text-sm mt-1">
                     {`"${booking.reviewText}"`}
                   </Text>
                 )}
@@ -429,7 +539,7 @@ export default function BookingDetailScreen() {
             <DangerButton
               label="Cancel Booking"
               fullWidth
-              onPress={handleCancel}
+              onPress={() => router.push(`/(client)/booking/${bookingId}/cancel`)}
             />
           )}
         </View>

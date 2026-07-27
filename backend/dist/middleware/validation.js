@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.validateSendMessage = exports.validateSubmitContractAcceptance = exports.validateSubmitKYCDocument = exports.validateUpdateNotificationPreferences = exports.validateUpdateAddress = exports.validateAddAddress = exports.validateChangePassword = exports.validateUpdateUserProfile = exports.validateRefundPayment = exports.validateReleaseEscrow = exports.validateAddPaymentMethod = exports.validateRescheduleBooking = exports.validateAddReview = exports.validateAddAddon = exports.validateDisputeQuote = exports.validateApproveQuote = exports.validateBookingStatusUpdate = exports.validateSubmitQuote = exports.validateCreateBooking = exports.validateAddServiceTypes = exports.validateUpdateWorkerProfile = exports.validateUpdateAvailability = void 0;
+exports.validateSendMessage = exports.validateSubmitContractAcceptance = exports.validateSubmitKYCDocument = exports.validateUpdateNotificationPreferences = exports.validateUpdateAddress = exports.validateAddAddress = exports.validateChangePassword = exports.validateUpdateUserProfile = exports.validateRefundPayment = exports.validateReleaseEscrow = exports.validateUpdatePaymentMethod = exports.validateAddPaymentMethod = exports.validateRescheduleBooking = exports.validateAddReview = exports.validateAddAddon = exports.validateDisputeQuote = exports.validateApproveQuote = exports.validateBookingStatusUpdate = exports.validateSubmitQuote = exports.validateCreateBooking = exports.validateAddServiceTypes = exports.validateUpdateWorkerProfile = exports.validateUpdateAvailability = void 0;
 const errorResponse_1 = require("../utils/errorResponse");
 /**
  * Validates that required fields are present and returns 400 if missing.
@@ -197,6 +197,14 @@ const validateAddPaymentMethod = (req, res, next) => {
     return next();
 };
 exports.validateAddPaymentMethod = validateAddPaymentMethod;
+const validateUpdatePaymentMethod = (req, res, next) => {
+    const { label } = req.body;
+    if (label === undefined || typeof label !== 'string' || !label.trim()) {
+        return res.status(400).json((0, errorResponse_1.errorResponse)(400, 'label is required and must be a non-empty string'));
+    }
+    return next();
+};
+exports.validateUpdatePaymentMethod = validateUpdatePaymentMethod;
 const validateReleaseEscrow = (_req, _res, next) => {
     // Release escrow needs no additional fields
     return next();
@@ -335,15 +343,14 @@ const validateSubmitContractAcceptance = (req, res, next) => {
 exports.validateSubmitContractAcceptance = validateSubmitContractAcceptance;
 // Message validators
 const validateSendMessage = (req, res, next) => {
-    const { receiverId, content } = req.body;
+    const { receiverId, content, imageUrl } = req.body;
     if (!receiverId || typeof receiverId !== 'string') {
         return res.status(400).json((0, errorResponse_1.errorResponse)(400, 'receiverId is required and must be a string'));
     }
-    if (!content || typeof content !== 'string') {
-        return res.status(400).json((0, errorResponse_1.errorResponse)(400, 'content is required and must be a string'));
-    }
-    if (content.trim().length === 0) {
-        return res.status(400).json((0, errorResponse_1.errorResponse)(400, 'content cannot be empty'));
+    const hasContent = typeof content === 'string' && content.trim().length > 0;
+    const hasImage = typeof imageUrl === 'string' && imageUrl.trim().length > 0;
+    if (!hasContent && !hasImage) {
+        return res.status(400).json((0, errorResponse_1.errorResponse)(400, 'Either content or imageUrl is required'));
     }
     return next();
 };

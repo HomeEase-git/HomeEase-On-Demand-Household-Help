@@ -33,7 +33,7 @@ export const ModalWrapper: React.FC<Props> = ({
         >
           {title && (
             <View className="flex-row justify-between items-center mb-4">
-              <Text className="text-primary font-bold text-lg">{title}</Text>
+              <Text className="text-text-primary font-bold text-lg">{title}</Text>
               <Pressable onPress={onClose}>
                 <Ionicons name="close" size={24} color={colors.white} />
               </Pressable>

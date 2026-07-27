@@ -1,82 +1,56 @@
-import React, { useState } from "react";
-import { View, Text, FlatList, Pressable } from "react-native";
+import React, { useEffect, useState } from "react";
+import { View, Text, FlatList, Pressable, ActivityIndicator } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import ConversationItem from "../../../components/list-items/ConversationItem";
 import NotificationItem from "../../../components/list-items/NotificationItem";
 import EmptyState from "../../../components/feedback/EmptyState";
-import { useNotificationStore } from "../../../store/notificationStore";
-
-// Worker-specific dummy data
-const workerConversations = [
-  {
-    id: "c1",
-    name: "Sarah Johnson",
-    lastMessage: "Can you start earlier tomorrow?",
-    time: "2:15 PM",
-    unread: 1,
-  },
-  {
-    id: "c2",
-    name: "Michael Chen",
-    lastMessage: "Great work today! Really satisfied.",
-    time: "Yesterday",
-    unread: 0,
-  },
-  {
-    id: "c3",
-    name: "Emma Wilson",
-    lastMessage: "Confirmed for this Saturday",
-    time: "Mon",
-    unread: 2,
-  },
-];
-
-const workerNotifications = [
-  {
-    id: "n1",
-    title: "New Job Request",
-    body: "Sarah Johnson requested plumbing service",
-    time: "10 mins ago",
-    type: "booking",
-    isRead: false,
-  },
-  {
-    id: "n2",
-    title: "Payment Received",
-    body: "₱1,200 for completed work",
-    time: "2 hours ago",
-    type: "payment",
-    isRead: false,
-  },
-  {
-    id: "n3",
-    title: "Rating Received",
-    body: "⭐⭐⭐⭐⭐ 5-star review from Michael",
-    time: "Yesterday",
-    type: "booking",
-    isRead: true,
-  },
-  {
-    id: "n4",
-    title: "Job Cancelled",
-    body: "Emma Wilson cancelled the job",
-    time: "Mon",
-    type: "message",
-    isRead: true,
-  },
-];
+import { useNotificationStore, notificationCategory } from "../../../store/notificationStore";
+import { useMessageStore } from "../../../store/messageStore";
+import { formatDate } from "../../../utils/formatDate";
+import * as api from "../../../services/api";
 
 export default function WorkerInboxScreen() {
   const router = useRouter();
   const [tab, setTab] = useState<"messages" | "notifications">("messages");
+  const [loading, setLoading] = useState(true);
+  const notifications = useNotificationStore((s) => s.notifications);
+  const notificationsLoading = useNotificationStore((s) => s.loading);
+  const fetchNotifications = useNotificationStore((s) => s.fetchNotifications);
   const markAllRead = useNotificationStore((s) => s.markAllRead);
-  const conversations = workerConversations;
+  const conversations = useMessageStore((s) => s.conversations);
+  const setConversations = useMessageStore((s) => s.setConversations);
+
+  useEffect(() => {
+    let active = true;
+
+    async function load() {
+      setLoading(true);
+      try {
+        const result = await api.getConversations();
+        if (!active) return;
+        setConversations(result);
+      } catch (error) {
+        console.error("Load conversations error:", error);
+      } finally {
+        if (active) setLoading(false);
+      }
+    }
+
+    load();
+    return () => {
+      active = false;
+    };
+  }, [setConversations]);
+
+  useEffect(() => {
+    fetchNotifications();
+  }, [fetchNotifications]);
 
   return (
-    <SafeAreaView className="flex-1 bg-primary-white">
+    <SafeAreaView className="flex-1 bg-white">
       <View className="px-4 pt-4 pb-2">
-        <Text className="text-primary text-2xl font-bold">Inbox</Text>
+        <Text className="text-text-primary text-2xl font-bold">Inbox</Text>
         <View className="flex-row mt-3 gap-2">
           <Pressable
             className={`px-4 py-2 rounded-xl ${
@@ -118,17 +92,29 @@ export default function WorkerInboxScreen() {
         )}
       </View>
       {tab === "messages" ? (
-        conversations.length > 0 ? (
+        loading ? (
+          <View className="py-6 items-center">
+            <ActivityIndicator size="small" />
+          </View>
+        ) : conversations.length > 0 ? (
           <FlatList
             data={[...conversations].sort((a, b) =>
-              (b.time ?? "").localeCompare(a.time ?? ""),
+              (b.lastMessageTime ?? "").localeCompare(a.lastMessageTime ?? ""),
             )}
-            keyExtractor={(item) => item.id}
+            keyExtractor={(item) => item.userId}
             contentContainerStyle={{ padding: 16 }}
             renderItem={({ item }) => (
               <ConversationItem
-                conversation={item}
-                onPress={() => router.push(`/(worker)/inbox/chat/${item.id}`)}
+                conversation={{
+                  id: item.userId,
+                  name: item.name,
+                  lastMessage: item.lastMessage,
+                  time: item.lastMessageTime,
+                  unread: item.unread,
+                }}
+                onPress={() =>
+                  router.push(`/(worker)/inbox/chat/${item.userId}`)
+                }
               />
             )}
           />
@@ -138,19 +124,35 @@ export default function WorkerInboxScreen() {
             subtitle="Accept job requests to start chatting with clients."
           />
         )
-      ) : (
+      ) : notificationsLoading ? (
+        <View className="py-6 items-center">
+          <ActivityIndicator size="small" />
+        </View>
+      ) : notifications.length > 0 ? (
         <FlatList
-          data={workerNotifications}
+          data={notifications}
           keyExtractor={(item) => item.id}
           contentContainerStyle={{ padding: 16 }}
           renderItem={({ item }) => (
             <NotificationItem
-              notification={item}
+              notification={{
+                id: item.id,
+                title: item.title,
+                body: item.message,
+                time: formatDate(item.createdAt, "MMM D, h:mm A"),
+                type: notificationCategory(item.type),
+                isRead: item.isRead,
+              }}
               onPress={() =>
                 router.push(`/(worker)/inbox/notification/${item.id}`)
               }
             />
           )}
+        />
+      ) : (
+        <EmptyState
+          title="No notifications yet"
+          subtitle="You'll see job, payment, and message updates here."
         />
       )}
     </SafeAreaView>

@@ -45,7 +45,7 @@ export default function UploadCertificationScreen() {
   };
 
   return (
-    <SafeAreaView className="flex-1 bg-primary-white">
+    <SafeAreaView className="flex-1 bg-white">
       <ScreenHeader title="Upload Certification" showBack />
       <ScrollView contentContainerStyle={{ padding: 24 }}>
         <InputField

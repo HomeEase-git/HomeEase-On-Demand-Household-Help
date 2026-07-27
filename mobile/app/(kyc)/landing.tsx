@@ -11,7 +11,7 @@ export default function KycLandingScreen() {
   const router = useRouter();
 
   return (
-    <SafeAreaView className="flex-1 bg-primary-white">
+    <SafeAreaView className="flex-1 bg-white">
       <ScreenHeader title="Identity Verification" showBack />
       <ScrollView
         className="flex-1"
@@ -27,7 +27,7 @@ export default function KycLandingScreen() {
             />
           </View>
         </View>
-        <Text className="text-primary text-xl font-bold text-center">
+        <Text className="text-text-primary text-xl font-bold text-center">
           Verify Your Identity
         </Text>
         <View className="bg-card rounded-xl p-4 mt-4">

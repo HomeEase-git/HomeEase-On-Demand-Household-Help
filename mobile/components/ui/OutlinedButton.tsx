@@ -14,13 +14,13 @@ export const OutlinedButton: React.FC<Props> = ({
 }) => {
   return (
     <Pressable
-      className={`border-2 border-primary rounded-xl py-4 px-6 items-center justify-center ${
+      className={`border-2 border-brand rounded-xl py-4 px-6 items-center justify-center ${
         disabled ? "opacity-50" : ""
       }`}
       onPress={onPress}
       disabled={disabled}
     >
-      <Text className="text-primary font-semibold">{label}</Text>
+      <Text className="text-brand font-semibold">{label}</Text>
     </Pressable>
   );
 };

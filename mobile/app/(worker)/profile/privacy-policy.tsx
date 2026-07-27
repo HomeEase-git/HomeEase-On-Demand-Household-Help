@@ -5,10 +5,10 @@ import ScreenHeader from "../../../components/ui/ScreenHeader";
 
 export default function WorkerPrivacyPolicyScreen() {
   return (
-    <SafeAreaView className="flex-1 bg-primary-white">
+    <SafeAreaView className="flex-1 bg-white">
       <ScreenHeader title="Privacy Policy" showBack />
       <ScrollView contentContainerStyle={{ padding: 24 }}>
-        <Text className="text-primary font-bold text-lg mb-2">
+        <Text className="text-text-primary font-bold text-lg mb-2">
           Data We Collect
         </Text>
         <Text className="text-text-secondary text-sm mb-4">
@@ -18,7 +18,7 @@ export default function WorkerPrivacyPolicyScreen() {
           professional certifications.
         </Text>
 
-        <Text className="text-primary font-bold text-lg mb-2">
+        <Text className="text-text-primary font-bold text-lg mb-2">
           How We Use It
         </Text>
         <Text className="text-text-secondary text-sm mb-4">
@@ -29,7 +29,7 @@ export default function WorkerPrivacyPolicyScreen() {
           decisions.
         </Text>
 
-        <Text className="text-primary font-bold text-lg mb-2">
+        <Text className="text-text-primary font-bold text-lg mb-2">
           Document Visibility
         </Text>
         <Text className="text-text-secondary text-sm mb-4">
@@ -40,7 +40,7 @@ export default function WorkerPrivacyPolicyScreen() {
           to remove profiles found to contain fraudulent information.
         </Text>
 
-        <Text className="text-primary font-bold text-lg mb-2">
+        <Text className="text-text-primary font-bold text-lg mb-2">
           Payout Information
         </Text>
         <Text className="text-text-secondary text-sm mb-4">
@@ -50,14 +50,14 @@ export default function WorkerPrivacyPolicyScreen() {
           transfers.
         </Text>
 
-        <Text className="text-primary font-bold text-lg mb-2">Security</Text>
+        <Text className="text-text-primary font-bold text-lg mb-2">Security</Text>
         <Text className="text-text-secondary text-sm mb-4">
           We use industry-standard encryption and security measures to protect
           your personal and financial information. You are responsible for
           keeping your account credentials confidential.
         </Text>
 
-        <Text className="text-primary font-bold text-lg mb-2">
+        <Text className="text-text-primary font-bold text-lg mb-2">
           Your Rights (RA 10173)
         </Text>
         <Text className="text-text-secondary text-sm mb-4">

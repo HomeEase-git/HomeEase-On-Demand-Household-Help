@@ -9,7 +9,7 @@ import StepperHorizontal from "../../components/steppers/StepperHorizontal";
 import PrimaryButton from "../../components/ui/PrimaryButton";
 import OutlinedButton from "../../components/ui/OutlinedButton";
 import { useAuthStore } from "../../store/authStore";
-import { submitKycDocument } from "../../services/api";
+import { submitKycDocument, uploadKycFile } from "../../services/api";
 import { compressImage } from "../../utils/imageCompressor";
 import { colors } from "../../constants/colors";
 
@@ -81,7 +81,8 @@ export default function SelfieScreen() {
 
         try {
           setSubmitting(true);
-          await submitKycDocument("selfie", selfieUri);
+          const { url } = await uploadKycFile("selfie", selfieUri, "image/jpeg");
+          await submitKycDocument("selfie", url);
         } catch (error) {
           console.error("KYC selfie submit error", error);
           Alert.alert(
@@ -204,7 +205,7 @@ export default function SelfieScreen() {
 
   // Preview / selection view
   return (
-    <SafeAreaView className="flex-1 bg-primary-white">
+    <SafeAreaView className="flex-1 bg-white">
       <ScreenHeader title="Take a Selfie" showBack />
       <ScrollView
         className="flex-1"
@@ -240,7 +241,7 @@ export default function SelfieScreen() {
               }}
             >
               <Text
-                style={{ color: "#4CAF50", fontSize: 12, fontWeight: "600" }}
+                style={{ color: colors.success, fontSize: 12, fontWeight: "600" }}
               >
                 ✓ Selfie captured
               </Text>

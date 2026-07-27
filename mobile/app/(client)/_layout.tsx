@@ -14,7 +14,7 @@ export default function ClientLayout() {
       screenOptions={{
         headerShown: false,
         tabBarStyle: {
-          backgroundColor: colors.primary.DEFAULT,
+          backgroundColor: colors.brand.DEFAULT,
           borderTopColor: colors.divider,
         },
         tabBarActiveTintColor: colors.accent.DEFAULT,

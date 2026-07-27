@@ -10,13 +10,17 @@ import {
   setDefaultAddress,
   getPaymentMethods,
   addPaymentMethod,
+  updatePaymentMethod,
+  setDefaultPaymentMethod,
   deletePaymentMethod,
   updateNotificationPreferences,
   getKYCDocuments,
   submitKYCDocument,
   acceptContract,
   deleteAccount,
+  getMyReviews,
 } from '../controllers/userController';
+import { avatarUpload, uploadAvatar, kycFileUpload, uploadKycFile } from '../controllers/uploadController';
 import { authMiddleware } from '../middleware/auth';
 import {
   validateUpdateUserProfile,
@@ -24,6 +28,7 @@ import {
   validateAddAddress,
   validateUpdateAddress,
   validateAddPaymentMethod,
+  validateUpdatePaymentMethod,
   validateUpdateNotificationPreferences,
   validateSubmitKYCDocument,
   validateSubmitContractAcceptance,
@@ -52,6 +57,8 @@ router.patch('/me/addresses/:addressId/set-default', setDefaultAddress);
 // Payment method routes
 router.get('/me/payment-methods', getPaymentMethods);
 router.post('/me/payment-methods', validateAddPaymentMethod, addPaymentMethod);
+router.patch('/me/payment-methods/:methodId', validateUpdatePaymentMethod, updatePaymentMethod);
+router.patch('/me/payment-methods/:methodId/set-default', setDefaultPaymentMethod);
 router.delete('/me/payment-methods/:methodId', deletePaymentMethod);
 
 // Notification preferences
@@ -61,9 +68,13 @@ router.patch(
   updateNotificationPreferences
 );
 
+// Avatar upload
+router.post('/me/avatar', avatarUpload, uploadAvatar);
+
 // KYC documents
 router.get('/me/kyc-documents', getKYCDocuments);
 router.post('/me/kyc-documents', validateSubmitKYCDocument, submitKYCDocument);
+router.post('/me/kyc-documents/upload', kycFileUpload, uploadKycFile);
 
 // Contract acceptance
 router.post(
@@ -71,5 +82,8 @@ router.post(
   validateSubmitContractAcceptance,
   acceptContract
 );
+
+// Reviews written by the current client
+router.get('/me/reviews', getMyReviews);
 
 export default router;

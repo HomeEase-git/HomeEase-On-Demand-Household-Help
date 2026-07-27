@@ -5,10 +5,10 @@ import ScreenHeader from "../../../components/ui/ScreenHeader";
 
 export default function WorkerTermsScreen() {
   return (
-    <SafeAreaView className="flex-1 bg-primary-white">
+    <SafeAreaView className="flex-1 bg-white">
       <ScreenHeader title="Terms and Conditions" showBack />
       <ScrollView contentContainerStyle={{ padding: 24 }}>
-        <Text className="text-primary font-bold text-lg mb-2">
+        <Text className="text-text-primary font-bold text-lg mb-2">
           1. Acceptance
         </Text>
         <Text className="text-text-secondary text-sm mb-4">
@@ -17,7 +17,7 @@ export default function WorkerTermsScreen() {
           this platform.
         </Text>
 
-        <Text className="text-primary font-bold text-lg mb-2">
+        <Text className="text-text-primary font-bold text-lg mb-2">
           2. Platform Role
         </Text>
         <Text className="text-text-secondary text-sm mb-4">
@@ -27,7 +27,7 @@ export default function WorkerTermsScreen() {
           the quality and completion of services you provide.
         </Text>
 
-        <Text className="text-primary font-bold text-lg mb-2">
+        <Text className="text-text-primary font-bold text-lg mb-2">
           3. Worker Responsibilities
         </Text>
         <Text className="text-text-secondary text-sm mb-4">
@@ -37,7 +37,7 @@ export default function WorkerTermsScreen() {
           regarding any scheduling changes or issues.
         </Text>
 
-        <Text className="text-primary font-bold text-lg mb-2">
+        <Text className="text-text-primary font-bold text-lg mb-2">
           4. Commission & Payouts
         </Text>
         <Text className="text-text-secondary text-sm mb-4">
@@ -48,7 +48,7 @@ export default function WorkerTermsScreen() {
           hours of job completion and service verification.
         </Text>
 
-        <Text className="text-primary font-bold text-lg mb-2">
+        <Text className="text-text-primary font-bold text-lg mb-2">
           5. Prohibited Conduct
         </Text>
         <Text className="text-text-secondary text-sm mb-4">
@@ -58,7 +58,7 @@ export default function WorkerTermsScreen() {
           in discriminatory or harassing behavior toward clients.
         </Text>
 
-        <Text className="text-primary font-bold text-lg mb-2">
+        <Text className="text-text-primary font-bold text-lg mb-2">
           6. Account Suspension
         </Text>
         <Text className="text-text-secondary text-sm mb-4">
@@ -67,7 +67,7 @@ export default function WorkerTermsScreen() {
           any activity deemed harmful to the platform or its users.
         </Text>
 
-        <Text className="text-primary font-bold text-lg mb-2">
+        <Text className="text-text-primary font-bold text-lg mb-2">
           7. Governing Law
         </Text>
         <Text className="text-text-secondary text-sm mb-4">

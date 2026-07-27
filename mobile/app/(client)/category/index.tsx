@@ -57,9 +57,9 @@ export default function CategoryIndexScreen() {
   }, []);
 
   return (
-    <SafeAreaView className="flex-1 bg-primary-white">
+    <SafeAreaView className="flex-1 bg-white">
       <View className="px-4 pt-4 pb-2">
-        <Text className="text-primary text-2xl font-bold">Services</Text>
+        <Text className="text-text-primary text-2xl font-bold">Services</Text>
         <Pressable
           className="mt-3"
           onPress={() => router.push("/(client)/home/search")}

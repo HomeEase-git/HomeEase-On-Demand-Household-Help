@@ -1,53 +1,70 @@
-import React from "react";
-import { View, Text, FlatList } from "react-native";
+import React, { useEffect, useState } from "react";
+import { View, Text, FlatList, ActivityIndicator } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useLocalSearchParams } from "expo-router";
 import ScreenHeader from "../../../../../components/ui/ScreenHeader";
 import StarRating from "../../../../../components/ui/StarRating";
 import ReviewCard from "../../../../../components/cards/ReviewCard";
-import { workers } from "../../../../../constants/dummyData";
-
-const MOCK_REVIEWS = [
-  {
-    id: "r1",
-    authorName: "Client A",
-    rating: 5,
-    comment: "Very professional and fast.",
-    date: "Mar 1, 2026",
-  },
-  {
-    id: "r2",
-    authorName: "Client B",
-    rating: 4,
-    comment: "Good job, would book again.",
-    date: "Feb 28, 2026",
-  },
-  {
-    id: "r3",
-    authorName: "Client C",
-    rating: 5,
-    comment: "On time and did a great job.",
-    date: "Feb 25, 2026",
-  },
-];
+import * as api from "../../../../../services/api";
+import type { WorkerReview } from "../../../../../types/api.types";
 
 export default function WorkerReviewsScreen() {
-  const { workerId } = useLocalSearchParams<{ workerId: string }>();
-  const worker = workers.find((w) => w.id === workerId);
+  const { workerId, rating, reviewCount } = useLocalSearchParams<{
+    workerId: string;
+    rating?: string;
+    reviewCount?: string;
+  }>();
+
+  const [reviews, setReviews] = useState<WorkerReview[]>([]);
+  const [distribution, setDistribution] = useState<Record<number, number>>({
+    5: 0,
+    4: 0,
+    3: 0,
+    2: 0,
+    1: 0,
+  });
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let active = true;
+
+    async function load() {
+      if (!workerId) return;
+      setLoading(true);
+      try {
+        const result = await api.getWorkerReviews(workerId);
+        if (!active) return;
+        setReviews(result.reviews);
+        setDistribution(result.distribution);
+      } catch (error) {
+        console.error("Load worker reviews error:", error);
+      } finally {
+        if (active) setLoading(false);
+      }
+    }
+
+    load();
+    return () => {
+      active = false;
+    };
+  }, [workerId]);
+
+  const displayRating = rating ? Number(rating) : reviews.length ? reviews[0].rating : 0;
+  const displayCount = reviewCount ? Number(reviewCount) : reviews.length;
 
   return (
-    <SafeAreaView className="flex-1 bg-primary-white">
+    <SafeAreaView className="flex-1 bg-white">
       <ScreenHeader title="Reviews" showBack />
-      <View className="px-4">
+      <View className="px-4 flex-1">
         <View className="bg-card rounded-2xl p-4 mb-4">
           <View className="flex-row items-center">
-            <Text className="text-primary text-4xl font-bold mr-3">
-              {worker?.rating ?? 4.8}
+            <Text className="text-text-primary text-4xl font-bold mr-3">
+              {displayRating.toFixed(1)}
             </Text>
             <View>
-              <StarRating rating={worker?.rating ?? 4.8} size={20} />
+              <StarRating rating={displayRating} size={20} />
               <Text className="text-text-muted text-sm mt-1">
-                {worker?.reviews ?? 120} ratings
+                {displayCount} ratings
               </Text>
             </View>
           </View>
@@ -58,21 +75,37 @@ export default function WorkerReviewsScreen() {
                 <View className="flex-1 h-2 bg-card-dark rounded-full overflow-hidden">
                   <View
                     className="h-full bg-gold rounded-full"
-                    style={{
-                      width: `${star === 5 ? 70 : star === 4 ? 20 : 10}%`,
-                    }}
+                    style={{ width: `${distribution[star] ?? 0}%` }}
                   />
                 </View>
               </View>
             ))}
           </View>
         </View>
-        <FlatList
-          data={MOCK_REVIEWS}
-          keyExtractor={(item) => item.id}
-          renderItem={({ item }) => <ReviewCard review={item} />}
-          contentContainerStyle={{ paddingBottom: 24 }}
-        />
+        {loading ? (
+          <ActivityIndicator size="small" />
+        ) : reviews.length === 0 ? (
+          <Text className="text-text-secondary text-sm text-center py-6">
+            No reviews yet
+          </Text>
+        ) : (
+          <FlatList
+            data={reviews}
+            keyExtractor={(item) => item.id}
+            renderItem={({ item }) => (
+              <ReviewCard
+                review={{
+                  id: item.id,
+                  authorName: item.clientName,
+                  rating: item.rating,
+                  comment: item.comment,
+                  date: item.date,
+                }}
+              />
+            )}
+            contentContainerStyle={{ paddingBottom: 24 }}
+          />
+        )}
       </View>
     </SafeAreaView>
   );

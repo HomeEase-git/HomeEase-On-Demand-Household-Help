@@ -9,6 +9,7 @@ import PrimaryButton from "../../../../components/ui/PrimaryButton";
 import OutlinedButton from "../../../../components/ui/OutlinedButton";
 import { colors } from "../../../../constants";
 import { addressStorage } from "../../../../utils/storage";
+import { geocodeAddress } from "../../../../utils/geo";
 import * as api from "../../../../services/api";
 
 const LABEL_OPTIONS = ["Home", "Work", "Other"];
@@ -28,13 +29,18 @@ export default function AddressEditScreen() {
   useEffect(() => {
     const loadExisting = async () => {
       if (!addressId || isNew) return;
-      const existing = await addressStorage.get(addressId);
-      if (existing) {
-        setLabel(existing.label ?? "Home");
-        setStreet(existing.street ?? "");
-        setCity(existing.city ?? "");
-        setState(existing.state ?? "");
-        setZipCode(existing.zipCode ?? "");
+      try {
+        const addresses = await api.getAddresses();
+        const existing = addresses.find((a: any) => a.id === addressId);
+        if (existing) {
+          setLabel(existing.label ?? "Home");
+          setStreet(existing.street ?? "");
+          setCity(existing.city ?? "");
+          setState(existing.state ?? "");
+          setZipCode(existing.zipCode ?? "");
+        }
+      } catch (error) {
+        console.error("Load address error:", error);
       }
     };
 
@@ -49,6 +55,9 @@ export default function AddressEditScreen() {
 
     setSaving(true);
     try {
+      const fullAddress = `${street}, ${city}, ${state} ${zipCode}`;
+      const geocoded = await geocodeAddress(fullAddress).catch(() => null);
+
       if (isNew) {
         const result = await api.addAddress({
           label,
@@ -57,21 +66,25 @@ export default function AddressEditScreen() {
           state,
           zipCode,
         });
-        await addressStorage.create({
+        await addressStorage.upsert(result.id, {
           label,
-          address: `${street}, ${city}, ${state} ${zipCode}`,
+          address: fullAddress,
+          lat: geocoded?.geometry.location.lat,
+          lng: geocoded?.geometry.location.lng,
         });
       } else if (addressId) {
-        const result = await api.updateAddress(addressId, {
+        await api.updateAddress(addressId, {
           label,
           street,
           city,
           state,
           zipCode,
         });
-        await addressStorage.update(addressId, {
+        await addressStorage.upsert(addressId, {
           label,
-          address: `${street}, ${city}, ${state} ${zipCode}`,
+          address: fullAddress,
+          lat: geocoded?.geometry.location.lat,
+          lng: geocoded?.geometry.location.lng,
         });
       }
 
@@ -89,10 +102,10 @@ export default function AddressEditScreen() {
   };
 
   return (
-    <SafeAreaView className="flex-1 bg-primary-white">
+    <SafeAreaView className="flex-1 bg-white">
       <ScreenHeader title={isNew ? "Add Address" : "Edit Address"} showBack />
       <ScrollView contentContainerStyle={{ padding: 24 }}>
-        <Text className="text-primary text-sm mb-2">Label</Text>
+        <Text className="text-brand text-sm mb-2">Label</Text>
         <View className="flex-row gap-2 mb-4">
           {LABEL_OPTIONS.map((l) => (
             <Pressable

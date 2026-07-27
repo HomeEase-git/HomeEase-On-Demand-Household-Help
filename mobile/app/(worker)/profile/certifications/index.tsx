@@ -57,7 +57,7 @@ export default function CertificationsScreen() {
   };
 
   return (
-    <SafeAreaView className="flex-1 bg-primary-white">
+    <SafeAreaView className="flex-1 bg-white">
       <ScreenHeader title="My Certifications" showBack />
       {loading ? (
         <View className="flex-1 items-center justify-center">

@@ -43,7 +43,7 @@ export default function AccountCreatedSuccessScreen() {
   };
 
   return (
-    <SafeAreaView className="flex-1 bg-primary-white">
+    <SafeAreaView className="flex-1 bg-white">
       <ScrollView
         className="flex-1"
         contentContainerStyle={{
@@ -60,11 +60,11 @@ export default function AccountCreatedSuccessScreen() {
           }}
         >
           <View className="w-40 h-40 bg-success/20 rounded-full items-center justify-center">
-            <Ionicons name="checkmark-circle" size={100} color="#4CAF50" />
+            <Ionicons name="checkmark-circle" size={100} color={colors.success} />
           </View>
         </Animated.View>
 
-        <Text className="text-primary text-3xl font-bold text-center mb-2">
+        <Text className="text-text-primary text-3xl font-bold text-center mb-2">
           Account Created!
         </Text>
 
@@ -74,19 +74,19 @@ export default function AccountCreatedSuccessScreen() {
 
         <View className="w-full bg-green-50 p-4 rounded-lg mb-8">
           <View className="flex-row items-center mb-3">
-            <Ionicons name="checkmark" size={20} color="#4CAF50" />
+            <Ionicons name="checkmark" size={20} color={colors.success} />
             <Text className="text-success font-semibold text-sm ml-3">
               Email verified
             </Text>
           </View>
           <View className="flex-row items-center mb-3">
-            <Ionicons name="lock-closed" size={20} color="#4CAF50" />
+            <Ionicons name="lock-closed" size={20} color={colors.success} />
             <Text className="text-success font-semibold text-sm ml-3">
               Account secured
             </Text>
           </View>
           <View className="flex-row items-center">
-            <Ionicons name="person" size={20} color="#4CAF50" />
+            <Ionicons name="person" size={20} color={colors.success} />
             <Text className="text-success font-semibold text-sm ml-3">
               Profile created
             </Text>
