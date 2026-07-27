@@ -1,6 +1,6 @@
 backend/.env
-mobile/.env
 backend/node_modules/
-mobile/node_modules/
 backend/dist/
+mobile/.env
+mobile/node_modules/
 mobile/expo/
