@@ -1,0 +1,175 @@
+import React, { useState, useRef } from "react";
+import {
+  View,
+  Text,
+  ScrollView,
+  Pressable,
+  TextInput,
+  Image,
+} from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
+import { Ionicons } from "@expo/vector-icons";
+import { useRouter, useLocalSearchParams } from "expo-router";
+import { InputField } from "../../components/ui/InputField";
+import { PrimaryButton } from "../../components/ui/PrimaryButton";
+import { OutlinedButton } from "../../components/ui/OutlinedButton";
+import { useAuth } from "../../hooks/useAuth";
+import { validateEmail } from "../../utils/validators";
+import { useToastContext } from "../../contexts/ToastContext";
+
+export default function SignInScreen() {
+  const router = useRouter();
+  const params = useLocalSearchParams<{ role?: string }>();
+  const role = (params.role as string) || "client";
+  const { login, loading, clearError } = useAuth();
+  const toast = useToastContext();
+
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
+  const [emailError, setEmailError] = useState("");
+  const [passwordError, setPasswordError] = useState("");
+
+  const emailRef = useRef<TextInput>(null);
+  const passwordRef = useRef<TextInput>(null);
+
+  const handleEmailChange = (text: string) => {
+    setEmail(text);
+    if (text.trim()) {
+      const validation = validateEmail(text);
+      setEmailError(validation.error || "");
+    } else {
+      setEmailError("");
+    }
+  };
+
+  const handlePasswordChange = (text: string) => {
+    setPassword(text);
+    setPasswordError("");
+  };
+
+  const handleSignIn = async () => {
+    // Validate email
+    const emailValidation = validateEmail(email);
+    if (!emailValidation.valid) {
+      setEmailError(emailValidation.error || "");
+      toast.error(emailValidation.error || "Invalid email");
+      return;
+    }
+
+    // Validate password
+    if (!password.trim()) {
+      setPasswordError("Password is required");
+      toast.error("Please enter your password");
+      return;
+    }
+
+    try {
+      clearError();
+      await login(email, password);
+      toast.success("Signed in successfully");
+
+      const destination =
+        role === "worker" ? "/(worker)/home" : "/(client)/home";
+      router.replace(destination);
+    } catch (err: any) {
+      const errorMsg = err?.message || "An error occurred";
+      toast.error(errorMsg);
+    }
+  };
+
+  return (
+    <SafeAreaView className="flex-1 bg-white">
+      <ScrollView
+        className="flex-1"
+        contentContainerStyle={{ paddingHorizontal: 24, paddingBottom: 40 }}
+        keyboardShouldPersistTaps="handled"
+      >
+        <View className="items-center mt-8">
+          <Image
+            source={require("../../assets/images/logo/home_ease-logo.png")}
+            style={{ width: 120, height: 120, resizeMode: "contain" }}
+          />
+        </View>
+
+        <Text className="text-text-primary text-2xl font-bold mt-4">
+          Welcome Back
+        </Text>
+        <Text className="text-text-secondary mb-6">Sign in to continue</Text>
+
+        <View>
+          <InputField
+            ref={emailRef}
+            label="Email"
+            value={email}
+            onChangeText={handleEmailChange}
+            placeholder="Enter your email"
+            keyboardType="email-address"
+            autoCapitalize="none"
+            returnKeyType="next"
+            onSubmitEditing={() => passwordRef.current?.focus()}
+            editable={!loading}
+          />
+          {emailError && (
+            <View className="flex-row items-center gap-1 mt-1 mb-2">
+              <Ionicons name="alert-circle" size={14} color="#EF4444" />
+              <Text className="text-error text-xs">{emailError}</Text>
+            </View>
+          )}
+        </View>
+
+        <View className="relative mb-4">
+          <InputField
+            ref={passwordRef}
+            label="Password"
+            value={password}
+            onChangeText={handlePasswordChange}
+            placeholder="Enter your password"
+            secureTextEntry={!showPassword}
+            returnKeyType="done"
+            onSubmitEditing={handleSignIn}
+            editable={!loading}
+          />
+          {passwordError && (
+            <View className="flex-row items-center gap-1 mt-1 mb-2">
+              <Ionicons name="alert-circle" size={14} color="#EF4444" />
+              <Text className="text-error text-xs">{passwordError}</Text>
+            </View>
+          )}
+        </View>
+
+        <Pressable
+          className="self-end mb-6"
+          disabled={loading}
+          onPress={() =>
+            router.push({
+              pathname: "/(auth)/forgot-password",
+              params: { role },
+            })
+          }
+        >
+          <Text className="text-accent font-semibold">Forgot Password?</Text>
+        </Pressable>
+
+        <PrimaryButton
+          label="Sign In"
+          fullWidth
+          onPress={handleSignIn}
+          loading={loading}
+        />
+
+        <View className="flex-row items-center my-6">
+          <View className="flex-1 h-px bg-divider" />
+          <Text className="text-text-muted px-3 text-sm">or</Text>
+          <View className="flex-1 h-px bg-divider" />
+        </View>
+
+        <OutlinedButton
+          label="Create an account"
+          onPress={() => router.push("/role-selection")}
+          disabled={loading}
+        />
+      </ScrollView>
+    </SafeAreaView>
+  );
+}

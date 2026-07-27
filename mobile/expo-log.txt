@@ -1,0 +1,8 @@
+Starting project at C:\Users\Benison\Desktop\HomeEase-ReactNative-main\mobile
+React Compiler enabled
+Starting Metro Bundler
+warning: Bundler cache is empty, rebuilding (this may take a minute)
+Waiting on http://localhost:8081
+Logs for your project will appear below.
+ΓÇ║ Detected a change in babel.config.js. Restart the server to see the new results. You may need to clear the bundler cache with the --clear flag for your changes to take effect.
+ΓÇ║ Detected a change in metro.config.js. Restart the server to see the new results.
