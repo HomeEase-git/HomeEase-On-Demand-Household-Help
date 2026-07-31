@@ -1,9 +1,8 @@
 import React, { useCallback, useState } from "react";
 import { View, Text, ScrollView, Pressable, ActivityIndicator } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { useFocusEffect } from "@react-navigation/native";
-import { Ionicons } from "@expo/vector-icons";
-import { useRouter } from "expo-router";
+import { useFocusEffect, useRouter } from "expo-router";
+import { AppIcon as Ionicons } from "../../../components/icons/AppIcon";
 import TransactionItem from "../../../components/list-items/TransactionItem";
 import * as api from "../../../services/api";
 import { colors } from "../../../constants";

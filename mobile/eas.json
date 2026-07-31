@@ -5,11 +5,7 @@
   "build": {
     "development": {
       "developmentClient": true,
-      "distribution": "internal",
-      "android": {
-        "gradleCommand": ":app:assembleRelease",
-        "withoutCredentials": true
-      }
+      "distribution": "internal"
     },
     "preview": {
       "distribution": "internal",

@@ -92,7 +92,12 @@ export default function Bookings() {
                           <Badge variant={b.status === 'Completed' ? 'approved' : 'pending'}>{b.status}</Badge>
                         </td>
                         <td>
-                          <Link to={`/bookings/detail/${b.id}`} className="action-btn view" title="View">
+                          <Link
+                            to={`/bookings/detail/${b.id}`}
+                            className="action-btn view"
+                            title="View"
+                            aria-label={`View booking ${b.displayId}`}
+                          >
                             <i className="fas fa-eye" />
                           </Link>
                         </td>

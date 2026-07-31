@@ -1,5 +1,6 @@
-import React, { useState, useEffect } from "react";
+import React, { useState } from "react";
 import { View, Text, Pressable } from "react-native";
+import { AppIcon as Ionicons } from "../icons/AppIcon";
 import { colors } from "../../constants/colors";
 
 interface Props {
@@ -26,8 +27,87 @@ const MONTHS = [
   "December",
 ];
 
+const LEAD_TIME_DAYS = 2;
+const MAX_RANGE_DAYS = 90;
+const BADGE_SIZE = 36;
+
+// Fixed color scheme per date state (background + text pairing).
+const DATE_COLORS = {
+  available: { bg: colors.neutral[200], text: colors.neutral[700] },
+  selected: { bg: colors.success, text: colors.white },
+  unavailable: { bg: colors.neutral[400], text: colors.text.black },
+  today: { bg: "#FDE047", text: colors.brand.DEFAULT },
+};
+
 const toDateString = (d: Date) =>
   `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+
+const NavButton = ({
+  icon,
+  onPress,
+  disabled,
+}: {
+  icon: "chevron-back" | "chevron-forward";
+  onPress: () => void;
+  disabled?: boolean;
+}) => (
+  <Pressable onPress={onPress} disabled={disabled} hitSlop={8}>
+    <View
+      style={{
+        width: 32,
+        height: 32,
+        borderRadius: 16,
+        backgroundColor: colors.surface,
+        alignItems: "center",
+        justifyContent: "center",
+        opacity: disabled ? 0.35 : 1,
+      }}
+    >
+      <Ionicons name={icon} size={18} color={colors.brand.DEFAULT} />
+    </View>
+  </Pressable>
+);
+
+const LegendSwatch = ({ color, label }: { color: string; label: string }) => (
+  <View style={{ flexDirection: "row", alignItems: "center" }}>
+    <View
+      style={{
+        width: 12,
+        height: 12,
+        borderRadius: 4,
+        backgroundColor: color,
+        marginRight: 5,
+      }}
+    />
+    <Text style={{ fontSize: 11, color: colors.text.secondary }}>{label}</Text>
+  </View>
+);
+
+const buildWeeks = (
+  firstDayOffset: number,
+  daysInMonth: number,
+): (number | null)[][] => {
+  const totalCells = firstDayOffset + daysInMonth;
+  const totalRows = Math.ceil(totalCells / 7);
+  const weeks: (number | null)[][] = [];
+  let day = 1;
+
+  for (let r = 0; r < totalRows; r++) {
+    const week: (number | null)[] = [];
+    for (let c = 0; c < 7; c++) {
+      const cellIndex = r * 7 + c;
+      if (cellIndex < firstDayOffset || day > daysInMonth) {
+        week.push(null);
+      } else {
+        week.push(day);
+        day++;
+      }
+    }
+    weeks.push(week);
+  }
+
+  return weeks;
+};
 
 export default function BookingCalendar({
   unavailableDates = [],
@@ -39,10 +119,10 @@ export default function BookingCalendar({
   today.setHours(0, 0, 0, 0);
 
   const minDate = new Date(today);
-  minDate.setDate(today.getDate() + 2); // 2-day lead time
+  minDate.setDate(today.getDate() + LEAD_TIME_DAYS);
 
   const maxDate = new Date(today);
-  maxDate.setDate(today.getDate() + 90); // 90-day cap
+  maxDate.setDate(today.getDate() + MAX_RANGE_DAYS);
 
   const [viewYear, setViewYear] = useState(today.getFullYear());
   const [viewMonth, setViewMonth] = useState(today.getMonth());
@@ -68,18 +148,29 @@ export default function BookingCalendar({
     } else setViewMonth((m) => m + 1);
   };
 
+  const isPrevDisabled =
+    viewYear === today.getFullYear() && viewMonth === today.getMonth();
+  const isNextDisabled =
+    viewYear === maxDate.getFullYear() && viewMonth === maxDate.getMonth();
+
   const firstDayOffset = new Date(viewYear, viewMonth, 1).getDay();
   const daysInMonth = new Date(viewYear, viewMonth + 1, 0).getDate();
+  const weeks = buildWeeks(firstDayOffset, daysInMonth);
 
   return (
     <View
       style={{
-        backgroundColor: colors.card.DEFAULT,
-        borderRadius: 16,
-        borderWidth: 0.5,
+        backgroundColor: colors.white,
+        borderRadius: 20,
+        borderWidth: 1,
         borderColor: colors.divider,
         padding: 16,
         marginBottom: 16,
+        shadowColor: "#000",
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.06,
+        shadowRadius: 8,
+        elevation: 2,
       }}
     >
       {/* Month navigation */}
@@ -88,142 +179,180 @@ export default function BookingCalendar({
           flexDirection: "row",
           alignItems: "center",
           justifyContent: "space-between",
-          marginBottom: 16,
         }}
       >
-        <Pressable
+        <NavButton
+          icon="chevron-back"
           onPress={goToPrevMonth}
-          style={{
-            width: 30,
-            height: 30,
-            borderRadius: 15,
-            backgroundColor: colors.surface,
-            alignItems: "center",
-            justifyContent: "center",
-          }}
-        >
-          <Text style={{ color: colors.brand.DEFAULT, fontSize: 16 }}>‹</Text>
-        </Pressable>
+          disabled={isPrevDisabled}
+        />
         <Text
           style={{
-            fontSize: 15,
-            fontWeight: "500",
+            fontSize: 16,
+            fontWeight: "700",
             color: colors.text.primary,
           }}
         >
           {MONTHS[viewMonth]} {viewYear}
         </Text>
-        <Pressable
+        <NavButton
+          icon="chevron-forward"
           onPress={goToNextMonth}
-          style={{
-            width: 30,
-            height: 30,
-            borderRadius: 15,
-            backgroundColor: colors.surface,
-            alignItems: "center",
-            justifyContent: "center",
-          }}
-        >
-          <Text style={{ color: colors.brand.DEFAULT, fontSize: 16 }}>›</Text>
-        </Pressable>
+          disabled={isNextDisabled}
+        />
+      </View>
+
+      <View
+        style={{
+          flexDirection: "row",
+          alignItems: "center",
+          justifyContent: "center",
+          marginTop: 6,
+          marginBottom: 14,
+        }}
+      >
+        <Ionicons name="information-circle-outline" size={13} color={colors.text.muted} />
+        <Text style={{ fontSize: 11, color: colors.text.muted, marginLeft: 4 }}>
+          Bookings need at least {LEAD_TIME_DAYS} days advance notice
+        </Text>
       </View>
 
       {/* Day headers */}
-      <View style={{ flexDirection: "row", marginBottom: 6 }}>
+      <View style={{ flexDirection: "row", marginBottom: 8 }}>
         {DAYS.map((d) => (
           <View key={d} style={{ flex: 1, alignItems: "center" }}>
-            <Text style={{ fontSize: 11, color: colors.text.muted }}>{d}</Text>
+            <Text
+              style={{
+                fontSize: 11,
+                fontWeight: "700",
+                color: colors.text.muted,
+                letterSpacing: 0.3,
+              }}
+            >
+              {d}
+            </Text>
           </View>
         ))}
       </View>
 
-      {/* Day grid */}
-      <View style={{ flexDirection: "row", flexWrap: "wrap" }}>
-        {/* Empty offset cells */}
-        {Array.from({ length: firstDayOffset }).map((_, i) => (
-          <View
-            key={`empty-${i}`}
-            style={{ width: `${100 / 7}%`, aspectRatio: 1 }}
-          />
-        ))}
+      {/* Day grid — each date is its own rounded-square badge, not a table cell */}
+      {weeks.map((week, rowIndex) => (
+        <View
+          key={rowIndex}
+          style={{ flexDirection: "row", marginBottom: 6 }}
+        >
+          {week.map((day, colIndex) => {
+            if (day === null) {
+              return (
+                <View key={colIndex} style={{ flex: 1, alignItems: "center" }} />
+              );
+            }
 
-        {Array.from({ length: daysInMonth }).map((_, i) => {
-          const day = i + 1;
-          const date = new Date(viewYear, viewMonth, day);
-          const dateStr = toDateString(date);
-          const isToday = date.toDateString() === today.toDateString();
-          const isSelected = selectedDate === dateStr;
-          const disabled = isUnavailable(date);
+            const date = new Date(viewYear, viewMonth, day);
+            const dateStr = toDateString(date);
+            const isToday = date.toDateString() === today.toDateString();
+            const isSelected = selectedDate === dateStr;
+            const disabled = isUnavailable(date);
 
-          return (
-            <View
-              key={day}
-              style={{ width: `${100 / 7}%`, aspectRatio: 1, padding: 2 }}
-            >
-              <Pressable
-                disabled={disabled}
-                onPress={() => onDateSelect(dateStr)}
-                style={{
-                  flex: 1,
-                  alignItems: "center",
-                  justifyContent: "center",
-                  borderRadius: 99,
-                  backgroundColor: isSelected
-                    ? colors.brand.DEFAULT
-                    : "transparent",
-                  borderWidth: isToday && !isSelected ? 1.5 : 0,
-                  borderColor: colors.brand.DEFAULT,
-                  opacity: disabled ? 0.3 : 1,
-                }}
-              >
-                <Text
-                  style={{
-                    fontSize: 13,
-                    fontWeight: isSelected || isToday ? "500" : "400",
-                    color: isSelected
-                      ? colors.white
-                      : disabled
-                        ? colors.text.muted
-                        : colors.text.primary,
-                    textDecorationLine: disabled ? "line-through" : "none",
-                  }}
-                >
-                  {day}
-                </Text>
-              </Pressable>
-            </View>
-          );
-        })}
+            let state = DATE_COLORS.available;
+            if (disabled) state = DATE_COLORS.unavailable;
+            if (isToday) state = DATE_COLORS.today;
+            if (isSelected) state = DATE_COLORS.selected;
+
+            return (
+              <View key={colIndex} style={{ flex: 1, alignItems: "center" }}>
+                <Pressable disabled={disabled} onPress={() => onDateSelect(dateStr)}>
+                  <View
+                    style={{
+                      width: BADGE_SIZE,
+                      height: BADGE_SIZE,
+                      borderRadius: 10,
+                      alignItems: "center",
+                      justifyContent: "center",
+                      backgroundColor: state.bg,
+                    }}
+                  >
+                    <Text
+                      style={{
+                        fontSize: 14,
+                        fontWeight: isSelected || isToday ? "700" : "500",
+                        color: state.text,
+                      }}
+                    >
+                      {day}
+                    </Text>
+                  </View>
+                </Pressable>
+              </View>
+            );
+          })}
+        </View>
+      ))}
+
+      {/* Legend */}
+      <View
+        style={{
+          flexDirection: "row",
+          flexWrap: "wrap",
+          justifyContent: "center",
+          gap: 14,
+          marginTop: 8,
+          paddingTop: 12,
+          borderTopWidth: 1,
+          borderTopColor: colors.divider,
+        }}
+      >
+        <LegendSwatch color={DATE_COLORS.available.bg} label="Available" />
+        <LegendSwatch color={DATE_COLORS.selected.bg} label="Selected" />
+        <LegendSwatch color={DATE_COLORS.today.bg} label="Today" />
+        <LegendSwatch color={DATE_COLORS.unavailable.bg} label="Unavailable" />
       </View>
 
       {/* Selected date banner */}
       {selectedDate ? (
         <View
           style={{
-            marginTop: 12,
-            paddingTop: 12,
-            borderTopWidth: 0.5,
+            marginTop: 14,
+            paddingTop: 14,
+            borderTopWidth: 1,
             borderTopColor: colors.divider,
+            flexDirection: "row",
+            alignItems: "center",
           }}
         >
-          <Text style={{ fontSize: 12, color: colors.text.muted }}>
-            Selected date
-          </Text>
-          <Text
+          <View
             style={{
-              fontSize: 14,
-              fontWeight: "500",
-              color: colors.accent.DEFAULT,
-              marginTop: 2,
+              width: 36,
+              height: 36,
+              borderRadius: 18,
+              backgroundColor: colors.success + "1A",
+              alignItems: "center",
+              justifyContent: "center",
+              marginRight: 10,
             }}
           >
-            {new Date(selectedDate + "T00:00:00").toLocaleDateString("en-PH", {
-              weekday: "long",
-              year: "numeric",
-              month: "long",
-              day: "numeric",
-            })}
-          </Text>
+            <Ionicons name="calendar" size={18} color={colors.success} />
+          </View>
+          <View>
+            <Text style={{ fontSize: 12, color: colors.text.muted }}>
+              Selected date
+            </Text>
+            <Text
+              style={{
+                fontSize: 14,
+                fontWeight: "700",
+                color: colors.text.primary,
+                marginTop: 1,
+              }}
+            >
+              {new Date(selectedDate + "T00:00:00").toLocaleDateString("en-PH", {
+                weekday: "long",
+                year: "numeric",
+                month: "long",
+                day: "numeric",
+              })}
+            </Text>
+          </View>
         </View>
       ) : null}
     </View>

@@ -8,7 +8,6 @@ import {
   Image,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { Ionicons } from "@expo/vector-icons";
 import { useRouter, useLocalSearchParams } from "expo-router";
 import { InputField } from "../../components/ui/InputField";
 import { PrimaryButton } from "../../components/ui/PrimaryButton";
@@ -67,13 +66,22 @@ export default function SignInScreen() {
     try {
       clearError();
       await login(email, password);
+
       toast.success("Signed in successfully");
 
       const destination =
         role === "worker" ? "/(worker)/home" : "/(client)/home";
       router.replace(destination);
     } catch (err: any) {
-      const errorMsg = err?.message || "An error occurred";
+      // The backend intentionally returns the same 401 for "no account with
+      // this email" and "wrong password" (prevents attackers from using this
+      // form to discover which emails are registered), so show one combined,
+      // human message here rather than whatever reason it gives.
+      const errorMsg =
+        err?.statusCode === 401
+          ? "Incorrect Email or Password"
+          : err?.message || "Something went wrong. Please try again.";
+      setPasswordError(errorMsg);
       toast.error(errorMsg);
     }
   };
@@ -97,46 +105,32 @@ export default function SignInScreen() {
         </Text>
         <Text className="text-text-secondary mb-6">Sign in to continue</Text>
 
-        <View>
-          <InputField
-            ref={emailRef}
-            label="Email"
-            value={email}
-            onChangeText={handleEmailChange}
-            placeholder="Enter your email"
-            keyboardType="email-address"
-            autoCapitalize="none"
-            returnKeyType="next"
-            onSubmitEditing={() => passwordRef.current?.focus()}
-            editable={!loading}
-          />
-          {emailError && (
-            <View className="flex-row items-center gap-1 mt-1 mb-2">
-              <Ionicons name="alert-circle" size={14} color="#EF4444" />
-              <Text className="text-error text-xs">{emailError}</Text>
-            </View>
-          )}
-        </View>
+        <InputField
+          ref={emailRef}
+          label="Email"
+          value={email}
+          onChangeText={handleEmailChange}
+          placeholder="Enter your email"
+          keyboardType="email-address"
+          autoCapitalize="none"
+          returnKeyType="next"
+          onSubmitEditing={() => passwordRef.current?.focus()}
+          editable={!loading}
+          error={emailError}
+        />
 
-        <View className="relative mb-4">
-          <InputField
-            ref={passwordRef}
-            label="Password"
-            value={password}
-            onChangeText={handlePasswordChange}
-            placeholder="Enter your password"
-            secureTextEntry={!showPassword}
-            returnKeyType="done"
-            onSubmitEditing={handleSignIn}
-            editable={!loading}
-          />
-          {passwordError && (
-            <View className="flex-row items-center gap-1 mt-1 mb-2">
-              <Ionicons name="alert-circle" size={14} color="#EF4444" />
-              <Text className="text-error text-xs">{passwordError}</Text>
-            </View>
-          )}
-        </View>
+        <InputField
+          ref={passwordRef}
+          label="Password"
+          value={password}
+          onChangeText={handlePasswordChange}
+          placeholder="Enter your password"
+          secureTextEntry={!showPassword}
+          returnKeyType="done"
+          onSubmitEditing={handleSignIn}
+          editable={!loading}
+          error={passwordError}
+        />
 
         <Pressable
           className="self-end mb-6"

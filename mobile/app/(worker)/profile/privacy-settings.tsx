@@ -5,9 +5,11 @@ import { useRouter } from "expo-router";
 import ScreenHeader from "../../../components/ui/ScreenHeader";
 import PrimaryButton from "../../../components/ui/PrimaryButton";
 import { colors } from "../../../constants";
+import { useAlertModal } from "../../../contexts/AlertModalContext";
 
 export default function WorkerPrivacySettingsScreen() {
   const router = useRouter();
+  const alertModal = useAlertModal();
   const [showProfile, setShowProfile] = useState(true);
   const [location, setLocation] = useState(true);
   const [usage, setUsage] = useState(false);
@@ -18,7 +20,7 @@ export default function WorkerPrivacySettingsScreen() {
       <ScrollView contentContainerStyle={{ padding: 24 }}>
         <View className="bg-card rounded-2xl overflow-hidden">
           <View className="flex-row justify-between items-center py-4 px-4 border-b border-divider">
-            <Text className="text-brand">Show Profile</Text>
+            <Text className="text-primary">Show Profile</Text>
             <Switch
               value={showProfile}
               onValueChange={setShowProfile}
@@ -27,7 +29,7 @@ export default function WorkerPrivacySettingsScreen() {
             />
           </View>
           <View className="flex-row justify-between items-center py-4 px-4 border-b border-divider">
-            <Text className="text-brand">Location Access</Text>
+            <Text className="text-primary">Location Access</Text>
             <Switch
               value={location}
               onValueChange={setLocation}
@@ -36,7 +38,7 @@ export default function WorkerPrivacySettingsScreen() {
             />
           </View>
           <View className="flex-row justify-between items-center py-4 px-4 border-b border-divider">
-            <Text className="text-brand">Share Usage Data</Text>
+            <Text className="text-primary">Share Usage Data</Text>
             <Switch
               value={usage}
               onValueChange={setUsage}
@@ -45,7 +47,7 @@ export default function WorkerPrivacySettingsScreen() {
             />
           </View>
           <View className="py-4 px-4 border-b border-divider">
-            <Text className="text-brand">Download My Data</Text>
+            <Text className="text-primary">Download My Data</Text>
             <Text className="text-text-muted text-xs mt-1">
               Export your data
             </Text>
@@ -62,8 +64,9 @@ export default function WorkerPrivacySettingsScreen() {
             label="Save Settings"
             fullWidth
             onPress={() => {
-              require("react-native").Alert.alert("Saved", "Settings updated");
-              router.back();
+              alertModal.success("Saved", "Settings updated", [
+                { text: "OK", onPress: () => router.back() },
+              ]);
             }}
           />
         </View>

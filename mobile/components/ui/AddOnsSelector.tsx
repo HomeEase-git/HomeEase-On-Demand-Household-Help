@@ -1,6 +1,6 @@
 import React, { useMemo } from "react";
 import { View, Text, FlatList, Pressable } from "react-native";
-import { Ionicons } from "@expo/vector-icons";
+import { AppIcon as Ionicons } from "../icons/AppIcon";
 import { colors } from "../../constants";
 
 export interface AddOn {

@@ -14,6 +14,7 @@ const STORAGE_KEYS = {
   PAYMENT_METHODS: '@homeease_payment_methods',
   SKILLS: '@homeease_skills',
   PROFILE: '@homeease_profile',
+  PRIVACY_SETTINGS: '@homeease_privacy_settings',
 };
 
 const memoryStore: Record<string, unknown> = {};
@@ -454,6 +455,22 @@ export const profileStorage = {
     const next = { ...(current ?? {}), ...payload };
     await writeStoredValue(STORAGE_KEYS.PROFILE, next);
     return next;
+  },
+};
+
+// Local-only privacy preferences. There is no backend model for these yet,
+// so they're device-local (not synced across a user's other devices).
+export const privacySettingsStorage = {
+  async get() {
+    return readStoredValue(STORAGE_KEYS.PRIVACY_SETTINGS, {
+      showProfile: true,
+      usage: false,
+    });
+  },
+
+  async save(payload: { showProfile: boolean; usage: boolean }) {
+    await writeStoredValue(STORAGE_KEYS.PRIVACY_SETTINGS, payload);
+    return payload;
   },
 };
 

@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { View, TextInput, Pressable, Text } from "react-native";
-import { Ionicons } from "@expo/vector-icons";
+import { AppIcon as Ionicons } from "../icons/AppIcon";
 import { colors } from "../../constants";
 
 type Props = {

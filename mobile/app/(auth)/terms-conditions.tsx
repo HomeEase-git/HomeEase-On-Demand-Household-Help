@@ -31,17 +31,17 @@ export default function TermsConditionsScreen() {
         <Section
           title="2. Use License"
           content="Permission is granted to temporarily download one copy of the materials (information or software) on HomeEase for personal, non-commercial transitory viewing only. This is the grant of a license, not a transfer of title, and under this license you may not:"
-        />
-
-        <BulletList
-          items={[
-            "Modify or copy the materials",
-            "Use the materials for any commercial purpose or for any public display",
-            "Attempt to decompile or reverse engineer any software contained on HomeEase",
-            "Remove any copyright or other proprietary notations from the materials",
-            "Transfer the materials to another person or 'mirror' the materials on any other server",
-          ]}
-        />
+        >
+          <BulletList
+            items={[
+              "Modify or copy the materials",
+              "Use the materials for any commercial purpose or for any public display",
+              "Attempt to decompile or reverse engineer any software contained on HomeEase",
+              "Remove any copyright or other proprietary notations from the materials",
+              "Transfer the materials to another person or 'mirror' the materials on any other server",
+            ]}
+          />
+        </Section>
 
         <Section
           title="3. Disclaimer"
@@ -76,24 +76,24 @@ export default function TermsConditionsScreen() {
         <Section
           title="9. User Responsibilities"
           content="Users of HomeEase agree to:"
-        />
-
-        <BulletList
-          items={[
-            "Provide accurate and complete information during registration",
-            "Maintain the confidentiality of their account credentials",
-            "Use the service only for lawful purposes",
-            "Not engage in any abusive or harassing behavior",
-            "Comply with all applicable laws and regulations",
-          ]}
-        />
+        >
+          <BulletList
+            items={[
+              "Provide accurate and complete information during registration",
+              "Maintain the confidentiality of their account credentials",
+              "Use the service only for lawful purposes",
+              "Not engage in any abusive or harassing behavior",
+              "Comply with all applicable laws and regulations",
+            ]}
+          />
+        </Section>
 
         <Section
           title="10. Payment Terms"
           content="If you engage in a transaction through HomeEase, you agree to pay all charges incurred in connection with that transaction at the rates in effect when the charges are incurred."
         />
 
-        <View className="mt-8 p-4 bg-blue-50 rounded-lg">
+        <View className="mt-2 p-4 bg-accent/10 border border-accent/30 rounded-2xl">
           <Text className="text-text-secondary text-xs">
             For questions about these Terms and Conditions, please contact our
             support team at{" "}
@@ -115,18 +115,27 @@ export default function TermsConditionsScreen() {
   );
 }
 
-function Section({ title, content }: { title: string; content: string }) {
+function Section({
+  title,
+  content,
+  children,
+}: {
+  title: string;
+  content: string;
+  children?: React.ReactNode;
+}) {
   return (
-    <View className="mb-6">
+    <View className="bg-card rounded-2xl p-4 mb-3">
       <Text className="text-text-primary text-base font-bold mb-2">{title}</Text>
       <Text className="text-text-secondary text-sm leading-6">{content}</Text>
+      {children}
     </View>
   );
 }
 
 function BulletList({ items }: { items: string[] }) {
   return (
-    <View className="mb-6 pl-4">
+    <View className="mt-3 pl-1">
       {items.map((item, index) => (
         <View key={index} className="flex-row mb-2">
           <Text className="text-accent font-bold mr-2">•</Text>

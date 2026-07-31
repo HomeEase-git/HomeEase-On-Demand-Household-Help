@@ -545,3 +545,376 @@ export const getWorkerCapacity = async (req: AuthRequest, res: Response) => {
     return res.status(500).json(errorResponse(500, 'Failed to fetch capacity'));
   }
 };
+
+/**
+ * GET /api/workers/me/skills
+ * List the authenticated worker's skills (worker only)
+ */
+export const listMySkills = async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      return res.status(401).json(errorResponse(401, 'Not authenticated'));
+    }
+
+    const workerProfile = await prisma.workerProfile.findUnique({
+      where: { userId: req.user.userId },
+      select: { id: true },
+    });
+
+    if (!workerProfile) {
+      return res.status(404).json(errorResponse(404, 'Worker profile not found'));
+    }
+
+    const skills = await prisma.skill.findMany({
+      where: { workerProfileId: workerProfile.id },
+      orderBy: { createdAt: 'asc' },
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: 'Skills retrieved successfully',
+      data: { skills },
+    });
+  } catch (error) {
+    console.error('Error fetching skills:', error);
+    return res.status(500).json(errorResponse(500, 'Failed to fetch skills'));
+  }
+};
+
+/**
+ * POST /api/workers/me/skills
+ * Add a skill to the authenticated worker's profile (worker only)
+ */
+export const createSkill = async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      return res.status(401).json(errorResponse(401, 'Not authenticated'));
+    }
+
+    const { name, category, rate } = req.body;
+
+    const workerProfile = await prisma.workerProfile.findUnique({
+      where: { userId: req.user.userId },
+      select: { id: true },
+    });
+
+    if (!workerProfile) {
+      return res.status(404).json(errorResponse(404, 'Worker profile not found'));
+    }
+
+    const skill = await prisma.skill.create({
+      data: {
+        workerProfileId: workerProfile.id,
+        name: name.trim(),
+        category: category.trim(),
+        rate,
+      },
+    });
+
+    return res.status(201).json({
+      success: true,
+      message: 'Skill added successfully',
+      data: { skill },
+    });
+  } catch (error) {
+    console.error('Error creating skill:', error);
+    return res.status(500).json(errorResponse(500, 'Failed to add skill'));
+  }
+};
+
+/**
+ * DELETE /api/workers/me/skills/:skillId
+ * Remove a skill from the authenticated worker's profile (worker only)
+ */
+export const deleteSkill = async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      return res.status(401).json(errorResponse(401, 'Not authenticated'));
+    }
+
+    const skillId = req.params.skillId as string;
+
+    const workerProfile = await prisma.workerProfile.findUnique({
+      where: { userId: req.user.userId },
+      select: { id: true },
+    });
+
+    if (!workerProfile) {
+      return res.status(404).json(errorResponse(404, 'Worker profile not found'));
+    }
+
+    const skill = await prisma.skill.findUnique({ where: { id: skillId } });
+    if (!skill || skill.workerProfileId !== workerProfile.id) {
+      return res.status(404).json(errorResponse(404, 'Skill not found'));
+    }
+
+    await prisma.skill.delete({ where: { id: skillId } });
+
+    return res.status(200).json({
+      success: true,
+      message: 'Skill removed successfully',
+      data: null,
+    });
+  } catch (error) {
+    console.error('Error deleting skill:', error);
+    return res.status(500).json(errorResponse(500, 'Failed to remove skill'));
+  }
+};
+
+// Maps the Certification model's DB shape onto the field names the mobile
+// app's certifications screens already expect (name/status vs title/verificationStatus).
+const formatCertification = (cert: {
+  id: string;
+  title: string;
+  issuer: string;
+  issueDate: Date;
+  expiryDate: Date | null;
+  documentUrl: string;
+  verificationStatus: string;
+  rejectionReason: string | null;
+}) => {
+  const statusLabel: Record<string, string> = {
+    PENDING: 'Pending',
+    APPROVED: 'Verified',
+    REJECTED: 'Declined',
+  };
+
+  return {
+    id: cert.id,
+    name: cert.title,
+    issuer: cert.issuer,
+    issueDate: cert.issueDate.toISOString().slice(0, 10),
+    expiryDate: cert.expiryDate ? cert.expiryDate.toISOString().slice(0, 10) : null,
+    documentUrl: cert.documentUrl,
+    status: statusLabel[cert.verificationStatus] ?? cert.verificationStatus,
+    rejectionReason: cert.rejectionReason,
+  };
+};
+
+/**
+ * GET /api/workers/me/certifications
+ * List the authenticated worker's certifications (worker only)
+ */
+export const listMyCertifications = async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      return res.status(401).json(errorResponse(401, 'Not authenticated'));
+    }
+
+    const workerProfile = await prisma.workerProfile.findUnique({
+      where: { userId: req.user.userId },
+      select: { id: true },
+    });
+
+    if (!workerProfile) {
+      return res.status(404).json(errorResponse(404, 'Worker profile not found'));
+    }
+
+    const certifications = await prisma.certification.findMany({
+      where: { workerProfileId: workerProfile.id },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: 'Certifications retrieved successfully',
+      data: { certifications: certifications.map(formatCertification) },
+    });
+  } catch (error) {
+    console.error('Error fetching certifications:', error);
+    return res.status(500).json(errorResponse(500, 'Failed to fetch certifications'));
+  }
+};
+
+/**
+ * GET /api/workers/me/certifications/:certId
+ * Get a single certification belonging to the authenticated worker (worker only)
+ */
+export const getCertification = async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      return res.status(401).json(errorResponse(401, 'Not authenticated'));
+    }
+
+    const certId = req.params.certId as string;
+
+    const workerProfile = await prisma.workerProfile.findUnique({
+      where: { userId: req.user.userId },
+      select: { id: true },
+    });
+
+    if (!workerProfile) {
+      return res.status(404).json(errorResponse(404, 'Worker profile not found'));
+    }
+
+    const certification = await prisma.certification.findUnique({ where: { id: certId } });
+    if (!certification || certification.workerProfileId !== workerProfile.id) {
+      return res.status(404).json(errorResponse(404, 'Certification not found'));
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: 'Certification retrieved successfully',
+      data: { certification: formatCertification(certification) },
+    });
+  } catch (error) {
+    console.error('Error fetching certification:', error);
+    return res.status(500).json(errorResponse(500, 'Failed to fetch certification'));
+  }
+};
+
+/**
+ * POST /api/workers/me/certifications
+ * Add a certification to the authenticated worker's profile (worker only).
+ * The document itself is uploaded separately via
+ * POST /api/users/me/kyc-documents/upload (documentType=CERTIFICATION), which
+ * returns the documentUrl passed in here.
+ */
+export const createCertification = async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      return res.status(401).json(errorResponse(401, 'Not authenticated'));
+    }
+
+    const { name, issuer, issueDate, expiryDate, documentUrl } = req.body;
+
+    const workerProfile = await prisma.workerProfile.findUnique({
+      where: { userId: req.user.userId },
+      select: { id: true },
+    });
+
+    if (!workerProfile) {
+      return res.status(404).json(errorResponse(404, 'Worker profile not found'));
+    }
+
+    const certification = await prisma.certification.create({
+      data: {
+        workerProfileId: workerProfile.id,
+        title: name.trim(),
+        issuer: issuer.trim(),
+        issueDate: new Date(issueDate),
+        expiryDate: expiryDate ? new Date(expiryDate) : null,
+        documentUrl,
+      },
+    });
+
+    return res.status(201).json({
+      success: true,
+      message: 'Certification added successfully',
+      data: { certification: formatCertification(certification) },
+    });
+  } catch (error) {
+    console.error('Error creating certification:', error);
+    return res.status(500).json(errorResponse(500, 'Failed to add certification'));
+  }
+};
+
+/**
+ * DELETE /api/workers/me/certifications/:certId
+ * Remove a certification from the authenticated worker's profile (worker only)
+ */
+export const deleteCertification = async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      return res.status(401).json(errorResponse(401, 'Not authenticated'));
+    }
+
+    const certId = req.params.certId as string;
+
+    const workerProfile = await prisma.workerProfile.findUnique({
+      where: { userId: req.user.userId },
+      select: { id: true },
+    });
+
+    if (!workerProfile) {
+      return res.status(404).json(errorResponse(404, 'Worker profile not found'));
+    }
+
+    const certification = await prisma.certification.findUnique({ where: { id: certId } });
+    if (!certification || certification.workerProfileId !== workerProfile.id) {
+      return res.status(404).json(errorResponse(404, 'Certification not found'));
+    }
+
+    await prisma.certification.delete({ where: { id: certId } });
+
+    return res.status(200).json({
+      success: true,
+      message: 'Certification removed successfully',
+      data: null,
+    });
+  } catch (error) {
+    console.error('Error deleting certification:', error);
+    return res.status(500).json(errorResponse(500, 'Failed to remove certification'));
+  }
+};
+
+/**
+ * GET /api/workers/me/payout
+ * Get the authenticated worker's payout method (worker only)
+ */
+export const getPayoutMethod = async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      return res.status(401).json(errorResponse(401, 'Not authenticated'));
+    }
+
+    const worker = await prisma.workerProfile.findUnique({
+      where: { userId: req.user.userId },
+      select: {
+        payoutMethod: true,
+        payoutAccountName: true,
+        payoutAccountNumber: true,
+      },
+    });
+
+    if (!worker) {
+      return res.status(404).json(errorResponse(404, 'Worker profile not found'));
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: 'Payout method retrieved successfully',
+      data: worker,
+    });
+  } catch (error) {
+    console.error('Error fetching payout method:', error);
+    return res.status(500).json(errorResponse(500, 'Failed to fetch payout method'));
+  }
+};
+
+/**
+ * PATCH /api/workers/me/payout
+ * Set the authenticated worker's payout method (worker only)
+ */
+export const updatePayoutMethod = async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      return res.status(401).json(errorResponse(401, 'Not authenticated'));
+    }
+
+    const { payoutMethod, payoutAccountName, payoutAccountNumber } = req.body;
+
+    const updated = await prisma.workerProfile.update({
+      where: { userId: req.user.userId },
+      data: {
+        payoutMethod,
+        payoutAccountName: payoutAccountName ?? undefined,
+        payoutAccountNumber: payoutAccountNumber ?? undefined,
+      },
+      select: {
+        payoutMethod: true,
+        payoutAccountName: true,
+        payoutAccountNumber: true,
+      },
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: 'Payout method updated successfully',
+      data: updated,
+    });
+  } catch (error) {
+    console.error('Error updating payout method:', error);
+    return res.status(500).json(errorResponse(500, 'Failed to update payout method'));
+  }
+};

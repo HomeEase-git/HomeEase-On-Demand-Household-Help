@@ -439,9 +439,9 @@ export async function withRetry<T>(
 
 export function setupGlobalErrorHandler(): void {
   // Handle unhandled promise rejections
-  if (typeof global !== 'undefined') {
+  if (typeof globalThis !== 'undefined') {
     const originalWarn = console.warn;
-    global.console.warn = (...args: any[]) => {
+    globalThis.console.warn = (...args: any[]) => {
       if (
         args[0]?.includes?.('Non-serializable values were found')
       ) {

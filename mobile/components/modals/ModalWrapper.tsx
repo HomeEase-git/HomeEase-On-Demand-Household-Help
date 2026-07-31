@@ -1,6 +1,6 @@
 import React from "react";
 import { Modal, View, Text, Pressable } from "react-native";
-import { Ionicons } from "@expo/vector-icons";
+import { AppIcon as Ionicons } from "../icons/AppIcon";
 import { colors } from "../../constants";
 
 type Props = {

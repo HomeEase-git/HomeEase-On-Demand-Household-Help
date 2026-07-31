@@ -1,14 +1,16 @@
 import React, { useEffect, useState, useRef } from "react";
-import { View, TextInput, ScrollView, Alert } from "react-native";
+import { View, TextInput, ScrollView } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter, useLocalSearchParams } from "expo-router";
 import ScreenHeader from "../../../../components/ui/ScreenHeader";
 import InputField from "../../../../components/ui/InputField";
 import PrimaryButton from "../../../../components/ui/PrimaryButton";
 import * as api from "../../../../services/api";
+import { useAlertModal } from "../../../../contexts/AlertModalContext";
 
 export default function EditPaymentMethodScreen() {
   const router = useRouter();
+  const alertModal = useAlertModal();
   const { methodId } = useLocalSearchParams<{ methodId: string }>();
   const [label, setLabel] = useState("");
   const [loading, setLoading] = useState(true);
@@ -35,7 +37,7 @@ export default function EditPaymentMethodScreen() {
 
   const handleSubmit = async () => {
     if (!label.trim()) {
-      Alert.alert("Error", "Please enter a label");
+      alertModal.error("Error", "Please enter a label");
       return;
     }
 
@@ -44,11 +46,11 @@ export default function EditPaymentMethodScreen() {
       if (methodId) {
         await api.updatePaymentMethod(methodId, { label: label.trim() });
       }
-      Alert.alert("Success", "Payment method updated");
+      alertModal.success("Success", "Payment method updated");
       router.back();
     } catch (error) {
       console.error("Update payment method error:", error);
-      Alert.alert("Error", "Unable to save payment method right now.");
+      alertModal.error("Error", "Unable to save payment method right now.");
     } finally {
       setSaving(false);
     }

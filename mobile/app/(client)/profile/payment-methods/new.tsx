@@ -2,7 +2,6 @@ import React, { useState, useRef } from "react";
 import {
   TextInput,
   ScrollView,
-  Alert,
   View,
   Text,
   Pressable,
@@ -13,9 +12,11 @@ import ScreenHeader from "../../../../components/ui/ScreenHeader";
 import InputField from "../../../../components/ui/InputField";
 import PrimaryButton from "../../../../components/ui/PrimaryButton";
 import * as api from "../../../../services/api";
+import { useAlertModal } from "../../../../contexts/AlertModalContext";
 
 export default function AddPaymentMethodScreen() {
   const router = useRouter();
+  const alertModal = useAlertModal();
   const [type, setType] = useState<
     "GCASH" | "MAYA" | "CARD" | "BANK_TRANSFER" | "CASH"
   >("GCASH");
@@ -28,7 +29,7 @@ export default function AddPaymentMethodScreen() {
 
   const handleSubmit = async () => {
     if (!accountIdentifier.trim()) {
-      Alert.alert("Error", "Please enter your payment account identifier");
+      alertModal.error("Error", "Please enter your payment account identifier");
       return;
     }
 
@@ -40,12 +41,12 @@ export default function AddPaymentMethodScreen() {
         label:
           label.trim() || `${type} ending in ...${accountIdentifier.slice(-4)}`,
       });
-      Alert.alert("Success", "Payment method added successfully", [
+      alertModal.success("Success", "Payment method added successfully", [
         { text: "OK", onPress: () => router.back() },
       ]);
     } catch (error) {
       console.error("Add payment method error:", error);
-      Alert.alert("Error", "Unable to add payment method");
+      alertModal.error("Error", "Unable to add payment method");
     } finally {
       setLoading(false);
     }
@@ -63,7 +64,7 @@ export default function AddPaymentMethodScreen() {
     <SafeAreaView className="flex-1 bg-white">
       <ScreenHeader title="Add Payment Method" showBack />
       <ScrollView contentContainerStyle={{ padding: 24 }}>
-        <Text className="text-brand text-sm mb-2 font-semibold">
+        <Text className="text-primary text-sm mb-2 font-semibold">
           Payment Type
         </Text>
         <View className="flex-row flex-wrap gap-2 mb-4">

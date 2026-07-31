@@ -2,11 +2,12 @@ import "react-native-reanimated";
 import "../global.css";
 import React, { useEffect, useRef } from "react";
 import { useFonts } from "expo-font";
-import { Stack, useNavigationContainerRef } from "expo-router";
+import { Stack } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { ToastProvider } from "../contexts/ToastContext";
+import { AlertModalProvider } from "../contexts/AlertModalContext";
 import { useAuthStore } from "../store/authStore";
 import { useBookingStore } from "../store/bookingStore";
 import { useMessageStore } from "../store/messageStore";
@@ -32,7 +33,6 @@ export default function RootLayout() {
   const initializeAuth = useAuthStore((state) => state.initializeAuth);
   const restoreDraft = useBookingStore((state) => state.restoreDraft);
   const token = useAuthStore((state) => state.token);
-  const navigationRef = useNavigationContainerRef();
   const [fontsLoaded] = useFonts({
     // Add any custom fonts here if needed
   });
@@ -88,7 +88,7 @@ export default function RootLayout() {
         // Initialize notifications
         await initializeNotificationService();
         setupNotificationReceivedHandler();
-        setupNotificationInteractionHandler(navigationRef);
+        setupNotificationInteractionHandler();
 
         console.log("[App] All services initialized");
       } catch (error) {
@@ -108,17 +108,19 @@ export default function RootLayout() {
     <GestureHandlerRootView className="flex-1 bg-white">
       <SafeAreaProvider>
         <ToastProvider>
-          <Stack
-            screenOptions={{
-              headerShown: false,
-              animation: "slide_from_right",
-              animationDuration: 250,
-              contentStyle: { backgroundColor: colors.surface },
-              headerStyle: { backgroundColor: colors.surface },
-              headerTintColor: colors.text.primary,
-              headerShadowVisible: false,
-            }}
-          />
+          <AlertModalProvider>
+            <Stack
+              screenOptions={{
+                headerShown: false,
+                animation: "slide_from_right",
+                animationDuration: 250,
+                contentStyle: { backgroundColor: colors.surface },
+                headerStyle: { backgroundColor: colors.surface },
+                headerTintColor: colors.text.primary,
+                headerShadowVisible: false,
+              }}
+            />
+          </AlertModalProvider>
         </ToastProvider>
       </SafeAreaProvider>
     </GestureHandlerRootView>

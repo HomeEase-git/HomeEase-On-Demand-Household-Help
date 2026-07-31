@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { View, Text, ScrollView, Alert } from "react-native";
+import { View, Text, ScrollView } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import * as DocumentPicker from "expo-document-picker";
@@ -10,11 +10,13 @@ import OutlinedButton from "../../components/ui/OutlinedButton";
 import UploadCard from "../../components/ui/UploadCard";
 import { useAuthStore } from "../../store/authStore";
 import { submitKycDocument, uploadKycFile } from "../../services/api";
+import { useAlertModal } from "../../contexts/AlertModalContext";
 
 // Worker-only screen — clients never reach this (selfie.tsx sends
 // them straight to the contract), but guard against direct navigation.
 export default function ResumeScreen() {
   const router = useRouter();
+  const alertModal = useAlertModal();
   const user = useAuthStore((s) => s.user);
   const isWorker = user?.role === "worker";
   const [resumeFile, setResumeFile] = useState<{
@@ -55,7 +57,7 @@ export default function ResumeScreen() {
 
       const document = result.assets?.[0];
       if (!document?.uri) {
-        Alert.alert("Upload failed", "We could not access the selected file.");
+        alertModal.error("Upload failed", "We could not access the selected file.");
         return;
       }
 
@@ -67,10 +69,10 @@ export default function ResumeScreen() {
           uri: document.uri,
           name: document.name || "resume.pdf",
         });
-        Alert.alert("Success", "Resume uploaded successfully.");
+        alertModal.success("Success", "Resume uploaded successfully.");
       } catch (error) {
         console.error("KYC resume submit error", error);
-        Alert.alert(
+        alertModal.error(
           "Upload failed",
           "We could not submit your resume. Please try again.",
         );
@@ -79,7 +81,7 @@ export default function ResumeScreen() {
       }
     } catch (error) {
       console.error("Resume upload error", error);
-      Alert.alert(
+      alertModal.error(
         "Upload failed",
         "We could not upload your resume. Please try again.",
       );
@@ -104,7 +106,7 @@ export default function ResumeScreen() {
         </Text>
 
         <View className="bg-card rounded-xl p-4 mb-6">
-          <Text className="text-brand font-semibold mb-2">
+          <Text className="text-primary font-semibold mb-2">
             Why we need your resume
           </Text>
           <Text className="text-text-secondary text-sm">

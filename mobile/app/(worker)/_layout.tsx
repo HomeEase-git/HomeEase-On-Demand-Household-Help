@@ -1,6 +1,6 @@
 import React from "react";
 import { Tabs } from "expo-router";
-import { Ionicons } from "@expo/vector-icons";
+import { AppIcon as Ionicons } from "../../components/icons/AppIcon";
 import { View } from "react-native";
 import NotificationBadge from "../../components/ui/NotificationBadge";
 import { useNotificationStore } from "../../store/notificationStore";
@@ -11,6 +11,7 @@ export default function WorkerLayout() {
 
   return (
     <Tabs
+      backBehavior="history"
       screenOptions={{
         headerShown: false,
         tabBarStyle: {

@@ -1,6 +1,6 @@
 import React from "react";
 import { View, Text, Pressable } from "react-native";
-import { Ionicons } from "@expo/vector-icons";
+import { AppIcon as Ionicons } from "../icons/AppIcon";
 import { colors, cardShadow } from "../../constants";
 
 type Category = { id: string; name: string; count: number };
@@ -32,7 +32,7 @@ export const CategoryCard: React.FC<Props> = ({ category, onPress }) => {
         {category.name}
       </Text>
       <Text className="text-text-secondary text-xs text-center">
-        {category.count} workers
+        {category.count} service{category.count === 1 ? "" : "s"}
       </Text>
     </Pressable>
   );

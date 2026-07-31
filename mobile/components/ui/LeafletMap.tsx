@@ -64,7 +64,8 @@ const buildHtml = ({
 
     L.marker([data.destination.lat, data.destination.lng], { icon: destinationIcon })
       .addTo(map)
-      .bindPopup(data.destinationLabel);
+      .bindPopup(data.destinationLabel)
+      .openPopup();
 
     if (data.currentLocation) {
       var currentIcon = L.divIcon({

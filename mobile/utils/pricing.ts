@@ -87,6 +87,20 @@ export function formatPrice(amount: number): string {
   return `₱${amount.toFixed(2)}`;
 }
 
+const QUOTE_REQUIRED_KEYWORDS = ["inspection", "diagnos", "assessment", "estimate"];
+
+/**
+ * Best-effort signal that a task's price is only an estimate until the
+ * worker inspects the job and submits a quote (e.g. "General Appliance
+ * Diagnosis", "Panel Inspection"). Service tasks are managed server-side
+ * with no explicit pricing-type field, so this matches on the task's own
+ * name/description rather than a fixed id.
+ */
+export function isLikelyQuoteRequired(name: string | null | undefined, description?: string | null): boolean {
+  const haystack = `${name ?? ""} ${description ?? ""}`.toLowerCase();
+  return QUOTE_REQUIRED_KEYWORDS.some((keyword) => haystack.includes(keyword));
+}
+
 /**
  * Calculate tip suggestions based on subtotal
  */

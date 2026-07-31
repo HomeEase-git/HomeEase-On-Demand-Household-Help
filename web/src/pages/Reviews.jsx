@@ -90,7 +90,14 @@ export default function Reviews() {
                         <td>{r.comment}</td>
                         <td>{r.createdAt}</td>
                         <td>
-                          <Link to={`/reviews/detail/${r.id}`} className="action-btn view" title="View"><i className="fas fa-eye" /></Link>
+                          <Link
+                            to={`/reviews/detail/${r.id}`}
+                            className="action-btn view"
+                            title="View"
+                            aria-label={`View review ${r.displayId}`}
+                          >
+                            <i className="fas fa-eye" />
+                          </Link>
                         </td>
                       </tr>
                     ))

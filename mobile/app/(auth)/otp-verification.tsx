@@ -1,18 +1,21 @@
 import React, { useState, useEffect } from "react";
-import { View, Text, Pressable, Alert, ScrollView } from "react-native";
+import { View, Text, Pressable, ScrollView } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter, useLocalSearchParams } from "expo-router";
-import { Ionicons } from "@expo/vector-icons";
+import { AppIcon as Ionicons } from "../../components/icons/AppIcon";
 import OtpInput from "../../components/ui/OtpInput";
+import FieldError from "../../components/ui/FieldError";
 import PrimaryButton from "../../components/ui/PrimaryButton";
 import { useAuthStore } from "../../store/authStore";
 import { verifyOtp, sendOtpEmail } from "../../services/api";
 import { colors } from "../../constants";
+import { useAlertModal } from "../../contexts/AlertModalContext";
 
 const COUNTDOWN_SECONDS = 60;
 
 export default function OtpVerificationScreen() {
   const router = useRouter();
+  const alertModal = useAlertModal();
   const params = useLocalSearchParams<{ email?: string }>();
   const email = (params.email as string) || "";
 
@@ -22,8 +25,14 @@ export default function OtpVerificationScreen() {
   }));
 
   const [otp, setOtp] = useState("");
+  const [otpError, setOtpError] = useState("");
   const [countdown, setCountdown] = useState(COUNTDOWN_SECONDS);
   const [canResend, setCanResend] = useState(false);
+
+  const handleOtpChange = (value: string) => {
+    setOtp(value);
+    setOtpError("");
+  };
 
   useEffect(() => {
     if (countdown <= 0) {
@@ -36,7 +45,7 @@ export default function OtpVerificationScreen() {
 
   const handleVerify = async () => {
     if (otp.length !== 6) {
-      Alert.alert("Error", "Please enter a complete 6-digit OTP");
+      setOtpError("Please enter a complete 6-digit OTP");
       return;
     }
 
@@ -49,10 +58,7 @@ export default function OtpVerificationScreen() {
         router.push("/(auth)/account-created-success");
       }
     } catch (err: any) {
-      Alert.alert(
-        "Error",
-        err?.message || "OTP verification failed. Please try again.",
-      );
+      setOtpError(err?.message || "OTP verification failed. Please try again.");
     } finally {
       setLoading(false);
     }
@@ -67,9 +73,10 @@ export default function OtpVerificationScreen() {
       setCountdown(COUNTDOWN_SECONDS);
       setCanResend(false);
       setOtp("");
-      Alert.alert("Success", "OTP sent to your email");
+      setOtpError("");
+      alertModal.success("Success", "OTP sent to your email");
     } catch (err: any) {
-      Alert.alert(
+      alertModal.error(
         "Error",
         err?.message || "Failed to resend OTP. Please try again.",
       );
@@ -104,16 +111,19 @@ export default function OtpVerificationScreen() {
         <Text className="text-text-secondary mt-2 mb-2">
           We sent a 6-digit code to
         </Text>
-        <Text className="text-brand font-semibold mb-6">
+        <Text className="text-primary font-semibold mb-6">
           {maskEmail(email)}
         </Text>
 
         <OtpInput
           value={otp}
-          onChangeText={setOtp}
+          onChangeText={handleOtpChange}
           length={6}
           // autoFocus={true}
         />
+        <View className="items-center">
+          <FieldError message={otpError} />
+        </View>
 
         <View className="mt-8">
           <PrimaryButton
@@ -132,7 +142,7 @@ export default function OtpVerificationScreen() {
           ) : (
             <Text className="text-text-muted text-sm">
               Resend code in{" "}
-              <Text className="font-semibold text-brand">{countdown}s</Text>
+              <Text className="font-semibold text-primary">{countdown}s</Text>
             </Text>
           )}
         </View>

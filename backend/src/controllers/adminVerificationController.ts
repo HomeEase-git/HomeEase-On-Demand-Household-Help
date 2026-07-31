@@ -4,6 +4,7 @@ import { errorResponse } from '@utils/errorResponse';
 import { formatVerification } from '@utils/formatters';
 import { verificationQueue } from '@queues/verificationQueue';
 import { writeAuditLog } from '@utils/auditLog';
+import { notifyUser } from '@utils/notify';
 import type { JwtPayload } from '@/types/index';
 
 interface AuthRequest extends Request {
@@ -111,6 +112,17 @@ export const approveVerification = async (req: AuthRequest, res: Response) => {
       return verification;
     });
 
+    await notifyUser({
+      userId: record.userId,
+      type: 'VERIFICATION_APPROVED',
+      title: 'Verification Approved',
+      message:
+        record.user.role === 'WORKER'
+          ? "You're verified! You can now start accepting jobs."
+          : 'Your account verification has been approved.',
+      relatedId: record.id,
+    });
+
     await writeAuditLog({
       actorId: req.user?.userId,
       actorName: req.user?.email,
@@ -169,6 +181,14 @@ export const rejectVerification = async (req: AuthRequest, res: Response) => {
       }
 
       return verification;
+    });
+
+    await notifyUser({
+      userId: record.userId,
+      type: 'VERIFICATION_REJECTED',
+      title: 'Verification Rejected',
+      message: `Your verification was rejected: ${rejectReason.trim()}`,
+      relatedId: record.id,
     });
 
     await writeAuditLog({

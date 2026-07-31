@@ -1,8 +1,7 @@
 import React, { useCallback, useState } from "react";
 import { View, Text, FlatList, Pressable } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { useFocusEffect } from "@react-navigation/native";
-import { useRouter } from "expo-router";
+import { useFocusEffect, useRouter } from "expo-router";
 import RecordCard from "../../../components/cards/RecordCard";
 import EmptyState from "../../../components/feedback/EmptyState";
 import { LoadingSkeleton } from "../../../components/feedback/LoadingSkeleton";
@@ -73,20 +72,6 @@ export default function RecordsScreen() {
         <Text className="text-text-primary text-2xl font-bold">Job Records</Text>
         <View className="flex-row gap-2 mt-3">
           <Pressable
-            className={`px-3 py-2 rounded-xl ${tab === "Completed" ? "bg-accent" : "bg-card"}`}
-            onPress={() => setTab("Completed")}
-          >
-            <Text
-              className={
-                tab === "Completed"
-                  ? "text-white font-semibold text-sm"
-                  : "text-text-secondary text-sm"
-              }
-            >
-              Completed
-            </Text>
-          </Pressable>
-          <Pressable
             className={`px-3 py-2 rounded-xl ${tab === "Ongoing" ? "bg-accent" : "bg-card"}`}
             onPress={() => setTab("Ongoing")}
           >
@@ -98,6 +83,20 @@ export default function RecordsScreen() {
               }
             >
               Ongoing
+            </Text>
+          </Pressable>
+          <Pressable
+            className={`px-3 py-2 rounded-xl ${tab === "Completed" ? "bg-accent" : "bg-card"}`}
+            onPress={() => setTab("Completed")}
+          >
+            <Text
+              className={
+                tab === "Completed"
+                  ? "text-white font-semibold text-sm"
+                  : "text-text-secondary text-sm"
+              }
+            >
+              Completed
             </Text>
           </Pressable>
           <Pressable

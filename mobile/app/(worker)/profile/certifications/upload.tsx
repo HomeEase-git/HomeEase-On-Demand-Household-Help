@@ -8,40 +8,65 @@ import UploadCard from "../../../../components/ui/UploadCard";
 import PrimaryButton from "../../../../components/ui/PrimaryButton";
 import ImageSourcePickerBottomSheet from "../../../../components/bottom-sheets/ImageSourcePickerBottomSheet";
 import type { BottomSheetHandle } from "../../../../components/bottom-sheets/BottomSheetWrapper";
+import * as api from "../../../../services/api";
+import { useAlertModal } from "../../../../contexts/AlertModalContext";
+
+const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 
 export default function UploadCertificationScreen() {
   const router = useRouter();
+  const alertModal = useAlertModal();
   const sheetRef = useRef<BottomSheetHandle | null>(null);
   const [name, setName] = useState("");
   const [issuer, setIssuer] = useState("");
   const [issueDate, setIssueDate] = useState("");
   const [expiryDate, setExpiryDate] = useState("");
   const [documentUri, setDocumentUri] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
 
   const handleSelect = (uri: string) => {
     setDocumentUri(uri);
   };
 
-  const handleSave = () => {
+  const handleSave = async () => {
     if (!name.trim() || !issuer.trim()) {
-      require("react-native").Alert.alert(
+      alertModal.error(
         "Error",
         "Please fill in the certificate name and issuing organization.",
       );
       return;
     }
-    if (!documentUri) {
-      require("react-native").Alert.alert(
-        "Error",
-        "Please upload a document photo.",
-      );
+    if (!DATE_PATTERN.test(issueDate.trim())) {
+      alertModal.error("Error", "Please enter a valid issue date (YYYY-MM-DD).");
       return;
     }
-    require("react-native").Alert.alert(
-      "Success",
-      "Certification uploaded successfully.",
-    );
-    router.back();
+    if (expiryDate.trim() && !DATE_PATTERN.test(expiryDate.trim())) {
+      alertModal.error("Error", "Please enter a valid expiry date (YYYY-MM-DD).");
+      return;
+    }
+    if (!documentUri) {
+      alertModal.error("Error", "Please upload a document photo.");
+      return;
+    }
+
+    setSaving(true);
+    try {
+      const { url } = await api.uploadCertificationFile(documentUri);
+      await api.addCertification({
+        name: name.trim(),
+        issuer: issuer.trim(),
+        issueDate: issueDate.trim(),
+        expiryDate: expiryDate.trim() || null,
+        documentUrl: url,
+      });
+      alertModal.success("Success", "Certification uploaded successfully.");
+      router.back();
+    } catch (error) {
+      console.error("Upload certification error:", error);
+      alertModal.error("Error", "Failed to upload certification. Please try again.");
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
@@ -82,6 +107,8 @@ export default function UploadCertificationScreen() {
             label="Save Certification"
             fullWidth
             onPress={handleSave}
+            disabled={saving}
+            loading={saving}
           />
         </View>
       </ScrollView>

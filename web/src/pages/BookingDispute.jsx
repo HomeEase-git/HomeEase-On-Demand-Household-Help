@@ -8,6 +8,7 @@ import Badge from '../components/common/Badge'
 import LoadingState from '../components/common/LoadingState'
 import ErrorState from '../components/common/ErrorState'
 import { fetchDisputes, updateDispute } from '../services/disputes'
+import { useToast } from '../context/ToastContext'
 
 const SUB_NAV = [
   { to: '/bookings', label: 'All Bookings' },
@@ -20,6 +21,7 @@ export default function BookingDispute() {
   const [search, setSearch] = useState('')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
+  const { showSuccess, showError } = useToast()
 
   const loadDisputes = async () => {
     setLoading(true)
@@ -44,6 +46,12 @@ export default function BookingDispute() {
 
   const closeModal = () => setSelectedId(null)
 
+  const RESOLUTION_LABELS = {
+    CANCELLED: 'Booking cancelled.',
+    REFUNDED: 'Payment refunded.',
+    QUOTE_APPROVED: 'Dispute marked resolved.',
+  }
+
   const resolveDispute = async (status) => {
     if (!selected) return
 
@@ -54,8 +62,9 @@ export default function BookingDispute() {
       })
       setDisputes((prev) => prev.filter((d) => d.id !== updated.id))
       setSelectedId(null)
+      showSuccess(RESOLUTION_LABELS[status] || 'Dispute updated.')
     } catch (err) {
-      setError(err.message || 'Failed to update dispute')
+      showError(err.message || 'Failed to update dispute')
     }
   }
 
@@ -107,6 +116,7 @@ export default function BookingDispute() {
                             type="button"
                             className="action-btn view"
                             title="Review dispute"
+                            aria-label={`Review dispute ${d.displayId}`}
                             onClick={() => setSelectedId(d.id)}
                           >
                             <i className="fas fa-eye" />

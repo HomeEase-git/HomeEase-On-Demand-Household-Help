@@ -3,7 +3,14 @@ import { randomUUID } from 'crypto';
 import multer from 'multer';
 import { errorResponse } from '@utils/errorResponse';
 import { KYC_DOCUMENT_TYPES } from '@utils/kycDocumentTypes';
-import { supabase, CHAT_IMAGE_BUCKET, AVATAR_BUCKET, KYC_DOCUMENT_BUCKET, RESUME_BUCKET } from '@config/supabase';
+import {
+  supabase,
+  CHAT_IMAGE_BUCKET,
+  AVATAR_BUCKET,
+  KYC_DOCUMENT_BUCKET,
+  RESUME_BUCKET,
+  BOOKING_PHOTO_BUCKET,
+} from '@config/supabase';
 import type { JwtPayload } from '@/types/index';
 
 interface AuthRequest extends Request {
@@ -119,6 +126,61 @@ export const uploadAvatar = async (req: AuthRequest, res: Response) => {
   } catch (error) {
     console.error('Error uploading avatar:', error);
     return res.status(500).json(errorResponse(500, 'Failed to upload avatar'));
+  }
+};
+
+export const bookingPhotoUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: MAX_FILE_SIZE },
+  fileFilter: (_req, file, cb) => {
+    if (!ALLOWED_MIME_TYPES.includes(file.mimetype)) {
+      cb(new Error('Only image uploads are allowed'));
+      return;
+    }
+    cb(null, true);
+  },
+}).single('photo');
+
+/**
+ * POST /api/bookings/:id/completion-photo/upload
+ * Uploads a job-completion proof photo to Supabase Storage and returns its
+ * public URL. Does not persist the URL — call PATCH /api/bookings/:id/complete
+ * with { completionPhotoUrl } after.
+ */
+export const uploadBookingCompletionPhoto = async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      return res.status(401).json(errorResponse(401, 'Not authenticated'));
+    }
+
+    if (!req.file) {
+      return res.status(400).json(errorResponse(400, 'No image file provided'));
+    }
+
+    const extension = req.file.mimetype.split('/')[1] || 'jpg';
+    const fileName = `${req.user.userId}/${randomUUID()}.${extension}`;
+
+    const { error: uploadError } = await supabase.storage
+      .from(BOOKING_PHOTO_BUCKET)
+      .upload(fileName, req.file.buffer, {
+        contentType: req.file.mimetype,
+      });
+
+    if (uploadError) {
+      console.error('Error uploading completion photo to Supabase:', uploadError);
+      return res.status(500).json(errorResponse(500, 'Failed to upload photo'));
+    }
+
+    const { data } = supabase.storage.from(BOOKING_PHOTO_BUCKET).getPublicUrl(fileName);
+
+    return res.status(201).json({
+      success: true,
+      message: 'Photo uploaded successfully',
+      data: { url: data.publicUrl },
+    });
+  } catch (error) {
+    console.error('Error uploading completion photo:', error);
+    return res.status(500).json(errorResponse(500, 'Failed to upload photo'));
   }
 };
 

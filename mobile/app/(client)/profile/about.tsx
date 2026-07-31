@@ -2,13 +2,10 @@ import React from "react";
 import { View, Text, ScrollView } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
-import { useRouter } from "expo-router";
 import ScreenHeader from "../../../components/ui/ScreenHeader";
 import { colors } from "../../../constants";
 
 export default function AboutScreen() {
-  const router = useRouter();
-
   return (
     <SafeAreaView className="flex-1 bg-white">
       <ScreenHeader title="About HomeEase" showBack />
@@ -23,32 +20,6 @@ export default function AboutScreen() {
           HomeEase connects you with verified home service workers for plumbing,
           cleaning, electrical, and more.
         </Text>
-        <View className="mt-8 w-full gap-3">
-          <Text
-            className="text-accent text-center"
-            onPress={() =>
-              require("react-native").Alert.alert("Opening Play Store...")
-            }
-          >
-            Rate the App
-          </Text>
-          <Text
-            className="text-accent text-center"
-            onPress={() =>
-              require("react-native").Alert.alert("Opening Website...")
-            }
-          >
-            Visit Website
-          </Text>
-          <Text
-            className="text-accent text-center"
-            onPress={() =>
-              require("react-native").Alert.alert("Opening Facebook...")
-            }
-          >
-            Follow us on Facebook
-          </Text>
-        </View>
         <Text className="text-text-muted text-xs text-center mt-8">
           Developed by Dela Cruz, Flores, Relleja, Robles — BulSU 2026
         </Text>

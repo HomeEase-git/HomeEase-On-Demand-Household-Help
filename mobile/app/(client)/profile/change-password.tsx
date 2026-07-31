@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { View, ScrollView, Alert } from "react-native";
+import { View, ScrollView } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { isAxiosError } from "axios";
@@ -7,35 +7,47 @@ import ScreenHeader from "../../../components/ui/ScreenHeader";
 import InputField from "../../../components/ui/InputField";
 import PrimaryButton from "../../../components/ui/PrimaryButton";
 import * as api from "../../../services/api";
+import { useAlertModal } from "../../../contexts/AlertModalContext";
 
 export default function ChangePasswordScreen() {
   const router = useRouter();
+  const alertModal = useAlertModal();
   const [current, setCurrent] = useState("");
   const [newPass, setNewPass] = useState("");
   const [confirm, setConfirm] = useState("");
   const [saving, setSaving] = useState(false);
+  const [currentError, setCurrentError] = useState("");
+  const [newPassError, setNewPassError] = useState("");
+  const [confirmError, setConfirmError] = useState("");
 
   const handleUpdate = async () => {
+    setCurrentError("");
+    setNewPassError("");
+    setConfirmError("");
+
     if (!current || !newPass || !confirm) {
-      Alert.alert("Error", "Fill all fields");
+      setCurrentError(!current ? "Current password is required" : "");
+      setNewPassError(!newPass ? "New password is required" : "");
+      setConfirmError(!confirm ? "Please confirm your new password" : "");
       return;
     }
     if (newPass !== confirm) {
-      Alert.alert("Error", "Passwords do not match");
+      setConfirmError("Passwords do not match");
       return;
     }
 
     setSaving(true);
     try {
       await api.changePassword(current, newPass);
-      Alert.alert("Success", "Password updated");
-      router.back();
+      alertModal.success("Success", "Password updated", [
+        { text: "OK", onPress: () => router.back() },
+      ]);
     } catch (error) {
-      const message =
-        isAxiosError(error) && error.response?.status === 401
-          ? "Current password is incorrect"
-          : "Unable to update password right now.";
-      Alert.alert("Error", message);
+      if (isAxiosError(error) && error.response?.status === 401) {
+        setCurrentError("Current password is incorrect");
+      } else {
+        alertModal.error("Error", "Unable to update password right now.");
+      }
     } finally {
       setSaving(false);
     }
@@ -48,20 +60,32 @@ export default function ChangePasswordScreen() {
         <InputField
           label="Current Password"
           value={current}
-          onChangeText={setCurrent}
+          onChangeText={(text) => {
+            setCurrent(text);
+            setCurrentError("");
+          }}
           secureTextEntry
+          error={currentError}
         />
         <InputField
           label="New Password"
           value={newPass}
-          onChangeText={setNewPass}
+          onChangeText={(text) => {
+            setNewPass(text);
+            setNewPassError("");
+          }}
           secureTextEntry
+          error={newPassError}
         />
         <InputField
           label="Confirm Password"
           value={confirm}
-          onChangeText={setConfirm}
+          onChangeText={(text) => {
+            setConfirm(text);
+            setConfirmError("");
+          }}
           secureTextEntry
+          error={confirmError}
         />
         <PrimaryButton
           label="Update Password"

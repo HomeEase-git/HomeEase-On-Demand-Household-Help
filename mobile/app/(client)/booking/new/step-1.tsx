@@ -4,11 +4,10 @@ import {
   Text,
   ScrollView,
   Pressable,
-  Alert,
   ActivityIndicator,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { Ionicons } from "@expo/vector-icons";
+import { AppIcon as Ionicons } from "../../../../components/icons/AppIcon";
 import { useRouter } from "expo-router";
 import ScreenHeader from "../../../../components/ui/ScreenHeader";
 import StepperHorizontal from "../../../../components/steppers/StepperHorizontal";
@@ -21,10 +20,12 @@ import ServiceTypePickerBottomSheet from "../../../../components/bottom-sheets/S
 import { useBookingStore } from "../../../../store/bookingStore";
 import { serviceConfigs } from "../../../../constants/serviceData";
 import { getServiceTypes } from "../../../../services/api";
-import { calculatePriceBreakdown } from "../../../../utils/pricing";
+import { calculatePriceBreakdown, isLikelyQuoteRequired } from "../../../../utils/pricing";
+import { resolveServiceConfig } from "../../../../utils/categoryMapping";
 import type { BottomSheetHandle } from "../../../../components/bottom-sheets/BottomSheetWrapper";
 import { colors } from "../../../../constants";
 import InvalidationBanner from "../../../../components/ui/InvalidationBanner";
+import { useAlertModal } from "../../../../contexts/AlertModalContext";
 
 type ServiceTask = {
   id: string;
@@ -45,6 +46,7 @@ type ServiceType = {
 
 export default function BookingStep1Screen() {
   const router = useRouter();
+  const alertModal = useAlertModal();
   const draft = useBookingStore((s) => s.draft);
   const setDraft = useBookingStore((s) => s.setDraft);
   const [category, setCategory] = useState<string | null>(draft.category);
@@ -75,9 +77,7 @@ export default function BookingStep1Screen() {
 
   const addOnConfig = useMemo(() => {
     if (!category) return null;
-    return serviceConfigs.find(
-      (config) => config.categoryName.toLowerCase() === category.toLowerCase(),
-    );
+    return resolveServiceConfig(category);
   }, [category]);
 
   useEffect(() => {
@@ -238,7 +238,7 @@ export default function BookingStep1Screen() {
 
         {selectedServiceType && (
           <>
-            <Text className="text-text-secondary text-sm mb-1 mt-3">
+            <Text className="text-text-secondary font-bold text-sm mb-1 mt-3">
               Select Task
             </Text>
             <ScrollView horizontal={false} className="flex-1">
@@ -263,6 +263,10 @@ export default function BookingStep1Screen() {
                         selected,
                         selectedAddOns,
                         addOnConfig ?? serviceConfigs[0],
+                      ),
+                      quoteRequired: isLikelyQuoteRequired(
+                        selected.name,
+                        selected.description,
                       ),
                     });
                   }}
@@ -316,18 +320,35 @@ export default function BookingStep1Screen() {
           </View>
         )}
 
+        {draft.quoteRequired && (
+          <View className="bg-warning/10 rounded-2xl p-3 mt-3 flex-row items-start">
+            <Ionicons
+              name="information-circle"
+              size={18}
+              color={colors.warning}
+              style={{ marginTop: 1, marginRight: 6 }}
+            />
+            <Text className="text-warning text-xs flex-1">
+              The price above is an estimate. The worker will inspect the job on-site and send you a final quote before starting work.
+            </Text>
+          </View>
+        )}
+
         <InputField
           label="Description"
+          boldLabel
           value={description}
           onChangeText={(t) => {
             setDescription(t);
             setDraft({ description: t });
           }}
-          placeholder="Describe what you need..."
+          placeholder="e.g. It's leaking badly"
           multiline
         />
 
-        <Text className="text-text-secondary text-sm mb-1">Address</Text>
+        <Text className="text-text-secondary font-bold text-sm mb-1">
+          Address
+        </Text>
         <Pressable
           className="bg-card rounded-xl p-4 flex-row items-center"
           onPress={() => router.push("/(client)/booking/address-picker")}
@@ -349,7 +370,7 @@ export default function BookingStep1Screen() {
         </Pressable>
 
         <View className="mt-4">
-          <Text className="text-text-secondary text-sm mb-1">
+          <Text className="text-text-secondary font-bold text-sm mb-1">
             Preferred Worker
           </Text>
           <View className="bg-card rounded-2xl p-4">
@@ -368,7 +389,7 @@ export default function BookingStep1Screen() {
                   label="Change"
                   onPress={() => {
                     if (draft.workerLocked) {
-                      Alert.alert(
+                      alertModal.warning(
                         "Worker Locked",
                         "This worker was selected from their profile or a previous booking and can't be changed from here. Please go back to change the service or booking.",
                       );
@@ -399,7 +420,7 @@ export default function BookingStep1Screen() {
             disabled={!canNext}
             onPress={() => {
               if (!canNext) {
-                Alert.alert(
+                alertModal.error(
                   "Error",
                   "Please select category and address" +
                     (selectedServiceType ? " and task" : ""),
@@ -425,6 +446,7 @@ export default function BookingStep1Screen() {
             selectedTaskId: null,
             selectedAddOnIds: [],
             estimatedPrice: 0,
+            quoteRequired: false,
           });
           serviceSheetRef.current?.close();
         }}

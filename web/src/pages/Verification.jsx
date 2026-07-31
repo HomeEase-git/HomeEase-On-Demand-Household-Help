@@ -87,7 +87,12 @@ export default function Verification() {
                       <td>{row.submitted}</td>
                       <td>
                         <div className="row-actions">
-                          <Link to={`/verification/detail/${row.id}`} className="action-btn view" title="Review">
+                          <Link
+                            to={`/verification/detail/${row.id}`}
+                            className="action-btn view"
+                            title="Review"
+                            aria-label={`Review verification for ${row.name}`}
+                          >
                             <i className="fas fa-eye" />
                           </Link>
                         </div>

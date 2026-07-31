@@ -96,7 +96,12 @@ export default function Users() {
                         <td>{user.spent}</td>
                         <td>
                           <div className="row-actions">
-                            <Link to={`/users/client/${user.id}`} className="action-btn view" title="View">
+                            <Link
+                              to={`/users/client/${user.id}`}
+                              className="action-btn view"
+                              title="View"
+                              aria-label={`View client ${user.name}`}
+                            >
                               <i className="fas fa-eye" />
                             </Link>
                           </div>

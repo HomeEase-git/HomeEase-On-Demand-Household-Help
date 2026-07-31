@@ -1,18 +1,20 @@
 import React, { useCallback, useState } from "react";
-import { View, Text, ScrollView, Alert, ActivityIndicator } from "react-native";
+import { View, Text, ScrollView } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
-import { useFocusEffect } from "@react-navigation/native";
-import { useRouter, useLocalSearchParams } from "expo-router";
+import { useFocusEffect, useRouter, useLocalSearchParams } from "expo-router";
 import ScreenHeader from "../../../components/ui/ScreenHeader";
+import AddressMap from "../../../components/ui/AddressMap";
 import PrimaryButton from "../../../components/ui/PrimaryButton";
 import OutlinedButton from "../../../components/ui/OutlinedButton";
 import GenericConfirmationModal from "../../../components/modals/GenericConfirmationModal";
+import { Skeleton } from "../../../components/ui/Skeleton";
 import { useWorkerStore } from "../../../store/workerStore";
 import { API_STATUS_MAP } from "../../../store/bookingStore";
 import * as api from "../../../services/api";
 import { colors } from "../../../constants";
 import StatusBadge from "../../../components/ui/StatusBadge";
+import { useAlertModal } from "../../../contexts/AlertModalContext";
 
 type BookingDetail = {
   id: string;
@@ -33,6 +35,7 @@ export default function RequestDetailScreen() {
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [declineVisible, setDeclineVisible] = useState(false);
+  const alertModal = useAlertModal();
 
   const load = useCallback(async () => {
     if (!requestId) return;
@@ -61,9 +64,24 @@ export default function RequestDetailScreen() {
     return (
       <SafeAreaView className="flex-1 bg-white">
         <ScreenHeader title="Job Request" showBack />
-        <View className="flex-1 items-center justify-center">
-          <ActivityIndicator size="small" />
-        </View>
+        <ScrollView contentContainerStyle={{ padding: 16 }}>
+          <View className="bg-card rounded-2xl p-4 mb-3 flex-row items-center">
+            <Skeleton width={56} height={56} borderRadius={28} marginBottom={0} />
+            <View style={{ flex: 1, marginLeft: 12 }}>
+              <Skeleton width="60%" height={16} marginBottom={6} />
+              <Skeleton width="40%" height={12} marginBottom={0} />
+            </View>
+          </View>
+          <View className="bg-card rounded-2xl p-4 mb-3">
+            <Skeleton width="30%" height={14} marginBottom={8} />
+            <Skeleton width="80%" height={12} marginBottom={6} />
+            <Skeleton width="50%" height={10} marginBottom={0} />
+          </View>
+          <View className="bg-card rounded-2xl p-4 mb-3 items-center">
+            <Skeleton width="40%" height={12} marginBottom={8} />
+            <Skeleton width="50%" height={32} marginBottom={0} />
+          </View>
+        </ScrollView>
       </SafeAreaView>
     );
   }
@@ -88,7 +106,7 @@ export default function RequestDetailScreen() {
     try {
       await api.acceptBooking(booking.id);
       updateJobStatus(booking.id, "Accepted");
-      Alert.alert(
+      alertModal.success(
         "Job Accepted!",
         "The client has been notified. You can track the job from the job detail screen.",
         [
@@ -101,7 +119,7 @@ export default function RequestDetailScreen() {
       );
     } catch (error) {
       console.error("Accept booking error:", error);
-      Alert.alert("Error", "Failed to accept this job. Please try again.");
+      alertModal.error("Error", "Failed to accept this job. Please try again.");
     } finally {
       setSubmitting(false);
     }
@@ -112,11 +130,11 @@ export default function RequestDetailScreen() {
     setSubmitting(true);
     try {
       await api.declineBooking(booking.id);
-      Alert.alert("Declined", "The job request has been declined.");
+      alertModal.success("Declined", "The job request has been declined.");
       router.back();
     } catch (error) {
       console.error("Decline booking error:", error);
-      Alert.alert("Error", "Failed to decline this job. Please try again.");
+      alertModal.error("Error", "Failed to decline this job. Please try again.");
     } finally {
       setSubmitting(false);
     }
@@ -189,13 +207,8 @@ export default function RequestDetailScreen() {
           <Text className="text-text-secondary text-sm">
             {booking.location || "No address provided"}
           </Text>
-          <View className="w-full h-32 bg-card-dark rounded-xl mt-3 items-center justify-center">
-            <Ionicons
-              name="map-outline"
-              size={40}
-              color={colors.accent.DEFAULT}
-            />
-            <Text className="text-text-muted text-xs mt-1">Map Preview</Text>
+          <View className="mt-3">
+            <AddressMap height="h-32" address={booking.location} />
           </View>
         </View>
 
@@ -254,9 +267,16 @@ export default function RequestDetailScreen() {
         ) : (
           <View className="bg-card rounded-2xl p-4 mt-4">
             <Text className="text-text-primary font-bold mb-2">Request Status</Text>
-            <Text className="text-text-secondary text-sm">
+            <Text className="text-text-secondary text-sm mb-3">
               This job request is {status.toLowerCase()}.
             </Text>
+            {status !== "Cancelled" && (
+              <PrimaryButton
+                label="View Job"
+                fullWidth
+                onPress={() => router.push(`/(worker)/requests/job/${booking.id}`)}
+              />
+            )}
           </View>
         )}
       </ScrollView>

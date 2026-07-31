@@ -39,6 +39,7 @@ enum BookingStatus {
   QUOTE_SUBMITTED
   QUOTE_APPROVED
   DISPUTED
+  PENDING_COMPLETION
   COMPLETED
   CANCELLED
 }
@@ -264,12 +265,18 @@ model WorkerProfile {
   // Resume file URL (raw file)
   resumeUrl String?
 
+  // Payout destination for withdrawing earnings (worker-configured)
+  payoutMethod        PaymentMethodType?
+  payoutAccountName   String?
+  payoutAccountNumber String?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   // Relations
   serviceTypes      ServiceType[]
   certifications    Certification[]
+  skills            Skill[]
   reviews           Review[]
   resumeParseResult ResumeParseResult?
 
@@ -380,6 +387,21 @@ model Certification {
   @@index([verificationStatus])
 }
 
+model Skill {
+  id              String        @id @default(cuid())
+  workerProfileId String
+  workerProfile   WorkerProfile @relation(fields: [workerProfileId], references: [id], onDelete: Cascade)
+
+  name     String
+  category String
+  rate     Float
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([workerProfileId])
+}
+
 // ============================================================================
 // LEGAL
 // ============================================================================
@@ -486,6 +508,14 @@ model Booking {
 
   // Final
   finalPrice Float?
+
+  // Completion — worker-submitted proof photo, awaiting client confirmation
+  completionPhotoUrl String?
+
+  // Payment method chosen by the client at booking time — settled upfront so
+  // the client isn't asked to pick a method again after confirming completion.
+  paymentMethodType        PaymentMethodType?
+  paymentAccountIdentifier String?
 
   // Location
   location String

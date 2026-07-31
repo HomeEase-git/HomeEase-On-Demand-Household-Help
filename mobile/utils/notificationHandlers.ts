@@ -1,6 +1,8 @@
 import * as Linking from 'expo-linking';
+import { router } from 'expo-router';
 import { notificationService, NotificationPayload } from '../services/notificationService';
 import { useNotificationStore } from '../store/notificationStore';
+import { useAuthStore } from '../store/authStore';
 
 /**
  * Notification routing utilities
@@ -47,12 +49,10 @@ export function setupNotificationReceivedHandler(): void {
  * Handle notification interaction (tap)
  * Routes to appropriate screen using deep linking
  */
-export function setupNotificationInteractionHandler(
-  navigationRef: any // React Navigation navigation ref
-): void {
+export function setupNotificationInteractionHandler(): void {
   notificationService.onNotificationInteraction(async (notification) => {
     try {
-      const payload = notification.request.content.data;
+      const payload = notification.request.content.data as NotificationPayload;
 
       console.log(`[NotificationHandler] Interaction: ${payload.type}`);
 
@@ -60,7 +60,7 @@ export function setupNotificationInteractionHandler(
       if (payload.deepLink && typeof payload.deepLink === 'string') {
         await Linking.openURL(payload.deepLink);
       } else {
-        routeNotification(payload, navigationRef);
+        routeNotification(payload);
       }
 
       // Mark as read
@@ -73,53 +73,72 @@ export function setupNotificationInteractionHandler(
 }
 
 /**
- * Route notification to appropriate screen based on type
+ * Route notification to appropriate screen based on type.
+ * Uses expo-router's imperative `router` (real, file-based paths) rather
+ * than a raw React Navigation ref, since expo-router's screens aren't
+ * registered under hand-picked names like 'booking-detail'.
  */
-function routeNotification(payload: any, navigationRef: any): void {
+function routeNotification(payload: any): void {
   const { type, data } = payload;
+  const isWorker = useAuthStore.getState().user?.role === 'worker';
 
   try {
     switch (type) {
       case 'booking':
-        if (data?.bookingId) {
-          navigationRef?.navigate('booking-detail', { id: data.bookingId });
+        if (isWorker) {
+          router.push(
+            data?.bookingId ? `/(worker)/requests/${data.bookingId}` : '/(worker)/requests',
+          );
+        } else if (data?.bookingId) {
+          router.push(`/(client)/booking/${data.bookingId}`);
         } else {
-          navigationRef?.navigate('bookings');
+          router.push('/(client)/booking');
         }
         break;
 
       case 'message':
-        if (data?.conversationId) {
-          navigationRef?.navigate('chat-detail', { id: data.conversationId });
+        if (isWorker) {
+          router.push(
+            data?.conversationId
+              ? `/(worker)/inbox/chat/${data.conversationId}`
+              : '/(worker)/inbox',
+          );
+        } else if (data?.conversationId) {
+          router.push(`/(client)/inbox/chat/${data.conversationId}`);
         } else {
-          navigationRef?.navigate('inbox');
+          router.push('/(client)/inbox');
         }
         break;
 
       case 'payment':
-        if (data?.transactionId) {
-          navigationRef?.navigate('transaction-detail', { id: data.transactionId });
+        if (isWorker) {
+          router.push(
+            data?.transactionId ? `/(worker)/earnings/${data.transactionId}` : '/(worker)/earnings',
+          );
+        } else if (data?.transactionId) {
+          router.push(`/(client)/profile/transactions/${data.transactionId}`);
         } else {
-          navigationRef?.navigate('earnings');
+          router.push('/(client)/profile/transactions');
         }
         break;
 
       case 'review':
-        if (data?.bookingId) {
-          navigationRef?.navigate('leave-review', { bookingId: data.bookingId });
+        if (isWorker) {
+          router.push('/(worker)/inbox');
+        } else if (data?.bookingId) {
+          router.push(`/(client)/profile/rate-review/${data.bookingId}`);
         } else {
-          navigationRef?.navigate('bookings');
+          router.push('/(client)/booking');
         }
         break;
 
       case 'system':
-        // System notifications could navigate to settings or support
-        navigationRef?.navigate('notifications');
+        router.push(isWorker ? '/(worker)/inbox' : '/(client)/inbox');
         break;
 
       default:
         console.warn(`[NotificationHandler] Unknown notification type: ${type}`);
-        navigationRef?.navigate('notifications');
+        router.push(isWorker ? '/(worker)/inbox' : '/(client)/inbox');
     }
   } catch (error) {
     console.error('[NotificationHandler] Navigation error:', error);

@@ -1,6 +1,6 @@
 import React from "react";
 import { View, Text, Pressable } from "react-native";
-import { Ionicons } from "@expo/vector-icons";
+import { AppIcon as Ionicons } from "../icons/AppIcon";
 import StarRating from "../ui/StarRating";
 import { useWorkerCapacity } from "../../hooks/useWorkerCapacity";
 import { colors, cardShadow } from "../../constants";
@@ -22,7 +22,7 @@ type Props = {
 };
 
 export const WorkerCard: React.FC<Props> = ({ worker, onPress }) => {
-  const { isAtCapacity, activeJobCount } = useWorkerCapacity(worker.name);
+  const { isAtCapacity, activeJobCount } = useWorkerCapacity(worker.id);
 
   const isUnavailable =
     worker.status === "unavailable" || worker.status === "busy" || isAtCapacity;

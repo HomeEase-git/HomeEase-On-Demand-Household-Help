@@ -12,6 +12,7 @@ import ScreenHeader from "../../../components/ui/ScreenHeader";
 import PrimaryButton from "../../../components/ui/PrimaryButton";
 import { useBookingStore } from "../../../store/bookingStore";
 import { getWorkers } from "../../../services/api";
+import { useWorkerCapacity } from "../../../hooks/useWorkerCapacity";
 
 type WorkerListItem = {
   id: string;
@@ -45,17 +46,23 @@ function normalizeWorkers(workers: Array<any>): WorkerListItem[] {
 function WorkerSelectItem({
   item,
   selectedId,
+  scheduledDate,
   onSelect,
 }: {
   item: WorkerListItem;
   selectedId: string | null;
+  scheduledDate: string | null;
   onSelect: (worker: WorkerListItem) => void;
 }) {
+  const { canAcceptJob, reason } = useWorkerCapacity(item.id, scheduledDate);
+  const disabled = !canAcceptJob;
+
   return (
     <Pressable
       className={`bg-card rounded-2xl p-4 mb-3 ${
         selectedId === item.id ? "border-2 border-accent" : ""
-      }`}
+      } ${disabled ? "opacity-50" : ""}`}
+      disabled={disabled}
       onPress={() => onSelect(item)}
     >
       <View className="flex-row items-center justify-between">
@@ -70,6 +77,9 @@ function WorkerSelectItem({
           <Text className="text-text-secondary text-xs mt-1">
             {item.rating.toFixed(1)} ★ • {item.reviews} reviews
           </Text>
+          {disabled && (
+            <Text className="text-error text-xs mt-1">{reason}</Text>
+          )}
         </View>
 
         <View className="w-6 h-6 rounded-full border-2 border-accent items-center justify-center">
@@ -140,19 +150,12 @@ export default function SelectWorkerScreen() {
   };
 
   const handleConfirm = () => {
-    if (selectedId) {
-      const selectedWorker = workers.find((w) => w.id === selectedId);
-      setDraft({
-        workerId: selectedId,
-        workerName: selectedWorker?.name ?? draft.workerName ?? null,
-      });
-    } else {
-      setDraft({
-        workerId: null,
-        workerName: null,
-      });
-    }
-
+    if (!selectedId) return;
+    const selectedWorker = workers.find((w) => w.id === selectedId);
+    setDraft({
+      workerId: selectedId,
+      workerName: selectedWorker?.name ?? draft.workerName ?? null,
+    });
     router.back();
   };
 
@@ -161,27 +164,13 @@ export default function SelectWorkerScreen() {
       <ScreenHeader title="Select a Worker" showBack />
 
       <View className="px-4 flex-1">
-        <Pressable
-          className={`bg-card rounded-2xl p-4 mb-3 flex-row items-center ${
-            !selectedId ? "border-2 border-accent" : ""
-          }`}
-          onPress={() => {
-            setSelectedId(null);
-            setDraft({ workerId: null, workerName: null });
-          }}
-        >
-          <View className="w-6 h-6 rounded-full border-2 border-accent items-center justify-center mr-3">
-            {!selectedId && <View className="w-3 h-3 rounded-full bg-accent" />}
-          </View>
-          <View className="flex-1">
-            <Text className="text-brand font-semibold">
-              Any Available Worker
-            </Text>
-            <Text className="text-text-secondary text-xs mt-0.5">
-              We&apos;ll assign the best available worker for your booking
+        {!draft.date && (
+          <View className="bg-warning/10 rounded-2xl p-3 mb-3">
+            <Text className="text-warning text-xs">
+              Pick a date first so we can show you which workers are actually available.
             </Text>
           </View>
-        </Pressable>
+        )}
 
         {isLoading ? (
           <View className="py-6 items-center">
@@ -200,6 +189,7 @@ export default function SelectWorkerScreen() {
               <WorkerSelectItem
                 item={item}
                 selectedId={selectedId}
+                scheduledDate={draft.date}
                 onSelect={handleSelectWorker}
               />
             )}
@@ -215,6 +205,7 @@ export default function SelectWorkerScreen() {
           <PrimaryButton
             label="Confirm Selection"
             fullWidth
+            disabled={!selectedId}
             onPress={handleConfirm}
           />
         </View>

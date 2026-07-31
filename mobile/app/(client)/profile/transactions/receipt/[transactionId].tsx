@@ -1,9 +1,10 @@
 import React, { useEffect, useState } from "react";
-import { View, Text, ScrollView, ActivityIndicator } from "react-native";
+import { View, Text, ScrollView } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter, useLocalSearchParams } from "expo-router";
 import ScreenHeader from "../../../../../components/ui/ScreenHeader";
 import PrimaryButton from "../../../../../components/ui/PrimaryButton";
+import { Skeleton } from "../../../../../components/ui/Skeleton";
 import * as api from "../../../../../services/api";
 
 type TransactionDetail = Awaited<ReturnType<typeof api.getTransactionDetail>>;
@@ -46,8 +47,28 @@ export default function ReceiptScreen() {
     return (
       <SafeAreaView className="flex-1 bg-white">
         <ScreenHeader title="Receipt" showBack />
-        <View className="flex-1 items-center justify-center">
-          <ActivityIndicator size="small" />
+        <View className="px-4 py-4">
+          <View className="mx-4 mt-4 rounded-2xl border border-divider overflow-hidden">
+            <View className="bg-card p-6 items-center">
+              <Skeleton width="40%" height={22} marginBottom={8} />
+              <Skeleton width="30%" height={12} marginBottom={0} />
+            </View>
+            <View className="p-6">
+              {Array.from({ length: 5 }).map((_, i) => (
+                <View
+                  key={i}
+                  className="flex-row justify-between py-2 border-b border-divider last:border-0"
+                >
+                  <Skeleton width="30%" height={12} marginBottom={0} />
+                  <Skeleton width="35%" height={12} marginBottom={0} />
+                </View>
+              ))}
+            </View>
+            <View className="p-6 flex-row justify-between items-center">
+              <Skeleton width="30%" height={18} marginBottom={0} />
+              <Skeleton width="25%" height={22} marginBottom={0} />
+            </View>
+          </View>
         </View>
       </SafeAreaView>
     );
@@ -79,7 +100,7 @@ export default function ReceiptScreen() {
           {/* Header */}
           <View className="bg-accent p-6 items-center">
             <Text className="text-text-primary font-bold text-2xl">HomeEase</Text>
-            <Text className="text-brand/80 text-sm mt-1">
+            <Text className="text-primary/80 text-sm mt-1">
               Official Receipt
             </Text>
           </View>
@@ -131,7 +152,7 @@ function Row({ label, value }: { label: string; value: string }) {
   return (
     <View className="flex-row justify-between py-2 border-b border-divider last:border-0">
       <Text className="text-text-secondary text-sm">{label}</Text>
-      <Text className="text-brand font-semibold">{value}</Text>
+      <Text className="text-primary font-semibold">{value}</Text>
     </View>
   );
 }

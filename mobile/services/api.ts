@@ -84,6 +84,26 @@ const createApiClient = (): ApiClient => {
               console.error('Error clearing auth on 401/403:', e);
             }
           }
+
+          // Screens read `error.message` directly to show the user what went
+          // wrong. Left alone, that's Axios's own generic text ("Request
+          // failed with status code 401") instead of the backend's actual
+          // reason. Rewrite it here, once, so every caller gets a message a
+          // user can act on without each screen having to reach into
+          // response.data itself.
+          const backendMessage = error.response?.data?.message || error.response?.data?.error;
+          if (typeof backendMessage === 'string' && backendMessage.trim()) {
+            error.message = backendMessage;
+          } else if (!error.response) {
+            error.message =
+              error.code === 'ECONNABORTED'
+                ? 'The request took too long. Please try again.'
+                : 'Unable to connect. Please check your internet connection.';
+          } else if (status && status >= 500) {
+            error.message = 'Something went wrong on our side. Please try again later.';
+          } else {
+            error.message = 'Something went wrong. Please try again.';
+          }
         }
       } catch (e) {
         // swallow any error from the handler to avoid masking original error
@@ -299,6 +319,8 @@ export async function createBooking(details: {
   estimatedDurationHours?: number;
   inspectionFeeCharged?: boolean;
   inspectionFeeAmount?: number;
+  paymentMethodType?: 'GCASH' | 'MAYA' | 'CARD' | 'BANK_TRANSFER' | 'CASH';
+  paymentAccountIdentifier?: string;
 }) {
   try {
     const response = await api.post('/bookings', {
@@ -316,6 +338,8 @@ export async function createBooking(details: {
       estimatedDurationHours: details.estimatedDurationHours,
       inspectionFeeCharged: details.inspectionFeeCharged,
       inspectionFeeAmount: details.inspectionFeeAmount,
+      paymentMethodType: details.paymentMethodType,
+      paymentAccountIdentifier: details.paymentAccountIdentifier,
     });
     return response;
   } catch (error) {
@@ -793,6 +817,29 @@ export async function getTransactionDetail(bookingId: string) {
   }
 }
 
+export async function createBookingPayment(
+  bookingId: string,
+  data: { methodType: 'GCASH' | 'MAYA' | 'CARD' | 'BANK_TRANSFER' | 'CASH'; accountIdentifier?: string },
+) {
+  try {
+    const response = await api.post(`/payments/${bookingId}`, data);
+    return response;
+  } catch (error) {
+    console.error('Create payment error:', error);
+    throw error;
+  }
+}
+
+export async function releasePaymentEscrow(paymentId: string) {
+  try {
+    const response = await api.post(`/payments/${paymentId}/release`);
+    return response;
+  } catch (error) {
+    console.error('Release payment escrow error:', error);
+    throw error;
+  }
+}
+
 export async function downloadReceipt(transactionId: string) {
   await delay(400);
   return {
@@ -1006,7 +1053,7 @@ export async function startBooking(bookingId: string) {
 
 export async function submitQuote(
   bookingId: string,
-  data: { laborCost: number; materialsCost: number; notes?: string },
+  data: { materialsCost: number; notes?: string },
 ) {
   try {
     const response = await api.post(`/bookings/${bookingId}/quote`, data);
@@ -1017,12 +1064,48 @@ export async function submitQuote(
   }
 }
 
-export async function completeBooking(bookingId: string) {
+export async function uploadBookingCompletionPhoto(
+  bookingId: string,
+  uri: string,
+  mimeType?: string | null,
+): Promise<{ url: string }> {
   try {
-    const response = await api.patch(`/bookings/${bookingId}/complete`);
+    const filename = uri.split('/').pop() ?? `completion-${Date.now()}.jpg`;
+    const resolvedMimeType = mimeType || 'image/jpeg';
+
+    const formData = new FormData();
+    formData.append('photo', {
+      uri,
+      name: filename,
+      type: resolvedMimeType,
+    } as any);
+
+    const response = await api.post(`/bookings/${bookingId}/completion-photo/upload`, formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+    return response;
+  } catch (error) {
+    console.error('Upload completion photo error:', error);
+    throw error;
+  }
+}
+
+export async function completeBooking(bookingId: string, completionPhotoUrl: string) {
+  try {
+    const response = await api.patch(`/bookings/${bookingId}/complete`, { completionPhotoUrl });
     return response;
   } catch (error) {
     console.error('Complete booking error:', error);
+    throw error;
+  }
+}
+
+export async function confirmBookingCompletion(bookingId: string) {
+  try {
+    const response = await api.patch(`/bookings/${bookingId}/confirm-completion`);
+    return response;
+  } catch (error) {
+    console.error('Confirm booking completion error:', error);
     throw error;
   }
 }
@@ -1064,6 +1147,132 @@ export async function getWorkerCapacity() {
     return response;
   } catch (error) {
     console.error('Get worker capacity error:', error);
+    throw error;
+  }
+}
+
+export type Skill = { id: string; name: string; category: string; rate: number };
+
+export async function getMySkills(): Promise<Skill[]> {
+  try {
+    const response = await api.get('/workers/me/skills');
+    return response.skills ?? [];
+  } catch (error) {
+    console.error('Get skills error:', error);
+    throw error;
+  }
+}
+
+export async function addSkill(data: { name: string; category: string; rate: number }): Promise<Skill> {
+  try {
+    const response = await api.post('/workers/me/skills', data);
+    return response.skill;
+  } catch (error) {
+    console.error('Add skill error:', error);
+    throw error;
+  }
+}
+
+export async function deleteSkill(skillId: string) {
+  try {
+    await api.delete(`/workers/me/skills/${skillId}`);
+    return true;
+  } catch (error) {
+    console.error('Delete skill error:', error);
+    throw error;
+  }
+}
+
+export type Certification = {
+  id: string;
+  name: string;
+  issuer: string;
+  issueDate: string;
+  expiryDate: string | null;
+  documentUrl: string;
+  status: string;
+  rejectionReason: string | null;
+};
+
+export async function getMyCertifications(): Promise<Certification[]> {
+  try {
+    const response = await api.get('/workers/me/certifications');
+    return response.certifications ?? [];
+  } catch (error) {
+    console.error('Get certifications error:', error);
+    throw error;
+  }
+}
+
+export async function getCertificationDetail(certId: string): Promise<Certification> {
+  try {
+    const response = await api.get(`/workers/me/certifications/${certId}`);
+    return response.certification;
+  } catch (error) {
+    console.error('Get certification error:', error);
+    throw error;
+  }
+}
+
+export async function uploadCertificationFile(
+  uri: string,
+  mimeType?: string | null,
+): Promise<{ url: string }> {
+  return uploadKycFile('certification', uri, mimeType);
+}
+
+export async function addCertification(data: {
+  name: string;
+  issuer: string;
+  issueDate: string;
+  expiryDate?: string | null;
+  documentUrl: string;
+}): Promise<Certification> {
+  try {
+    const response = await api.post('/workers/me/certifications', data);
+    return response.certification;
+  } catch (error) {
+    console.error('Add certification error:', error);
+    throw error;
+  }
+}
+
+export async function deleteCertification(certId: string) {
+  try {
+    await api.delete(`/workers/me/certifications/${certId}`);
+    return true;
+  } catch (error) {
+    console.error('Delete certification error:', error);
+    throw error;
+  }
+}
+
+export type PayoutMethod = {
+  payoutMethod: 'GCASH' | 'MAYA' | 'BANK_TRANSFER' | null;
+  payoutAccountName: string | null;
+  payoutAccountNumber: string | null;
+};
+
+export async function getPayoutMethod(): Promise<PayoutMethod> {
+  try {
+    const response = await api.get('/workers/me/payout');
+    return response;
+  } catch (error) {
+    console.error('Get payout method error:', error);
+    throw error;
+  }
+}
+
+export async function updatePayoutMethod(data: {
+  payoutMethod: 'GCASH' | 'MAYA' | 'BANK_TRANSFER';
+  payoutAccountName?: string;
+  payoutAccountNumber?: string;
+}): Promise<PayoutMethod> {
+  try {
+    const response = await api.patch('/workers/me/payout', data);
+    return response;
+  } catch (error) {
+    console.error('Update payout method error:', error);
     throw error;
   }
 }

@@ -1,7 +1,8 @@
 import React from "react";
-import { View, Text, Pressable, Alert } from "react-native";
-import { Ionicons } from "@expo/vector-icons";
+import { View, Text, Pressable } from "react-native";
+import { AppIcon as Ionicons } from "../icons/AppIcon";
 import { colors, cardShadow } from "../../constants";
+import { useAlertModal } from "../../contexts/AlertModalContext";
 
 type PaymentMethod = {
   id: string;
@@ -27,14 +28,13 @@ export const PaymentMethodCard: React.FC<Props> = ({
   onSetDefault,
   isDefault = method.isDefault,
 }) => {
+  const alertModal = useAlertModal();
+
   const handleDelete = () => {
-    Alert.alert(
+    alertModal.confirm(
       "Delete Payment Method",
       `Remove ${method.type === "card" ? `•••• ${method.lastFour}` : method.label} from your saved methods?`,
-      [
-        { text: "Cancel", style: "cancel" },
-        { text: "Delete", style: "destructive", onPress: onDelete },
-      ],
+      { confirmText: "Delete", destructive: true, onConfirm: onDelete },
     );
   };
 

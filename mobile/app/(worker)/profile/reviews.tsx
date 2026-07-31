@@ -1,10 +1,11 @@
 import React, { useEffect, useState } from "react";
-import { View, Text, FlatList, ActivityIndicator } from "react-native";
+import { View, Text, FlatList } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import ScreenHeader from "../../../components/ui/ScreenHeader";
 import ReviewCard from "../../../components/cards/ReviewCard";
 import EmptyState from "../../../components/feedback/EmptyState";
 import StarRating from "../../../components/ui/StarRating";
+import { SkeletonList, ReviewCardSkeleton } from "../../../components/ui/Skeleton";
 import { useAuthStore } from "../../../store/authStore";
 import * as api from "../../../services/api";
 
@@ -60,8 +61,8 @@ export default function WorkerReviewsScreen() {
     return (
       <SafeAreaView className="flex-1 bg-white">
         <ScreenHeader title="My Reviews" showBack />
-        <View className="flex-1 items-center justify-center">
-          <ActivityIndicator size="small" />
+        <View className="p-4">
+          <SkeletonList count={4} SkeletonComponent={ReviewCardSkeleton} />
         </View>
       </SafeAreaView>
     );
@@ -72,6 +73,7 @@ export default function WorkerReviewsScreen() {
       <SafeAreaView className="flex-1 bg-white">
         <ScreenHeader title="My Reviews" showBack />
         <EmptyState
+          icon="star-outline"
           title="No reviews yet"
           subtitle="Completed jobs will show client reviews here."
         />

@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useRef } from "react";
-import { View, ScrollView, Alert, TextInput, Text, Switch } from "react-native";
+import { View, ScrollView, TextInput, Text, Switch } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import ScreenHeader from "../../../components/ui/ScreenHeader";
@@ -8,9 +8,11 @@ import PrimaryButton from "../../../components/ui/PrimaryButton";
 import { useAuthStore } from "../../../store/authStore";
 import { useWorkerProfileStore } from "../../../store/workerProfileStore";
 import * as api from "../../../services/api";
+import { useAlertModal } from "../../../contexts/AlertModalContext";
 
 export default function WorkerEditProfileScreen() {
   const router = useRouter();
+  const alertModal = useAlertModal();
   const user = useAuthStore((s) => s.user);
   const setUser = useAuthStore((s) => s.setUser);
   const savedDigitalId = useWorkerProfileStore((s) => s.digitalId);
@@ -60,11 +62,11 @@ export default function WorkerEditProfileScreen() {
 
   const handleSubmit = async () => {
     if (!name.trim()) {
-      Alert.alert("Error", "Name cannot be empty.");
+      alertModal.error("Error", "Name cannot be empty.");
       return;
     }
     if (!phone.trim()) {
-      Alert.alert("Error", "Phone number cannot be empty.");
+      alertModal.error("Error", "Phone number cannot be empty.");
       return;
     }
 
@@ -88,12 +90,12 @@ export default function WorkerEditProfileScreen() {
         licenseNumber: licenseNumber.trim(),
       });
 
-      Alert.alert("Success", "Profile updated successfully.", [
+      alertModal.success("Success", "Profile updated successfully.", [
         { text: "OK", onPress: () => router.back() },
       ]);
     } catch (error) {
       console.error("Update profile error:", error);
-      Alert.alert("Error", "Failed to update profile.");
+      alertModal.error("Error", "Failed to update profile.");
     }
   };
 
@@ -155,7 +157,7 @@ export default function WorkerEditProfileScreen() {
         <View className="bg-card-light rounded-2xl p-4 mb-5">
           <View className="flex-row items-start justify-between mb-3">
             <View className="flex-1 mr-3">
-              <Text className="text-brand font-semibold">Digital ID</Text>
+              <Text className="text-primary font-semibold">Digital ID</Text>
               <Text className="text-text-secondary text-sm mt-1">
                 Enable a shareable identity card for clients.
               </Text>

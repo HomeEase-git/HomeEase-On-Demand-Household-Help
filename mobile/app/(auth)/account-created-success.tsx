@@ -1,7 +1,7 @@
 import React, { useEffect } from "react";
 import { View, Text, ScrollView, Animated, Easing } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { Ionicons } from "@expo/vector-icons";
+import { AppIcon as Ionicons } from "../../components/icons/AppIcon";
 import { useRouter } from "expo-router";
 import PrimaryButton from "../../components/ui/PrimaryButton";
 import { colors } from "../../constants";

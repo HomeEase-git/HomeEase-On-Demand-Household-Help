@@ -10,11 +10,13 @@ import {
   approveQuote,
   disputeQuote,
   completeBooking,
+  confirmCompletion,
   cancelBooking,
   rescheduleBooking,
   addAddon,
   submitReview,
 } from '../controllers/bookingController';
+import { bookingPhotoUpload, uploadBookingCompletionPhoto } from '../controllers/uploadController';
 import { authMiddleware } from '../middleware/auth';
 import { restrictTo } from '../middleware/role';
 import {
@@ -60,8 +62,14 @@ router.patch('/:id/quote/approve', restrictTo('CLIENT'), validateApproveQuote, a
 // Dispute quote (client only)
 router.patch('/:id/quote/dispute', restrictTo('CLIENT'), validateDisputeQuote, disputeQuote);
 
-// Complete booking (worker only)
+// Upload a job-completion proof photo (worker only)
+router.post('/:id/completion-photo/upload', restrictTo('WORKER'), bookingPhotoUpload, uploadBookingCompletionPhoto);
+
+// Complete booking — worker submits completion photo, awaits client confirmation (worker only)
 router.patch('/:id/complete', restrictTo('WORKER'), completeBooking);
+
+// Confirm completion — client reviews the photo and finalizes the booking (client only)
+router.patch('/:id/confirm-completion', restrictTo('CLIENT'), confirmCompletion);
 
 // Cancel booking (client or worker)
 router.patch('/:id/cancel', validateBookingStatusUpdate, cancelBooking);

@@ -1,11 +1,13 @@
 import React from "react";
 import { View, Text, ScrollView } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { Ionicons } from "@expo/vector-icons";
+import { AppIcon as Ionicons } from "../../../components/icons/AppIcon";
 import ScreenHeader from "../../../components/ui/ScreenHeader";
 import { colors } from "../../../constants";
+import { useAlertModal } from "../../../contexts/AlertModalContext";
 
 export default function WorkerAboutScreen() {
+  const alertModal = useAlertModal();
   return (
     <SafeAreaView className="flex-1 bg-white">
       <ScreenHeader title="About HomeEase" showBack />
@@ -26,25 +28,19 @@ export default function WorkerAboutScreen() {
         <View className="mt-8 w-full gap-3">
           <Text
             className="text-accent text-center"
-            onPress={() =>
-              require("react-native").Alert.alert("Opening Play Store...")
-            }
+            onPress={() => alertModal.info("Opening Play Store...")}
           >
             Rate the App
           </Text>
           <Text
             className="text-accent text-center"
-            onPress={() =>
-              require("react-native").Alert.alert("Opening Website...")
-            }
+            onPress={() => alertModal.info("Opening Website...")}
           >
             Visit Website
           </Text>
           <Text
             className="text-accent text-center"
-            onPress={() =>
-              require("react-native").Alert.alert("Opening Facebook...")
-            }
+            onPress={() => alertModal.info("Opening Facebook...")}
           >
             Follow us on Facebook
           </Text>

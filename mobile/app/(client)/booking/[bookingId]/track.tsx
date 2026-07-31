@@ -1,17 +1,42 @@
-import React from "react";
-import { View, Text, Pressable, Alert, Linking } from "react-native";
+import React, { useCallback, useState } from "react";
+import { View, Text, Pressable, Linking } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { Ionicons } from "@expo/vector-icons";
-import { useRouter, useLocalSearchParams } from "expo-router";
+import { AppIcon as Ionicons } from "../../../../components/icons/AppIcon";
+import { useFocusEffect, useRouter, useLocalSearchParams } from "expo-router";
 import ScreenHeader from "../../../../components/ui/ScreenHeader";
+import AddressMap from "../../../../components/ui/AddressMap";
 import { useBookingStore } from "../../../../store/bookingStore";
+import * as api from "../../../../services/api";
 import { colors } from "../../../../constants";
+import { useAlertModal } from "../../../../contexts/AlertModalContext";
 
 export default function TrackBookingScreen() {
   const router = useRouter();
+  const alertModal = useAlertModal();
   const { bookingId } = useLocalSearchParams<{ bookingId: string }>();
   const booking = useBookingStore((s) =>
     s.bookings.find((b) => b.id === bookingId),
+  );
+  const [location, setLocation] = useState<string | null>(
+    booking?.address ?? null,
+  );
+
+  useFocusEffect(
+    useCallback(() => {
+      if (!bookingId) return;
+      let cancelled = false;
+      api
+        .getBookingDetail(bookingId)
+        .then((detail) => {
+          if (!cancelled) setLocation(detail?.location ?? null);
+        })
+        .catch((error) => {
+          console.error("Load booking location error:", error);
+        });
+      return () => {
+        cancelled = true;
+      };
+    }, [bookingId]),
   );
 
   if (!booking) {
@@ -92,13 +117,10 @@ export default function TrackBookingScreen() {
           ))}
         </View>
 
-        <View className="flex-1 bg-card-dark rounded-2xl items-center justify-center min-h-[200]">
-          <Ionicons name="map" size={60} color={colors.accent.DEFAULT} />
-          <Text className="text-text-secondary mt-2">Live Tracking</Text>
-          <Text className="text-text-muted text-xs mt-1">
-            Real-time map available after backend integration
-          </Text>
-        </View>
+        <Text className="text-text-secondary text-sm font-semibold mb-2">
+          Service Location
+        </Text>
+        <AddressMap address={location} height="min-h-[200]" />
 
         <View
           className="rounded-full py-2 px-4 self-center mt-4"
@@ -128,7 +150,7 @@ export default function TrackBookingScreen() {
           <Pressable
             onPress={() => {
               if (!booking.workerId) {
-                Alert.alert("Unavailable", "This worker cannot be messaged yet.");
+                alertModal.info("Unavailable", "This worker cannot be messaged yet.");
                 return;
               }
               router.push(`/(client)/inbox/chat/${booking.workerId}`);
@@ -140,11 +162,11 @@ export default function TrackBookingScreen() {
           <Pressable
             onPress={() => {
               if (!booking.workerPhone) {
-                Alert.alert("No phone number", "This worker has no phone number on file.");
+                alertModal.info("No phone number", "This worker has no phone number on file.");
                 return;
               }
               Linking.openURL(`tel:${booking.workerPhone}`).catch(() =>
-                Alert.alert("Error", "Could not open the phone dialer."),
+                alertModal.error("Error", "Could not open the phone dialer."),
               );
             }}
             className="bg-accent rounded-full p-2"

@@ -9,3 +9,4 @@ export const CHAT_IMAGE_BUCKET = process.env.SUPABASE_CHAT_BUCKET || 'chat-image
 export const KYC_DOCUMENT_BUCKET = process.env.SUPABASE_KYC_BUCKET || 'kyc-documents';
 export const RESUME_BUCKET = process.env.SUPABASE_RESUME_BUCKET || 'resumes';
 export const AVATAR_BUCKET = process.env.SUPABASE_AVATAR_BUCKET || 'avatars';
+export const BOOKING_PHOTO_BUCKET = process.env.SUPABASE_BOOKING_PHOTO_BUCKET || 'booking-photos';

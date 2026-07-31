@@ -1,9 +1,8 @@
-import React, { useCallback, useState } from "react";
-import { View, Text, ScrollView, Pressable, Alert } from "react-native";
+import React, { useCallback } from "react";
+import { View, Text, ScrollView, Pressable } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { useFocusEffect } from "@react-navigation/native";
-import { Ionicons } from "@expo/vector-icons";
-import { useRouter } from "expo-router";
+import { useFocusEffect, useRouter } from "expo-router";
+import { AppIcon as Ionicons } from "../../../components/icons/AppIcon";
 import SectionHeader from "../../../components/ui/SectionHeader";
 import RequestCard from "../../../components/cards/RequestCard";
 import NotificationBadge from "../../../components/ui/NotificationBadge";
@@ -17,13 +16,10 @@ const todayStr = () => new Date().toISOString().slice(0, 10);
 
 export default function WorkerHomeScreen() {
   const router = useRouter();
-  const available = useWorkerStore((s) => s.available);
-  const setAvailable = useWorkerStore((s) => s.setAvailable);
   const jobs = useWorkerStore((s) => s.jobs);
   const setJobs = useWorkerStore((s) => s.setJobs);
   const user = useAuthStore((s) => s.user);
   const unreadCount = useNotificationStore((s) => s.unreadCount);
-  const [togglingAvailability, setTogglingAvailability] = useState(false);
 
   const firstName = user?.name?.split(" ")[0] ?? "Worker";
   const pending = jobs.filter((j) => j.status === "Pending");
@@ -36,37 +32,18 @@ export default function WorkerHomeScreen() {
   const load = useCallback(async () => {
     if (!user?.id) return;
     try {
-      const [bookings, detail] = await Promise.all([
-        api.getBookings(),
-        api.getWorkerDetail(user.id),
-      ]);
+      const bookings = await api.getBookings();
       setJobs((bookings as ApiWorkerBooking[]).map(mapApiJob));
-      if (detail) setAvailable(detail.isAvailable);
     } catch (error) {
       console.error("Load worker home error:", error);
     }
-  }, [user?.id, setJobs, setAvailable]);
+  }, [user?.id, setJobs]);
 
   useFocusEffect(
     useCallback(() => {
       load();
     }, [load]),
   );
-
-  const handleToggleAvailability = async () => {
-    if (togglingAvailability) return;
-    const next = !available;
-    setTogglingAvailability(true);
-    try {
-      const result = await api.updateAvailability(next);
-      setAvailable(result.isAvailable ?? next);
-    } catch (error) {
-      console.error("Toggle availability error:", error);
-      Alert.alert("Error", "Failed to update availability.");
-    } finally {
-      setTogglingAvailability(false);
-    }
-  };
 
   return (
     <SafeAreaView className="flex-1 bg-white" edges={["top"]}>
@@ -98,37 +75,6 @@ export default function WorkerHomeScreen() {
             Here&apos;s your status today
           </Text>
         </View>
-
-        <View className="bg-card-light rounded-2xl p-4 mx-4 mt-3 flex-row items-center">
-          <View
-            className={`w-3 h-3 rounded-full mr-3 ${
-              available ? "bg-success" : "bg-error"
-            }`}
-          />
-          <Text className="text-text-primary font-bold flex-1">
-            I&apos;m {available ? "Available" : "Unavailable"}
-          </Text>
-          <Pressable
-            className={`w-12 h-7 rounded-full ${
-              available ? "bg-accent" : "bg-card-dark"
-            }`}
-            onPress={handleToggleAvailability}
-            disabled={togglingAvailability}
-          >
-            <View
-              className={`w-5 h-5 rounded-full bg-white mt-1 ${
-                available ? "ml-6" : "ml-1"
-              }`}
-            />
-          </Pressable>
-        </View>
-        <Text
-          className={`${
-            available ? "text-success" : "text-error"
-          } text-xs mx-4 mt-1`}
-        >
-          Clients {available ? "can" : "cannot"} find and book you
-        </Text>
 
         <View className="flex-row mx-4 mt-3 gap-2">
           <View className="flex-1 bg-card rounded-xl p-3 items-center">

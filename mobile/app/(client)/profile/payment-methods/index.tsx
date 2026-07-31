@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { View, Text, FlatList, Pressable, Alert } from "react-native";
+import { View, Text, FlatList, Pressable } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter, useFocusEffect } from "expo-router";
@@ -8,6 +8,7 @@ import PaymentMethodCard from "../../../../components/cards/PaymentMethodCard";
 import EmptyState from "../../../../components/feedback/EmptyState";
 import { colors } from "../../../../constants";
 import * as api from "../../../../services/api";
+import { useAlertModal } from "../../../../contexts/AlertModalContext";
 
 type PaymentMethod = {
   id: string;
@@ -20,6 +21,7 @@ type PaymentMethod = {
 
 export default function PaymentMethodsScreen() {
   const router = useRouter();
+  const alertModal = useAlertModal();
   const [methods, setMethods] = useState<PaymentMethod[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -37,7 +39,7 @@ export default function PaymentMethodsScreen() {
       setMethods(mapped);
     } catch (error) {
       console.error("Load payment methods error:", error);
-      Alert.alert("Error", "Failed to load payment methods");
+      alertModal.error("Error", "Failed to load payment methods");
     } finally {
       setLoading(false);
     }
@@ -50,28 +52,25 @@ export default function PaymentMethodsScreen() {
   );
 
   const handleDelete = async (id: string) => {
-    Alert.alert(
+    alertModal.confirm(
       "Delete payment method?",
       "This will remove it from your saved payment methods.",
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Delete",
-          style: "destructive",
-          onPress: async () => {
-            try {
-              await api.deletePaymentMethod(id);
-              setMethods((prev) => prev.filter((m) => m.id !== id));
-            } catch (error) {
-              console.error("Delete payment method error:", error);
-              Alert.alert(
-                "Error",
-                "Unable to delete payment method right now.",
-              );
-            }
-          },
+      {
+        confirmText: "Delete",
+        destructive: true,
+        onConfirm: async () => {
+          try {
+            await api.deletePaymentMethod(id);
+            setMethods((prev) => prev.filter((m) => m.id !== id));
+          } catch (error) {
+            console.error("Delete payment method error:", error);
+            alertModal.error(
+              "Error",
+              "Unable to delete payment method right now.",
+            );
+          }
         },
-      ],
+      },
     );
   };
 
@@ -81,7 +80,7 @@ export default function PaymentMethodsScreen() {
       setMethods((prev) => prev.map((m) => ({ ...m, isDefault: m.id === id })));
     } catch (error) {
       console.error("Set default payment method error:", error);
-      Alert.alert("Error", "Unable to update the default payment method.");
+      alertModal.error("Error", "Unable to update the default payment method.");
     }
   };
 
@@ -96,6 +95,7 @@ export default function PaymentMethodsScreen() {
         </View>
       ) : methods.length === 0 ? (
         <EmptyState
+          icon="card-outline"
           title="No payment methods"
           subtitle="Add a card, wallet, or bank account to pay for bookings."
           actionLabel="Add Payment Method"

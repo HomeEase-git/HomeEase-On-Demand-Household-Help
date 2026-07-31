@@ -1,7 +1,7 @@
 import React from "react";
-import { View, Text, ScrollView, Alert } from "react-native";
+import { View, Text, ScrollView } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { Ionicons } from "@expo/vector-icons";
+import { AppIcon as Ionicons } from "../../../components/icons/AppIcon";
 import { useRouter } from "expo-router";
 import ScreenHeader from "../../../components/ui/ScreenHeader";
 import StarRating from "../../../components/ui/StarRating";
@@ -12,6 +12,7 @@ import {
   type WorkerProfileState,
 } from "../../../store/workerProfileStore";
 import { colors } from "../../../constants";
+import { useAlertModal } from "../../../contexts/AlertModalContext";
 
 const PARSED_RESUME = {
   name: "Dominic Paulo R. Dela Cruz",
@@ -67,6 +68,7 @@ const PARSED_RESUME = {
 
 export default function ResumePreviewScreen() {
   const router = useRouter();
+  const alertModal = useAlertModal();
   const setProfile = useWorkerProfileStore(
     (s: WorkerProfileState) => s.setProfile,
   );
@@ -95,7 +97,7 @@ export default function ResumePreviewScreen() {
       skills: PARSED_RESUME.skills.map((s) => s.name),
       certifications: PARSED_RESUME.certifications,
     });
-    Alert.alert(
+    alertModal.success(
       "Profile Updated",
       "Your profile has been updated with the parsed resume data. You can edit individual fields from your profile screen.",
       [{ text: "OK", onPress: () => router.back() }],
@@ -117,11 +119,11 @@ export default function ResumePreviewScreen() {
               AI-Powered Resume Analysis
             </Text>
           </View>
-          <Text className="text-brand/70 text-xs mt-1">
+          <Text className="text-primary/70 text-xs mt-1">
             Powered by Claude AI · Analyzed just now
           </Text>
           <View className="bg-brand/20 rounded-xl p-3 mt-3 flex-row items-center justify-between">
-            <Text className="text-brand text-sm">Overall Match Score</Text>
+            <Text className="text-primary text-sm">Overall Match Score</Text>
             <Text className="text-text-primary font-bold text-2xl">92%</Text>
           </View>
         </View>
@@ -178,7 +180,7 @@ export default function ResumePreviewScreen() {
                     : ""
                 }`}
               >
-                <Text className="text-brand text-sm flex-1">
+                <Text className="text-primary text-sm flex-1">
                   {skill.name}
                 </Text>
                 <View className={`${lc.bg} rounded-full px-2 py-0.5`}>
@@ -205,7 +207,7 @@ export default function ResumePreviewScreen() {
             >
               <View className="w-2 h-2 rounded-full bg-accent mt-1.5 mr-3 flex-shrink-0" />
               <View className="flex-1">
-                <Text className="text-brand font-semibold text-sm">
+                <Text className="text-primary font-semibold text-sm">
                   {entry.role}
                 </Text>
                 <Text className="text-text-secondary text-xs">
@@ -233,7 +235,7 @@ export default function ResumePreviewScreen() {
             >
               <Ionicons name="school-outline" size={16} color={colors.brand.DEFAULT} />
               <View className="flex-1 ml-3">
-                <Text className="text-brand font-semibold text-sm">
+                <Text className="text-primary font-semibold text-sm">
                   {entry.degree}
                 </Text>
                 <Text className="text-text-secondary text-xs">
@@ -260,7 +262,7 @@ export default function ResumePreviewScreen() {
               }`}
             >
               <Ionicons name="checkmark-circle" size={16} color={colors.success} />
-              <Text className="text-brand text-sm ml-2">{cert}</Text>
+              <Text className="text-primary text-sm ml-2">{cert}</Text>
             </View>
           ))}
         </View>

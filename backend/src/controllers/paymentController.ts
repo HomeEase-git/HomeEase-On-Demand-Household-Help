@@ -36,6 +36,24 @@ export const createPayment = async (req: AuthRequest, res: Response) => {
     const paymongoPaymentId = typeof req.body?.paymongoPaymentId === 'string' ? req.body.paymongoPaymentId.trim() : null;
     const paymongoSourceId = typeof req.body?.paymongoSourceId === 'string' ? req.body.paymongoSourceId.trim() : null;
 
+    const booking = await prisma.booking.findUnique({
+      where: { id: bookingId },
+      include: {
+        addOns: true,   // schema: addOns (capital O), fields: name + price
+        client: true,
+        worker: true,
+      },
+    });
+
+    if (!booking) {
+      return res.status(404).json(errorResponse(404, 'Booking not found'));
+    }
+
+    // Only client can create payment for their booking
+    if (booking.clientId !== currentUserId) {
+      return res.status(403).json(errorResponse(403, 'You do not have permission to create payment for this booking'));
+    }
+
     let methodType: (typeof validPaymentMethodTypes)[number] | null = null;
     let accountIdentifier: string | null = null;
 
@@ -61,13 +79,7 @@ export const createPayment = async (req: AuthRequest, res: Response) => {
           errorResponse(400, `Payment method type mismatch: expected ${savedMethod.type}, got ${rawMethodType}`)
         );
       }
-    } else {
-      if (!rawMethodType) {
-        return res.status(400).json(
-          errorResponse(400, 'methodType is required and must be one of: GCASH, MAYA, CARD, BANK_TRANSFER, CASH')
-        );
-      }
-
+    } else if (rawMethodType) {
       if (!validPaymentMethodTypes.includes(rawMethodType as (typeof validPaymentMethodTypes)[number])) {
         return res.status(400).json(
           errorResponse(400, `Invalid methodType "${rawMethodType}". Allowed values: GCASH, MAYA, CARD, BANK_TRANSFER, CASH`)
@@ -76,24 +88,15 @@ export const createPayment = async (req: AuthRequest, res: Response) => {
 
       methodType = rawMethodType as (typeof validPaymentMethodTypes)[number];
       accountIdentifier = requestAccountIdentifier || null;
-    }
-
-    const booking = await prisma.booking.findUnique({
-      where: { id: bookingId },
-      include: {
-        addOns: true,   // schema: addOns (capital O), fields: name + price
-        client: true,
-        worker: true,
-      },
-    });
-
-    if (!booking) {
-      return res.status(404).json(errorResponse(404, 'Booking not found'));
-    }
-
-    // Only client can create payment for their booking
-    if (booking.clientId !== currentUserId) {
-      return res.status(403).json(errorResponse(403, 'You do not have permission to create payment for this booking'));
+    } else if (booking.paymentMethodType) {
+      // Nothing provided in the request — fall back to the method the client
+      // already settled on when they made the booking.
+      methodType = booking.paymentMethodType as (typeof validPaymentMethodTypes)[number];
+      accountIdentifier = booking.paymentAccountIdentifier ?? (requestAccountIdentifier || null);
+    } else {
+      return res.status(400).json(
+        errorResponse(400, 'methodType is required and must be one of: GCASH, MAYA, CARD, BANK_TRANSFER, CASH')
+      );
     }
 
     // Can only create payment for completed or approved bookings

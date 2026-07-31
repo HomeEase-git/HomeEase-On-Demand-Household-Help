@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { View, Text, ScrollView, Alert } from "react-native";
+import { View, Text, ScrollView } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter, useLocalSearchParams } from "expo-router";
 import ScreenHeader from "../../components/ui/ScreenHeader";
@@ -7,23 +7,31 @@ import InputField from "../../components/ui/InputField";
 import PrimaryButton from "../../components/ui/PrimaryButton";
 import { isValidEmail } from "../../utils/validators";
 import { sendPasswordResetEmail } from "../../services/api";
+import { useAlertModal } from "../../contexts/AlertModalContext";
 
 export default function ForgotPasswordScreen() {
   const router = useRouter();
+  const alertModal = useAlertModal();
   const params = useLocalSearchParams<{ role?: string }>();
   const role = (params.role as string) || "client";
 
   const [email, setEmail] = useState("");
   const [loading, setLoading] = useState(false);
+  const [emailError, setEmailError] = useState("");
+
+  const handleEmailChange = (text: string) => {
+    setEmail(text);
+    setEmailError("");
+  };
 
   const handleSend = async () => {
     if (!email.trim()) {
-      Alert.alert("Error", "Please enter your email");
+      setEmailError("Email is required");
       return;
     }
 
     if (!isValidEmail(email)) {
-      Alert.alert("Error", "Please enter a valid email address");
+      setEmailError("Please enter a valid email address");
       return;
     }
 
@@ -35,7 +43,7 @@ export default function ForgotPasswordScreen() {
         params: { email, role },
       });
     } catch (err: any) {
-      Alert.alert(
+      alertModal.error(
         "Error",
         err?.message || "Failed to send reset email. Please try again.",
       );
@@ -62,13 +70,14 @@ export default function ForgotPasswordScreen() {
         <InputField
           label="Email"
           value={email}
-          onChangeText={setEmail}
+          onChangeText={handleEmailChange}
           placeholder="Enter your email"
           keyboardType="email-address"
           autoCapitalize="none"
           returnKeyType="done"
           onSubmitEditing={handleSend}
           editable={!loading}
+          error={emailError}
         />
 
         <PrimaryButton

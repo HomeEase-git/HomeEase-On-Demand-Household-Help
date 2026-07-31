@@ -1,13 +1,39 @@
 import React, { useState } from "react";
 import { View, Text, Pressable } from "react-native";
+import { AppIcon as Ionicons } from "../icons/AppIcon";
 import BottomSheetWrapper, { BottomSheetHandle } from "./BottomSheetWrapper";
 import PrimaryButton from "../ui/PrimaryButton";
+import { colors } from "../../constants";
 
 const METHODS = [
-  { id: "gcash", label: "GCash", icon: "G", bg: "bg-green-500" },
-  { id: "maya", label: "Maya", icon: "M", bg: "bg-blue-500" },
-  { id: "bank", label: "Bank Transfer", icon: "B", bg: "bg-card-light" },
-  { id: "cash", label: "Cash", icon: "₱", bg: "bg-gold/30" },
+  {
+    id: "gcash",
+    label: "GCash",
+    icon: "wallet-outline" as const,
+    bg: "bg-green-500",
+    iconColor: colors.white,
+  },
+  {
+    id: "maya",
+    label: "Maya",
+    icon: "phone-portrait-outline" as const,
+    bg: "bg-blue-500",
+    iconColor: colors.white,
+  },
+  {
+    id: "bank",
+    label: "Bank Transfer",
+    icon: "business-outline" as const,
+    bg: "bg-card-light",
+    iconColor: colors.brand.DEFAULT,
+  },
+  {
+    id: "cash",
+    label: "Cash",
+    icon: "cash-outline" as const,
+    bg: "bg-gold/30",
+    iconColor: colors.accent.muted,
+  },
 ];
 
 type Props = {
@@ -45,9 +71,18 @@ export const PaymentMethodBottomSheet: React.FC<Props> = ({
           <View
             className={`w-10 h-10 rounded-full items-center justify-center ${m.bg}`}
           >
-            <Text className="text-text-primary font-bold">{m.icon}</Text>
+            <Ionicons name={m.icon} size={20} color={m.iconColor} />
           </View>
-          <Text className="text-brand font-semibold ml-3">{m.label}</Text>
+          <Text className="text-brand font-semibold ml-3 flex-1">
+            {m.label}
+          </Text>
+          {selected === m.id && (
+            <Ionicons
+              name="checkmark-circle"
+              size={20}
+              color={colors.accent.DEFAULT}
+            />
+          )}
         </Pressable>
       ))}
       <View className="mt-4">

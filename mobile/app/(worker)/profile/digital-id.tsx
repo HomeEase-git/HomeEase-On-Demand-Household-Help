@@ -26,7 +26,7 @@ export default function DigitalIdScreen() {
         <ScreenHeader title="Digital ID" showBack />
         <ScrollView contentContainerStyle={{ padding: 24 }}>
           <View className="bg-card-light rounded-2xl p-6 items-center">
-            <Text className="text-brand font-semibold text-lg mb-2">
+            <Text className="text-primary font-semibold text-lg mb-2">
               Digital ID is not enabled yet
             </Text>
             <Text className="text-text-secondary text-sm text-center">
@@ -75,7 +75,7 @@ export default function DigitalIdScreen() {
         </View>
 
         <View className="bg-card-light rounded-2xl p-4 mt-6">
-          <Text className="text-brand font-semibold mb-2">How to use it</Text>
+          <Text className="text-primary font-semibold mb-2">How to use it</Text>
           <Text className="text-text-secondary text-sm">
             Show this card to clients before starting work so they can confirm
             your identity and the details you provided.
@@ -83,7 +83,7 @@ export default function DigitalIdScreen() {
         </View>
 
         <View className="bg-card-light rounded-2xl p-4 mt-3">
-          <Text className="text-brand font-semibold mb-2">
+          <Text className="text-primary font-semibold mb-2">
             Contact details
           </Text>
           <Text className="text-text-secondary text-sm">

@@ -1,7 +1,8 @@
 import React, { useState, forwardRef } from "react";
 import { Text, TextInput, Pressable, TextInputProps, View } from "react-native";
-import { Ionicons } from "@expo/vector-icons";
+import { AppIcon as Ionicons } from "../icons/AppIcon";
 import { colors } from "../../constants";
+import FieldError from "./FieldError";
 
 type Props = {
   label: string;
@@ -11,8 +12,10 @@ type Props = {
   secureTextEntry?: boolean;
   multiline?: boolean;
   editable?: boolean;
+  error?: string | null;
   returnKeyType?: TextInputProps["returnKeyType"];
   onSubmitEditing?: TextInputProps["onSubmitEditing"];
+  boldLabel?: boolean;
 } & Pick<TextInputProps, "keyboardType" | "autoCapitalize">;
 
 export const InputField = forwardRef<TextInput, Props>(
@@ -25,10 +28,12 @@ export const InputField = forwardRef<TextInput, Props>(
       secureTextEntry,
       multiline,
       editable = true,
+      error,
       keyboardType,
       autoCapitalize,
       returnKeyType,
       onSubmitEditing,
+      boldLabel = false,
     },
     ref,
   ) => {
@@ -36,11 +41,17 @@ export const InputField = forwardRef<TextInput, Props>(
 
     return (
       <View className="mb-4">
-        <Text className="text-text-secondary text-sm mb-1">{label}</Text>
+        <Text
+          className={`text-text-secondary text-sm mb-1 ${boldLabel ? "font-bold" : ""}`}
+        >
+          {label}
+        </Text>
         <View
-          className={`flex-row items-center bg-gray-100 border border-divider rounded-xl px-4 ${
+          className={`flex-row items-center bg-gray-100 border rounded-xl px-4 ${
             multiline ? "py-3" : "py-1.5"
-          } ${!editable ? "opacity-60 bg-card-dark" : ""}`}
+          } ${!editable ? "opacity-60 bg-card-dark" : ""} ${
+            error ? "border-error" : "border-divider"
+          }`}
         >
           <TextInput
             ref={ref}
@@ -58,6 +69,12 @@ export const InputField = forwardRef<TextInput, Props>(
             autoCapitalize={autoCapitalize}
             returnKeyType={returnKeyType}
             onSubmitEditing={onSubmitEditing}
+            // Android's Autofill framework can hold a reference to this
+            // EditText and touch it (e.g. for a "Save password?" prompt)
+            // at the same moment Fabric tears the view down on navigation,
+            // which crashes with "specified child already has a parent".
+            // These forms don't rely on autofill, so just opt out of it.
+            importantForAutofill="no"
           />
           {secureTextEntry && (
             <Pressable onPress={() => setIsSecure((prev) => !prev)}>
@@ -69,6 +86,7 @@ export const InputField = forwardRef<TextInput, Props>(
             </Pressable>
           )}
         </View>
+        <FieldError message={error} />
       </View>
     );
   },

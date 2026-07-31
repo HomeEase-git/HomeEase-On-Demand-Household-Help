@@ -10,10 +10,12 @@ export type StatusType =
   | "QuoteSubmitted"
   | "QuoteApproved"
   | "Disputed"
+  | "PendingCompletion"
   | "Completed"
   | "Cancelled"
   | "Credited"
   | "Verified"
+  | "Declined"
   | "Pending KYC";
 
 type Props = {
@@ -55,6 +57,10 @@ export const StatusBadge: React.FC<Props> = ({ status }) => {
       containerClass += " bg-orange-500/20";
       textClass += " text-orange-400";
       break;
+    case "PendingCompletion":
+      containerClass += " bg-teal-500/20";
+      textClass += " text-teal-400";
+      break;
     case "Completed":
     case "Credited":
     case "Verified":
@@ -74,6 +80,7 @@ export const StatusBadge: React.FC<Props> = ({ status }) => {
     InProgress: "In Progress",
     QuoteSubmitted: "Quote Submitted",
     QuoteApproved: "Quote Approved",
+    PendingCompletion: "Awaiting Confirmation",
     Pending: "Pending",
     Declined: "Declined",
     "Pending KYC": "Pending KYC",

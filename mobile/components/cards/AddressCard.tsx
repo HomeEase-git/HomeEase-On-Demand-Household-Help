@@ -1,7 +1,8 @@
 import React from "react";
-import { View, Text, Pressable, Alert } from "react-native";
-import { Ionicons } from "@expo/vector-icons";
+import { View, Text, Pressable } from "react-native";
+import { AppIcon as Ionicons } from "../icons/AppIcon";
 import { colors, cardShadow } from "../../constants";
+import { useAlertModal } from "../../contexts/AlertModalContext";
 
 type Address = {
   id: string;
@@ -23,14 +24,13 @@ export const AddressCard: React.FC<Props> = ({
   onDelete,
   isDefault = address.isDefault,
 }) => {
+  const alertModal = useAlertModal();
+
   const handleDelete = () => {
-    Alert.alert(
+    alertModal.confirm(
       "Delete Address",
       `Remove "${address.label}" from your saved addresses?`,
-      [
-        { text: "Cancel", style: "cancel" },
-        { text: "Delete", style: "destructive", onPress: onDelete },
-      ],
+      { confirmText: "Delete", destructive: true, onConfirm: onDelete },
     );
   };
 

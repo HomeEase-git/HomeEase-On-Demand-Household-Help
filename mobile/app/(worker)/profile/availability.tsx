@@ -1,12 +1,14 @@
 import React, { useEffect, useState } from "react";
-import { View, Text, ScrollView, Switch, Alert, ActivityIndicator } from "react-native";
+import { View, Text, ScrollView, Switch } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import ScreenHeader from "../../../components/ui/ScreenHeader";
 import PrimaryButton from "../../../components/ui/PrimaryButton";
+import { Skeleton } from "../../../components/ui/Skeleton";
 import { useAuthStore } from "../../../store/authStore";
 import * as api from "../../../services/api";
 import { colors } from "../../../constants/colors";
+import { useAlertModal } from "../../../contexts/AlertModalContext";
 
 const DAYS = [
   { key: "Mon", label: "Monday" },
@@ -24,6 +26,7 @@ const TODAY_KEY = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][
 
 export default function AvailabilityScreen() {
   const router = useRouter();
+  const alertModal = useAlertModal();
   const user = useAuthStore((s) => s.user);
   const [schedule, setSchedule] = useState<Record<string, boolean>>(
     Object.fromEntries(DAYS.map(({ key }, i) => [key, i < 5])),
@@ -66,13 +69,12 @@ export default function AvailabilityScreen() {
     setSaving(true);
     try {
       const availableDays = DAYS.filter(({ key }) => schedule[key]).map(({ key }) => key);
-      // Only update the weekly schedule here — the global on/off toggle lives on the Home screen.
       await api.updateAvailability(undefined, availableDays);
-      Alert.alert("Saved");
+      alertModal.success("Saved");
       router.back();
     } catch (error) {
       console.error("Save availability error:", error);
-      Alert.alert("Error", "Failed to save your schedule.");
+      alertModal.error("Error", "Failed to save your schedule.");
     } finally {
       setSaving(false);
     }
@@ -82,9 +84,37 @@ export default function AvailabilityScreen() {
     return (
       <SafeAreaView style={{ flex: 1, backgroundColor: colors.surface }}>
         <ScreenHeader title="Set Availability" showBack />
-        <View style={{ flex: 1, alignItems: "center", justifyContent: "center" }}>
-          <ActivityIndicator size="small" />
-        </View>
+        <ScrollView contentContainerStyle={{ padding: 24 }}>
+          <Skeleton width="30%" height={16} marginBottom={4} />
+          <Skeleton width="70%" height={13} marginBottom={16} />
+          <View
+            style={{
+              backgroundColor: colors.card.DEFAULT,
+              borderRadius: 16,
+              overflow: "hidden",
+              borderWidth: 1,
+              borderColor: colors.divider,
+            }}
+          >
+            {DAYS.map(({ key }, index) => (
+              <View
+                key={key}
+                style={{
+                  flexDirection: "row",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  paddingHorizontal: 16,
+                  paddingVertical: 14,
+                  borderBottomWidth: index === DAYS.length - 1 ? 0 : 1,
+                  borderBottomColor: colors.divider,
+                }}
+              >
+                <Skeleton width={90} height={14} marginBottom={0} />
+                <Skeleton width={40} height={22} borderRadius={11} marginBottom={0} />
+              </View>
+            ))}
+          </View>
+        </ScrollView>
       </SafeAreaView>
     );
   }

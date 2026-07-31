@@ -1,7 +1,7 @@
 import React from "react";
 import { View, Text, ScrollView, Pressable, Image } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { Ionicons } from "@expo/vector-icons";
+import { AppIcon as Ionicons } from "../components/icons/AppIcon";
 import { useRouter, useLocalSearchParams } from "expo-router";
 import { colors } from "../constants";
 import { icons } from "@/constants/icons";

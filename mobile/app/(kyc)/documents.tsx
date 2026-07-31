@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { View, Text, ScrollView, Alert } from "react-native";
+import { View, Text, ScrollView } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import * as DocumentPicker from "expo-document-picker";
@@ -15,6 +15,7 @@ import {
   isDocumentTypeAllowed,
   type KycDocumentKey,
 } from "../../utils/kycDocumentConfig";
+import { useAlertModal } from "../../contexts/AlertModalContext";
 
 // Worker-only screen: clearances + optional certification.
 // Clients never reach this screen (selfie.tsx sends them straight
@@ -49,6 +50,7 @@ const emptyDocument: UploadedDocument = {
 
 export default function DocumentsScreen() {
   const router = useRouter();
+  const alertModal = useAlertModal();
   const user = useAuthStore((s) => s.user);
   const isWorker = user?.role === "worker";
   const [documents, setDocuments] = useState(initialDocuments);
@@ -75,7 +77,7 @@ export default function DocumentsScreen() {
       const { status } =
         await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (status !== "granted") {
-        Alert.alert(
+        alertModal.warning(
           "File access required",
           "Please allow photo access to choose a document file.",
         );
@@ -98,7 +100,7 @@ export default function DocumentsScreen() {
 
       const mimeType = document.mimeType || "application/octet-stream";
       if (!isDocumentTypeAllowed(key, mimeType)) {
-        Alert.alert(
+        alertModal.error(
           "Invalid file type",
           `${documentRequirements[key].label} must be uploaded as a PDF or image file.`,
         );
@@ -116,13 +118,13 @@ export default function DocumentsScreen() {
           name: document.name || `${key} document`,
         },
       }));
-      Alert.alert(
+      alertModal.success(
         "Success",
         `${documentRequirements[key].label} uploaded successfully.`,
       );
     } catch (error) {
       console.error("KYC document upload error", error);
-      Alert.alert(
+      alertModal.error(
         "Upload failed",
         "We could not process that file. Please try again.",
       );
@@ -174,7 +176,7 @@ export default function DocumentsScreen() {
         </Text>
 
         <View className="mb-4">
-          <Text className="text-brand font-semibold mb-2">Clearances</Text>
+          <Text className="text-primary font-semibold mb-2">Clearances</Text>
           {renderUploadCard("nbiClearance")}
           {renderUploadCard("barangayClearance")}
           {renderUploadCard("policeClearance")}
@@ -182,7 +184,7 @@ export default function DocumentsScreen() {
         </View>
 
         <View className="mb-4">
-          <Text className="text-brand font-semibold mb-2">Optional</Text>
+          <Text className="text-primary font-semibold mb-2">Optional</Text>
           {renderUploadCard("certification")}
         </View>
 

@@ -1,9 +1,8 @@
-import React, { useState } from "react";
-import { View, Text, ScrollView, Pressable, Alert, Linking } from "react-native";
+import React, { useRef, useState } from "react";
+import { View, Text, Image, ScrollView, Pressable, Linking } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { useFocusEffect } from "@react-navigation/native";
+import { useFocusEffect, useRouter, useLocalSearchParams } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
-import { useRouter, useLocalSearchParams } from "expo-router";
 import ScreenHeader from "../../../../components/ui/ScreenHeader";
 import StatusBadge from "../../../../components/ui/StatusBadge";
 import StepperVertical from "../../../../components/steppers/StepperVertical";
@@ -12,17 +11,25 @@ import OutlinedButton from "../../../../components/ui/OutlinedButton";
 import DangerButton from "../../../../components/ui/DangerButton";
 import PriceBreakdownCard from "../../../../components/ui/PriceBreakdown";
 import { LoadingSkeleton } from "../../../../components/feedback/LoadingSkeleton";
+import PaymentMethodBottomSheet from "../../../../components/bottom-sheets/PaymentMethodBottomSheet";
+import type { BottomSheetHandle } from "../../../../components/bottom-sheets/BottomSheetWrapper";
 import {
   useBookingStore,
   type Booking,
   type BookingState,
 } from "../../../../store/bookingStore";
-import { getBookingDetail } from "../../../../services/api";
+import {
+  getBookingDetail,
+  confirmBookingCompletion,
+  createBookingPayment,
+  releasePaymentEscrow,
+} from "../../../../services/api";
 import { calculatePriceBreakdown } from "../../../../utils/pricing";
 import { isExactCategoryMatch } from "../../../../utils/categoryMapping";
 import type { StatusType } from "../../../../components/ui/StatusBadge";
 import { colors } from "../../../../constants";
-import { workers } from "../../../../constants/dummyData";
+import { useAlertModal } from "../../../../contexts/AlertModalContext";
+import { PAYMENT_METHOD_TYPE_MAP } from "../../../../utils/paymentMethodMap";
 
 // Backend BookingStatus enum -> store's friendly status values
 const API_STATUS_MAP: Record<string, Booking["status"]> = {
@@ -33,6 +40,7 @@ const API_STATUS_MAP: Record<string, Booking["status"]> = {
   QUOTE_SUBMITTED: "QuoteSubmitted",
   QUOTE_APPROVED: "QuoteApproved",
   DISPUTED: "Disputed",
+  PENDING_COMPLETION: "PendingCompletion",
   COMPLETED: "Completed",
   CANCELLED: "Cancelled",
 };
@@ -41,12 +49,18 @@ type ApiBookingDetail = {
   id: string;
   worker: { id: string; fullName: string; phone?: string | null } | null;
   service: string;
+  category?: string;
   status: string;
   location: string;
   scheduledDate: string;
   scheduledTime: string | null;
   estimatedPrice: number;
   finalPrice: number | null;
+  completionPhotoUrl?: string | null;
+  // Settled at booking time — used to auto-process payment after completion
+  // is confirmed, without asking the client to pick a method again.
+  paymentMethodType?: string | null;
+  paymentAccountIdentifier?: string | null;
   payment: {
     methodType: string;
     accountIdentifier: string | null;
@@ -66,6 +80,7 @@ function mapApiBookingDetail(d: ApiBookingDetail): Booking {
   return {
     id: d.id,
     service: d.service,
+    category: d.category ?? undefined,
     worker: d.worker?.fullName ?? "Unassigned",
     workerId: d.worker?.id,
     workerPhone: d.worker?.phone ?? undefined,
@@ -74,6 +89,7 @@ function mapApiBookingDetail(d: ApiBookingDetail): Booking {
     address: d.location,
     status: API_STATUS_MAP[d.status] ?? "Pending",
     amount: d.finalPrice ?? d.estimatedPrice,
+    completionPhotoUrl: d.completionPhotoUrl ?? undefined,
     payment: d.payment
       ? {
           methodType: d.payment.methodType,
@@ -81,7 +97,12 @@ function mapApiBookingDetail(d: ApiBookingDetail): Booking {
           status: d.payment.status,
           totalAmount: d.payment.totalAmount,
         }
-      : undefined,
+      : d.paymentMethodType
+        ? {
+            methodType: d.paymentMethodType,
+            accountIdentifier: d.paymentAccountIdentifier ?? undefined,
+          }
+        : undefined,
     quote: d.quote
       ? {
           laborCost: d.quote.laborCost,
@@ -98,11 +119,14 @@ function mapApiBookingDetail(d: ApiBookingDetail): Booking {
 
 export default function BookingDetailScreen() {
   const router = useRouter();
+  const alertModal = useAlertModal();
   const { bookingId } = useLocalSearchParams<{ bookingId: string }>();
-  const { bookings, updateBookingStatus, prefillFromBooking } =
-    useBookingStore();
+  const { bookings, prefillFromBooking } = useBookingStore();
   const booking = bookings.find((b) => b.id === bookingId);
   const [loading, setLoading] = useState(true);
+  const [confirmingCompletion, setConfirmingCompletion] = useState(false);
+  const [processingPayment, setProcessingPayment] = useState(false);
+  const paymentSheetRef = useRef<BottomSheetHandle | null>(null);
 
   useFocusEffect(
     React.useCallback(() => {
@@ -157,26 +181,108 @@ export default function BookingDetailScreen() {
 
   const priceBreakdown = calculatePriceBreakdown(booking.amount, 1, 0, 0);
 
-  const statusColor =
-    {
-      Pending: colors.warning,
-      Accepted: "#3B82F6",
-      Active: colors.active,
-      InProgress: colors.accent.DEFAULT,
-      QuoteSubmitted: "#8B5CF6",
-      QuoteApproved: "#0D9488",
-      Disputed: "#F97316",
-      Completed: colors.success,
-      Cancelled: colors.error,
-    }[booking.status] || colors.text.muted;
+  const statusCaption: Partial<Record<Booking["status"], string>> = {
+    QuoteSubmitted: "Action required",
+    Disputed: "Under review",
+    PendingCompletion: "Action required",
+  };
 
   const canCancel = booking.status === "Pending";
   const canTrack =
     booking.status === "Active" || booking.status === "InProgress";
-  const canComplete =
-    booking.status === "Active" || booking.status === "QuoteApproved";
   const isCompleted = booking.status === "Completed";
+  const isPendingCompletion = booking.status === "PendingCompletion";
+  // A payment record only gets a `status` once actually processed — before
+  // that, booking.payment (if present) just reflects the method settled at
+  // booking time, which we reuse instead of asking the client again.
+  const settledMethodType = !booking.payment?.status
+    ? booking.payment?.methodType
+    : undefined;
+  const needsPayment = isCompleted && !booking.payment?.status;
   const hasQuote = booking.status === "QuoteSubmitted" && booking.quote;
+
+  const processPayment = async (methodType: string, accountIdentifier?: string) => {
+    if (processingPayment) return;
+    setProcessingPayment(true);
+    try {
+      const payment = await createBookingPayment(booking.id, {
+        methodType: methodType as "GCASH" | "MAYA" | "CARD" | "BANK_TRANSFER" | "CASH",
+        accountIdentifier,
+      });
+      await releasePaymentEscrow(payment.id);
+      useBookingStore.setState((s) => ({
+        bookings: s.bookings.map((b) =>
+          b.id === booking.id
+            ? {
+                ...b,
+                payment: {
+                  methodType,
+                  accountIdentifier,
+                  status: "COMPLETED",
+                  totalAmount: payment.totalAmount,
+                },
+              }
+            : b,
+        ),
+      }));
+      alertModal.success(
+        "Payment Released",
+        "The worker has been paid. Thank you!",
+      );
+    } catch (error) {
+      console.error("Process payment error:", error);
+      alertModal.error(
+        "Payment failed",
+        "We couldn't process payment right now. You can try again from this screen.",
+      );
+    } finally {
+      setProcessingPayment(false);
+    }
+  };
+
+  const handleConfirmCompletion = async () => {
+    if (confirmingCompletion) return;
+    setConfirmingCompletion(true);
+    try {
+      await confirmBookingCompletion(booking.id);
+      useBookingStore.setState((s) => ({
+        bookings: s.bookings.map((b) =>
+          b.id === booking.id ? { ...b, status: "Completed" as const } : b,
+        ),
+      }));
+      // Payment method was already settled at booking time — process it
+      // automatically instead of asking the client to pick one again. Only
+      // fall back to the picker if we somehow don't have a settled method
+      // (e.g. a booking created before this was tracked).
+      if (settledMethodType) {
+        await processPayment(settledMethodType, booking.payment?.accountIdentifier);
+      } else {
+        paymentSheetRef.current?.expand();
+      }
+    } catch (error) {
+      console.error("Confirm completion error:", error);
+      alertModal.error(
+        "Error",
+        "Failed to confirm completion. Please try again.",
+      );
+    } finally {
+      setConfirmingCompletion(false);
+    }
+  };
+
+  const handleProceedToPayment = () => {
+    if (settledMethodType) {
+      processPayment(settledMethodType, booking.payment?.accountIdentifier);
+    } else {
+      paymentSheetRef.current?.expand();
+    }
+  };
+
+  const handleSelectPaymentMethod = (method: string) => {
+    const methodType = PAYMENT_METHOD_TYPE_MAP[method] ?? "CASH";
+    processPayment(methodType);
+  };
+
   const quoteActedOn =
     booking.status === "QuoteApproved" || booking.status === "Disputed";
 
@@ -210,16 +316,7 @@ export default function BookingDetailScreen() {
     },
   ];
 
-  const workerName =
-    workers.find((w) => w.id === booking.worker)?.name ?? booking.worker;
-
-  const handleComplete = () => {
-    updateBookingStatus(booking.id, "Completed");
-    router.push({
-      pathname: "/(client)/booking/post-service" as any,
-      params: { bookingId: booking.id },
-    });
-  };
+  const workerName = booking.worker;
 
   return (
     <SafeAreaView className="flex-1 bg-white">
@@ -230,24 +327,12 @@ export default function BookingDetailScreen() {
       >
         {/* Status Row */}
         <View className="flex-row items-center gap-2 mb-4">
-          <View
-            className="w-3 h-3 rounded-full"
-            style={{ backgroundColor: statusColor }}
-          />
-          <Text
-            className="font-semibold text-sm"
-            style={{ color: statusColor }}
-          >
-            {booking.status === "QuoteSubmitted"
-              ? "Quote Submitted — Action Required"
-              : booking.status === "QuoteApproved"
-                ? "Quote Approved"
-                : booking.status === "Disputed"
-                  ? "Quote Disputed"
-                  : booking.status === "InProgress"
-                    ? "In Progress"
-                    : booking.status}
-          </Text>
+          <StatusBadge status={booking.status} />
+          {statusCaption[booking.status] ? (
+            <Text className="text-text-secondary text-xs font-semibold">
+              {statusCaption[booking.status]}
+            </Text>
+          ) : null}
           <Text className="text-text-secondary text-xs ml-auto">
             ID: {booking.id}
           </Text>
@@ -261,7 +346,7 @@ export default function BookingDetailScreen() {
           >
             <Ionicons name="document-text" size={24} color="#8B5CF6" />
             <View className="ml-3 flex-1">
-              <Text className="font-bold text-sm" style={{ color: "#6D28D9" }}>
+              <Text className="font-bold text-sm text-purple-800">
                 Worker submitted a quote
               </Text>
               <Text className="text-text-secondary text-xs mt-0.5">
@@ -329,13 +414,13 @@ export default function BookingDetailScreen() {
               <Ionicons name="person" size={24} color={colors.accent.DEFAULT} />
             </View>
             <View className="ml-3 flex-1">
-              <Text className="text-brand font-semibold">{workerName}</Text>
+              <Text className="text-primary font-semibold">{workerName}</Text>
               <Text className="text-text-secondary text-xs">Professional</Text>
             </View>
             <Pressable
               onPress={() => {
                 if (!booking.workerId) {
-                  Alert.alert("Unavailable", "This worker cannot be messaged yet.");
+                  alertModal.info("Unavailable", "This worker cannot be messaged yet.");
                   return;
                 }
                 router.push(`/(client)/inbox/chat/${booking.workerId}`);
@@ -351,11 +436,11 @@ export default function BookingDetailScreen() {
             <Pressable
               onPress={() => {
                 if (!booking.workerPhone) {
-                  Alert.alert("No phone number", "This worker has no phone number on file.");
+                  alertModal.info("No phone number", "This worker has no phone number on file.");
                   return;
                 }
                 Linking.openURL(`tel:${booking.workerPhone}`).catch(() =>
-                  Alert.alert("Error", "Could not open the phone dialer."),
+                  alertModal.error("Error", "Could not open the phone dialer."),
                 );
               }}
               className="p-2"
@@ -373,7 +458,7 @@ export default function BookingDetailScreen() {
         <View className="bg-card rounded-2xl p-4 mb-3">
           <View className="flex-row items-center mb-2">
             <Ionicons name="calendar" size={16} color={colors.accent.DEFAULT} />
-            <Text className="text-brand font-semibold ml-2">
+            <Text className="text-primary font-semibold ml-2">
               {new Date(booking.date).toLocaleDateString("en-PH", {
                 weekday: "long",
                 year: "numeric",
@@ -385,7 +470,7 @@ export default function BookingDetailScreen() {
           {booking.time && (
             <View className="flex-row items-center mb-2">
               <Ionicons name="time" size={16} color={colors.accent.DEFAULT} />
-              <Text className="text-brand font-semibold ml-2">
+              <Text className="text-primary font-semibold ml-2">
                 {booking.time}
               </Text>
             </View>
@@ -397,7 +482,7 @@ export default function BookingDetailScreen() {
                 size={16}
                 color={colors.accent.DEFAULT}
               />
-              <Text className="text-brand font-semibold ml-2 flex-1">
+              <Text className="text-primary font-semibold ml-2 flex-1">
                 {booking.address}
               </Text>
             </View>
@@ -426,11 +511,30 @@ export default function BookingDetailScreen() {
               size={20}
               color={colors.accent.DEFAULT}
             />
-            <Text className="text-brand font-semibold ml-3">
+            <Text className="text-primary font-semibold ml-3">
               {booking.payment?.methodType ?? "Payment pending"}
             </Text>
           </View>
         </View>
+
+        {/* Completion photo — worker's proof of finished work */}
+        {booking.completionPhotoUrl && (
+          <View className="bg-card rounded-2xl p-4 mb-3">
+            <Text className="text-text-primary font-bold mb-2">
+              {isPendingCompletion ? "Worker Submitted Completed Work" : "Completion Photo"}
+            </Text>
+            <Image
+              source={{ uri: booking.completionPhotoUrl }}
+              style={{ width: "100%", height: 220, borderRadius: 16 }}
+              resizeMode="cover"
+            />
+            {isPendingCompletion && (
+              <Text className="text-text-secondary text-xs mt-2">
+                Review the photo above. If the work is done to your satisfaction, confirm completion below.
+              </Text>
+            )}
+          </View>
+        )}
 
         {/* Progress Stepper */}
         <View className="bg-card rounded-2xl p-4 mb-3">
@@ -457,7 +561,7 @@ export default function BookingDetailScreen() {
                   ))}
                 </View>
                 {booking.reviewText && (
-                  <Text className="text-brand text-sm mt-1">
+                  <Text className="text-primary text-sm mt-1">
                     {`"${booking.reviewText}"`}
                   </Text>
                 )}
@@ -472,6 +576,24 @@ export default function BookingDetailScreen() {
 
         {/* Action Buttons */}
         <View className="gap-3 mt-2">
+          {isPendingCompletion && (
+            <PrimaryButton
+              label="Confirm Completion"
+              fullWidth
+              onPress={handleConfirmCompletion}
+              disabled={confirmingCompletion}
+              loading={confirmingCompletion}
+            />
+          )}
+          {needsPayment && (
+            <PrimaryButton
+              label="Proceed to Payment"
+              fullWidth
+              onPress={handleProceedToPayment}
+              disabled={processingPayment}
+              loading={processingPayment}
+            />
+          )}
           {hasQuote && (
             <PrimaryButton
               label="Review & Approve Quote"
@@ -479,13 +601,6 @@ export default function BookingDetailScreen() {
               onPress={() =>
                 router.push(`/(client)/booking/${bookingId}/quote`)
               }
-            />
-          )}
-          {canComplete && (
-            <PrimaryButton
-              label="Mark as Complete"
-              fullWidth
-              onPress={handleComplete}
             />
           )}
           {canTrack && (
@@ -513,8 +628,8 @@ export default function BookingDetailScreen() {
               label="Book Again"
               fullWidth
               onPress={() => {
-                if (!isExactCategoryMatch(booking.service)) {
-                  Alert.alert(
+                if (!isExactCategoryMatch(booking.category ?? booking.service)) {
+                  alertModal.warning(
                     "Booking unavailable",
                     "This booking's service type couldn't be matched to a bookable category. Please try a different booking or contact support.",
                   );
@@ -544,6 +659,10 @@ export default function BookingDetailScreen() {
           )}
         </View>
       </ScrollView>
+      <PaymentMethodBottomSheet
+        innerRef={paymentSheetRef}
+        onSelect={handleSelectPaymentMethod}
+      />
     </SafeAreaView>
   );
 }

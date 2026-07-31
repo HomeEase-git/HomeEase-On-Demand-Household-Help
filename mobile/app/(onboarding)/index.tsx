@@ -9,32 +9,32 @@ import {
   NativeScrollEvent,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import PrimaryButton from "../../components/ui/PrimaryButton";
-import { colors } from "../../constants";
+import {
+  OnboardingWelcomeIllustration,
+  OnboardingBookingIllustration,
+  OnboardingTrustIllustration,
+} from "../../components/illustrations/Illustrations";
 
 const { width } = Dimensions.get("window");
 
 const slides = [
   {
     id: "1",
-    icon: "home" as const,
-    iconColor: colors.brand.DEFAULT,
+    Illustration: OnboardingWelcomeIllustration,
     title: "Welcome to HomeEase",
     subtitle: "Your home, our care.",
   },
   {
     id: "2",
-    icon: "calendar" as const,
-    iconColor: colors.brand.DEFAULT,
+    Illustration: OnboardingBookingIllustration,
     title: "Book in Minutes",
     subtitle: "Choose a service, pick a worker, done.",
   },
   {
     id: "3",
-    icon: "shield-checkmark" as const,
-    iconColor: colors.brand.DEFAULT,
+    Illustration: OnboardingTrustIllustration,
     title: "Trusted Professionals",
     subtitle: "All workers are verified and rated.",
   },
@@ -84,14 +84,13 @@ export default function OnboardingScreen() {
             style={{ width }}
             className="flex-1 px-8 justify-center items-center"
           >
-            {/* TODO: Replace with contextual illustration */}
-            <View className="w-64 h-64 bg-card-dark rounded-full items-center justify-center mb-8">
-              <Ionicons name={item.icon} size={100} color={item.iconColor} />
+            <View className="mb-8">
+              <item.Illustration size={220} />
             </View>
-            <Text className="text-accent text-3xl font-bold text-center">
+            <Text className="text-text-primary text-3xl font-bold text-center">
               {item.title}
             </Text>
-            <Text className="text-accent text-center text-lg mt-3">
+            <Text className="text-text-secondary text-center text-lg mt-3">
               {item.subtitle}
             </Text>
           </View>

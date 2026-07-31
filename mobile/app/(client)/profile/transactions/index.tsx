@@ -1,10 +1,11 @@
 import React, { useEffect, useState } from "react";
-import { View, Text, FlatList, Pressable, ActivityIndicator } from "react-native";
+import { View, Text, FlatList, Pressable } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import ScreenHeader from "../../../../components/ui/ScreenHeader";
 import TransactionItem from "../../../../components/list-items/TransactionItem";
 import EmptyState from "../../../../components/feedback/EmptyState";
+import { SkeletonList, TransactionItemSkeleton } from "../../../../components/ui/Skeleton";
 import * as api from "../../../../services/api";
 
 const FILTERS = ["All", "This Week", "This Month"] as const;
@@ -90,11 +91,12 @@ export default function TransactionsScreen() {
         ))}
       </View>
       {loading ? (
-        <View className="py-6 items-center">
-          <ActivityIndicator size="small" />
+        <View className="px-4 pt-2">
+          <SkeletonList count={6} SkeletonComponent={TransactionItemSkeleton} spacing={0} />
         </View>
       ) : filtered.length === 0 ? (
         <EmptyState
+          icon="receipt-outline"
           title="No transactions yet"
           subtitle={
             filter === "All"

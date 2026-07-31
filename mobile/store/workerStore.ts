@@ -44,17 +44,13 @@ export function mapApiJob(b: ApiWorkerBooking): WorkerJob {
 }
 
 type WorkerState = {
-  available: boolean;
   jobs: WorkerJob[];
-  setAvailable: (available: boolean) => void;
   setJobs: (jobs: WorkerJob[]) => void;
   updateJobStatus: (id: string, status: BookingStatus) => void;
 };
 
 export const useWorkerStore = create<WorkerState>((set) => ({
-  available: true,
   jobs: [],
-  setAvailable: (available) => set({ available }),
   setJobs: (jobs) => set({ jobs }),
   updateJobStatus: (id, status) =>
     set((state) => ({

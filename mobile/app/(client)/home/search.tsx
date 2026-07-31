@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from "react";
-import { View, Text, FlatList, Pressable, Alert } from "react-native";
+import { View, Text, FlatList, Pressable } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import SearchBar from "../../../components/ui/SearchBar";
@@ -14,6 +14,7 @@ import LoadingSkeleton from "../../../components/feedback/LoadingSkeleton";
 import { useSearchStore } from "../../../store/searchStore";
 import { getCurrentPosition } from "../../../services/location";
 import type { LatLng } from "../../../utils/geo";
+import { useAlertModal } from "../../../contexts/AlertModalContext";
 
 const DEFAULT_FILTERS: SearchFilters = { sort: "rating", availableOnly: false };
 const DEBOUNCE_MS = 400;
@@ -21,6 +22,7 @@ const NEARBY_RADIUS_KM = 10;
 
 export default function SearchScreen() {
   const router = useRouter();
+  const alertModal = useAlertModal();
   const [query, setQuery] = useState("");
   const [debouncedQuery, setDebouncedQuery] = useState("");
   const [filters, setFilters] = useState<SearchFilters>(DEFAULT_FILTERS);
@@ -32,12 +34,17 @@ export default function SearchScreen() {
   const recentSearches = useSearchStore((s) => s.recentSearches);
   const addSearch = useSearchStore((s) => s.addSearch);
   const clearSearches = useSearchStore((s) => s.clearSearches);
+  const restoreSearches = useSearchStore((s) => s.restoreSearches);
 
   useEffect(() => {
     getCurrentPosition()
       .then(setOrigin)
       .catch(() => setOrigin(null));
   }, []);
+
+  useEffect(() => {
+    restoreSearches();
+  }, [restoreSearches]);
 
   useEffect(() => {
     const handle = setTimeout(() => {
@@ -105,10 +112,10 @@ export default function SearchScreen() {
   const showLoading = searching || isPending;
 
   const handleClearRecent = () => {
-    Alert.alert("Clear recent searches?", undefined, [
-      { text: "Cancel", style: "cancel" },
-      { text: "Clear", onPress: () => clearSearches() },
-    ]);
+    alertModal.confirm("Clear recent searches?", undefined, {
+      confirmText: "Clear",
+      onConfirm: () => clearSearches(),
+    });
   };
 
   return (

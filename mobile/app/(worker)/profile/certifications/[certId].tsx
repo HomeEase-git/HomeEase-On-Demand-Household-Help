@@ -1,44 +1,55 @@
-import React from "react";
-import { View, Text, Alert } from "react-native";
+import React, { useEffect, useState } from "react";
+import { View, Text, Image } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { Ionicons } from "@expo/vector-icons";
+import { AppIcon as Ionicons } from "../../../../components/icons/AppIcon";
 import { useRouter, useLocalSearchParams } from "expo-router";
 import ScreenHeader from "../../../../components/ui/ScreenHeader";
 import StatusBadge from "../../../../components/ui/StatusBadge";
+import type { StatusType } from "../../../../components/ui/StatusBadge";
 import DangerButton from "../../../../components/ui/DangerButton";
 import OutlinedButton from "../../../../components/ui/OutlinedButton";
 import { colors } from "../../../../constants";
-
-const CERTS: Record<
-  string,
-  {
-    name: string;
-    issuer: string;
-    issueDate: string;
-    expiryDate: string;
-    status: string;
-  }
-> = {
-  cert1: {
-    name: "Plumbing License",
-    issuer: "PRC",
-    issueDate: "2020-01-01",
-    expiryDate: "2025-01-01",
-    status: "Verified",
-  },
-  cert2: {
-    name: "Safety Training",
-    issuer: "TESDA",
-    issueDate: "2021-06-01",
-    expiryDate: "2024-06-01",
-    status: "Verified",
-  },
-};
+import * as api from "../../../../services/api";
+import type { Certification } from "../../../../services/api";
+import { useAlertModal } from "../../../../contexts/AlertModalContext";
 
 export default function CertificationDetailScreen() {
   const router = useRouter();
+  const alertModal = useAlertModal();
   const { certId } = useLocalSearchParams<{ certId: string }>();
-  const cert = certId ? CERTS[certId] : null;
+  const [cert, setCert] = useState<Certification | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let active = true;
+    async function load() {
+      if (!certId) return;
+      setLoading(true);
+      try {
+        const detail = await api.getCertificationDetail(certId);
+        if (active) setCert(detail);
+      } catch (error) {
+        console.error("Load certification error:", error);
+      } finally {
+        if (active) setLoading(false);
+      }
+    }
+    load();
+    return () => {
+      active = false;
+    };
+  }, [certId]);
+
+  if (loading) {
+    return (
+      <SafeAreaView className="flex-1 bg-white">
+        <ScreenHeader title="Certification Details" showBack />
+        <View className="flex-1 items-center justify-center">
+          <Text className="text-text-secondary">Loading certification...</Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
 
   if (!cert) {
     return (
@@ -52,21 +63,24 @@ export default function CertificationDetailScreen() {
   }
 
   const handleDelete = () => {
-    Alert.alert(
+    alertModal.confirm(
       "Delete Certification",
       `Are you sure you want to remove "${cert.name}"? This cannot be undone.`,
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Delete",
-          style: "destructive",
-          onPress: () => {
-            Alert.alert("Deleted", `"${cert.name}" has been removed.`, [
+      {
+        confirmText: "Delete",
+        destructive: true,
+        onConfirm: async () => {
+          try {
+            await api.deleteCertification(cert.id);
+            alertModal.success("Deleted", `"${cert.name}" has been removed.`, [
               { text: "OK", onPress: () => router.back() },
             ]);
-          },
+          } catch (error) {
+            console.error("Delete certification error:", error);
+            alertModal.error("Error", "Unable to delete certification right now.");
+          }
         },
-      ],
+      },
     );
   };
 
@@ -74,16 +88,23 @@ export default function CertificationDetailScreen() {
     <SafeAreaView className="flex-1 bg-white">
       <ScreenHeader title="Certification Details" showBack />
       <View className="px-4 py-6">
-        <View className="w-full h-48 bg-card-dark rounded-2xl items-center justify-center mb-4">
-          <Ionicons
-            name="document-text"
-            size={60}
-            color={colors.brand.DEFAULT}
-          />
-          <Text className="text-text-secondary mt-2">Document Preview</Text>
-          <Text className="text-text-muted text-xs mt-1">
-            Full document viewing available after backend integration
-          </Text>
+        <View className="w-full h-48 bg-card-dark rounded-2xl items-center justify-center mb-4 overflow-hidden">
+          {cert.documentUrl ? (
+            <Image
+              source={{ uri: cert.documentUrl }}
+              className="w-full h-full"
+              resizeMode="cover"
+            />
+          ) : (
+            <>
+              <Ionicons
+                name="document-text"
+                size={60}
+                color={colors.brand.DEFAULT}
+              />
+              <Text className="text-text-secondary mt-2">No document available</Text>
+            </>
+          )}
         </View>
 
         <View className="bg-card rounded-2xl p-4 mb-4">
@@ -100,13 +121,18 @@ export default function CertificationDetailScreen() {
             </Text>
           ) : null}
           <View className="mt-3">
-            <StatusBadge status={cert.status as "Verified"} />
+            <StatusBadge status={cert.status as StatusType} />
           </View>
+          {cert.status === "Declined" && cert.rejectionReason ? (
+            <Text className="text-error text-xs mt-2">
+              Reason: {cert.rejectionReason}
+            </Text>
+          ) : null}
         </View>
 
         <View className="gap-3">
           <OutlinedButton
-            label="Edit Certification"
+            label="Upload New Certification"
             onPress={() =>
               router.push("/(worker)/profile/certifications/upload")
             }

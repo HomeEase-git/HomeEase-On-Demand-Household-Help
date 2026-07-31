@@ -111,7 +111,82 @@ export const validateAddServiceTypes = (
   if (!serviceTypeIds.every((id: unknown) => typeof id === 'string')) {
     return res.status(400).json(errorResponse(400, 'All serviceTypeIds must be strings'));
   }
-  
+
+  return next();
+};
+
+export const validateCreateSkill = (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  const { name, category, rate } = req.body;
+
+  if (!name || typeof name !== 'string' || !name.trim()) {
+    return res.status(400).json(errorResponse(400, 'name is required and must be a non-empty string'));
+  }
+
+  if (!category || typeof category !== 'string' || !category.trim()) {
+    return res.status(400).json(errorResponse(400, 'category is required and must be a non-empty string'));
+  }
+
+  if (typeof rate !== 'number' || rate <= 0) {
+    return res.status(400).json(errorResponse(400, 'rate must be a positive number'));
+  }
+
+  return next();
+};
+
+export const validateCreateCertification = (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  const { name, issuer, issueDate, expiryDate, documentUrl } = req.body;
+
+  if (!name || typeof name !== 'string' || !name.trim()) {
+    return res.status(400).json(errorResponse(400, 'name is required and must be a non-empty string'));
+  }
+
+  if (!issuer || typeof issuer !== 'string' || !issuer.trim()) {
+    return res.status(400).json(errorResponse(400, 'issuer is required and must be a non-empty string'));
+  }
+
+  if (!issueDate || isNaN(new Date(issueDate).getTime())) {
+    return res.status(400).json(errorResponse(400, 'issueDate is required and must be a valid date'));
+  }
+
+  if (expiryDate !== undefined && expiryDate !== null && isNaN(new Date(expiryDate).getTime())) {
+    return res.status(400).json(errorResponse(400, 'expiryDate must be a valid date'));
+  }
+
+  if (!documentUrl || typeof documentUrl !== 'string') {
+    return res.status(400).json(errorResponse(400, 'documentUrl is required and must be a string'));
+  }
+
+  return next();
+};
+
+export const validateUpdatePayoutMethod = (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  const { payoutMethod, payoutAccountName, payoutAccountNumber } = req.body;
+
+  const allowedMethods = ['GCASH', 'MAYA', 'BANK_TRANSFER'];
+  if (!payoutMethod || !allowedMethods.includes(payoutMethod)) {
+    return res.status(400).json(errorResponse(400, `payoutMethod must be one of ${allowedMethods.join(', ')}`));
+  }
+
+  if (payoutAccountName !== undefined && typeof payoutAccountName !== 'string') {
+    return res.status(400).json(errorResponse(400, 'payoutAccountName must be a string'));
+  }
+
+  if (payoutAccountNumber !== undefined && typeof payoutAccountNumber !== 'string') {
+    return res.status(400).json(errorResponse(400, 'payoutAccountNumber must be a string'));
+  }
+
   return next();
 };
 
@@ -131,6 +206,8 @@ export const validateCreateBooking = (
     estimatedDurationHours,
     inspectionFeeCharged,
     inspectionFeeAmount,
+    paymentMethodType,
+    paymentAccountIdentifier,
   } = req.body;
   
   if (!workerId || typeof workerId !== 'string') {
@@ -172,7 +249,20 @@ export const validateCreateBooking = (
       return res.status(400).json(errorResponse(400, 'inspectionFeeAmount must be a non-negative number'));
     }
   }
-  
+
+  const VALID_PAYMENT_METHOD_TYPES = ['GCASH', 'MAYA', 'CARD', 'BANK_TRANSFER', 'CASH'];
+  if (paymentMethodType !== undefined) {
+    if (typeof paymentMethodType !== 'string' || !VALID_PAYMENT_METHOD_TYPES.includes(paymentMethodType)) {
+      return res.status(400).json(
+        errorResponse(400, `paymentMethodType must be one of: ${VALID_PAYMENT_METHOD_TYPES.join(', ')}`)
+      );
+    }
+  }
+
+  if (paymentAccountIdentifier !== undefined && typeof paymentAccountIdentifier !== 'string') {
+    return res.status(400).json(errorResponse(400, 'paymentAccountIdentifier must be a string'));
+  }
+
   return next();
 };
 
@@ -181,20 +271,18 @@ export const validateSubmitQuote = (
   res: Response,
   next: NextFunction
 ) => {
-  const { laborCost, materialsCost, notes } = req.body;
-  
-  if (typeof laborCost !== 'number' || laborCost < 0) {
-    return res.status(400).json(errorResponse(400, 'laborCost must be a non-negative number'));
-  }
-  
+  const { materialsCost, notes } = req.body;
+
+  // laborCost is not accepted here — it's pinned to the booking's settled
+  // estimatedPrice server-side. Only additional (materials) costs are quoted.
   if (typeof materialsCost !== 'number' || materialsCost < 0) {
     return res.status(400).json(errorResponse(400, 'materialsCost must be a non-negative number'));
   }
-  
+
   if (notes !== undefined && typeof notes !== 'string') {
     return res.status(400).json(errorResponse(400, 'notes must be a string'));
   }
-  
+
   return next();
 };
 

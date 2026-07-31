@@ -1,7 +1,7 @@
 import React, { useState } from "react";
-import { View, Text, ScrollView, Pressable, Alert } from "react-native";
+import { View, Text, ScrollView, Pressable } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { Ionicons } from "@expo/vector-icons";
+import { AppIcon as Ionicons } from "../../../../components/icons/AppIcon";
 import { useRouter, useLocalSearchParams } from "expo-router";
 import ScreenHeader from "../../../../components/ui/ScreenHeader";
 import InputField from "../../../../components/ui/InputField";
@@ -11,6 +11,7 @@ import GenericConfirmationModal from "../../../../components/modals/GenericConfi
 import { useBookingStore } from "../../../../store/bookingStore";
 import { cancelBooking } from "../../../../services/api";
 import { colors } from "../../../../constants";
+import { useAlertModal } from "../../../../contexts/AlertModalContext";
 
 const REASONS = [
   "Changed my mind",
@@ -22,6 +23,7 @@ const REASONS = [
 
 export default function CancelBookingScreen() {
   const router = useRouter();
+  const alertModal = useAlertModal();
   const { bookingId } = useLocalSearchParams<{ bookingId: string }>();
   const { bookings, updateBookingStatus } = useBookingStore();
   const [reason, setReason] = useState<string | null>(null);
@@ -44,14 +46,14 @@ export default function CancelBookingScreen() {
     try {
       await cancelBooking(bookingId, finalReason);
       updateBookingStatus(bookingId, "Cancelled");
-      Alert.alert(
+      alertModal.success(
         "Booking Cancelled",
         "Your booking has been cancelled successfully.",
         [{ text: "OK", onPress: () => router.replace("/(client)/booking") }],
       );
     } catch (error) {
       console.error("Cancel booking error:", error);
-      Alert.alert("Error", "Failed to cancel booking. Please try again.");
+      alertModal.error("Error", "Failed to cancel booking. Please try again.");
     } finally {
       setLoading(false);
     }
@@ -103,7 +105,7 @@ export default function CancelBookingScreen() {
                 <View className="w-2 h-2 rounded-full bg-white" />
               )}
             </View>
-            <Text className="text-brand">{r}</Text>
+            <Text className="text-primary">{r}</Text>
           </Pressable>
         ))}
 

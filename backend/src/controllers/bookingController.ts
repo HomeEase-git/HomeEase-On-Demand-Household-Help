@@ -15,19 +15,24 @@ interface AuthRequest extends Request {
  *
  * Schema BookingStatus values:
  *   PENDING | ACCEPTED | REJECTED | IN_PROGRESS |
- *   QUOTE_SUBMITTED | QUOTE_APPROVED | DISPUTED | COMPLETED | CANCELLED
+ *   QUOTE_SUBMITTED | QUOTE_APPROVED | DISPUTED | PENDING_COMPLETION |
+ *   COMPLETED | CANCELLED
  *
  * NOTE: DECLINED and QUOTE_DISPUTED do not exist in the schema.
  *   - Use REJECTED in place of DECLINED.
  *   - Use DISPUTED in place of QUOTE_DISPUTED.
+ *
+ * PENDING_COMPLETION: worker has submitted a completion photo and is
+ * awaiting the client's confirmation before the booking is finalized.
  */
 const VALID_TRANSITIONS: Record<string, string[]> = {
   PENDING: ['ACCEPTED', 'REJECTED', 'CANCELLED'],
   ACCEPTED: ['IN_PROGRESS', 'CANCELLED', 'REJECTED'],
   IN_PROGRESS: ['QUOTE_SUBMITTED', 'CANCELLED'],
   QUOTE_SUBMITTED: ['QUOTE_APPROVED', 'DISPUTED', 'CANCELLED'],
-  QUOTE_APPROVED: ['COMPLETED', 'CANCELLED'],
+  QUOTE_APPROVED: ['PENDING_COMPLETION', 'CANCELLED'],
   DISPUTED: ['QUOTE_APPROVED', 'QUOTE_SUBMITTED', 'CANCELLED'],
+  PENDING_COMPLETION: ['COMPLETED', 'CANCELLED'],
   COMPLETED: [],
   REJECTED: [],
   CANCELLED: [],
@@ -60,6 +65,8 @@ export const createBooking = async (req: AuthRequest, res: Response) => {
       estimatedDurationHours,
       inspectionFeeCharged,
       inspectionFeeAmount,
+      paymentMethodType,
+      paymentAccountIdentifier,
     } = req.body;
 
     // Verify worker exists and is available
@@ -156,6 +163,8 @@ export const createBooking = async (req: AuthRequest, res: Response) => {
             notes,
             inspectionFeeCharged: inspectionFeeChargedVal,
             inspectionFeeAmount: inspectionFeeAmountVal ?? null,
+            paymentMethodType: paymentMethodType ?? null,
+            paymentAccountIdentifier: paymentAccountIdentifier ?? null,
             status: 'PENDING',
           },
           include: {
@@ -253,7 +262,7 @@ export const listBookings = async (req: AuthRequest, res: Response) => {
         include: {
           client: { select: { id: true, fullName: true, avatar: true, phone: true } },
           worker: { select: { id: true, fullName: true, avatar: true, phone: true } },
-          serviceTask: { select: { id: true, name: true } },
+          serviceTask: { select: { id: true, name: true, serviceType: { select: { name: true } } } },
           review: { select: { rating: true } },
         },
         orderBy: { createdAt: 'desc' },
@@ -272,6 +281,7 @@ export const listBookings = async (req: AuthRequest, res: Response) => {
       workerId: b.worker?.id ?? null,
       workerPhone: b.worker?.phone ?? null,
       service: b.serviceTask?.name ?? b.serviceType,
+      category: b.serviceTask?.serviceType?.name ?? b.serviceType,
       status: b.status,
       scheduledDate: b.scheduledDate,
       estimatedPrice: b.estimatedPrice,
@@ -315,7 +325,7 @@ export const getBookingDetail = async (req: AuthRequest, res: Response) => {
       include: {
         client: { select: { id: true, fullName: true, email: true, phone: true } },
         worker: { select: { id: true, fullName: true, email: true, phone: true } },
-        serviceTask: true,
+        serviceTask: { include: { serviceType: { select: { name: true } } } },
         payment: { select: { methodType: true, accountIdentifier: true, status: true, totalAmount: true } },
         // Quote data lives inline on Booking (laborCost, materialsCost, etc.)
         addOns: true,  // schema relation is addOns (capital O)
@@ -347,15 +357,21 @@ export const getBookingDetail = async (req: AuthRequest, res: Response) => {
         client: booking.client,
         worker: booking.worker,
         service: booking.serviceTask?.name ?? booking.serviceType,
+        category: booking.serviceTask?.serviceType?.name ?? booking.serviceType,
         status: booking.status,
         location: booking.location,
         scheduledDate: booking.scheduledDate,
         scheduledTime: booking.scheduledTime,
         estimatedPrice: booking.estimatedPrice,
         finalPrice,
+        completionPhotoUrl: booking.completionPhotoUrl,
         estimatedDurationHours: booking.estimatedDurationHours,
         inspectionFeeCharged: booking.inspectionFeeCharged,
         inspectionFeeAmount: booking.inspectionFeeAmount,
+        // Settled at booking time — used to auto-process payment after
+        // completion is confirmed, without asking the client again.
+        paymentMethodType: booking.paymentMethodType,
+        paymentAccountIdentifier: booking.paymentAccountIdentifier,
         payment: booking.payment
           ? {
               methodType: booking.payment.methodType,
@@ -616,7 +632,11 @@ export const startBooking = async (req: AuthRequest, res: Response) => {
 
 /**
  * POST /api/bookings/:id/quote
- * Worker submits labor/materials quote
+ * Worker submits a quote for additional costs on top of the booking's
+ * already-settled estimatedPrice (the labor cost, agreed at booking time).
+ * laborCost is never taken from the request — it's always pinned to
+ * booking.estimatedPrice so the client can't be charged more for labor than
+ * what was agreed when they booked.
  * Quote data is stored inline on the Booking model (no separate Quote table in schema)
  */
 export const submitQuote = async (req: AuthRequest, res: Response) => {
@@ -626,7 +646,7 @@ export const submitQuote = async (req: AuthRequest, res: Response) => {
     }
 
     const id = req.params.id as string;
-    const { laborCost, materialsCost, notes } = req.body;
+    const { materialsCost, notes } = req.body;
 
     const booking = await prisma.booking.findUnique({
       where: { id },
@@ -644,11 +664,12 @@ export const submitQuote = async (req: AuthRequest, res: Response) => {
       return res.status(409).json(errorResponse(409, `Cannot submit quote for booking with status ${booking.status}`));
     }
 
-    // Quote fields live directly on Booking — no separate Quote model in schema
+    // Quote fields live directly on Booking — no separate Quote model in schema.
+    // laborCost is the booking's settled estimatedPrice, not worker input.
     const updated = await prisma.booking.update({
       where: { id },
       data: {
-        laborCost,
+        laborCost: booking.estimatedPrice,
         materialsCost,
         quoteNotes: notes,
         quoteStatus: 'SUBMITTED',
@@ -823,12 +844,81 @@ export const disputeQuote = async (req: AuthRequest, res: Response) => {
 
 /**
  * PATCH /api/bookings/:id/complete
- * Complete booking (decrement activeJobCount in transaction)
+ * Worker submits proof of completed work (a required photo). This does NOT
+ * finalize the booking — it moves to PENDING_COMPLETION and waits for the
+ * client to confirm via POST /api/bookings/:id/confirm-completion.
  */
 export const completeBooking = async (req: AuthRequest, res: Response) => {
   try {
     if (!req.user || req.user.role !== 'WORKER') {
       return res.status(403).json(errorResponse(403, 'Only workers can complete bookings'));
+    }
+
+    const id = req.params.id as string;
+    const { completionPhotoUrl } = req.body as { completionPhotoUrl?: string };
+
+    if (!completionPhotoUrl || typeof completionPhotoUrl !== 'string') {
+      return res.status(400).json(errorResponse(400, 'A completion photo is required to complete this job'));
+    }
+
+    const booking = await prisma.booking.findUnique({
+      where: { id },
+    });
+
+    if (!booking) {
+      return res.status(404).json(errorResponse(404, 'Booking not found'));
+    }
+
+    if (booking.workerId !== req.user.userId) {
+      return res.status(403).json(errorResponse(403, 'This booking is not assigned to you'));
+    }
+
+    if (!isValidTransition(booking.status, 'PENDING_COMPLETION')) {
+      return res.status(409).json(errorResponse(409, `Cannot complete booking with status ${booking.status}`));
+    }
+
+    const updated = await prisma.booking.update({
+      where: { id },
+      data: {
+        status: 'PENDING_COMPLETION',
+        completionPhotoUrl,
+      },
+    });
+
+    // Notify client to review the submitted photo and confirm
+    await notifyUser({
+      userId: booking.clientId,
+      type: 'BOOKING_COMPLETED',
+      title: 'Worker Submitted Completed Work',
+      message: 'Please review the photo and confirm the job is done.',
+      relatedId: id,
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: 'Completion submitted — waiting for client confirmation',
+      data: {
+        id: updated.id,
+        status: updated.status,
+        completionPhotoUrl: updated.completionPhotoUrl,
+      },
+    });
+  } catch (error) {
+    console.error('Error completing booking:', error);
+    return res.status(500).json(errorResponse(500, 'Failed to complete booking'));
+  }
+};
+
+/**
+ * PATCH /api/bookings/:id/confirm-completion
+ * Client confirms the worker's submitted proof of work. This finalizes the
+ * booking (COMPLETED, finalPrice, decrement activeJobCount) — the client
+ * proceeds to payment (POST /api/payments/:bookingId) afterward.
+ */
+export const confirmCompletion = async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user || req.user.role !== 'CLIENT') {
+      return res.status(403).json(errorResponse(403, 'Only clients can confirm job completion'));
     }
 
     const id = req.params.id as string;
@@ -842,67 +932,67 @@ export const completeBooking = async (req: AuthRequest, res: Response) => {
       return res.status(404).json(errorResponse(404, 'Booking not found'));
     }
 
-    if (booking.workerId !== req.user.userId) {
-      return res.status(403).json(errorResponse(403, 'This booking is not assigned to you'));
+    if (booking.clientId !== req.user.userId) {
+      return res.status(403).json(errorResponse(403, 'This booking does not belong to you'));
     }
 
     if (!isValidTransition(booking.status, 'COMPLETED')) {
-      return res.status(409).json(errorResponse(409, `Cannot complete booking with status ${booking.status}`));
+      return res.status(409).json(errorResponse(409, `Cannot confirm completion for booking with status ${booking.status}`));
     }
 
-    try {
-      const result = await prisma.$transaction(async (tx: any) => {
-        // addOns use `price` field per schema
-        const addonsCost = (booking.addOns || []).reduce((sum: number, addon: any) => sum + addon.price, 0);
-        const hasQuote = booking.laborCost != null && booking.materialsCost != null;
-        const finalPrice = hasQuote
-          ? (booking.laborCost ?? 0) + (booking.materialsCost ?? 0) + addonsCost
-          : booking.estimatedPrice;
+    const result = await prisma.$transaction(async (tx: any) => {
+      // addOns use `price` field per schema
+      const addonsCost = (booking.addOns || []).reduce((sum: number, addon: any) => sum + addon.price, 0);
+      const hasQuote = booking.laborCost != null && booking.materialsCost != null;
+      const finalPrice = hasQuote
+        ? (booking.laborCost ?? 0) + (booking.materialsCost ?? 0) + addonsCost
+        : booking.estimatedPrice;
 
-        // Update booking — schema has completionDate (not completedAt)
-        const updated = await tx.booking.update({
-          where: { id },
-          data: {
-            status: 'COMPLETED',
-            finalPrice,
-            completionDate: new Date(),
-          },
-        });
+      // Update booking — schema has completionDate (not completedAt)
+      const updated = await tx.booking.update({
+        where: { id },
+        data: {
+          status: 'COMPLETED',
+          finalPrice,
+          completionDate: new Date(),
+        },
+      });
 
-        // Decrement activeJobCount
+      // Decrement activeJobCount
+      if (booking.workerId) {
         await tx.workerProfile.update({
           where: { userId: booking.workerId },
           data: { activeJobCount: { decrement: 1 } },
         });
+      }
 
-        return updated;
-      });
+      return updated;
+    });
 
-      // Notify client
+    // Notify worker
+    if (booking.workerId) {
       await notifyUser({
-        userId: booking.clientId,
+        userId: booking.workerId,
         type: 'BOOKING_COMPLETED',
-        title: 'Service Completed',
-        message: 'The service has been completed',
+        title: 'Client Confirmed Completion',
+        message: 'The client confirmed your work. You can proceed to receive payment.',
         relatedId: id,
       });
-
-      return res.status(200).json({
-        success: true,
-        message: 'Booking completed successfully',
-        data: {
-          id: result.id,
-          status: result.status,
-          finalPrice: result.finalPrice,
-          completedAt: result.completionDate,
-        },
-      });
-    } catch (txError) {
-      throw txError;
     }
+
+    return res.status(200).json({
+      success: true,
+      message: 'Completion confirmed successfully',
+      data: {
+        id: result.id,
+        status: result.status,
+        finalPrice: result.finalPrice,
+        completedAt: result.completionDate,
+      },
+    });
   } catch (error) {
-    console.error('Error completing booking:', error);
-    return res.status(500).json(errorResponse(500, 'Failed to complete booking'));
+    console.error('Error confirming booking completion:', error);
+    return res.status(500).json(errorResponse(500, 'Failed to confirm completion'));
   }
 };
 

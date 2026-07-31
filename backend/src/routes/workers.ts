@@ -9,6 +9,15 @@ import {
   updateWorkerProfile,
   addServiceTypes,
   getWorkerCapacity,
+  listMySkills,
+  createSkill,
+  deleteSkill,
+  listMyCertifications,
+  getCertification,
+  createCertification,
+  deleteCertification,
+  getPayoutMethod,
+  updatePayoutMethod,
 } from '../controllers/workerController';
 import { authMiddleware } from '../middleware/auth';
 import { restrictTo } from '../middleware/role';
@@ -16,6 +25,9 @@ import {
   validateUpdateAvailability,
   validateUpdateWorkerProfile,
   validateAddServiceTypes,
+  validateCreateSkill,
+  validateCreateCertification,
+  validateUpdatePayoutMethod,
 } from '../middleware/validation';
 
 const router = Router();
@@ -57,6 +69,30 @@ router.get(
   authMiddleware,
   restrictTo('WORKER'),
   getWorkerCapacity
+);
+
+router.get('/me/skills', authMiddleware, restrictTo('WORKER'), listMySkills);
+router.post('/me/skills', authMiddleware, restrictTo('WORKER'), validateCreateSkill, createSkill);
+router.delete('/me/skills/:skillId', authMiddleware, restrictTo('WORKER'), deleteSkill);
+
+router.get('/me/certifications', authMiddleware, restrictTo('WORKER'), listMyCertifications);
+router.get('/me/certifications/:certId', authMiddleware, restrictTo('WORKER'), getCertification);
+router.post(
+  '/me/certifications',
+  authMiddleware,
+  restrictTo('WORKER'),
+  validateCreateCertification,
+  createCertification
+);
+router.delete('/me/certifications/:certId', authMiddleware, restrictTo('WORKER'), deleteCertification);
+
+router.get('/me/payout', authMiddleware, restrictTo('WORKER'), getPayoutMethod);
+router.patch(
+  '/me/payout',
+  authMiddleware,
+  restrictTo('WORKER'),
+  validateUpdatePayoutMethod,
+  updatePayoutMethod
 );
 
 export default router;

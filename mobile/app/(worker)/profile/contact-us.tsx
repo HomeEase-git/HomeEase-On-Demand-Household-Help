@@ -1,24 +1,26 @@
 import React, { useState } from "react";
 import { View, Text, ScrollView } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { Ionicons } from "@expo/vector-icons";
+import { AppIcon as Ionicons } from "../../../components/icons/AppIcon";
 import { useRouter } from "expo-router";
 import ScreenHeader from "../../../components/ui/ScreenHeader";
 import InputField from "../../../components/ui/InputField";
 import PrimaryButton from "../../../components/ui/PrimaryButton";
 import { colors } from "../../../constants";
+import { useAlertModal } from "../../../contexts/AlertModalContext";
 
 export default function WorkerContactUsScreen() {
   const router = useRouter();
+  const alertModal = useAlertModal();
   const [subject, setSubject] = useState("");
   const [message, setMessage] = useState("");
 
   const handleSend = () => {
     if (!subject.trim() || !message.trim()) {
-      require("react-native").Alert.alert("Error", "Please fill in all fields");
+      alertModal.error("Error", "Please fill in all fields");
       return;
     }
-    require("react-native").Alert.alert("Sent", "We'll reply within 24hrs");
+    alertModal.success("Sent", "We'll reply within 24hrs");
     router.back();
   };
 
@@ -33,7 +35,7 @@ export default function WorkerContactUsScreen() {
               size={20}
               color={colors.brand.DEFAULT}
             />
-            <Text className="text-brand ml-2">support@homeease.com</Text>
+            <Text className="text-primary ml-2">support@homeease.com</Text>
           </View>
           <View className="flex-row items-center mb-3">
             <Ionicons
@@ -41,7 +43,7 @@ export default function WorkerContactUsScreen() {
               size={20}
               color={colors.brand.DEFAULT}
             />
-            <Text className="text-brand ml-2">(044) 123-4567</Text>
+            <Text className="text-primary ml-2">(044) 123-4567</Text>
           </View>
           <View className="flex-row items-center">
             <Ionicons
@@ -49,7 +51,7 @@ export default function WorkerContactUsScreen() {
               size={20}
               color={colors.brand.DEFAULT}
             />
-            <Text className="text-brand ml-2">Mon-Fri 8AM-5PM</Text>
+            <Text className="text-primary ml-2">Mon-Fri 8AM-5PM</Text>
           </View>
         </View>
         <InputField

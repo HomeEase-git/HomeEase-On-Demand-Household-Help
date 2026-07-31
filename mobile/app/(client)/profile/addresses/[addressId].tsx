@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
-import { View, Text, ScrollView, Alert, Pressable } from "react-native";
+import { View, Text, ScrollView, Pressable } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { Ionicons } from "@expo/vector-icons";
+import { AppIcon as Ionicons } from "../../../../components/icons/AppIcon";
 import { useRouter, useLocalSearchParams } from "expo-router";
 import ScreenHeader from "../../../../components/ui/ScreenHeader";
 import InputField from "../../../../components/ui/InputField";
@@ -11,11 +11,13 @@ import { colors } from "../../../../constants";
 import { addressStorage } from "../../../../utils/storage";
 import { geocodeAddress } from "../../../../utils/geo";
 import * as api from "../../../../services/api";
+import { useAlertModal } from "../../../../contexts/AlertModalContext";
 
 const LABEL_OPTIONS = ["Home", "Work", "Other"];
 
 export default function AddressEditScreen() {
   const router = useRouter();
+  const alertModal = useAlertModal();
   const { addressId } = useLocalSearchParams<{ addressId: string }>();
   const isNew = addressId === "new";
 
@@ -49,7 +51,7 @@ export default function AddressEditScreen() {
 
   const handleSave = async () => {
     if (!street.trim() || !city.trim() || !state.trim() || !zipCode.trim()) {
-      Alert.alert("Error", "Please fill in all address fields.");
+      alertModal.error("Error", "Please fill in all address fields.");
       return;
     }
 
@@ -88,14 +90,14 @@ export default function AddressEditScreen() {
         });
       }
 
-      Alert.alert(
+      alertModal.success(
         "Success",
         isNew ? "Address added successfully." : "Address updated successfully.",
         [{ text: "OK", onPress: () => router.back() }],
       );
     } catch (error) {
       console.error("Address save error:", error);
-      Alert.alert("Error", "Unable to save address right now.");
+      alertModal.error("Error", "Unable to save address right now.");
     } finally {
       setSaving(false);
     }
@@ -105,7 +107,7 @@ export default function AddressEditScreen() {
     <SafeAreaView className="flex-1 bg-white">
       <ScreenHeader title={isNew ? "Add Address" : "Edit Address"} showBack />
       <ScrollView contentContainerStyle={{ padding: 24 }}>
-        <Text className="text-brand text-sm mb-2">Label</Text>
+        <Text className="text-primary text-sm mb-2">Label</Text>
         <View className="flex-row gap-2 mb-4">
           {LABEL_OPTIONS.map((l) => (
             <Pressable

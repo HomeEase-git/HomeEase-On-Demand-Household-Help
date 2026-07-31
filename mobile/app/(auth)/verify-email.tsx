@@ -1,15 +1,17 @@
 import React, { useEffect, useState } from "react";
-import { View, Text, ScrollView, Alert } from "react-native";
+import { View, Text, ScrollView } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { Ionicons } from "@expo/vector-icons";
+import { AppIcon as Ionicons } from "../../components/icons/AppIcon";
 import { useRouter, useLocalSearchParams } from "expo-router";
 import PrimaryButton from "../../components/ui/PrimaryButton";
 import OutlinedButton from "../../components/ui/OutlinedButton";
 import { verifyEmail } from "../../services/api";
 import { colors } from "../../constants";
+import { useAlertModal } from "../../contexts/AlertModalContext";
 
 export default function VerifyEmailScreen() {
   const router = useRouter();
+  const alertModal = useAlertModal();
   const params = useLocalSearchParams<{ email?: string; token?: string }>();
   const email = (params.email as string) || "";
   const token = (params.token as string) || "";
@@ -26,7 +28,7 @@ export default function VerifyEmailScreen() {
 
   const handleVerifyEmail = async () => {
     if (!token && !verified) {
-      Alert.alert("Error", "Invalid verification link");
+      alertModal.error("Error", "Invalid verification link");
       return;
     }
 
@@ -37,7 +39,7 @@ export default function VerifyEmailScreen() {
         setVerified(true);
       }
     } catch (err: any) {
-      Alert.alert(
+      alertModal.error(
         "Error",
         err?.message || "Email verification failed. Please try again.",
       );

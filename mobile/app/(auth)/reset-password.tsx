@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { View, Text, ScrollView, Alert, Pressable } from "react-native";
+import { View, Text, ScrollView, Pressable } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter, useLocalSearchParams } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
@@ -8,6 +8,7 @@ import InputField from "../../components/ui/InputField";
 import PrimaryButton from "../../components/ui/PrimaryButton";
 import { resetPassword } from "../../services/api";
 import { colors } from "../../constants";
+import { useAlertModal } from "../../contexts/AlertModalContext";
 
 const requirements = [
   {
@@ -25,6 +26,7 @@ const requirements = [
 
 export default function ResetPasswordScreen() {
   const router = useRouter();
+  const alertModal = useAlertModal();
   const params = useLocalSearchParams<{ email?: string; otp?: string }>();
   const email = (params.email as string) || "";
   const otp = (params.otp as string) || "";
@@ -34,35 +36,57 @@ export default function ResetPasswordScreen() {
   const [loading, setLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+  const [newPasswordError, setNewPasswordError] = useState("");
+  const [confirmPasswordError, setConfirmPasswordError] = useState("");
 
   const strength = requirements.filter((r) => r.test(newPassword)).length;
   const isValidPassword = strength === 3 && newPassword === confirmPassword;
 
+  const handleNewPasswordChange = (text: string) => {
+    setNewPassword(text);
+    setNewPasswordError("");
+    if (confirmPassword && text !== confirmPassword) {
+      setConfirmPasswordError("Passwords do not match");
+    } else {
+      setConfirmPasswordError("");
+    }
+  };
+
+  const handleConfirmPasswordChange = (text: string) => {
+    setConfirmPassword(text);
+    setConfirmPasswordError(
+      text && text !== newPassword ? "Passwords do not match" : "",
+    );
+  };
+
   const handleReset = async () => {
     if (!newPassword || !confirmPassword) {
-      Alert.alert("Error", "Please fill in all fields");
+      setNewPasswordError(!newPassword ? "Password is required" : "");
+      setConfirmPasswordError(
+        !confirmPassword ? "Please confirm your password" : "",
+      );
       return;
     }
     if (newPassword !== confirmPassword) {
-      Alert.alert("Error", "Passwords do not match");
+      setConfirmPasswordError("Passwords do not match");
       return;
     }
     if (strength < 3) {
-      Alert.alert("Error", "Password does not meet all requirements");
+      setNewPasswordError("Password does not meet all requirements");
       return;
     }
 
     setLoading(true);
     try {
       await resetPassword(email, otp, newPassword);
-      Alert.alert("Success", "Password reset successfully!", [
+      alertModal.success("Success", "Password reset successfully!", [
         {
           text: "OK",
           onPress: () => router.replace("/(auth)/sign-in"),
         },
       ]);
     } catch (err: any) {
-      Alert.alert(
+      alertModal.error(
         "Error",
         err?.message || "Failed to reset password. Please try again.",
       );
@@ -84,16 +108,15 @@ export default function ResetPasswordScreen() {
           Create a strong password to secure your account.
         </Text>
 
-        <View className="relative">
-          <InputField
-            label="New Password"
-            value={newPassword}
-            onChangeText={setNewPassword}
-            placeholder="Enter new password"
-            secureTextEntry={!showPassword}
-            editable={!loading}
-          />
-        </View>
+        <InputField
+          label="New Password"
+          value={newPassword}
+          onChangeText={handleNewPasswordChange}
+          placeholder="Enter new password"
+          secureTextEntry={!showPassword}
+          editable={!loading}
+          error={newPasswordError}
+        />
 
         <View className="mb-4">
           <View className="flex-row h-1 rounded-full overflow-hidden bg-divider">
@@ -142,14 +165,15 @@ export default function ResetPasswordScreen() {
           </View>
         </View>
 
-        <View className="relative mb-4">
+        <View className="relative">
           <InputField
             label="Confirm Password"
             value={confirmPassword}
-            onChangeText={setConfirmPassword}
+            onChangeText={handleConfirmPasswordChange}
             placeholder="Confirm new password"
             secureTextEntry={!showConfirmPassword}
             editable={!loading}
+            error={confirmPasswordError}
           />
           <Pressable
             className="absolute right-3 top-10"
@@ -158,19 +182,10 @@ export default function ResetPasswordScreen() {
             <Ionicons
               name={showConfirmPassword ? "eye-off" : "eye"}
               size={20}
-              color="#666"
+              color={colors.text.secondary}
             />
           </Pressable>
         </View>
-
-        {confirmPassword && newPassword !== confirmPassword && (
-          <View className="flex-row items-center gap-2 mb-4 p-3 bg-error/10 rounded-lg">
-            <Ionicons name="alert-circle" size={16} color={colors.error} />
-            <Text className="text-error text-xs flex-1">
-              Passwords do not match
-            </Text>
-          </View>
-        )}
 
         <PrimaryButton
           label="Reset Password"

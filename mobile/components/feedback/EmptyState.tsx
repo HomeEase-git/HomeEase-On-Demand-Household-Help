@@ -5,6 +5,7 @@ import { colors } from "../../constants";
 
 type Props = {
   icon?: keyof typeof Ionicons.glyphMap;
+  illustration?: React.ReactNode;
   title: string;
   subtitle?: string;
   actionLabel?: string;
@@ -13,6 +14,7 @@ type Props = {
 
 export const EmptyState: React.FC<Props> = ({
   icon = "information-circle-outline",
+  illustration,
   title,
   subtitle,
   actionLabel,
@@ -20,9 +22,12 @@ export const EmptyState: React.FC<Props> = ({
 }) => {
   return (
     <View className="flex-1 items-center justify-center py-16 px-6">
-      {/* TODO: Replace with contextual empty state illustration */}
-      <View className="w-20 h-20 rounded-full bg-card items-center justify-center mb-4">
-        <Ionicons name={icon} size={32} color={colors.text.muted} />
+      <View className="mb-4">
+        {illustration ?? (
+          <View className="w-20 h-20 rounded-full bg-card items-center justify-center">
+            <Ionicons name={icon} size={32} color={colors.text.muted} />
+          </View>
+        )}
       </View>
       <Text className="text-text-primary font-semibold text-base text-center">
         {title}

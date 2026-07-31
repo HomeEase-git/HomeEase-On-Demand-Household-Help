@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from "react";
-import { View, Text, FlatList, TextInput, Pressable, Linking, Alert } from "react-native";
+import { View, Text, FlatList, TextInput, Pressable, Linking } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { Ionicons } from "@expo/vector-icons";
+import { AppIcon as Ionicons } from "../../../../components/icons/AppIcon";
 import { useRouter, useLocalSearchParams } from "expo-router";
 import ChatBubbleSent from "../../../../components/chat/ChatBubbleSent";
 import ChatBubbleReceived from "../../../../components/chat/ChatBubbleReceived";
@@ -11,6 +11,7 @@ import { useMessageStore } from "../../../../store/messageStore";
 import { useAuthStore } from "../../../../store/authStore";
 import { colors } from "../../../../constants";
 import * as api from "../../../../services/api";
+import { useAlertModal } from "../../../../contexts/AlertModalContext";
 
 function formatTime(iso: string) {
   return new Date(iso).toLocaleTimeString("en-US", {
@@ -26,6 +27,7 @@ export default function WorkerChatScreen() {
   const [sending, setSending] = useState(false);
   const imageSheetRef = useRef<BottomSheetHandle | null>(null);
   const currentUserId = useAuthStore((s) => s.user?.id);
+  const alertModal = useAlertModal();
 
   const messages = useMessageStore((s) =>
     userId ? (s.messagesByUser[userId] ?? []) : [],
@@ -92,17 +94,17 @@ export default function WorkerChatScreen() {
       appendMessage(userId, message);
     } catch (error) {
       console.error("Send image error:", error);
-      Alert.alert("Error", "Failed to send image. Please try again.");
+      alertModal.error("Error", "Failed to send image. Please try again.");
     }
   };
 
   const call = () => {
     if (!conversation?.phone) {
-      Alert.alert("No phone number", "This contact has no phone number on file.");
+      alertModal.info("No phone number", "This contact has no phone number on file.");
       return;
     }
     Linking.openURL(`tel:${conversation.phone}`).catch(() =>
-      Alert.alert("Error", "Could not open the phone dialer."),
+      alertModal.error("Error", "Could not open the phone dialer."),
     );
   };
 
@@ -157,7 +159,7 @@ export default function WorkerChatScreen() {
           <Ionicons name="attach-outline" size={24} color={colors.text.muted} />
         </Pressable>
         <TextInput
-          className="flex-1 bg-card rounded-full px-4 py-2 text-brand max-h-24"
+          className="flex-1 bg-card rounded-full px-4 py-2 text-primary max-h-24"
           placeholder="Message..."
           placeholderTextColor={colors.text.muted}
           value={input}

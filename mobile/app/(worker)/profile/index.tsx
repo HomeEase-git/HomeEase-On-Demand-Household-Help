@@ -1,9 +1,8 @@
 import React, { useCallback, useRef, useState } from "react";
-import { View, Text, ScrollView, Pressable, Image, Alert, ActivityIndicator } from "react-native";
+import { View, Text, ScrollView, Pressable, Image, ActivityIndicator } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { Ionicons } from "@expo/vector-icons";
-import { useRouter } from "expo-router";
-import { useFocusEffect } from "@react-navigation/native";
+import { AppIcon as Ionicons } from "../../../components/icons/AppIcon";
+import { useRouter, useFocusEffect } from "expo-router";
 import StarRating from "../../../components/ui/StarRating";
 import LogoutConfirmationModal from "../../../components/modals/LogoutConfirmationModal";
 import ImageSourcePickerBottomSheet from "../../../components/bottom-sheets/ImageSourcePickerBottomSheet";
@@ -12,6 +11,7 @@ import { useAuthStore } from "../../../store/authStore";
 import * as api from "../../../services/api";
 import type { WorkerDetail } from "../../../types/api.types";
 import { colors, cardShadow } from "../../../constants";
+import { useAlertModal } from "../../../contexts/AlertModalContext";
 
 const MENU = [
   { label: "Edit Profile", path: "/(worker)/profile/edit" },
@@ -36,6 +36,7 @@ const MENU = [
 
 export default function WorkerProfileScreen() {
   const router = useRouter();
+  const alertModal = useAlertModal();
   const imageSheetRef = useRef<BottomSheetHandle | null>(null);
   const user = useAuthStore((s) => s.user);
   const setUser = useAuthStore((s) => s.setUser);
@@ -53,7 +54,7 @@ export default function WorkerProfileScreen() {
       setUser({ ...user, avatar: updated.avatar });
     } catch (error) {
       console.error("Avatar upload error", error);
-      Alert.alert(
+      alertModal.error(
         "Upload failed",
         "We could not update your profile picture. Please try again.",
       );

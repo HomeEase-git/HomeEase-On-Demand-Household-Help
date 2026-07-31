@@ -1,5 +1,5 @@
 import React, { useState, useRef, useMemo } from "react";
-import { View, Text, ScrollView, Alert, Pressable } from "react-native";
+import { View, Text, ScrollView, Pressable } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 // eslint-disable-next-line import/no-named-as-default
@@ -25,9 +25,11 @@ import GenericConfirmationModal from "../../../../components/modals/GenericConfi
 import * as api from "../../../../services/api";
 import { serviceConfigs } from "../../../../constants/serviceData";
 import type { BottomSheetHandle } from "../../../../components/bottom-sheets/BottomSheetWrapper";
+import { useAlertModal } from "../../../../contexts/AlertModalContext";
 
 export default function BookingStep3Screen() {
   const router = useRouter();
+  const alertModal = useAlertModal();
   const draft = useBookingStore((s: BookingState) => s.draft);
   const setDraft = useBookingStore((s: BookingState) => s.setDraft);
   const setBookingCreated = useBookingStore(
@@ -70,14 +72,14 @@ export default function BookingStep3Screen() {
     setConfirmVisible(false);
 
     if (!draft.workerId) {
-      Alert.alert(
+      alertModal.error(
         "Error",
         "Missing worker information. Please go back and select a worker.",
       );
       return;
     }
     if (!draft.selectedTaskId) {
-      Alert.alert(
+      alertModal.error(
         "Error",
         "Missing service information. Please go back and select a service.",
       );
@@ -144,7 +146,7 @@ export default function BookingStep3Screen() {
       router.push("/(client)/booking/success");
     } catch (err) {
       console.error("Booking creation error:", err);
-      Alert.alert("Error", "Failed to create booking. Please try again.");
+      alertModal.error("Error", "Failed to create booking. Please try again.");
     } finally {
       setLoading(false);
     }
@@ -199,7 +201,15 @@ export default function BookingStep3Screen() {
           </Text>
         </View>
 
-        <Text className="text-text-secondary text-sm mb-1 mt-4">
+        {draft.quoteRequired && (
+          <View className="bg-warning/10 rounded-2xl p-3 mt-3">
+            <Text className="text-warning text-xs">
+              This is an inspection-based service. The price below is an estimate — the worker will send you a final quote to approve before starting work.
+            </Text>
+          </View>
+        )}
+
+        <Text className="text-text-secondary font-bold text-sm mb-1 mt-4">
           Payment Method
         </Text>
         <Pressable
@@ -215,7 +225,9 @@ export default function BookingStep3Screen() {
           </Text>
         </Pressable>
 
-        <Text className="text-text-secondary text-sm mb-1 mt-4">Add a Tip</Text>
+        <Text className="text-text-secondary font-bold text-sm mb-1 mt-4">
+          Add a Tip
+        </Text>
         <View className="flex-row gap-2 flex-wrap mt-1">
           {[0, 20, 50, 100].map((amount) => (
             <Pressable
@@ -286,13 +298,17 @@ export default function BookingStep3Screen() {
 
         <View className="mt-8">
           <PrimaryButton
-            label="Submit booking request"
+            label={
+              draft.quoteRequired
+                ? "Submit request for quote"
+                : "Submit booking request"
+            }
             fullWidth
             disabled={!paymentMethod || loading || !validation.ok}
             loading={loading}
             onPress={() => {
               if (!paymentMethod) {
-                Alert.alert("Error", "Please select a payment method");
+                alertModal.warning("Error", "Please select a payment method");
                 return;
               }
               handleConfirmBooking();
@@ -310,7 +326,11 @@ export default function BookingStep3Screen() {
       <GenericConfirmationModal
         visible={confirmVisible}
         title="Submit booking request"
-        message="You are about to submit a booking request. Payment will not be charged at this time."
+        message={
+          draft.quoteRequired
+            ? "The worker will inspect the job and send you a quote to approve before starting work. Payment will not be charged at this time."
+            : "You are about to submit a booking request. Payment will not be charged at this time."
+        }
         confirmLabel="Submit Request"
         cancelLabel="Cancel"
         onConfirm={onConfirm}

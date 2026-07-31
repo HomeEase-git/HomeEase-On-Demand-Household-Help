@@ -1,7 +1,8 @@
 import { useBookingStore } from "../store/bookingStore";
-import { workers } from "../constants/dummyData";
 
 const MAX_CONCURRENT_JOBS = 2;
+
+const ACTIVE_STATUSES = ['Accepted', 'Active', 'InProgress', 'QuoteSubmitted', 'QuoteApproved'];
 
 /**
  * useWorkerCapacity
@@ -11,9 +12,9 @@ const MAX_CONCURRENT_JOBS = 2;
  * to warn clients or block selection when a worker is full.
  *
  * Usage:
- *   const { isAtCapacity, activeJobCount } = useWorkerCapacity(workerId);
+ *   const { isAtCapacity, activeJobCount } = useWorkerCapacity(workerId, scheduledDate);
  */
-export function useWorkerCapacity(workerId: string | null) {
+export function useWorkerCapacity(workerId: string | null, scheduledDate?: string | null) {
   const bookings = useBookingStore((s) => s.bookings);
 
   if (!workerId) {
@@ -27,24 +28,29 @@ export function useWorkerCapacity(workerId: string | null) {
     };
   }
 
-  // Map workerId to display name where possible for backwards compatibility
-  const workerRecord = workers.find((w) => w.id === workerId);
-  const workerName = workerRecord ? workerRecord.name : null;
+  const activeJobsForWorker = bookings.filter(
+    (b) => b.workerId === workerId && ACTIVE_STATUSES.includes(b.status as string),
+  );
 
-  const activeJobCount = bookings.filter((b) => {
-    const matchesWorker = workerName ? b.worker === workerName : b.worker === workerId;
-    const activeStatuses = ['Accepted', 'Active', 'InProgress', 'QuoteSubmitted', 'QuoteApproved'];
-    return matchesWorker && activeStatuses.includes(b.status as string);
-  }).length;
-
+  const activeJobCount = activeJobsForWorker.length;
   const isAtCapacity = activeJobCount >= MAX_CONCURRENT_JOBS;
+
+  const isUnavailableForDate = Boolean(
+    scheduledDate && activeJobsForWorker.some((b) => b.date === scheduledDate),
+  );
+
+  const reason = isAtCapacity
+    ? 'Worker at capacity'
+    : isUnavailableForDate
+      ? 'Worker already has a job on this date'
+      : undefined;
 
   return {
     isAtCapacity,
     activeJobCount,
     maxJobs: MAX_CONCURRENT_JOBS,
-    canAcceptJob: !isAtCapacity,
-    isUnavailableForDate: false,
-    reason: isAtCapacity ? 'Worker at capacity' : undefined,
+    canAcceptJob: !isAtCapacity && !isUnavailableForDate,
+    isUnavailableForDate,
+    reason,
   };
 }

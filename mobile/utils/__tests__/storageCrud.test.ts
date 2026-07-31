@@ -25,6 +25,7 @@ describe("CRUD storage helpers", () => {
       label: "Home",
       address: "123 Main Street",
     });
+    if (!created) throw new Error("expected address to be created");
 
     expect(created.id).toBeDefined();
     expect(created.label).toBe("Home");
@@ -49,6 +50,7 @@ describe("CRUD storage helpers", () => {
       expiryDate: "2026-01-01",
       status: "Pending",
     });
+    if (!created) throw new Error("expected certification to be created");
 
     expect(created.id).toBeDefined();
 

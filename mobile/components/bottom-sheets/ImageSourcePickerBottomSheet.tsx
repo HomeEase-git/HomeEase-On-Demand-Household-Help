@@ -1,7 +1,8 @@
 import React from "react";
-import { View, Text, Pressable, Alert } from "react-native";
+import { View, Text, Pressable } from "react-native";
 import * as ImagePicker from "expo-image-picker";
 import BottomSheetWrapper, { BottomSheetHandle } from "./BottomSheetWrapper";
+import { useAlertModal } from "../../contexts/AlertModalContext";
 
 type Props = {
   innerRef: React.RefObject<BottomSheetHandle | null>;
@@ -13,6 +14,7 @@ export const ImageSourcePickerBottomSheet: React.FC<Props> = ({
   onSelect,
 }) => {
   const [loading, setLoading] = React.useState(false);
+  const alertModal = useAlertModal();
 
   const openCamera = async () => {
     if (loading) return;
@@ -20,7 +22,7 @@ export const ImageSourcePickerBottomSheet: React.FC<Props> = ({
       setLoading(true);
       const { status } = await ImagePicker.requestCameraPermissionsAsync();
       if (status !== "granted") {
-        Alert.alert(
+        alertModal.warning(
           "Permission required",
           "Camera access is needed to take a photo.",
         );
@@ -35,7 +37,7 @@ export const ImageSourcePickerBottomSheet: React.FC<Props> = ({
         innerRef.current?.close();
       }
     } catch (error) {
-      Alert.alert(
+      alertModal.error(
         "Error",
         "Something went wrong while opening the camera. Please try again.",
       );
@@ -57,7 +59,7 @@ export const ImageSourcePickerBottomSheet: React.FC<Props> = ({
         innerRef.current?.close();
       }
     } catch (error) {
-      Alert.alert(
+      alertModal.error(
         "Error",
         "Something went wrong while opening your gallery. Please try again.",
       );

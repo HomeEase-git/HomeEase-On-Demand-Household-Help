@@ -5,6 +5,7 @@ import { useRouter } from "expo-router";
 import ConversationItem from "../../../components/list-items/ConversationItem";
 import NotificationItem from "../../../components/list-items/NotificationItem";
 import EmptyState from "../../../components/feedback/EmptyState";
+import { EmptyInboxIllustration } from "../../../components/illustrations/Illustrations";
 import { useNotificationStore, notificationCategory } from "../../../store/notificationStore";
 import { useMessageStore } from "../../../store/messageStore";
 import { formatDate } from "../../../utils/formatDate";
@@ -120,6 +121,7 @@ export default function InboxScreen() {
           />
         ) : (
           <EmptyState
+            illustration={<EmptyInboxIllustration />}
             title="No conversations yet"
             subtitle="Start a new chat from your bookings or worker profiles."
           />
@@ -151,6 +153,7 @@ export default function InboxScreen() {
         />
       ) : (
         <EmptyState
+          icon="notifications-outline"
           title="No notifications yet"
           subtitle="You'll see booking, payment, and message updates here."
         />

@@ -1,9 +1,8 @@
 import React, { useRef } from "react";
-import { View, Text, ScrollView, Pressable, Image, Alert, ActivityIndicator } from "react-native";
+import { View, Text, ScrollView, Pressable, Image, ActivityIndicator } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { Ionicons } from "@expo/vector-icons";
+import { AppIcon as Ionicons } from "../../../components/icons/AppIcon";
 import { useRouter } from "expo-router";
-import VerificationBanner from "../../../components/ui/VerificationBanner";
 import ImageSourcePickerBottomSheet from "../../../components/bottom-sheets/ImageSourcePickerBottomSheet";
 import LogoutConfirmationModal from "../../../components/modals/LogoutConfirmationModal";
 import { useState } from "react";
@@ -11,6 +10,7 @@ import type { BottomSheetHandle } from "../../../components/bottom-sheets/Bottom
 import { useAuthStore } from "../../../store/authStore";
 import { colors, cardShadow } from "../../../constants";
 import { uploadAvatar, updateUserProfile } from "../../../services/api";
+import { useAlertModal } from "../../../contexts/AlertModalContext";
 
 const MENU_GROUPS = [
   [
@@ -40,6 +40,7 @@ const MENU_GROUPS = [
 
 export default function ClientProfileScreen() {
   const router = useRouter();
+  const alertModal = useAlertModal();
   const imageSheetRef = useRef<BottomSheetHandle | null>(null);
   const [logoutVisible, setLogoutVisible] = useState(false);
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
@@ -59,7 +60,7 @@ export default function ClientProfileScreen() {
       setUser({ ...user, avatar: updated.avatar });
     } catch (error) {
       console.error("Avatar upload error", error);
-      Alert.alert(
+      alertModal.error(
         "Upload failed",
         "We could not update your profile picture. Please try again.",
       );
@@ -119,13 +120,6 @@ export default function ClientProfileScreen() {
               </Pressable>
             </View>
           </View>
-        </View>
-
-        <View className="mx-4 mt-3">
-          <VerificationBanner
-            isVerified={false}
-            onVerifyPress={() => router.push("/(kyc)/landing")}
-          />
         </View>
 
         {MENU_GROUPS.map((group, gi) => (

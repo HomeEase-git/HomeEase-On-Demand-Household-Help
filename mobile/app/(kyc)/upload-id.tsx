@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from "react";
-import { View, Text, ScrollView, Alert } from "react-native";
+import { View, Text, ScrollView } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import * as ImagePicker from "expo-image-picker";
@@ -15,6 +15,7 @@ import {
   isDocumentTypeAllowed,
   type KycDocumentKey,
 } from "../../utils/kycDocumentConfig";
+import { useAlertModal } from "../../contexts/AlertModalContext";
 
 // This screen only ever collects the government ID (front + back).
 // Selfie, clearances, resume, and certifications each have their own
@@ -40,6 +41,7 @@ const emptyDocument: UploadedDocument = {
 
 export default function UploadIdScreen() {
   const router = useRouter();
+  const alertModal = useAlertModal();
   const user = useAuthStore((s) => s.user);
   const isWorker = user?.role === "worker";
   const [documents, setDocuments] = useState(initialDocuments);
@@ -61,7 +63,7 @@ export default function UploadIdScreen() {
     name: string,
   ) => {
     if (!isDocumentTypeAllowed(key, mimeType)) {
-      Alert.alert(
+      alertModal.error(
         "Invalid file type",
         "Government ID images must be JPG, JPEG, or PNG.",
       );
@@ -75,10 +77,10 @@ export default function UploadIdScreen() {
         ...prev,
         [key]: { uri, mimeType, name },
       }));
-      Alert.alert("Success", "Government ID uploaded successfully.");
+      alertModal.success("Success", "Government ID uploaded successfully.");
     } catch (error) {
       console.error("KYC document submit error", error);
-      Alert.alert(
+      alertModal.error(
         "Upload failed",
         "We could not submit your ID document. Please try again.",
       );
@@ -90,7 +92,7 @@ export default function UploadIdScreen() {
     try {
       const { status } = await ImagePicker.requestCameraPermissionsAsync();
       if (status !== "granted") {
-        Alert.alert(
+        alertModal.warning(
           "Camera permission required",
           "Please allow camera access to take a photo of your ID.",
         );
@@ -115,7 +117,7 @@ export default function UploadIdScreen() {
       );
     } catch (error) {
       console.error("KYC ID camera error", error);
-      Alert.alert(
+      alertModal.error(
         "Upload failed",
         "We could not capture that photo. Please try again.",
       );
@@ -130,7 +132,7 @@ export default function UploadIdScreen() {
       const { status } =
         await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (status !== "granted") {
-        Alert.alert(
+        alertModal.warning(
           "Photo access required",
           "Please allow photo access to upload your ID.",
         );
@@ -156,7 +158,7 @@ export default function UploadIdScreen() {
       );
     } catch (error) {
       console.error("KYC ID gallery error", error);
-      Alert.alert(
+      alertModal.error(
         "Upload failed",
         "We could not process that file. Please try again.",
       );
@@ -190,7 +192,7 @@ export default function UploadIdScreen() {
       );
     } catch (error) {
       console.error("KYC ID file picker error", error);
-      Alert.alert(
+      alertModal.error(
         "Upload failed",
         "We could not process that file. Please try again.",
       );
@@ -200,7 +202,7 @@ export default function UploadIdScreen() {
   };
 
   const handleUpload = (key: KycDocumentKey) => {
-    Alert.alert(
+    alertModal.info(
       documentRequirements[key].label,
       "Choose how you'd like to add this document.",
       [

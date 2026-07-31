@@ -1,12 +1,12 @@
 import React, { useCallback, useState } from "react";
-import { View, Text, ScrollView, Linking, ActivityIndicator } from "react-native";
+import { View, Text, Image, ScrollView, Linking } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { useFocusEffect } from "@react-navigation/native";
-import { useLocalSearchParams } from "expo-router";
+import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import ScreenHeader from "../../../components/ui/ScreenHeader";
 import StatusBadge from "../../../components/ui/StatusBadge";
-import MapPlaceholder from "../../../components/ui/MapPlaceholder";
+import AddressMap from "../../../components/ui/AddressMap";
 import PrimaryButton from "../../../components/ui/PrimaryButton";
+import { Skeleton } from "../../../components/ui/Skeleton";
 import { API_STATUS_MAP } from "../../../store/bookingStore";
 import * as api from "../../../services/api";
 
@@ -21,9 +21,11 @@ type BookingDetail = {
   finalPrice: number | null;
   payment: { methodType: string } | null;
   notes: string | null;
+  completionPhotoUrl?: string | null;
 };
 
 export default function RecordDetailScreen() {
+  const router = useRouter();
   const { recordId } = useLocalSearchParams<{ recordId: string }>();
   const [record, setRecord] = useState<BookingDetail | null>(null);
   const [loading, setLoading] = useState(true);
@@ -51,9 +53,21 @@ export default function RecordDetailScreen() {
     return (
       <SafeAreaView className="flex-1 bg-white">
         <ScreenHeader title="Job Record" showBack />
-        <View className="flex-1 items-center justify-center">
-          <ActivityIndicator size="small" />
-        </View>
+        <ScrollView contentContainerStyle={{ padding: 16 }}>
+          <View className="items-center mb-4">
+            <Skeleton width={90} height={22} borderRadius={11} marginBottom={0} />
+          </View>
+          <View className="bg-card rounded-2xl p-4 mb-3">
+            <Skeleton width="60%" height={18} marginBottom={8} />
+            <Skeleton width="40%" height={12} marginBottom={16} />
+            {Array.from({ length: 4 }).map((_, i) => (
+              <View key={i} className="flex-row justify-between mb-2">
+                <Skeleton width="20%" height={10} marginBottom={0} />
+                <Skeleton width="35%" height={12} marginBottom={0} />
+              </View>
+            ))}
+          </View>
+        </ScrollView>
       </SafeAreaView>
     );
   }
@@ -100,23 +114,23 @@ export default function RecordDetailScreen() {
 
           <View className="flex-row justify-between mb-2">
             <Text className="text-text-muted text-xs">Client</Text>
-            <Text className="text-brand text-sm">{record.client.fullName}</Text>
+            <Text className="text-primary text-sm">{record.client.fullName}</Text>
           </View>
           <View className="flex-row justify-between mb-2">
             <Text className="text-text-muted text-xs">Address</Text>
-            <Text className="text-brand text-sm text-right flex-1 ml-4">
+            <Text className="text-primary text-sm text-right flex-1 ml-4">
               {record.location || "—"}
             </Text>
           </View>
           {record.payment ? (
             <View className="flex-row justify-between mb-2">
               <Text className="text-text-muted text-xs">Payment</Text>
-              <Text className="text-brand text-sm">{record.payment.methodType}</Text>
+              <Text className="text-primary text-sm">{record.payment.methodType}</Text>
             </View>
           ) : null}
           <View className="flex-row justify-between">
             <Text className="text-text-muted text-xs">Earnings</Text>
-            <Text className="text-brand text-sm">₱{amount}.00</Text>
+            <Text className="text-primary text-sm">₱{amount}.00</Text>
           </View>
         </View>
 
@@ -130,11 +144,24 @@ export default function RecordDetailScreen() {
         {record.location ? (
           <>
             <View className="mb-3">
-              <MapPlaceholder height="h-56" label="Navigate to Job" />
+              <AddressMap height="h-56" address={record.location} />
             </View>
             <PrimaryButton label="Open in Maps" onPress={openMap} />
           </>
         ) : null}
+
+        {record.completionPhotoUrl && (
+          <View className="bg-card rounded-2xl p-4 mb-3">
+            <Text className="text-text-primary font-bold mb-2">
+              Completion Photo
+            </Text>
+            <Image
+              source={{ uri: record.completionPhotoUrl }}
+              style={{ width: "100%", height: 180, borderRadius: 16 }}
+              resizeMode="cover"
+            />
+          </View>
+        )}
 
         {(isCompleted || isCancelled) && (
           <View className="bg-card rounded-2xl p-4 mt-4">
@@ -144,6 +171,16 @@ export default function RecordDetailScreen() {
                 ? "This job was completed successfully."
                 : "This booking was cancelled."}
             </Text>
+          </View>
+        )}
+
+        {!isCompleted && !isCancelled && (
+          <View className="mt-4">
+            <PrimaryButton
+              label="Manage Job"
+              fullWidth
+              onPress={() => router.push(`/(worker)/requests/job/${record.id}`)}
+            />
           </View>
         )}
       </ScrollView>

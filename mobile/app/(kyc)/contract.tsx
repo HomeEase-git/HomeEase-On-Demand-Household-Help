@@ -1,14 +1,16 @@
 import React, { useRef, useState } from "react";
-import { View, Text, ScrollView, Pressable, Alert } from "react-native";
+import { View, Text, ScrollView, Pressable } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import ScreenHeader from "../../components/ui/ScreenHeader";
 import PrimaryButton from "../../components/ui/PrimaryButton";
 import { colors } from "../../constants";
 import { useAuthStore } from "../../store/authStore";
+import { useAlertModal } from "../../contexts/AlertModalContext";
 
 export default function ContractScreen() {
   const router = useRouter();
+  const alertModal = useAlertModal();
   const user = useAuthStore((s) => s.user);
   const isWorker = user?.role === "worker";
   const scrollViewRef = useRef<ScrollView>(null);
@@ -24,7 +26,7 @@ export default function ContractScreen() {
 
   const toggleAcceptance = () => {
     if (!hasScrolled) {
-      Alert.alert(
+      alertModal.warning(
         "Please Read",
         "Please read the entire contract before accepting.",
       );

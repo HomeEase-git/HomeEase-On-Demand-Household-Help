@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { View, Text, ScrollView, Alert } from "react-native";
+import { View, Text, ScrollView } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
@@ -9,16 +9,20 @@ import InputField from "../../../components/ui/InputField";
 import DangerButton from "../../../components/ui/DangerButton";
 import OutlinedButton from "../../../components/ui/OutlinedButton";
 import GenericConfirmationModal from "../../../components/modals/GenericConfirmationModal";
+import GenericSuccessModal from "../../../components/modals/GenericSuccessModal";
 import { useAuthStore } from "../../../store/authStore";
 import { colors } from "../../../constants";
+import { useToastContext } from "../../../contexts/ToastContext";
 import * as api from "../../../services/api";
 
 export default function DeleteAccountScreen() {
   const router = useRouter();
   const logout = useAuthStore((s) => s.logout);
+  const toast = useToastContext();
   const [confirmText, setConfirmText] = useState("");
   const [password, setPassword] = useState("");
   const [modalVisible, setModalVisible] = useState(false);
+  const [successVisible, setSuccessVisible] = useState(false);
   const [deleting, setDeleting] = useState(false);
 
   const canDelete = confirmText === "DELETE" && password.length > 0;
@@ -33,20 +37,21 @@ export default function DeleteAccountScreen() {
     try {
       await api.deleteAccount(password);
       logout();
-      Alert.alert(
-        "Account deleted",
-        "Your account has been permanently deleted",
-      );
-      router.replace("/landing");
+      setSuccessVisible(true);
     } catch (error) {
       const message =
         isAxiosError(error) && error.response?.status === 401
           ? "Password is incorrect"
           : "Failed to delete account";
-      Alert.alert("Error", message);
+      toast.error(message);
     } finally {
       setDeleting(false);
     }
+  };
+
+  const handleSuccessClose = () => {
+    setSuccessVisible(false);
+    router.replace("/landing");
   };
 
   return (
@@ -101,6 +106,11 @@ export default function DeleteAccountScreen() {
         cancelLabel="Cancel"
         onConfirm={onConfirmDelete}
         onCancel={() => setModalVisible(false)}
+      />
+      <GenericSuccessModal
+        visible={successVisible}
+        title="Your account has been permanently deleted"
+        onClose={handleSuccessClose}
       />
     </SafeAreaView>
   );

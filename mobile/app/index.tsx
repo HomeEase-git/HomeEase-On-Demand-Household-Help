@@ -1,6 +1,6 @@
 import React, { useEffect } from "react";
 import { View, Text, Image } from "react-native";
-import { Ionicons } from "@expo/vector-icons";
+import { AppIcon as Ionicons } from "../components/icons/AppIcon";
 import { useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 

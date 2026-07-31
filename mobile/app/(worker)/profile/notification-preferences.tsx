@@ -1,14 +1,16 @@
 import React, { useEffect, useState } from "react";
-import { View, Text, ScrollView, Switch, Alert } from "react-native";
+import { View, Text, ScrollView, Switch } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import ScreenHeader from "../../../components/ui/ScreenHeader";
 import PrimaryButton from "../../../components/ui/PrimaryButton";
 import { colors } from "../../../constants";
 import * as api from "../../../services/api";
+import { useAlertModal } from "../../../contexts/AlertModalContext";
 
 export default function WorkerNotificationPreferencesScreen() {
   const router = useRouter();
+  const alertModal = useAlertModal();
   const [booking, setBooking] = useState(true);
   const [messages, setMessages] = useState(true);
   const [promos, setPromos] = useState(false);
@@ -43,11 +45,12 @@ export default function WorkerNotificationPreferencesScreen() {
         promotions: promos,
         systemNotifications: system,
       });
-      Alert.alert("Saved", "Preferences updated");
-      router.back();
+      alertModal.success("Saved", "Preferences updated", [
+        { text: "OK", onPress: () => router.back() },
+      ]);
     } catch (error) {
       console.error("Save notification preferences error:", error);
-      Alert.alert("Error", "Unable to save preferences right now.");
+      alertModal.error("Error", "Unable to save preferences right now.");
     } finally {
       setSaving(false);
     }
@@ -68,7 +71,7 @@ export default function WorkerNotificationPreferencesScreen() {
               key={item.label}
               className="flex-row justify-between items-center py-4 px-4 border-b border-divider last:border-0"
             >
-              <Text className="text-brand">{item.label}</Text>
+              <Text className="text-primary">{item.label}</Text>
               <Switch
                 value={item.value}
                 onValueChange={item.set}

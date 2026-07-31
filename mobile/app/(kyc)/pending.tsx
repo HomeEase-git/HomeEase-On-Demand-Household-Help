@@ -1,11 +1,10 @@
 import React from "react";
 import { View, Text } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import OutlinedButton from "../../components/ui/OutlinedButton";
 import { useAuthStore } from "../../store/authStore";
-import { colors } from "../../constants";
+import { KycPendingIllustration } from "../../components/illustrations/Illustrations";
 
 export default function KycPendingScreen() {
   const router = useRouter();
@@ -15,9 +14,8 @@ export default function KycPendingScreen() {
 
   return (
     <SafeAreaView className="flex-1 bg-white items-center justify-center px-8">
-      {/* TODO: Replace with hourglass/review illustration */}
-      <View className="w-32 h-32 bg-warning/20 rounded-full items-center justify-center mb-8">
-        <Ionicons name="hourglass-outline" size={80} color={colors.warning} />
+      <View className="mb-8">
+        <KycPendingIllustration />
       </View>
       <Text className="text-text-primary text-2xl font-bold text-center">
         Verification in Progress

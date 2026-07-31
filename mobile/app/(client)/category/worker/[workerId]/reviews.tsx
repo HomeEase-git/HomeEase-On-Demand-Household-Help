@@ -1,10 +1,11 @@
 import React, { useEffect, useState } from "react";
-import { View, Text, FlatList, ActivityIndicator } from "react-native";
+import { View, Text, FlatList } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useLocalSearchParams } from "expo-router";
 import ScreenHeader from "../../../../../components/ui/ScreenHeader";
 import StarRating from "../../../../../components/ui/StarRating";
 import ReviewCard from "../../../../../components/cards/ReviewCard";
+import { SkeletonList, ReviewCardSkeleton } from "../../../../../components/ui/Skeleton";
 import * as api from "../../../../../services/api";
 import type { WorkerReview } from "../../../../../types/api.types";
 
@@ -83,7 +84,7 @@ export default function WorkerReviewsScreen() {
           </View>
         </View>
         {loading ? (
-          <ActivityIndicator size="small" />
+          <SkeletonList count={3} SkeletonComponent={ReviewCardSkeleton} />
         ) : reviews.length === 0 ? (
           <Text className="text-text-secondary text-sm text-center py-6">
             No reviews yet

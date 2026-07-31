@@ -1,7 +1,6 @@
 import React, { useState, useRef } from "react";
 import { View, Text, ScrollView, Pressable, TextInput } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { Ionicons } from "@expo/vector-icons";
 import { useRouter, useLocalSearchParams } from "expo-router";
 import { InputField } from "../../components/ui/InputField";
 import { PrimaryButton } from "../../components/ui/PrimaryButton";
@@ -146,7 +145,7 @@ export default function SignUpScreen() {
         });
       }
     } catch (err: any) {
-      const errorMsg = err?.message || "An error occurred";
+      const errorMsg = err?.message || "Something went wrong. Please try again.";
       toast.error(errorMsg);
     }
   };
@@ -170,109 +169,74 @@ export default function SignUpScreen() {
         </View>
 
         {/* Full Name */}
-        <View>
-          <InputField
-            ref={fullNameRef}
-            label="Full Name"
-            value={fullName}
-            onChangeText={handleNameChange}
-            placeholder="Enter your full name"
-            returnKeyType="next"
-            onSubmitEditing={() => emailRef.current?.focus()}
-            editable={!loading}
-          />
-          {nameError ? (
-            <View className="flex-row items-center gap-1 mt-1 mb-2">
-              <Ionicons name="alert-circle" size={14} color="#EF4444" />
-              <Text className="text-error text-xs">{nameError}</Text>
-            </View>
-          ) : null}
-        </View>
+        <InputField
+          ref={fullNameRef}
+          label="Full Name"
+          value={fullName}
+          onChangeText={handleNameChange}
+          placeholder="Enter your full name"
+          returnKeyType="next"
+          onSubmitEditing={() => emailRef.current?.focus()}
+          editable={!loading}
+          error={nameError}
+        />
 
         {/* Email */}
-        <View>
-          <InputField
-            ref={emailRef}
-            label="Email"
-            value={email}
-            onChangeText={handleEmailChange}
-            placeholder="Enter your email"
-            keyboardType="email-address"
-            autoCapitalize="none"
-            returnKeyType="next"
-            onSubmitEditing={() => phoneRef.current?.focus()}
-            editable={!loading}
-          />
-          {emailError ? (
-            <View className="flex-row items-center gap-1 mt-1 mb-2">
-              <Ionicons name="alert-circle" size={14} color="#EF4444" />
-              <Text className="text-error text-xs">{emailError}</Text>
-            </View>
-          ) : null}
-        </View>
+        <InputField
+          ref={emailRef}
+          label="Email"
+          value={email}
+          onChangeText={handleEmailChange}
+          placeholder="Enter your email"
+          keyboardType="email-address"
+          autoCapitalize="none"
+          returnKeyType="next"
+          onSubmitEditing={() => phoneRef.current?.focus()}
+          editable={!loading}
+          error={emailError}
+        />
 
         {/* Phone */}
-        <View>
-          <InputField
-            ref={phoneRef}
-            label="Phone"
-            value={phone}
-            onChangeText={handlePhoneChange}
-            placeholder="Enter your phone number"
-            keyboardType="phone-pad"
-            returnKeyType="next"
-            onSubmitEditing={() => passwordRef.current?.focus()}
-            editable={!loading}
-          />
-          {phoneError ? (
-            <View className="flex-row items-center gap-1 mt-1 mb-2">
-              <Ionicons name="alert-circle" size={14} color="#EF4444" />
-              <Text className="text-error text-xs">{phoneError}</Text>
-            </View>
-          ) : null}
-        </View>
+        <InputField
+          ref={phoneRef}
+          label="Phone"
+          value={phone}
+          onChangeText={handlePhoneChange}
+          placeholder="Enter your phone number"
+          keyboardType="phone-pad"
+          returnKeyType="next"
+          onSubmitEditing={() => passwordRef.current?.focus()}
+          editable={!loading}
+          error={phoneError}
+        />
 
         {/* Password */}
-        <View className="relative">
-          <InputField
-            ref={passwordRef}
-            label="Password"
-            value={password}
-            onChangeText={handlePasswordChange}
-            placeholder="Create a password"
-            secureTextEntry={!showPassword}
-            returnKeyType="next"
-            onSubmitEditing={() => confirmPasswordRef.current?.focus()}
-            editable={!loading}
-          />
-          {passwordError ? (
-            <View className="flex-row items-center gap-1 mt-1 mb-2">
-              <Ionicons name="alert-circle" size={14} color="#EF4444" />
-              <Text className="text-error text-xs">{passwordError}</Text>
-            </View>
-          ) : null}
-        </View>
+        <InputField
+          ref={passwordRef}
+          label="Password"
+          value={password}
+          onChangeText={handlePasswordChange}
+          placeholder="Create a password"
+          secureTextEntry={!showPassword}
+          returnKeyType="next"
+          onSubmitEditing={() => confirmPasswordRef.current?.focus()}
+          editable={!loading}
+          error={passwordError}
+        />
 
         {/* Confirm Password */}
-        <View className="relative mb-4">
-          <InputField
-            ref={confirmPasswordRef}
-            label="Confirm Password"
-            value={confirmPassword}
-            onChangeText={handleConfirmPasswordChange}
-            placeholder="Confirm your password"
-            secureTextEntry={!showConfirmPassword}
-            returnKeyType="done"
-            onSubmitEditing={handleSignUp}
-            editable={!loading}
-          />
-          {confirmPasswordError ? (
-            <View className="flex-row items-center gap-1 mt-1 mb-2">
-              <Ionicons name="alert-circle" size={14} color="#EF4444" />
-              <Text className="text-error text-xs">{confirmPasswordError}</Text>
-            </View>
-          ) : null}
-        </View>
+        <InputField
+          ref={confirmPasswordRef}
+          label="Confirm Password"
+          value={confirmPassword}
+          onChangeText={handleConfirmPasswordChange}
+          placeholder="Confirm your password"
+          secureTextEntry={!showConfirmPassword}
+          returnKeyType="done"
+          onSubmitEditing={handleSignUp}
+          editable={!loading}
+          error={confirmPasswordError}
+        />
 
         {/* Terms Checkbox */}
         <Pressable

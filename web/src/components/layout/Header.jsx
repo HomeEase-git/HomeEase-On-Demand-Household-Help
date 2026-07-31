@@ -43,7 +43,7 @@ export default function Header() {
         </button>
         <div className="user-menu">
           <div className="avatar">{getInitials(user?.name)}</div>
-          <span className="user-email">{user?.email || 'admin@homeeaseadmin.com'}</span>
+          <span className="user-email">{user?.email}</span>
           <i className="fas fa-chevron-down" />
         </div>
       </div>

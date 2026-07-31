@@ -1,5 +1,6 @@
-import * as Notifications from 'expo-notifications';
+import type * as Notifications from 'expo-notifications';
 import Constants from 'expo-constants';
+import { isRunningInExpoGo } from 'expo';
 
 /**
  * Push Notification Types
@@ -21,16 +22,37 @@ export type PushNotificationToken = {
 };
 
 /**
+ * expo-notifications registers a push-token listener as soon as the module is
+ * imported, which logs a warning/error whenever the app is running in Expo Go
+ * (remote push was removed from Expo Go in SDK 53). Loading the module lazily,
+ * and only outside Expo Go, keeps that log out of the Expo Go dev workflow
+ * while leaving full functionality intact in development builds/production.
+ */
+let notificationsModulePromise: Promise<typeof Notifications | null> | null = null;
+
+function getNotificationsModule(): Promise<typeof Notifications | null> {
+  if (!notificationsModulePromise) {
+    notificationsModulePromise = isRunningInExpoGo()
+      ? Promise.resolve(null)
+      : import('expo-notifications');
+  }
+  return notificationsModulePromise;
+}
+
+/**
  * NotificationService
- * 
+ *
  * Handles Firebase Cloud Messaging setup and local notification management.
- * 
+ *
  * Features:
  * - Request user permissions
  * - Obtain and store push token
  * - Handle local notifications (foreground)
  * - Setup deep linking for notification taps
  * - Log and debug notification events
+ *
+ * No-ops when running in Expo Go — use a development build to test push
+ * notifications and other native-only behavior.
  */
 class NotificationService {
   private token: PushNotificationToken | null = null;
@@ -41,13 +63,19 @@ class NotificationService {
 
   /**
    * Initialize notifications service
-   * 
+   *
    * Call this once on app startup
    */
   async initialize(): Promise<void> {
     try {
+      const Notifications = await getNotificationsModule();
+      if (!Notifications) {
+        console.log('[Notifications] Skipped in Expo Go — use a development build to test notifications.');
+        return;
+      }
+
       // Configure notification handler
-      this.setupNotificationHandlers();
+      this.setupNotificationHandlers(Notifications);
 
       // Check permissions
       const { granted } = await Notifications.getPermissionsAsync();
@@ -67,11 +95,14 @@ class NotificationService {
 
   /**
    * Request notification permissions from user
-   * 
+   *
    * @returns true if permission granted
    */
   async requestPermissions(): Promise<boolean> {
     try {
+      const Notifications = await getNotificationsModule();
+      if (!Notifications) return false;
+
       const { granted } = await Notifications.requestPermissionsAsync({
         ios: {
           allowAlert: true,
@@ -99,12 +130,15 @@ class NotificationService {
 
   /**
    * Obtain and store push token
-   * 
+   *
    * Token should be sent to backend when user logs in
    * Use notificationService.getToken() to retrieve it
    */
   private async obtainPushToken(): Promise<void> {
     try {
+      const Notifications = await getNotificationsModule();
+      if (!Notifications) return;
+
       // Get project ID for Firebase
       const projectId =
         Constants.expoConfig?.extra?.eas?.projectId || Constants.projectId;
@@ -144,7 +178,7 @@ class NotificationService {
 
   /**
    * Send token to backend (called after backend endpoint is ready)
-   * 
+   *
    * @param token - Push token to send
    */
   async sendTokenToBackend(token: PushNotificationToken): Promise<void> {
@@ -160,10 +194,10 @@ class NotificationService {
 
   /**
    * Setup notification handlers
-   * 
+   *
    * Configures default notification behavior
    */
-  private setupNotificationHandlers(): void {
+  private setupNotificationHandlers(Notifications: typeof import('expo-notifications')): void {
     // Set default notification behavior
     Notifications.setNotificationHandler({
       handleNotification: async (notification) => {
@@ -189,12 +223,21 @@ class NotificationService {
   onNotificationReceived(
     callback: (notification: Notifications.Notification) => void
   ): () => void {
-    const subscription = Notifications.addNotificationReceivedListener((notification) => {
-      console.log('[Notifications] Foreground notification:', notification);
-      callback(notification);
+    let unsubscribed = false;
+    let subscription: { remove: () => void } | null = null;
+
+    getNotificationsModule().then((Notifications) => {
+      if (!Notifications || unsubscribed) return;
+      subscription = Notifications.addNotificationReceivedListener((notification) => {
+        console.log('[Notifications] Foreground notification:', notification);
+        callback(notification);
+      });
     });
 
-    return () => subscription.remove();
+    return () => {
+      unsubscribed = true;
+      subscription?.remove();
+    };
   }
 
   /**
@@ -203,13 +246,21 @@ class NotificationService {
   onNotificationInteraction(
     callback: (notification: Notifications.Notification) => void
   ): () => void {
-    const subscription =
-      Notifications.addNotificationResponseReceivedListener((response) => {
+    let unsubscribed = false;
+    let subscription: { remove: () => void } | null = null;
+
+    getNotificationsModule().then((Notifications) => {
+      if (!Notifications || unsubscribed) return;
+      subscription = Notifications.addNotificationResponseReceivedListener((response) => {
         console.log('[Notifications] Notification interaction:', response);
         callback(response.notification);
       });
+    });
 
-    return () => subscription.remove();
+    return () => {
+      unsubscribed = true;
+      subscription?.remove();
+    };
   }
 
   /**
@@ -217,6 +268,9 @@ class NotificationService {
    */
   async sendLocalNotification(payload: NotificationPayload): Promise<void> {
     try {
+      const Notifications = await getNotificationsModule();
+      if (!Notifications) return;
+
       await Notifications.scheduleNotificationAsync({
         content: {
           title: payload.title,
@@ -242,6 +296,9 @@ class NotificationService {
    */
   async clearAllNotifications(): Promise<void> {
     try {
+      const Notifications = await getNotificationsModule();
+      if (!Notifications) return;
+
       await Notifications.dismissAllNotificationsAsync();
       console.log('[Notifications] All notifications cleared');
     } catch (error) {
@@ -254,6 +311,9 @@ class NotificationService {
    */
   async getNotificationBadgeCount(): Promise<number> {
     try {
+      const Notifications = await getNotificationsModule();
+      if (!Notifications) return 0;
+
       const count = await Notifications.getBadgeCountAsync();
       return count || 0;
     } catch (error) {
@@ -267,6 +327,9 @@ class NotificationService {
    */
   async setNotificationBadgeCount(count: number): Promise<void> {
     try {
+      const Notifications = await getNotificationsModule();
+      if (!Notifications) return;
+
       await Notifications.setBadgeCountAsync(count);
       console.log(`[Notifications] Badge count set to ${count}`);
     } catch (error) {
@@ -289,7 +352,7 @@ export const notificationService = new NotificationService();
 
 /**
  * Initialize notification service on app startup
- * 
+ *
  * Usage in app._layout.tsx:
  *   useEffect(() => {
  *     notificationService.initialize();

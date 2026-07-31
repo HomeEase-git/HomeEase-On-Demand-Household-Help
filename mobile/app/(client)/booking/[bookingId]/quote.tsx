@@ -1,7 +1,7 @@
 import React, { useState } from "react";
-import { View, Text, ScrollView, Alert, Pressable } from "react-native";
+import { View, Text, ScrollView, Pressable } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { Ionicons } from "@expo/vector-icons";
+import { AppIcon as Ionicons } from "../../../../components/icons/AppIcon";
 import { useRouter, useLocalSearchParams } from "expo-router";
 import ScreenHeader from "../../../../components/ui/ScreenHeader";
 import InputField from "../../../../components/ui/InputField";
@@ -11,9 +11,11 @@ import OutlinedButton from "../../../../components/ui/OutlinedButton";
 import { useBookingStore } from "../../../../store/bookingStore";
 import { approveQuote as apiApproveQuote, disputeQuote as apiDisputeQuote } from "../../../../services/api";
 import { colors } from "../../../../constants";
+import { useAlertModal } from "../../../../contexts/AlertModalContext";
 
 export default function QuoteReviewScreen() {
   const router = useRouter();
+  const alertModal = useAlertModal();
   const { bookingId } = useLocalSearchParams<{ bookingId: string }>();
   const { bookings, approveQuote, disputeQuote } = useBookingStore();
 
@@ -44,57 +46,55 @@ export default function QuoteReviewScreen() {
     booking.status === "QuoteApproved" || booking.status === "Disputed";
 
   const handleApprove = async () => {
-    Alert.alert(
+    alertModal.confirm(
       "Approve Quote?",
       `You are agreeing to pay ₱${quote.totalAmount.toFixed(2)} upon service completion.`,
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Approve",
-          onPress: async () => {
-            setLoading(true);
-            try {
-              await apiApproveQuote(booking.id);
-              approveQuote(booking.id);
-              Alert.alert(
-                "Quote Approved",
-                "The worker has been notified. They will proceed with the service.",
-                [
-                  {
-                    text: "OK",
-                    onPress: () => router.back(),
-                  },
-                ],
-              );
-            } catch (error) {
-              console.error("Approve quote error:", error);
-              Alert.alert("Error", "Failed to approve quote. Please try again.");
-            } finally {
-              setLoading(false);
-            }
-          },
+      {
+        confirmText: "Approve",
+        cancelText: "Cancel",
+        onConfirm: async () => {
+          setLoading(true);
+          try {
+            await apiApproveQuote(booking.id);
+            approveQuote(booking.id);
+            alertModal.success(
+              "Quote Approved",
+              "The worker has been notified. They will proceed with the service.",
+              [
+                {
+                  text: "OK",
+                  onPress: () => router.back(),
+                },
+              ],
+            );
+          } catch (error) {
+            console.error("Approve quote error:", error);
+            alertModal.error("Error", "Failed to approve quote. Please try again.");
+          } finally {
+            setLoading(false);
+          }
         },
-      ],
+      },
     );
   };
 
   const handleDispute = async () => {
     if (!disputeReason.trim()) {
-      Alert.alert("Error", "Please describe why you are disputing this quote.");
+      alertModal.error("Error", "Please describe why you are disputing this quote.");
       return;
     }
     setLoading(true);
     try {
       await apiDisputeQuote(booking.id, disputeReason);
       disputeQuote(booking.id, disputeReason);
-      Alert.alert(
+      alertModal.success(
         "Dispute Submitted",
         "Our support team will review the quote and contact both parties.",
         [{ text: "OK", onPress: () => router.back() }],
       );
     } catch (error) {
       console.error("Dispute quote error:", error);
-      Alert.alert("Error", "Failed to submit dispute. Please try again.");
+      alertModal.error("Error", "Failed to submit dispute. Please try again.");
     } finally {
       setLoading(false);
     }
@@ -166,16 +166,20 @@ export default function QuoteReviewScreen() {
           </View>
 
           <View className="flex-row justify-between py-2 border-b border-divider">
-            <Text className="text-text-secondary text-sm">Labor</Text>
-            <Text className="text-brand font-semibold">
+            <Text className="text-text-secondary text-sm">
+              Labor (agreed at booking)
+            </Text>
+            <Text className="text-primary font-semibold">
               ₱{quote.laborCost.toFixed(2)}
             </Text>
           </View>
 
           {quote.materialsCost > 0 && (
             <View className="flex-row justify-between py-2 border-b border-divider">
-              <Text className="text-text-secondary text-sm">Materials</Text>
-              <Text className="text-brand font-semibold">
+              <Text className="text-text-secondary text-sm">
+                Additional Costs
+              </Text>
+              <Text className="text-primary font-semibold">
                 ₱{quote.materialsCost.toFixed(2)}
               </Text>
             </View>
@@ -193,7 +197,7 @@ export default function QuoteReviewScreen() {
               <Text className="text-text-secondary text-xs font-semibold mb-1">
                 Worker&apos;s notes
               </Text>
-              <Text className="text-brand text-sm">{quote.notes}</Text>
+              <Text className="text-primary text-sm">{quote.notes}</Text>
             </View>
           ) : null}
         </View>

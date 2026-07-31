@@ -13,6 +13,7 @@ export type BookingStatus =
   | 'QuoteSubmitted'
   | 'QuoteApproved'
   | 'Disputed'
+  | 'PendingCompletion'
   | 'Completed'
   | 'Cancelled';
 
@@ -25,6 +26,7 @@ export const API_STATUS_MAP: Record<string, BookingStatus> = {
   QUOTE_SUBMITTED: 'QuoteSubmitted',
   QUOTE_APPROVED: 'QuoteApproved',
   DISPUTED: 'Disputed',
+  PENDING_COMPLETION: 'PendingCompletion',
   COMPLETED: 'Completed',
   CANCELLED: 'Cancelled',
 };
@@ -59,6 +61,7 @@ export type Booking = {
   time?: string;
   workerId?: string;
   workerPhone?: string;
+  completionPhotoUrl?: string | null;
   category?: string;
   selectedTaskId?: string;
   selectedAddOnIds?: string[];
@@ -80,6 +83,9 @@ export type DraftBooking = {
   selectedTaskId: string | null;
   selectedAddOnIds: string[];
   estimatedPrice: number;
+  // True when the selected task's price is only an estimate until the
+  // worker inspects the job and submits a quote (see utils/pricing.ts).
+  quoteRequired?: boolean;
   // New metadata
   entrySource?: 'worker_profile' | 'new_booking' | 'book_again' | null;
   workerLocked?: boolean;
@@ -88,6 +94,37 @@ export type DraftBooking = {
   lng?: number;
   lastInvalidationReason?: string | null;
 };
+
+export type ApiBookingListItem = {
+  id: string;
+  workerName: string | null;
+  workerId: string | null;
+  workerPhone: string | null;
+  service: string;
+  category?: string;
+  status: string;
+  scheduledDate: string;
+  estimatedPrice: number;
+  finalPrice: number | null;
+  rating: number | null;
+};
+
+// Maps the API's booking-list shape into the store's friendly `Booking` shape.
+// Shared by any screen that hydrates `bookings` from GET /bookings.
+export function mapApiBooking(b: ApiBookingListItem): Booking {
+  return {
+    id: b.id,
+    service: b.service,
+    category: b.category ?? undefined,
+    worker: b.workerName ?? 'Unassigned',
+    workerId: b.workerId ?? undefined,
+    workerPhone: b.workerPhone ?? undefined,
+    date: b.scheduledDate,
+    status: API_STATUS_MAP[b.status] ?? 'Pending',
+    amount: b.finalPrice ?? b.estimatedPrice,
+    rating: b.rating ?? undefined,
+  };
+}
 
 export type BookingState = {
   bookings: Booking[];
@@ -129,6 +166,7 @@ const initialDraft: DraftBooking = {
   selectedTaskId: null,
   selectedAddOnIds: [],
   estimatedPrice: 0,
+  quoteRequired: false,
   entrySource: null,
   workerLocked: false,
   workerName: null,

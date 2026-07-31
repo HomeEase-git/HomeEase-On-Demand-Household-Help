@@ -1,8 +1,9 @@
 import React, { useEffect, useState } from "react";
-import { View, Text, ActivityIndicator } from "react-native";
+import { View, Text } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useLocalSearchParams } from "expo-router";
 import ScreenHeader from "../../../components/ui/ScreenHeader";
+import { Skeleton } from "../../../components/ui/Skeleton";
 import * as api from "../../../services/api";
 
 type TransactionDetail = Awaited<ReturnType<typeof api.getTransactionDetail>>;
@@ -41,8 +42,21 @@ export default function EarningsTransactionScreen() {
     return (
       <SafeAreaView className="flex-1 bg-white">
         <ScreenHeader title="Transaction Details" showBack />
-        <View className="flex-1 items-center justify-center">
-          <ActivityIndicator size="small" />
+        <View className="px-4 py-6">
+          <View className="bg-card rounded-2xl p-6 mb-4 items-center">
+            <Skeleton width="50%" height={32} marginBottom={0} />
+          </View>
+          <View className="bg-card rounded-2xl p-4">
+            {Array.from({ length: 7 }).map((_, i) => (
+              <View
+                key={i}
+                className="flex-row justify-between py-2 border-b border-divider last:border-0"
+              >
+                <Skeleton width="30%" height={12} marginBottom={0} />
+                <Skeleton width="40%" height={12} marginBottom={0} />
+              </View>
+            ))}
+          </View>
         </View>
       </SafeAreaView>
     );
@@ -86,7 +100,7 @@ function Row({ label, value }: { label: string; value: string }) {
   return (
     <View className="flex-row justify-between py-2 border-b border-divider last:border-0">
       <Text className="text-text-secondary text-sm">{label}</Text>
-      <Text className="text-brand font-semibold flex-1 text-right ml-4">{value}</Text>
+      <Text className="text-primary font-semibold flex-1 text-right ml-4">{value}</Text>
     </View>
   );
 }

@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { View, Text, FlatList, Pressable, Alert } from "react-native";
+import { View, Text, FlatList, Pressable } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter, useFocusEffect } from "expo-router";
@@ -8,6 +8,8 @@ import AddressCard from "../../../../components/cards/AddressCard";
 import EmptyState from "../../../../components/feedback/EmptyState";
 import { colors } from "../../../../constants";
 import * as api from "../../../../services/api";
+import { addressStorage } from "../../../../utils/storage";
+import { useAlertModal } from "../../../../contexts/AlertModalContext";
 
 type Address = {
   id: string;
@@ -21,6 +23,7 @@ type Address = {
 
 export default function AddressesScreen() {
   const router = useRouter();
+  const alertModal = useAlertModal();
   const [addresses, setAddresses] = useState<Address[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -31,7 +34,7 @@ export default function AddressesScreen() {
       setAddresses(data);
     } catch (error) {
       console.error("Load addresses error:", error);
-      Alert.alert("Error", "Failed to load addresses");
+      alertModal.error("Error", "Failed to load addresses");
     } finally {
       setLoading(false);
     }
@@ -44,25 +47,23 @@ export default function AddressesScreen() {
   );
 
   const handleDelete = async (id: string) => {
-    Alert.alert(
+    alertModal.confirm(
       "Delete address?",
       "This will remove the address from your saved list.",
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Delete",
-          style: "destructive",
-          onPress: async () => {
-            try {
-              await api.deleteAddress(id);
-              setAddresses((prev) => prev.filter((a) => a.id !== id));
-            } catch (error) {
-              console.error("Delete address error:", error);
-              Alert.alert("Error", "Unable to delete address right now.");
-            }
-          },
+      {
+        confirmText: "Delete",
+        destructive: true,
+        onConfirm: async () => {
+          try {
+            await api.deleteAddress(id);
+            await addressStorage.remove(id);
+            setAddresses((prev) => prev.filter((a) => a.id !== id));
+          } catch (error) {
+            console.error("Delete address error:", error);
+            alertModal.error("Error", "Unable to delete address right now.");
+          }
         },
-      ],
+      },
     );
   };
 
@@ -74,7 +75,7 @@ export default function AddressesScreen() {
       );
     } catch (error) {
       console.error("Set default address error:", error);
-      Alert.alert("Error", "Unable to set default address.");
+      alertModal.error("Error", "Unable to set default address.");
     }
   };
 
@@ -87,6 +88,7 @@ export default function AddressesScreen() {
         </View>
       ) : addresses.length === 0 ? (
         <EmptyState
+          icon="location-outline"
           title="No saved addresses"
           subtitle="Add an address to make booking faster."
           actionLabel="Add Address"

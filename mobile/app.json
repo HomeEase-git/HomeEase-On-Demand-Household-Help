@@ -10,7 +10,6 @@
     "assetBundlePatterns": [
       "**/*"
     ],
-    "newArchEnabled": true,
     "ios": {
       "supportsTablet": true
     },
@@ -21,7 +20,6 @@
         "backgroundImage": "./assets/images/android-icon-background.png",
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
       },
-      "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false,
       "package": "com.homeease.app",
       "permissions": [
@@ -58,7 +56,10 @@
           "locationWhenInUsePermission": "HomeEase uses your location to show nearby workers and calculate routes to your address.",
           "isAndroidBackgroundLocationEnabled": false
         }
-      ]
+      ],
+      "expo-image",
+      "expo-status-bar",
+      "expo-web-browser"
     ],
     "experiments": {
       "typedRoutes": true,

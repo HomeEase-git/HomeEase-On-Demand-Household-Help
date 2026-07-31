@@ -1,7 +1,7 @@
 import React from "react";
 import { View, Text, ScrollView, Linking } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { Ionicons } from "@expo/vector-icons";
+import { AppIcon as Ionicons } from "../../components/icons/AppIcon";
 import { useRouter, useLocalSearchParams } from "expo-router";
 import PrimaryButton from "../../components/ui/PrimaryButton";
 import OutlinedButton from "../../components/ui/OutlinedButton";
@@ -44,7 +44,7 @@ export default function PasswordResetSentScreen() {
         <Text className="text-text-secondary text-center text-lg mb-2">
           We&apos;ve sent a password reset link to
         </Text>
-        <Text className="text-brand text-center font-semibold text-lg mb-6">
+        <Text className="text-primary text-center font-semibold text-lg mb-6">
           {maskEmail(email)}
         </Text>
 

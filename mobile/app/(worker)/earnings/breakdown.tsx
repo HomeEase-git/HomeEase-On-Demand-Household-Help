@@ -1,10 +1,11 @@
 import React, { useEffect, useState } from "react";
-import { View, Text, FlatList, ActivityIndicator } from "react-native";
+import { View, Text, FlatList } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import ScreenHeader from "../../../components/ui/ScreenHeader";
 import TransactionItem from "../../../components/list-items/TransactionItem";
 import EmptyState from "../../../components/feedback/EmptyState";
+import { Skeleton, SkeletonList, TransactionItemSkeleton } from "../../../components/ui/Skeleton";
 import * as api from "../../../services/api";
 
 type TransactionListItem = {
@@ -47,9 +48,14 @@ export default function EarningsBreakdownScreen() {
       <ScreenHeader title="Earnings Breakdown" showBack />
       <View className="px-4 py-4 flex-1">
         {loading ? (
-          <View className="py-6 items-center">
-            <ActivityIndicator size="small" />
-          </View>
+          <>
+            <View className="bg-card rounded-2xl p-4 mb-4">
+              <Skeleton width="20%" height={12} marginBottom={8} />
+              <Skeleton width="40%" height={26} marginBottom={8} />
+              <Skeleton width="50%" height={10} marginBottom={0} />
+            </View>
+            <SkeletonList count={5} SkeletonComponent={TransactionItemSkeleton} spacing={0} />
+          </>
         ) : (
           <>
             <View className="bg-card rounded-2xl p-4 mb-4">
@@ -63,7 +69,11 @@ export default function EarningsBreakdownScreen() {
               </Text>
             </View>
             {transactions.length === 0 ? (
-              <EmptyState title="No transactions yet" />
+              <EmptyState
+                icon="receipt-outline"
+                title="No transactions yet"
+                subtitle="Completed jobs will appear here once you get paid."
+              />
             ) : (
               <FlatList
                 data={transactions}

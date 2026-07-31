@@ -1,16 +1,17 @@
 import React from "react";
-import { View, Text, Pressable, Alert } from "react-native";
-import { Ionicons } from "@expo/vector-icons";
+import { View, Text, Pressable } from "react-native";
+import { AppIcon as Ionicons } from "../icons/AppIcon";
 import StatusBadge from "../ui/StatusBadge";
 import type { StatusType } from "../ui/StatusBadge";
 import { colors, cardShadow } from "../../constants";
+import { useAlertModal } from "../../contexts/AlertModalContext";
 
 type Cert = {
   id: string;
   name: string;
   issuer: string;
   issueDate: string;
-  expiryDate: string;
+  expiryDate: string | null;
   status: string;
 };
 
@@ -27,14 +28,13 @@ export const CertificationCard: React.FC<Props> = ({
   onEdit,
   onDelete,
 }) => {
+  const alertModal = useAlertModal();
+
   const handleDelete = () => {
-    Alert.alert(
+    alertModal.confirm(
       "Delete Certification",
       `Remove "${cert.name}" from your certifications?`,
-      [
-        { text: "Cancel", style: "cancel" },
-        { text: "Delete", style: "destructive", onPress: onDelete },
-      ],
+      { confirmText: "Delete", destructive: true, onConfirm: onDelete },
     );
   };
 

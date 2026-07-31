@@ -1,10 +1,18 @@
 export type LatLng = { lat: number; lng: number };
 
+export type AddressComponents = {
+  street?: string;
+  city?: string;
+  state?: string;
+  zipCode?: string;
+};
+
 export type PlaceResult = {
   formatted_address: string;
   geometry: {
     location: LatLng;
   };
+  components?: AddressComponents;
 };
 
 export type RouteResult = {
@@ -36,12 +44,24 @@ export function haversineDistanceKm(a: LatLng, b: LatLng): number {
   return 2 * EARTH_RADIUS_KM * Math.asin(Math.sqrt(h));
 }
 
+function parseAddressComponents(address: Record<string, string> | undefined): AddressComponents {
+  if (!address) return {};
+  const houseNumber = address.house_number;
+  const road = address.road;
+  const street = [houseNumber, road].filter(Boolean).join(' ') || undefined;
+  const city =
+    address.city || address.town || address.municipality || address.suburb || address.county;
+  const state = address.state || address.region;
+  const zipCode = address.postcode;
+  return { street, city, state, zipCode };
+}
+
 export async function geocodeAddress(address: string): Promise<PlaceResult | null> {
   const normalized = address.trim();
   if (!normalized) return null;
 
   const response = await fetch(
-    `https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${encodeURIComponent(
+    `https://nominatim.openstreetmap.org/search?format=json&limit=1&addressdetails=1&q=${encodeURIComponent(
       normalized,
     )}`,
     { headers: NOMINATIM_HEADERS },
@@ -59,6 +79,7 @@ export async function geocodeAddress(address: string): Promise<PlaceResult | nul
         lng: parseFloat(firstResult.lon),
       },
     },
+    components: parseAddressComponents(firstResult.address),
   };
 }
 
@@ -70,6 +91,22 @@ export async function reverseGeocode(lat: number, lng: number): Promise<string |
 
   const data = await response.json();
   return data?.display_name ?? null;
+}
+
+export async function reverseGeocodeDetailed(lat: number, lng: number): Promise<PlaceResult | null> {
+  const response = await fetch(
+    `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&addressdetails=1`,
+    { headers: NOMINATIM_HEADERS },
+  );
+
+  const data = await response.json();
+  if (!data?.display_name) return null;
+
+  return {
+    formatted_address: data.display_name,
+    geometry: { location: { lat, lng } },
+    components: parseAddressComponents(data.address),
+  };
 }
 
 export async function fetchRoute(from: LatLng, to: LatLng): Promise<RouteResult | null> {

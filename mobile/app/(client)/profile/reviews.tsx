@@ -1,9 +1,10 @@
 import React, { useEffect, useState } from "react";
-import { FlatList, ActivityIndicator, View } from "react-native";
+import { FlatList, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import ScreenHeader from "../../../components/ui/ScreenHeader";
 import ReviewCard from "../../../components/cards/ReviewCard";
 import EmptyState from "../../../components/feedback/EmptyState";
+import { SkeletonList, ReviewCardSkeleton } from "../../../components/ui/Skeleton";
 import * as api from "../../../services/api";
 
 export default function ReviewsScreen() {
@@ -36,11 +37,15 @@ export default function ReviewsScreen() {
     <SafeAreaView className="flex-1 bg-white">
       <ScreenHeader title="My Reviews" showBack />
       {loading ? (
-        <View className="py-6 items-center">
-          <ActivityIndicator size="small" />
+        <View className="p-4">
+          <SkeletonList count={4} SkeletonComponent={ReviewCardSkeleton} />
         </View>
       ) : reviews.length === 0 ? (
-        <EmptyState title="No reviews yet" />
+        <EmptyState
+          icon="star-outline"
+          title="No reviews yet"
+          subtitle="Reviews you leave for workers will show up here."
+        />
       ) : (
         <FlatList
           data={reviews}

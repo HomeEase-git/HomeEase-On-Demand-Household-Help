@@ -2,7 +2,6 @@ import { createContext, useContext, useEffect, useMemo, useState } from 'react';
 import { getStoredToken, getStoredUser } from '../services/apiClient';
 import { fetchCurrentUser, login as loginRequest, logout as logoutRequest } from '../services/auth';
 
-const DUMMY_ADMIN_TOKEN = 'dummy-admin-token';
 const AuthContext = createContext(null);
 
 export function AuthProvider({ children }) {
@@ -19,15 +18,6 @@ export function AuthProvider({ children }) {
 
       if (!storedToken || !storedUser) {
         if (!cancelled) setIsLoading(false);
-        return;
-      }
-
-      if (storedToken === DUMMY_ADMIN_TOKEN && storedUser.role === 'ADMIN') {
-        if (!cancelled) {
-          setUser(storedUser);
-          setToken(storedToken);
-          setIsLoading(false);
-        }
         return;
       }
 

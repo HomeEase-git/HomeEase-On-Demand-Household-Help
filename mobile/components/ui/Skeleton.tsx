@@ -88,6 +88,38 @@ export const BookingCardSkeleton: React.FC = () => {
   );
 };
 
+// Transaction Item Skeleton
+export const TransactionItemSkeleton: React.FC = () => {
+  return (
+    <View style={styles.transactionItemContainer}>
+      <View style={{ flex: 1 }}>
+        <Skeleton width="50%" height={10} marginBottom={6} />
+        <Skeleton width="70%" height={14} marginBottom={0} />
+      </View>
+      <Skeleton width={56} height={14} marginBottom={0} />
+    </View>
+  );
+};
+
+// Review Card Skeleton
+export const ReviewCardSkeleton: React.FC = () => {
+  return (
+    <View style={styles.reviewCardContainer}>
+      <View style={{ flexDirection: "row", alignItems: "center" }}>
+        <Skeleton width={40} height={40} borderRadius={20} marginBottom={0} />
+        <View style={{ flex: 1, marginLeft: 12 }}>
+          <Skeleton width="40%" height={14} marginBottom={6} />
+          <Skeleton width="25%" height={10} marginBottom={0} />
+        </View>
+        <Skeleton width={70} height={12} marginBottom={0} />
+      </View>
+      <View style={{ marginTop: 12 }}>
+        <Skeleton width="100%" height={12} marginBottom={0} />
+      </View>
+    </View>
+  );
+};
+
 // List Skeleton
 export const SkeletonList: React.FC<{
   count?: number;
@@ -149,5 +181,18 @@ const styles = StyleSheet.create({
   bookingCardFooter: {
     flexDirection: "row",
     justifyContent: "space-between",
+  },
+  transactionItemContainer: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingVertical: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.divider,
+  },
+  reviewCardContainer: {
+    backgroundColor: colors.card.DEFAULT,
+    borderRadius: 16,
+    padding: 16,
+    marginBottom: 12,
   },
 });

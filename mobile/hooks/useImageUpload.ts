@@ -92,11 +92,11 @@ export function useImageUpload(options: UseImageUploadOptions = {}) {
 
         return compressed.uri;
       } catch (err) {
-        const errorMessage = err instanceof Error ? err.message : 'Failed to process image';
+        console.error('Image processing error:', err);
         setState((prev) => ({
           ...prev,
           loading: false,
-          error: errorMessage,
+          error: 'We could not process that image. Please try a different one.',
         }));
         return null;
       }
@@ -128,10 +128,10 @@ export function useImageUpload(options: UseImageUploadOptions = {}) {
         return await processImage(result.assets[0].uri);
       }
     } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : 'Camera error';
+      console.error('Camera error:', err);
       setState((prev) => ({
         ...prev,
-        error: errorMessage,
+        error: 'Something went wrong while opening the camera. Please try again.',
       }));
     }
     return null;
@@ -152,10 +152,10 @@ export function useImageUpload(options: UseImageUploadOptions = {}) {
         return await processImage(result.assets[0].uri);
       }
     } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : 'Gallery error';
+      console.error('Gallery error:', err);
       setState((prev) => ({
         ...prev,
-        error: errorMessage,
+        error: 'Something went wrong while opening your gallery. Please try again.',
       }));
     }
     return null;

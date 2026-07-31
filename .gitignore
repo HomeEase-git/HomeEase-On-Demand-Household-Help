@@ -1,11 +1,74 @@
-backend/.env
-backend/node_modules/
+# ==============================
+# Environment variables / secrets
+# ==============================
+.env
+.env.*
+!.env.example
+!.env.sample
+**/.env
+**/.env.*
+!**/.env.example
+!**/.env.sample
+
+# ==============================
+# Credentials, keys & certificates
+# ==============================
+**/*serviceAccount*.json
+**/*service-account*.json
+**/google-services.json
+**/GoogleService-Info.plist
+**/*.pem
+**/*.key
+**/*.p12
+**/*.p8
+**/*.pfx
+**/*.jks
+**/*.keystore
+**/*credentials*.json
+**/*secrets*.json
+**/id_rsa
+**/id_rsa.pub
+
+# ==============================
+# Dependencies
+# ==============================
+node_modules/
+**/node_modules/
+
+# ==============================
+# Build output
+# ==============================
 backend/dist/
-
-mobile/.env
-mobile/node_modules/
-mobile/expo/
-
-web/.env
-web/node_modules/
 web/dist/
+**/dist/
+**/build/
+
+# ==============================
+# Mobile / Expo / React Native
+# ==============================
+mobile/.expo/
+**/.expo/
+**/.expo-shared/
+mobile/android/
+mobile/ios/
+*.log
+**/*.log
+*.orig.*
+
+# ==============================
+# Test coverage
+# ==============================
+coverage/
+**/coverage/
+
+# ==============================
+# OS files
+# ==============================
+.DS_Store
+Thumbs.db
+
+# ==============================
+# Editor / IDE
+# ==============================
+.vscode/
+.idea/

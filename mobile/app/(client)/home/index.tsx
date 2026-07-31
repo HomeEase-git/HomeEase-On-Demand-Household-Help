@@ -8,7 +8,7 @@ import {
   ActivityIndicator,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { Ionicons } from "@expo/vector-icons";
+import { AppIcon as Ionicons } from "../../../components/icons/AppIcon";
 import { useRouter } from "expo-router";
 import { SearchBar } from "../../../components/ui/SearchBar";
 import { SectionHeader } from "../../../components/ui/SectionHeader";
@@ -16,13 +16,18 @@ import { PromoBanner } from "../../../components/ui/PromoBanner";
 import { CategoryCard } from "../../../components/cards/CategoryCard";
 import { WorkerCard } from "../../../components/cards/WorkerCard";
 import { NotificationBadge } from "../../../components/ui/NotificationBadge";
-import { getServiceTypes, getWorkers } from "../../../services/api";
+import { getServiceTypes, searchWorkers } from "../../../services/api";
 import { useNotificationStore } from "../../../store/notificationStore";
 import { useAuthStore } from "../../../store/authStore";
-import { FilterSortBottomSheet } from "../../../components/bottom-sheets/FilterSortBottomSheet";
+import {
+  FilterSortBottomSheet,
+  type SearchFilters,
+} from "../../../components/bottom-sheets/FilterSortBottomSheet";
 import { Skeleton } from "../../../components/ui/Skeleton";
 import type { BottomSheetHandle } from "../../../components/bottom-sheets/BottomSheetWrapper";
 import { colors } from "../../../constants";
+
+const DEFAULT_FILTERS: SearchFilters = { sort: "rating", availableOnly: false };
 
 const PROMO_BANNERS = [
   { title: "20% Off Cleaning!", color: colors.banner1 },
@@ -89,6 +94,7 @@ export default function ClientHomeScreen() {
   );
   const [workers, setWorkers] = useState<HomeWorker[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [filters, setFilters] = useState<SearchFilters>(DEFAULT_FILTERS);
   const user = useAuthStore((s) => s.user);
 
   const firstName = user?.name?.split(" ")[0] ?? "there";
@@ -102,7 +108,7 @@ export default function ClientHomeScreen() {
       try {
         const [serviceTypes, workersResponse] = await Promise.all([
           getServiceTypes(),
-          getWorkers({ limit: 3 }),
+          searchWorkers({ sortBy: filters.sort, availableOnly: filters.availableOnly }),
         ]);
 
         if (!active) return;
@@ -115,7 +121,7 @@ export default function ClientHomeScreen() {
           })),
         );
 
-        setWorkers((workersResponse.data ?? []).map(normalizeHomeWorker));
+        setWorkers((workersResponse.data ?? []).slice(0, 3).map(normalizeHomeWorker));
       } catch (err) {
         if (!active) return;
         setError("Unable to load home content. Please try again.");
@@ -129,7 +135,7 @@ export default function ClientHomeScreen() {
     return () => {
       active = false;
     };
-  }, []);
+  }, [filters]);
 
   return (
     <SafeAreaView className="flex-1 bg-white" edges={["top"]}>
@@ -193,6 +199,10 @@ export default function ClientHomeScreen() {
                 <SearchBar
                   placeholder="Search services or workers..."
                   onFilterPress={() => filterRef.current?.expand()}
+                  filterActive={
+                    filters.sort !== DEFAULT_FILTERS.sort ||
+                    filters.availableOnly !== DEFAULT_FILTERS.availableOnly
+                  }
                 />
               </Pressable>
             </View>
@@ -242,7 +252,8 @@ export default function ClientHomeScreen() {
       </ScrollView>
       <FilterSortBottomSheet
         innerRef={filterRef}
-        onApply={() => filterRef.current?.close()}
+        value={filters}
+        onApply={setFilters}
       />
     </SafeAreaView>
   );

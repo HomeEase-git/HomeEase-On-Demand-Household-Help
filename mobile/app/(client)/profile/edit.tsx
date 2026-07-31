@@ -1,5 +1,5 @@
 import React, { useState, useRef } from "react";
-import { View, ScrollView, Alert, TextInput } from "react-native";
+import { View, ScrollView, TextInput } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import ScreenHeader from "../../../components/ui/ScreenHeader";
@@ -7,13 +7,15 @@ import InputField from "../../../components/ui/InputField";
 import PrimaryButton from "../../../components/ui/PrimaryButton";
 import { useAuthStore } from "../../../store/authStore";
 import * as api from "../../../services/api";
+import { useAlertModal } from "../../../contexts/AlertModalContext";
 
 export default function EditProfileScreen() {
   const router = useRouter();
+  const alertModal = useAlertModal();
   const user = useAuthStore((s) => s.user);
   const setUser = useAuthStore((s) => s.setUser);
   const [name, setName] = useState(user?.name || "");
-  const [phone, setPhone] = useState("09XX-XXX-XXXX");
+  const [phone, setPhone] = useState(user?.phone || "");
   const [email] = useState(user?.email || "");
   const [loading, setLoading] = useState(false);
 
@@ -22,11 +24,11 @@ export default function EditProfileScreen() {
 
   const handleSave = async () => {
     if (!name.trim()) {
-      Alert.alert("Error", "Name cannot be empty");
+      alertModal.error("Error", "Name cannot be empty");
       return;
     }
     if (phone.length < 10) {
-      Alert.alert("Error", "Please enter a valid phone number");
+      alertModal.error("Error", "Please enter a valid phone number");
       return;
     }
     setLoading(true);
@@ -36,11 +38,11 @@ export default function EditProfileScreen() {
         phone: phone.trim(),
       });
       setUser(updatedUser);
-      Alert.alert("Success", "Profile updated");
+      alertModal.success("Success", "Profile updated");
       router.back();
     } catch (err) {
       console.error("Update profile error:", err);
-      Alert.alert("Error", "Failed to update profile");
+      alertModal.error("Error", "Failed to update profile");
     } finally {
       setLoading(false);
     }
@@ -64,7 +66,7 @@ export default function EditProfileScreen() {
           label="Phone"
           value={phone}
           onChangeText={setPhone}
-          placeholder="Phone"
+          placeholder="09XX-XXX-XXXX"
           keyboardType="phone-pad"
           returnKeyType="done"
           onSubmitEditing={handleSave}

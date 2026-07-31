@@ -90,7 +90,12 @@ export default function Workers() {
                         <td>{worker.earnings}</td>
                         <td>
                           <div className="row-actions">
-                            <Link to={`/workers/${worker.id}`} className="action-btn view" title="View">
+                            <Link
+                              to={`/workers/${worker.id}`}
+                              className="action-btn view"
+                              title="View"
+                              aria-label={`View worker ${worker.name}`}
+                            >
                               <i className="fas fa-eye" />
                             </Link>
                           </div>

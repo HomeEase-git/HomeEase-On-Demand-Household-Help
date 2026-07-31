@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
-import { View, Text, ScrollView, Pressable, Alert, ActivityIndicator } from "react-native";
+import { View, Text, ScrollView, Pressable, ActivityIndicator } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { Ionicons } from "@expo/vector-icons";
+import { AppIcon as Ionicons } from "../../../../components/icons/AppIcon";
 import { useRouter, useLocalSearchParams } from "expo-router";
 import ScreenHeader from "../../../../components/ui/ScreenHeader";
 import StarRating from "../../../../components/ui/StarRating";
@@ -15,9 +15,11 @@ import {
   isExactCategoryMatch,
 } from "../../../../utils/categoryMapping";
 import { colors } from "../../../../constants";
+import { useAlertModal } from "../../../../contexts/AlertModalContext";
 
 export default function WorkerProfileScreen() {
   const router = useRouter();
+  const alertModal = useAlertModal();
   const { workerId } = useLocalSearchParams<{ workerId: string }>();
   const setDraft = useBookingStore((s) => s.setDraft);
 
@@ -75,6 +77,13 @@ export default function WorkerProfileScreen() {
     );
   }
 
+  const verifiedCertifications = worker.certifications.filter(
+    (cert) => cert.verificationStatus === "APPROVED",
+  );
+  const pendingCertificationCount = worker.certifications.filter(
+    (cert) => cert.verificationStatus === "PENDING",
+  ).length;
+
   return (
     <SafeAreaView className="flex-1 bg-white">
       <View className="absolute top-0 left-0 right-0 z-10 pt-2">
@@ -90,13 +99,35 @@ export default function WorkerProfileScreen() {
         </View>
 
         <View className="bg-card rounded-2xl p-4 mx-4 -mt-8">
-          <Text className="text-text-primary font-bold text-xl">{worker.name}</Text>
-          <View className="flex-row items-center mt-1">
+          <View className="flex-row items-center">
+            <Text className="text-text-primary font-bold text-xl">{worker.name}</Text>
+            {worker.verificationStatus === "VERIFIED" && (
+              <Ionicons
+                name="shield-checkmark"
+                size={18}
+                color={colors.success}
+                style={{ marginLeft: 6 }}
+              />
+            )}
+          </View>
+          <Pressable
+            className="flex-row items-center mt-1"
+            onPress={() =>
+              router.push({
+                pathname: "/(client)/category/worker/[workerId]/reviews",
+                params: {
+                  workerId,
+                  rating: String(worker.rating),
+                  reviewCount: String(worker.reviews),
+                },
+              })
+            }
+          >
             <StarRating rating={worker.rating} size={16} />
             <Text className="text-text-muted text-sm ml-2">
               ({worker.reviews} reviews)
             </Text>
-          </View>
+          </Pressable>
           <View className="flex-row flex-wrap gap-2 mt-2">
             <View className="bg-accent/20 rounded-full px-3 py-1">
               <Text className="text-accent text-xs">{worker.service}</Text>
@@ -114,6 +145,22 @@ export default function WorkerProfileScreen() {
                 {worker.status === "available" ? "Available" : "Busy"}
               </Text>
             </View>
+            {typeof worker.resumeParseResult?.yearsOfExperience === "number" &&
+              worker.resumeParseResult.yearsOfExperience > 0 && (
+                <View className="bg-card-light rounded-full px-3 py-1">
+                  <Text className="text-text-secondary text-xs">
+                    {worker.resumeParseResult.yearsOfExperience}
+                    {worker.resumeParseResult.yearsOfExperience === 1 ? " yr" : " yrs"} experience
+                  </Text>
+                </View>
+              )}
+            {worker.resumeParseResult?.masteryLevel && (
+              <View className="bg-card-light rounded-full px-3 py-1">
+                <Text className="text-text-secondary text-xs">
+                  {worker.resumeParseResult.masteryLevel}
+                </Text>
+              </View>
+            )}
           </View>
           {worker.activeJobCount > 0 && (
             <Text
@@ -133,15 +180,37 @@ export default function WorkerProfileScreen() {
               ₱{worker.rate}/hr
             </Text>
           )}
+          {worker.serviceAreaRadius > 0 && (
+            <View className="flex-row items-center mt-2">
+              <Ionicons name="location-outline" size={14} color={colors.text.muted} />
+              <Text className="text-text-muted text-xs ml-1">
+                Serves within {worker.serviceAreaRadius} km
+              </Text>
+            </View>
+          )}
         </View>
 
         <View className="bg-card rounded-2xl p-4 mx-4 mt-3">
           <Text className="text-text-primary font-bold mb-2">About</Text>
           <Text className="text-text-secondary text-sm">
             {worker.bio ||
+              worker.resumeParseResult?.summary ||
               `Experienced ${worker.service.toLowerCase()} professional with great reviews. Book now for quality service.`}
           </Text>
         </View>
+
+        {worker.availableDays.length > 0 && (
+          <View className="bg-card rounded-2xl p-4 mx-4 mt-3">
+            <Text className="text-text-primary font-bold mb-2">Availability</Text>
+            <View className="flex-row flex-wrap gap-2">
+              {worker.availableDays.map((day) => (
+                <View key={day} className="bg-card-light rounded-full px-3 py-1">
+                  <Text className="text-text-secondary text-xs">{day}</Text>
+                </View>
+              ))}
+            </View>
+          </View>
+        )}
 
         <View className="bg-card rounded-2xl p-4 mx-4 mt-3">
           <Text className="text-text-primary font-bold mb-2">Skills</Text>
@@ -199,12 +268,14 @@ export default function WorkerProfileScreen() {
           <Text className="text-text-primary font-bold mb-3">
             Certifications
           </Text>
-          {worker.certifications.length === 0 ? (
+          {verifiedCertifications.length === 0 ? (
             <Text className="text-text-secondary text-sm text-center py-4">
-              No certifications submitted yet
+              {pendingCertificationCount > 0
+                ? "Certifications submitted, pending verification"
+                : "No certifications submitted yet"}
             </Text>
           ) : (
-            worker.certifications.map((cert) => (
+            verifiedCertifications.map((cert) => (
               <View
                 key={cert.id}
                 className="bg-card-light rounded-xl p-3 mb-2 flex-row items-center"
@@ -216,9 +287,17 @@ export default function WorkerProfileScreen() {
                   style={{ marginRight: 8 }}
                 />
                 <View className="flex-1">
-                  <Text className="text-brand text-sm font-semibold">
-                    {cert.title}
-                  </Text>
+                  <View className="flex-row items-center">
+                    <Text className="text-brand text-sm font-semibold">
+                      {cert.title}
+                    </Text>
+                    <Ionicons
+                      name="checkmark-circle"
+                      size={14}
+                      color={colors.success}
+                      style={{ marginLeft: 4 }}
+                    />
+                  </View>
                   <Text className="text-text-muted text-xs">
                     {cert.issuer} · {cert.issueDate}
                   </Text>
@@ -235,7 +314,7 @@ export default function WorkerProfileScreen() {
           fullWidth
           onPress={() => {
             if (!isExactCategoryMatch(worker.service)) {
-              Alert.alert(
+              alertModal.warning(
                 "Booking unavailable",
                 "This worker's service type couldn't be matched to a bookable category. Please try again later or contact support.",
               );
@@ -246,6 +325,7 @@ export default function WorkerProfileScreen() {
             setDraft({
               category: normalizedCategory,
               workerId: worker.id,
+              workerName: worker.name,
               workerLocked: true,
               entrySource: "worker_profile",
             });

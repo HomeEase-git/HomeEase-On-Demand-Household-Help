@@ -1,8 +1,8 @@
 import React, { useRef, useState, useEffect } from "react";
-import { View, Text, ScrollView, Pressable, Alert, Image } from "react-native";
+import { View, Text, ScrollView, Pressable, Image } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { CameraView, useCameraPermissions } from "expo-camera";
-import { Ionicons } from "@expo/vector-icons";
+import { AppIcon as Ionicons } from "../../components/icons/AppIcon";
 import { useRouter } from "expo-router";
 import ScreenHeader from "../../components/ui/ScreenHeader";
 import StepperHorizontal from "../../components/steppers/StepperHorizontal";
@@ -12,9 +12,11 @@ import { useAuthStore } from "../../store/authStore";
 import { submitKycDocument, uploadKycFile } from "../../services/api";
 import { compressImage } from "../../utils/imageCompressor";
 import { colors } from "../../constants/colors";
+import { useAlertModal } from "../../contexts/AlertModalContext";
 
 export default function SelfieScreen() {
   const router = useRouter();
+  const alertModal = useAlertModal();
   const user = useAuthStore((s) => s.user);
   const cameraRef = useRef<CameraView>(null);
   const [permission, requestPermission] = useCameraPermissions();
@@ -38,13 +40,13 @@ export default function SelfieScreen() {
 
   const handleTakeSelfie = async () => {
     if (!permission?.granted) {
-      Alert.alert(
+      alertModal.confirm(
         "Camera Permission",
         "Camera access is required to take a selfie.",
-        [
-          { text: "Cancel", style: "cancel" },
-          { text: "Grant Permission", onPress: requestPermission },
-        ],
+        {
+          confirmText: "Grant Permission",
+          onConfirm: requestPermission,
+        },
       );
       return;
     }
@@ -67,11 +69,9 @@ export default function SelfieScreen() {
           const compressed = await compressImage(photo.uri, 1200, 0.7);
           selfieUri = compressed.uri;
           setCapturedUri(compressed.uri);
-          Alert.alert(
+          alertModal.success(
             "Selfie Captured",
             `Compressed by ${compressed.compressionRatio}%`,
-            [{ text: "OK" }],
-            { cancelable: false },
           );
         } catch (err) {
           // If compression fails, use original
@@ -85,7 +85,7 @@ export default function SelfieScreen() {
           await submitKycDocument("selfie", url);
         } catch (error) {
           console.error("KYC selfie submit error", error);
-          Alert.alert(
+          alertModal.error(
             "Submission failed",
             "We could not upload your selfie. Please try again.",
           );
@@ -95,7 +95,7 @@ export default function SelfieScreen() {
         }
       }
     } catch (err) {
-      Alert.alert("Error", "Failed to capture photo. Please try again.");
+      alertModal.error("Error", "Failed to capture photo. Please try again.");
       console.error("Capture error:", err);
     } finally {
       setCompressing(false);

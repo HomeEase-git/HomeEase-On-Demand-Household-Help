@@ -146,7 +146,12 @@ export default function Payments() {
                         </td>
                         <td>
                           <div className="row-actions">
-                            <Link to={`/payments/transaction/${t.id}`} className="action-btn view" title="View">
+                            <Link
+                              to={`/payments/transaction/${t.id}`}
+                              className="action-btn view"
+                              title="View"
+                              aria-label={`View transaction ${t.displayId || t.id}`}
+                            >
                               <i className="fas fa-eye" />
                             </Link>
                           </div>

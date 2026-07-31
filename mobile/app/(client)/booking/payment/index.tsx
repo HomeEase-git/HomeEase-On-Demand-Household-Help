@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { View, Text, TextInput, ScrollView, Alert } from "react-native";
+import { View, Text, TextInput, ScrollView } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import PrimaryButton from "../../../../components/ui/PrimaryButton";
@@ -8,9 +8,12 @@ import * as api from "../../../../services/api";
 import { serviceConfigs } from "../../../../constants/serviceData";
 import { useBookingStore, type Booking } from "../../../../store/bookingStore";
 import { colors } from "../../../../constants";
+import { useAlertModal } from "../../../../contexts/AlertModalContext";
+import { PAYMENT_METHOD_TYPE_MAP } from "../../../../utils/paymentMethodMap";
 
 export default function PaymentScreen() {
   const router = useRouter();
+  const alertModal = useAlertModal();
   const draft = useBookingStore((s) => s.draft);
   const setBookingCreated = useBookingStore((s) => s.setBookingCreated);
   const [accountValue, setAccountValue] = useState("");
@@ -40,13 +43,13 @@ export default function PaymentScreen() {
 
   const handleSubmit = async () => {
     if (!method) {
-      Alert.alert("Payment method", "Please select a payment method first.");
+      alertModal.warning("Payment method", "Please select a payment method first.");
       router.back();
       return;
     }
 
     if (!baseAmount) {
-      Alert.alert(
+      alertModal.error(
         "Booking error",
         "Missing service price. Please return and finish your booking.",
       );
@@ -57,7 +60,7 @@ export default function PaymentScreen() {
     const requiresInput =
       method === "gcash" || method === "maya" || method === "bank";
     if (requiresInput && !accountValue.trim()) {
-      Alert.alert(
+      alertModal.warning(
         "Payment details",
         "Please enter the required payment details for this method.",
       );
@@ -68,7 +71,7 @@ export default function PaymentScreen() {
       setSubmitting(true);
 
       if (!draft.workerId || !draft.selectedTaskId || !draft.date) {
-        Alert.alert(
+        alertModal.error(
           "Booking error",
           "Incomplete booking details. Please return and finish your booking.",
         );
@@ -88,6 +91,8 @@ export default function PaymentScreen() {
           : [];
       });
 
+      const methodType = PAYMENT_METHOD_TYPE_MAP[method] ?? "CASH";
+
       const bookingPayload = {
         workerId: draft.workerId,
         serviceTaskId: draft.selectedTaskId,
@@ -100,6 +105,8 @@ export default function PaymentScreen() {
         estimatedPrice: draft.estimatedPrice || 0,
         tip: draft.tip || 0,
         addOns,
+        paymentMethodType: methodType,
+        paymentAccountIdentifier: accountValue.trim() || undefined,
       };
 
       const response = await api.createBooking(bookingPayload);
@@ -118,7 +125,10 @@ export default function PaymentScreen() {
         address: draft.address || undefined,
         status: "Pending",
         amount: total,
-        payment: { methodType: method ?? "CASH" },
+        payment: {
+          methodType,
+          accountIdentifier: accountValue.trim() || undefined,
+        },
         category: draft.category ?? undefined,
         selectedTaskId: draft.selectedTaskId ?? undefined,
         selectedAddOnIds: draft.selectedAddOnIds,
@@ -128,7 +138,7 @@ export default function PaymentScreen() {
       router.replace("/(client)/booking/payment/success");
     } catch (e) {
       console.error("Payment/create booking failed:", e);
-      Alert.alert(
+      alertModal.error(
         "Payment failed",
         "Unable to complete your booking. Please try again.",
       );
@@ -265,7 +275,7 @@ export default function PaymentScreen() {
 
         <View className="mt-4 gap-3">
           <PrimaryButton
-            label="Confirm & Pay"
+            label="Submit Booking Request"
             fullWidth
             loading={submitting}
             disabled={submitting || !method}

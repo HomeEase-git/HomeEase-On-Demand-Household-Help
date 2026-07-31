@@ -1,7 +1,7 @@
 import React, { useState } from "react";
-import { View, Text, ScrollView, Alert } from "react-native";
+import { View, Text, ScrollView } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { Ionicons } from "@expo/vector-icons";
+import { AppIcon as Ionicons } from "../../../components/icons/AppIcon";
 import { useRouter } from "expo-router";
 import { isAxiosError } from "axios";
 import ScreenHeader from "../../../components/ui/ScreenHeader";
@@ -12,9 +12,11 @@ import GenericConfirmationModal from "../../../components/modals/GenericConfirma
 import { useAuthStore } from "../../../store/authStore";
 import { colors } from "../../../constants";
 import * as api from "../../../services/api";
+import { useAlertModal } from "../../../contexts/AlertModalContext";
 
 export default function WorkerDeleteAccountScreen() {
   const router = useRouter();
+  const alertModal = useAlertModal();
   const logout = useAuthStore((s) => s.logout);
   const [confirmText, setConfirmText] = useState("");
   const [password, setPassword] = useState("");
@@ -33,17 +35,17 @@ export default function WorkerDeleteAccountScreen() {
     try {
       await api.deleteAccount(password);
       logout();
-      Alert.alert(
+      alertModal.success(
         "Account deleted",
         "Your account has been permanently deleted",
+        [{ text: "OK", onPress: () => router.replace("/landing") }],
       );
-      router.replace("/landing");
     } catch (error) {
       const message =
         isAxiosError(error) && error.response?.status === 401
           ? "Password is incorrect"
           : "Failed to delete account";
-      Alert.alert("Error", message);
+      alertModal.error("Error", message);
     } finally {
       setDeleting(false);
     }

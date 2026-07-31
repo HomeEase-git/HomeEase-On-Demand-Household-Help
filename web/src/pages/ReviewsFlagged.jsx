@@ -5,6 +5,7 @@ import SectionCard from '../components/common/SectionCard'
 import LoadingState from '../components/common/LoadingState'
 import ErrorState from '../components/common/ErrorState'
 import { fetchReviews, updateReview } from '../services/reviews'
+import { useToast } from '../context/ToastContext'
 
 const SUB_NAV = [
   { to: '/reviews', label: 'All Reviews' },
@@ -16,6 +17,7 @@ export default function ReviewsFlagged() {
   const [selected, setSelected] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
+  const { showSuccess, showError } = useToast()
 
   const loadFlaggedReviews = async () => {
     setLoading(true)
@@ -51,8 +53,9 @@ export default function ReviewsFlagged() {
         flagReason: null,
       })
       updateLocalReview(updated)
+      showSuccess('Review kept public.')
     } catch (err) {
-      setError(err.message || 'Failed to update review')
+      showError(err.message || 'Failed to update review')
     }
   }
 
@@ -63,8 +66,9 @@ export default function ReviewsFlagged() {
         status: 'HIDDEN',
       })
       updateLocalReview(updated)
+      showSuccess('Review hidden from the worker profile.')
     } catch (err) {
-      setError(err.message || 'Failed to update review')
+      showError(err.message || 'Failed to update review')
     }
   }
 
@@ -75,8 +79,9 @@ export default function ReviewsFlagged() {
         status: 'WARNED',
       })
       updateLocalReview(updated)
+      showSuccess('Review hidden and user warned.')
     } catch (err) {
-      setError(err.message || 'Failed to update review')
+      showError(err.message || 'Failed to update review')
     }
   }
 

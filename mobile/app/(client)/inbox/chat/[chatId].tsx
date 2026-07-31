@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from "react";
-import { View, Text, FlatList, TextInput, Pressable, Linking, Alert } from "react-native";
+import { View, Text, FlatList, TextInput, Pressable, Linking } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter, useLocalSearchParams } from "expo-router";
@@ -10,6 +10,8 @@ import type { BottomSheetHandle } from "../../../../components/bottom-sheets/Bot
 import { useMessageStore } from "../../../../store/messageStore";
 import { useAuthStore } from "../../../../store/authStore";
 import * as api from "../../../../services/api";
+import { colors } from "../../../../constants";
+import { useAlertModal } from "../../../../contexts/AlertModalContext";
 
 function formatTime(iso: string) {
   return new Date(iso).toLocaleTimeString("en-US", {
@@ -20,6 +22,7 @@ function formatTime(iso: string) {
 
 export default function ChatScreen() {
   const router = useRouter();
+  const alertModal = useAlertModal();
   const { chatId: userId } = useLocalSearchParams<{ chatId: string }>();
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
@@ -91,31 +94,37 @@ export default function ChatScreen() {
       appendMessage(userId, message);
     } catch (error) {
       console.error("Send image error:", error);
-      Alert.alert("Error", "Failed to send image. Please try again.");
+      alertModal.error("Error", "Failed to send image. Please try again.");
     }
   };
 
   const call = () => {
     if (!conversation?.phone) {
-      Alert.alert("No phone number", "This contact has no phone number on file.");
+      alertModal.warning("No phone number", "This contact has no phone number on file.");
       return;
     }
     Linking.openURL(`tel:${conversation.phone}`).catch(() =>
-      Alert.alert("Error", "Could not open the phone dialer."),
+      alertModal.error("Error", "Could not open the phone dialer."),
     );
   };
 
   return (
     <SafeAreaView className="flex-1 bg-white" edges={["top"]}>
-      <View className="flex-row items-center px-4 py-3 border-b border-divider">
+      <View className="flex-row items-center px-4 py-3 border-b border-divider bg-white">
         <Pressable onPress={() => router.back()} className="mr-2">
-          <Ionicons name="chevron-back" size={24} color="#FFFFFF" />
+          <Ionicons name="chevron-back" size={24} color={colors.text.primary} />
         </Pressable>
         <Pressable
           className="w-9 h-9 bg-card-light rounded-full items-center justify-center mr-3"
-          onPress={() => {}}
+          onPress={() =>
+            userId &&
+            router.push({
+              pathname: "/(client)/category/worker/[workerId]",
+              params: { workerId: userId },
+            })
+          }
         >
-          <Ionicons name="person-circle" size={32} color="#A0A8D0" />
+          <Ionicons name="person-circle" size={32} color={colors.text.muted} />
         </Pressable>
         <View className="flex-1">
           <Text className="text-text-primary font-bold">
@@ -123,7 +132,7 @@ export default function ChatScreen() {
           </Text>
         </View>
         <Pressable onPress={call}>
-          <Ionicons name="call-outline" size={22} color="#FFFFFF" />
+          <Ionicons name="call-outline" size={22} color={colors.text.primary} />
         </Pressable>
       </View>
 
@@ -137,12 +146,24 @@ export default function ChatScreen() {
               message={item.content}
               imageUrl={item.imageUrl}
               timestamp={formatTime(item.createdAt)}
+              onImagePress={(url) =>
+                router.push({
+                  pathname: "/(client)/inbox/image-viewer",
+                  params: { imageUrl: url },
+                })
+              }
             />
           ) : (
             <ChatBubbleReceived
               message={item.content}
               imageUrl={item.imageUrl}
               timestamp={formatTime(item.createdAt)}
+              onImagePress={(url) =>
+                router.push({
+                  pathname: "/(client)/inbox/image-viewer",
+                  params: { imageUrl: url },
+                })
+              }
             />
           )
         }
@@ -153,18 +174,18 @@ export default function ChatScreen() {
           className="p-2 mr-2"
           onPress={() => imageSheetRef.current?.expand()}
         >
-          <Ionicons name="attach-outline" size={24} color="#A0A8D0" />
+          <Ionicons name="attach-outline" size={24} color={colors.text.muted} />
         </Pressable>
         <TextInput
-          className="flex-1 bg-card rounded-full px-4 py-2 text-brand max-h-24"
+          className="flex-1 bg-card rounded-full px-4 py-2 text-text-primary max-h-24"
           placeholder="Message..."
-          placeholderTextColor="#6B7299"
+          placeholderTextColor={colors.text.muted}
           value={input}
           onChangeText={setInput}
           multiline
         />
         <Pressable className="bg-accent rounded-full p-2 ml-2" onPress={send}>
-          <Ionicons name="send" size={20} color="#FFFFFF" />
+          <Ionicons name="send" size={20} color={colors.white} />
         </Pressable>
       </View>
       <ImageSourcePickerBottomSheet

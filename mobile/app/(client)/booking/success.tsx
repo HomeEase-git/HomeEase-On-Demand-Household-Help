@@ -1,7 +1,7 @@
 import React, { useEffect } from "react";
 import { View, Text, ScrollView, Animated, Easing } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { Ionicons } from "@expo/vector-icons";
+import { AppIcon as Ionicons } from "../../../components/icons/AppIcon";
 import { useRouter } from "expo-router";
 import PrimaryButton from "../../../components/ui/PrimaryButton";
 import OutlinedButton from "../../../components/ui/OutlinedButton";
@@ -10,7 +10,6 @@ import { useBookingStore } from "../../../store/bookingStore";
 
 export default function BookingSuccessScreen() {
   const router = useRouter();
-  const draft = useBookingStore((s) => s.draft);
   const selectedBooking = useBookingStore((s) => s.selectedBooking);
   const scaleAnim = React.useRef(new Animated.Value(0)).current;
   const opacityAnim = React.useRef(new Animated.Value(0)).current;
@@ -35,8 +34,7 @@ export default function BookingSuccessScreen() {
     }).start();
   }, [scaleAnim, opacityAnim]);
 
-  // Generate a reference number (in production, this would come from the backend)
-  const referenceNumber = `BK-${Math.random().toString().slice(2, 6).padStart(4, "0")}`;
+  const referenceNumber = selectedBooking?.id ?? "Pending";
 
   return (
     <SafeAreaView className="flex-1 bg-white">
@@ -80,19 +78,20 @@ export default function BookingSuccessScreen() {
             <View className="flex-row items-center mb-3">
               <Ionicons name="checkmark" size={20} color={colors.success} />
               <Text className="text-success font-semibold text-sm ml-3">
-                Payment processed
+                Request submitted
               </Text>
             </View>
             <View className="flex-row items-center mb-3">
               <Ionicons name="calendar" size={20} color={colors.success} />
               <Text className="text-success font-semibold text-sm ml-3">
-                {draft.date} at {draft.time}
+                {selectedBooking?.date}
+                {selectedBooking?.time ? ` at ${selectedBooking.time}` : ""}
               </Text>
             </View>
             <View className="flex-row items-center">
               <Ionicons name="location" size={20} color={colors.success} />
               <Text className="text-success font-semibold text-sm ml-3 flex-1">
-                {draft.address || "Location set"}
+                {selectedBooking?.address || "Location set"}
               </Text>
             </View>
           </View>
@@ -108,7 +107,7 @@ export default function BookingSuccessScreen() {
             <View className="border-t border-divider pt-3">
               <Text className="text-text-secondary text-xs mb-1">Service</Text>
               <Text className="text-brand font-semibold">
-                {draft.category || "Service"}
+                {selectedBooking?.category || selectedBooking?.service || "Service"}
               </Text>
             </View>
           </View>

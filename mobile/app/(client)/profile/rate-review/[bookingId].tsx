@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { View, Text, ScrollView, Alert } from "react-native";
+import { View, Text, ScrollView } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter, useLocalSearchParams } from "expo-router";
 import ScreenHeader from "../../../../components/ui/ScreenHeader";
@@ -10,16 +10,18 @@ import InputField from "../../../../components/ui/InputField";
 import GenericSuccessModal from "../../../../components/modals/GenericSuccessModal";
 import { useBookingStore } from "../../../../store/bookingStore";
 import { submitReview as apiSubmitReview } from "../../../../services/api";
-import { workers } from "../../../../constants/dummyData";
+import { isExactCategoryMatch } from "../../../../utils/categoryMapping";
+import { useAlertModal } from "../../../../contexts/AlertModalContext";
 
 export default function RateBookingScreen() {
   const router = useRouter();
+  const alertModal = useAlertModal();
   const { bookingId } = useLocalSearchParams<{ bookingId: string }>();
   const booking = useBookingStore((s) =>
     s.bookings.find((b) => b.id === bookingId),
   );
   const submitReview = useBookingStore((s) => s.submitReview);
-  const setDraft = useBookingStore((s) => s.setDraft);
+  const prefillFromBooking = useBookingStore((s) => s.prefillFromBooking);
 
   const [rating, setRating] = useState(booking?.rating ?? 0);
   const [review, setReview] = useState(booking?.reviewText ?? "");
@@ -30,11 +32,11 @@ export default function RateBookingScreen() {
 
   const handleSubmit = async () => {
     if (!booking) {
-      Alert.alert("Error", "Booking not found");
+      alertModal.error("Error", "Booking not found");
       return;
     }
     if (rating < 1) {
-      Alert.alert("Error", "Please select a rating");
+      alertModal.error("Error", "Please select a rating");
       return;
     }
     setLoading(true);
@@ -44,7 +46,7 @@ export default function RateBookingScreen() {
       setSuccessVisible(true);
     } catch (error) {
       console.error("Submit review error:", error);
-      Alert.alert("Error", "Failed to submit review. Please try again.");
+      alertModal.error("Error", "Failed to submit review. Please try again.");
     } finally {
       setLoading(false);
     }
@@ -52,19 +54,19 @@ export default function RateBookingScreen() {
 
   const handleBookAgain = () => {
     if (!booking) {
-      Alert.alert("Error", "Booking not found");
+      alertModal.error("Error", "Booking not found");
       return;
     }
 
-    // Look up the worker by name to get their actual ID
-    const matchedWorker = workers.find(
-      (w) => w.name === booking.worker || w.id === booking.worker,
-    );
+    if (!isExactCategoryMatch(booking.category ?? booking.service)) {
+      alertModal.warning(
+        "Booking unavailable",
+        "This booking's service type couldn't be matched to a bookable category. Please try a different booking or contact support.",
+      );
+      return;
+    }
 
-    setDraft({
-      category: booking.service,
-      workerId: matchedWorker?.id ?? null,
-    });
+    prefillFromBooking(booking);
     router.push("/(client)/booking/new/step-1");
   };
 
@@ -74,7 +76,7 @@ export default function RateBookingScreen() {
       <ScrollView contentContainerStyle={{ padding: 24 }}>
         <View className="bg-card rounded-2xl p-4 mb-4 flex-row items-center">
           <View className="w-12 h-12 bg-card-light rounded-full items-center justify-center mr-3">
-            <Text className="text-brand text-lg">👤</Text>
+            <Text className="text-primary text-lg">👤</Text>
           </View>
           <View>
             <Text className="text-text-primary font-bold">

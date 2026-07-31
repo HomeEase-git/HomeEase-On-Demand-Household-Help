@@ -1,7 +1,7 @@
 import React from "react";
 import { colors } from "../../constants";
 import { View, Pressable } from "react-native";
-import { Ionicons } from "@expo/vector-icons";
+import { AppIcon as Ionicons } from "../icons/AppIcon";
 
 type Props = {
   rating: number;

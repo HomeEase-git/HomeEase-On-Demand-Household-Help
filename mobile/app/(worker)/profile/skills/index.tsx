@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
-import { View, Text, FlatList, Pressable, Modal, Alert } from "react-native";
+import { View, Text, FlatList, Pressable, Modal } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { Ionicons } from "@expo/vector-icons";
+import { AppIcon as Ionicons } from "../../../../components/icons/AppIcon";
 import { useRouter } from "expo-router";
 import ScreenHeader from "../../../../components/ui/ScreenHeader";
 import SkillCard from "../../../../components/cards/SkillCard";
@@ -9,27 +9,32 @@ import InputField from "../../../../components/ui/InputField";
 import PrimaryButton from "../../../../components/ui/PrimaryButton";
 import OutlinedButton from "../../../../components/ui/OutlinedButton";
 import { colors } from "../../../../constants";
-import { skillStorage } from "../../../../utils/storage";
-
-type Skill = {
-  id: string;
-  name: string;
-  category: string;
-  rate: number;
-};
+import * as api from "../../../../services/api";
+import type { Skill } from "../../../../services/api";
+import { useAlertModal } from "../../../../contexts/AlertModalContext";
 
 export default function SkillsScreen() {
   const router = useRouter();
+  const alertModal = useAlertModal();
   const [skills, setSkills] = useState<Skill[]>([]);
+  const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
+  const [saving, setSaving] = useState(false);
   const [skillName, setSkillName] = useState("");
   const [skillCategory, setSkillCategory] = useState("");
   const [skillRate, setSkillRate] = useState("");
 
   useEffect(() => {
     const loadSkills = async () => {
-      const stored = await skillStorage.list();
-      setSkills(stored);
+      setLoading(true);
+      try {
+        const stored = await api.getMySkills();
+        setSkills(stored);
+      } catch (error) {
+        console.error("Load skills error:", error);
+      } finally {
+        setLoading(false);
+      }
     };
 
     loadSkills();
@@ -37,42 +42,52 @@ export default function SkillsScreen() {
 
   const handleAddSkill = async () => {
     if (!skillName.trim() || !skillCategory.trim() || !skillRate.trim()) {
-      Alert.alert("Error", "Please fill in all fields.");
+      alertModal.error("Error", "Please fill in all fields.");
       return;
     }
     const rate = parseFloat(skillRate);
     if (isNaN(rate) || rate <= 0) {
-      Alert.alert("Error", "Please enter a valid rate.");
+      alertModal.error("Error", "Please enter a valid rate.");
       return;
     }
-    const newSkill = await skillStorage.create({
-      name: skillName.trim(),
-      category: skillCategory.trim(),
-      rate,
-    });
-    if (newSkill) {
+    setSaving(true);
+    try {
+      const newSkill = await api.addSkill({
+        name: skillName.trim(),
+        category: skillCategory.trim(),
+        rate,
+      });
       setSkills((prev) => [...prev, newSkill]);
+      setSkillName("");
+      setSkillCategory("");
+      setSkillRate("");
+      setShowModal(false);
+    } catch (error) {
+      console.error("Add skill error:", error);
+      alertModal.error("Error", "Failed to add skill. Please try again.");
+    } finally {
+      setSaving(false);
     }
-    setSkillName("");
-    setSkillCategory("");
-    setSkillRate("");
-    setShowModal(false);
   };
 
   const handleDeleteSkill = (id: string) => {
-    Alert.alert("Delete Skill", "Are you sure you want to remove this skill?", [
-      { text: "Cancel", style: "cancel" },
+    alertModal.confirm(
+      "Delete Skill",
+      "Are you sure you want to remove this skill?",
       {
-        text: "Delete",
-        style: "destructive",
-        onPress: async () => {
-          const ok = await skillStorage.remove(id);
-          if (ok) {
+        confirmText: "Delete",
+        destructive: true,
+        onConfirm: async () => {
+          try {
+            await api.deleteSkill(id);
             setSkills((prev) => prev.filter((s) => s.id !== id));
+          } catch (error) {
+            console.error("Delete skill error:", error);
+            alertModal.error("Error", "Failed to remove skill. Please try again.");
           }
         },
       },
-    ]);
+    );
   };
 
   return (
@@ -90,17 +105,19 @@ export default function SkillsScreen() {
               color={colors.text.muted}
             />
             <Text className="text-text-secondary mt-3">
-              No skills added yet
+              {loading ? "Loading skills..." : "No skills added yet"}
             </Text>
-            <Text className="text-text-muted text-sm mt-1">
-              Tap + to add your first skill
-            </Text>
+            {!loading && (
+              <Text className="text-text-muted text-sm mt-1">
+                Tap + to add your first skill
+              </Text>
+            )}
           </View>
         }
         renderItem={({ item }) => (
           <SkillCard
             skill={item}
-            onEdit={() => Alert.alert("Edit", "Edit skill coming soon.")}
+            onEdit={() => alertModal.info("Edit", "Edit skill coming soon.")}
             onDelete={() => handleDeleteSkill(item.id)}
           />
         )}
@@ -145,6 +162,8 @@ export default function SkillsScreen() {
                 label="Add Skill"
                 fullWidth
                 onPress={handleAddSkill}
+                disabled={saving}
+                loading={saving}
               />
               <OutlinedButton
                 label="Cancel"
