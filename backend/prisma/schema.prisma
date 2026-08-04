@@ -124,6 +124,30 @@ enum NotificationType {
   VERIFICATION_REJECTED
 }
 
+enum TimeSlot {
+  MORNING
+  AFTERNOON
+  EVENING
+}
+
+enum RoomType {
+  BEDROOM
+  BATHROOM
+  KITCHEN
+  LIVING_ROOM
+  DINING_ROOM
+  OFFICE
+  GARAGE
+  BALCONY
+  OTHER
+}
+
+enum ConditionType {
+  TIDY
+  NORMAL
+  HEAVY
+}
+
 // ============================================================================
 // USER & AUTH
 // ============================================================================
@@ -241,8 +265,8 @@ model WorkerProfile {
   user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   bio          String?
-  rating       Float @default(5.0)
-  totalReviews Int   @default(0)
+  rating       Float   @default(5.0)
+  totalReviews Int     @default(0)
 
   // Availability & Capacity
   isAvailable       Boolean @default(true)
@@ -251,11 +275,27 @@ model WorkerProfile {
   availableDays     Int[]   @default([1, 2, 3, 4, 5]) // 0=Sun, 1=Mon ... 6=Sat
   serviceAreaRadius Int     @default(30) // in kilometers
 
+  // Job preferences — used by auto-matching to filter candidate workers
+  acceptsHeavyCondition Boolean    @default(false)
+  acceptsPets           Boolean    @default(false)
+  preferredRoomTypes    RoomType[]
+
+  // Hourly rate the worker charges — surfaced in search results and used to
+  // compute estimatedTotal; distinct from per-skill Skill.rate, which is more
+  // granular but optional (not every worker sets skill-level rates).
+  hourlyRate Float?
+
   // Location
   address String?
   city    String?
   state   String?
   zipCode String?
+
+  // Live GPS location — updated while a worker is en route/on a job, used
+  // for arrival verification and distance-based matching.
+  currentLat         Float?
+  currentLng         Float?
+  lastLocationUpdate DateTime?
 
   // KYC — denormalized snapshot; source of truth is VerificationRequest
   kycStatus      KYCStatus @default(PENDING)
@@ -279,10 +319,31 @@ model WorkerProfile {
   skills            Skill[]
   reviews           Review[]
   resumeParseResult ResumeParseResult?
+  availability      WorkerAvailability[]
 
   @@index([userId])
   @@index([kycStatus])
   @@index([isAvailable])
+}
+
+// Per-date/slot availability record used by auto-matching to find candidate
+// workers for a given (date, timeSlot) — a normalized companion to the
+// coarse-grained WorkerProfile.availableDays weekly pattern.
+model WorkerAvailability {
+  id              String        @id @default(cuid())
+  workerProfileId String
+  workerProfile   WorkerProfile @relation(fields: [workerProfileId], references: [id], onDelete: Cascade)
+
+  date      DateTime
+  timeSlot  TimeSlot
+  isBlocked Boolean  @default(false) // worker explicitly marked this date/slot unavailable
+  isBooked  Boolean  @default(false) // an active booking currently occupies this slot — blocks closing it
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([workerProfileId, date, timeSlot])
+  @@index([workerProfileId, date])
 }
 
 // ============================================================================
@@ -323,9 +384,9 @@ model VerificationRequest {
 }
 
 model KycDocument {
-  id                     String              @id @default(cuid())
-  verificationRequestId  String
-  verificationRequest    VerificationRequest @relation(fields: [verificationRequestId], references: [id], onDelete: Cascade)
+  id                    String              @id @default(cuid())
+  verificationRequestId String
+  verificationRequest   VerificationRequest @relation(fields: [verificationRequestId], references: [id], onDelete: Cascade)
 
   documentType KycDocumentType
   fileName     String?
@@ -377,8 +438,8 @@ model Certification {
 
   // Verification tracking
   verificationStatus KycDocumentStatus @default(PENDING)
-  rejectionReason     String?
-  reviewedAt          DateTime?
+  rejectionReason    String?
+  reviewedAt         DateTime?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -469,16 +530,29 @@ model Booking {
   workerId String?
   worker   User?   @relation("worker", fields: [workerId], references: [id], onDelete: Cascade)
 
+  // Auto-matching — set when the system assigned workerId rather than the
+  // client picking a specific worker; declinedWorkerIds is the running
+  // denormalized skip-list consulted on each match attempt (see DeclinedWorker
+  // for the audited, per-attempt companion record).
+  isAutoMatched     Boolean   @default(false)
+  declinedWorkerIds String[]
+  expiresAt         DateTime?
+
   // Service
   serviceType            String
   serviceTaskId          String?
-  serviceTask            ServiceTask? @relation(fields: [serviceTaskId], references: [id])
+  serviceTask            ServiceTask?   @relation(fields: [serviceTaskId], references: [id])
   description            String
   estimatedDurationHours Float?
+  rooms                  RoomType[]
+  condition              ConditionType?
+  priorities             String[]
+  addOnsSnapshot         Json? // itemized add-ons as submitted at booking time; BookingAddOn[] below is the normalized/authoritative record
 
   // Scheduling
   scheduledDate  DateTime
   scheduledTime  String?
+  timeSlot       TimeSlot?
   completionDate DateTime?
 
   // Status
@@ -512,6 +586,13 @@ model Booking {
   // Completion — worker-submitted proof photo, awaiting client confirmation
   completionPhotoUrl String?
 
+  // Job execution timeline — discrete milestones distinct from completionDate
+  // (client-confirmed) and workerArrivedAt (see ArrivalVerification for the
+  // audited GPS check-in event this timestamp mirrors).
+  workerArrivedAt   DateTime?
+  workerStartedAt   DateTime?
+  workerCompletedAt DateTime?
+
   // Payment method chosen by the client at booking time — settled upfront so
   // the client isn't asked to pick a method again after confirming completion.
   paymentMethodType        PaymentMethodType?
@@ -522,20 +603,33 @@ model Booking {
   city     String
   notes    String?
 
+  // GPS snapshots — client location at booking time, worker's last known
+  // position, and the derived distance between them (meters).
+  clientLat      Float?
+  clientLng      Float?
+  workerLat      Float?
+  workerLng      Float?
+  distanceMeters Float?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   // Relations
-  payment Payment?
-  review  Review?
-  addOns  BookingAddOn[]
+  payment             Payment?
+  review              Review?
+  addOns              BookingAddOn[]
+  declinedWorkers     DeclinedWorker[]
+  arrivalVerification ArrivalVerification?
+  cancellation        Cancellation?
+  pricingLogs         PricingLog[]
+  disputes            Dispute[]
 
+  // NOTE: only enforceable while workerId is set — see merge notes.
+  @@unique([workerId, scheduledDate, timeSlot], name: "worker_slot_unique")
   @@index([clientId, status])
   @@index([workerId, status])
   @@index([scheduledDate])
   @@index([status])
-  // NOTE: only enforceable while workerId is set — see merge notes.
-  @@unique([workerId, scheduledDate, scheduledTime], name: "worker_slot_unique")
 }
 
 model BookingAddOn {
@@ -547,6 +641,100 @@ model BookingAddOn {
   price Float
 
   @@index([bookingId])
+}
+
+// ============================================================================
+// BOOKING FLOW — MATCHING, ARRIVAL, CANCELLATION, PRICING, DISPUTES
+// Worker/actor references below are intentionally soft (plain String id, no
+// FK) to match the existing audit-style convention already used elsewhere
+// (AuditLog.actorId, VerificationRequest.reviewedById, Booking.disputeResolvedById).
+// ============================================================================
+
+// Per-attempt audit trail for auto-matching skip logic — Booking.declinedWorkerIds
+// is the fast denormalized read; this is the "why/when" companion.
+model DeclinedWorker {
+  id        String  @id @default(cuid())
+  bookingId String
+  booking   Booking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+
+  workerId String // soft reference — worker who declined or was skipped
+  reason   String?
+
+  declinedAt DateTime @default(now())
+
+  @@unique([bookingId, workerId])
+}
+
+// GPS check-in event recorded when a worker marks themselves as arrived at
+// the job site — the immutable audit record; Booking.workerLat/workerLng
+// hold the live/last-known position.
+model ArrivalVerification {
+  id        String  @id @default(cuid())
+  bookingId String  @unique
+  booking   Booking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+
+  workerLat      Float
+  workerLng      Float
+  distanceMeters Float
+  isVerified     Boolean @default(false) // within the accepted geofence radius
+
+  createdAt DateTime @default(now())
+}
+
+model Cancellation {
+  id        String  @id @default(cuid())
+  bookingId String  @unique
+  booking   Booking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+
+  cancelledBy   Role // CLIENT, WORKER, or ADMIN
+  cancelledById String // soft reference to the user who cancelled
+  reason        String?
+
+  feeCharged   Float? @default(0)
+  refundAmount Float?
+
+  createdAt DateTime @default(now())
+}
+
+// Itemized pricing snapshot — logged whenever the estimate is (re)computed,
+// e.g. on initial submit and again after condition/distance are known.
+model PricingLog {
+  id        String  @id @default(cuid())
+  bookingId String
+  booking   Booking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+
+  basePrice     Float
+  conditionFee  Float? @default(0)
+  distanceFee   Float? @default(0)
+  addOnsTotal   Float? @default(0)
+  finalEstimate Float
+  breakdown     Json? // full itemized snapshot for support/audit lookups
+
+  createdAt DateTime @default(now())
+
+  @@index([bookingId])
+}
+
+model Dispute {
+  id        String  @id @default(cuid())
+  bookingId String
+  booking   Booking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+
+  raisedById   String // soft reference — client or worker who raised it
+  reason       String
+  evidenceUrls String[]
+
+  status       String    @default("OPEN") // 'OPEN' | 'UNDER_REVIEW' | 'RESOLVED' | 'REJECTED'
+  resolution   String?
+  resolvedById String? // soft reference — admin who resolved it
+  resolvedAt   DateTime?
+  refundAmount Float?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([bookingId])
+  @@index([status])
 }
 
 // ============================================================================
@@ -589,6 +777,17 @@ model Payment {
   paymongoPaymentId String?
   paymongoSourceId  String?
 
+  // Authorize/capture flow — amount is held (authorized) at booking time and
+  // captured on completion; capturedAmount may differ from authorizedAmount
+  // if the final price changed (e.g. quote approval, add-ons).
+  authorizedAmount Float?
+  authorizedAt     DateTime?
+  authorizationId  String?
+  capturedAmount   Float?
+  capturedAt       DateTime?
+  paymentIntentId  String?
+  clientSecret     String?
+
   // Payment method used
   methodType        PaymentMethodType
   accountIdentifier String? // masked GCash number, last 4 of card, etc.
@@ -609,7 +808,7 @@ model SavedPaymentMethod {
   type              PaymentMethodType
   accountIdentifier String? // masked — last 4 digits or masked phone number
   label             String? // e.g. "My GCash", "Work Card"
-  isDefault         Boolean @default(false)
+  isDefault         Boolean           @default(false)
 
   createdAt DateTime @default(now())
 
@@ -663,10 +862,10 @@ model Message {
   receiverId String
   receiver   User   @relation("receiver", fields: [receiverId], references: [id], onDelete: Cascade)
 
-  content String
+  content  String
   imageUrl String?
-  isRead  Boolean   @default(false)
-  readAt  DateTime?
+  isRead   Boolean   @default(false)
+  readAt   DateTime?
 
   createdAt DateTime @default(now())
 
@@ -702,7 +901,7 @@ model Notification {
 // ============================================================================
 
 model AuditLog {
-  id        String   @id @default(cuid())
+  id        String  @id @default(cuid())
   actorId   String?
   actorName String?
   actorRole String?
@@ -738,6 +937,14 @@ model AppSettings {
   siteName             String  @default("HomeEaseAdmin")
   supportEmail         String  @default("support@homeease.dev")
   notificationsEnabled Boolean @default(true)
+
+  // Platform configuration — live business rules read at runtime by the
+  // booking/payment/worker-availability flows (see appSettingsService).
+  commissionRate       Float @default(0.10)
+  withholdingTaxRate   Float @default(0.05)
+  maxSlotsPerDay       Int   @default(2)
+  pendingExpiryMinutes Int   @default(60)
+  geofenceRadiusMeters Int   @default(100)
 
   updatedAt DateTime @updatedAt
 }
