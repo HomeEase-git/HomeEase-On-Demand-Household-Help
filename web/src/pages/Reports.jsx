@@ -139,14 +139,6 @@ export default function Reports() {
                 </select>
               </div>
               <div className="detail-block">
-                <label>From</label>
-                <input type="date" style={{ width: '100%', padding: '0.5rem', border: '1px solid var(--border)', borderRadius: 8 }} />
-              </div>
-              <div className="detail-block">
-                <label>To</label>
-                <input type="date" style={{ width: '100%', padding: '0.5rem', border: '1px solid var(--border)', borderRadius: 8 }} />
-              </div>
-              <div className="detail-block">
                 <label>Format</label>
                 <select style={{ width: '100%', padding: '0.5rem', border: '1px solid var(--border)', borderRadius: 8 }}>
                   <option>CSV</option>
@@ -154,7 +146,8 @@ export default function Reports() {
               </div>
             </div>
             <p className="page-subtitle" style={{ marginBottom: '1rem' }}>
-              Date filtering coming soon — export currently returns all available rows, capped at 500.
+              Export returns all available rows for the selected type, capped at 500. For a date-filtered export, use
+              the Payout Distribution page instead.
             </p>
             {error && <div className="form-error" style={{ marginBottom: '1rem' }}>{error}</div>}
             <button type="button" className="btn btn-primary" onClick={handleExport} disabled={exporting}>

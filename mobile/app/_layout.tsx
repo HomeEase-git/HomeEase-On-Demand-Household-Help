@@ -64,6 +64,25 @@ export default function RootLayout() {
 
     socket.on("notification:new", (notification) => {
       useNotificationStore.getState().receiveNotification(notification);
+
+      // Live-update the cached KYC status so a worker sitting on the waiting
+      // screen (which has no buttons/refresh control) advances automatically
+      // as soon as an admin decides, instead of needing to relaunch the app.
+      if (
+        notification.type === "VERIFICATION_APPROVED" ||
+        notification.type === "VERIFICATION_REJECTED"
+      ) {
+        const currentUser = useAuthStore.getState().user;
+        if (currentUser?.role === "worker") {
+          useAuthStore
+            .getState()
+            .setKycStatus(
+              notification.type === "VERIFICATION_APPROVED"
+                ? "APPROVED"
+                : "REJECTED",
+            );
+        }
+      }
     });
 
     return () => {
@@ -81,6 +100,22 @@ export default function RootLayout() {
         // Initialize auth and booking draft
         await initializeAuth();
         await restoreDraft();
+
+        // Refresh the worker's KYC status from the server on every launch —
+        // the cached value from the last login can be stale if an admin
+        // approved/rejected the account while the app was closed, and the
+        // (worker) layout guard depends on this being current.
+        const { user } = useAuthStore.getState();
+        if (user?.role === "worker") {
+          try {
+            const profile = await api.getUserProfile();
+            if (profile.kycStatus) {
+              useAuthStore.getState().setKycStatus(profile.kycStatus);
+            }
+          } catch (error) {
+            console.error("[App] Failed to refresh worker KYC status:", error);
+          }
+        }
 
         // Initialize offline support
         initializeOfflineSupport();

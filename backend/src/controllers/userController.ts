@@ -30,6 +30,12 @@ export const getUserProfile = async (req: AuthRequest, res: Response) => {
         isVerified: true,
         createdAt: true,
         updatedAt: true,
+        workerProfile: { select: { kycStatus: true } },
+        verificationRequests: {
+          orderBy: { submittedAt: 'desc' },
+          take: 1,
+          select: { rejectionReason: true },
+        },
       },
     });
 
@@ -37,10 +43,20 @@ export const getUserProfile = async (req: AuthRequest, res: Response) => {
       return res.status(404).json(errorResponse(404, 'User not found'));
     }
 
+    const { workerProfile, verificationRequests, ...userFields } = user;
+    const kycStatus = user.role === 'WORKER' ? (workerProfile?.kycStatus ?? 'PENDING') : undefined;
+
     return res.status(200).json({
       success: true,
       message: 'Profile retrieved successfully',
-      data: user,
+      data: {
+        ...userFields,
+        // Used by the mobile app to gate worker access behind admin approval.
+        kycStatus,
+        // The admin's actual reason, so a rejected worker isn't shown a
+        // generic canned message regardless of why they were rejected.
+        kycRejectionReason: kycStatus === 'REJECTED' ? (verificationRequests[0]?.rejectionReason ?? null) : undefined,
+      },
     });
   } catch (error) {
     console.error('Error fetching user profile:', error);
@@ -624,7 +640,7 @@ export const acceptContract = async (req: AuthRequest, res: Response) => {
     }
     
     const { contractType, acceptedAt } = req.body;
-    
+
     const acceptance = await prisma.contractAcceptance.create({
       data: {
         userId: req.user.userId,
@@ -632,7 +648,31 @@ export const acceptContract = async (req: AuthRequest, res: Response) => {
         acceptedAt: acceptedAt ? new Date(acceptedAt) : new Date(),
       },
     });
-    
+
+    // Contract acceptance is the last step of worker onboarding — flip the
+    // open verification request (and the denormalized WorkerProfile status)
+    // to SUBMITTED so it surfaces for admin review and the app can gate the
+    // worker into the waiting screen instead of the tabs.
+    if (req.user.role === 'WORKER') {
+      const verificationRequest = await prisma.verificationRequest.findFirst({
+        where: { userId: req.user.userId, status: 'PENDING' },
+        orderBy: { submittedAt: 'desc' },
+      });
+
+      if (verificationRequest) {
+        await prisma.$transaction([
+          prisma.verificationRequest.update({
+            where: { id: verificationRequest.id },
+            data: { status: 'SUBMITTED' },
+          }),
+          prisma.workerProfile.updateMany({
+            where: { userId: req.user.userId },
+            data: { kycStatus: 'SUBMITTED', kycSubmittedAt: new Date() },
+          }),
+        ]);
+      }
+    }
+
     return res.status(201).json({
       success: true,
       message: 'Contract acceptance recorded successfully',

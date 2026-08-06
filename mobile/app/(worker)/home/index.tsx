@@ -20,6 +20,7 @@ export default function WorkerHomeScreen() {
   const setJobs = useWorkerStore((s) => s.setJobs);
   const user = useAuthStore((s) => s.user);
   const unreadCount = useNotificationStore((s) => s.unreadCount);
+  const [capacity, setCapacity] = React.useState<{ activeJobCount: number; maxConcurrentJobs: number } | null>(null);
 
   const firstName = user?.name?.split(" ")[0] ?? "Worker";
   const pending = jobs.filter((j) => j.status === "Pending");
@@ -32,8 +33,9 @@ export default function WorkerHomeScreen() {
   const load = useCallback(async () => {
     if (!user?.id) return;
     try {
-      const bookings = await api.getBookings();
+      const [bookings, capacityData] = await Promise.all([api.getBookings(), api.getWorkerCapacity()]);
       setJobs((bookings as ApiWorkerBooking[]).map(mapApiJob));
+      setCapacity(capacityData);
     } catch (error) {
       console.error("Load worker home error:", error);
     }
@@ -97,6 +99,29 @@ export default function WorkerHomeScreen() {
           </View>
         </View>
 
+        {capacity && (
+          <Pressable
+            className="flex-row items-center justify-between bg-card rounded-xl p-3 mx-4 mt-3"
+            onPress={() => router.push("/(worker)/profile/availability")}
+          >
+            <View className="flex-row items-center">
+              <Ionicons
+                name="briefcase-outline"
+                size={18}
+                color={capacity.activeJobCount >= capacity.maxConcurrentJobs ? colors.error : colors.text.secondary}
+              />
+              <Text className="text-text-secondary text-sm ml-2">Active slot load</Text>
+            </View>
+            <Text
+              className={`font-bold text-sm ${
+                capacity.activeJobCount >= capacity.maxConcurrentJobs ? "text-error" : "text-text-primary"
+              }`}
+            >
+              {capacity.activeJobCount}/{capacity.maxConcurrentJobs} slots filled
+            </Text>
+          </Pressable>
+        )}
+
         <View className="mx-4 mt-4">
           <SectionHeader
             title="Upcoming Jobs"
@@ -156,6 +181,19 @@ export default function WorkerHomeScreen() {
               />
               <Text className="text-brand font-semibold mt-2">
                 My Earnings
+              </Text>
+            </Pressable>
+            <Pressable
+              className="flex-1 min-w-[140] bg-blue-100 border-2 border-brand rounded-xl p-4"
+              onPress={() => router.push("/(worker)/profile/rate")}
+            >
+              <Ionicons
+                name="pricetag-outline"
+                size={24}
+                color={colors.brand.DEFAULT}
+              />
+              <Text className="text-brand font-semibold mt-2">
+                Set Hourly Rate
               </Text>
             </Pressable>
             <Pressable

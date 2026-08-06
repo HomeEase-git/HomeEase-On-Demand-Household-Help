@@ -1,8 +1,10 @@
 export type DigitalIdCardData = {
   name: string;
-  email: string;
-  phone: string;
-  role: "worker" | "client";
+  avatar?: string | null;
+  badgeId: string;
+  verified: boolean;
+  rating: number;
+  totalReviews: number;
   trade?: string;
   serviceArea?: string;
   licenseNumber?: string;
@@ -10,22 +12,28 @@ export type DigitalIdCardData = {
 
 export type DigitalIdCard = {
   fullName: string;
-  email: string;
-  phone: string;
-  roleLabel: string;
-  trade: string;
-  serviceArea: string;
-  licenseNumber: string;
+  avatar: string | null;
+  badgeId: string;
+  verified: boolean;
   verificationLabel: string;
+  rating: number;
+  totalReviews: number;
+  trade?: string;
+  serviceArea?: string;
+  licenseNumber?: string;
 };
 
 export const buildDigitalIdCard = (data: DigitalIdCardData): DigitalIdCard => ({
   fullName: data.name || "Unknown User",
-  email: data.email || "—",
-  phone: data.phone || "—",
-  roleLabel: data.role === "worker" ? "Verified Worker" : "Verified Client",
-  trade: data.trade || "General Services",
-  serviceArea: data.serviceArea || "Service Area Pending",
-  licenseNumber: data.licenseNumber || "Not provided",
-  verificationLabel: `HomeEase Verified ${data.role === "worker" ? "Worker" : "Client"}`,
+  avatar: data.avatar ?? null,
+  badgeId: data.badgeId,
+  verified: data.verified,
+  verificationLabel: data.verified
+    ? "HomeEase Verified Worker"
+    : "Verification Pending",
+  rating: data.rating,
+  totalReviews: data.totalReviews,
+  trade: data.trade || undefined,
+  serviceArea: data.serviceArea || undefined,
+  licenseNumber: data.licenseNumber || undefined,
 });

@@ -32,7 +32,7 @@ export const CategoryCard: React.FC<Props> = ({ category, onPress }) => {
         {category.name}
       </Text>
       <Text className="text-text-secondary text-xs text-center">
-        {category.count} service{category.count === 1 ? "" : "s"}
+        {category.count} worker{category.count === 1 ? "" : "s"} available
       </Text>
     </Pressable>
   );

@@ -1,69 +1,26 @@
-import React from "react";
-import { View, Text, ScrollView } from "react-native";
+import React, { useCallback, useEffect, useState } from "react";
+import { View, Text, ScrollView, ActivityIndicator } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { AppIcon as Ionicons } from "../../../components/icons/AppIcon";
 import { useRouter } from "expo-router";
 import ScreenHeader from "../../../components/ui/ScreenHeader";
-import StarRating from "../../../components/ui/StarRating";
 import PrimaryButton from "../../../components/ui/PrimaryButton";
 import OutlinedButton from "../../../components/ui/OutlinedButton";
 import {
   useWorkerProfileStore,
   type WorkerProfileState,
 } from "../../../store/workerProfileStore";
+import { useAuthStore } from "../../../store/authStore";
+import { parseMyResume } from "../../../services/api";
+import type { ParsedResume } from "../../../types/api.types";
 import { colors } from "../../../constants";
 import { useAlertModal } from "../../../contexts/AlertModalContext";
 
-const PARSED_RESUME = {
-  name: "Dominic Paulo R. Dela Cruz",
-  trade: "Plumbing",
-  yearsOfExperience: 10,
-  masteryLevel: "Expert",
-  masteryScore: 5,
-  summary:
-    "Licensed plumber with over 10 years of hands-on experience in residential and commercial plumbing systems. Specializes in pipe installation, leak detection, and full system diagnostics.",
-  skills: [
-    { name: "Pipe Installation & Repair", level: "Expert" },
-    { name: "Drain Cleaning", level: "Expert" },
-    { name: "Fixture Installation", level: "Advanced" },
-    { name: "Leak Detection", level: "Expert" },
-    { name: "Water Heater Service", level: "Intermediate" },
-    { name: "Emergency Repairs", level: "Advanced" },
-  ],
-  experience: [
-    {
-      company: "Bulacan Home Services",
-      role: "Senior Plumber",
-      years: "2018 - Present",
-    },
-    {
-      company: "Metro Plumbing Co.",
-      role: "Journeyman Plumber",
-      years: "2014 - 2018",
-    },
-    {
-      company: "TESDA Apprenticeship Program",
-      role: "Apprentice",
-      years: "2013 - 2014",
-    },
-  ],
-  education: [
-    {
-      institution: "Bulacan State University",
-      degree: "BSIT - Construction Technology",
-      year: "2013",
-    },
-    {
-      institution: "TESDA",
-      degree: "National Certificate II - Plumbing",
-      year: "2014",
-    },
-  ],
-  certifications: [
-    "PRC Licensed Plumber",
-    "TESDA NC II",
-    "Safety Training Certificate",
-  ],
+const LEVEL_COLOR: Record<string, { bg: string; text: string }> = {
+  Expert: { bg: "bg-success/20", text: "text-success" },
+  Advanced: { bg: "bg-accent/20", text: "text-accent" },
+  Intermediate: { bg: "bg-warning/20", text: "text-warning" },
+  Beginner: { bg: "bg-card-dark", text: "text-text-muted" },
 };
 
 export default function ResumePreviewScreen() {
@@ -73,29 +30,41 @@ export default function ResumePreviewScreen() {
     (s: WorkerProfileState) => s.setProfile,
   );
   const isSaved = useWorkerProfileStore((s: WorkerProfileState) => s.isSaved);
+  const currentName = useAuthStore((s) => s.user?.name);
 
-  const getLevelColor = (level: string) => {
-    switch (level) {
-      case "Expert":
-        return { bg: "bg-success/20", text: "text-success" };
-      case "Advanced":
-        return { bg: "bg-accent/20", text: "text-accent" };
-      case "Intermediate":
-        return { bg: "bg-warning/20", text: "text-warning" };
-      default:
-        return { bg: "bg-card-dark", text: "text-text-muted" };
+  const [result, setResult] = useState<ParsedResume | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [reanalyzing, setReanalyzing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const load = useCallback(async (force: boolean) => {
+    force ? setReanalyzing(true) : setLoading(true);
+    setError(null);
+    try {
+      const data = await parseMyResume(force);
+      setResult(data);
+    } catch (err: any) {
+      setError(err?.message || "Failed to analyze resume. Please try again.");
+    } finally {
+      setLoading(false);
+      setReanalyzing(false);
     }
-  };
+  }, []);
+
+  useEffect(() => {
+    load(false);
+  }, [load]);
 
   const handleUseProfileData = () => {
+    if (!result) return;
     setProfile({
-      name: PARSED_RESUME.name,
-      trade: PARSED_RESUME.trade,
-      yearsOfExperience: PARSED_RESUME.yearsOfExperience,
-      masteryLevel: PARSED_RESUME.masteryLevel,
-      summary: PARSED_RESUME.summary,
-      skills: PARSED_RESUME.skills.map((s) => s.name),
-      certifications: PARSED_RESUME.certifications,
+      name: currentName ?? "",
+      trade: result.tradeCategory ?? "",
+      yearsOfExperience: result.yearsOfExperience ?? 0,
+      masteryLevel: result.masteryLevel ?? "Unknown",
+      summary: result.summary ?? "",
+      skills: result.parsedSkills,
+      certifications: [],
     });
     alertModal.success(
       "Profile Updated",
@@ -103,6 +72,44 @@ export default function ResumePreviewScreen() {
       [{ text: "OK", onPress: () => router.back() }],
     );
   };
+
+  if (loading) {
+    return (
+      <SafeAreaView className="flex-1 bg-white">
+        <ScreenHeader title="Resume Analysis" showBack />
+        <View className="flex-1 items-center justify-center px-8">
+          <ActivityIndicator size="large" color={colors.brand.DEFAULT} />
+          <Text className="text-text-secondary text-sm mt-4 text-center">
+            Analyzing your resume with AI — this may take a few seconds…
+          </Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  if (error || !result) {
+    return (
+      <SafeAreaView className="flex-1 bg-white">
+        <ScreenHeader title="Resume Analysis" showBack />
+        <View className="flex-1 items-center justify-center px-8">
+          <Ionicons name="alert-circle-outline" size={48} color={colors.text.muted} />
+          <Text className="text-text-primary font-semibold text-base mt-4 text-center">
+            Couldn&apos;t analyze your resume
+          </Text>
+          <Text className="text-text-secondary text-sm mt-2 text-center">
+            {error || "No analysis is available yet."}
+          </Text>
+          <View className="mt-6 w-full">
+            <PrimaryButton label="Try Again" onPress={() => load(false)} fullWidth />
+          </View>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  const hasSkills = result.parsedSkills.length > 0;
+  const masteryLevel = result.masteryLevel ?? "Unknown";
+  const levelColors = LEVEL_COLOR[masteryLevel] ?? LEVEL_COLOR.Beginner;
 
   return (
     <SafeAreaView className="flex-1 bg-white">
@@ -120,12 +127,10 @@ export default function ResumePreviewScreen() {
             </Text>
           </View>
           <Text className="text-primary/70 text-xs mt-1">
-            Powered by Claude AI · Analyzed just now
+            {result.parsedAt
+              ? `Analyzed ${new Date(result.parsedAt).toLocaleDateString()}`
+              : "Analyzed just now"}
           </Text>
-          <View className="bg-brand/20 rounded-xl p-3 mt-3 flex-row items-center justify-between">
-            <Text className="text-primary text-sm">Overall Match Score</Text>
-            <Text className="text-text-primary font-bold text-2xl">92%</Text>
-          </View>
         </View>
 
         {/* Profile Overview */}
@@ -138,30 +143,34 @@ export default function ResumePreviewScreen() {
               <Ionicons name="person-circle" size={48} color={colors.brand.DEFAULT} />
             </View>
             <View className="flex-1">
-              <Text className="text-text-primary font-bold text-lg">
-                {PARSED_RESUME.name}
+              <Text className="text-accent text-sm">
+                {result.tradeCategory ?? "Trade not detected"}
               </Text>
-              <Text className="text-accent text-sm">{PARSED_RESUME.trade}</Text>
-              <View className="mt-1 flex-row items-center">
-                <Ionicons name="time-outline" size={14} color={colors.text.muted} />
-                <Text className="text-text-secondary text-xs ml-1">
-                  {PARSED_RESUME.yearsOfExperience} years experience
+              {result.yearsOfExperience != null && (
+                <View className="mt-1 flex-row items-center">
+                  <Ionicons name="time-outline" size={14} color={colors.text.muted} />
+                  <Text className="text-text-secondary text-xs ml-1">
+                    {result.yearsOfExperience} years experience
+                  </Text>
+                </View>
+              )}
+            </View>
+          </View>
+          {result.masteryLevel && (
+            <View className="mt-3 flex-row items-center justify-between bg-card-dark rounded-xl p-3">
+              <View>
+                <Text className="text-text-secondary text-xs">Mastery Level</Text>
+                <Text className="text-text-primary font-bold text-base mt-0.5">
+                  {result.masteryLevel}
                 </Text>
               </View>
             </View>
-          </View>
-          <View className="mt-3 flex-row items-center justify-between bg-card-dark rounded-xl p-3">
-            <View>
-              <Text className="text-text-secondary text-xs">Mastery Level</Text>
-              <Text className="text-text-primary font-bold text-base mt-0.5">
-                {PARSED_RESUME.masteryLevel}
-              </Text>
-            </View>
-            <StarRating rating={PARSED_RESUME.masteryScore} size={20} />
-          </View>
-          <Text className="text-text-secondary text-sm mt-3 leading-5">
-            {PARSED_RESUME.summary}
-          </Text>
+          )}
+          {result.summary && (
+            <Text className="text-text-secondary text-sm mt-3 leading-5">
+              {result.summary}
+            </Text>
+          )}
         </View>
 
         {/* Skills */}
@@ -169,102 +178,29 @@ export default function ResumePreviewScreen() {
           <Text className="text-text-primary font-bold text-base mb-3">
             Extracted Skills
           </Text>
-          {PARSED_RESUME.skills.map((skill, index) => {
-            const lc = getLevelColor(skill.level);
-            return (
+          {hasSkills ? (
+            result.parsedSkills.map((skill, index) => (
               <View
-                key={index}
+                key={`${skill}-${index}`}
                 className={`flex-row items-center justify-between py-2 ${
-                  index < PARSED_RESUME.skills.length - 1
+                  index < result.parsedSkills.length - 1
                     ? "border-b border-divider"
                     : ""
                 }`}
               >
-                <Text className="text-primary text-sm flex-1">
-                  {skill.name}
-                </Text>
-                <View className={`${lc.bg} rounded-full px-2 py-0.5`}>
-                  <Text className={`${lc.text} text-xs font-semibold`}>
-                    {skill.level}
+                <Text className="text-primary text-sm flex-1">{skill}</Text>
+                <View className={`${levelColors.bg} rounded-full px-2 py-0.5`}>
+                  <Text className={`${levelColors.text} text-xs font-semibold`}>
+                    {masteryLevel}
                   </Text>
                 </View>
               </View>
-            );
-          })}
-        </View>
-
-        {/* Experience */}
-        <View className="bg-card rounded-2xl p-4 mb-4">
-          <Text className="text-text-primary font-bold text-base mb-3">
-            Work Experience
-          </Text>
-          {PARSED_RESUME.experience.map((entry, index) => (
-            <View
-              key={index}
-              className={`flex-row ${
-                index < PARSED_RESUME.experience.length - 1 ? "mb-3" : ""
-              }`}
-            >
-              <View className="w-2 h-2 rounded-full bg-accent mt-1.5 mr-3 flex-shrink-0" />
-              <View className="flex-1">
-                <Text className="text-primary font-semibold text-sm">
-                  {entry.role}
-                </Text>
-                <Text className="text-text-secondary text-xs">
-                  {entry.company}
-                </Text>
-                <Text className="text-text-muted text-xs mt-0.5">
-                  {entry.years}
-                </Text>
-              </View>
-            </View>
-          ))}
-        </View>
-
-        {/* Education */}
-        <View className="bg-card rounded-2xl p-4 mb-4">
-          <Text className="text-text-primary font-bold text-base mb-3">
-            Education & Training
-          </Text>
-          {PARSED_RESUME.education.map((entry, index) => (
-            <View
-              key={index}
-              className={`flex-row items-start ${
-                index < PARSED_RESUME.education.length - 1 ? "mb-3" : ""
-              }`}
-            >
-              <Ionicons name="school-outline" size={16} color={colors.brand.DEFAULT} />
-              <View className="flex-1 ml-3">
-                <Text className="text-primary font-semibold text-sm">
-                  {entry.degree}
-                </Text>
-                <Text className="text-text-secondary text-xs">
-                  {entry.institution}
-                </Text>
-                <Text className="text-text-muted text-xs mt-0.5">
-                  {entry.year}
-                </Text>
-              </View>
-            </View>
-          ))}
-        </View>
-
-        {/* Certifications */}
-        <View className="bg-card rounded-2xl p-4 mb-4">
-          <Text className="text-text-primary font-bold text-base mb-3">
-            Certifications
-          </Text>
-          {PARSED_RESUME.certifications.map((cert, index) => (
-            <View
-              key={index}
-              className={`flex-row items-center ${
-                index < PARSED_RESUME.certifications.length - 1 ? "mb-2" : ""
-              }`}
-            >
-              <Ionicons name="checkmark-circle" size={16} color={colors.success} />
-              <Text className="text-primary text-sm ml-2">{cert}</Text>
-            </View>
-          ))}
+            ))
+          ) : (
+            <Text className="text-text-muted text-sm">
+              No skills could be extracted from this resume.
+            </Text>
+          )}
         </View>
 
         {/* Actions */}
@@ -280,9 +216,15 @@ export default function ResumePreviewScreen() {
             <PrimaryButton
               label="Use This Profile Data"
               fullWidth
+              disabled={!hasSkills}
               onPress={handleUseProfileData}
             />
           )}
+          <OutlinedButton
+            label={reanalyzing ? "Re-analyzing…" : "Re-analyze Resume"}
+            onPress={() => load(true)}
+            disabled={reanalyzing}
+          />
           <OutlinedButton label="Go Back" onPress={() => router.back()} />
           <Text className="text-text-muted text-xs text-center mt-2">
             AI analysis may not be 100% accurate. Review your profile after

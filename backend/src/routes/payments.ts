@@ -5,8 +5,9 @@ import {
   listMyPayments,
   releaseEscrow,
   refundPayment,
-  createPaymentIntent,
+  createPaymongoCheckout,
   handlePayMongoWebhook,
+  handlePaymongoTransferWebhook,
 } from '../controllers/paymentController';
 import { authMiddleware } from '../middleware/auth';
 import { restrictTo } from '../middleware/role';
@@ -19,6 +20,9 @@ const router = Router();
 
 // PayMongo webhook (no auth required)
 router.post('/paymongo/webhook', handlePayMongoWebhook);
+
+// PayMongo transfer (disbursement) callback (no auth required — signature-verified)
+router.post('/paymongo/transfers/callback', handlePaymongoTransferWebhook);
 
 // All other routes require auth
 router.use(authMiddleware);
@@ -38,7 +42,7 @@ router.post('/:id/release', restrictTo('CLIENT'), validateReleaseEscrow, release
 // Refund payment (client only)
 router.post('/:id/refund', restrictTo('CLIENT'), validateRefundPayment, refundPayment);
 
-// Create PayMongo payment intent (client only)
-router.post('/paymongo/intent', restrictTo('CLIENT'), createPaymentIntent);
+// Create PayMongo Source checkout (GCash/Maya) for an existing pending payment (client only)
+router.post('/:bookingId/paymongo/checkout', restrictTo('CLIENT'), createPaymongoCheckout);
 
 export default router;

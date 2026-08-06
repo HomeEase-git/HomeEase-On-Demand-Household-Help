@@ -23,7 +23,6 @@ export default function AuthLayout() {
       <Stack.Screen name="otp-verification" />
       <Stack.Screen name="account-created-success" />
       <Stack.Screen name="terms-conditions" />
-      <Stack.Screen name="verify-email" />
     </Stack>
   );
 }

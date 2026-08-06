@@ -1,0 +1,36 @@
+/**
+ * Booking status transition map — pure, no I/O, so it's shared between the
+ * controller (enforcement) and tests (verification) without pulling in
+ * Prisma/Redis/Supabase.
+ *
+ * Schema BookingStatus values:
+ *   PENDING | ACCEPTED | REJECTED | IN_PROGRESS |
+ *   QUOTE_SUBMITTED | QUOTE_APPROVED | DISPUTED | PENDING_COMPLETION |
+ *   COMPLETED | CANCELLED
+ *
+ * NOTE: DECLINED and QUOTE_DISPUTED do not exist in the schema.
+ *   - Use REJECTED in place of DECLINED.
+ *   - Use DISPUTED in place of QUOTE_DISPUTED.
+ *
+ * PENDING_COMPLETION: worker has submitted a completion photo and is
+ * awaiting the client's confirmation before the booking is finalized.
+ */
+export const VALID_TRANSITIONS: Record<string, string[]> = {
+  PENDING: ['ACCEPTED', 'REJECTED', 'CANCELLED'],
+  ACCEPTED: ['IN_PROGRESS', 'CANCELLED', 'REJECTED'],
+  IN_PROGRESS: ['QUOTE_SUBMITTED', 'CANCELLED'],
+  QUOTE_SUBMITTED: ['QUOTE_APPROVED', 'DISPUTED', 'CANCELLED'],
+  QUOTE_APPROVED: ['PENDING_COMPLETION', 'CANCELLED'],
+  // IN_PROGRESS (not QUOTE_SUBMITTED) is the restart point for a dispute
+  // resolved via REQUEST_NEW_QUOTE — the worker resubmits through the normal
+  // submitQuote endpoint from there (see adminDisputeController.resolveDispute).
+  DISPUTED: ['QUOTE_APPROVED', 'IN_PROGRESS', 'CANCELLED'],
+  PENDING_COMPLETION: ['COMPLETED', 'CANCELLED'],
+  COMPLETED: [],
+  REJECTED: [],
+  CANCELLED: [],
+};
+
+export const isValidTransition = (currentStatus: string, newStatus: string): boolean => {
+  return VALID_TRANSITIONS[currentStatus]?.includes(newStatus) ?? false;
+};

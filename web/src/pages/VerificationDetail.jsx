@@ -12,6 +12,8 @@ import {
   approveVerification,
   rejectVerification,
   rerunVerification,
+  approveDocument,
+  rejectDocument,
 } from '../services/verification'
 
 export default function VerificationDetail() {
@@ -58,6 +60,16 @@ export default function VerificationDetail() {
     } finally {
       setRerunning(false)
     }
+  }
+
+  const handleApproveDocument = async (documentId) => {
+    await approveDocument(id, documentId)
+    reload()
+  }
+
+  const handleRejectDocument = async (documentId, reason) => {
+    await rejectDocument(id, documentId, reason)
+    reload()
   }
 
   const handleReject = async (e) => {
@@ -161,7 +173,11 @@ export default function VerificationDetail() {
         )}
       </SectionCard>
       <SectionCard title="Uploaded Documents">
-        <DocumentViewer documents={verification.documents} />
+        <DocumentViewer
+          documents={verification.documents}
+          onApproveDocument={handleApproveDocument}
+          onRejectDocument={handleRejectDocument}
+        />
       </SectionCard>
       {isPending && (
         <div className="cta-buttons">

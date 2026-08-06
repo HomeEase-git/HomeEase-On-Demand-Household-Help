@@ -1,103 +1,220 @@
 import { Request, Response } from 'express';
+import type { ConditionType, RoomType, TimeSlot } from '@prisma/client';
 import prisma from '@config/database';
 import { errorResponse } from '@utils/errorResponse';
+import { toDayStart } from '@services/workerAvailabilityService';
+import { distanceKm } from '@utils/geo';
+import { getAppSettings } from '@services/appSettingsService';
+import { parseWorkerResume } from '@services/resumeParseService';
 import type { JwtPayload } from '@/types/index';
 
 interface AuthRequest extends Request {
   user?: JwtPayload;
 }
 
+const VALID_TIME_SLOTS: TimeSlot[] = ['MORNING', 'AFTERNOON', 'EVENING'];
+const VALID_CONDITIONS: ConditionType[] = ['TIDY', 'NORMAL', 'HEAVY'];
+const VALID_ROOM_TYPES: RoomType[] = [
+  'BEDROOM',
+  'BATHROOM',
+  'KITCHEN',
+  'LIVING_ROOM',
+  'DINING_ROOM',
+  'OFFICE',
+  'GARAGE',
+  'BALCONY',
+  'OTHER',
+];
+const DEFAULT_SEARCH_RADIUS_KM = 30;
+// Search has no specific ServiceTask (that's picked in a later booking step),
+// so estimatedTotal for an hourly-rate worker uses a flat assumed duration —
+// documented here since it's the one non-obvious number in the card payload.
+const DEFAULT_ESTIMATE_HOURS = 2;
+
 /**
  * GET /api/workers
- * Search/list workers with filters
- * Query params: category, minRating, maxPrice, page, limit
+ * Worker discovery search (public). Query params:
+ *   serviceType, date (YYYY-MM-DD), timeSlot, condition, rooms (comma-separated
+ *   RoomType), lat, lng, radius (km, default 30), page, limit
+ *   — plus legacy category/minRating/maxPrice, kept for existing callers.
+ *
+ * Filters to isAvailable + kycStatus APPROVED workers under capacity, with an
+ * open (date, timeSlot) slot when both are given, within radius km of
+ * (lat, lng) when both are given, offering serviceType, and — when
+ * condition/rooms are given — matching the worker's job preferences.
+ * Distance can't be filtered/sorted in SQL without a geo extension, so the
+ * radius/rating/distance pass happens in memory over a bounded candidate set.
  */
 export const searchWorkers = async (req: AuthRequest, res: Response) => {
   try {
-    const { category, minRating, maxPrice, page = '1', limit = '10' } = req.query;
+    const {
+      serviceType,
+      category,
+      date,
+      timeSlot,
+      condition,
+      rooms,
+      lat,
+      lng,
+      radius,
+      minRating,
+      maxPrice,
+      page = '1',
+      limit = '10',
+    } = req.query;
 
     const pageNum = Math.max(1, parseInt(page as string) || 1);
     const limitNum = Math.min(100, Math.max(1, parseInt(limit as string) || 10));
-    const skip = (pageNum - 1) * limitNum;
+
+    if (timeSlot !== undefined && !VALID_TIME_SLOTS.includes(timeSlot as TimeSlot)) {
+      return res.status(400).json(errorResponse(400, `timeSlot must be one of ${VALID_TIME_SLOTS.join(', ')}`));
+    }
+    if (condition !== undefined && !VALID_CONDITIONS.includes(condition as ConditionType)) {
+      return res.status(400).json(errorResponse(400, `condition must be one of ${VALID_CONDITIONS.join(', ')}`));
+    }
+    if (date !== undefined && (typeof date !== 'string' || isNaN(new Date(date).getTime()))) {
+      return res.status(400).json(errorResponse(400, 'date must be a valid YYYY-MM-DD date'));
+    }
+
+    const clientLat = lat !== undefined ? parseFloat(lat as string) : null;
+    const clientLng = lng !== undefined ? parseFloat(lng as string) : null;
+    const hasLocation = clientLat != null && !isNaN(clientLat) && clientLng != null && !isNaN(clientLng);
+    const radiusKm = radius !== undefined && !isNaN(parseFloat(radius as string))
+      ? parseFloat(radius as string)
+      : DEFAULT_SEARCH_RADIUS_KM;
+
+    const requestedRooms = typeof rooms === 'string'
+      ? rooms.split(',').map((r) => r.trim().toUpperCase()).filter((r): r is RoomType => VALID_ROOM_TYPES.includes(r as RoomType))
+      : [];
+
+    const serviceTypeName = typeof serviceType === 'string' ? serviceType : typeof category === 'string' ? category : undefined;
 
     const whereClause: any = {
       isAvailable: true,
+      kycStatus: 'APPROVED',
     };
 
-    // Filter by service category if provided
-    if (category && typeof category === 'string') {
-      whereClause.serviceTypes = {
-        some: {
-          name: {
-            contains: category,
-            mode: 'insensitive',
-          },
-        },
-      };
+    if (serviceTypeName) {
+      whereClause.serviceTypes = { some: { name: { contains: serviceTypeName, mode: 'insensitive' } } };
     }
 
-    // Filter by minimum rating if provided
     if (minRating) {
       const rating = parseFloat(minRating as string);
-      if (!isNaN(rating)) {
-        whereClause.rating = { gte: rating };
-      }
+      if (!isNaN(rating)) whereClause.rating = { gte: rating };
     }
 
-    // Filter by max base price — price lives on ServiceType, not WorkerProfile
     if (maxPrice) {
       const price = parseFloat(maxPrice as string);
       if (!isNaN(price)) {
         whereClause.serviceTypes = {
-          some: {
-            ...(whereClause.serviceTypes?.some || {}),
-            basePrice: { lte: price },
-          },
+          some: { ...(whereClause.serviceTypes?.some || {}), basePrice: { lte: price } },
         };
       }
     }
 
-    const [workers, total] = await Promise.all([
-      prisma.workerProfile.findMany({
-        where: whereClause,
-        include: {
-          user: {
-            select: {
-              id: true,
-              fullName: true,
-              email: true,
-              avatar: true,   // was: profileImage (field is `avatar` in schema)
-            },
-          },
-          serviceTypes: true,
-          reviews: {
-            take: 3,
-            orderBy: { createdAt: 'desc' },
-          },
-        },
-        skip,
-        take: limitNum,
-        orderBy: { rating: 'desc' },
-      }),
-      prisma.workerProfile.count({ where: whereClause }),
-    ]);
+    if (condition === 'HEAVY') {
+      whereClause.acceptsHeavyCondition = true;
+    }
 
-    const formattedWorkers = workers.map((worker) => ({
-      id: worker.userId,
-      name: worker.user.fullName,
-      service: worker.serviceTypes[0]?.name || 'General Service',
-      rating: worker.rating,
-      reviews: worker.reviews.length,
-      basePrice: worker.serviceTypes[0]?.basePrice ?? null, // was: worker.hourlyRate (doesn't exist)
-      status: worker.isAvailable ? 'AVAILABLE' : 'BUSY',
-      avatar: worker.user.avatar,  // was: profileImage
-    }));
+    let dayStart: Date | null = null;
+    if (typeof date === 'string') {
+      dayStart = toDayStart(date);
+      whereClause.availability = {
+        some: {
+          date: dayStart,
+          isBlocked: false,
+          isBooked: false,
+          ...(timeSlot !== undefined ? { timeSlot: timeSlot as TimeSlot } : {}),
+        },
+      };
+    }
+
+    // capacity: activeJobCount < maxConcurrentJobs — expressed as a raw
+    // filter since Prisma can't compare two columns of the same row directly.
+    const candidates = await prisma.workerProfile.findMany({
+      where: whereClause,
+      include: {
+        user: { select: { id: true, fullName: true, avatar: true } },
+        serviceTypes: true,
+        availability: dayStart ? { where: { date: dayStart, isBlocked: false, isBooked: false } } : false,
+      },
+      // Bounded candidate pool — the radius/rating/distance ranking below
+      // runs in memory (see file header comment), so this caps how much a
+      // single request can pull before that pass.
+      take: 500,
+    });
+
+    const filtered = candidates.filter((w) => w.activeJobCount < w.maxConcurrentJobs);
+
+    const roomFiltered = requestedRooms.length > 0
+      ? filtered.filter((w) => w.preferredRoomTypes.length === 0 || w.preferredRoomTypes.some((r) => requestedRooms.includes(r)))
+      : filtered;
+
+    const withDistance = roomFiltered.map((w) => {
+      const distance =
+        hasLocation && w.currentLat != null && w.currentLng != null
+          ? distanceKm({ lat: clientLat as number, lng: clientLng as number }, { lat: w.currentLat, lng: w.currentLng })
+          : null;
+      return { worker: w, distance };
+    });
+
+    const withinRadius = hasLocation
+      ? withDistance.filter((w) => w.distance != null && w.distance <= radiusKm)
+      : withDistance;
+
+    withinRadius.sort((a, b) => {
+      if (b.worker.rating !== a.worker.rating) return b.worker.rating - a.worker.rating;
+      const distA = a.distance ?? Number.POSITIVE_INFINITY;
+      const distB = b.distance ?? Number.POSITIVE_INFINITY;
+      return distA - distB;
+    });
+
+    const total = withinRadius.length;
+    const start = (pageNum - 1) * limitNum;
+    const page_ = withinRadius.slice(start, start + limitNum);
+
+    const cards = page_.map(({ worker, distance }) => {
+      const matchedServiceType =
+        worker.serviceTypes.find((st) => serviceTypeName && st.name.toLowerCase() === serviceTypeName.toLowerCase()) ??
+        worker.serviceTypes[0];
+
+      const estimatedTotal =
+        worker.hourlyRate != null
+          ? Math.round(worker.hourlyRate * DEFAULT_ESTIMATE_HOURS * 100) / 100
+          : matchedServiceType?.basePrice ?? null;
+
+      const badges: string[] = ['VERIFIED'];
+      if (worker.rating >= 4.8 && worker.totalReviews >= 20) badges.push('TOP_RATED');
+      if (worker.totalReviews === 0) badges.push('NEW');
+      if (condition === 'HEAVY' && worker.acceptsHeavyCondition) badges.push('HEAVY_DUTY_READY');
+
+      return {
+        id: worker.userId,
+        fullName: worker.user.fullName,
+        avatar: worker.user.avatar,
+        rating: worker.rating,
+        totalReviews: worker.totalReviews,
+        distance,
+        hourlyRate: worker.hourlyRate,
+        estimatedTotal,
+        // Lets the client fetch this worker's packages for the selected
+        // category later in the booking flow without an extra round-trip.
+        matchedServiceTypeId: matchedServiceType?.id ?? null,
+        // At-capacity workers are already filtered out of `withinRadius`
+        // above — these are exposed so a still-available worker's current
+        // load can be shown (e.g. "1 active job"), not to signal fullness.
+        activeJobCount: worker.activeJobCount,
+        maxConcurrentJobs: worker.maxConcurrentJobs,
+        badges,
+        openSlots: dayStart ? worker.availability.map((a) => a.timeSlot) : [],
+      };
+    });
 
     return res.status(200).json({
       success: true,
       message: 'Workers retrieved successfully',
       data: {
-        workers: formattedWorkers,
+        workers: cards,
         pagination: {
           page: pageNum,
           limit: limitNum,
@@ -141,6 +258,7 @@ export const getWorkerDetail = async (req: AuthRequest, res: Response) => {
         kycApprovedAt: true,
         resumeUrl: true,
         maxConcurrentJobs: true,
+        hourlyRate: true,
         user: {
           select: {
             id: true,
@@ -163,6 +281,10 @@ export const getWorkerDetail = async (req: AuthRequest, res: Response) => {
       return res.status(404).json(errorResponse(404, 'Worker not found'));
     }
 
+    if (worker.kycStatus !== 'APPROVED') {
+      return res.status(404).json(errorResponse(404, 'Worker not found'));
+    }
+
     return res.status(200).json({
       success: true,
       message: 'Worker details retrieved successfully',
@@ -181,6 +303,7 @@ export const getWorkerDetail = async (req: AuthRequest, res: Response) => {
         zipCode: worker.zipCode,
         isAvailable: worker.isAvailable,
         availableDays: worker.availableDays,
+        hourlyRate: worker.hourlyRate,
         kycStatus: worker.kycStatus,
         kycSubmittedAt: worker.kycSubmittedAt,
         kycApprovedAt: worker.kycApprovedAt,
@@ -202,6 +325,67 @@ export const getWorkerDetail = async (req: AuthRequest, res: Response) => {
 };
 
 /**
+ * GET /api/workers/me/digital-id
+ * Self-serve digital ID card data for the logged-in worker. Unlike the public
+ * getWorkerDetail above, this does NOT gate on kycStatus === 'APPROVED' — a
+ * worker needs to see their own pending state, not a 404.
+ */
+export const getMyDigitalId = async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      return res.status(401).json(errorResponse(401, 'Not authenticated'));
+    }
+
+    const worker = await prisma.workerProfile.findUnique({
+      where: { userId: req.user.userId },
+      select: {
+        id: true,
+        kycStatus: true,
+        kycApprovedAt: true,
+        rating: true,
+        totalReviews: true,
+        digitalIdTrade: true,
+        digitalIdServiceArea: true,
+        licenseNumber: true,
+        user: {
+          select: {
+            id: true,
+            fullName: true,
+            avatar: true,
+          },
+        },
+      },
+    });
+
+    if (!worker) {
+      return res.status(404).json(errorResponse(404, 'Worker profile not found'));
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: 'Digital ID retrieved successfully',
+      data: {
+        id: worker.user.id,
+        name: worker.user.fullName,
+        avatar: worker.user.avatar,
+        rating: worker.rating,
+        totalReviews: worker.totalReviews,
+        kycStatus: worker.kycStatus,
+        kycApprovedAt: worker.kycApprovedAt,
+        verified: worker.kycStatus === 'APPROVED',
+        badgeId: `HE-${worker.user.id.slice(-8).toUpperCase()}`,
+        trade: worker.digitalIdTrade,
+        serviceArea: worker.digitalIdServiceArea,
+        licenseNumber: worker.licenseNumber,
+      },
+    });
+  } catch (error) {
+    console.error('Error fetching digital ID:', error);
+    return res.status(500).json(errorResponse(500, 'Failed to fetch digital ID'));
+  }
+};
+
+/**
  * GET /api/workers/:workerId/reviews
  * Get paginated reviews for a worker
  */
@@ -217,10 +401,10 @@ export const getWorkerReviews = async (req: AuthRequest, res: Response) => {
     // Check if worker exists — workerId param is the User.id (userId on WorkerProfile)
     const workerProfile = await prisma.workerProfile.findUnique({
       where: { userId: workerId },
-      select: { id: true },
+      select: { id: true, kycStatus: true },
     });
 
-    if (!workerProfile) {
+    if (!workerProfile || workerProfile.kycStatus !== 'APPROVED') {
       return res.status(404).json(errorResponse(404, 'Worker not found'));
     }
 
@@ -302,6 +486,15 @@ export const getWorkerAvailability = async (req: AuthRequest, res: Response) => 
       return res.status(400).json(errorResponse(400, 'date query parameter is required'));
     }
 
+    const workerProfile = await prisma.workerProfile.findUnique({
+      where: { userId: workerId },
+      select: { kycStatus: true },
+    });
+
+    if (!workerProfile || workerProfile.kycStatus !== 'APPROVED') {
+      return res.status(404).json(errorResponse(404, 'Worker not found'));
+    }
+
     const dayStart = new Date(`${date}T00:00:00.000Z`);
     const dayEnd = new Date(`${date}T23:59:59.999Z`);
 
@@ -337,6 +530,15 @@ export const getWorkerAvailability = async (req: AuthRequest, res: Response) => 
 export const getWorkerBlockedDates = async (req: AuthRequest, res: Response) => {
   try {
     const workerId = req.params.workerId as string;
+
+    const workerProfile = await prisma.workerProfile.findUnique({
+      where: { userId: workerId },
+      select: { kycStatus: true },
+    });
+
+    if (!workerProfile || workerProfile.kycStatus !== 'APPROVED') {
+      return res.status(404).json(errorResponse(404, 'Worker not found'));
+    }
 
     const today = new Date();
     today.setUTCHours(0, 0, 0, 0);
@@ -418,10 +620,15 @@ export const updateWorkerProfile = async (req: AuthRequest, res: Response) => {
       city,
       state,
       zipCode,
-      kycStatus,
-      kycSubmittedAt,
-      kycApprovedAt,
       resumeUrl,
+      digitalIdTrade,
+      digitalIdServiceArea,
+      licenseNumber,
+      // kycStatus/kycSubmittedAt/kycApprovedAt are deliberately NOT accepted
+      // here — this is a worker self-service endpoint, and those fields
+      // must only ever be set by admin review (adminVerificationController)
+      // or the server-side contract-acceptance flow (userController.
+      // acceptContract), never by the worker's own request body.
     } = req.body;
 
     const updateData: any = {};
@@ -431,10 +638,10 @@ export const updateWorkerProfile = async (req: AuthRequest, res: Response) => {
     if (city !== undefined) updateData.city = city;
     if (state !== undefined) updateData.state = state;
     if (zipCode !== undefined) updateData.zipCode = zipCode;
-    if (kycStatus !== undefined) updateData.kycStatus = kycStatus;
-    if (kycSubmittedAt !== undefined) updateData.kycSubmittedAt = kycSubmittedAt;
-    if (kycApprovedAt !== undefined) updateData.kycApprovedAt = kycApprovedAt;
     if (resumeUrl !== undefined) updateData.resumeUrl = resumeUrl;
+    if (digitalIdTrade !== undefined) updateData.digitalIdTrade = digitalIdTrade;
+    if (digitalIdServiceArea !== undefined) updateData.digitalIdServiceArea = digitalIdServiceArea;
+    if (licenseNumber !== undefined) updateData.licenseNumber = licenseNumber;
 
     const updated = await prisma.workerProfile.update({
       where: { userId: req.user.userId },
@@ -455,6 +662,9 @@ export const updateWorkerProfile = async (req: AuthRequest, res: Response) => {
         kycSubmittedAt: updated.kycSubmittedAt,
         kycApprovedAt: updated.kycApprovedAt,
         resumeUrl: updated.resumeUrl,
+        digitalIdTrade: updated.digitalIdTrade,
+        digitalIdServiceArea: updated.digitalIdServiceArea,
+        licenseNumber: updated.licenseNumber,
       },
     });
   } catch (error) {
@@ -503,6 +713,373 @@ export const addServiceTypes = async (req: AuthRequest, res: Response) => {
   } catch (error) {
     console.error('Error adding service types:', error);
     return res.status(500).json(errorResponse(500, 'Failed to add service types'));
+  }
+};
+
+/**
+ * GET /api/workers/me/service-types
+ * List the authenticated worker's connected service types (worker only)
+ */
+export const listMyServiceTypes = async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      return res.status(401).json(errorResponse(401, 'Not authenticated'));
+    }
+
+    const workerProfile = await prisma.workerProfile.findUnique({
+      where: { userId: req.user.userId },
+      select: { serviceTypes: true },
+    });
+
+    if (!workerProfile) {
+      return res.status(404).json(errorResponse(404, 'Worker profile not found'));
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: 'Service types retrieved successfully',
+      data: { serviceTypes: workerProfile.serviceTypes },
+    });
+  } catch (error) {
+    console.error('Error fetching service types:', error);
+    return res.status(500).json(errorResponse(500, 'Failed to fetch service types'));
+  }
+};
+
+/**
+ * DELETE /api/workers/me/service-types/:serviceTypeId
+ * Remove a service type from the authenticated worker's profile (worker only)
+ */
+export const removeServiceType = async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      return res.status(401).json(errorResponse(401, 'Not authenticated'));
+    }
+
+    const serviceTypeId = req.params.serviceTypeId as string;
+
+    const workerProfile = await prisma.workerProfile.findUnique({
+      where: { userId: req.user.userId },
+      select: { id: true, serviceTypes: { where: { id: serviceTypeId }, select: { id: true } } },
+    });
+
+    if (!workerProfile) {
+      return res.status(404).json(errorResponse(404, 'Worker profile not found'));
+    }
+
+    if (workerProfile.serviceTypes.length === 0) {
+      return res.status(404).json(errorResponse(404, 'Service type not found on this profile'));
+    }
+
+    await prisma.workerProfile.update({
+      where: { userId: req.user.userId },
+      data: {
+        serviceTypes: {
+          disconnect: { id: serviceTypeId },
+        },
+      },
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: 'Service type removed successfully',
+      data: null,
+    });
+  } catch (error) {
+    console.error('Error removing service type:', error);
+    return res.status(500).json(errorResponse(500, 'Failed to remove service type'));
+  }
+};
+
+/**
+ * POST /api/workers/me/resume/parse
+ * Runs (or re-runs, with { force: true }) AI resume parsing against the
+ * worker's already-uploaded resume PDF and persists the result. Returns the
+ * cached ResumeParseResult without re-calling the AI if one already exists
+ * and force isn't set — resume-preview.tsx calls this on mount, so repeat
+ * screen visits shouldn't burn an API call each time.
+ */
+export const parseMyResume = async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      return res.status(401).json(errorResponse(401, 'Not authenticated'));
+    }
+
+    const force = req.body?.force === true;
+
+    const workerProfile = await prisma.workerProfile.findUnique({
+      where: { userId: req.user.userId },
+      select: { id: true, resumeUrl: true, resumeParseResult: true },
+    });
+
+    if (!workerProfile) {
+      return res.status(404).json(errorResponse(404, 'Worker profile not found'));
+    }
+
+    if (!workerProfile.resumeUrl) {
+      return res.status(400).json(errorResponse(400, 'Upload a resume before requesting analysis'));
+    }
+
+    if (workerProfile.resumeParseResult && !force) {
+      return res.status(200).json({
+        success: true,
+        message: 'Resume analysis retrieved successfully',
+        data: workerProfile.resumeParseResult,
+      });
+    }
+
+    const result = await parseWorkerResume(workerProfile.id, workerProfile.resumeUrl);
+
+    return res.status(200).json({
+      success: true,
+      message: 'Resume analyzed successfully',
+      data: result,
+    });
+  } catch (error) {
+    console.error('Error parsing resume:', error);
+    return res.status(502).json(
+      errorResponse(502, error instanceof Error ? error.message : 'Failed to analyze resume')
+    );
+  }
+};
+
+/**
+ * GET /api/workers/me/packages
+ * List the authenticated worker's own priced service packages (worker only)
+ */
+export const listMyPackages = async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      return res.status(401).json(errorResponse(401, 'Not authenticated'));
+    }
+
+    const workerProfile = await prisma.workerProfile.findUnique({
+      where: { userId: req.user.userId },
+      select: { id: true },
+    });
+
+    if (!workerProfile) {
+      return res.status(404).json(errorResponse(404, 'Worker profile not found'));
+    }
+
+    const packages = await prisma.workerPackage.findMany({
+      where: { workerProfileId: workerProfile.id },
+      include: { serviceType: { select: { id: true, name: true } } },
+      orderBy: { createdAt: 'asc' },
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: 'Packages retrieved successfully',
+      data: { packages },
+    });
+  } catch (error) {
+    console.error('Error fetching packages:', error);
+    return res.status(500).json(errorResponse(500, 'Failed to fetch packages'));
+  }
+};
+
+/**
+ * POST /api/workers/me/packages
+ * Create a priced package for one of the worker's own service categories
+ * (worker only). serviceTypeId must already be connected to the worker via
+ * the service-categories self-serve feature — a worker can't create a
+ * package for a category they don't offer.
+ */
+export const createPackage = async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      return res.status(401).json(errorResponse(401, 'Not authenticated'));
+    }
+
+    const { serviceTypeId, name, description, price } = req.body;
+
+    const workerProfile = await prisma.workerProfile.findUnique({
+      where: { userId: req.user.userId },
+      select: { id: true, serviceTypes: { where: { id: serviceTypeId }, select: { id: true } } },
+    });
+
+    if (!workerProfile) {
+      return res.status(404).json(errorResponse(404, 'Worker profile not found'));
+    }
+
+    if (workerProfile.serviceTypes.length === 0) {
+      return res.status(400).json(
+        errorResponse(400, 'Add this service category to your profile before creating a package for it')
+      );
+    }
+
+    const created = await prisma.workerPackage.create({
+      data: {
+        workerProfileId: workerProfile.id,
+        serviceTypeId,
+        name: name.trim(),
+        description: typeof description === 'string' ? description.trim() : null,
+        price,
+      },
+      include: { serviceType: { select: { id: true, name: true } } },
+    });
+
+    return res.status(201).json({
+      success: true,
+      message: 'Package created successfully',
+      data: created,
+    });
+  } catch (error) {
+    console.error('Error creating package:', error);
+    return res.status(500).json(errorResponse(500, 'Failed to create package'));
+  }
+};
+
+/**
+ * PATCH /api/workers/me/packages/:packageId
+ * Update a package's name/description/price/isActive/serviceTypeId (worker
+ * only, ownership-checked).
+ */
+export const updatePackage = async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      return res.status(401).json(errorResponse(401, 'Not authenticated'));
+    }
+
+    const packageId = req.params.packageId as string;
+    const { serviceTypeId, name, description, price, isActive } = req.body;
+
+    const workerProfile = await prisma.workerProfile.findUnique({
+      where: { userId: req.user.userId },
+      select: {
+        id: true,
+        serviceTypes: serviceTypeId ? { where: { id: serviceTypeId }, select: { id: true } } : false,
+      },
+    });
+
+    if (!workerProfile) {
+      return res.status(404).json(errorResponse(404, 'Worker profile not found'));
+    }
+
+    const existing = await prisma.workerPackage.findFirst({
+      where: { id: packageId, workerProfileId: workerProfile.id },
+      select: { id: true },
+    });
+
+    if (!existing) {
+      return res.status(404).json(errorResponse(404, 'Package not found on this profile'));
+    }
+
+    if (serviceTypeId !== undefined && (workerProfile.serviceTypes ?? []).length === 0) {
+      return res.status(400).json(
+        errorResponse(400, 'Add this service category to your profile before assigning a package to it')
+      );
+    }
+
+    const updateData: any = {};
+    if (serviceTypeId !== undefined) updateData.serviceTypeId = serviceTypeId;
+    if (name !== undefined) updateData.name = name.trim();
+    if (description !== undefined) updateData.description = typeof description === 'string' ? description.trim() : null;
+    if (price !== undefined) updateData.price = price;
+    if (isActive !== undefined) updateData.isActive = isActive;
+
+    const updated = await prisma.workerPackage.update({
+      where: { id: packageId },
+      data: updateData,
+      include: { serviceType: { select: { id: true, name: true } } },
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: 'Package updated successfully',
+      data: updated,
+    });
+  } catch (error) {
+    console.error('Error updating package:', error);
+    return res.status(500).json(errorResponse(500, 'Failed to update package'));
+  }
+};
+
+/**
+ * DELETE /api/workers/me/packages/:packageId
+ * Remove a package from the authenticated worker's profile (worker only,
+ * ownership-checked). Historical bookings that included this package keep
+ * their own BookingAddOn snapshot (name/price copied at booking time, no FK
+ * back to WorkerPackage), so deleting it doesn't affect past bookings.
+ */
+export const deletePackage = async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      return res.status(401).json(errorResponse(401, 'Not authenticated'));
+    }
+
+    const packageId = req.params.packageId as string;
+
+    const workerProfile = await prisma.workerProfile.findUnique({
+      where: { userId: req.user.userId },
+      select: { id: true },
+    });
+
+    if (!workerProfile) {
+      return res.status(404).json(errorResponse(404, 'Worker profile not found'));
+    }
+
+    const existing = await prisma.workerPackage.findFirst({
+      where: { id: packageId, workerProfileId: workerProfile.id },
+      select: { id: true },
+    });
+
+    if (!existing) {
+      return res.status(404).json(errorResponse(404, 'Package not found on this profile'));
+    }
+
+    await prisma.workerPackage.delete({ where: { id: packageId } });
+
+    return res.status(200).json({
+      success: true,
+      message: 'Package removed successfully',
+      data: null,
+    });
+  } catch (error) {
+    console.error('Error deleting package:', error);
+    return res.status(500).json(errorResponse(500, 'Failed to delete package'));
+  }
+};
+
+/**
+ * GET /api/workers/:workerId/packages
+ * Public — a client browsing/booking a worker can see that worker's active
+ * packages, optionally scoped to a specific service type (the one selected
+ * earlier in the booking flow).
+ */
+export const getWorkerPackages = async (req: Request, res: Response) => {
+  try {
+    const workerId = req.params.workerId as string;
+    const serviceTypeId = typeof req.query.serviceTypeId === 'string' ? req.query.serviceTypeId : undefined;
+
+    const workerProfile = await prisma.workerProfile.findUnique({
+      where: { userId: workerId },
+      select: { id: true, kycStatus: true },
+    });
+
+    if (!workerProfile || workerProfile.kycStatus !== 'APPROVED') {
+      return res.status(404).json(errorResponse(404, 'Worker not found'));
+    }
+
+    const packages = await prisma.workerPackage.findMany({
+      where: {
+        workerProfileId: workerProfile.id,
+        isActive: true,
+        ...(serviceTypeId ? { serviceTypeId } : {}),
+      },
+      include: { serviceType: { select: { id: true, name: true } } },
+      orderBy: { createdAt: 'asc' },
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: 'Packages retrieved successfully',
+      data: { packages },
+    });
+  } catch (error) {
+    console.error('Error fetching worker packages:', error);
+    return res.status(500).json(errorResponse(500, 'Failed to fetch packages'));
   }
 };
 
@@ -916,5 +1493,206 @@ export const updatePayoutMethod = async (req: AuthRequest, res: Response) => {
   } catch (error) {
     console.error('Error updating payout method:', error);
     return res.status(500).json(errorResponse(500, 'Failed to update payout method'));
+  }
+};
+
+/**
+ * GET /api/workers/me/availability-slots?date=YYYY-MM-DD&timeSlot=MORNING
+ * Fine-grained per-date/per-timeSlot availability (worker only). Distinct
+ * from PATCH /me/availability (coarse isAvailable + weekly availableDays
+ * toggle) and from the public GET /:workerId/availability (booked-time
+ * lookup for the client calendar) — this manages the WorkerAvailability
+ * table directly.
+ */
+export const getMyAvailabilitySlots = async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      return res.status(401).json(errorResponse(401, 'Not authenticated'));
+    }
+
+    const { date, timeSlot } = req.query;
+
+    const workerProfile = await prisma.workerProfile.findUnique({
+      where: { userId: req.user.userId },
+      select: { id: true },
+    });
+
+    if (!workerProfile) {
+      return res.status(404).json(errorResponse(404, 'Worker profile not found'));
+    }
+
+    const where: { workerProfileId: string; date?: Date; timeSlot?: TimeSlot } = {
+      workerProfileId: workerProfile.id,
+    };
+
+    if (date !== undefined) {
+      if (typeof date !== 'string' || isNaN(new Date(date).getTime())) {
+        return res.status(400).json(errorResponse(400, 'date must be a valid YYYY-MM-DD date'));
+      }
+      where.date = toDayStart(date);
+    }
+
+    if (timeSlot !== undefined) {
+      if (typeof timeSlot !== 'string' || !VALID_TIME_SLOTS.includes(timeSlot as TimeSlot)) {
+        return res.status(400).json(errorResponse(400, `timeSlot must be one of ${VALID_TIME_SLOTS.join(', ')}`));
+      }
+      where.timeSlot = timeSlot as TimeSlot;
+    }
+
+    const slots = await prisma.workerAvailability.findMany({
+      where,
+      orderBy: [{ date: 'asc' }, { timeSlot: 'asc' }],
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: 'Availability slots retrieved successfully',
+      data: { slots },
+    });
+  } catch (error) {
+    console.error('Error fetching availability slots:', error);
+    return res.status(500).json(errorResponse(500, 'Failed to fetch availability slots'));
+  }
+};
+
+/**
+ * PATCH /api/workers/me/availability-slots
+ * Body: { slots: [{ date, timeSlot }] }
+ *
+ * Replaces the worker's open slots for every date present in the request:
+ * requested (date, timeSlot) pairs are opened (created or un-blocked), and
+ * any existing open slot on those same dates that isn't in the new list is
+ * closed (isBlocked = true) — unless it's currently isBooked, in which case
+ * the whole request is rejected with a 409 (a worker can't close a slot out
+ * from under an active booking). Dates not mentioned in the request are left
+ * untouched. Max 2 slots per day.
+ */
+export const updateAvailabilitySlots = async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      return res.status(401).json(errorResponse(401, 'Not authenticated'));
+    }
+
+    const { slots, dates } = req.body as {
+      slots: Array<{ date: string; timeSlot: TimeSlot }>;
+      // Optional — full set of dates being managed in this request. A date
+      // listed here with no matching entries in `slots` has ALL of its open
+      // slots closed (this is how a worker clears an entire day down to
+      // zero slots, which `slots` alone can't express since an empty day
+      // just wouldn't appear in it).
+      dates?: string[];
+    };
+
+    const workerProfile = await prisma.workerProfile.findUnique({
+      where: { userId: req.user.userId },
+      select: { id: true },
+    });
+
+    if (!workerProfile) {
+      return res.status(404).json(errorResponse(404, 'Worker profile not found'));
+    }
+
+    const byDay = new Map<string, Set<TimeSlot>>();
+    for (const slot of slots) {
+      const dayIso = toDayStart(slot.date).toISOString();
+      if (!byDay.has(dayIso)) byDay.set(dayIso, new Set());
+      byDay.get(dayIso)!.add(slot.timeSlot);
+    }
+    // Register fully-cleared days (present in `dates`, absent from `slots`)
+    // with an empty set so the close-loop below still runs for them.
+    for (const date of dates ?? []) {
+      const dayIso = toDayStart(date).toISOString();
+      if (!byDay.has(dayIso)) byDay.set(dayIso, new Set());
+    }
+
+    const { maxSlotsPerDay } = await getAppSettings();
+    for (const [dayIso, timeSlots] of byDay) {
+      if (timeSlots.size > maxSlotsPerDay) {
+        return res.status(400).json(
+          errorResponse(400, `Cannot set more than ${maxSlotsPerDay} slots for ${dayIso.slice(0, 10)}`)
+        );
+      }
+    }
+
+    const updatedSlots = await prisma.$transaction(async (tx) => {
+      const opened: Array<{ id: string; date: Date; timeSlot: TimeSlot }> = [];
+
+      for (const [dayIso, timeSlots] of byDay) {
+        const day = new Date(dayIso);
+
+        const existing = await tx.workerAvailability.findMany({
+          where: { workerProfileId: workerProfile.id, date: day },
+        });
+
+        for (const row of existing) {
+          if (!timeSlots.has(row.timeSlot)) {
+            if (row.isBooked) {
+              throw new ActiveBookingConflictError(row.timeSlot, dayIso.slice(0, 10));
+            }
+            await tx.workerAvailability.update({ where: { id: row.id }, data: { isBlocked: true } });
+          }
+        }
+
+        for (const timeSlot of timeSlots) {
+          const row = await tx.workerAvailability.upsert({
+            where: { workerProfileId_date_timeSlot: { workerProfileId: workerProfile.id, date: day, timeSlot } },
+            create: { workerProfileId: workerProfile.id, date: day, timeSlot, isBlocked: false },
+            update: { isBlocked: false },
+          });
+          opened.push(row);
+        }
+      }
+
+      return opened;
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: 'Availability slots updated successfully',
+      data: { slots: updatedSlots },
+    });
+  } catch (error) {
+    if (error instanceof ActiveBookingConflictError) {
+      return res.status(409).json(
+        errorResponse(409, `Cannot close ${error.timeSlot} on ${error.date} — it has an active booking`)
+      );
+    }
+    console.error('Error updating availability slots:', error);
+    return res.status(500).json(errorResponse(500, 'Failed to update availability slots'));
+  }
+};
+
+class ActiveBookingConflictError extends Error {
+  constructor(public timeSlot: string, public date: string) {
+    super(`Slot ${timeSlot} on ${date} has an active booking`);
+  }
+}
+
+/**
+ * PATCH /api/workers/me/rate
+ * Body: { hourlyRate: number } — enforced range $20-$100/hr (worker only)
+ */
+export const updateHourlyRate = async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      return res.status(401).json(errorResponse(401, 'Not authenticated'));
+    }
+
+    const { hourlyRate } = req.body as { hourlyRate: number };
+
+    const updated = await prisma.workerProfile.update({
+      where: { userId: req.user.userId },
+      data: { hourlyRate },
+      select: { hourlyRate: true },
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: 'Hourly rate updated successfully',
+      data: updated,
+    });
+  } catch (error) {
+    console.error('Error updating hourly rate:', error);
+    return res.status(500).json(errorResponse(500, 'Failed to update hourly rate'));
   }
 };

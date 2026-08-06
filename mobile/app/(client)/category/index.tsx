@@ -38,7 +38,7 @@ export default function CategoryIndexScreen() {
         const categories = serviceTypes.map((serviceType: any) => ({
           id: serviceType.name.toLowerCase().replace(/\s+/g, "-"),
           name: serviceType.name,
-          count: serviceType.tasks?.length ?? 0,
+          count: serviceType.availableWorkerCount ?? 0,
         }));
         setServiceCategories(categories);
       } catch (err) {

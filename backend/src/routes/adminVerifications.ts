@@ -5,6 +5,8 @@ import {
   approveVerification,
   rejectVerification,
   rerunVerification,
+  approveDocument,
+  rejectDocument,
 } from '../controllers/adminVerificationController';
 import { authMiddleware } from '../middleware/auth';
 import { restrictTo } from '../middleware/role';
@@ -18,5 +20,7 @@ router.get('/:id', getVerificationById);
 router.patch('/:id/approve', approveVerification);
 router.patch('/:id/reject', rejectVerification);
 router.patch('/:id/rerun', rerunVerification);
+router.patch('/:id/documents/:documentId/approve', approveDocument);
+router.patch('/:id/documents/:documentId/reject', rejectDocument);
 
 export default router;

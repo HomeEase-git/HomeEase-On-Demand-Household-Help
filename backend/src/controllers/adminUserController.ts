@@ -35,6 +35,7 @@ async function formatClient(user: {
   email: string;
   phone: string | null;
   isDeleted: boolean;
+  status: string;
   createdAt: Date;
 }) {
   const bookings = await prisma.booking.findMany({
@@ -52,7 +53,9 @@ async function formatClient(user: {
     name: user.fullName,
     email: user.email,
     phone: user.phone ?? '—',
-    status: user.isDeleted ? 'suspended' : 'active',
+    // Real 3-state account status (ACTIVE/SUSPENDED/BANNED) — lowercased for
+    // the frontend's existing badge-variant convention.
+    status: user.status.toLowerCase(),
     bookings: bookings.length,
     spent: formatPeso(totalSpent),
     joined: user.createdAt.toLocaleDateString('en-US', {
@@ -174,6 +177,7 @@ async function formatWorker(user: {
   fullName: string;
   email: string;
   isDeleted: boolean;
+  status: string;
   createdAt: Date;
   workerProfile: {
     bio: string | null;
@@ -208,6 +212,9 @@ async function formatWorker(user: {
     reviews: user.workerProfile?.totalReviews ?? 0,
     status: statusLabel,
     verification: statusLabel,
+    // Real account status (ACTIVE/SUSPENDED/BANNED) — distinct from the KYC
+    // verification label above, which `status`/`verification` both carry.
+    accountStatus: user.status.toLowerCase(),
     earnings: formatPeso(earnings),
     joined: user.createdAt.toLocaleDateString('en-US', {
       month: 'short',
@@ -302,51 +309,85 @@ export const getWorkerById = async (req: Request, res: Response) => {
   }
 };
 
+async function setUserStatus(
+  req: AuthRequest,
+  res: Response,
+  targetStatus: 'ACTIVE' | 'SUSPENDED' | 'BANNED',
+  reason?: string,
+  notes?: string
+) {
+  const id = req.params.id as string;
+
+  const user = await prisma.user.findUnique({ where: { id } });
+  if (!user) {
+    return res.status(404).json(errorResponse(404, 'User not found'));
+  }
+
+  const updatedUser = await prisma.user.update({
+    where: { id },
+    data: {
+      isDeleted: targetStatus !== 'ACTIVE',
+      deletedAt: targetStatus === 'ACTIVE' ? null : new Date(),
+      status: targetStatus,
+    },
+  });
+
+  await writeAuditLog({
+    actorId: req.user?.userId,
+    actorName: req.user?.email,
+    actorRole: req.user?.role,
+    action: 'USER_STATUS_UPDATED',
+    category: 'STATUS_CHANGE',
+    message: `${user.fullName} status changed to ${targetStatus}${reason ? `: ${reason}` : ''}`,
+  });
+
+  return res.json({
+    success: true,
+    data: {
+      id: updatedUser.id,
+      status: targetStatus,
+      reason: reason ?? null,
+      notes: notes ?? null,
+    },
+  });
+}
+
 export const updateUserStatus = async (req: AuthRequest, res: Response) => {
   try {
-    const id = req.params.id as string;
     const { status, reason, notes } = req.body as { status?: string; reason?: string; notes?: string };
 
     if (!status || !['ACTIVE', 'SUSPENDED', 'BANNED'].includes(status.toUpperCase())) {
       return res.status(400).json(errorResponse(400, 'Invalid status'));
     }
 
-    const user = await prisma.user.findUnique({ where: { id } });
-    if (!user) {
-      return res.status(404).json(errorResponse(404, 'User not found'));
-    }
-
-    const targetStatus = status.toUpperCase() as 'ACTIVE' | 'SUSPENDED' | 'BANNED';
-
-    const updatedUser = await prisma.user.update({
-      where: { id },
-      data: {
-        isDeleted: targetStatus !== 'ACTIVE',
-        deletedAt: targetStatus === 'ACTIVE' ? null : new Date(),
-        status: targetStatus,
-      },
-    });
-
-    await writeAuditLog({
-      actorId: req.user?.userId,
-      actorName: req.user?.email,
-      actorRole: req.user?.role,
-      action: 'USER_STATUS_UPDATED',
-      category: 'STATUS_CHANGE',
-      message: `${user.fullName} status changed to ${targetStatus}${reason ? `: ${reason}` : ''}`,
-    });
-
-    return res.json({
-      success: true,
-      data: {
-        id: updatedUser.id,
-        status: status.toUpperCase(),
-        reason: reason ?? null,
-        notes: notes ?? null,
-      },
-    });
+    return await setUserStatus(req, res, status.toUpperCase() as 'ACTIVE' | 'SUSPENDED' | 'BANNED', reason, notes);
   } catch (error) {
     console.error('Update user status error:', error);
+    return res.status(500).json(errorResponse(500, 'Internal server error'));
+  }
+};
+
+/**
+ * PATCH /api/admin/workers/:id/suspend (also usable for clients)
+ * Thin convenience wrapper around updateUserStatus's SUSPENDED path.
+ */
+export const suspendUser = async (req: AuthRequest, res: Response) => {
+  try {
+    const { reason, notes } = req.body as { reason?: string; notes?: string };
+    return await setUserStatus(req, res, 'SUSPENDED', reason, notes);
+  } catch (error) {
+    console.error('Suspend user error:', error);
+    return res.status(500).json(errorResponse(500, 'Internal server error'));
+  }
+};
+
+/** PATCH /api/admin/workers/:id/reinstate — clears a suspension/ban. */
+export const reinstateUser = async (req: AuthRequest, res: Response) => {
+  try {
+    const { reason, notes } = req.body as { reason?: string; notes?: string };
+    return await setUserStatus(req, res, 'ACTIVE', reason, notes);
+  } catch (error) {
+    console.error('Reinstate user error:', error);
     return res.status(500).json(errorResponse(500, 'Internal server error'));
   }
 };

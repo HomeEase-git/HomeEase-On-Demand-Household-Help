@@ -1,456 +1,293 @@
-import React, { useState, useRef, useMemo, useEffect } from "react";
-import {
-  View,
-  Text,
-  ScrollView,
-  Pressable,
-  ActivityIndicator,
-} from "react-native";
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import { View, Text, ScrollView, ActivityIndicator, Image, Pressable } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { AppIcon as Ionicons } from "../../../../components/icons/AppIcon";
 import { useRouter } from "expo-router";
 import ScreenHeader from "../../../../components/ui/ScreenHeader";
 import StepperHorizontal from "../../../../components/steppers/StepperHorizontal";
 import InputField from "../../../../components/ui/InputField";
 import PrimaryButton from "../../../../components/ui/PrimaryButton";
-import OutlinedButton from "../../../../components/ui/OutlinedButton";
-import PriceBreakdownCard from "../../../../components/ui/PriceBreakdown";
-import AddOnsSelector from "../../../../components/ui/AddOnsSelector";
-import ServiceTypePickerBottomSheet from "../../../../components/bottom-sheets/ServiceTypePickerBottomSheet";
-import { useBookingStore } from "../../../../store/bookingStore";
-import { serviceConfigs } from "../../../../constants/serviceData";
-import { getServiceTypes } from "../../../../services/api";
-import { calculatePriceBreakdown, isLikelyQuoteRequired } from "../../../../utils/pricing";
-import { resolveServiceConfig } from "../../../../utils/categoryMapping";
-import type { BottomSheetHandle } from "../../../../components/bottom-sheets/BottomSheetWrapper";
-import { colors } from "../../../../constants";
 import InvalidationBanner from "../../../../components/ui/InvalidationBanner";
+import ServiceCategorySelector, {
+  type ServiceCategoryOption,
+} from "../../../../components/booking4step/ServiceCategorySelector";
+import RoomSelector from "../../../../components/booking4step/RoomSelector";
+import ConditionSelector from "../../../../components/booking4step/ConditionSelector";
+import DynamicScopeFields from "../../../../components/booking4step/DynamicScopeFields";
+import PricingRangePreview from "../../../../components/booking4step/PricingRangePreview";
+import ImageSourcePickerBottomSheet from "../../../../components/bottom-sheets/ImageSourcePickerBottomSheet";
+import type { BottomSheetHandle } from "../../../../components/bottom-sheets/BottomSheetWrapper";
+import { AppIcon as Ionicons } from "../../../../components/icons/AppIcon";
+import { colors } from "../../../../constants";
+import { useBookingStore } from "../../../../store/bookingStore";
+import { getServiceTypes, uploadIssuePhoto } from "../../../../services/api";
+import { useBookingPriceEstimate } from "../../../../hooks/useBookingPriceEstimate";
+import { totalRoomCount } from "../../../../utils/bookingPriceEstimate";
+import type { RoomSelection, ConditionType } from "../../../../types/booking4step.types";
 import { useAlertModal } from "../../../../contexts/AlertModalContext";
 
-type ServiceTask = {
-  id: string;
-  name: string;
-  description?: string | null;
-  basePrice: number;
-  durationHours: number;
-};
+const MAX_ISSUE_PHOTOS = 5;
 
-type ServiceType = {
-  id: string;
-  name: string;
-  description?: string | null;
-  basePrice: number;
-  isActive: boolean;
-  tasks: ServiceTask[];
-};
+const BOOKING_STEPS = ["Scope", "Schedule", "Who", "Confirm"];
+
+function hasAnswer(value: string | string[] | undefined): boolean {
+  return Array.isArray(value) ? value.length > 0 : !!value && value.trim().length > 0;
+}
 
 export default function BookingStep1Screen() {
   const router = useRouter();
   const alertModal = useAlertModal();
   const draft = useBookingStore((s) => s.draft);
   const setDraft = useBookingStore((s) => s.setDraft);
-  const [category, setCategory] = useState<string | null>(draft.category);
+
+  const [categories, setCategories] = useState<ServiceCategoryOption[]>([]);
+  const [loadingCategories, setLoadingCategories] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [selectedCategory, setSelectedCategory] = useState<ServiceCategoryOption | null>(null);
+  const [rooms, setRooms] = useState<RoomSelection[]>(draft.rooms ?? []);
+  const [condition, setCondition] = useState<ConditionType | null>(draft.condition ?? null);
+  const [scopeAnswers, setScopeAnswers] = useState<Record<string, string | string[]>>({});
   const [description, setDescription] = useState(draft.description);
-  const [serviceTypes, setServiceTypes] = useState<ServiceType[]>([]);
-  const [selectedServiceTypeId, setSelectedServiceTypeId] = useState<
-    string | null
-  >(null);
-  const [selectedTask, setSelectedTask] = useState<ServiceTask | null>(null);
-  const [selectedAddOns, setSelectedAddOns] = useState<string[]>([]);
-  const [loadingServices, setLoadingServices] = useState(false);
-  const [serviceError, setServiceError] = useState<string | null>(null);
-  const addressSet = !!draft.address;
-  const serviceSheetRef = useRef<BottomSheetHandle | null>(null);
-
-  const selectedServiceType = useMemo(() => {
-    if (selectedServiceTypeId) {
-      return (
-        serviceTypes.find((type) => type.id === selectedServiceTypeId) ?? null
-      );
-    }
-    return (
-      serviceTypes.find(
-        (type) => type.name.toLowerCase() === category?.toLowerCase(),
-      ) ?? null
-    );
-  }, [selectedServiceTypeId, category, serviceTypes]);
-
-  const addOnConfig = useMemo(() => {
-    if (!category) return null;
-    return resolveServiceConfig(category);
-  }, [category]);
+  const [issuePhotos, setIssuePhotos] = useState<string[]>(draft.issuePhotoUrls ?? []);
+  const [uploadingPhoto, setUploadingPhoto] = useState(false);
+  const photoSheetRef = useRef<BottomSheetHandle | null>(null);
 
   useEffect(() => {
     let active = true;
-
-    async function loadServiceTypes() {
-      setLoadingServices(true);
-      setServiceError(null);
-
+    (async () => {
+      setLoadingCategories(true);
+      setLoadError(null);
       try {
         const types = await getServiceTypes();
         if (!active) return;
-        setServiceTypes(types);
-      } catch (error) {
-        if (!active) return;
-        setServiceError("Unable to load services. Please try again.");
-      } finally {
-        if (!active) return;
-        setLoadingServices(false);
-      }
-    }
+        const options: ServiceCategoryOption[] = types.map((t: any) => ({
+          id: t.id,
+          name: t.name,
+          basePrice: t.basePrice,
+          description: t.description,
+          scopeType: t.scopeType ?? "ROOM_BASED",
+          hasCondition: t.hasCondition ?? true,
+          scopeFields: Array.isArray(t.scopeFields)
+            ? t.scopeFields.map((f: any) => ({
+                id: f.id,
+                label: f.label,
+                fieldType: f.fieldType,
+                required: f.required,
+                options: Array.isArray(f.options) ? f.options.map((o: any) => ({ id: o.id, label: o.label })) : [],
+              }))
+            : [],
+        }));
+        setCategories(options);
 
-    loadServiceTypes();
+        const matched =
+          options.find((o) => o.name === draft.serviceType) ??
+          options.find((o) => o.name.toLowerCase() === draft.category?.toLowerCase()) ??
+          null;
+        if (matched) {
+          setSelectedCategory(matched);
+          // Restore previously-answered custom fields (draft stores them
+          // keyed by label; the picker/UI below keys by field id).
+          if (matched.scopeType === "CUSTOM" && draft.scopeAnswers) {
+            const byLabel = draft.scopeAnswers;
+            const restored: Record<string, string | string[]> = {};
+            matched.scopeFields.forEach((f) => {
+              if (byLabel[f.label] !== undefined) restored[f.id] = byLabel[f.label];
+            });
+            setScopeAnswers(restored);
+          }
+        }
+      } catch {
+        if (active) setLoadError("Unable to load service categories. Please try again.");
+      } finally {
+        if (active) setLoadingCategories(false);
+      }
+    })();
     return () => {
       active = false;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  useEffect(() => {
-    setDescription(draft.description);
-    setSelectedAddOns(draft.selectedAddOnIds || []);
+  const isRoomBased = (selectedCategory?.scopeType ?? "ROOM_BASED") === "ROOM_BASED";
+  const showCondition = selectedCategory?.hasCondition ?? true;
 
-    if (draft.category && serviceTypes.length) {
-      const matchedType = serviceTypes.find(
-        (type) => type.name.toLowerCase() === draft.category?.toLowerCase(),
-      );
-      if (matchedType) {
-        setSelectedServiceTypeId(matchedType.id);
-      }
-    }
+  const priceEstimate = useBookingPriceEstimate(selectedCategory?.basePrice ?? 0, 0, undefined, {
+    rooms: isRoomBased ? rooms : [],
+    condition: showCondition ? condition : null,
+    scopeType: selectedCategory?.scopeType ?? null,
+  });
 
-    if (draft.selectedTaskId && serviceTypes.length) {
-      const matchedType =
-        selectedServiceType ||
-        serviceTypes.find(
-          (type) => type.name.toLowerCase() === draft.category?.toLowerCase(),
-        );
-      const task = matchedType?.tasks.find(
-        (t) => t.id === draft.selectedTaskId,
-      );
-      setSelectedTask(task || null);
-    } else {
-      setSelectedTask(null);
-    }
-  }, [
-    draft.category,
-    draft.description,
-    draft.selectedTaskId,
-    draft.selectedAddOnIds,
-    serviceTypes,
-    selectedServiceType,
-  ]);
+  const scopeComplete = !selectedCategory
+    ? false
+    : isRoomBased
+      ? totalRoomCount(rooms) > 0
+      : selectedCategory.scopeFields.every((f) => !f.required || hasAnswer(scopeAnswers[f.id]));
 
-  const computeEstimatedPrice = (
-    task: ServiceTask,
-    addOnIds: string[],
-    addOnSource: (typeof serviceConfigs)[0],
-  ) => {
-    const addOnTotal = addOnSource.addOns
-      .filter((a) => addOnIds.includes(a.id))
-      .reduce((sum, a) => sum + a.price, 0);
-    return task.basePrice + addOnTotal;
+  const canNext = !!selectedCategory && scopeComplete && (!showCondition || !!condition);
+
+  const handleCategorySelect = (cat: ServiceCategoryOption) => {
+    setSelectedCategory(cat);
+    // Switching category can change scope shape entirely — start clean
+    // rather than carrying over rooms/answers that no longer apply.
+    setRooms([]);
+    setScopeAnswers({});
+    setCondition(null);
   };
 
-  const priceBreakdown = useMemo(() => {
-    if (!selectedTask || !selectedServiceType || !addOnConfig) return null;
-    const addOnTotal = addOnConfig.addOns
-      .filter((a) => selectedAddOns.includes(a.id))
-      .reduce((sum, a) => sum + a.price, 0);
-    return calculatePriceBreakdown(selectedTask.basePrice, 1, addOnTotal, 0);
-  }, [selectedTask, selectedServiceType, selectedAddOns, addOnConfig]);
+  const handlePickIssuePhoto = async (uri: string) => {
+    if (issuePhotos.length >= MAX_ISSUE_PHOTOS) return;
+    setUploadingPhoto(true);
+    try {
+      const { url } = await uploadIssuePhoto(uri);
+      setIssuePhotos((prev) => [...prev, url]);
+    } catch {
+      alertModal.error("Upload failed", "Could not upload that photo. Please try again.");
+    } finally {
+      setUploadingPhoto(false);
+    }
+  };
 
-  const unresolvableCategory =
-    (draft.entrySource === "worker_profile" ||
-      draft.entrySource === "book_again") &&
-    category &&
-    !selectedServiceType;
+  const handleRemoveIssuePhoto = (url: string) => {
+    setIssuePhotos((prev) => prev.filter((u) => u !== url));
+  };
 
-  const canNext =
-    category &&
-    addressSet &&
-    (!selectedServiceType || selectedTask !== null) &&
-    !unresolvableCategory;
+  const handleNext = () => {
+    if (!canNext) {
+      alertModal.warning(
+        "Scope incomplete",
+        isRoomBased
+          ? "Please choose a service, at least one room, and a condition before continuing."
+          : "Please choose a service and fill in the required details before continuing."
+      );
+      return;
+    }
+
+    const labelAnswers: Record<string, string | string[]> = {};
+    if (!isRoomBased) {
+      selectedCategory!.scopeFields.forEach((f) => {
+        const value = scopeAnswers[f.id];
+        if (hasAnswer(value)) labelAnswers[f.label] = value;
+      });
+    }
+
+    setDraft({
+      category: selectedCategory!.name,
+      serviceType: selectedCategory!.name,
+      categoryBasePrice: selectedCategory!.basePrice,
+      description,
+      rooms: isRoomBased ? rooms : [],
+      condition: showCondition ? condition : null,
+      scopeType: selectedCategory!.scopeType,
+      hasCondition: showCondition,
+      scopeAnswers: isRoomBased ? {} : labelAnswers,
+      issuePhotoUrls: issuePhotos,
+    });
+    router.push("/(client)/booking/new/step-2");
+  };
 
   return (
     <SafeAreaView className="flex-1 bg-white">
-      <ScreenHeader title="Book a Service" showBack />
-      <ScrollView
-        className="flex-1"
-        contentContainerStyle={{ padding: 24, paddingBottom: 40 }}
-      >
-        <StepperHorizontal
-          steps={["Service", "Schedule", "Payment"]}
-          currentStep={0}
-        />
+      <ScreenHeader title="What do you need?" showBack />
+      <ScrollView className="flex-1" contentContainerStyle={{ padding: 24, paddingBottom: 40 }}>
+        <StepperHorizontal steps={BOOKING_STEPS} currentStep={0} />
         <InvalidationBanner />
 
-        {unresolvableCategory && (
-          <View className="bg-error/10 border border-error/30 rounded-2xl p-4 mb-4 flex-row items-start">
-            <Ionicons
-              name="alert-circle"
-              size={20}
-              color={colors.error}
-              style={{ marginTop: 2, marginRight: 8 }}
-            />
-            <View className="flex-1">
-              <Text className="text-error font-bold text-sm">
-                Booking unavailable
-              </Text>
-              <Text className="text-error text-xs mt-1">
-                The service could not be matched to a bookable category. Please
-                start a new booking.
-              </Text>
-            </View>
+        {draft.workerLocked && draft.workerName && (
+          <View className="bg-accent/10 rounded-2xl p-3 mb-4 flex-row items-center">
+            <Text className="text-accent text-sm flex-1">
+              Booking directly with <Text className="font-bold">{draft.workerName}</Text>
+            </Text>
           </View>
         )}
 
-        <Text className="text-text-primary font-bold text-lg mt-4">
-          Service Details
-        </Text>
-
-        <Pressable
-          className="bg-card rounded-xl p-4 mt-3 flex-row items-center justify-between"
-          onPress={() => serviceSheetRef.current?.expand()}
-        >
-          <Text
-            className={
-              category ? "text-brand font-semibold" : "text-text-muted"
-            }
-          >
-            {category ?? "Select service category"}
-          </Text>
-          <Ionicons name="chevron-down" size={20} color={colors.text.muted} />
-        </Pressable>
-
-        {loadingServices ? (
+        <Text className="text-text-primary font-bold text-lg mt-2 mb-3">Service</Text>
+        {loadError ? (
           <View className="py-6 items-center">
-            <ActivityIndicator size="small" />
-            <Text className="text-text-secondary mt-2">
-              Loading services...
-            </Text>
+            <Text className="text-error">{loadError}</Text>
           </View>
-        ) : serviceError ? (
-          <View className="py-6 items-center">
-            <Text className="text-error">{serviceError}</Text>
-          </View>
-        ) : null}
+        ) : (
+          <ServiceCategorySelector
+            categories={categories}
+            selectedId={selectedCategory?.id ?? null}
+            loading={loadingCategories}
+            onSelect={handleCategorySelect}
+          />
+        )}
 
-        {selectedServiceType && (
+        {selectedCategory && isRoomBased && (
           <>
-            <Text className="text-text-secondary font-bold text-sm mb-1 mt-3">
-              Select Task
-            </Text>
-            <ScrollView horizontal={false} className="flex-1">
-              {selectedServiceType.tasks.map((task) => (
-                <Pressable
-                  key={task.id}
-                  className={`bg-card rounded-xl p-3 mb-2 flex-row items-center ${
-                    selectedTask?.id === task.id
-                      ? "border-2 border-accent"
-                      : "border-2 border-transparent"
-                  }`}
-                  onPress={() => {
-                    const selected = selectedServiceType.tasks.find(
-                      (t) => t.id === task.id,
-                    );
-                    if (!selected) return;
-
-                    setSelectedTask(selected);
-                    setDraft({
-                      selectedTaskId: selected.id,
-                      estimatedPrice: computeEstimatedPrice(
-                        selected,
-                        selectedAddOns,
-                        addOnConfig ?? serviceConfigs[0],
-                      ),
-                      quoteRequired: isLikelyQuoteRequired(
-                        selected.name,
-                        selected.description,
-                      ),
-                    });
-                  }}
-                >
-                  <View className="flex-1">
-                    <Text className="text-brand font-semibold">
-                      {task.name}
-                    </Text>
-                    <Text className="text-text-secondary text-xs mt-0.5">
-                      {task.description}
-                    </Text>
-                  </View>
-                  <View className="items-end ml-3">
-                    <Text className="text-accent font-semibold">
-                      ₱{task.basePrice}
-                    </Text>
-                    <Text className="text-text-muted text-xs">
-                      {task.durationHours}hr{task.durationHours > 1 ? "s" : ""}
-                    </Text>
-                  </View>
-                </Pressable>
-              ))}
-            </ScrollView>
+            <Text className="text-text-primary font-bold text-lg mt-6 mb-3">Which rooms?</Text>
+            <RoomSelector selection={rooms} onChange={setRooms} />
           </>
         )}
 
-        {selectedServiceType && selectedTask && addOnConfig && (
-          <View className="mt-3">
-            <AddOnsSelector
-              addOns={addOnConfig.addOns}
-              selectedIds={selectedAddOns}
-              onSelectionChange={(updated) => {
-                setSelectedAddOns(updated);
-                setDraft({
-                  selectedAddOnIds: updated,
-                  estimatedPrice: computeEstimatedPrice(
-                    selectedTask,
-                    updated,
-                    addOnConfig,
-                  ),
-                });
-              }}
-              showPriceImpact={true}
+        {selectedCategory && !isRoomBased && (
+          <View className="mt-6">
+            <DynamicScopeFields
+              fields={selectedCategory.scopeFields}
+              answers={scopeAnswers}
+              onChange={setScopeAnswers}
             />
           </View>
         )}
 
-        {priceBreakdown && (
-          <View className="mt-3">
-            <PriceBreakdownCard breakdown={priceBreakdown} detailed={false} />
-          </View>
+        {selectedCategory && showCondition && (
+          <>
+            <Text className="text-text-primary font-bold text-lg mt-6 mb-3">Condition</Text>
+            <ConditionSelector value={condition} onChange={setCondition} />
+          </>
         )}
 
-        {draft.quoteRequired && (
-          <View className="bg-warning/10 rounded-2xl p-3 mt-3 flex-row items-start">
-            <Ionicons
-              name="information-circle"
-              size={18}
-              color={colors.warning}
-              style={{ marginTop: 1, marginRight: 6 }}
-            />
-            <Text className="text-warning text-xs flex-1">
-              The price above is an estimate. The worker will inspect the job on-site and send you a final quote before starting work.
-            </Text>
-          </View>
-        )}
+        <View className="mt-6">
+          <PricingRangePreview estimate={priceEstimate} />
+        </View>
 
+        <Text className="text-text-secondary font-bold text-sm mb-1 mt-6">Description (optional)</Text>
         <InputField
-          label="Description"
-          boldLabel
+          label=""
           value={description}
           onChangeText={(t) => {
             setDescription(t);
-            setDraft({ description: t });
           }}
-          placeholder="e.g. It's leaking badly"
+          placeholder="Anything specific the pro should know?"
           multiline
         />
 
-        <Text className="text-text-secondary font-bold text-sm mb-1">
-          Address
-        </Text>
-        <Pressable
-          className="bg-card rounded-xl p-4 flex-row items-center"
-          onPress={() => router.push("/(client)/booking/address-picker")}
-        >
-          <Ionicons
-            name="location-outline"
-            size={20}
-            color={colors.accent.DEFAULT}
-          />
-          <Text
-            className={
-              addressSet
-                ? "text-brand ml-3 flex-1"
-                : "text-text-muted ml-3 flex-1"
-            }
-          >
-            {addressSet ? draft.address! : "Tap to set your location"}
-          </Text>
-        </Pressable>
-
-        <View className="mt-4">
-          <Text className="text-text-secondary font-bold text-sm mb-1">
-            Preferred Worker
-          </Text>
-          <View className="bg-card rounded-2xl p-4">
-            {draft.workerId ? (
-              <View className="flex-row items-center justify-between">
-                <View className="flex-1">
-                  <Text className="text-brand font-semibold">
-                    {draft.workerName ?? "Selected worker"}
-                  </Text>
-                  <Text className="text-text-secondary text-xs">
-                    Worker selected for this booking
-                  </Text>
-                </View>
-
-                <OutlinedButton
-                  label="Change"
-                  onPress={() => {
-                    if (draft.workerLocked) {
-                      alertModal.warning(
-                        "Worker Locked",
-                        "This worker was selected from their profile or a previous booking and can't be changed from here. Please go back to change the service or booking.",
-                      );
-                      return;
-                    }
-                    router.push("/(client)/booking/select-worker");
-                  }}
-                />
-              </View>
-            ) : (
-              <View>
-                <Text className="text-text-secondary text-sm mb-3">
-                  Please choose a specific worker for your booking.
-                </Text>
-                <OutlinedButton
-                  label="Choose a Worker"
-                  onPress={() => router.push("/(client)/booking/select-worker")}
-                />
-              </View>
-            )}
-          </View>
+        <View className="flex-row flex-wrap gap-2 mt-3">
+          {issuePhotos.map((url) => (
+            <View key={url} className="relative">
+              <Image source={{ uri: url }} className="w-20 h-20 rounded-xl" />
+              <Pressable
+                className="absolute -top-1.5 -right-1.5 bg-black/70 rounded-full w-5 h-5 items-center justify-center"
+                onPress={() => handleRemoveIssuePhoto(url)}
+              >
+                <Ionicons name="close" size={12} color="#fff" />
+              </Pressable>
+            </View>
+          ))}
+          {issuePhotos.length < MAX_ISSUE_PHOTOS && (
+            <Pressable
+              className="w-20 h-20 rounded-xl border border-dashed items-center justify-center"
+              style={{ borderColor: colors.divider }}
+              onPress={() => photoSheetRef.current?.expand()}
+              disabled={uploadingPhoto}
+            >
+              {uploadingPhoto ? (
+                <ActivityIndicator size="small" />
+              ) : (
+                <>
+                  <Ionicons name="camera-outline" size={20} color={colors.text.muted} />
+                  <Text className="text-text-secondary text-[10px] mt-1">Add photo</Text>
+                </>
+              )}
+            </Pressable>
+          )}
         </View>
 
         <View className="mt-8">
-          <PrimaryButton
-            label="Next"
-            fullWidth
-            disabled={!canNext}
-            onPress={() => {
-              if (!canNext) {
-                alertModal.error(
-                  "Error",
-                  "Please select category and address" +
-                    (selectedServiceType ? " and task" : ""),
-                );
-                return;
-              }
-              setDraft({ category, description });
-              router.push("/(client)/booking/new/step-2");
-            }}
-          />
+          <PrimaryButton label="Next" fullWidth disabled={!canNext || loadingCategories} onPress={handleNext} />
         </View>
       </ScrollView>
-
-      <ServiceTypePickerBottomSheet
-        innerRef={serviceSheetRef}
-        onSelect={(name, id) => {
-          setCategory(name);
-          setSelectedTask(null);
-          setSelectedAddOns([]);
-          setSelectedServiceTypeId(id);
-          setDraft({
-            category: name,
-            selectedTaskId: null,
-            selectedAddOnIds: [],
-            estimatedPrice: 0,
-            quoteRequired: false,
-          });
-          serviceSheetRef.current?.close();
-        }}
-      />
+      <ImageSourcePickerBottomSheet innerRef={photoSheetRef} onSelect={handlePickIssuePhoto} />
     </SafeAreaView>
   );
 }

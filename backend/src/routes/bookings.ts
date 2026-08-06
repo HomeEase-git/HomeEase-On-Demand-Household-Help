@@ -5,6 +5,7 @@ import {
   getBookingDetail,
   acceptBooking,
   declineBooking,
+  arriveBooking,
   startBooking,
   submitQuote,
   approveQuote,
@@ -16,7 +17,7 @@ import {
   addAddon,
   submitReview,
 } from '../controllers/bookingController';
-import { bookingPhotoUpload, uploadBookingCompletionPhoto } from '../controllers/uploadController';
+import { bookingPhotoUpload, uploadBookingCompletionPhoto, uploadIssuePhoto } from '../controllers/uploadController';
 import { authMiddleware } from '../middleware/auth';
 import { restrictTo } from '../middleware/role';
 import {
@@ -28,6 +29,7 @@ import {
   validateAddAddon,
   validateAddReview,
   validateRescheduleBooking,
+  validateArriveBooking,
 } from '../middleware/validation';
 
 const router = Router();
@@ -44,13 +46,21 @@ router.get('/:id', getBookingDetail);
 // Create booking (client only)
 router.post('/', restrictTo('CLIENT'), validateCreateBooking, createBooking);
 
+// Upload a pre-booking issue photo (client only) — no bookingId yet, since
+// this runs during Step 1 before the booking exists; the returned URL is
+// included in the createBooking payload as issuePhotoUrls.
+router.post('/issue-photo/upload', restrictTo('CLIENT'), bookingPhotoUpload, uploadIssuePhoto);
+
 // Accept booking (worker only)
 router.patch('/:id/accept', restrictTo('WORKER'), acceptBooking);
 
 // Decline booking (worker only)
 router.patch('/:id/decline', restrictTo('WORKER'), validateBookingStatusUpdate, declineBooking);
 
-// Start booking (worker only)
+// Worker checks in as arrived at the job site (worker only)
+router.patch('/:id/arrive', restrictTo('WORKER'), validateArriveBooking, arriveBooking);
+
+// Start booking (worker only) — requires a prior verified arrival
 router.patch('/:id/start', restrictTo('WORKER'), startBooking);
 
 // Submit quote (worker only)

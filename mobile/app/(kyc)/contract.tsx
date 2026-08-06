@@ -7,15 +7,19 @@ import PrimaryButton from "../../components/ui/PrimaryButton";
 import { colors } from "../../constants";
 import { useAuthStore } from "../../store/authStore";
 import { useAlertModal } from "../../contexts/AlertModalContext";
+import { useToastContext } from "../../contexts/ToastContext";
+import { acceptContract as acceptContractApi } from "../../services/api";
 
 export default function ContractScreen() {
   const router = useRouter();
   const alertModal = useAlertModal();
+  const toast = useToastContext();
   const user = useAuthStore((s) => s.user);
   const isWorker = user?.role === "worker";
   const scrollViewRef = useRef<ScrollView>(null);
   const [hasScrolled, setHasScrolled] = useState(false);
   const [accepted, setAccepted] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
 
   const handleScroll = ({ nativeEvent }: { nativeEvent: any }) => {
     const { layoutMeasurement, contentOffset, contentSize } = nativeEvent;
@@ -63,7 +67,7 @@ export default function ContractScreen() {
         },
         {
           heading: "6. Dispute Resolution",
-          body: "In the event of a dispute between Worker and Client, HomeEase will mediate based on available evidence including chat history, booking records, and submitted documentation. HomeEase's decision is final for platform-related matters.",
+          body: "In the event of a dispute between Worker and Client, either party may raise it through the in-app dispute flow on the affected booking. HomeEase will review the evidence — chat history, booking records, quote submissions, and submitted documentation — and issue a resolution (which may include approving a quote, requesting a revised quote, or cancelling the booking with a refund). If the Worker believes a resolution was made in error, they may contact HomeEase Support to request it be reconsidered. This process does not limit either party's right to pursue other legal remedies.",
         },
         {
           heading: "7. Governing Law",
@@ -105,11 +109,27 @@ export default function ContractScreen() {
         },
       ];
 
-  const handleContinue = () => {
-    if (isWorker) {
+  const handleContinue = async () => {
+    if (submitting) return;
+    setSubmitting(true);
+    try {
+      await acceptContractApi(
+        isWorker ? "WORKER_SERVICE_AGREEMENT" : "CLIENT_USER_AGREEMENT",
+      );
+
+      // This is what flips the worker's account into "awaiting admin
+      // review" — without it the waiting screen's status would stay stale.
+      if (isWorker) {
+        useAuthStore.getState().setKycStatus("SUBMITTED");
+      }
+
       router.push("/(kyc)/pending");
-    } else {
-      router.push("/(kyc)/pending");
+    } catch (error: any) {
+      toast.error(
+        error?.message || "Failed to submit. Please try again.",
+      );
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -173,11 +193,10 @@ export default function ContractScreen() {
           </Pressable>
 
           <PrimaryButton
-            label={
-              isWorker ? "Continue to Certifications" : "Complete Registration"
-            }
+            label={isWorker ? "Submit for Review" : "Complete Registration"}
             fullWidth
-            disabled={!accepted}
+            disabled={!accepted || submitting}
+            loading={submitting}
             onPress={handleContinue}
           />
         </View>

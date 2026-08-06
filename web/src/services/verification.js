@@ -34,3 +34,18 @@ export async function rerunVerification(id) {
   });
   return response.data;
 }
+
+export async function approveDocument(verificationId, documentId) {
+  const response = await apiRequest(`/admin/verifications/${verificationId}/documents/${documentId}/approve`, {
+    method: 'PATCH',
+  });
+  return response.data;
+}
+
+export async function rejectDocument(verificationId, documentId, rejectReason) {
+  const response = await apiRequest(`/admin/verifications/${verificationId}/documents/${documentId}/reject`, {
+    method: 'PATCH',
+    body: JSON.stringify({ rejectReason }),
+  });
+  return response.data;
+}

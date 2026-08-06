@@ -4,8 +4,16 @@ import { authStorage } from '../utils/storage';
 import { AbortableRequest } from '../utils/apiErrorHandling';
 import { KycDocumentKey } from '../utils/kycDocumentConfig';
 import { mapKycDocumentType } from '../utils/kycDocumentTypeMap';
-import type { WorkerDetail } from "../types/api.types";
+import type { WorkerDetail, WorkerDigitalId, ParsedResume } from "../types/api.types";
 import type { LatLng } from "../utils/geo";
+import type {
+  CreateBookingPayload,
+  CreateBookingResponse,
+  WorkerCard,
+  TimeSlot,
+  RoomType,
+  ConditionType,
+} from "../types/booking4step.types";
 
 type NormalizedWorkerListItem = {
   id: string;
@@ -16,6 +24,8 @@ type NormalizedWorkerListItem = {
   basePrice: number | null;
   status: string;
   avatar: string | null;
+  activeJobCount: number | null;
+  maxConcurrentJobs: number | null;
 };
 
 // ============================================================================
@@ -164,6 +174,7 @@ export async function postSignUp(userData: {
       email: response.email,
       phone: response.phone,
       role: response.role.toLowerCase(),
+      kycStatus: response.kycStatus,
       token: response.token,
     };
   } catch (error) {
@@ -184,6 +195,7 @@ export async function postLogin(email: string, password: string) {
       email: response.email,
       phone: response.phone,
       role: response.role.toLowerCase(),
+      kycStatus: response.kycStatus,
       token: response.token,
     };
   } catch (error) {
@@ -304,42 +316,30 @@ export async function getBookingDetail(bookingId: string) {
   }
 }
 
-export async function createBooking(details: {
-  workerId: string;
-  serviceTaskId: string;
-  location: string;
-  city?: string;
-  scheduledDate: string;
-  scheduledTime?: string;
-  description?: string;
-  notes?: string;
-  estimatedPrice: number;
-  tip?: number;
-  addOns?: { id?: string; name: string; price: number }[];
-  estimatedDurationHours?: number;
-  inspectionFeeCharged?: boolean;
-  inspectionFeeAmount?: number;
-  paymentMethodType?: 'GCASH' | 'MAYA' | 'CARD' | 'BANK_TRANSFER' | 'CASH';
-  paymentAccountIdentifier?: string;
-}) {
+export async function createBooking(details: CreateBookingPayload): Promise<CreateBookingResponse> {
   try {
     const response = await api.post('/bookings', {
-      workerId: details.workerId,
-      serviceTaskId: details.serviceTaskId,
-      location: details.location,
-      city: details.city || '',
-      scheduledDate: details.scheduledDate,
-      scheduledTime: details.scheduledTime || '',
+      workerId: details.workerId ?? undefined,
+      serviceType: details.serviceType,
+      serviceTaskId: details.serviceTaskId ?? undefined,
+      rooms: details.rooms ?? [],
+      condition: details.condition ?? undefined,
       description: details.description || '',
-      notes: details.notes || '',
-      estimatedPrice: details.estimatedPrice,
-      tip: details.tip || 0,
+      address: details.address,
+      city: details.city || '',
+      lat: details.lat,
+      lng: details.lng,
+      date: details.date,
+      timeSlot: details.timeSlot,
       addOns: details.addOns || [],
-      estimatedDurationHours: details.estimatedDurationHours,
-      inspectionFeeCharged: details.inspectionFeeCharged,
-      inspectionFeeAmount: details.inspectionFeeAmount,
+      packageIds: details.packageIds || [],
+      priorities: details.priorities ?? [],
+      tip: details.tip || 0,
+      notes: details.notes || '',
       paymentMethodType: details.paymentMethodType,
       paymentAccountIdentifier: details.paymentAccountIdentifier,
+      scopeAnswers: details.scopeAnswers ?? undefined,
+      issuePhotoUrls: details.issuePhotoUrls ?? [],
     });
     return response;
   } catch (error) {
@@ -446,6 +446,57 @@ export async function getWorkers(filters?: {
   }
 }
 
+export interface DiscoverWorkersFilters {
+  serviceType?: string;
+  date?: string; // YYYY-MM-DD
+  timeSlot?: TimeSlot;
+  condition?: ConditionType;
+  rooms?: RoomType[];
+  lat?: number;
+  lng?: number;
+  radius?: number; // km, backend defaults to 30
+  page?: number;
+  limit?: number;
+}
+
+export interface DiscoverWorkersResult {
+  workers: WorkerCard[];
+  pagination: { page: number; limit: number; total: number; pages: number };
+}
+
+/**
+ * GET /workers with the Phase 2 discovery contract (scope + time + geo
+ * filters, server-side KYC/capacity/slot filtering, sorted rating desc then
+ * distance asc). Used by Step 2 (live pro-count per time slot) and Step 3
+ * (full worker card list) — unlike the legacy `getWorkers`/`searchWorkers`
+ * above, filtering/sorting/pagination all happen server-side here.
+ */
+export async function discoverWorkers(filters: DiscoverWorkersFilters): Promise<DiscoverWorkersResult> {
+  try {
+    const params: Record<string, string | number> = {};
+    if (filters.serviceType) params.serviceType = filters.serviceType;
+    if (filters.date) params.date = filters.date;
+    if (filters.timeSlot) params.timeSlot = filters.timeSlot;
+    if (filters.condition) params.condition = filters.condition;
+    if (filters.rooms?.length) params.rooms = filters.rooms.join(',');
+    if (filters.lat !== undefined) params.lat = filters.lat;
+    if (filters.lng !== undefined) params.lng = filters.lng;
+    if (filters.radius !== undefined) params.radius = filters.radius;
+    if (filters.page) params.page = filters.page;
+    if (filters.limit) params.limit = filters.limit;
+
+    const response = await api.get('/workers', { params });
+
+    return {
+      workers: Array.isArray(response?.workers) ? response.workers : [],
+      pagination: response?.pagination ?? { page: 1, limit: 10, total: 0, pages: 0 },
+    };
+  } catch (error) {
+    console.error('Discover workers error:', error);
+    throw error;
+  }
+}
+
 function normalizeWorkerListItem(worker: any): NormalizedWorkerListItem {
   const rawStatus = String(worker.status ?? "available").toLowerCase();
   const normalizedStatus =
@@ -471,6 +522,8 @@ function normalizeWorkerListItem(worker: any): NormalizedWorkerListItem {
           : null,
     status: normalizedStatus,
     avatar: worker.avatar ?? worker.user?.avatar ?? null,
+    activeJobCount: typeof worker.activeJobCount === "number" ? worker.activeJobCount : null,
+    maxConcurrentJobs: typeof worker.maxConcurrentJobs === "number" ? worker.maxConcurrentJobs : null,
   };
 }
 
@@ -501,10 +554,36 @@ export async function getWorkerDetail(workerId: string): Promise<WorkerDetail | 
       isAvailable: Boolean(response.isAvailable),
       availableDays: Array.isArray(response.availableDays) ? response.availableDays : [],
       maxConcurrentJobs: Number(response.maxConcurrentJobs ?? 0),
+      hourlyRate: typeof response.hourlyRate === "number" ? response.hourlyRate : null,
     };
   } catch (error) {
     if (isAxiosError(error) && error.response?.status === 404) return null;
     console.error('Get worker detail error:', error);
+    throw error;
+  }
+}
+
+export async function getMyDigitalId(): Promise<WorkerDigitalId> {
+  try {
+    const response = await api.get('/workers/me/digital-id');
+    return response;
+  } catch (error) {
+    console.error('Get digital ID error:', error);
+    throw error;
+  }
+}
+
+/**
+ * Runs (or, with force=true, re-runs) AI resume parsing against the
+ * worker's already-uploaded resume and returns the extracted result.
+ * Returns a cached result without re-calling the AI unless force is set.
+ */
+export async function parseMyResume(force = false): Promise<ParsedResume> {
+  try {
+    const response = await api.post('/workers/me/resume/parse', { force });
+    return response;
+  } catch (error) {
+    console.error('Parse resume error:', error);
     throw error;
   }
 }
@@ -769,11 +848,12 @@ function titleCaseStatus(status: string) {
   return status.charAt(0).toUpperCase() + status.slice(1).toLowerCase();
 }
 
-export async function getTransactions(page?: number) {
+export async function getTransactions(page?: number, status?: 'PENDING' | 'COMPLETED' | 'FAILED' | 'REFUNDED') {
   try {
-    const response = await api.get('/payments', {
-      params: page ? { page } : {},
-    });
+    const params: Record<string, string | number> = {};
+    if (page) params.page = page;
+    if (status) params.status = status;
+    const response = await api.get('/payments', { params });
     const payments = response.payments ?? [];
     return {
       data: payments.map((p: any) => ({
@@ -840,13 +920,14 @@ export async function releasePaymentEscrow(paymentId: string) {
   }
 }
 
-export async function downloadReceipt(transactionId: string) {
-  await delay(400);
-  return {
-    success: true,
-    url: `https://receipts.homeease.com/${transactionId}.pdf`,
-    fileName: `receipt-${transactionId}.pdf`,
-  };
+export async function createPaymongoCheckout(bookingId: string) {
+  try {
+    const response = await api.post(`/payments/${bookingId}/paymongo/checkout`);
+    return response as { checkoutUrl: string; sourceId: string };
+  } catch (error) {
+    console.error('Create PayMongo checkout error:', error);
+    throw error;
+  }
 }
 
 // ============================================================================
@@ -1051,6 +1132,33 @@ export async function startBooking(bookingId: string) {
   }
 }
 
+export interface ArrivalVerificationResult {
+  id: string;
+  workerArrivedAt: string;
+  arrivalVerification: {
+    id: string;
+    distanceMeters: number;
+    isVerified: boolean;
+    createdAt: string;
+  };
+}
+
+/**
+ * PATCH /bookings/:id/arrive — worker checks in at the job site. The
+ * backend enforces the <=100m geofence server-side (against the client's
+ * booked lat/lng) and rejects with a 409 if the worker is too far; this
+ * wrapper just forwards the device's current GPS reading.
+ */
+export async function arriveBooking(bookingId: string, lat: number, lng: number): Promise<ArrivalVerificationResult> {
+  try {
+    const response = await api.patch(`/bookings/${bookingId}/arrive`, { lat, lng });
+    return response;
+  } catch (error) {
+    console.error('Arrive booking error:', error);
+    throw error;
+  }
+}
+
 export async function submitQuote(
   bookingId: string,
   data: { materialsCost: number; notes?: string },
@@ -1090,6 +1198,28 @@ export async function uploadBookingCompletionPhoto(
   }
 }
 
+export async function uploadIssuePhoto(uri: string, mimeType?: string | null): Promise<{ url: string }> {
+  try {
+    const filename = uri.split('/').pop() ?? `issue-${Date.now()}.jpg`;
+    const resolvedMimeType = mimeType || 'image/jpeg';
+
+    const formData = new FormData();
+    formData.append('photo', {
+      uri,
+      name: filename,
+      type: resolvedMimeType,
+    } as any);
+
+    const response = await api.post('/bookings/issue-photo/upload', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+    return response;
+  } catch (error) {
+    console.error('Upload issue photo error:', error);
+    throw error;
+  }
+}
+
 export async function completeBooking(bookingId: string, completionPhotoUrl: string) {
   try {
     const response = await api.patch(`/bookings/${bookingId}/complete`, { completionPhotoUrl });
@@ -1123,6 +1253,61 @@ export async function updateAvailability(isAvailable?: boolean, availableDays?: 
   }
 }
 
+export interface WorkerAvailabilitySlot {
+  id: string;
+  workerProfileId: string;
+  date: string;
+  timeSlot: TimeSlot;
+  isBlocked: boolean;
+  isBooked: boolean;
+}
+
+/**
+ * GET /workers/me/availability-slots — the fine-grained per-date/per-slot
+ * schedule (distinct from the coarse day-of-week toggle above). Optionally
+ * scoped to a single date for a lighter fetch (see AvailabilityCalendar,
+ * which fetches the whole visible 7-day window at once by omitting `date`).
+ */
+export async function getMyAvailabilitySlots(date?: string): Promise<WorkerAvailabilitySlot[]> {
+  try {
+    const response = await api.get('/workers/me/availability-slots', { params: date ? { date } : undefined });
+    return response.slots ?? [];
+  } catch (error) {
+    console.error('Get availability slots error:', error);
+    throw error;
+  }
+}
+
+/**
+ * PATCH /workers/me/availability-slots — replaces the worker's open slots
+ * for every date present in `slots`. The backend enforces max 2/day and
+ * rejects (409) closing a slot that currently has an active booking
+ * (isBooked === true); this wrapper just forwards the desired set.
+ */
+export async function updateAvailabilitySlots(
+  slots: Array<{ date: string; timeSlot: TimeSlot }>,
+  dates?: string[],
+): Promise<WorkerAvailabilitySlot[]> {
+  try {
+    const response = await api.patch('/workers/me/availability-slots', { slots, dates });
+    return response.slots ?? [];
+  } catch (error) {
+    console.error('Update availability slots error:', error);
+    throw error;
+  }
+}
+
+/** PATCH /workers/me/rate — enforced ₱20-₱100/hr range server-side. */
+export async function updateHourlyRate(hourlyRate: number): Promise<{ hourlyRate: number }> {
+  try {
+    const response = await api.patch('/workers/me/rate', { hourlyRate });
+    return response;
+  } catch (error) {
+    console.error('Update hourly rate error:', error);
+    throw error;
+  }
+}
+
 export async function updateWorkerProfileDetails(data: {
   bio?: string;
   serviceAreaRadius?: number;
@@ -1131,6 +1316,9 @@ export async function updateWorkerProfileDetails(data: {
   state?: string;
   zipCode?: string;
   resumeUrl?: string;
+  digitalIdTrade?: string;
+  digitalIdServiceArea?: string;
+  licenseNumber?: string;
 }) {
   try {
     const response = await api.patch('/workers/me/profile', data);
@@ -1179,6 +1367,108 @@ export async function deleteSkill(skillId: string) {
     return true;
   } catch (error) {
     console.error('Delete skill error:', error);
+    throw error;
+  }
+}
+
+export type WorkerServiceType = { id: string; name: string; description?: string | null; basePrice: number };
+
+export async function getMyServiceTypes(): Promise<WorkerServiceType[]> {
+  try {
+    const response = await api.get('/workers/me/service-types');
+    return response.serviceTypes ?? [];
+  } catch (error) {
+    console.error('Get my service types error:', error);
+    throw error;
+  }
+}
+
+export async function addServiceTypes(serviceTypeIds: string[]): Promise<WorkerServiceType[]> {
+  try {
+    const response = await api.post('/workers/me/service-types', { serviceTypeIds });
+    return response.serviceTypes ?? [];
+  } catch (error) {
+    console.error('Add service types error:', error);
+    throw error;
+  }
+}
+
+export async function removeServiceType(serviceTypeId: string) {
+  try {
+    await api.delete(`/workers/me/service-types/${serviceTypeId}`);
+    return true;
+  } catch (error) {
+    console.error('Remove service type error:', error);
+    throw error;
+  }
+}
+
+export type WorkerPackage = {
+  id: string;
+  serviceTypeId: string;
+  serviceType?: { id: string; name: string };
+  name: string;
+  description?: string | null;
+  price: number;
+  isActive: boolean;
+};
+
+export async function getMyPackages(): Promise<WorkerPackage[]> {
+  try {
+    const response = await api.get('/workers/me/packages');
+    return response.packages ?? [];
+  } catch (error) {
+    console.error('Get packages error:', error);
+    throw error;
+  }
+}
+
+export async function createPackage(data: {
+  serviceTypeId: string;
+  name: string;
+  description?: string;
+  price: number;
+}): Promise<WorkerPackage> {
+  try {
+    const response = await api.post('/workers/me/packages', data);
+    return response;
+  } catch (error) {
+    console.error('Create package error:', error);
+    throw error;
+  }
+}
+
+export async function updatePackage(
+  packageId: string,
+  data: Partial<{ serviceTypeId: string; name: string; description: string; price: number; isActive: boolean }>,
+): Promise<WorkerPackage> {
+  try {
+    const response = await api.patch(`/workers/me/packages/${packageId}`, data);
+    return response;
+  } catch (error) {
+    console.error('Update package error:', error);
+    throw error;
+  }
+}
+
+export async function deletePackage(packageId: string) {
+  try {
+    await api.delete(`/workers/me/packages/${packageId}`);
+    return true;
+  } catch (error) {
+    console.error('Delete package error:', error);
+    throw error;
+  }
+}
+
+/** Public — a client viewing/booking a worker fetches that worker's active packages, optionally scoped to a service type. */
+export async function getWorkerPackages(workerId: string, serviceTypeId?: string): Promise<WorkerPackage[]> {
+  try {
+    const query = serviceTypeId ? `?serviceTypeId=${encodeURIComponent(serviceTypeId)}` : '';
+    const response = await api.get(`/workers/${workerId}/packages${query}`);
+    return response.packages ?? [];
+  } catch (error) {
+    console.error('Get worker packages error:', error);
     throw error;
   }
 }
@@ -1392,6 +1682,21 @@ export async function getKycDocuments() {
   }
 }
 
+export async function acceptContract(
+  contractType: 'WORKER_SERVICE_AGREEMENT' | 'CLIENT_USER_AGREEMENT',
+) {
+  try {
+    const response = await api.post('/users/me/contract-acceptance', {
+      contractType,
+      acceptedAt: new Date().toISOString(),
+    });
+    return response;
+  } catch (error) {
+    console.error('Accept contract error:', error);
+    throw error;
+  }
+}
+
 export async function changePassword(currentPassword: string, newPassword: string) {
   try {
     const response = await api.post('/users/me/change-password', {
@@ -1418,6 +1723,8 @@ export async function getUserProfile() {
       email: response.email,
       phone: response.phone,
       role: response.role?.toLowerCase() || 'client',
+      kycStatus: response.kycStatus,
+      kycRejectionReason: response.kycRejectionReason,
       bio: response.bio,
       yearsOfExperience: response.yearsOfExperience,
       serviceArea: response.serviceArea,
@@ -1467,28 +1774,6 @@ export async function deleteAccount(password: string) {
 
 function delay(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-export async function getWorkerAvailability(workerId: string, date: string): Promise<{ occupied: string[] }> {
-  try {
-    const response = await api.get(`/workers/${workerId}/availability`, {
-      params: { date },
-    });
-    return { occupied: response.occupied ?? [] };
-  } catch (error) {
-    console.error('Get worker availability error:', error);
-    throw error;
-  }
-}
-
-export async function getWorkerBlockedDates(workerId: string) {
-  try {
-    const response = await api.get(`/workers/${workerId}/blocked-dates`);
-    return { dates: response.dates ?? [] };
-  } catch (error) {
-    console.error('Get worker blocked dates error:', error);
-    throw error;
-  }
 }
 
 export async function getServiceTypes() {

@@ -1,56 +1,32 @@
-import { useBookingStore } from "../store/bookingStore";
-
-const MAX_CONCURRENT_JOBS = 2;
-
-const ACTIVE_STATUSES = ['Accepted', 'Active', 'InProgress', 'QuoteSubmitted', 'QuoteApproved'];
+const DEFAULT_MAX_CONCURRENT_JOBS = 2;
 
 /**
  * useWorkerCapacity
  *
- * Returns capacity info for a given worker based on their
- * active bookings in the store. Use this on the booking flow
- * to warn clients or block selection when a worker is full.
+ * Derives a capacity badge from the server-authoritative activeJobCount/
+ * maxConcurrentJobs already returned on each worker card by GET /workers
+ * (workerController.searchWorkers) — NOT from local booking state. Actual
+ * capacity enforcement happens server-side (createBooking/acceptBooking);
+ * this is a display-only hint, and since at-capacity workers are already
+ * filtered out of search results, isAtCapacity will normally be false for
+ * anything this hook is called on.
  *
  * Usage:
- *   const { isAtCapacity, activeJobCount } = useWorkerCapacity(workerId, scheduledDate);
+ *   const { isAtCapacity, activeJobCount } = useWorkerCapacity(worker.activeJobCount, worker.maxConcurrentJobs);
  */
-export function useWorkerCapacity(workerId: string | null, scheduledDate?: string | null) {
-  const bookings = useBookingStore((s) => s.bookings);
-
-  if (!workerId) {
-    return {
-      isAtCapacity: false,
-      activeJobCount: 0,
-      maxJobs: MAX_CONCURRENT_JOBS,
-      canAcceptJob: true,
-      isUnavailableForDate: false,
-      reason: undefined,
-    };
-  }
-
-  const activeJobsForWorker = bookings.filter(
-    (b) => b.workerId === workerId && ACTIVE_STATUSES.includes(b.status as string),
-  );
-
-  const activeJobCount = activeJobsForWorker.length;
-  const isAtCapacity = activeJobCount >= MAX_CONCURRENT_JOBS;
-
-  const isUnavailableForDate = Boolean(
-    scheduledDate && activeJobsForWorker.some((b) => b.date === scheduledDate),
-  );
-
-  const reason = isAtCapacity
-    ? 'Worker at capacity'
-    : isUnavailableForDate
-      ? 'Worker already has a job on this date'
-      : undefined;
+export function useWorkerCapacity(
+  activeJobCount: number | null | undefined,
+  maxConcurrentJobs: number | null | undefined,
+) {
+  const count = activeJobCount ?? 0;
+  const maxJobs = maxConcurrentJobs ?? DEFAULT_MAX_CONCURRENT_JOBS;
+  const isAtCapacity = count >= maxJobs;
 
   return {
     isAtCapacity,
-    activeJobCount,
-    maxJobs: MAX_CONCURRENT_JOBS,
-    canAcceptJob: !isAtCapacity && !isUnavailableForDate,
-    isUnavailableForDate,
-    reason,
+    activeJobCount: count,
+    maxJobs,
+    canAcceptJob: !isAtCapacity,
+    reason: isAtCapacity ? 'Worker at capacity' : undefined,
   };
 }

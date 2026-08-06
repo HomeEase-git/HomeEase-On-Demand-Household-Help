@@ -42,7 +42,7 @@ export default function PasswordResetSentScreen() {
         </View>
 
         <Text className="text-text-secondary text-center text-lg mb-2">
-          We&apos;ve sent a password reset link to
+          We&apos;ve sent a 6-digit reset code to
         </Text>
         <Text className="text-primary text-center font-semibold text-lg mb-6">
           {maskEmail(email)}
@@ -52,8 +52,8 @@ export default function PasswordResetSentScreen() {
           <View className="flex-row items-start gap-3">
             <Ionicons name="information-circle" size={20} color={colors.brand.DEFAULT} />
             <Text className="text-text-secondary text-sm flex-1">
-              Follow the link in the email to reset your password. The link will
-              expire in 24 hours.
+              Enter the code in the app to set a new password. The code will
+              expire in 10 minutes.
             </Text>
           </View>
         </View>
@@ -67,22 +67,27 @@ export default function PasswordResetSentScreen() {
               </Text>
               <Text className="text-text-secondary text-xs">
                 Check your spam folder or wait a minute before requesting a new
-                link.
+                code.
               </Text>
             </View>
           </View>
         </View>
 
         <PrimaryButton
-          label="Back to Sign In"
+          label="Enter Code"
           fullWidth
-          onPress={() => router.replace("/(auth)/sign-in")}
+          onPress={() =>
+            router.push({
+              pathname: "/(auth)/reset-password",
+              params: { email },
+            })
+          }
         />
 
         <OutlinedButton
-          label="Request Another Link"
+          label="Back to Sign In"
           // fullWidth
-          onPress={() => router.back()}
+          onPress={() => router.replace("/(auth)/sign-in")}
         />
 
         <Text className="text-text-muted text-xs text-center mt-6">

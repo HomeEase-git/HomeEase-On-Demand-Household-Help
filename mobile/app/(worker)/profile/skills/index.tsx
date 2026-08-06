@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { View, Text, FlatList, Pressable, Modal } from "react-native";
+import { View, Text, FlatList, Pressable, Modal, ScrollView } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { AppIcon as Ionicons } from "../../../../components/icons/AppIcon";
 import { useRouter } from "expo-router";
@@ -10,7 +10,7 @@ import PrimaryButton from "../../../../components/ui/PrimaryButton";
 import OutlinedButton from "../../../../components/ui/OutlinedButton";
 import { colors } from "../../../../constants";
 import * as api from "../../../../services/api";
-import type { Skill } from "../../../../services/api";
+import type { Skill, WorkerServiceType } from "../../../../services/api";
 import { useAlertModal } from "../../../../contexts/AlertModalContext";
 
 export default function SkillsScreen() {
@@ -23,6 +23,13 @@ export default function SkillsScreen() {
   const [skillName, setSkillName] = useState("");
   const [skillCategory, setSkillCategory] = useState("");
   const [skillRate, setSkillRate] = useState("");
+
+  const [myServiceTypes, setMyServiceTypes] = useState<WorkerServiceType[]>([]);
+  const [catalogServiceTypes, setCatalogServiceTypes] = useState<WorkerServiceType[]>([]);
+  const [categoriesLoading, setCategoriesLoading] = useState(true);
+  const [showCategoryModal, setShowCategoryModal] = useState(false);
+  const [pendingCategoryIds, setPendingCategoryIds] = useState<string[]>([]);
+  const [savingCategories, setSavingCategories] = useState(false);
 
   useEffect(() => {
     const loadSkills = async () => {
@@ -37,7 +44,24 @@ export default function SkillsScreen() {
       }
     };
 
+    const loadServiceTypes = async () => {
+      setCategoriesLoading(true);
+      try {
+        const [mine, catalog] = await Promise.all([
+          api.getMyServiceTypes(),
+          api.getServiceTypes(),
+        ]);
+        setMyServiceTypes(mine);
+        setCatalogServiceTypes(catalog);
+      } catch (error) {
+        console.error("Load service types error:", error);
+      } finally {
+        setCategoriesLoading(false);
+      }
+    };
+
     loadSkills();
+    loadServiceTypes();
   }, []);
 
   const handleAddSkill = async () => {
@@ -90,6 +114,58 @@ export default function SkillsScreen() {
     );
   };
 
+  const handleRemoveCategory = (serviceTypeId: string) => {
+    alertModal.confirm(
+      "Remove Category",
+      "Clients browsing this category won't see you anymore. Continue?",
+      {
+        confirmText: "Remove",
+        destructive: true,
+        onConfirm: async () => {
+          try {
+            await api.removeServiceType(serviceTypeId);
+            setMyServiceTypes((prev) => prev.filter((s) => s.id !== serviceTypeId));
+          } catch (error) {
+            console.error("Remove service type error:", error);
+            alertModal.error("Error", "Failed to remove category. Please try again.");
+          }
+        },
+      },
+    );
+  };
+
+  const openCategoryModal = () => {
+    setPendingCategoryIds([]);
+    setShowCategoryModal(true);
+  };
+
+  const toggleCatalogSelection = (id: string) => {
+    setPendingCategoryIds((prev) =>
+      prev.includes(id) ? prev.filter((v) => v !== id) : [...prev, id],
+    );
+  };
+
+  const handleSaveCategories = async () => {
+    if (pendingCategoryIds.length === 0) {
+      setShowCategoryModal(false);
+      return;
+    }
+    setSavingCategories(true);
+    try {
+      const updated = await api.addServiceTypes(pendingCategoryIds);
+      setMyServiceTypes(updated);
+      setShowCategoryModal(false);
+    } catch (error) {
+      console.error("Add service types error:", error);
+      alertModal.error("Error", "Failed to save categories. Please try again.");
+    } finally {
+      setSavingCategories(false);
+    }
+  };
+
+  const connectedIds = new Set(myServiceTypes.map((s) => s.id));
+  const availableToAdd = catalogServiceTypes.filter((s) => !connectedIds.has(s.id));
+
   return (
     <SafeAreaView className="flex-1 bg-white">
       <ScreenHeader title="Skills & Services" showBack />
@@ -97,6 +173,37 @@ export default function SkillsScreen() {
         data={skills}
         keyExtractor={(item) => item.id}
         contentContainerStyle={{ padding: 16, paddingBottom: 80 }}
+        ListHeaderComponent={
+          <View className="mb-6">
+            <Text className="text-text-primary font-bold mb-1">Service Categories</Text>
+            <Text className="text-text-muted text-sm mb-3">
+              Categories you offer — clients browse and book by category.
+            </Text>
+            <View className="flex-row flex-wrap gap-2 mb-3">
+              {myServiceTypes.map((service) => (
+                <View
+                  key={service.id}
+                  className="flex-row items-center bg-accent/10 border-2 border-accent rounded-xl px-3.5 py-2.5"
+                >
+                  <Text className="text-accent text-sm font-medium mr-2">{service.name}</Text>
+                  <Pressable onPress={() => handleRemoveCategory(service.id)} hitSlop={8}>
+                    <Ionicons name="close-circle" size={16} color={colors.accent.DEFAULT} />
+                  </Pressable>
+                </View>
+              ))}
+              {!categoriesLoading && myServiceTypes.length === 0 && (
+                <Text className="text-text-muted text-sm">No categories added yet.</Text>
+              )}
+            </View>
+            <Pressable
+              className="flex-row items-center self-start bg-card rounded-xl px-3.5 py-2.5"
+              onPress={openCategoryModal}
+            >
+              <Ionicons name="add" size={16} color={colors.text.secondary} />
+              <Text className="text-text-secondary text-sm font-medium ml-1">Add Category</Text>
+            </Pressable>
+          </View>
+        }
         ListEmptyComponent={
           <View className="items-center py-16">
             <Ionicons
@@ -168,6 +275,61 @@ export default function SkillsScreen() {
               <OutlinedButton
                 label="Cancel"
                 onPress={() => setShowModal(false)}
+              />
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal visible={showCategoryModal} transparent animationType="slide">
+        <View className="flex-1 bg-black/40 justify-end">
+          <View className="bg-white rounded-t-3xl p-6 pb-8">
+            <View className="flex-row justify-between items-center mb-6">
+              <Text className="text-text-primary text-xl font-bold">Add Category</Text>
+              <Pressable onPress={() => setShowCategoryModal(false)}>
+                <Ionicons name="close" size={24} color={colors.text.primary} />
+              </Pressable>
+            </View>
+            <ScrollView className="max-h-80">
+              <View className="flex-row flex-wrap gap-2">
+                {availableToAdd.map((service) => {
+                  const isSelected = pendingCategoryIds.includes(service.id);
+                  return (
+                    <Pressable
+                      key={service.id}
+                      onPress={() => toggleCatalogSelection(service.id)}
+                      className={`rounded-xl px-3.5 py-2.5 border-2 ${
+                        isSelected ? "bg-accent/10 border-accent" : "bg-card border-transparent"
+                      }`}
+                    >
+                      <Text
+                        className={`text-sm font-medium ${
+                          isSelected ? "text-accent" : "text-text-secondary"
+                        }`}
+                      >
+                        {service.name}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+                {availableToAdd.length === 0 && (
+                  <Text className="text-text-muted text-sm">
+                    You've already added every available category.
+                  </Text>
+                )}
+              </View>
+            </ScrollView>
+            <View className="gap-3 mt-4">
+              <PrimaryButton
+                label="Save"
+                fullWidth
+                onPress={handleSaveCategories}
+                disabled={savingCategories || pendingCategoryIds.length === 0}
+                loading={savingCategories}
+              />
+              <OutlinedButton
+                label="Cancel"
+                onPress={() => setShowCategoryModal(false)}
               />
             </View>
           </View>

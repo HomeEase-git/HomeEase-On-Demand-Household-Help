@@ -137,6 +137,8 @@ export interface Worker {
   rate?: number;
   status: 'available' | 'busy';
   avatar?: string;
+  activeJobCount?: number | null;
+  maxConcurrentJobs?: number | null;
 }
 
 export interface Certification {
@@ -164,6 +166,7 @@ export interface WorkerDetail extends Worker {
   isAvailable: boolean;
   availableDays: string[];
   maxConcurrentJobs: number;
+  hourlyRate?: number | null;
 }
 
 export interface WorkerFilters {
@@ -179,6 +182,21 @@ export interface WorkerSearchRequest {
   categoryId?: string;
   minRating?: number;
   page?: number;
+}
+
+export interface WorkerDigitalId {
+  id: string;
+  name: string;
+  avatar: string | null;
+  rating: number;
+  totalReviews: number;
+  kycStatus: string;
+  kycApprovedAt: string | null;
+  verified: boolean;
+  badgeId: string;
+  trade: string | null;
+  serviceArea: string | null;
+  licenseNumber: string | null;
 }
 
 export interface WorkerReview {

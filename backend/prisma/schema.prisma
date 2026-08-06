@@ -64,6 +64,13 @@ enum EscrowStatus {
   REFUNDED
 }
 
+enum PayoutStatus {
+  PENDING // Payout row created, not yet sent to PayMongo
+  PROCESSING // PayMongo transfer created, awaiting callback confirmation
+  PAID // PayMongo confirmed the transfer succeeded
+  FAILED // PayMongo confirmed failure, or a platform-side error before send
+}
+
 enum PaymentMethodType {
   GCASH
   MAYA
@@ -122,6 +129,8 @@ enum NotificationType {
   VERIFICATION_SUBMITTED
   VERIFICATION_APPROVED
   VERIFICATION_REJECTED
+  PAYOUT_SENT
+  PAYOUT_FAILED
 }
 
 enum TimeSlot {
@@ -146,6 +155,20 @@ enum ConditionType {
   TIDY
   NORMAL
   HEAVY
+}
+
+// Whether a service's booking "scope" step is the generic room picker
+// (Cleaning, Painting, ...) or an admin-defined set of custom fields
+// (Appliance Repair: "which appliance", Pest Control: "describe the issue").
+enum ServiceScopeType {
+  ROOM_BASED
+  CUSTOM
+}
+
+enum ScopeFieldType {
+  TEXT
+  SELECT
+  MULTI_SELECT
 }
 
 // ============================================================================
@@ -268,6 +291,13 @@ model WorkerProfile {
   rating       Float   @default(5.0)
   totalReviews Int     @default(0)
 
+  // Digital ID card fields — shown to clients in person (digital-id.tsx).
+  // Distinct from serviceAreaRadius (a booking-matching radius in km) and
+  // ResumeParseResult.tradeCategory (AI-extracted, not worker-edited).
+  digitalIdTrade       String?
+  digitalIdServiceArea String?
+  licenseNumber        String?
+
   // Availability & Capacity
   isAvailable       Boolean @default(true)
   maxConcurrentJobs Int     @default(2)
@@ -320,6 +350,7 @@ model WorkerProfile {
   reviews           Review[]
   resumeParseResult ResumeParseResult?
   availability      WorkerAvailability[]
+  packages          WorkerPackage[]
 
   @@index([userId])
   @@index([kycStatus])
@@ -492,11 +523,77 @@ model ServiceType {
   basePrice   Float
   isActive    Boolean @default(true)
 
+  // Admin-configured booking "scope" step for this category — see
+  // ServiceScopeType/ServiceScopeField for the CUSTOM case.
+  scopeType    ServiceScopeType @default(ROOM_BASED)
+  hasCondition Boolean          @default(true)
+
   // Relations
-  workers WorkerProfile[]
-  tasks   ServiceTask[]
+  workers     WorkerProfile[]
+  tasks       ServiceTask[]
+  packages    WorkerPackage[]
+  scopeFields ServiceScopeField[]
 
   @@unique([name])
+}
+
+// Admin-defined question shown in the booking "scope" step when the parent
+// ServiceType.scopeType is CUSTOM (e.g. "Appliance Type" for Appliance
+// Repair). Answers are snapshotted onto Booking.scopeAnswers keyed by
+// `label`, not by this row's id, so editing/reordering fields later doesn't
+// orphan past bookings.
+model ServiceScopeField {
+  id            String      @id @default(cuid())
+  serviceTypeId String
+  serviceType   ServiceType @relation(fields: [serviceTypeId], references: [id], onDelete: Cascade)
+
+  label     String
+  fieldType ScopeFieldType
+  required  Boolean        @default(true)
+  sortOrder Int            @default(0)
+
+  options ServiceScopeFieldOption[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([serviceTypeId])
+}
+
+model ServiceScopeFieldOption {
+  id      String            @id @default(cuid())
+  fieldId String
+  field   ServiceScopeField @relation(fields: [fieldId], references: [id], onDelete: Cascade)
+
+  label     String
+  sortOrder Int    @default(0)
+
+  @@index([fieldId])
+}
+
+// A worker-defined, priced service bundle (e.g. "Deep Clean Package — ₱1500,
+// includes fridge + oven + windows"), offered for one of the worker's own
+// service categories. Replaces the old free/unpriced add-on toggles in the
+// booking flow — see BookingAddOn for how a selected package is actually
+// charged (resolved server-side to a priced add-on line item at booking
+// creation, see bookingController.createBooking).
+model WorkerPackage {
+  id              String        @id @default(cuid())
+  workerProfileId String
+  workerProfile   WorkerProfile @relation(fields: [workerProfileId], references: [id], onDelete: Cascade)
+  serviceTypeId   String
+  serviceType     ServiceType   @relation(fields: [serviceTypeId], references: [id], onDelete: Cascade)
+
+  name        String
+  description String?
+  price       Float
+  isActive    Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([workerProfileId])
+  @@index([serviceTypeId])
 }
 
 model ServiceTask {
@@ -548,6 +645,8 @@ model Booking {
   condition              ConditionType?
   priorities             String[]
   addOnsSnapshot         Json? // itemized add-ons as submitted at booking time; BookingAddOn[] below is the normalized/authoritative record
+  scopeAnswers           Json? // { [ServiceScopeField.label]: string | string[] } snapshot for CUSTOM-scope services (see ServiceType.scopeType)
+  issuePhotoUrls         String[]       @default([]) // client-attached photos of the issue, uploaded at Step 1 before the booking exists (see POST /bookings/issue-photo/upload)
 
   // Scheduling
   scheduledDate  DateTime
@@ -792,12 +891,52 @@ model Payment {
   methodType        PaymentMethodType
   accountIdentifier String? // masked GCash number, last 4 of card, etc.
 
+  payout Payout?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@index([bookingId])
   @@index([status])
   @@index([escrowStatus])
+}
+
+// Tracks the actual disbursement of a worker's payout via PayMongo, separate
+// from Payment.escrowStatus (which only tracks the platform's own escrow
+// ledger — RELEASED means "the worker's cut is owed", not "the worker has
+// been paid"). One Payout per Payment, created once escrow is released.
+model Payout {
+  id        String  @id @default(cuid())
+  paymentId String  @unique
+  payment   Payment @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+  bookingId String // denormalized for cheap admin filtering, soft reference like Dispute.raisedById
+  workerId  String // soft reference — User.id of the worker being paid
+
+  amount        Float
+  channel       PaymentMethodType // GCASH/MAYA/BANK_TRANSFER — CARD/CASH are not valid payout channels
+  accountName   String? // snapshot of WorkerProfile.payoutAccountName at send time
+  accountNumber String // snapshot of WorkerProfile.payoutAccountNumber at send time
+
+  status                PayoutStatus @default(PENDING)
+  paymongoTransferId    String?      @unique
+  paymongoTransferStatus String? // raw status string from PayMongo, for debugging
+  // Deprecated — populated only on Xendit-era rows from before the PayMongo
+  // disbursement migration; no longer written to.
+  xenditDisbursementId  String?      @unique
+  xenditStatus          String?
+  failureReason         String?
+  attempts              Int          @default(0)
+
+  processingAt DateTime?
+  paidAt       DateTime?
+  failedAt     DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([bookingId])
+  @@index([workerId])
+  @@index([status])
 }
 
 model SavedPaymentMethod {

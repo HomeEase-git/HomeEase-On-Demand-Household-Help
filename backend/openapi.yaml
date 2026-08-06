@@ -1,0 +1,2394 @@
+openapi: 3.0.3
+info:
+  title: HomeEase Booking Platform API
+  version: 1.1.0
+  description: >
+    Full REST API surface for the HomeEase household-services marketplace:
+    auth, client/worker profiles, worker discovery, the booking lifecycle
+    (creation/auto-match through accept/arrive/start/quote/complete/review),
+    payments & PayMongo escrow, messaging, notifications, KYC verification,
+    and the admin back office (users, bookings, disputes, payments, pricing
+    rules, reviews, reports, analytics, audit logs, settings).
+servers:
+  - url: /api
+
+security:
+  - bearerAuth: []
+
+tags:
+  - name: Auth
+  - name: Users
+  - name: Worker Availability
+  - name: Worker Discovery
+  - name: Worker Profile
+  - name: Bookings
+  - name: Payments
+  - name: Messages
+  - name: Notifications
+  - name: Services
+  - name: KYC Verification
+  - name: Admin Disputes
+  - name: Admin Bookings
+  - name: Admin Users
+  - name: Admin Payments
+  - name: Admin Pricing Rules
+  - name: Admin Reviews
+  - name: Admin Reports
+  - name: Admin Analytics
+  - name: Admin Audit Logs
+  - name: Admin Settings
+  - name: Webhooks
+
+paths:
+  /workers:
+    get:
+      tags: [Worker Discovery]
+      summary: Search available workers
+      security: []
+      parameters:
+        - name: serviceType
+          in: query
+          schema: { type: string }
+        - name: date
+          in: query
+          schema: { type: string, format: date }
+          description: YYYY-MM-DD
+        - name: timeSlot
+          in: query
+          schema: { $ref: '#/components/schemas/TimeSlot' }
+        - name: condition
+          in: query
+          schema: { $ref: '#/components/schemas/ConditionType' }
+        - name: rooms
+          in: query
+          schema: { type: string }
+          description: Comma-separated RoomType values
+        - name: lat
+          in: query
+          schema: { type: number }
+        - name: lng
+          in: query
+          schema: { type: number }
+        - name: radius
+          in: query
+          schema: { type: number, default: 30 }
+          description: Search radius in kilometers
+        - name: page
+          in: query
+          schema: { type: integer, default: 1 }
+        - name: limit
+          in: query
+          schema: { type: integer, default: 10 }
+      responses:
+        '200':
+          description: Worker cards sorted by rating desc, then distance asc
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          workers:
+                            type: array
+                            items: { $ref: '#/components/schemas/WorkerCard' }
+                          pagination: { $ref: '#/components/schemas/Pagination' }
+
+  /workers/{workerId}:
+    get:
+      tags: [Worker Discovery]
+      summary: Get a worker's public profile
+      security: []
+      parameters: [{ $ref: '#/components/parameters/WorkerId' }]
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SuccessEnvelope' }
+        '404':
+          description: 'Not found — includes workers that exist but aren''t KYC-approved (treated as nonexistent)'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+
+  /workers/me/availability-slots:
+    get:
+      tags: [Worker Availability]
+      summary: Get the authenticated worker's per-date/timeSlot availability records
+      parameters:
+        - name: date
+          in: query
+          schema: { type: string, format: date }
+        - name: timeSlot
+          in: query
+          schema: { $ref: '#/components/schemas/TimeSlot' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          slots:
+                            type: array
+                            items: { $ref: '#/components/schemas/WorkerAvailabilitySlot' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    patch:
+      tags: [Worker Availability]
+      summary: Open/close availability slots (max 2 per day; cannot close a booked slot)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [slots]
+              properties:
+                slots:
+                  type: array
+                  items:
+                    type: object
+                    required: [date, timeSlot]
+                    properties:
+                      date: { type: string, format: date }
+                      timeSlot: { $ref: '#/components/schemas/TimeSlot' }
+      responses:
+        '200':
+          description: Slots updated
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          slots:
+                            type: array
+                            items: { $ref: '#/components/schemas/WorkerAvailabilitySlot' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '409':
+          description: A requested slot has an active booking and cannot be closed
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+
+  /workers/me/rate:
+    patch:
+      tags: [Worker Availability]
+      summary: Set the authenticated worker's hourly rate ($20–$100)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [hourlyRate]
+              properties:
+                hourlyRate: { type: number, minimum: 20, maximum: 100 }
+      responses:
+        '200':
+          description: Rate updated
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          hourlyRate: { type: number }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /bookings:
+    get:
+      tags: [Bookings]
+      summary: List the authenticated user's bookings (role-filtered, paginated)
+      parameters:
+        - name: status
+          in: query
+          schema: { $ref: '#/components/schemas/BookingStatus' }
+        - name: page
+          in: query
+          schema: { type: integer, default: 1 }
+        - name: limit
+          in: query
+          schema: { type: integer, default: 10 }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SuccessEnvelope' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+    post:
+      tags: [Bookings]
+      summary: Create a booking (auto-matches a worker if workerId is omitted)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateBookingRequest' }
+      responses:
+        '201':
+          description: Booking created; Payment authorized/held
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/CreateBookingResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403':
+          description: Not a client, or the matched/specified worker isn't KYC-approved
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+        '404':
+          description: Service type/task not found, or no worker matched the request
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+        '409':
+          description: Worker at capacity, slot no longer available, or price outside PricingRule bounds
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+
+  /bookings/{id}:
+    get:
+      tags: [Bookings]
+      summary: Get full booking detail (client, worker, or any admin)
+      parameters:
+        - $ref: '#/components/parameters/BookingId'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SuccessEnvelope' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /bookings/{id}/accept:
+    patch:
+      tags: [Bookings]
+      summary: Worker accepts a PENDING booking
+      parameters: [{ $ref: '#/components/parameters/BookingId' }]
+      responses:
+        '200': { description: Accepted }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: Not PENDING, or worker at capacity
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+
+  /bookings/{id}/decline:
+    patch:
+      tags: [Bookings]
+      summary: Worker declines a PENDING booking; suggests an alternative worker
+      parameters: [{ $ref: '#/components/parameters/BookingId' }]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason: { type: string }
+      responses:
+        '200':
+          description: Declined
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          id: { type: string }
+                          status: { type: string, enum: [REJECTED] }
+                          alternativeWorkerId: { type: string, nullable: true }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /bookings/{id}/arrive:
+    patch:
+      tags: [Bookings]
+      summary: Worker checks in at the job site (must be within 100m)
+      parameters: [{ $ref: '#/components/parameters/BookingId' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [lat, lng]
+              properties:
+                lat: { type: number }
+                lng: { type: number }
+      responses:
+        '200':
+          description: Arrival verified
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SuccessEnvelope' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: Not ACCEPTED, no client location on file, or outside the geofence
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+
+  /bookings/{id}/start:
+    patch:
+      tags: [Bookings]
+      summary: Worker starts the job (requires a prior verified arrival)
+      parameters: [{ $ref: '#/components/parameters/BookingId' }]
+      responses:
+        '200': { description: Started }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: Not ACCEPTED, or worker hasn't checked in as arrived yet
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+
+  /bookings/{id}/quote:
+    post:
+      tags: [Bookings]
+      summary: Worker submits materials cost on top of the pinned labor estimate
+      parameters: [{ $ref: '#/components/parameters/BookingId' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [materialsCost]
+              properties:
+                materialsCost: { type: number, minimum: 0 }
+                notes: { type: string }
+      responses:
+        '201': { description: Quote submitted }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /bookings/{id}/quote/approve:
+    patch:
+      tags: [Bookings]
+      summary: Client approves the submitted quote
+      parameters: [{ $ref: '#/components/parameters/BookingId' }]
+      responses:
+        '200': { description: Approved }
+        '400':
+          description: No quote exists on this booking
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /bookings/{id}/quote/dispute:
+    patch:
+      tags: [Bookings]
+      summary: Client disputes the submitted quote (creates a Dispute, notifies admins)
+      parameters: [{ $ref: '#/components/parameters/BookingId' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason: { type: string }
+      responses:
+        '200': { description: Disputed }
+        '400':
+          description: No quote exists on this booking
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /bookings/{id}/completion-photo/upload:
+    post:
+      tags: [Bookings]
+      summary: Upload a completion proof photo (returns a URL to pass to PATCH .../complete)
+      parameters: [{ $ref: '#/components/parameters/BookingId' }]
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                photo: { type: string, format: binary }
+      responses:
+        '201':
+          description: Uploaded
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          url: { type: string, format: uri }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /bookings/{id}/complete:
+    patch:
+      tags: [Bookings]
+      summary: Worker submits completion (requires QUOTE_APPROVED + a completion photo); frees capacity/slot
+      parameters: [{ $ref: '#/components/parameters/BookingId' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [completionPhotoUrl]
+              properties:
+                completionPhotoUrl: { type: string, format: uri }
+      responses:
+        '200': { description: Marked PENDING_COMPLETION }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /bookings/{id}/confirm-completion:
+    patch:
+      tags: [Bookings]
+      summary: Client confirms completion; captures payment and releases escrow to the worker
+      parameters: [{ $ref: '#/components/parameters/BookingId' }]
+      responses:
+        '200': { description: Completed; payment captured and released }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /bookings/{id}/review:
+    post:
+      tags: [Bookings]
+      summary: Client reviews a COMPLETED booking; updates the worker's average rating
+      parameters: [{ $ref: '#/components/parameters/BookingId' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [rating, comment]
+              properties:
+                rating: { type: number, minimum: 1, maximum: 5 }
+                comment: { type: string }
+      responses:
+        '201': { description: Review submitted }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /auth/signup:
+    post:
+      tags: [Auth]
+      summary: Register a new client or worker account
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [fullName, email, phone, password, role]
+              properties:
+                fullName: { type: string }
+                email: { type: string, format: email }
+                phone: { type: string }
+                password: { type: string, minLength: 8 }
+                role: { type: string, enum: [CLIENT, WORKER] }
+      responses:
+        '201': { description: Account created; verification email/OTP sent }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '409':
+          description: Email already registered
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+
+  /auth/login:
+    post:
+      tags: [Auth]
+      summary: Log in with email and password
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email: { type: string, format: email }
+                password: { type: string }
+      responses:
+        '200':
+          description: OK — returns access/refresh tokens and the user profile
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SuccessEnvelope' }
+        '401':
+          description: Invalid credentials
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+
+  /auth/me:
+    get:
+      tags: [Auth]
+      summary: Get the authenticated user's profile
+      responses:
+        '200': { description: OK }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /auth/send-otp:
+    post:
+      tags: [Auth]
+      summary: Send a one-time email verification code
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email]
+              properties:
+                email: { type: string, format: email }
+      responses:
+        '200': { description: OTP sent }
+        '400': { $ref: '#/components/responses/BadRequest' }
+
+  /auth/verify-otp:
+    post:
+      tags: [Auth]
+      summary: Verify the emailed OTP; marks the account as verified
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, otp]
+              properties:
+                email: { type: string, format: email }
+                otp: { type: string }
+      responses:
+        '200': { description: Verified }
+        '400': { $ref: '#/components/responses/BadRequest' }
+
+  /auth/resend-otp:
+    post:
+      tags: [Auth]
+      summary: Resend the email verification OTP
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email]
+              properties:
+                email: { type: string, format: email }
+      responses:
+        '200': { description: OTP resent }
+        '400': { $ref: '#/components/responses/BadRequest' }
+
+  /auth/forgot-password:
+    post:
+      tags: [Auth]
+      summary: Request a password reset email
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email]
+              properties:
+                email: { type: string, format: email }
+      responses:
+        '200': { description: 'Reset email sent (always 200 — does not reveal whether the email exists)' }
+
+  /auth/reset-password:
+    post:
+      tags: [Auth]
+      summary: Reset the password using the emailed token
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, token, newPassword]
+              properties:
+                email: { type: string, format: email }
+                token: { type: string }
+                newPassword: { type: string, minLength: 8 }
+      responses:
+        '200': { description: Password reset }
+        '400': { $ref: '#/components/responses/BadRequest' }
+
+  /auth/refresh:
+    post:
+      tags: [Auth]
+      summary: Exchange a refresh token for a new access token
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [refreshToken]
+              properties:
+                refreshToken: { type: string }
+      responses:
+        '200': { description: OK — new access token }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /auth/logout:
+    post:
+      tags: [Auth]
+      summary: Revoke the given refresh token (or all of the user's refresh tokens if omitted)
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                refreshToken: { type: string }
+      responses:
+        '200': { description: Logged out }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /users/me:
+    get:
+      tags: [Users]
+      summary: Get the authenticated user's full profile
+      responses:
+        '200': { description: OK }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+    patch:
+      tags: [Users]
+      summary: Update the authenticated user's profile
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                fullName: { type: string }
+                phone: { type: string }
+                avatar: { type: string }
+      responses:
+        '200': { description: Updated }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+    delete:
+      tags: [Users]
+      summary: Soft-delete the authenticated user's account
+      responses:
+        '200': { description: Account deleted }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /users/me/change-password:
+    post:
+      tags: [Users]
+      summary: Change the authenticated user's password
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [currentPassword, newPassword]
+              properties:
+                currentPassword: { type: string }
+                newPassword: { type: string, minLength: 8 }
+      responses:
+        '200': { description: Password changed }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /users/me/addresses:
+    get:
+      tags: [Users]
+      summary: List the authenticated user's saved addresses
+      responses:
+        '200': { description: OK }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+    post:
+      tags: [Users]
+      summary: Add a saved address
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [label, street, city, state, zipCode]
+              properties:
+                label: { type: string }
+                street: { type: string }
+                city: { type: string }
+                state: { type: string }
+                zipCode: { type: string }
+      responses:
+        '201': { description: Created }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /users/me/addresses/{addressId}:
+    patch:
+      tags: [Users]
+      summary: Update a saved address
+      parameters: [{ $ref: '#/components/parameters/AddressId' }]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                label: { type: string }
+                street: { type: string }
+                city: { type: string }
+                state: { type: string }
+                zipCode: { type: string }
+      responses:
+        '200': { description: Updated }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    delete:
+      tags: [Users]
+      summary: Delete a saved address
+      parameters: [{ $ref: '#/components/parameters/AddressId' }]
+      responses:
+        '200': { description: Deleted }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /users/me/addresses/{addressId}/set-default:
+    patch:
+      tags: [Users]
+      summary: Mark an address as the default
+      parameters: [{ $ref: '#/components/parameters/AddressId' }]
+      responses:
+        '200': { description: Default address updated }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /users/me/payment-methods:
+    get:
+      tags: [Users]
+      summary: List the authenticated client's saved payment methods
+      responses:
+        '200': { description: OK }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+    post:
+      tags: [Users]
+      summary: Save a payment method
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [type, accountIdentifier]
+              properties:
+                type: { type: string, enum: [GCASH, MAYA, CARD, BANK_TRANSFER, CASH] }
+                accountIdentifier: { type: string, description: Masked account number/phone }
+      responses:
+        '201': { description: Saved }
+        '400': { $ref: '#/components/responses/BadRequest' }
+
+  /users/me/payment-methods/{methodId}:
+    patch:
+      tags: [Users]
+      summary: Rename a saved payment method
+      parameters: [{ $ref: '#/components/parameters/PaymentMethodId' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [label]
+              properties:
+                label: { type: string }
+      responses:
+        '200': { description: Updated }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    delete:
+      tags: [Users]
+      summary: Remove a saved payment method
+      parameters: [{ $ref: '#/components/parameters/PaymentMethodId' }]
+      responses:
+        '200': { description: Deleted }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /users/me/payment-methods/{methodId}/set-default:
+    patch:
+      tags: [Users]
+      summary: Mark a payment method as the default
+      parameters: [{ $ref: '#/components/parameters/PaymentMethodId' }]
+      responses:
+        '200': { description: Default payment method updated }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /users/me/notification-preferences:
+    patch:
+      tags: [Users]
+      summary: Update notification preferences
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                bookingUpdates: { type: boolean }
+                messages: { type: boolean }
+                promotions: { type: boolean }
+                systemNotifications: { type: boolean }
+      responses:
+        '200': { description: Updated }
+        '400': { $ref: '#/components/responses/BadRequest' }
+
+  /users/me/avatar:
+    post:
+      tags: [Users]
+      summary: Upload a profile avatar image
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [avatar]
+              properties:
+                avatar: { type: string, format: binary }
+      responses:
+        '200':
+          description: Uploaded
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          avatar: { type: string, format: uri }
+        '400': { $ref: '#/components/responses/BadRequest' }
+
+  /users/me/kyc-documents:
+    get:
+      tags: [Users]
+      summary: List the authenticated user's submitted KYC documents (legacy, pre-VerificationRequest flow)
+      responses:
+        '200': { description: OK }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+    post:
+      tags: [Users]
+      summary: Record a KYC document already uploaded elsewhere
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [documentType, documentUrl]
+              properties:
+                documentType: { $ref: '#/components/schemas/KycDocumentType' }
+                documentUrl: { type: string, format: uri }
+      responses:
+        '201': { description: Recorded }
+        '400': { $ref: '#/components/responses/BadRequest' }
+
+  /users/me/kyc-documents/upload:
+    post:
+      tags: [Users]
+      summary: Upload a single KYC document file (PDF/JPG/PNG/WEBP)
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file: { type: string, format: binary }
+      responses:
+        '201': { description: Uploaded }
+        '400': { $ref: '#/components/responses/BadRequest' }
+
+  /users/me/contract-acceptance:
+    post:
+      tags: [Users]
+      summary: Record acceptance of a legal contract (worker service agreement / client user agreement)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [contractType]
+              properties:
+                contractType: { type: string, enum: [WORKER_SERVICE_AGREEMENT, CLIENT_USER_AGREEMENT] }
+                acceptedAt: { type: string, format: date-time }
+      responses:
+        '201': { description: Recorded }
+        '400': { $ref: '#/components/responses/BadRequest' }
+
+  /users/me/reviews:
+    get:
+      tags: [Users]
+      summary: List reviews written by (client) or received by (worker) the authenticated user
+      responses:
+        '200': { description: OK }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /workers/{workerId}/reviews:
+    get:
+      tags: [Worker Discovery]
+      summary: List a worker's reviews
+      security: []
+      parameters: [{ $ref: '#/components/parameters/WorkerId' }]
+      responses:
+        '200': { description: OK }
+        '404':
+          description: 'Not found — includes workers that exist but aren''t KYC-approved (treated as nonexistent)'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+
+  /workers/{workerId}/availability:
+    get:
+      tags: [Worker Discovery]
+      summary: Get a worker's open availability slots
+      security: []
+      parameters:
+        - { $ref: '#/components/parameters/WorkerId' }
+        - name: date
+          in: query
+          schema: { type: string, format: date }
+      responses:
+        '200': { description: OK }
+        '404':
+          description: 'Not found — includes workers that exist but aren''t KYC-approved (treated as nonexistent)'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+
+  /workers/{workerId}/blocked-dates:
+    get:
+      tags: [Worker Discovery]
+      summary: Get a worker's fully-blocked dates (no open slots)
+      security: []
+      parameters: [{ $ref: '#/components/parameters/WorkerId' }]
+      responses:
+        '200': { description: OK }
+        '404':
+          description: 'Not found — includes workers that exist but aren''t KYC-approved (treated as nonexistent)'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+
+  /workers/me/availability:
+    patch:
+      tags: [Worker Profile]
+      summary: Set overall availability and default available days
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [isAvailable]
+              properties:
+                isAvailable: { type: boolean }
+                availableDays:
+                  type: array
+                  items: { type: integer, minimum: 0, maximum: 6 }
+                  description: 0=Sun … 6=Sat
+      responses:
+        '200': { description: Updated }
+        '400': { $ref: '#/components/responses/BadRequest' }
+
+  /workers/me/profile:
+    patch:
+      tags: [Worker Profile]
+      summary: Update the worker's profile fields
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                bio: { type: string }
+                serviceAreaRadius: { type: number, minimum: 0 }
+                address: { type: string }
+                city: { type: string }
+                state: { type: string }
+                zipCode: { type: string }
+                resumeUrl: { type: string }
+      responses:
+        '200': { description: Updated }
+        '400': { $ref: '#/components/responses/BadRequest' }
+
+  /workers/me/service-types:
+    get:
+      tags: [Worker Profile]
+      summary: List the authenticated worker's connected service categories
+      responses:
+        '200': { description: OK }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+    post:
+      tags: [Worker Profile]
+      summary: Add one or more service categories to the worker's profile
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [serviceTypeIds]
+              properties:
+                serviceTypeIds:
+                  type: array
+                  items: { type: string }
+                  minItems: 1
+      responses:
+        '200': { description: Added }
+        '400': { $ref: '#/components/responses/BadRequest' }
+
+  /workers/me/service-types/{serviceTypeId}:
+    delete:
+      tags: [Worker Profile]
+      summary: Remove a service category from the worker's profile
+      parameters:
+        - name: serviceTypeId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200': { description: Removed }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /workers/me/capacity:
+    get:
+      tags: [Worker Profile]
+      summary: Get the authenticated worker's active job count vs. max concurrent jobs
+      responses:
+        '200': { description: OK }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /workers/me/skills:
+    get:
+      tags: [Worker Profile]
+      summary: List the authenticated worker's free-text skills
+      responses:
+        '200': { description: OK }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+    post:
+      tags: [Worker Profile]
+      summary: Add a skill
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, category, rate]
+              properties:
+                name: { type: string }
+                category: { type: string }
+                rate: { type: number, minimum: 0, exclusiveMinimum: true }
+      responses:
+        '201': { description: Created }
+        '400': { $ref: '#/components/responses/BadRequest' }
+
+  /workers/me/skills/{skillId}:
+    delete:
+      tags: [Worker Profile]
+      summary: Remove a skill
+      parameters:
+        - name: skillId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200': { description: Removed }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /workers/me/certifications:
+    get:
+      tags: [Worker Profile]
+      summary: List the authenticated worker's certifications
+      responses:
+        '200': { description: OK }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+    post:
+      tags: [Worker Profile]
+      summary: Add a certification
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, issuer, issueDate, documentUrl]
+              properties:
+                name: { type: string }
+                issuer: { type: string }
+                issueDate: { type: string, format: date }
+                expiryDate: { type: string, format: date, nullable: true }
+                documentUrl: { type: string, format: uri }
+      responses:
+        '201': { description: Created }
+        '400': { $ref: '#/components/responses/BadRequest' }
+
+  /workers/me/certifications/{certId}:
+    get:
+      tags: [Worker Profile]
+      summary: Get a certification's detail (including verification status)
+      parameters:
+        - name: certId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200': { description: OK }
+        '404': { $ref: '#/components/responses/NotFound' }
+    delete:
+      tags: [Worker Profile]
+      summary: Remove a certification
+      parameters:
+        - name: certId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200': { description: Removed }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /workers/me/payout:
+    get:
+      tags: [Worker Profile]
+      summary: Get the authenticated worker's payout method
+      responses:
+        '200': { description: OK }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+    patch:
+      tags: [Worker Profile]
+      summary: Set the authenticated worker's payout method
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [payoutMethod]
+              properties:
+                payoutMethod: { type: string, enum: [GCASH, MAYA, BANK_TRANSFER] }
+                payoutAccountName: { type: string }
+                payoutAccountNumber: { type: string }
+      responses:
+        '200': { description: Updated }
+        '400': { $ref: '#/components/responses/BadRequest' }
+
+  /bookings/{id}/cancel:
+    patch:
+      tags: [Bookings]
+      summary: Client or worker cancels a booking before completion
+      parameters: [{ $ref: '#/components/parameters/BookingId' }]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason: { type: string }
+      responses:
+        '200': { description: Cancelled }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /bookings/{id}/reschedule:
+    patch:
+      tags: [Bookings]
+      summary: Reschedule a booking to a new date/time slot
+      parameters: [{ $ref: '#/components/parameters/BookingId' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [newDate, newTime]
+              properties:
+                newDate: { type: string, format: date }
+                newTime: { $ref: '#/components/schemas/TimeSlot' }
+      responses:
+        '200': { description: Rescheduled }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /bookings/{id}/addons:
+    post:
+      tags: [Bookings]
+      summary: Worker adds an extra charge line item mid-job
+      parameters: [{ $ref: '#/components/parameters/BookingId' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [title, cost]
+              properties:
+                title: { type: string }
+                description: { type: string }
+                cost: { type: number, exclusiveMinimum: true, minimum: 0 }
+      responses:
+        '201': { description: Added }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /payments/{bookingId}:
+    post:
+      tags: [Payments]
+      summary: Create a Payment record for a booking (client only)
+      parameters: [{ $ref: '#/components/parameters/BookingId' }]
+      responses:
+        '201': { description: Created }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+    get:
+      tags: [Payments]
+      summary: Get the payment detail for a booking
+      parameters: [{ $ref: '#/components/parameters/BookingId' }]
+      responses:
+        '200': { description: OK }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /payments:
+    get:
+      tags: [Payments]
+      summary: List the authenticated user's payments (client) or payouts (worker)
+      parameters:
+        - name: page
+          in: query
+          schema: { type: integer, default: 1 }
+        - name: limit
+          in: query
+          schema: { type: integer, default: 10 }
+      responses:
+        '200': { description: OK }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /payments/{id}/release:
+    post:
+      tags: [Payments]
+      summary: Client manually releases held escrow to the worker
+      parameters: [{ $ref: '#/components/parameters/PaymentId' }]
+      responses:
+        '200': { description: Released }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /payments/{id}/refund:
+    post:
+      tags: [Payments]
+      summary: Client refunds a held payment
+      parameters: [{ $ref: '#/components/parameters/PaymentId' }]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason: { type: string }
+      responses:
+        '200': { description: Refunded }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /payments/{bookingId}/paymongo/checkout:
+    post:
+      tags: [Payments]
+      summary: Create a PayMongo Source checkout (GCash/Maya) for an existing pending payment
+      parameters: [{ $ref: '#/components/parameters/BookingId' }]
+      responses:
+        '200':
+          description: OK — returns the PayMongo checkout redirect URL
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          checkoutUrl: { type: string, format: uri }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /messages/unread-count:
+    get:
+      tags: [Messages]
+      summary: Get the authenticated user's unread message count
+      responses:
+        '200': { description: OK }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /messages/conversations:
+    get:
+      tags: [Messages]
+      summary: List the authenticated user's conversations
+      responses:
+        '200': { description: OK }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /messages/conversations/{userId}:
+    get:
+      tags: [Messages]
+      summary: Get the message thread with another user
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200': { description: OK }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /messages/conversations/{userId}/read:
+    patch:
+      tags: [Messages]
+      summary: Mark a conversation as read
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200': { description: Marked read }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /messages/upload-image:
+    post:
+      tags: [Messages]
+      summary: Upload a chat image attachment (returns a URL to send in a message)
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [image]
+              properties:
+                image: { type: string, format: binary }
+      responses:
+        '201': { description: Uploaded }
+        '400': { $ref: '#/components/responses/BadRequest' }
+
+  /messages:
+    post:
+      tags: [Messages]
+      summary: Send a message (text and/or an image URL)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [receiverId]
+              properties:
+                receiverId: { type: string }
+                content: { type: string }
+                imageUrl: { type: string, format: uri }
+              description: Either content or imageUrl is required.
+      responses:
+        '201': { description: Sent }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /notifications/unread-count:
+    get:
+      tags: [Notifications]
+      summary: Get the authenticated user's unread notification count
+      responses:
+        '200': { description: OK }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /notifications/read-all:
+    patch:
+      tags: [Notifications]
+      summary: Mark all notifications as read
+      responses:
+        '200': { description: Marked read }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /notifications:
+    get:
+      tags: [Notifications]
+      summary: List the authenticated user's notifications
+      parameters:
+        - name: page
+          in: query
+          schema: { type: integer, default: 1 }
+        - name: limit
+          in: query
+          schema: { type: integer, default: 20 }
+      responses:
+        '200': { description: OK }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /notifications/{id}/read:
+    patch:
+      tags: [Notifications]
+      summary: Mark a single notification as read
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200': { description: Marked read }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /services:
+    get:
+      tags: [Services]
+      summary: List active service types and their tasks
+      security: []
+      responses:
+        '200': { description: OK }
+
+  /verification/upload:
+    post:
+      tags: [KYC Verification]
+      summary: Submit KYC documents for review (creates or adds to a VerificationRequest)
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [documentType, documents]
+              properties:
+                documentType: { $ref: '#/components/schemas/KycDocumentType' }
+                documents:
+                  type: array
+                  items: { type: string, format: binary }
+                  maxItems: 5
+      responses:
+        '201': { description: Submitted; kycStatus set to SUBMITTED for workers }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /verification/mine:
+    get:
+      tags: [KYC Verification]
+      summary: List the authenticated user's verification submissions
+      responses:
+        '200': { description: OK }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /admin/disputes:
+    get:
+      tags: [Admin Disputes]
+      summary: List disputes (open/resolved)
+      parameters:
+        - name: status
+          in: query
+          schema: { type: string, description: 'OPEN | UNDER_REVIEW | RESOLVED_* | REJECTED | all' }
+        - name: search
+          in: query
+          schema: { type: string }
+        - name: page
+          in: query
+          schema: { type: integer, default: 1 }
+        - name: limit
+          in: query
+          schema: { type: integer, default: 10 }
+      responses:
+        '200': { description: OK }
+
+  /admin/disputes/{id}:
+    get:
+      tags: [Admin Disputes]
+      summary: Get a dispute's full detail (admin view)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200': { description: OK }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /admin/disputes/{id}/resolve:
+    patch:
+      tags: [Admin Disputes]
+      summary: Resolve a dispute
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [action]
+              properties:
+                action:
+                  type: string
+                  enum: [APPROVE_QUOTE, REQUEST_NEW_QUOTE, CANCEL_BOOKING]
+                resolution: { type: string }
+      responses:
+        '200': { description: Resolved }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: Dispute already resolved, or the booking is no longer DISPUTED
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+
+  /admin/bookings:
+    get:
+      tags: [Admin Bookings]
+      summary: Master paginated booking list
+      parameters:
+        - name: status
+          in: query
+          schema: { type: string }
+        - name: search
+          in: query
+          schema: { type: string }
+        - name: page
+          in: query
+          schema: { type: integer, default: 1 }
+        - name: limit
+          in: query
+          schema: { type: integer, default: 10 }
+      responses:
+        '200': { description: OK }
+
+  /admin/bookings/{id}:
+    get:
+      tags: [Admin Bookings]
+      summary: Get a booking's full detail (admin view)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200': { description: OK }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /admin/bookings/{id}/cancel:
+    patch:
+      tags: [Admin Bookings]
+      summary: Admin cancels a booking in any non-terminal state; refunds/releases the payment hold
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason: { type: string }
+      responses:
+        '200': { description: Cancelled }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: Booking already in a terminal state
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+
+  /admin/users/workers:
+    get:
+      tags: [Admin Users]
+      summary: List workers (audit view)
+      parameters:
+        - name: status
+          in: query
+          schema: { type: string, description: 'verified | pending | all' }
+        - name: search
+          in: query
+          schema: { type: string }
+      responses:
+        '200': { description: OK }
+
+  /admin/users/clients:
+    get:
+      tags: [Admin Users]
+      summary: List clients (audit view)
+      parameters:
+        - name: status
+          in: query
+          schema: { type: string, description: 'active | suspended | banned | all' }
+        - name: search
+          in: query
+          schema: { type: string }
+      responses:
+        '200': { description: OK }
+
+  /admin/users/clients/{id}:
+    get:
+      tags: [Admin Users]
+      summary: Get a client's detail
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200': { description: OK }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /admin/users/workers/{id}:
+    get:
+      tags: [Admin Users]
+      summary: Get a worker's detail (audit view — includes all KYC statuses, unlike the public worker-detail endpoint)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200': { description: OK }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /admin/users/{id}/status:
+    patch:
+      tags: [Admin Users]
+      summary: Set a user's account status directly
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [status]
+              properties:
+                status: { type: string, enum: [ACTIVE, SUSPENDED, BANNED] }
+                reason: { type: string }
+                notes: { type: string }
+      responses:
+        '200': { description: Updated }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /admin/verifications:
+    get:
+      tags: [Admin Users]
+      summary: List verification requests
+      parameters:
+        - name: status
+          in: query
+          schema: { type: string, description: 'PENDING | SUBMITTED | APPROVED | REJECTED | ALL (default PENDING)' }
+        - name: type
+          in: query
+          schema: { type: string, description: 'client | worker | all' }
+        - name: search
+          in: query
+          schema: { type: string }
+      responses:
+        '200': { description: OK }
+
+  /admin/verifications/{id}:
+    get:
+      tags: [Admin Users]
+      summary: Get a verification request's detail, including its documents
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200': { description: OK }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /admin/verifications/{id}/approve:
+    patch:
+      tags: [Admin Users]
+      summary: Approve a worker's KYC verification (sets WorkerProfile.kycStatus = APPROVED)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200': { description: Approved }
+
+  /admin/verifications/{id}/reject:
+    patch:
+      tags: [Admin Users]
+      summary: Reject a worker's KYC verification
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [rejectReason]
+              properties:
+                rejectReason: { type: string }
+      responses:
+        '200': { description: Rejected }
+
+  /admin/verifications/{id}/rerun:
+    patch:
+      tags: [Admin Users]
+      summary: Re-queue a verification request for AI review
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200': { description: Re-queued; aiStatus reset to PENDING }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /admin/users/{id}/suspend:
+    patch:
+      tags: [Admin Users]
+      summary: Suspend a client or worker account
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason: { type: string }
+                notes: { type: string }
+      responses:
+        '200': { description: Suspended }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /admin/users/{id}/reinstate:
+    patch:
+      tags: [Admin Users]
+      summary: Clear a suspension/ban
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200': { description: Reinstated }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /payments/paymongo/webhook:
+    post:
+      tags: [Webhooks]
+      summary: PayMongo webhook (signature-verified via the Paymongo-Signature header)
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              description: Raw PayMongo event payload — signature verified against the raw body, not parsed JSON.
+      responses:
+        '200': { description: Acknowledged }
+        '401':
+          description: Invalid signature
+          content:
+            application/json:
+              schema: { type: object }
+        '500':
+          description: Webhook not configured (missing PAYMONGO_WEBHOOK_SECRET)
+          content:
+            application/json:
+              schema: { type: object }
+
+  /admin/payments:
+    get:
+      tags: [Admin Payments]
+      summary: List all transactions
+      parameters:
+        - name: status
+          in: query
+          schema: { type: string }
+        - name: search
+          in: query
+          schema: { type: string }
+        - name: page
+          in: query
+          schema: { type: integer, default: 1 }
+        - name: limit
+          in: query
+          schema: { type: integer, default: 10 }
+      responses:
+        '200': { description: OK }
+
+  /admin/payments/{id}:
+    get:
+      tags: [Admin Payments]
+      summary: Get a transaction's detail
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200': { description: OK }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /admin/payments/payouts:
+    get:
+      tags: [Admin Payments]
+      summary: List worker payouts
+      parameters:
+        - name: search
+          in: query
+          schema: { type: string }
+        - name: workerId
+          in: query
+          schema: { type: string }
+        - name: dateFrom
+          in: query
+          schema: { type: string, format: date }
+        - name: dateTo
+          in: query
+          schema: { type: string, format: date }
+        - name: page
+          in: query
+          schema: { type: integer, default: 1 }
+        - name: limit
+          in: query
+          schema: { type: integer, default: 10 }
+      responses:
+        '200': { description: OK }
+
+  /admin/payments/payouts/export:
+    get:
+      tags: [Admin Payments]
+      summary: Export worker payouts as CSV
+      parameters:
+        - name: search
+          in: query
+          schema: { type: string }
+        - name: workerId
+          in: query
+          schema: { type: string }
+        - name: dateFrom
+          in: query
+          schema: { type: string, format: date }
+        - name: dateTo
+          in: query
+          schema: { type: string, format: date }
+      responses:
+        '200':
+          description: CSV file
+          content:
+            text/csv:
+              schema: { type: string }
+
+  /admin/pricing-rules:
+    get:
+      tags: [Admin Pricing Rules]
+      summary: List city/service-type pricing bounds
+      parameters:
+        - name: search
+          in: query
+          schema: { type: string }
+      responses:
+        '200': { description: OK }
+    post:
+      tags: [Admin Pricing Rules]
+      summary: Create a pricing rule
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PricingRuleInput' }
+      responses:
+        '201': { description: Created }
+        '400': { $ref: '#/components/responses/BadRequest' }
+
+  /admin/pricing-rules/{id}:
+    patch:
+      tags: [Admin Pricing Rules]
+      summary: Update a pricing rule
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PricingRuleInput' }
+      responses:
+        '200': { description: Updated }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    delete:
+      tags: [Admin Pricing Rules]
+      summary: Delete a pricing rule
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200': { description: Deleted }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /admin/reviews:
+    get:
+      tags: [Admin Reviews]
+      summary: List reviews (moderation view)
+      parameters:
+        - name: status
+          in: query
+          schema: { type: string, description: 'VISIBLE | HIDDEN | WARNED | all' }
+        - name: flagged
+          in: query
+          schema: { type: boolean }
+        - name: search
+          in: query
+          schema: { type: string }
+        - name: page
+          in: query
+          schema: { type: integer, default: 1 }
+        - name: limit
+          in: query
+          schema: { type: integer, default: 10 }
+      responses:
+        '200': { description: OK }
+
+  /admin/reviews/{id}:
+    get:
+      tags: [Admin Reviews]
+      summary: Get a review's detail
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200': { description: OK }
+        '404': { $ref: '#/components/responses/NotFound' }
+    patch:
+      tags: [Admin Reviews]
+      summary: Moderate a review (edit, flag, hide, or warn)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                rating: { type: number, minimum: 1, maximum: 5 }
+                comment: { type: string, nullable: true }
+                flagged: { type: boolean }
+                flagReason: { type: string, nullable: true }
+                status: { type: string, enum: [VISIBLE, HIDDEN, WARNED] }
+      responses:
+        '200': { description: Updated }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /admin/reports/service:
+    get:
+      tags: [Admin Reports]
+      summary: Business performance summary metrics
+      responses:
+        '200': { description: OK }
+
+  /admin/reports/activity:
+    get:
+      tags: [Admin Reports]
+      summary: User engagement/activity metrics
+      responses:
+        '200': { description: OK }
+
+  /admin/analytics:
+    get:
+      tags: [Admin Analytics]
+      summary: Platform analytics (bookings/revenue/growth trends)
+      responses:
+        '200': { description: OK }
+
+  /admin/audit-logs:
+    get:
+      tags: [Admin Audit Logs]
+      summary: List system/admin-action audit log entries
+      parameters:
+        - name: search
+          in: query
+          schema: { type: string }
+        - name: category
+          in: query
+          schema: { type: string, description: 'ADMIN_ACTION | LOGIN_HISTORY | SYSTEM_ERROR | STATUS_CHANGE | all' }
+        - name: page
+          in: query
+          schema: { type: integer, default: 1 }
+        - name: limit
+          in: query
+          schema: { type: integer, default: 10 }
+      responses:
+        '200': { description: OK }
+
+  /admin/dashboard/stats:
+    get:
+      tags: [Admin Analytics]
+      summary: Dashboard summary stats (headline KPIs)
+      responses:
+        '200': { description: OK }
+
+  /admin/settings:
+    get:
+      tags: [Admin Settings]
+      summary: Get platform settings (commission/tax rates, capacity, geofence, etc.)
+      responses:
+        '200': { description: OK }
+    put:
+      tags: [Admin Settings]
+      summary: Update platform settings
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [siteName, supportEmail]
+              properties:
+                siteName: { type: string }
+                supportEmail: { type: string, format: email }
+                notificationsEnabled: { type: boolean }
+                commissionRate: { type: number, minimum: 0, maximum: 1 }
+                withholdingTaxRate: { type: number, minimum: 0, maximum: 1 }
+                maxSlotsPerDay: { type: integer, minimum: 1, maximum: 24 }
+                pendingExpiryMinutes: { type: integer, minimum: 5, maximum: 10080 }
+                geofenceRadiusMeters: { type: integer, minimum: 10, maximum: 5000 }
+      responses:
+        '200': { description: Updated }
+        '400': { $ref: '#/components/responses/BadRequest' }
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  parameters:
+    BookingId:
+      name: id
+      in: path
+      required: true
+      schema: { type: string }
+    WorkerId:
+      name: workerId
+      in: path
+      required: true
+      schema: { type: string }
+    AddressId:
+      name: addressId
+      in: path
+      required: true
+      schema: { type: string }
+    PaymentMethodId:
+      name: methodId
+      in: path
+      required: true
+      schema: { type: string }
+    PaymentId:
+      name: id
+      in: path
+      required: true
+      schema: { type: string }
+
+  responses:
+    BadRequest:
+      description: Invalid request body/query
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+    Unauthorized:
+      description: Missing/invalid auth token
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+    Forbidden:
+      description: Authenticated but not permitted to perform this action
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+    Conflict:
+      description: State/capacity/slot conflict
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+
+  schemas:
+    TimeSlot:
+      type: string
+      enum: [MORNING, AFTERNOON, EVENING]
+    KycDocumentType:
+      type: string
+      enum:
+        - GOVERNMENT_ID_FRONT
+        - GOVERNMENT_ID_BACK
+        - SELFIE
+        - RESUME
+        - CERTIFICATION
+        - NBI_CLEARANCE
+        - BARANGAY_CLEARANCE
+        - POLICE_CLEARANCE
+        - CEDULA
+    PricingRuleInput:
+      type: object
+      required: [city, serviceType, minPrice, maxPrice]
+      properties:
+        city: { type: string }
+        serviceType: { type: string }
+        minPrice: { type: number }
+        maxPrice: { type: number }
+    ConditionType:
+      type: string
+      enum: [TIDY, NORMAL, HEAVY]
+    RoomType:
+      type: string
+      enum: [BEDROOM, BATHROOM, KITCHEN, LIVING_ROOM, DINING_ROOM, OFFICE, GARAGE, BALCONY, OTHER]
+    BookingStatus:
+      type: string
+      enum:
+        - PENDING
+        - ACCEPTED
+        - REJECTED
+        - IN_PROGRESS
+        - QUOTE_SUBMITTED
+        - QUOTE_APPROVED
+        - DISPUTED
+        - PENDING_COMPLETION
+        - COMPLETED
+        - CANCELLED
+
+    SuccessEnvelope:
+      type: object
+      properties:
+        success: { type: boolean, example: true }
+        message: { type: string }
+        data: {}
+
+    ErrorEnvelope:
+      type: object
+      properties:
+        success: { type: boolean, example: false }
+        statusCode: { type: integer }
+        message: { type: string }
+        error: { type: string }
+
+    Pagination:
+      type: object
+      properties:
+        page: { type: integer }
+        limit: { type: integer }
+        total: { type: integer }
+        pages: { type: integer }
+
+    WorkerAvailabilitySlot:
+      type: object
+      properties:
+        id: { type: string }
+        workerProfileId: { type: string }
+        date: { type: string, format: date }
+        timeSlot: { $ref: '#/components/schemas/TimeSlot' }
+        isBlocked: { type: boolean }
+        isBooked: { type: boolean }
+
+    WorkerCard:
+      type: object
+      properties:
+        id: { type: string }
+        fullName: { type: string }
+        avatar: { type: string, nullable: true }
+        rating: { type: number }
+        totalReviews: { type: integer }
+        distance: { type: number, nullable: true, description: kilometers }
+        hourlyRate: { type: number, nullable: true }
+        estimatedTotal: { type: number, nullable: true }
+        badges:
+          type: array
+          items: { type: string }
+        openSlots:
+          type: array
+          items: { $ref: '#/components/schemas/TimeSlot' }
+
+    CreateBookingRequest:
+      type: object
+      required: [serviceType, address, lat, lng, date, timeSlot]
+      properties:
+        workerId:
+          type: string
+          nullable: true
+          description: Omit to trigger auto-match
+        serviceType: { type: string }
+        serviceTaskId: { type: string, nullable: true }
+        rooms:
+          type: array
+          items: { $ref: '#/components/schemas/RoomType' }
+        condition: { $ref: '#/components/schemas/ConditionType' }
+        description: { type: string }
+        address: { type: string }
+        city: { type: string }
+        lat: { type: number }
+        lng: { type: number }
+        date: { type: string, format: date }
+        timeSlot: { $ref: '#/components/schemas/TimeSlot' }
+        addOns:
+          type: array
+          items:
+            type: object
+            required: [price]
+            properties:
+              id: { type: string }
+              name: { type: string }
+              price: { type: number }
+        priorities:
+          type: array
+          items: { type: string }
+        tip: { type: number }
+        paymentMethodType:
+          type: string
+          enum: [GCASH, MAYA, CARD, BANK_TRANSFER, CASH]
+        paymentAccountIdentifier: { type: string }
+
+    CreateBookingResponse:
+      type: object
+      properties:
+        id: { type: string }
+        clientName: { type: string }
+        workerName: { type: string, nullable: true }
+        isAutoMatched: { type: boolean }
+        status: { $ref: '#/components/schemas/BookingStatus' }
+        scheduledDate: { type: string, format: date }
+        timeSlot: { $ref: '#/components/schemas/TimeSlot' }
+        estimatedPrice: { type: number }
+        estimatedDurationHours: { type: number, nullable: true }
+        expiresAt: { type: string, format: date-time, description: 1 hour from creation }
+        pricing:
+          type: object
+          properties:
+            basePrice: { type: number }
+            conditionFee: { type: number }
+            distanceFee: { type: number }
+            addOnsTotal: { type: number }
+            finalEstimate: { type: number }
+        payment:
+          type: object
+          properties:
+            id: { type: string }
+            status: { type: string }
+            escrowStatus: { type: string }
+            clientSecret:
+              type: string
+              nullable: true
+              description: PayMongo Payment Intent client key (CARD only) for client-side confirmation

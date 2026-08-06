@@ -87,16 +87,6 @@ const CATEGORIES = [
     ],
   },
   {
-    name: "Aircon & Refrigeration",
-    description: "AC cleaning, repair, and refrigerator servicing",
-    basePrice: 500,
-    tasks: [
-      { name: "AC Cleaning", basePrice: 500, durationHours: 1.5 },
-      { name: "AC Repair", basePrice: 900, durationHours: 2.5 },
-      { name: "Refrigerator Repair", basePrice: 700, durationHours: 2 },
-    ],
-  },
-  {
     name: "Painting",
     description: "Interior and exterior painting services",
     basePrice: 600,

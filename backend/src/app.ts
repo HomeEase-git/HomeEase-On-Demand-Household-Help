@@ -18,6 +18,7 @@ import adminVerificationRoutes from '@routes/adminVerifications';
 import adminDashboardRoutes from '@routes/adminDashboard';
 import adminAnalyticsRoutes from '@routes/adminAnalytics';
 import adminPricingRuleRoutes from '@routes/adminPricingRules';
+import adminServiceTypeRoutes from '@routes/adminServiceTypes';
 import adminAuditLogRoutes from '@routes/adminAuditLogs';
 import adminReportsRoutes from '@routes/adminReports';
 import adminSettingsRoutes from '@routes/adminSettings';
@@ -31,6 +32,13 @@ const allowedOrigins = (process.env.ALLOWED_ORIGINS || 'http://localhost:3000')
   .filter(Boolean);
 
 // Middleware
+// PayMongo webhook signature verification needs the raw request bytes, so these
+// routes must capture them before the global JSON parser consumes the stream.
+// The transfer callback is assumed to be signed the same way as the collections
+// webhook (Paymongo-Signature HMAC) — confirm against a real payload once
+// PayMongo's Wallet/Disbursements product is enabled and adjust if it differs.
+app.use('/api/payments/paymongo/webhook', express.raw({ type: 'application/json' }));
+app.use('/api/payments/paymongo/transfers/callback', express.raw({ type: 'application/json' }));
 app.use(express.json({ limit: jsonBodyLimit }));
 app.use(express.urlencoded({ extended: true, limit: jsonBodyLimit }));
 app.use(
@@ -59,6 +67,7 @@ app.use('/api/admin/verifications', adminVerificationRoutes);
 app.use('/api/admin/dashboard', adminDashboardRoutes);
 app.use('/api/admin/analytics', adminAnalyticsRoutes);
 app.use('/api/admin/pricing-rules', adminPricingRuleRoutes);
+app.use('/api/admin/service-types', adminServiceTypeRoutes);
 app.use('/api/admin/audit-logs', adminAuditLogRoutes);
 app.use('/api/admin/reports', adminReportsRoutes);
 app.use('/api/admin/settings', adminSettingsRoutes);

@@ -1,13 +1,8 @@
 import { Worker } from 'bullmq';
 import { analyzeVerificationDocuments } from '@services/verificationAiService';
 import prisma from '@config/database';
+import { redisConnection as connection } from '@config/redis';
 import { VERIFICATION_QUEUE_NAME, type VerificationJobData } from '@queues/verificationQueue';
-
-const connection = {
-  host: process.env.REDIS_HOST || '127.0.0.1',
-  port: Number(process.env.REDIS_PORT || 6379),
-  password: process.env.REDIS_PASSWORD || undefined,
-};
 
 export async function startVerificationWorker() {
   const worker = new Worker<VerificationJobData>(
