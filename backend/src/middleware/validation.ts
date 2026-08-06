@@ -45,26 +45,26 @@ export const validateUpdateWorkerProfile = (
     city,
     state,
     zipCode,
-    kycStatus,
-    kycSubmittedAt,
-    kycApprovedAt,
     resumeUrl,
+    digitalIdTrade,
+    digitalIdServiceArea,
+    licenseNumber,
   } = req.body;
-  
+
   if (bio !== undefined && typeof bio !== 'string') {
     return res.status(400).json(errorResponse(400, 'bio must be a string'));
   }
-  
+
   if (serviceAreaRadius !== undefined) {
     if (typeof serviceAreaRadius !== 'number' || serviceAreaRadius < 0) {
       return res.status(400).json(errorResponse(400, 'serviceAreaRadius must be a non-negative number'));
     }
   }
-  
+
   if (address !== undefined && typeof address !== 'string') {
     return res.status(400).json(errorResponse(400, 'address must be a string'));
   }
-  
+
   if (city !== undefined && typeof city !== 'string') {
     return res.status(400).json(errorResponse(400, 'city must be a string'));
   }
@@ -77,23 +77,22 @@ export const validateUpdateWorkerProfile = (
     return res.status(400).json(errorResponse(400, 'zipCode must be a string'));
   }
 
-  const allowedKycStatuses = ['PENDING', 'SUBMITTED', 'APPROVED', 'REJECTED'];
-  if (kycStatus !== undefined && !allowedKycStatuses.includes(kycStatus)) {
-    return res.status(400).json(errorResponse(400, 'kycStatus must be one of PENDING, SUBMITTED, APPROVED, or REJECTED'));
-  }
-
-  if (kycSubmittedAt !== undefined && isNaN(new Date(kycSubmittedAt).getTime())) {
-    return res.status(400).json(errorResponse(400, 'kycSubmittedAt must be a valid date'));
-  }
-
-  if (kycApprovedAt !== undefined && isNaN(new Date(kycApprovedAt).getTime())) {
-    return res.status(400).json(errorResponse(400, 'kycApprovedAt must be a valid date'));
-  }
-
   if (resumeUrl !== undefined && typeof resumeUrl !== 'string') {
     return res.status(400).json(errorResponse(400, 'resumeUrl must be a string'));
   }
-  
+
+  if (digitalIdTrade !== undefined && typeof digitalIdTrade !== 'string') {
+    return res.status(400).json(errorResponse(400, 'digitalIdTrade must be a string'));
+  }
+
+  if (digitalIdServiceArea !== undefined && typeof digitalIdServiceArea !== 'string') {
+    return res.status(400).json(errorResponse(400, 'digitalIdServiceArea must be a string'));
+  }
+
+  if (licenseNumber !== undefined && typeof licenseNumber !== 'string') {
+    return res.status(400).json(errorResponse(400, 'licenseNumber must be a string'));
+  }
+
   return next();
 };
 
@@ -110,6 +109,62 @@ export const validateAddServiceTypes = (
   
   if (!serviceTypeIds.every((id: unknown) => typeof id === 'string')) {
     return res.status(400).json(errorResponse(400, 'All serviceTypeIds must be strings'));
+  }
+
+  return next();
+};
+
+export const validateCreatePackage = (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  const { serviceTypeId, name, description, price } = req.body;
+
+  if (!serviceTypeId || typeof serviceTypeId !== 'string') {
+    return res.status(400).json(errorResponse(400, 'serviceTypeId is required and must be a string'));
+  }
+
+  if (!name || typeof name !== 'string' || !name.trim()) {
+    return res.status(400).json(errorResponse(400, 'name is required and must be a non-empty string'));
+  }
+
+  if (description !== undefined && typeof description !== 'string') {
+    return res.status(400).json(errorResponse(400, 'description must be a string'));
+  }
+
+  if (typeof price !== 'number' || price <= 0) {
+    return res.status(400).json(errorResponse(400, 'price must be a positive number'));
+  }
+
+  return next();
+};
+
+export const validateUpdatePackage = (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  const { serviceTypeId, name, description, price, isActive } = req.body;
+
+  if (serviceTypeId !== undefined && typeof serviceTypeId !== 'string') {
+    return res.status(400).json(errorResponse(400, 'serviceTypeId must be a string'));
+  }
+
+  if (name !== undefined && (typeof name !== 'string' || !name.trim())) {
+    return res.status(400).json(errorResponse(400, 'name must be a non-empty string'));
+  }
+
+  if (description !== undefined && typeof description !== 'string') {
+    return res.status(400).json(errorResponse(400, 'description must be a string'));
+  }
+
+  if (price !== undefined && (typeof price !== 'number' || price <= 0)) {
+    return res.status(400).json(errorResponse(400, 'price must be a positive number'));
+  }
+
+  if (isActive !== undefined && typeof isActive !== 'boolean') {
+    return res.status(400).json(errorResponse(400, 'isActive must be a boolean'));
   }
 
   return next();
@@ -167,6 +222,69 @@ export const validateCreateCertification = (
   return next();
 };
 
+const VALID_TIME_SLOTS = ['MORNING', 'AFTERNOON', 'EVENING'];
+
+export const validateUpdateAvailabilitySlots = (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  const { slots, dates } = req.body;
+
+  if (!Array.isArray(slots)) {
+    return res.status(400).json(errorResponse(400, 'slots must be an array'));
+  }
+
+  // slots may be empty as long as `dates` names at least one day to clear —
+  // that's how a worker closes a day down to zero open slots.
+  if (slots.length === 0 && (!Array.isArray(dates) || dates.length === 0)) {
+    return res.status(400).json(errorResponse(400, 'slots must be non-empty, or dates must list at least one day to clear'));
+  }
+
+  for (const slot of slots) {
+    if (!slot || typeof slot !== 'object') {
+      return res.status(400).json(errorResponse(400, 'Each slot must be an object with date and timeSlot'));
+    }
+    if (!slot.date || isNaN(new Date(slot.date).getTime())) {
+      return res.status(400).json(errorResponse(400, 'Each slot.date must be a valid date'));
+    }
+    if (!VALID_TIME_SLOTS.includes(slot.timeSlot)) {
+      return res.status(400).json(errorResponse(400, `Each slot.timeSlot must be one of ${VALID_TIME_SLOTS.join(', ')}`));
+    }
+  }
+
+  if (dates !== undefined) {
+    if (!Array.isArray(dates) || dates.some((d: unknown) => typeof d !== 'string' || isNaN(new Date(d).getTime()))) {
+      return res.status(400).json(errorResponse(400, 'dates must be an array of valid date strings'));
+    }
+  }
+
+  return next();
+};
+
+const MIN_HOURLY_RATE = 20;
+const MAX_HOURLY_RATE = 100;
+
+export const validateUpdateHourlyRate = (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  const { hourlyRate } = req.body;
+
+  if (typeof hourlyRate !== 'number' || Number.isNaN(hourlyRate)) {
+    return res.status(400).json(errorResponse(400, 'hourlyRate must be a number'));
+  }
+
+  if (hourlyRate < MIN_HOURLY_RATE || hourlyRate > MAX_HOURLY_RATE) {
+    return res.status(400).json(
+      errorResponse(400, `hourlyRate must be between $${MIN_HOURLY_RATE} and $${MAX_HOURLY_RATE}`)
+    );
+  }
+
+  return next();
+};
+
 export const validateUpdatePayoutMethod = (
   req: Request,
   res: Response,
@@ -191,6 +309,18 @@ export const validateUpdatePayoutMethod = (
 };
 
 // Booking validators
+const VALID_TIME_SLOTS_BOOKING = ['MORNING', 'AFTERNOON', 'EVENING'];
+const VALID_CONDITIONS_BOOKING = ['TIDY', 'NORMAL', 'HEAVY'];
+const VALID_ROOM_TYPES_BOOKING = [
+  'BEDROOM', 'BATHROOM', 'KITCHEN', 'LIVING_ROOM', 'DINING_ROOM', 'OFFICE', 'GARAGE', 'BALCONY', 'OTHER',
+];
+
+/**
+ * Booking creation no longer takes a client-supplied estimatedPrice or free-text
+ * scheduledTime — price is computed server-side (see bookingController.createBooking
+ * / pricingRuleService) and scheduling uses the TimeSlot enum. workerId is optional:
+ * omitting it triggers auto-match.
+ */
 export const validateCreateBooking = (
   req: Request,
   res: Response,
@@ -198,56 +328,75 @@ export const validateCreateBooking = (
 ) => {
   const {
     workerId,
+    serviceType,
     serviceTaskId,
-    location,
-    scheduledDate,
-    scheduledTime,
-    estimatedPrice,
-    estimatedDurationHours,
-    inspectionFeeCharged,
-    inspectionFeeAmount,
+    rooms,
+    condition,
+    address,
+    lat,
+    lng,
+    date,
+    timeSlot,
+    addOns,
+    priorities,
+    tip,
     paymentMethodType,
     paymentAccountIdentifier,
+    scopeAnswers,
   } = req.body;
-  
-  if (!workerId || typeof workerId !== 'string') {
-    return res.status(400).json(errorResponse(400, 'workerId is required and must be a string'));
-  }
-  
-  if (!serviceTaskId || typeof serviceTaskId !== 'string') {
-    return res.status(400).json(errorResponse(400, 'serviceTaskId is required and must be a string'));
-  }
-  
-  if (!location || typeof location !== 'string') {
-    return res.status(400).json(errorResponse(400, 'location is required and must be a string'));
-  }
-  
-  if (!scheduledDate) {
-    return res.status(400).json(errorResponse(400, 'scheduledDate is required'));
-  }
-  
-  if (!scheduledTime || typeof scheduledTime !== 'string') {
-    return res.status(400).json(errorResponse(400, 'scheduledTime is required and must be a string'));
-  }
-  
-  if (typeof estimatedPrice !== 'number' || estimatedPrice <= 0) {
-    return res.status(400).json(errorResponse(400, 'estimatedPrice must be a positive number'));
+
+  if (!serviceType || typeof serviceType !== 'string') {
+    return res.status(400).json(errorResponse(400, 'serviceType is required and must be a string'));
   }
 
-  if (estimatedDurationHours !== undefined) {
-    if (typeof estimatedDurationHours !== 'number' || estimatedDurationHours < 0) {
-      return res.status(400).json(errorResponse(400, 'estimatedDurationHours must be a non-negative number'));
+  if (serviceTaskId !== undefined && serviceTaskId !== null && typeof serviceTaskId !== 'string') {
+    return res.status(400).json(errorResponse(400, 'serviceTaskId must be a string'));
+  }
+
+  if (workerId !== undefined && workerId !== null && typeof workerId !== 'string') {
+    return res.status(400).json(errorResponse(400, 'workerId must be a string'));
+  }
+
+  if (!address || typeof address !== 'string') {
+    return res.status(400).json(errorResponse(400, 'address is required and must be a string'));
+  }
+
+  if (typeof lat !== 'number' || typeof lng !== 'number') {
+    return res.status(400).json(errorResponse(400, 'lat and lng are required and must be numbers'));
+  }
+
+  if (!date || isNaN(new Date(date).getTime())) {
+    return res.status(400).json(errorResponse(400, 'date is required and must be a valid date'));
+  }
+
+  if (!timeSlot || !VALID_TIME_SLOTS_BOOKING.includes(timeSlot)) {
+    return res.status(400).json(errorResponse(400, `timeSlot is required and must be one of ${VALID_TIME_SLOTS_BOOKING.join(', ')}`));
+  }
+
+  if (rooms !== undefined) {
+    if (!Array.isArray(rooms) || !rooms.every((r: unknown) => typeof r === 'string' && VALID_ROOM_TYPES_BOOKING.includes(r))) {
+      return res.status(400).json(errorResponse(400, `rooms must be an array of: ${VALID_ROOM_TYPES_BOOKING.join(', ')}`));
     }
   }
 
-  if (inspectionFeeCharged !== undefined && typeof inspectionFeeCharged !== 'boolean') {
-    return res.status(400).json(errorResponse(400, 'inspectionFeeCharged must be a boolean'));
+  if (condition !== undefined && condition !== null && !VALID_CONDITIONS_BOOKING.includes(condition)) {
+    return res.status(400).json(errorResponse(400, `condition must be one of ${VALID_CONDITIONS_BOOKING.join(', ')}`));
   }
 
-  if (inspectionFeeAmount !== undefined) {
-    if (typeof inspectionFeeAmount !== 'number' || inspectionFeeAmount < 0) {
-      return res.status(400).json(errorResponse(400, 'inspectionFeeAmount must be a non-negative number'));
+  if (priorities !== undefined) {
+    if (!Array.isArray(priorities) || !priorities.every((p: unknown) => typeof p === 'string')) {
+      return res.status(400).json(errorResponse(400, 'priorities must be an array of strings'));
     }
+  }
+
+  if (addOns !== undefined) {
+    if (!Array.isArray(addOns) || !addOns.every((a: unknown) => a && typeof a === 'object' && typeof (a as any).price === 'number')) {
+      return res.status(400).json(errorResponse(400, 'addOns must be an array of objects with a numeric price'));
+    }
+  }
+
+  if (tip !== undefined && (typeof tip !== 'number' || tip < 0)) {
+    return res.status(400).json(errorResponse(400, 'tip must be a non-negative number'));
   }
 
   const VALID_PAYMENT_METHOD_TYPES = ['GCASH', 'MAYA', 'CARD', 'BANK_TRANSFER', 'CASH'];
@@ -261,6 +410,45 @@ export const validateCreateBooking = (
 
   if (paymentAccountIdentifier !== undefined && typeof paymentAccountIdentifier !== 'string') {
     return res.status(400).json(errorResponse(400, 'paymentAccountIdentifier must be a string'));
+  }
+
+  if (scopeAnswers !== undefined) {
+    const isPlainObject = typeof scopeAnswers === 'object' && scopeAnswers !== null && !Array.isArray(scopeAnswers);
+    const hasValidValues =
+      isPlainObject &&
+      Object.values(scopeAnswers).every(
+        (v: unknown) => typeof v === 'string' || (Array.isArray(v) && v.every((x) => typeof x === 'string'))
+      );
+    if (!hasValidValues) {
+      return res
+        .status(400)
+        .json(errorResponse(400, 'scopeAnswers must be an object mapping field labels to a string or string array'));
+    }
+  }
+
+  const { issuePhotoUrls } = req.body;
+  if (issuePhotoUrls !== undefined) {
+    const isValid =
+      Array.isArray(issuePhotoUrls) &&
+      issuePhotoUrls.length <= 5 &&
+      issuePhotoUrls.every((url: unknown) => typeof url === 'string' && url.length <= 2048);
+    if (!isValid) {
+      return res.status(400).json(errorResponse(400, 'issuePhotoUrls must be an array of at most 5 URL strings'));
+    }
+  }
+
+  return next();
+};
+
+export const validateArriveBooking = (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  const { lat, lng } = req.body;
+
+  if (typeof lat !== 'number' || typeof lng !== 'number') {
+    return res.status(400).json(errorResponse(400, 'lat and lng are required and must be numbers'));
   }
 
   return next();

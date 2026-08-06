@@ -31,17 +31,21 @@ const WITHHOLDING_TAX_PERCENTAGE = WITHHOLDING_TAX_RATE * 100; // Convert to per
  * Calculate the commission amount
  * Commission is calculated on the subtotal (labor + materials)
  */
-export const calculateCommission = (subtotal: number): number => {
-  return Math.round((subtotal * COMMISSION_PERCENTAGE) / 100 * 100) / 100;
+export const calculateCommission = (subtotal: number, commissionRate: number = COMMISSION_RATE): number => {
+  return Math.round(subtotal * commissionRate * 100) / 100;
 };
 
 /**
  * Calculate withholding tax amount
  * Tax is calculated on the subtotal after commission is deducted
  */
-export const calculateWithholdingTax = (subtotal: number): number => {
-  const afterCommission = subtotal - calculateCommission(subtotal);
-  return Math.round((afterCommission * WITHHOLDING_TAX_PERCENTAGE) / 100 * 100) / 100;
+export const calculateWithholdingTax = (
+  subtotal: number,
+  commissionRate: number = COMMISSION_RATE,
+  withholdingTaxRate: number = WITHHOLDING_TAX_RATE
+): number => {
+  const afterCommission = subtotal - calculateCommission(subtotal, commissionRate);
+  return Math.round(afterCommission * withholdingTaxRate * 100) / 100;
 };
 
 /**
@@ -50,10 +54,12 @@ export const calculateWithholdingTax = (subtotal: number): number => {
  */
 export const calculateWorkerPayout = (
   subtotal: number,
-  tip: number = 0
+  tip: number = 0,
+  commissionRate: number = COMMISSION_RATE,
+  withholdingTaxRate: number = WITHHOLDING_TAX_RATE
 ): number => {
-  const commission = calculateCommission(subtotal);
-  const tax = calculateWithholdingTax(subtotal);
+  const commission = calculateCommission(subtotal, commissionRate);
+  const tax = calculateWithholdingTax(subtotal, commissionRate, withholdingTaxRate);
   const payout = subtotal - commission - tax + tip;
   return Math.round(payout * 100) / 100;
 };

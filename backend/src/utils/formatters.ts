@@ -29,10 +29,13 @@ export function formatVerification(
     documents: record.documents.map((doc) => ({
       id: doc.id,
       name: doc.originalName ?? doc.fileName ?? 'document',
+      documentType: doc.documentType,
       mimeType: doc.mimeType,
       url: doc.fileUrl,
       fileSize: doc.fileSize ?? 0,
       uploadedAt: doc.createdAt.toISOString(),
+      status: doc.status,
+      rejectionReason: doc.rejectionReason ?? null,
     })),
   };
 }

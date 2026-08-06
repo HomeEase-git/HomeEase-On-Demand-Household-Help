@@ -7,7 +7,6 @@ import Users from './pages/Users'
 import ClientDetail from './pages/ClientDetail'
 import WorkerDetail from './pages/WorkerDetail'
 import Workers from './pages/Workers'
-import SuspendUser from './pages/SuspendUser'
 import Verification from './pages/Verification'
 import VerificationDetail from './pages/VerificationDetail'
 import Bookings from './pages/Bookings'
@@ -16,6 +15,7 @@ import BookingDispute from './pages/BookingDispute'
 import Payments from './pages/Payments'
 import TransactionDetail from './pages/TransactionDetail'
 import Refunds from './pages/Refunds'
+import Payouts from './pages/Payouts'
 import Reviews from './pages/Reviews'
 import ReviewsFlagged from './pages/ReviewsFlagged'
 import ReviewDetail from './pages/ReviewDetail'
@@ -23,6 +23,7 @@ import Reports from './pages/Reports'
 import Settings from './pages/Settings'
 import Login from './pages/Login'
 import PriceControl from './pages/PriceControl'
+import ServiceCatalog from './pages/ServiceCatalog'
 
 export default function App() {
   return (
@@ -43,7 +44,6 @@ export default function App() {
         <Route path="users/clients" element={<Users />} />
         <Route path="users/workers" element={<Navigate to="/workers" replace />} />
         <Route path="users/client/:id" element={<ClientDetail />} />
-        <Route path="users/suspend" element={<SuspendUser />} />
         <Route path="workers" element={<Workers />} />
         <Route path="workers/:id" element={<WorkerDetail />} />
         <Route path="verification" element={<Verification />} />
@@ -54,6 +54,7 @@ export default function App() {
         <Route path="payments" element={<Payments />} />
         <Route path="payments/transaction/:id" element={<TransactionDetail />} />
         <Route path="payments/refunds" element={<Refunds />} />
+        <Route path="payments/payouts" element={<Payouts />} />
         <Route path="reviews" element={<Reviews />} />
         <Route path="reviews/flagged" element={<ReviewsFlagged />} />
         <Route path="reviews/detail/:id" element={<ReviewDetail />} />
@@ -63,6 +64,7 @@ export default function App() {
         <Route path="reports/activity" element={<Reports />} />
         <Route path="reports/export" element={<Reports />} />
         <Route path="price-control" element={<PriceControl />} />
+        <Route path="service-catalog" element={<ServiceCatalog />} />
         <Route path="settings" element={<Settings />} />
         <Route path="*" element={<Navigate to="/dashboard" replace />} />
       </Route>

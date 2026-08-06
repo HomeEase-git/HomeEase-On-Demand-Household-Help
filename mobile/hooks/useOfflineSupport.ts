@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import NetInfo from '@react-native-community/netinfo';
-import { offlineSyncManager, SyncQueueState } from '../services/offline-sync';
+import { offlineSyncManager } from '../services/offline-sync';
 
 type CachedOfflineData<T> = {
   data: T;
@@ -82,56 +82,6 @@ export function useOnlineStatus() {
   }, []);
 
   return { isOnline, connectionType };
-}
-
-/**
- * useSyncQueue
- * 
- * Hook to manage offline sync queue state and operations.
- * Tracks pending requests and sync progress.
- * 
- * Usage:
- *   const { queue, syncing, syncNow } = useSyncQueue();
- *   
- *   return (
- *     <View>
- *       <Text>{queue.length} pending requests</Text>
- *       {syncing && <ActivityIndicator />}
- *     </View>
- *   );
- */
-export function useSyncQueue() {
-  const [queueState, setQueueState] = useState<SyncQueueState>(
-    offlineSyncManager.getQueueState()
-  );
-  const [syncing, setSyncing] = useState(false);
-
-  const updateQueueState = useCallback(() => {
-    setQueueState(offlineSyncManager.getQueueState());
-  }, []);
-
-  const syncNow = useCallback(async () => {
-    setSyncing(true);
-    try {
-      // This would be called with actual API implementation
-      // For now, just update state
-      await new Promise((resolve) => setTimeout(resolve, 500));
-      updateQueueState();
-    } finally {
-      setSyncing(false);
-    }
-  }, [updateQueueState]);
-
-  return {
-    queue: queueState.items,
-    queueSize: queueState.items.length,
-    syncing: syncing || queueState.isSyncing,
-    syncedCount: queueState.syncedCount,
-    failedCount: queueState.failedCount,
-    lastSyncTime: queueState.lastSyncTime,
-    syncNow,
-    updateQueueState,
-  };
 }
 
 /**

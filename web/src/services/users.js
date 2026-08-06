@@ -27,3 +27,21 @@ export async function updateUserStatus(id, status, reason, notes) {
   });
   return response.data;
 }
+
+/** PATCH /admin/users/:id/suspend — thin convenience wrapper (same effect as updateUserStatus(id, 'SUSPENDED', ...)). */
+export async function suspendUser(id, reason, notes) {
+  const response = await apiRequest(`/admin/users/${id}/suspend`, {
+    method: 'PATCH',
+    body: JSON.stringify({ reason, notes }),
+  });
+  return response.data;
+}
+
+/** PATCH /admin/users/:id/reinstate — clears a suspension/ban, restoring ACTIVE status. */
+export async function reinstateUser(id, reason, notes) {
+  const response = await apiRequest(`/admin/users/${id}/reinstate`, {
+    method: 'PATCH',
+    body: JSON.stringify({ reason, notes }),
+  });
+  return response.data;
+}

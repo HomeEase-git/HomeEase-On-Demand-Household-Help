@@ -7,8 +7,12 @@ import EmptyState from "../../../components/feedback/EmptyState";
 import { LoadingSkeleton } from "../../../components/feedback/LoadingSkeleton";
 import { useWorkerStore, mapApiJob, type ApiWorkerBooking } from "../../../store/workerStore";
 import * as api from "../../../services/api";
+import { summarizeFlatRoomTypes } from "../../../utils/bookingPriceEstimate";
+import { ROOM_TYPE_LABELS } from "../../../types/booking4step.types";
+import { usePolling } from "../../../hooks/usePolling";
 
 const TABS = ["Pending", "Accepted"] as const;
+const POLL_INTERVAL_MS = 8000;
 
 export default function RequestsScreen() {
   const router = useRouter();
@@ -16,24 +20,36 @@ export default function RequestsScreen() {
   const setJobs = useWorkerStore((s) => s.setJobs);
   const [tab, setTab] = useState<(typeof TABS)[number]>("Pending");
   const [loading, setLoading] = useState(true);
+  const [focused, setFocused] = useState(false);
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    try {
-      const bookings = await api.getBookings();
-      setJobs((bookings as ApiWorkerBooking[]).map(mapApiJob));
-    } catch (error) {
-      console.error("Load job requests error:", error);
-    } finally {
-      setLoading(false);
-    }
-  }, [setJobs]);
+  // `silent` skips the loading flag so a background poll refresh doesn't
+  // flash the skeleton over an already-rendered list.
+  const load = useCallback(
+    async (silent = false) => {
+      if (!silent) setLoading(true);
+      try {
+        const bookings = await api.getBookings();
+        setJobs((bookings as ApiWorkerBooking[]).map(mapApiJob));
+      } catch (error) {
+        console.error("Load job requests error:", error);
+      } finally {
+        if (!silent) setLoading(false);
+      }
+    },
+    [setJobs],
+  );
 
   useFocusEffect(
     useCallback(() => {
+      setFocused(true);
       load();
+      return () => setFocused(false);
     }, [load]),
   );
+
+  // New incoming requests should show up without the worker having to
+  // background/foreground the screen to trigger the focus refresh above.
+  usePolling(() => load(true), POLL_INTERVAL_MS, { paused: !focused });
 
   const filtered = jobs.filter((j) => j.status === tab);
 
@@ -54,6 +70,9 @@ export default function RequestsScreen() {
           date: item.scheduledDate,
           amount: item.finalPrice ?? item.estimatedPrice,
           status: item.status,
+          roomsSummary: item.rooms.length > 0 ? summarizeFlatRoomTypes(item.rooms, ROOM_TYPE_LABELS) : undefined,
+          distanceKm: item.distanceMeters != null ? item.distanceMeters / 1000 : null,
+          payoutEstimate: item.workerPayoutEstimate,
         }}
         onPress={() => handleRequestPress(item.id)}
       />

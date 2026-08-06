@@ -18,12 +18,13 @@ export function useAuth() {
     
     try {
       const response = await postLogin(email, password);
-      
+
       store.setUser({
         id: response.id,
         name: response.name,
         email: response.email,
         role: response.role,
+        kycStatus: response.kycStatus,
       });
       store.setToken(response.token);
       
@@ -56,9 +57,10 @@ export function useAuth() {
         email: response.email,
         phone: response.phone,
         role: response.role,
+        kycStatus: response.kycStatus,
       });
       store.setToken(response.token);
-      
+
       // Send OTP email for clients
       // if (response.role === 'client') {
       //   await sendOtpEmail(userData.email);

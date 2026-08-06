@@ -1,30 +1,56 @@
-import React, { useCallback, useRef, useState } from "react";
-import { View, Text, Image, ScrollView } from "react-native";
+import React, { useCallback, useEffect, useRef, useState } from "react";
+import { View, Text, Image, ScrollView, Share } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useFocusEffect, useRouter, useLocalSearchParams } from "expo-router";
+import { AppIcon as Ionicons } from "../../../../components/icons/AppIcon";
 import ScreenHeader from "../../../../components/ui/ScreenHeader";
 import StatusBadge from "../../../../components/ui/StatusBadge";
 import StepperVertical from "../../../../components/steppers/StepperVertical";
 import PrimaryButton from "../../../../components/ui/PrimaryButton";
 import OutlinedButton from "../../../../components/ui/OutlinedButton";
 import UploadCard from "../../../../components/ui/UploadCard";
+import StarRating from "../../../../components/ui/StarRating";
 import ImageSourcePickerBottomSheet from "../../../../components/bottom-sheets/ImageSourcePickerBottomSheet";
 import type { BottomSheetHandle } from "../../../../components/bottom-sheets/BottomSheetWrapper";
 import { Skeleton } from "../../../../components/ui/Skeleton";
 import { API_STATUS_MAP } from "../../../../store/bookingStore";
 import * as api from "../../../../services/api";
+import { getCurrentPosition, LocationPermissionDeniedError } from "../../../../services/location";
 import { useAlertModal } from "../../../../contexts/AlertModalContext";
+import { usePolling } from "../../../../hooks/usePolling";
+
+const POLL_INTERVAL_MS = 8000;
 
 type BookingDetail = {
   id: string;
-  client: { fullName: string };
+  client: { fullName: string; phone?: string | null };
   service: string;
   status: string;
   scheduledDate: string;
   estimatedPrice: number;
   finalPrice: number | null;
   completionPhotoUrl?: string | null;
+  workerArrivedAt?: string | null;
+  timeline?: { workerArrivedAt?: string | null; workerStartedAt?: string | null } | null;
+  review?: { rating: number; comment: string | null } | null;
+  payment?: {
+    status: string;
+    escrowStatus: string;
+    subtotal?: number;
+    commissionAmount?: number;
+    withholdingTaxAmount?: number;
+    workerPayout?: number;
+    capturedAmount?: number | null;
+  } | null;
 };
+
+function formatElapsed(ms: number): string {
+  const totalSeconds = Math.floor(ms / 1000);
+  const h = Math.floor(totalSeconds / 3600);
+  const m = Math.floor((totalSeconds % 3600) / 60);
+  const s = totalSeconds % 60;
+  return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+}
 
 export default function JobDetailScreen() {
   const router = useRouter();
@@ -32,30 +58,55 @@ export default function JobDetailScreen() {
   const [job, setJob] = useState<BookingDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
+  const [arriving, setArriving] = useState(false);
   const [completionPhotoUri, setCompletionPhotoUri] = useState<string | null>(null);
   const [completionPhotoUrl, setCompletionPhotoUrl] = useState<string | null>(null);
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
+  const [elapsedMs, setElapsedMs] = useState(0);
+  const [focused, setFocused] = useState(false);
   const photoSheetRef = useRef<BottomSheetHandle | null>(null);
   const alertModal = useAlertModal();
 
-  const load = useCallback(async () => {
-    if (!jobId) return;
-    setLoading(true);
-    try {
-      const detail = await api.getBookingDetail(jobId);
-      setJob(detail);
-    } catch (error) {
-      console.error("Load job detail error:", error);
-    } finally {
-      setLoading(false);
-    }
-  }, [jobId]);
+  // `silent` skips the loading flag so a background poll refresh doesn't
+  // flash the skeleton over an already-rendered screen.
+  const load = useCallback(
+    async (silent = false) => {
+      if (!jobId) return;
+      if (!silent) setLoading(true);
+      try {
+        const detail = await api.getBookingDetail(jobId);
+        setJob(detail);
+      } catch (error) {
+        console.error("Load job detail error:", error);
+      } finally {
+        if (!silent) setLoading(false);
+      }
+    },
+    [jobId],
+  );
 
   useFocusEffect(
     useCallback(() => {
+      setFocused(true);
       load();
+      return () => setFocused(false);
     }, [load]),
   );
+
+  // Picks up status changes made elsewhere (e.g. an admin resolving a
+  // dispute, or the client cancelling) without requiring a screen refocus.
+  usePolling(() => load(true), POLL_INTERVAL_MS, { paused: !focused });
+
+  const workerStartedAt = job?.timeline?.workerStartedAt;
+  useEffect(() => {
+    if (!workerStartedAt) return;
+    const startedAt = new Date(workerStartedAt).getTime();
+    const tick = () => setElapsedMs(Date.now() - startedAt);
+    tick();
+    const interval = setInterval(tick, 1000);
+    return () => clearInterval(interval);
+  }, [workerStartedAt]);
+  const displayedElapsedMs = workerStartedAt ? elapsedMs : 0;
 
   if (loading) {
     return (
@@ -73,12 +124,6 @@ export default function JobDetailScreen() {
           <View className="bg-card rounded-2xl p-4 mb-3">
             <Skeleton width="35%" height={10} marginBottom={8} />
             <Skeleton width="30%" height={24} marginBottom={0} />
-          </View>
-          <View className="bg-card rounded-2xl p-4 mb-3">
-            <Skeleton width="40%" height={14} marginBottom={12} />
-            <Skeleton width="100%" height={12} marginBottom={8} />
-            <Skeleton width="100%" height={12} marginBottom={8} />
-            <Skeleton width="100%" height={12} marginBottom={0} />
           </View>
         </ScrollView>
       </SafeAreaView>
@@ -105,21 +150,28 @@ export default function JobDetailScreen() {
   const isPendingCompletion = status === "PendingCompletion";
   const isCompleted = status === "Completed";
   const amount = job.finalPrice ?? job.estimatedPrice;
+  const hasArrived = !!(job.workerArrivedAt || job.timeline?.workerArrivedAt);
+
+  // Prefer the real settled amounts off the Payment row once one exists;
+  // fall back to a rough 10%-commission estimate for jobs still pre-payout.
+  const payoutEstimate = job.payment?.workerPayout ?? amount * 0.9;
+  const commissionEstimate = job.payment?.commissionAmount ?? amount * 0.1;
+  const taxEstimate = job.payment?.withholdingTaxAmount ?? 0;
 
   const steps = [
     { label: "Accepted", timestamp: job.scheduledDate, status: "done" as const },
     {
-      label: "In Progress",
+      label: "Arrived",
       timestamp: "",
-      status: isAccepted ? ("active" as const) : ("done" as const),
+      status: hasArrived ? ("done" as const) : isAccepted ? ("active" as const) : ("pending" as const),
     },
     {
-      label: "Quote Approved",
+      label: "In Progress",
       timestamp: "",
       status:
-        isQuoteApproved || isPendingCompletion || isCompleted
+        isQuoteApproved || isPendingCompletion || isCompleted || isQuoteSubmitted || isDisputed
           ? ("done" as const)
-          : isInProgress || isQuoteSubmitted || isDisputed
+          : isInProgress
             ? ("active" as const)
             : ("pending" as const),
     },
@@ -133,6 +185,25 @@ export default function JobDetailScreen() {
           : ("pending" as const),
     },
   ];
+
+  const handleArrive = async () => {
+    setArriving(true);
+    try {
+      const position = await getCurrentPosition();
+      await api.arriveBooking(job.id, position.lat, position.lng);
+      alertModal.success("Arrival confirmed", "You're checked in at the job site.");
+      load();
+    } catch (error) {
+      if (error instanceof LocationPermissionDeniedError) {
+        alertModal.error("Location needed", "Please enable location access to check in at the job site.");
+      } else {
+        const message = error instanceof Error ? error.message : "Failed to verify your arrival.";
+        alertModal.error("Can't check in yet", message);
+      }
+    } finally {
+      setArriving(false);
+    }
+  };
 
   const handleStart = async () => {
     setSubmitting(true);
@@ -196,6 +267,22 @@ export default function JobDetailScreen() {
     router.push("/(worker)/inbox");
   };
 
+  const handleShareReceipt = () => {
+    const lines = [
+      `HomeEase — Job Receipt`,
+      `Reference: ${job.id}`,
+      `Service: ${job.service}`,
+      `Client: ${job.client.fullName}`,
+      `Date: ${job.scheduledDate}`,
+      ``,
+      `Subtotal: ₱${(job.payment?.subtotal ?? amount).toFixed(2)}`,
+      `Commission: -₱${commissionEstimate.toFixed(2)}`,
+      taxEstimate > 0 ? `Withholding tax: -₱${taxEstimate.toFixed(2)}` : null,
+      `Your payout: ₱${payoutEstimate.toFixed(2)}`,
+    ].filter(Boolean);
+    Share.share({ message: lines.join("\n") }).catch(() => {});
+  };
+
   return (
     <SafeAreaView className="flex-1 bg-white">
       <ScreenHeader title="Job Detail" showBack />
@@ -214,16 +301,25 @@ export default function JobDetailScreen() {
           <Text className="text-text-muted text-xs mt-1">Date: {job.scheduledDate}</Text>
         </View>
 
+        {/* Live working timer */}
+        {isInProgress && (
+          <View className="bg-brand rounded-2xl p-4 mb-3 items-center">
+            <Text className="text-white/70 text-xs font-medium">Time on job</Text>
+            <Text className="text-white font-bold text-3xl mt-1" style={{ fontVariant: ["tabular-nums"] }}>
+              {formatElapsed(displayedElapsedMs)}
+            </Text>
+          </View>
+        )}
+
         {/* Earnings */}
         <View className="bg-card rounded-2xl p-4 mb-3">
           <Text className="text-text-secondary text-xs mb-1">
-            Your Earnings
+            {isCompleted ? "Payout Amount" : "Your Estimated Earnings"}
           </Text>
-          <Text className="text-success font-bold text-2xl">
-            ₱{(amount * 0.9).toFixed(2)}
-          </Text>
+          <Text className="text-success font-bold text-2xl">₱{payoutEstimate.toFixed(2)}</Text>
           <Text className="text-text-muted text-xs mt-1">
-            After 10% platform fee from ₱{amount}.00
+            Labor ₱{(job.payment?.subtotal ?? amount).toFixed(2)} − commission ₱{commissionEstimate.toFixed(2)}
+            {taxEstimate > 0 ? ` − tax ₱${taxEstimate.toFixed(2)}` : ""}
           </Text>
         </View>
 
@@ -241,6 +337,17 @@ export default function JobDetailScreen() {
           </View>
         )}
 
+        {/* Client rating — once reviewed */}
+        {isCompleted && job.review && (
+          <View className="bg-card rounded-2xl p-4 mb-3">
+            <Text className="text-text-primary font-bold mb-2">Client Rating</Text>
+            <StarRating rating={job.review.rating} size={20} />
+            {job.review.comment && (
+              <Text className="text-text-secondary text-sm mt-2">&ldquo;{job.review.comment}&rdquo;</Text>
+            )}
+          </View>
+        )}
+
         {/* Progress Stepper */}
         <View className="bg-card rounded-2xl p-4 mb-3">
           <Text className="text-text-primary font-bold mb-3">Job Progress</Text>
@@ -249,7 +356,16 @@ export default function JobDetailScreen() {
 
         {/* Actions */}
         <View className="gap-3 mt-4">
-          {isAccepted && (
+          {isAccepted && !hasArrived && (
+            <PrimaryButton
+              label="I've Arrived"
+              fullWidth
+              onPress={handleArrive}
+              disabled={arriving}
+              loading={arriving}
+            />
+          )}
+          {isAccepted && hasArrived && (
             <PrimaryButton
               label="Start Job"
               fullWidth
@@ -257,6 +373,11 @@ export default function JobDetailScreen() {
               disabled={submitting}
               loading={submitting}
             />
+          )}
+          {isAccepted && !hasArrived && (
+            <Text className="text-text-muted text-xs text-center -mt-1">
+              You must check in within 100m of the job site before starting.
+            </Text>
           )}
           {isInProgress && (
             <PrimaryButton
@@ -326,13 +447,18 @@ export default function JobDetailScreen() {
             </View>
           )}
           {isCompleted && (
-            <View className="bg-success/10 border border-success rounded-2xl p-4 items-center">
-              <Text className="text-success font-semibold">
-                This job has been completed.
-              </Text>
-              <Text className="text-text-secondary text-xs mt-1">
-                Payment will be released to your account.
-              </Text>
+            <View className="gap-3">
+              <View className="bg-success/10 border border-success rounded-2xl p-4 items-center">
+                <Text className="text-success font-semibold">
+                  This job has been completed.
+                </Text>
+                <Text className="text-text-secondary text-xs mt-1">
+                  {job.payment?.escrowStatus === "RELEASED"
+                    ? "Payment has been released to your account."
+                    : "Payment is being processed."}
+                </Text>
+              </View>
+              <OutlinedButton label="Share Receipt" onPress={handleShareReceipt} />
             </View>
           )}
           <OutlinedButton

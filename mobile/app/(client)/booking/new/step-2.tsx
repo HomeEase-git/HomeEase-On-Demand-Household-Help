@@ -1,149 +1,177 @@
-import React, { useState, useEffect } from "react";
-import { View, Text, ScrollView } from "react-native";
+import React, { useCallback, useRef, useState } from "react";
+import { View, Text, ScrollView, Pressable } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { useRouter } from "expo-router";
+import { useRouter, useFocusEffect } from "expo-router";
+import { AppIcon as Ionicons } from "../../../../components/icons/AppIcon";
+import { colors } from "../../../../constants";
 import { useAlertModal } from "../../../../contexts/AlertModalContext";
-// eslint-disable-next-line import/no-named-as-default
 import ScreenHeader from "../../../../components/ui/ScreenHeader";
-// eslint-disable-next-line import/no-named-as-default
 import StepperHorizontal from "../../../../components/steppers/StepperHorizontal";
-// eslint-disable-next-line import/no-named-as-default
 import PrimaryButton from "../../../../components/ui/PrimaryButton";
-import BookingCalendar from "../../../../components/ui/BookingCalendar";
-import TimeSlotPicker from "../../../../components/ui/TimeSlotPicker";
 import InvalidationBanner from "../../../../components/ui/InvalidationBanner";
+import AddressPickerBottomSheet, {
+  type SavedAddress,
+} from "../../../../components/bottom-sheets/AddressPickerBottomSheet";
+import type { BottomSheetHandle } from "../../../../components/bottom-sheets/BottomSheetWrapper";
+import DateGridPicker from "../../../../components/booking4step/DateGridPicker";
+import TimeSlotPicker from "../../../../components/ui/TimeSlotPicker";
 import { useBookingStore } from "../../../../store/bookingStore";
-// eslint-disable-next-line import/no-named-as-default
-import useBookingAvailability from "../../../../hooks/useBookingAvailability";
+import { useSlotAvailabilityCounts } from "../../../../hooks/useWorkerDiscovery";
 import * as api from "../../../../services/api";
+import { addressStorage } from "../../../../utils/storage";
+import { geocodeAddress } from "../../../../utils/geo";
+import type { TimeSlot } from "../../../../types/booking4step.types";
+
+const BOOKING_STEPS = ["Scope", "Schedule", "Who", "Confirm"];
 
 export default function BookingStep2Screen() {
   const router = useRouter();
   const alertModal = useAlertModal();
   const draft = useBookingStore((s) => s.draft);
   const setDraft = useBookingStore((s) => s.setDraft);
-  const [date, setDate] = useState(draft.date ?? "");
-  const [time, setTime] = useState(draft.time ?? null);
-  const [disabledSlots, setDisabledSlots] = useState<string[]>([]);
-  const [unavailableDates, setUnavailableDates] = useState<string[]>([]);
+  const addressSheetRef = useRef<BottomSheetHandle>(null);
 
-  const availability = useBookingAvailability({
-    workerId: draft.workerId,
-    date: date || null,
-    time: time || null,
-    category: draft.category,
-  });
+  const [address, setAddress] = useState<string | null>(draft.address);
+  const [lat, setLat] = useState<number | undefined>(draft.lat);
+  const [lng, setLng] = useState<number | undefined>(draft.lng);
+  const [city, setCity] = useState<string | undefined>(draft.city);
+  const [date, setDate] = useState<string | null>(draft.date);
+  const [timeSlot, setTimeSlot] = useState<TimeSlot | null>(draft.timeSlot);
 
-  const canNext = !!date && !!time && !availability.blockSubmit;
+  const [addresses, setAddresses] = useState<SavedAddress[]>([]);
+  const [loadingAddresses, setLoadingAddresses] = useState(true);
+  const [selectedAddressId, setSelectedAddressId] = useState<string | null>(null);
+  const [resolvingId, setResolvingId] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (draft.workerId && !draft.workerLocked && !availability.workerOk) {
-      const reason =
-        "This worker is not available on the selected date, so we cleared your worker selection.";
-      useBookingStore.getState().invalidateWorker(reason);
+  const loadAddresses = useCallback(async () => {
+    setLoadingAddresses(true);
+    try {
+      const data = await api.getAddresses();
+      setAddresses(data);
+    } catch (error) {
+      console.error("Load addresses error:", error);
+    } finally {
+      setLoadingAddresses(false);
     }
-    // Fetch blocked dates when worker changes
-  }, [availability.workerOk, date, time, draft.workerId, draft.workerLocked]);
+  }, []);
 
-  useEffect(() => {
-    let mounted = true;
-    const loadBlocked = async () => {
-      if (!draft.workerId) {
-        setUnavailableDates([]);
+  useFocusEffect(
+    useCallback(() => {
+      loadAddresses();
+    }, [loadAddresses])
+  );
+
+  const handleSelectAddress = async (item: SavedAddress) => {
+    const fullAddress = `${item.street}, ${item.city}, ${item.state} ${item.zipCode}`;
+
+    const applySelection = (selLat: number, selLng: number) => {
+      setAddress(fullAddress);
+      setLat(selLat);
+      setLng(selLng);
+      setCity(item.city);
+      setSelectedAddressId(item.id);
+      addressSheetRef.current?.close();
+    };
+
+    const cached = await addressStorage.get(item.id);
+    if (cached?.lat != null && cached?.lng != null) {
+      applySelection(cached.lat, cached.lng);
+      return;
+    }
+
+    setResolvingId(item.id);
+    try {
+      const geocoded = await geocodeAddress(fullAddress);
+      if (!geocoded) {
+        alertModal.error("Error", "Couldn't locate this address on the map. Try editing it from My Addresses.");
         return;
       }
-      try {
-        const resp = await api.getWorkerBlockedDates(draft.workerId);
-        if (mounted) setUnavailableDates(resp.dates || []);
-      } catch {
-        // ignore
-      }
-    };
-    loadBlocked();
-    return () => {
-      mounted = false;
-    };
-  }, [draft.workerId]);
+      applySelection(geocoded.geometry.location.lat, geocoded.geometry.location.lng);
+    } catch (error) {
+      console.error("Geocode saved address error:", error);
+      alertModal.error("Error", "Couldn't locate this address on the map. Try editing it from My Addresses.");
+    } finally {
+      setResolvingId(null);
+    }
+  };
 
-  useEffect(() => {
-    let mounted = true;
-    const loadOccupied = async () => {
-      if (!draft.workerId || !date) {
-        setDisabledSlots([]);
-        return;
-      }
-      try {
-        const resp = await api.getWorkerAvailability(draft.workerId, date);
-        if (mounted) setDisabledSlots(resp.occupied || []);
-      } catch {
-        // ignore
-      }
-    };
-    loadOccupied();
-    return () => {
-      mounted = false;
-    };
-  }, [draft.workerId, date]);
+  const handleAddNew = () => {
+    addressSheetRef.current?.close();
+    router.push("/(client)/profile/addresses/new");
+  };
+
+  const hasScope = !!draft.serviceType;
+  const { counts, loading: loadingCounts } = useSlotAvailabilityCounts(
+    {
+      serviceType: draft.serviceType ?? undefined,
+      date: date ?? undefined,
+      condition: draft.condition ?? undefined,
+      rooms: draft.rooms?.map((r) => r.room),
+      lat,
+      lng,
+    },
+    hasScope && !!date && lat != null && lng != null
+  );
+
+  const canNext = !!address && lat != null && lng != null && !!date && !!timeSlot;
+
+  const handleNext = () => {
+    if (!canNext) {
+      alertModal.warning("Schedule incomplete", "Please set your address, a date, and a time slot to continue.");
+      return;
+    }
+
+    setDraft({ address, lat, lng, city, date, timeSlot });
+    router.push("/(client)/booking/new/step-3");
+  };
 
   return (
     <SafeAreaView className="flex-1 bg-white">
-      <ScreenHeader title="Schedule" showBack />
-      <ScrollView
-        className="flex-1"
-        contentContainerStyle={{ padding: 24, paddingBottom: 40 }}
-      >
-        <StepperHorizontal
-          steps={["Service", "Schedule", "Payment"]}
-          currentStep={1}
-        />
-
+      <ScreenHeader title="When & where?" showBack />
+      <ScrollView className="flex-1" contentContainerStyle={{ padding: 24, paddingBottom: 40 }}>
+        <StepperHorizontal steps={BOOKING_STEPS} currentStep={1} />
         <InvalidationBanner />
 
-        {/* Calendar */}
-        <Text className="text-text-primary font-bold text-lg mt-4 mb-3">
-          Select a date
-        </Text>
-        <BookingCalendar
-          workerId={draft.workerId}
-          selectedDate={date}
-          unavailableDates={unavailableDates}
-          onDateSelect={(d) => {
-            setDate(d);
-            setDraft({ date: d });
-          }}
-        />
+        <Text className="text-text-primary font-bold text-lg mt-2 mb-3">Service address</Text>
+        <Pressable
+          onPress={() => addressSheetRef.current?.expand()}
+          className="bg-card rounded-xl px-4 py-4 flex-row items-center"
+        >
+          <Ionicons name="location-outline" size={20} color={colors.accent.DEFAULT} />
+          <Text
+            className={`flex-1 ml-3 ${address ? "text-text-primary" : "text-text-muted"}`}
+            numberOfLines={1}
+          >
+            {address || "Select an address"}
+          </Text>
+          <Ionicons name="chevron-down" size={18} color={colors.text.muted} />
+        </Pressable>
 
-        <Text className="text-text-primary font-bold text-lg mt-4 mb-3">
-          Select a time
-        </Text>
+        <Text className="text-text-primary font-bold text-lg mt-6 mb-3">Select a date</Text>
+        <DateGridPicker selectedDate={date} onSelect={setDate} />
+
+        <Text className="text-text-primary font-bold text-lg mt-6 mb-3">Select a time</Text>
         <TimeSlotPicker
-          value={time}
-          onChange={(t) => {
-            setTime(t);
-            setDraft({ time: t });
-          }}
-          disabledSlots={disabledSlots}
+          value={timeSlot}
+          onChange={setTimeSlot}
+          counts={date ? counts : undefined}
+          loadingCounts={loadingCounts}
         />
 
         <View className="mt-8">
-          <PrimaryButton
-            label="Next"
-            fullWidth
-            disabled={!canNext}
-            onPress={() => {
-              if (!canNext) {
-                alertModal.warning(
-                  "Select a Date",
-                  "Please select a date to continue.",
-                );
-                return;
-              }
-              setDraft({ date, time });
-              router.push("/(client)/booking/new/step-3");
-            }}
-          />
+          <PrimaryButton label="Next" fullWidth disabled={!canNext} onPress={handleNext} />
         </View>
       </ScrollView>
+
+      <AddressPickerBottomSheet
+        innerRef={addressSheetRef}
+        addresses={addresses}
+        loading={loadingAddresses}
+        selectedAddressId={selectedAddressId}
+        resolvingId={resolvingId}
+        onSelect={handleSelectAddress}
+        onAddNew={handleAddNew}
+      />
     </SafeAreaView>
   );
 }

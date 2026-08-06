@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { API_STATUS_MAP, type BookingStatus } from "./bookingStore";
+import type { ConditionType, RoomType, TimeSlot } from "../types/booking4step.types";
 
 export type WorkerJob = {
   id: string;
@@ -12,6 +13,13 @@ export type WorkerJob = {
   estimatedPrice: number;
   finalPrice: number | null;
   rating: number | null;
+  timeSlot: TimeSlot | null;
+  rooms: RoomType[];
+  condition: ConditionType | null;
+  location: string | null;
+  city: string | null;
+  distanceMeters: number | null;
+  workerPayoutEstimate: number | null;
 };
 
 // Shape returned by GET /bookings (services/api.ts getBookings()) for a worker
@@ -26,6 +34,13 @@ export type ApiWorkerBooking = {
   estimatedPrice: number;
   finalPrice: number | null;
   rating: number | null;
+  timeSlot?: TimeSlot | null;
+  rooms?: RoomType[];
+  condition?: ConditionType | null;
+  location?: string | null;
+  city?: string | null;
+  distanceMeters?: number | null;
+  workerPayoutEstimate?: number | null;
 };
 
 export function mapApiJob(b: ApiWorkerBooking): WorkerJob {
@@ -40,6 +55,13 @@ export function mapApiJob(b: ApiWorkerBooking): WorkerJob {
     estimatedPrice: b.estimatedPrice,
     finalPrice: b.finalPrice ?? null,
     rating: b.rating ?? null,
+    timeSlot: b.timeSlot ?? null,
+    rooms: b.rooms ?? [],
+    condition: b.condition ?? null,
+    location: b.location ?? null,
+    city: b.city ?? null,
+    distanceMeters: b.distanceMeters ?? null,
+    workerPayoutEstimate: b.workerPayoutEstimate ?? null,
   };
 }
 

@@ -41,7 +41,9 @@ export default function Dashboard() {
     { label: 'Total Workers', value: String(stats.totalWorkers), icon: 'fa-user-cog', color: 'blue' },
     { label: 'Pending Approvals', value: String(stats.pendingApprovals), icon: 'fa-check-circle', color: 'green' },
     { label: 'Active Bookings', value: String(stats.activeBookings), icon: 'fa-calendar-check', color: 'purple' },
+    { label: 'Open Disputes', value: String(stats.openDisputes), icon: 'fa-triangle-exclamation', color: 'orange' },
     { label: 'Total Revenue', value: stats.totalRevenue, icon: 'fa-peso-sign', color: 'blue' },
+    { label: 'Total Worker Payouts', value: stats.totalPayouts, icon: 'fa-money-bill-transfer', color: 'green' },
   ]
 
   return (
@@ -103,6 +105,7 @@ export default function Dashboard() {
       <div className="cta-buttons">
         <Link to="/verification" className="btn btn-primary">Approve Workers ({stats.pendingApprovals})</Link>
         <Link to="/bookings" className="btn btn-success">View Bookings ({stats.activeBookings})</Link>
+        <Link to="/bookings/dispute" className="btn btn-danger">Resolve Disputes ({stats.openDisputes})</Link>
         <Link to="/payments" className="btn btn-purple">Process Payments</Link>
         <Link to="/reports" className="btn btn-orange">Check Reports</Link>
         <Link to="/analytics" className="btn btn-outline">Analytics & Reports</Link>

@@ -4,8 +4,18 @@ import prisma from '@config/database';
 import { errorResponse } from '@utils/errorResponse';
 import { formatDisplayId, formatPeso } from '@utils/formatters';
 import { buildPaginationMeta, getPaginationParams } from '@utils/pagination';
+import { writeAuditLog } from '@utils/auditLog';
+import { notifyUser } from '@utils/notify';
+import { refundOrVoidPayment } from '@services/paymentLifecycleService';
+import { freeSlot } from '@services/workerAvailabilityService';
+import { cancelPendingExpiryJob } from '@queues/bookingQueue';
+import type { JwtPayload } from '@/types/index';
 
-function buildBookingWhere(search: string, status?: string): Prisma.BookingWhereInput {
+interface AuthRequest extends Request {
+  user?: JwtPayload;
+}
+
+function buildBookingWhere(search: string, status?: string, dateFrom?: string, dateTo?: string): Prisma.BookingWhereInput {
   const where: Prisma.BookingWhereInput = {};
 
   if (status && status !== 'all') {
@@ -18,6 +28,13 @@ function buildBookingWhere(search: string, status?: string): Prisma.BookingWhere
       { client: { fullName: { contains: search } } },
       { worker: { fullName: { contains: search } } },
     ];
+  }
+
+  if (dateFrom || dateTo) {
+    where.scheduledDate = {
+      ...(dateFrom && !isNaN(new Date(dateFrom).getTime()) ? { gte: new Date(dateFrom) } : {}),
+      ...(dateTo && !isNaN(new Date(dateTo).getTime()) ? { lte: new Date(dateTo) } : {}),
+    };
   }
 
   return where;
@@ -63,8 +80,10 @@ export const listBookings = async (req: Request, res: Response) => {
     const { page, limit, skip } = getPaginationParams(req.query);
     const search = typeof req.query.search === 'string' ? req.query.search.trim() : '';
     const status = typeof req.query.status === 'string' ? req.query.status.toLowerCase() : 'all';
+    const dateFrom = typeof req.query.dateFrom === 'string' ? req.query.dateFrom : undefined;
+    const dateTo = typeof req.query.dateTo === 'string' ? req.query.dateTo : undefined;
 
-    const where = buildBookingWhere(search, status);
+    const where = buildBookingWhere(search, status, dateFrom, dateTo);
 
     const [total, bookings] = await Promise.all([
       prisma.booking.count({ where }),
@@ -143,6 +162,89 @@ export const getBookingById = async (req: Request, res: Response) => {
     });
   } catch (error) {
     console.error('Get booking error:', error);
+    return res.status(500).json(errorResponse(500, 'Internal server error'));
+  }
+};
+
+const TERMINAL_STATUSES = ['COMPLETED', 'CANCELLED', 'REJECTED'];
+
+/**
+ * PATCH /api/admin/bookings/:id/cancel
+ * Admin override — cancels a booking in any non-terminal state, writes a
+ * Cancellation audit record, frees the worker's capacity/calendar slot if
+ * one was held, and releases/refunds the payment hold.
+ */
+export const cancelBookingAdmin = async (req: AuthRequest, res: Response) => {
+  try {
+    const id = req.params.id as string;
+    const { reason } = req.body as { reason?: string };
+    const adminId = req.user?.userId;
+
+    const booking = await prisma.booking.findUnique({ where: { id } });
+    if (!booking) {
+      return res.status(404).json(errorResponse(404, 'Booking not found'));
+    }
+
+    if (TERMINAL_STATUSES.includes(booking.status)) {
+      return res.status(409).json(errorResponse(409, `Cannot cancel a booking with status ${booking.status}`));
+    }
+
+    await prisma.$transaction(async (tx) => {
+      if (['ACCEPTED', 'IN_PROGRESS', 'QUOTE_SUBMITTED', 'QUOTE_APPROVED', 'DISPUTED'].includes(booking.status) && booking.workerId) {
+        const workerProfile = await tx.workerProfile.update({
+          where: { userId: booking.workerId },
+          data: { activeJobCount: { decrement: 1 } },
+        });
+        if (booking.timeSlot) {
+          await freeSlot(tx, workerProfile.id, booking.scheduledDate, booking.timeSlot);
+        }
+      }
+
+      await tx.cancellation.create({
+        data: {
+          bookingId: id,
+          cancelledBy: 'ADMIN',
+          cancelledById: adminId ?? 'system',
+          reason: reason?.trim() || 'Cancelled by admin',
+        },
+      });
+
+      await tx.booking.update({
+        where: { id },
+        data: { status: 'CANCELLED', notes: reason?.trim() || booking.notes },
+      });
+    });
+
+    await cancelPendingExpiryJob(id);
+    await refundOrVoidPayment(id, reason?.trim() || 'Cancelled by admin').catch((error) => {
+      console.error(`Failed to refund payment for admin-cancelled booking ${id}:`, error);
+    });
+
+    await writeAuditLog({
+      actorId: adminId,
+      actorName: req.user?.email,
+      actorRole: req.user?.role,
+      action: 'BOOKING_CANCELLED_BY_ADMIN',
+      category: 'ADMIN_ACTION',
+      message: `Booking ${formatDisplayId(id)} cancelled by admin${reason ? `: ${reason}` : ''}`,
+    });
+
+    const partiesToNotify = [booking.clientId, booking.workerId].filter((v): v is string => Boolean(v));
+    await Promise.all(
+      partiesToNotify.map((userId) =>
+        notifyUser({
+          userId,
+          type: 'BOOKING_CANCELLED',
+          title: 'Booking Cancelled',
+          message: `This booking was cancelled by an administrator${reason ? `: ${reason}` : ''}`,
+          relatedId: id,
+        })
+      )
+    );
+
+    return res.json({ success: true, data: { id, status: 'CANCELLED' } });
+  } catch (error) {
+    console.error('Admin cancel booking error:', error);
     return res.status(500).json(errorResponse(500, 'Internal server error'));
   }
 };

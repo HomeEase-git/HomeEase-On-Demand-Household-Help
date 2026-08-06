@@ -65,12 +65,30 @@ export default function SignInScreen() {
 
     try {
       clearError();
-      await login(email, password);
+      const result = await login(email, password);
 
       toast.success("Signed in successfully");
 
-      const destination =
-        role === "worker" ? "/(worker)/home" : "/(client)/home";
+      let destination:
+        | "/(client)/home"
+        | "/(worker)/home"
+        | "/(kyc)/rejected"
+        | "/(kyc)/pending"
+        | "/(kyc)/landing" = "/(client)/home";
+      if (role === "worker") {
+        const kycStatus = result.data?.kycStatus;
+        if (kycStatus === "APPROVED") {
+          destination = "/(worker)/home";
+        } else if (kycStatus === "REJECTED") {
+          destination = "/(kyc)/rejected";
+        } else if (kycStatus === "SUBMITTED") {
+          // Docs already submitted — waiting on the admin to review.
+          destination = "/(kyc)/pending";
+        } else {
+          // Never submitted KYC docs yet.
+          destination = "/(kyc)/landing";
+        }
+      }
       router.replace(destination);
     } catch (err: any) {
       // The backend intentionally returns the same 401 for "no account with

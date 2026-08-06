@@ -19,3 +19,12 @@ export async function fetchBookingById(id) {
   const response = await apiRequest(`/admin/bookings/${id}`);
   return response.data;
 }
+
+/** PATCH /admin/bookings/:id/cancel — force-cancels a booking in any non-terminal state. */
+export async function cancelBookingAdmin(id, reason) {
+  const response = await apiRequest(`/admin/bookings/${id}/cancel`, {
+    method: 'PATCH',
+    body: JSON.stringify({ reason }),
+  });
+  return response.data;
+}

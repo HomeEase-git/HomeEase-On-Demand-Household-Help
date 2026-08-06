@@ -12,6 +12,7 @@
     "prisma:migrate": "prisma migrate dev",
     "prisma:studio": "prisma studio",
     "prisma:seed:full": "tsx prisma/seeds/seed-full.ts",
+    "prisma:seed:complete": "tsx prisma/seeds/seed-complete.ts",
     "test:concurrency": "ts-node scripts/concurrency_test.ts"
   },
   "keywords": [],

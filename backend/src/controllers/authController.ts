@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import prisma from '@config/database';
+import { TokenType } from '@prisma/client';
 import { hashPassword, comparePassword } from '@utils/passwordHash';
 import { generateToken } from '@utils/jwt';
 import { validateEmail, validatePassword, validatePhone, validateOtp } from '@utils/validators';
@@ -12,11 +13,8 @@ import {
 } from '@utils/emailService';
 import {
   generateOtp,
-  generateResetToken,
   storeOtp,
   verifyOtp,
-  storePasswordResetToken,
-  verifyPasswordResetToken,
   storeRefreshToken,
   verifyRefreshToken,
   revokeRefreshToken,
@@ -124,6 +122,9 @@ export const signup = async (req: Request, res: Response) => {
         phone: user.phone,
         role: user.role,
         isVerified: user.isVerified,
+        // New worker accounts always start unverified — surfaced so the
+        // mobile app can route into the KYC flow instead of the worker tabs.
+        kycStatus: user.role === 'WORKER' ? 'PENDING' : undefined,
         token,
         refreshToken,
       },
@@ -147,7 +148,10 @@ export const login = async (req: Request, res: Response) => {
       return res.status(400).json(errorResponse(400, 'Email and password required'));
     }
 
-    const user = await prisma.user.findUnique({ where: { email } });
+    const user = await prisma.user.findUnique({
+      where: { email },
+      include: { workerProfile: { select: { kycStatus: true } } },
+    });
 
     if (!user) {
       await writeAuditLog({
@@ -207,6 +211,9 @@ export const login = async (req: Request, res: Response) => {
         phone: user.phone,
         role: user.role,
         isVerified: user.isVerified,
+        // Lets the app gate worker access until admin approval — client
+        // accounts don't have a workerProfile so this stays undefined.
+        kycStatus: user.role === 'WORKER' ? (user.workerProfile?.kycStatus ?? 'PENDING') : undefined,
         token,
         refreshToken,
       },
@@ -227,7 +234,10 @@ export const getMe = async (req: Request, res: Response) => {
       return res.status(401).json(errorResponse(401, 'Not authenticated'));
     }
 
-    const user = await prisma.user.findUnique({ where: { id: req.user.userId } });
+    const user = await prisma.user.findUnique({
+      where: { id: req.user.userId },
+      include: { workerProfile: { select: { kycStatus: true } } },
+    });
 
     if (!user) {
       return res.status(404).json(errorResponse(404, 'User not found'));
@@ -242,6 +252,7 @@ export const getMe = async (req: Request, res: Response) => {
         phone: user.phone,
         role: user.role,
         isVerified: user.isVerified,
+        kycStatus: user.role === 'WORKER' ? (user.workerProfile?.kycStatus ?? 'PENDING') : undefined,
       },
     });
   } catch (error) {
@@ -388,20 +399,20 @@ export const forgotPassword = async (req: Request, res: Response) => {
       });
     }
 
-    const token = generateResetToken();
-    await storePasswordResetToken(user.id, token);
+    const otp = generateOtp();
+    await storeOtp(user.id, otp, TokenType.PASSWORD_RESET);
 
     // Must not let a failed send produce a different response than the
     // "email not registered" path above — that would leak account existence.
     try {
-      await sendPasswordResetEmail(email, token);
+      await sendPasswordResetEmail(email, otp);
     } catch (emailError) {
       console.error('Failed to send password reset email:', emailError);
     }
 
     return res.json({
       success: true,
-      message: 'If that email is registered, a reset link has been sent',
+      message: 'If that email is registered, a reset code has been sent',
     });
   } catch (error) {
     console.error('Forgot password error:', error);
@@ -412,15 +423,15 @@ export const forgotPassword = async (req: Request, res: Response) => {
 export const resetPassword = async (req: Request, res: Response) => {
   try {
     const email = normalizeEmail(req.body.email);
-    const token = getTrimmedString(req.body.token);
+    const otp = getTrimmedString(req.body.otp);
     const newPassword = getPasswordString(req.body.newPassword);
 
     if (!validateEmail(email)) {
       return res.status(400).json(errorResponse(400, 'Invalid email'));
     }
 
-    if (!token) {
-      return res.status(400).json(errorResponse(400, 'Reset token is required'));
+    if (!validateOtp(otp)) {
+      return res.status(400).json(errorResponse(400, 'OTP must be 6 digits'));
     }
 
     if (!validatePassword(newPassword)) {
@@ -432,13 +443,13 @@ export const resetPassword = async (req: Request, res: Response) => {
     const user = await prisma.user.findUnique({ where: { email } });
 
     if (!user) {
-      return res.status(400).json(errorResponse(400, 'Invalid or expired reset token'));
+      return res.status(400).json(errorResponse(400, 'Invalid or expired OTP'));
     }
 
-    const isValid = await verifyPasswordResetToken(user.id, token);
+    const isValid = await verifyOtp(user.id, otp, TokenType.PASSWORD_RESET);
 
     if (!isValid) {
-      return res.status(400).json(errorResponse(400, 'Invalid or expired reset token'));
+      return res.status(400).json(errorResponse(400, 'Invalid or expired OTP'));
     }
 
     const hashedPassword = await hashPassword(newPassword);

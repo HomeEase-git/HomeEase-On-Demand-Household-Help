@@ -7,8 +7,10 @@ import SearchBar from '../components/common/SearchBar'
 import LoadingState from '../components/common/LoadingState'
 import ErrorState from '../components/common/ErrorState'
 import { fetchVerifications } from '../services/verification'
+import { usePolling } from '../hooks/usePolling'
 
 const TYPE_MAP = { All: 'all', Clients: 'client', Workers: 'worker' }
+const POLL_INTERVAL_MS = 8000
 
 export default function Verification() {
   const [filterTab, setFilterTab] = useState('All')
@@ -38,6 +40,8 @@ export default function Verification() {
   useEffect(() => {
     load()
   }, [load])
+
+  usePolling(load, POLL_INTERVAL_MS)
 
   return (
     <>

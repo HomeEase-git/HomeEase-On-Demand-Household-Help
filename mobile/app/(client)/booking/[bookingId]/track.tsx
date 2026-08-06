@@ -1,5 +1,5 @@
 import React, { useCallback, useState } from "react";
-import { View, Text, Pressable, Linking } from "react-native";
+import { View, Text, Image, Pressable, Linking } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { AppIcon as Ionicons } from "../../../../components/icons/AppIcon";
 import { useFocusEffect, useRouter, useLocalSearchParams } from "expo-router";
@@ -135,11 +135,29 @@ export default function TrackBookingScreen() {
         </View>
 
         <View className="bg-card rounded-2xl p-4 mt-6 flex-row items-center">
-          <View className="w-12 h-12 bg-card-dark rounded-full items-center justify-center mr-3">
-            <Ionicons name="person-circle" size={40} color={colors.white} />
+          <View className="w-12 h-12 bg-card-dark rounded-full items-center justify-center mr-3 overflow-hidden">
+            {booking.workerAvatar ? (
+              <Image
+                source={{ uri: booking.workerAvatar }}
+                style={{ width: 48, height: 48 }}
+                resizeMode="cover"
+              />
+            ) : (
+              <Ionicons name="person-circle" size={40} color={colors.white} />
+            )}
           </View>
           <View className="flex-1">
-            <Text className="text-text-primary font-bold">{booking.worker}</Text>
+            <View className="flex-row items-center">
+              <Text className="text-text-primary font-bold">{booking.worker}</Text>
+              {booking.workerVerified && (
+                <Ionicons
+                  name="checkmark-circle"
+                  size={14}
+                  color={colors.success}
+                  style={{ marginLeft: 4 }}
+                />
+              )}
+            </View>
             <Text
               className="text-sm font-semibold"
               style={{ color: statusColor }}

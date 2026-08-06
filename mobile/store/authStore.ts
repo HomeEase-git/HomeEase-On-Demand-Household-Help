@@ -3,6 +3,8 @@ import { authStorage } from '../utils/storage';
 
 type Role = 'client' | 'worker';
 
+export type KycStatus = 'PENDING' | 'SUBMITTED' | 'APPROVED' | 'REJECTED';
+
 type User = {
   id: string;
   name: string;
@@ -10,6 +12,9 @@ type User = {
   phone?: string;
   avatar?: string;
   role: Role;
+  // Only meaningful for workers — gates access to the worker tabs until an
+  // admin approves the account. Undefined for clients.
+  kycStatus?: KycStatus;
 } | null;
 
 type AuthState = {
@@ -21,6 +26,7 @@ type AuthState = {
   isInitializing: boolean;
   
   setUser: (user: User) => void;
+  setKycStatus: (kycStatus: KycStatus) => void;
   setToken: (token: string) => void;
   setLoading: (loading: boolean) => void;
   setError: (error: string | null) => void;
@@ -29,7 +35,7 @@ type AuthState = {
   initializeAuth: () => Promise<void>;
 };
 
-export const useAuthStore = create<AuthState>((set) => ({
+export const useAuthStore = create<AuthState>((set, get) => ({
   user: null,
   isAuthenticated: false,
   loading: false,
@@ -48,6 +54,14 @@ export const useAuthStore = create<AuthState>((set) => ({
     }
   },
   
+  setKycStatus: (kycStatus) => {
+    const currentUser = get().user;
+    if (!currentUser) return;
+    const updatedUser = { ...currentUser, kycStatus };
+    set({ user: updatedUser });
+    authStorage.saveUser(updatedUser);
+  },
+
   setToken: (token) => {
     set({ token });
     // Persist token

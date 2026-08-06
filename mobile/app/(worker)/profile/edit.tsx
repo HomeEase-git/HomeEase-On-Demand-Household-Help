@@ -1,12 +1,11 @@
 import React, { useEffect, useState, useRef } from "react";
-import { View, ScrollView, TextInput, Text, Switch } from "react-native";
+import { View, ScrollView, TextInput, Text } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import ScreenHeader from "../../../components/ui/ScreenHeader";
 import InputField from "../../../components/ui/InputField";
 import PrimaryButton from "../../../components/ui/PrimaryButton";
 import { useAuthStore } from "../../../store/authStore";
-import { useWorkerProfileStore } from "../../../store/workerProfileStore";
 import * as api from "../../../services/api";
 import { useAlertModal } from "../../../contexts/AlertModalContext";
 
@@ -15,8 +14,6 @@ export default function WorkerEditProfileScreen() {
   const alertModal = useAlertModal();
   const user = useAuthStore((s) => s.user);
   const setUser = useAuthStore((s) => s.setUser);
-  const savedDigitalId = useWorkerProfileStore((s) => s.digitalId);
-  const setDigitalId = useWorkerProfileStore((s) => s.setDigitalId);
 
   const [name, setName] = useState(user?.name ?? "");
   const [phone, setPhone] = useState(user?.phone ?? "");
@@ -24,6 +21,9 @@ export default function WorkerEditProfileScreen() {
   const [bio, setBio] = useState("");
   const [years, setYears] = useState("");
   const [areaRadius, setAreaRadius] = useState("");
+  const [trade, setTrade] = useState("");
+  const [serviceArea, setServiceArea] = useState("");
+  const [licenseNumber, setLicenseNumber] = useState("");
 
   useEffect(() => {
     let active = true;
@@ -38,21 +38,23 @@ export default function WorkerEditProfileScreen() {
         console.error("Load worker detail for edit error:", error);
       }
     }
+    async function loadDigitalId() {
+      try {
+        const digitalId = await api.getMyDigitalId();
+        if (!active) return;
+        setTrade(digitalId.trade ?? "");
+        setServiceArea(digitalId.serviceArea ?? "");
+        setLicenseNumber(digitalId.licenseNumber ?? "");
+      } catch (error) {
+        console.error("Load digital ID for edit error:", error);
+      }
+    }
     loadWorkerDetail();
+    loadDigitalId();
     return () => {
       active = false;
     };
   }, [user?.id]);
-  const [digitalIdEnabled, setDigitalIdEnabled] = useState(
-    savedDigitalId?.enabled ?? false,
-  );
-  const [trade, setTrade] = useState(savedDigitalId?.trade ?? "");
-  const [serviceArea, setServiceArea] = useState(
-    savedDigitalId?.serviceArea ?? "",
-  );
-  const [licenseNumber, setLicenseNumber] = useState(
-    savedDigitalId?.licenseNumber ?? "",
-  );
 
   const nameRef = useRef<TextInput>(null);
   const phoneRef = useRef<TextInput>(null);
@@ -79,16 +81,12 @@ export default function WorkerEditProfileScreen() {
       await api.updateWorkerProfileDetails({
         bio: bio.trim(),
         serviceAreaRadius: parseInt(areaRadius, 10) || undefined,
+        digitalIdTrade: trade.trim(),
+        digitalIdServiceArea: serviceArea.trim(),
+        licenseNumber: licenseNumber.trim(),
       });
 
       setUser(updatedUser);
-
-      setDigitalId({
-        enabled: digitalIdEnabled,
-        trade: trade.trim(),
-        serviceArea: serviceArea.trim(),
-        licenseNumber: licenseNumber.trim(),
-      });
 
       alertModal.success("Success", "Profile updated successfully.", [
         { text: "OK", onPress: () => router.back() },
@@ -155,41 +153,30 @@ export default function WorkerEditProfileScreen() {
         />
 
         <View className="bg-card-light rounded-2xl p-4 mb-5">
-          <View className="flex-row items-start justify-between mb-3">
-            <View className="flex-1 mr-3">
-              <Text className="text-primary font-semibold">Digital ID</Text>
-              <Text className="text-text-secondary text-sm mt-1">
-                Enable a shareable identity card for clients.
-              </Text>
-            </View>
-            <Switch
-              value={digitalIdEnabled}
-              onValueChange={setDigitalIdEnabled}
-            />
-          </View>
+          <Text className="text-primary font-semibold">Digital ID details</Text>
+          <Text className="text-text-secondary text-sm mt-1 mb-3">
+            Shown on your Digital ID card alongside your verified photo and
+            name.
+          </Text>
 
-          {digitalIdEnabled ? (
-            <View>
-              <InputField
-                label="Trade / Profession"
-                value={trade}
-                onChangeText={setTrade}
-                placeholder="Plumbing"
-              />
-              <InputField
-                label="Service Area"
-                value={serviceArea}
-                onChangeText={setServiceArea}
-                placeholder="Quezon City"
-              />
-              <InputField
-                label="License / Registration Number"
-                value={licenseNumber}
-                onChangeText={setLicenseNumber}
-                placeholder="ABC-2024-001"
-              />
-            </View>
-          ) : null}
+          <InputField
+            label="Trade / Profession"
+            value={trade}
+            onChangeText={setTrade}
+            placeholder="Plumbing"
+          />
+          <InputField
+            label="Service Area"
+            value={serviceArea}
+            onChangeText={setServiceArea}
+            placeholder="Quezon City"
+          />
+          <InputField
+            label="License / Registration Number"
+            value={licenseNumber}
+            onChangeText={setLicenseNumber}
+            placeholder="ABC-2024-001"
+          />
         </View>
 
         <PrimaryButton label="Save Changes" fullWidth onPress={handleSubmit} />

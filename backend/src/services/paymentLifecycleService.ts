@@ -1,0 +1,249 @@
+import type { Prisma, PaymentMethodType } from '@prisma/client';
+import prisma from '@config/database';
+import { calculateCommission, calculateWithholdingTax } from '@utils/pricing';
+import { createPaymentIntent, capturePaymentIntent, createRefund } from '@services/paymongoService';
+import { notifyUser } from '@utils/notify';
+import { getAppSettings } from '@services/appSettingsService';
+import { schedulePayout } from '@queues/payoutQueue';
+import { writeAuditLog } from '@utils/auditLog';
+
+export interface BookingForPayment {
+  id: string;
+  estimatedPrice: number;
+  tip: number | null;
+  paymentMethodType: PaymentMethodType | null;
+  paymentAccountIdentifier: string | null;
+}
+
+/**
+ * Creates the Payment row at booking-creation time in an "authorized" state:
+ * status PENDING, escrowStatus HELD, authorizedAmount/authorizedAt set.
+ *
+ * For CARD, opens a real manual-capture PayMongo PaymentIntent — genuine
+ * deferred authorization. GCASH/MAYA still need the client to complete a
+ * Source checkout (see paymentController.createPaymongoCheckout, unchanged);
+ * once PayMongo reports the source chargeable, the webhook charges it and
+ * marks the Payment COMPLETED but leaves escrowStatus HELD until this
+ * booking is actually confirmed complete (see captureAndReleasePayment).
+ * BANK_TRANSFER/CASH have no gateway automation — the amount is recorded as
+ * authorized for bookkeeping and settled off-platform.
+ */
+export async function authorizePaymentForBooking(
+  tx: Prisma.TransactionClient,
+  booking: BookingForPayment,
+  addOnsTotal: number
+) {
+  const { commissionRate, withholdingTaxRate } = await getAppSettings();
+  const methodType: PaymentMethodType = booking.paymentMethodType ?? 'CASH';
+  const subtotal = booking.estimatedPrice + addOnsTotal;
+  const tip = booking.tip ?? 0;
+  const commission = calculateCommission(subtotal, commissionRate);
+  const withholdingTax = calculateWithholdingTax(subtotal, commissionRate, withholdingTaxRate);
+  const workerPayout = subtotal - commission - withholdingTax + tip;
+  const totalAmount = subtotal + tip;
+
+  let authorizationId: string | null = null;
+  let paymentIntentId: string | null = null;
+  let clientSecret: string | null = null;
+
+  if (methodType === 'CARD') {
+    try {
+      const intent = await createPaymentIntent({
+        amountPesos: totalAmount,
+        description: `HomeEase booking ${booking.id}`,
+      });
+      authorizationId = intent.id;
+      paymentIntentId = intent.id;
+      clientSecret = intent.clientKey;
+    } catch (error) {
+      // Don't block booking creation on a gateway hiccup — the client can
+      // retry the card charge later; the Payment row still records the
+      // authorized amount for the booking to proceed.
+      console.error('Failed to create PayMongo payment intent:', error);
+    }
+  }
+
+  return tx.payment.create({
+    data: {
+      bookingId: booking.id,
+      subtotal,
+      tip,
+      commissionRate,
+      commissionAmount: commission,
+      withholdingTaxRate,
+      withholdingTaxAmount: withholdingTax,
+      workerPayout,
+      totalAmount,
+      status: 'PENDING',
+      escrowStatus: 'HELD',
+      authorizedAmount: totalAmount,
+      authorizedAt: new Date(),
+      authorizationId,
+      paymentIntentId,
+      clientSecret,
+      methodType,
+      accountIdentifier: booking.paymentAccountIdentifier ?? null,
+    },
+  });
+}
+
+/**
+ * Captures the held authorization and releases escrow to the worker. Called
+ * once the client confirms a booking's completion. Idempotent — a payment
+ * whose escrow is already RELEASED is returned as-is.
+ *
+ * `finalAmount` is the final SUBTOTAL (labor+materials+add-ons, or
+ * estimatedPrice+add-ons — see bookingController.confirmCompletion) and can
+ * differ from what was authorized at booking-creation time (a quote was
+ * approved, or add-ons were added mid-job). commissionAmount/
+ * withholdingTaxAmount/workerPayout are therefore recomputed here against
+ * the current AppSettings rates and the real final subtotal, rather than
+ * reusing the estimate-time figures — otherwise admin financial reporting
+ * would silently go stale on any quote/add-on job.
+ *
+ * Known limitation: only CARD supports collecting a price increase at this
+ * step (via capturePaymentIntent, which can capture up to the originally
+ * authorized amount). GCash/Maya are charged in full up front
+ * (handleSourceChargeable, paymentController.ts) and CASH/BANK_TRANSFER
+ * settle off-platform — for those methods this recompute updates the
+ * platform's bookkeeping (commission/tax/payout math) to match the final
+ * agreed price, but does not and cannot collect any difference from the
+ * client. A quote/add-on that increases the price on a non-CARD booking
+ * needs a separate manual-collection step; not built here.
+ */
+export async function captureAndReleasePayment(
+  bookingId: string,
+  finalAmount: number,
+  workerId: string | null
+) {
+  const payment = await prisma.payment.findUnique({ where: { bookingId } });
+  if (!payment) {
+    throw new Error('Payment not found for booking');
+  }
+
+  if (payment.escrowStatus === 'RELEASED') {
+    return payment;
+  }
+
+  const { commissionRate, withholdingTaxRate } = await getAppSettings();
+  const subtotal = finalAmount;
+  const tip = payment.tip;
+  const commissionAmount = calculateCommission(subtotal, commissionRate);
+  const withholdingTaxAmount = calculateWithholdingTax(subtotal, commissionRate, withholdingTaxRate);
+  const workerPayout = subtotal - commissionAmount - withholdingTaxAmount + tip;
+  const totalAmount = subtotal + tip;
+
+  let capturedPaymongoPaymentId: string | null = null;
+  if (payment.methodType === 'CARD' && payment.paymentIntentId && payment.status !== 'COMPLETED') {
+    // Capture the full total (subtotal + tip) — the intent was authorized
+    // for totalAmount at booking-creation time (authorizePaymentForBooking),
+    // so capturing just the subtotal would under-capture by the tip amount.
+    const captured = await capturePaymentIntent(payment.paymentIntentId, totalAmount);
+    // The captured PaymentIntent's resulting Payment resource id — needed to
+    // issue a real refund later if this booking's escrow ends up reversed.
+    capturedPaymongoPaymentId = captured?.attributes?.payments?.[0]?.id ?? null;
+  }
+
+  const updated = await prisma.payment.update({
+    where: { id: payment.id },
+    data: {
+      subtotal,
+      commissionRate,
+      commissionAmount,
+      withholdingTaxRate,
+      withholdingTaxAmount,
+      workerPayout,
+      totalAmount,
+      capturedAmount: totalAmount,
+      capturedAt: new Date(),
+      status: 'COMPLETED',
+      escrowStatus: 'RELEASED',
+      releasedAt: new Date(),
+      ...(capturedPaymongoPaymentId ? { paymongoPaymentId: capturedPaymongoPaymentId } : {}),
+    },
+  });
+
+  if (workerId) {
+    // Wrapped so a Redis/PayMongo hiccup here never fails escrow release
+    // itself — the escrow update above already committed.
+    try {
+      const workerProfile = await prisma.workerProfile.findUnique({
+        where: { userId: workerId },
+        select: { payoutMethod: true, payoutAccountName: true, payoutAccountNumber: true },
+      });
+
+      if (workerProfile?.payoutMethod && workerProfile.payoutAccountNumber) {
+        const payout = await prisma.payout.create({
+          data: {
+            paymentId: updated.id,
+            bookingId,
+            workerId,
+            amount: updated.workerPayout,
+            channel: workerProfile.payoutMethod,
+            accountName: workerProfile.payoutAccountName,
+            accountNumber: workerProfile.payoutAccountNumber,
+          },
+        });
+        await schedulePayout(payout.id);
+      } else {
+        await writeAuditLog({
+          action: 'PAYOUT_BLOCKED_NO_METHOD',
+          category: 'SYSTEM_ERROR',
+          message: `Worker ${workerId} has no payout method configured — payout for booking ${bookingId} was not created`,
+          metadata: { bookingId, workerId },
+        });
+      }
+    } catch (error) {
+      console.error(`Failed to create/schedule payout for booking ${bookingId}:`, error);
+    }
+
+    await notifyUser({
+      userId: workerId,
+      type: 'PAYMENT_RECEIVED',
+      title: 'Payment Released',
+      message: `₱${updated.workerPayout.toFixed(2)} has been released to your account`,
+      relatedId: bookingId,
+    });
+  }
+
+  return updated;
+}
+
+/**
+ * Releases a held escrow back to the client without paying the worker —
+ * used for cancellations/refunds. An authorization that was never charged
+ * (CARD never captured, or a GCash/Maya source never confirmed) simply
+ * expires/voids on PayMongo's side, nothing to reverse. But money CAN
+ * already be with the platform while escrow is still HELD: GCash/Maya are
+ * charged as soon as the source becomes chargeable (handleSourceChargeable,
+ * paymentController.ts), well before the job — and completion capture also
+ * sets status COMPLETED — so `status === 'COMPLETED'` with a real
+ * `paymongoPaymentId` means a genuine refund must be issued via PayMongo,
+ * not just a DB status flip.
+ */
+export async function refundOrVoidPayment(bookingId: string, reason: string) {
+  const payment = await prisma.payment.findUnique({ where: { bookingId } });
+  if (!payment) return null;
+  if (payment.escrowStatus !== 'HELD') return payment;
+
+  if (payment.status === 'COMPLETED' && payment.paymongoPaymentId) {
+    // Don't mark REFUNDED in our DB unless the gateway refund actually
+    // succeeded — leaving escrowStatus HELD on failure so it's visible for
+    // manual follow-up rather than silently lying about the client's money.
+    await createRefund({
+      paymongoPaymentId: payment.paymongoPaymentId,
+      amountPesos: payment.capturedAmount ?? payment.totalAmount,
+      notes: reason,
+    });
+  }
+
+  return prisma.payment.update({
+    where: { id: payment.id },
+    data: {
+      status: payment.status === 'COMPLETED' ? 'REFUNDED' : 'FAILED',
+      escrowStatus: 'REFUNDED',
+      refundReason: reason,
+      refundedAt: new Date(),
+    },
+  });
+}

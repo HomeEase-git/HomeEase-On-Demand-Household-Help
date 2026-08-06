@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { Link, Navigate, useParams } from 'react-router-dom'
 import PageHeader from '../components/common/PageHeader'
 import SectionCard from '../components/common/SectionCard'
@@ -6,14 +7,42 @@ import LoadingState from '../components/common/LoadingState'
 import ErrorState from '../components/common/ErrorState'
 import { useDetailQuery } from '../hooks/useListQuery'
 import { fetchWorkerById } from '../services/workers'
+import { suspendUser, reinstateUser } from '../services/users'
+import { useToast } from '../context/ToastContext'
 
 export default function WorkerDetail() {
   const { id } = useParams()
   const { data: worker, loading, error, reload } = useDetailQuery(fetchWorkerById, id)
+  const { showSuccess, showError } = useToast()
+  const [statusModalOpen, setStatusModalOpen] = useState(false)
+  const [reason, setReason] = useState('')
+  const [submitting, setSubmitting] = useState(false)
 
   if (loading) return <LoadingState message="Loading worker..." />
   if (error) return <ErrorState message={error} onRetry={reload} />
   if (!worker) return <Navigate to="/workers" replace />
+
+  const isSuspended = worker.accountStatus !== 'active'
+
+  const handleToggleStatus = async () => {
+    setSubmitting(true)
+    try {
+      if (isSuspended) {
+        await reinstateUser(worker.id, reason.trim() || 'Reinstated by admin')
+        showSuccess('Worker account reinstated.')
+      } else {
+        await suspendUser(worker.id, reason.trim() || 'Suspended by admin')
+        showSuccess('Worker account suspended.')
+      }
+      setStatusModalOpen(false)
+      setReason('')
+      reload()
+    } catch (err) {
+      showError(err.message || 'Failed to update account status')
+    } finally {
+      setSubmitting(false)
+    }
+  }
 
   const details = [
     { label: 'Worker ID', value: worker.displayId },
@@ -30,6 +59,10 @@ export default function WorkerDetail() {
         </Badge>
       ),
     },
+    {
+      label: 'Account Status',
+      value: <Badge variant={worker.accountStatus === 'active' ? 'active' : 'suspended'}>{worker.accountStatus}</Badge>,
+    },
     { label: 'Joined', value: worker.joined },
   ]
 
@@ -41,7 +74,13 @@ export default function WorkerDetail() {
         actions={(
           <>
             <Link to="/workers" className="btn btn-outline">Back to Workers</Link>
-            <Link to="/users/suspend" className="btn btn-danger">Suspend / Ban User</Link>
+            <button
+              type="button"
+              className={isSuspended ? 'btn btn-success' : 'btn btn-danger'}
+              onClick={() => setStatusModalOpen(true)}
+            >
+              {isSuspended ? 'Reinstate Account' : 'Suspend Account'}
+            </button>
           </>
         )}
       />
@@ -81,6 +120,45 @@ export default function WorkerDetail() {
           </table>
         </div>
       </SectionCard>
+
+      {statusModalOpen && (
+        <div className="modal-backdrop" onClick={() => setStatusModalOpen(false)} role="presentation">
+          <div className="modal" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true">
+            <h2 className="modal-title">{isSuspended ? 'Reinstate' : 'Suspend'} {worker.name}?</h2>
+            {!isSuspended && (
+              <p className="modal-body">
+                Suspending blocks this worker from accepting new bookings and being surfaced in discovery until
+                reinstated.
+              </p>
+            )}
+            <label htmlFor="status-reason" style={{ display: 'block', margin: '0.5rem 0 0.35rem', fontWeight: 600 }}>
+              Reason
+            </label>
+            <textarea
+              id="status-reason"
+              className="form-input"
+              rows={3}
+              value={reason}
+              onChange={(e) => setReason(e.target.value)}
+              placeholder={isSuspended ? 'Why is this account being reinstated?' : 'Why is this account being suspended?'}
+              style={{ width: '100%', resize: 'vertical' }}
+            />
+            <div className="modal-actions">
+              <button type="button" className="btn btn-outline" onClick={() => setStatusModalOpen(false)} disabled={submitting}>
+                Cancel
+              </button>
+              <button
+                type="button"
+                className={isSuspended ? 'btn btn-success' : 'btn btn-danger'}
+                onClick={handleToggleStatus}
+                disabled={submitting}
+              >
+                {submitting ? 'Saving...' : isSuspended ? 'Confirm Reinstate' : 'Confirm Suspend'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   )
 }

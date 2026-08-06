@@ -17,6 +17,7 @@ const MENU = [
   { label: "Edit Profile", path: "/(worker)/profile/edit" },
   { label: "Digital ID", path: "/(worker)/profile/digital-id" },
   { label: "My Skills & Services", path: "/(worker)/profile/skills" },
+  { label: "My Packages", path: "/(worker)/profile/packages" },
   { label: "Set Availability", path: "/(worker)/profile/availability" },
   { label: "My Certifications", path: "/(worker)/profile/certifications" },
   { label: "My Reviews", path: "/(worker)/profile/reviews" },
@@ -43,6 +44,7 @@ export default function WorkerProfileScreen() {
   const logout = useAuthStore((s) => s.logout);
   const [logoutVisible, setLogoutVisible] = useState(false);
   const [detail, setDetail] = useState<WorkerDetail | null>(null);
+  const [verified, setVerified] = useState(false);
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
 
   const handleAvatarSelected = async (uri: string) => {
@@ -70,6 +72,12 @@ export default function WorkerProfileScreen() {
       setDetail(result);
     } catch (error) {
       console.error("Load worker profile error:", error);
+    }
+    try {
+      const digitalId = await api.getMyDigitalId();
+      setVerified(digitalId.verified);
+    } catch (error) {
+      console.error("Load digital ID error:", error);
     }
   }, [user?.id]);
 
@@ -125,14 +133,17 @@ export default function WorkerProfileScreen() {
               </Text>
               <View className="ml-1">
                 <Ionicons
-                  name="checkmark-circle"
+                  name={verified ? "checkmark-circle" : "time-outline"}
                   size={18}
-                  color={colors.success}
+                  color={verified ? colors.success : colors.warning}
                 />
               </View>
             </View>
-            <Text className="text-text-secondary text-xs">
-              Verified Professional
+            <Text
+              className="text-xs"
+              style={{ color: verified ? colors.success : colors.warning }}
+            >
+              {verified ? "Verified Professional" : "Verification Pending"}
             </Text>
             <View className="flex-row items-center mt-1">
               <StarRating rating={detail?.rating ?? 0} size={14} />

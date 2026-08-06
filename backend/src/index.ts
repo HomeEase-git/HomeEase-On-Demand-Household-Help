@@ -4,6 +4,9 @@ import app from './app';
 import prisma from '@config/database';
 import { initSocket } from './socket';
 import { startVerificationWorker } from '@workers/verificationWorker';
+import { startBookingWorker } from '@workers/bookingWorker';
+import { startPayoutWorker } from '@workers/payoutWorker';
+import { registerRepeatableBookingJobs } from '@queues/bookingQueue';
 import { ensureStorageBuckets } from '@utils/ensureStorageBuckets';
 
 const PORT = process.env.PORT || 3000;
@@ -23,6 +26,18 @@ const startServer = async () => {
 
     startVerificationWorker().catch((error) => {
       console.error('Failed to start verification worker:', error);
+    });
+
+    startBookingWorker().catch((error) => {
+      console.error('Failed to start booking worker:', error);
+    });
+
+    startPayoutWorker().catch((error) => {
+      console.error('Failed to start payout worker:', error);
+    });
+
+    registerRepeatableBookingJobs().catch((error) => {
+      console.error('Failed to register repeatable booking jobs:', error);
     });
 
     ensureStorageBuckets().catch((error) => {

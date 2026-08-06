@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { View, Text, ScrollView, Pressable } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter, useLocalSearchParams } from "expo-router";
@@ -6,9 +6,13 @@ import { Ionicons } from "@expo/vector-icons";
 import ScreenHeader from "../../components/ui/ScreenHeader";
 import InputField from "../../components/ui/InputField";
 import PrimaryButton from "../../components/ui/PrimaryButton";
-import { resetPassword } from "../../services/api";
+import OtpInput from "../../components/ui/OtpInput";
+import FieldError from "../../components/ui/FieldError";
+import { resetPassword, sendPasswordResetEmail } from "../../services/api";
 import { colors } from "../../constants";
 import { useAlertModal } from "../../contexts/AlertModalContext";
+
+const RESEND_COUNTDOWN_SECONDS = 60;
 
 const requirements = [
   {
@@ -27,10 +31,11 @@ const requirements = [
 export default function ResetPasswordScreen() {
   const router = useRouter();
   const alertModal = useAlertModal();
-  const params = useLocalSearchParams<{ email?: string; otp?: string }>();
+  const params = useLocalSearchParams<{ email?: string }>();
   const email = (params.email as string) || "";
-  const otp = (params.otp as string) || "";
 
+  const [otp, setOtp] = useState("");
+  const [otpError, setOtpError] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [loading, setLoading] = useState(false);
@@ -38,9 +43,47 @@ export default function ResetPasswordScreen() {
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [newPasswordError, setNewPasswordError] = useState("");
   const [confirmPasswordError, setConfirmPasswordError] = useState("");
+  const [countdown, setCountdown] = useState(RESEND_COUNTDOWN_SECONDS);
+  const [canResend, setCanResend] = useState(false);
+  const [resending, setResending] = useState(false);
 
   const strength = requirements.filter((r) => r.test(newPassword)).length;
-  const isValidPassword = strength === 3 && newPassword === confirmPassword;
+  const isValidPassword =
+    otp.length === 6 && strength === 3 && newPassword === confirmPassword;
+
+  useEffect(() => {
+    if (countdown <= 0) {
+      setCanResend(true);
+      return;
+    }
+    const timer = setInterval(() => setCountdown((c) => c - 1), 1000);
+    return () => clearInterval(timer);
+  }, [countdown]);
+
+  const handleOtpChange = (value: string) => {
+    setOtp(value);
+    setOtpError("");
+  };
+
+  const handleResend = async () => {
+    if (!canResend || !email || resending) return;
+    setResending(true);
+    try {
+      await sendPasswordResetEmail(email);
+      setCountdown(RESEND_COUNTDOWN_SECONDS);
+      setCanResend(false);
+      setOtp("");
+      setOtpError("");
+      alertModal.success("Success", "A new code has been sent to your email");
+    } catch (err: any) {
+      alertModal.error(
+        "Error",
+        err?.message || "Failed to resend code. Please try again.",
+      );
+    } finally {
+      setResending(false);
+    }
+  };
 
   const handleNewPasswordChange = (text: string) => {
     setNewPassword(text);
@@ -60,6 +103,10 @@ export default function ResetPasswordScreen() {
   };
 
   const handleReset = async () => {
+    if (otp.length !== 6) {
+      setOtpError("Please enter the complete 6-digit code");
+      return;
+    }
     if (!newPassword || !confirmPassword) {
       setNewPasswordError(!newPassword ? "Password is required" : "");
       setConfirmPasswordError(
@@ -105,8 +152,28 @@ export default function ResetPasswordScreen() {
       >
         <Text className="text-text-primary text-2xl font-bold">Reset Password</Text>
         <Text className="text-text-secondary mt-2 mb-6">
-          Create a strong password to secure your account.
+          Enter the 6-digit code we emailed you, then create a strong new
+          password.
         </Text>
+
+        <View className="mb-2">
+          <OtpInput value={otp} onChangeText={handleOtpChange} length={6} />
+        </View>
+        <View className="items-center mb-2">
+          <FieldError message={otpError} />
+        </View>
+        <View className="items-center mb-6">
+          {canResend ? (
+            <Pressable onPress={handleResend} disabled={resending}>
+              <Text className="text-accent font-semibold">Resend Code</Text>
+            </Pressable>
+          ) : (
+            <Text className="text-text-muted text-sm">
+              Resend code in{" "}
+              <Text className="font-semibold text-primary">{countdown}s</Text>
+            </Text>
+          )}
+        </View>
 
         <InputField
           label="New Password"

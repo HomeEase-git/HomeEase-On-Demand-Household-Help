@@ -1,170 +1,312 @@
 import { Request, Response } from 'express';
+import type { ConditionType, PaymentMethodType, RoomType, TimeSlot } from '@prisma/client';
 import prisma from '@config/database';
 import { errorResponse } from '@utils/errorResponse';
 import { notifyUser } from '@utils/notify';
 import { writeAuditLog } from '@utils/auditLog';
 import { formatDisplayId } from '@utils/formatters';
+import { distanceKm, distanceMeters, isWithinRadiusMeters } from '@utils/geo';
+import { findAutoMatchWorker } from '@services/matchingService';
+import { validatePriceWithinPricingRule } from '@services/pricingRuleService';
+import { authorizePaymentForBooking, captureAndReleasePayment, refundOrVoidPayment } from '@services/paymentLifecycleService';
+import { toDayStart, findSlot, markSlotBooked, freeSlot } from '@services/workerAvailabilityService';
+import { calculateWorkerPayout } from '@utils/pricing';
+import { schedulePendingExpiry, cancelPendingExpiryJob } from '@queues/bookingQueue';
+import { VALID_TRANSITIONS, isValidTransition } from '@services/bookingStateMachine';
+import { getAppSettings } from '@services/appSettingsService';
 import type { JwtPayload } from '@/types/index';
+
+export { VALID_TRANSITIONS, isValidTransition };
 
 interface AuthRequest extends Request {
   user?: JwtPayload;
 }
 
-/**
- * Status transition map: defines valid state transitions
- *
- * Schema BookingStatus values:
- *   PENDING | ACCEPTED | REJECTED | IN_PROGRESS |
- *   QUOTE_SUBMITTED | QUOTE_APPROVED | DISPUTED | PENDING_COMPLETION |
- *   COMPLETED | CANCELLED
- *
- * NOTE: DECLINED and QUOTE_DISPUTED do not exist in the schema.
- *   - Use REJECTED in place of DECLINED.
- *   - Use DISPUTED in place of QUOTE_DISPUTED.
- *
- * PENDING_COMPLETION: worker has submitted a completion photo and is
- * awaiting the client's confirmation before the booking is finalized.
- */
-const VALID_TRANSITIONS: Record<string, string[]> = {
-  PENDING: ['ACCEPTED', 'REJECTED', 'CANCELLED'],
-  ACCEPTED: ['IN_PROGRESS', 'CANCELLED', 'REJECTED'],
-  IN_PROGRESS: ['QUOTE_SUBMITTED', 'CANCELLED'],
-  QUOTE_SUBMITTED: ['QUOTE_APPROVED', 'DISPUTED', 'CANCELLED'],
-  QUOTE_APPROVED: ['PENDING_COMPLETION', 'CANCELLED'],
-  DISPUTED: ['QUOTE_APPROVED', 'QUOTE_SUBMITTED', 'CANCELLED'],
-  PENDING_COMPLETION: ['COMPLETED', 'CANCELLED'],
-  COMPLETED: [],
-  REJECTED: [],
-  CANCELLED: [],
-};
+// Condition-based surcharge on the base price — HEAVY jobs take more effort;
+// TIDY/NORMAL carry no adjustment.
+const CONDITION_FEE_MULTIPLIER: Record<string, number> = { TIDY: 0, NORMAL: 0, HEAVY: 0.25 };
+// Distance-based surcharge beyond a free radius around the worker.
+const FREE_DISTANCE_KM = 5;
+const PER_KM_FEE = 10;
+const DEFAULT_MATCH_RADIUS_KM = 30;
 
-const isValidTransition = (currentStatus: string, newStatus: string): boolean => {
-  return VALID_TRANSITIONS[currentStatus]?.includes(newStatus) ?? false;
-};
+const round2 = (n: number): number => Math.round(n * 100) / 100;
+
+async function resolveServiceTypeConfig(name: string) {
+  return prisma.serviceType.findFirst({
+    where: { name: { equals: name, mode: 'insensitive' } },
+    include: { scopeFields: { include: { options: true } } },
+  });
+}
 
 /**
  * POST /api/bookings
- * Create a new booking (client only)
+ * Create a new booking (client only).
+ *
+ * If workerId is omitted, runs the "surprise me" auto-match algorithm
+ * (see matchingService.findAutoMatchWorker) to pick a worker instead of
+ * requiring the client to choose one. Price is always computed server-side
+ * (basePrice + condition surcharge + distance surcharge), logged via
+ * PricingLog, and checked against any PricingRule for (city, serviceType).
+ * A Payment row is created immediately in an authorized/held state (see
+ * paymentLifecycleService.authorizePaymentForBooking) rather than after
+ * completion, and a 1-hour expiry job is queued so an unanswered PENDING
+ * booking auto-cancels (see queues/bookingQueue + workers/bookingWorker).
  */
 export const createBooking = async (req: AuthRequest, res: Response) => {
   try {
     if (!req.user || req.user.role !== 'CLIENT') {
       return res.status(403).json(errorResponse(403, 'Only clients can create bookings'));
     }
+    const clientId = req.user.userId;
 
     const {
-      workerId,
-      serviceTaskId,
+      workerId: requestedWorkerId,
       serviceType,
+      serviceTaskId,
+      rooms,
+      condition,
       description,
-      location,
+      address,
       city,
-      scheduledDate,
-      estimatedPrice,
+      lat,
+      lng,
+      date,
+      timeSlot,
+      addOns,
+      packageIds,
+      priorities,
+      tip,
       notes,
-      estimatedDurationHours,
-      inspectionFeeCharged,
-      inspectionFeeAmount,
       paymentMethodType,
       paymentAccountIdentifier,
-    } = req.body;
+      scopeAnswers,
+      issuePhotoUrls,
+    } = req.body as {
+      workerId?: string;
+      serviceType: string;
+      serviceTaskId?: string;
+      rooms?: RoomType[];
+      condition?: ConditionType;
+      description?: string;
+      address: string;
+      city?: string;
+      lat: number;
+      lng: number;
+      date: string;
+      timeSlot: TimeSlot;
+      addOns?: Array<{ id?: string; name?: string; price: number }>;
+      packageIds?: string[];
+      priorities?: string[];
+      tip?: number;
+      notes?: string;
+      paymentMethodType?: PaymentMethodType;
+      paymentAccountIdentifier?: string;
+      scopeAnswers?: Record<string, string | string[]>;
+      issuePhotoUrls?: string[];
+    };
 
-    // Verify worker exists and is available
-    const worker = await prisma.workerProfile.findUnique({
-      where: { userId: workerId },
-    });
+    const scheduledDate = toDayStart(date);
+    const clientLocation = { lat, lng };
+    const cityName = city ?? '';
 
-    if (!worker) {
-      return res.status(404).json(errorResponse(404, 'Worker not found'));
+    const serviceTask = serviceTaskId
+      ? await prisma.serviceTask.findUnique({ where: { id: serviceTaskId }, include: { serviceType: true } })
+      : null;
+
+    if (serviceTaskId && !serviceTask) {
+      return res.status(404).json(errorResponse(404, 'Service task not found'));
     }
 
-    if (!worker.isAvailable) {
-      return res.status(409).json(errorResponse(409, 'Worker is not currently available'));
+    const resolvedServiceTypeName = serviceTask?.serviceType.name ?? serviceType;
+    // Task-priced bookings aren't category-scoped — only fetch/enforce the
+    // parent category's scope config (rooms vs custom fields, condition
+    // on/off) when the client booked straight off a ServiceType.
+    const serviceTypeConfig = serviceTask ? null : await resolveServiceTypeConfig(resolvedServiceTypeName);
+    const basePrice = serviceTask?.basePrice ?? serviceTypeConfig?.basePrice ?? null;
+
+    if (basePrice == null) {
+      return res.status(404).json(errorResponse(404, 'Service type not found'));
     }
 
-    // Verify service task exists (optional field)
-    if (serviceTaskId) {
-      const serviceTask = await prisma.serviceTask.findUnique({
-        where: { id: serviceTaskId },
-      });
-      if (!serviceTask) {
-        return res.status(404).json(errorResponse(404, 'Service task not found'));
+    if (serviceTypeConfig) {
+      if (serviceTypeConfig.scopeType === 'ROOM_BASED') {
+        if (!Array.isArray(rooms) || rooms.length === 0) {
+          return res.status(400).json(errorResponse(400, 'At least one room is required for this service'));
+        }
+      } else if (serviceTypeConfig.scopeType === 'CUSTOM') {
+        const answers: Record<string, string | string[]> =
+          scopeAnswers && typeof scopeAnswers === 'object' && !Array.isArray(scopeAnswers)
+            ? (scopeAnswers as Record<string, string | string[]>)
+            : {};
+        for (const field of serviceTypeConfig.scopeFields) {
+          const answer = answers[field.label];
+          const hasAnswer = Array.isArray(answer) ? answer.length > 0 : typeof answer === 'string' && answer.trim().length > 0;
+          if (field.required && !hasAnswer) {
+            return res.status(400).json(errorResponse(400, `"${field.label}" is required for this service`));
+          }
+          if (hasAnswer && (field.fieldType === 'SELECT' || field.fieldType === 'MULTI_SELECT')) {
+            const validLabels = new Set(field.options.map((o) => o.label));
+            const values = Array.isArray(answer) ? answer : [answer as string];
+            if (!values.every((v) => validLabels.has(v))) {
+              return res.status(400).json(errorResponse(400, `"${field.label}" has an invalid selection`));
+            }
+          }
+        }
+      }
+
+      if (serviceTypeConfig.hasCondition && !condition) {
+        return res.status(400).json(errorResponse(400, 'condition is required for this service'));
       }
     }
 
-    // Server-side validation for scheduledTime if provided
-    const HHMM_REGEX = /^([01]\d|2[0-3]):[0-5]\d$/;
-    const scheduledTime = req.body.scheduledTime;
-    if (scheduledTime && !HHMM_REGEX.test(scheduledTime)) {
-      return res.status(400).json(errorResponse(400, 'scheduledTime must be in HH:mm 24h format'));
+    // hasCondition=false means this category doesn't ask the question at
+    // all — ignore whatever the client sent rather than erroring on it.
+    const effectiveCondition = serviceTypeConfig && !serviceTypeConfig.hasCondition ? null : (condition ?? null);
+    const effectiveScopeAnswers =
+      scopeAnswers && typeof scopeAnswers === 'object' && !Array.isArray(scopeAnswers) ? scopeAnswers : undefined;
+    const effectiveIssuePhotoUrls = Array.isArray(issuePhotoUrls)
+      ? issuePhotoUrls.filter((url): url is string => typeof url === 'string' && url.length > 0)
+      : [];
+
+    const hasPets = Array.isArray(priorities) && priorities.some((p) => p.toLowerCase().includes('pet'));
+
+    let resolvedWorkerId = requestedWorkerId ?? null;
+    let isAutoMatched = false;
+    let matchDistanceKm: number | null = null;
+
+    if (!resolvedWorkerId) {
+      const match = await findAutoMatchWorker({
+        serviceType: resolvedServiceTypeName,
+        serviceTaskId,
+        date: scheduledDate,
+        timeSlot,
+        condition: effectiveCondition,
+        rooms,
+        hasPets,
+        clientLocation,
+        radiusKm: DEFAULT_MATCH_RADIUS_KM,
+      });
+
+      if (!match) {
+        return res.status(404).json(errorResponse(404, 'No available worker found for this request'));
+      }
+
+      resolvedWorkerId = match.workerId;
+      isAutoMatched = true;
+      matchDistanceKm = match.distanceKm;
     }
 
-    const estimatedDurationHoursVal =
-      typeof estimatedDurationHours === 'number' && estimatedDurationHours >= 0
-        ? estimatedDurationHours
-        : undefined;
-    const inspectionFeeAmountVal =
-      typeof inspectionFeeAmount === 'number' && inspectionFeeAmount >= 0
-        ? inspectionFeeAmount
-        : undefined;
-    const inspectionFeeChargedVal =
-      inspectionFeeAmountVal != null && inspectionFeeAmountVal > 0
-        ? true
-        : Boolean(inspectionFeeCharged);
+    const workerProfile = await prisma.workerProfile.findUnique({ where: { userId: resolvedWorkerId } });
 
-    if (!req.user?.userId) {
-      return res.status(401).json(errorResponse(401, 'Unauthorized'));
+    if (!workerProfile) {
+      return res.status(404).json(errorResponse(404, 'Worker not found'));
     }
 
-    const userId = req.user?.userId;
-    if (!userId) {
-      return res.status(401).json(errorResponse(401, 'Unauthorized'));
+    if (workerProfile.kycStatus !== 'APPROVED') {
+      return res.status(403).json(errorResponse(403, 'Worker is not verified yet'));
     }
 
-    // Wrap availability check + insert in a transaction to avoid race conditions
+    if (!workerProfile.isAvailable) {
+      return res.status(409).json(errorResponse(409, 'Worker is not currently available'));
+    }
+
+    if (workerProfile.activeJobCount >= workerProfile.maxConcurrentJobs) {
+      return res.status(409).json(errorResponse(409, 'Worker is at maximum capacity'));
+    }
+
+    const slot = await findSlot(prisma, workerProfile.id, scheduledDate, timeSlot);
+    if (!slot || slot.isBlocked || slot.isBooked) {
+      return res.status(409).json(errorResponse(409, 'Selected slot is no longer available'));
+    }
+
+    const workerDistanceKm =
+      matchDistanceKm ??
+      (workerProfile.currentLat != null && workerProfile.currentLng != null
+        ? distanceKm(clientLocation, { lat: workerProfile.currentLat, lng: workerProfile.currentLng })
+        : null);
+
+    // Free job-preference toggles carry no price of their own — clamp
+    // server-side so a tampered client can't slip a nonzero price through
+    // this array (only resolvedPackages below, priced from the worker's own
+    // WorkerPackage rows, are a trustworthy priced-add-on source).
+    const preferenceAddOns = (Array.isArray(addOns) ? addOns : []).map((a) => ({
+      name: a.name || a.id || 'Add-on',
+      price: 0,
+    }));
+
+    let resolvedPackages: { name: string; price: number }[] = [];
+    if (Array.isArray(packageIds) && packageIds.length > 0) {
+      const found = await prisma.workerPackage.findMany({
+        where: { id: { in: packageIds }, workerProfileId: workerProfile.id, isActive: true },
+      });
+      if (found.length !== packageIds.length) {
+        return res.status(400).json(errorResponse(400, 'One or more selected packages are unavailable'));
+      }
+      resolvedPackages = found.map((p) => ({ name: p.name, price: p.price }));
+    }
+
+    const addOnsList = [...preferenceAddOns, ...resolvedPackages];
+    const addOnsTotal = addOnsList.reduce((sum, a) => sum + (typeof a.price === 'number' ? a.price : 0), 0);
+    const conditionFee = round2(basePrice * (CONDITION_FEE_MULTIPLIER[effectiveCondition ?? 'NORMAL'] ?? 0));
+    const distanceFee = round2(workerDistanceKm != null ? Math.max(0, workerDistanceKm - FREE_DISTANCE_KM) * PER_KM_FEE : 0);
+    const estimatedPrice = round2(basePrice + conditionFee + distanceFee);
+    const finalEstimate = round2(estimatedPrice + addOnsTotal);
+
+    const priceCheck = await validatePriceWithinPricingRule(cityName, resolvedServiceTypeName, finalEstimate);
+    if (!priceCheck.ok) {
+      return res.status(409).json(
+        errorResponse(
+          409,
+          `Calculated price ₱${finalEstimate} is outside the allowed range (₱${priceCheck.bounds.minPrice}–₱${priceCheck.bounds.maxPrice}) for ${cityName || 'this city'}/${resolvedServiceTypeName}`
+        )
+      );
+    }
+
     try {
-      const booking = await prisma.$transaction(async (tx: any) => {
-        // Re-fetch worker profile inside transaction
-        const workerProfile = await tx.workerProfile.findUnique({ where: { userId: workerId } });
-        if (!workerProfile) throw new Error('Worker not found');
-        if (!workerProfile.isAvailable) throw new Error('Worker not available');
+      const { booking, payment } = await prisma.$transaction(async (tx) => {
+        // Re-check KYC + capacity + slot inside the transaction to close the
+        // race between the checks above and this insert (e.g. an admin
+        // rejecting the worker in that window).
+        const workerTx = await tx.workerProfile.findUnique({ where: { userId: resolvedWorkerId! } });
+        if (!workerTx) throw new Error('WORKER_NOT_FOUND');
+        if (workerTx.kycStatus !== 'APPROVED') throw new Error('WORKER_NOT_APPROVED');
+        if (workerTx.activeJobCount >= workerTx.maxConcurrentJobs) throw new Error('AT_CAPACITY');
 
-        // Check for slot conflicts (same worker, same date, same time)
-        const existing = await tx.booking.findFirst({
-          where: {
-            workerId,
-            scheduledDate: new Date(scheduledDate),
-            scheduledTime: scheduledTime ?? null,
-            // consider only bookings that block the slot
-            status: { in: ['PENDING', 'ACCEPTED', 'IN_PROGRESS', 'QUOTE_SUBMITTED', 'QUOTE_APPROVED'] },
-          },
-        });
+        const slotTx = await findSlot(tx, workerTx.id, scheduledDate, timeSlot);
+        if (!slotTx || slotTx.isBlocked || slotTx.isBooked) throw new Error('SLOT_TAKEN');
 
-        if (existing) {
-          throw new Error('Slot not available');
-        }
-
-        // Insert booking (include tip if provided)
-        const tipVal = typeof req.body.tip === 'number' ? req.body.tip : 0;
         const created = await tx.booking.create({
           data: {
-            clientId: userId,
-            workerId,
+            clientId,
+            workerId: resolvedWorkerId,
+            serviceType: resolvedServiceTypeName,
             serviceTaskId: serviceTaskId ?? null,
-            serviceType: serviceType ?? 'GENERAL',
             description: description ?? '',
-            location,
-            city: city ?? '',
-            scheduledDate: new Date(scheduledDate),
-            scheduledTime: scheduledTime ?? null,
-            estimatedDurationHours: estimatedDurationHoursVal ?? null,
+            estimatedDurationHours: serviceTask?.durationHours ?? null,
+            rooms: Array.isArray(rooms) ? rooms : [],
+            condition: effectiveCondition,
+            priorities: Array.isArray(priorities) ? priorities : [],
+            addOnsSnapshot: addOnsList.length > 0 ? addOnsList : undefined,
+            scopeAnswers: effectiveScopeAnswers,
+            issuePhotoUrls: effectiveIssuePhotoUrls,
+            scheduledDate,
+            timeSlot,
+            isAutoMatched,
+            declinedWorkerIds: [],
+            expiresAt: new Date(Date.now() + 60 * 60 * 1000),
             estimatedPrice,
-            tip: tipVal,
-            notes,
-            inspectionFeeCharged: inspectionFeeChargedVal,
-            inspectionFeeAmount: inspectionFeeAmountVal ?? null,
+            tip: typeof tip === 'number' ? tip : 0,
+            notes: notes ?? null,
             paymentMethodType: paymentMethodType ?? null,
             paymentAccountIdentifier: paymentAccountIdentifier ?? null,
+            location: address,
+            city: cityName,
+            clientLat: lat,
+            clientLng: lng,
+            workerLat: workerProfile.currentLat ?? null,
+            workerLng: workerProfile.currentLng ?? null,
+            distanceMeters: workerDistanceKm != null ? Math.round(workerDistanceKm * 1000) : null,
             status: 'PENDING',
           },
           include: {
@@ -174,19 +316,48 @@ export const createBooking = async (req: AuthRequest, res: Response) => {
           },
         });
 
-        // Persist add-ons if provided
-        const addOns = Array.isArray(req.body.addOns) ? req.body.addOns : [];
-        if (addOns.length > 0) {
-          const mapped = addOns.map((a: any) => ({ bookingId: created.id, name: a.name || a.id || 'Add-on', price: typeof a.price === 'number' ? a.price : 0 }));
-          await tx.bookingAddOn.createMany({ data: mapped });
+        if (addOnsList.length > 0) {
+          await tx.bookingAddOn.createMany({
+            data: addOnsList.map((a) => ({
+              bookingId: created.id,
+              name: a.name,
+              price: typeof a.price === 'number' ? a.price : 0,
+            })),
+          });
         }
 
-        return created;
+        await tx.pricingLog.create({
+          data: {
+            bookingId: created.id,
+            basePrice,
+            conditionFee,
+            distanceFee,
+            addOnsTotal,
+            finalEstimate,
+            breakdown: {
+              basePrice,
+              conditionFee,
+              distanceFee,
+              addOnsTotal,
+              finalEstimate,
+              condition: effectiveCondition,
+              distanceKm: workerDistanceKm,
+              isAutoMatched,
+            },
+          },
+        });
+
+        await markSlotBooked(tx, workerTx.id, scheduledDate, timeSlot);
+
+        const createdPayment = await authorizePaymentForBooking(tx, created, addOnsTotal);
+
+        return { booking: created, payment: createdPayment };
       });
 
-      // Create notification for worker
+      await schedulePendingExpiry(booking.id);
+
       await notifyUser({
-        userId: workerId,
+        userId: booking.workerId as string,
         type: 'BOOKING_REQUEST',
         title: 'New Booking Request',
         message: `${booking.client.fullName} has requested your service`,
@@ -199,24 +370,31 @@ export const createBooking = async (req: AuthRequest, res: Response) => {
         data: {
           id: booking.id,
           clientName: booking.client.fullName,
-          workerName: booking.worker.fullName,
+          workerName: booking.worker?.fullName ?? null,
+          isAutoMatched,
           status: booking.status,
           scheduledDate: booking.scheduledDate,
-          scheduledTime: booking.scheduledTime,
+          timeSlot: booking.timeSlot,
           estimatedPrice: booking.estimatedPrice,
           estimatedDurationHours: booking.estimatedDurationHours,
-          inspectionFeeCharged: booking.inspectionFeeCharged,
-          inspectionFeeAmount: booking.inspectionFeeAmount,
+          expiresAt: booking.expiresAt,
+          pricing: { basePrice, conditionFee, distanceFee, addOnsTotal, finalEstimate },
+          payment: { id: payment.id, status: payment.status, escrowStatus: payment.escrowStatus, clientSecret: payment.clientSecret },
         },
       });
     } catch (txErr: any) {
-      if (txErr.message === 'Slot not available') {
+      if (txErr.message === 'SLOT_TAKEN') {
         return res.status(409).json(errorResponse(409, 'Slot no longer available'));
       }
-      if (txErr.message === 'Worker not found' || txErr.message === 'Worker not available') {
-        return res.status(404).json(errorResponse(404, txErr.message));
+      if (txErr.message === 'AT_CAPACITY') {
+        return res.status(409).json(errorResponse(409, 'Worker is at maximum capacity'));
       }
-      // Prisma unique constraint code
+      if (txErr.message === 'WORKER_NOT_FOUND') {
+        return res.status(404).json(errorResponse(404, 'Worker not found'));
+      }
+      if (txErr.message === 'WORKER_NOT_APPROVED') {
+        return res.status(403).json(errorResponse(403, 'Worker is not verified yet'));
+      }
       if (txErr.code === 'P2002') {
         return res.status(409).json(errorResponse(409, 'Slot no longer available'));
       }
@@ -261,7 +439,15 @@ export const listBookings = async (req: AuthRequest, res: Response) => {
         where: whereClause,
         include: {
           client: { select: { id: true, fullName: true, avatar: true, phone: true } },
-          worker: { select: { id: true, fullName: true, avatar: true, phone: true } },
+          worker: {
+            select: {
+              id: true,
+              fullName: true,
+              avatar: true,
+              phone: true,
+              workerProfile: { select: { kycStatus: true } },
+            },
+          },
           serviceTask: { select: { id: true, name: true, serviceType: { select: { name: true } } } },
           review: { select: { rating: true } },
         },
@@ -272,6 +458,15 @@ export const listBookings = async (req: AuthRequest, res: Response) => {
       prisma.booking.count({ where: whereClause }),
     ]);
 
+    // workerPayoutEstimate below uses the live AppSettings rates (not the
+    // COMMISSION_RATE/WITHHOLDING_TAX_RATE env-var defaults) so this estimate
+    // doesn't silently drift once an admin changes the platform's commission
+    // rate — the real payout is still only settled from the Payment row.
+    const { commissionRate, withholdingTaxRate } = await getAppSettings();
+
+    // Worker-facing list needs enough of the job scope to size up a request
+    // (rooms, condition, distance, payout) without a second round-trip to
+    // getBookingDetail per row.
     const formattedBookings = bookings.map((b: any) => ({
       id: b.id,
       clientName: b.client.fullName,
@@ -280,12 +475,23 @@ export const listBookings = async (req: AuthRequest, res: Response) => {
       workerName: b.worker?.fullName ?? null,
       workerId: b.worker?.id ?? null,
       workerPhone: b.worker?.phone ?? null,
+      workerAvatar: b.worker?.avatar ?? null,
+      workerVerified: b.worker?.workerProfile?.kycStatus === 'APPROVED',
       service: b.serviceTask?.name ?? b.serviceType,
       category: b.serviceTask?.serviceType?.name ?? b.serviceType,
       status: b.status,
       scheduledDate: b.scheduledDate,
+      timeSlot: b.timeSlot,
+      rooms: b.rooms,
+      condition: b.condition,
+      location: b.location,
+      city: b.city,
+      distanceMeters: b.distanceMeters,
       estimatedPrice: b.estimatedPrice,
       finalPrice: b.finalPrice,
+      // Estimate only — the authoritative payout is on the Payment row,
+      // settled at capture time (see paymentLifecycleService).
+      workerPayoutEstimate: calculateWorkerPayout(b.finalPrice ?? b.estimatedPrice, b.tip ?? 0, commissionRate, withholdingTaxRate),
       rating: b.review?.rating ?? null,
     }));
 
@@ -324,12 +530,25 @@ export const getBookingDetail = async (req: AuthRequest, res: Response) => {
       where: { id },
       include: {
         client: { select: { id: true, fullName: true, email: true, phone: true } },
-        worker: { select: { id: true, fullName: true, email: true, phone: true } },
+        worker: {
+          select: {
+            id: true,
+            fullName: true,
+            email: true,
+            phone: true,
+            avatar: true,
+            workerProfile: { select: { kycStatus: true } },
+          },
+        },
         serviceTask: { include: { serviceType: { select: { name: true } } } },
-        payment: { select: { methodType: true, accountIdentifier: true, status: true, totalAmount: true } },
+        payment: true,
         // Quote data lives inline on Booking (laborCost, materialsCost, etc.)
         addOns: true,  // schema relation is addOns (capital O)
         review: true,
+        pricingLogs: { orderBy: { createdAt: 'asc' } },
+        disputes: { orderBy: { createdAt: 'desc' } },
+        arrivalVerification: true,
+        cancellation: true,
       },
     });
 
@@ -337,8 +556,9 @@ export const getBookingDetail = async (req: AuthRequest, res: Response) => {
       return res.status(404).json(errorResponse(404, 'Booking not found'));
     }
 
-    // Check ownership (client or assigned worker)
-    if (booking.clientId !== req.user.userId && booking.workerId !== req.user.userId) {
+    // Check ownership (client, assigned worker, or any admin)
+    const isOwner = booking.clientId === req.user.userId || booking.workerId === req.user.userId;
+    if (!isOwner && req.user.role !== 'ADMIN') {
       return res.status(403).json(errorResponse(403, 'You do not have permission to view this booking'));
     }
 
@@ -347,7 +567,7 @@ export const getBookingDetail = async (req: AuthRequest, res: Response) => {
     const hasQuote = booking.laborCost != null && booking.materialsCost != null;
     const finalPrice = hasQuote
       ? (booking.laborCost ?? 0) + (booking.materialsCost ?? 0) + addonsCost
-      : booking.estimatedPrice;
+      : booking.estimatedPrice + addonsCost;
 
     return res.status(200).json({
       success: true,
@@ -355,13 +575,29 @@ export const getBookingDetail = async (req: AuthRequest, res: Response) => {
       data: {
         id: booking.id,
         client: booking.client,
-        worker: booking.worker,
+        worker: booking.worker
+          ? {
+              id: booking.worker.id,
+              fullName: booking.worker.fullName,
+              email: booking.worker.email,
+              phone: booking.worker.phone,
+              avatar: booking.worker.avatar,
+              verified: booking.worker.workerProfile?.kycStatus === 'APPROVED',
+            }
+          : null,
         service: booking.serviceTask?.name ?? booking.serviceType,
         category: booking.serviceTask?.serviceType?.name ?? booking.serviceType,
         status: booking.status,
         location: booking.location,
+        city: booking.city,
         scheduledDate: booking.scheduledDate,
         scheduledTime: booking.scheduledTime,
+        timeSlot: booking.timeSlot,
+        rooms: booking.rooms,
+        condition: booking.condition,
+        scopeAnswers: booking.scopeAnswers,
+        priorities: booking.priorities,
+        isAutoMatched: booking.isAutoMatched,
         estimatedPrice: booking.estimatedPrice,
         finalPrice,
         completionPhotoUrl: booking.completionPhotoUrl,
@@ -374,10 +610,22 @@ export const getBookingDetail = async (req: AuthRequest, res: Response) => {
         paymentAccountIdentifier: booking.paymentAccountIdentifier,
         payment: booking.payment
           ? {
+              id: booking.payment.id,
               methodType: booking.payment.methodType,
               accountIdentifier: booking.payment.accountIdentifier,
               status: booking.payment.status,
+              escrowStatus: booking.payment.escrowStatus,
               totalAmount: booking.payment.totalAmount,
+              authorizedAmount: booking.payment.authorizedAmount,
+              authorizedAt: booking.payment.authorizedAt,
+              capturedAmount: booking.payment.capturedAmount,
+              capturedAt: booking.payment.capturedAt,
+              releasedAt: booking.payment.releasedAt,
+              subtotal: booking.payment.subtotal,
+              tip: booking.payment.tip,
+              commissionAmount: booking.payment.commissionAmount,
+              withholdingTaxAmount: booking.payment.withholdingTaxAmount,
+              workerPayout: booking.payment.workerPayout,
             }
           : null,
         quote: hasQuote
@@ -392,6 +640,20 @@ export const getBookingDetail = async (req: AuthRequest, res: Response) => {
         addOns: booking.addOns,
         review: booking.review,
         notes: booking.notes,
+        // Chronological milestones for a status-progress UI.
+        timeline: {
+          createdAt: booking.createdAt,
+          acceptedAt: ['ACCEPTED', 'IN_PROGRESS', 'QUOTE_SUBMITTED', 'QUOTE_APPROVED', 'DISPUTED', 'PENDING_COMPLETION', 'COMPLETED'].includes(booking.status) ? booking.updatedAt : null,
+          workerArrivedAt: booking.workerArrivedAt,
+          workerStartedAt: booking.workerStartedAt,
+          quotedAt: booking.quotedAt,
+          approvedAt: booking.approvedAt,
+          completionDate: booking.completionDate,
+        },
+        pricingLogs: booking.pricingLogs,
+        disputes: booking.disputes,
+        arrivalVerification: booking.arrivalVerification,
+        cancellation: booking.cancellation,
         createdAt: booking.createdAt,
         updatedAt: booking.updatedAt,
       },
@@ -434,7 +696,7 @@ export const acceptBooking = async (req: AuthRequest, res: Response) => {
 
     // Wrap in transaction to prevent double-counting
     try {
-      const result = await prisma.$transaction(async (tx: any) => {
+      const result = await prisma.$transaction(async (tx) => {
         // Check current capacity
         const workerProfile = await tx.workerProfile.findUnique({
           where: { userId: currentUserId },
@@ -460,8 +722,16 @@ export const acceptBooking = async (req: AuthRequest, res: Response) => {
           data: { activeJobCount: { increment: 1 } },
         });
 
+        if (booking.timeSlot) {
+          await markSlotBooked(tx, workerProfile.id, booking.scheduledDate, booking.timeSlot);
+        }
+
         return updated;
       });
+
+      // The booking is no longer PENDING, so the 1-hour auto-expiry no
+      // longer applies.
+      await cancelPendingExpiryJob(id);
 
       // Create notification for client
       await notifyUser({
@@ -494,11 +764,11 @@ export const acceptBooking = async (req: AuthRequest, res: Response) => {
 
 /**
  * PATCH /api/bookings/:id/decline
- * Worker declines (rejects) booking — reverts to PENDING so client can re-assign
- *
- * NOTE: Schema has no DECLINED status; REJECTED is used here, but since we
- * immediately revert back to PENDING, the booking is returned to the client
- * in a re-assignable state.
+ * Worker declines a PENDING booking. Records the decline (DeclinedWorker +
+ * Booking.declinedWorkerIds), moves the booking to the terminal REJECTED
+ * status, voids the payment hold, and returns alternative worker candidates
+ * (re-running auto-match excluding every worker who's declined so far) so
+ * the client can pick another one without starting the booking from scratch.
  */
 export const declineBooking = async (req: AuthRequest, res: Response) => {
   try {
@@ -508,6 +778,7 @@ export const declineBooking = async (req: AuthRequest, res: Response) => {
 
     const id = req.params.id as string;
     const { reason } = req.body;
+    const workerId = req.user.userId;
 
     const booking = await prisma.booking.findUnique({
       where: { id },
@@ -517,7 +788,7 @@ export const declineBooking = async (req: AuthRequest, res: Response) => {
       return res.status(404).json(errorResponse(404, 'Booking not found'));
     }
 
-    if (booking.workerId !== req.user.userId) {
+    if (booking.workerId !== workerId) {
       return res.status(403).json(errorResponse(403, 'This booking is not assigned to you'));
     }
 
@@ -526,27 +797,59 @@ export const declineBooking = async (req: AuthRequest, res: Response) => {
       return res.status(409).json(errorResponse(409, `Cannot decline booking with status ${booking.status}`));
     }
 
-    // Set to REJECTED momentarily, then back to PENDING so client can re-assign
-    await prisma.booking.update({
-      where: { id },
-      data: { status: 'REJECTED', notes: reason }, // schema has no cancelReason; storing in notes
+    const updatedDeclinedWorkerIds = Array.from(new Set([...booking.declinedWorkerIds, workerId]));
+
+    const updated = await prisma.$transaction(async (tx) => {
+      await tx.declinedWorker.upsert({
+        where: { bookingId_workerId: { bookingId: id, workerId } },
+        create: { bookingId: id, workerId, reason: typeof reason === 'string' ? reason : null },
+        update: { reason: typeof reason === 'string' ? reason : null },
+      });
+
+      const workerProfile = await tx.workerProfile.findUnique({ where: { userId: workerId }, select: { id: true } });
+      if (workerProfile && booking.timeSlot) {
+        await freeSlot(tx, workerProfile.id, booking.scheduledDate, booking.timeSlot);
+      }
+
+      return tx.booking.update({
+        where: { id },
+        data: {
+          status: 'REJECTED',
+          declinedWorkerIds: updatedDeclinedWorkerIds,
+        },
+      });
     });
 
-    // Revert to PENDING so client can re-assign
-    const updated = await prisma.booking.update({
-      where: { id },
-      data: { status: 'PENDING' },
+    await cancelPendingExpiryJob(id);
+    await refundOrVoidPayment(id, 'WORKER_DECLINED').catch((error) => {
+      console.error(`Failed to void payment for declined booking ${id}:`, error);
     });
 
     await writeAuditLog({
-      actorId: req.user.userId,
+      actorId: workerId,
       actorName: req.user.email,
       actorRole: req.user.role,
       action: 'BOOKING_DECLINED',
       category: 'STATUS_CHANGE',
       message: `Worker declined booking ${formatDisplayId(id)}`,
-      metadata: { bookingId: id, workerId: req.user.userId },
+      metadata: { bookingId: id, workerId },
     });
+
+    // Suggest alternatives — best-effort; a client-facing rebooking flow
+    // still goes through POST /api/bookings with workerId omitted.
+    const alternatives = updated.timeSlot
+      ? await findAutoMatchWorker({
+          serviceType: updated.serviceType,
+          serviceTaskId: updated.serviceTaskId,
+          date: updated.scheduledDate,
+          timeSlot: updated.timeSlot,
+          condition: updated.condition,
+          rooms: updated.rooms,
+          clientLocation: { lat: updated.clientLat ?? 0, lng: updated.clientLng ?? 0 },
+          radiusKm: DEFAULT_MATCH_RADIUS_KM,
+          excludeWorkerIds: updatedDeclinedWorkerIds,
+        }).catch(() => null)
+      : null;
 
     // Notify client
     await notifyUser({
@@ -562,7 +865,8 @@ export const declineBooking = async (req: AuthRequest, res: Response) => {
       message: 'Booking declined successfully',
       data: {
         id: updated.id,
-        status: 'PENDING',
+        status: updated.status,
+        alternativeWorkerId: alternatives?.workerId ?? null,
       },
     });
   } catch (error) {
@@ -572,8 +876,93 @@ export const declineBooking = async (req: AuthRequest, res: Response) => {
 };
 
 /**
+ * PATCH /api/bookings/:id/arrive
+ * Worker checks in at the job site. Requires status ACCEPTED and the
+ * worker's reported GPS to be within the admin-configured geofence radius
+ * (AppSettings.geofenceRadiusMeters) of the client's booking address.
+ * Records an ArrivalVerification audit row and stamps
+ * Booking.workerArrivedAt — required before /start can fire.
+ */
+export const arriveBooking = async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user || req.user.role !== 'WORKER') {
+      return res.status(403).json(errorResponse(403, 'Only workers can check in as arrived'));
+    }
+
+    const id = req.params.id as string;
+    const { lat, lng } = req.body as { lat: number; lng: number };
+
+    const booking = await prisma.booking.findUnique({ where: { id } });
+
+    if (!booking) {
+      return res.status(404).json(errorResponse(404, 'Booking not found'));
+    }
+
+    if (booking.workerId !== req.user.userId) {
+      return res.status(403).json(errorResponse(403, 'This booking is not assigned to you'));
+    }
+
+    if (booking.status !== 'ACCEPTED') {
+      return res.status(409).json(errorResponse(409, `Cannot check in for booking with status ${booking.status}`));
+    }
+
+    if (booking.clientLat == null || booking.clientLng == null) {
+      return res.status(409).json(errorResponse(409, 'Booking has no client location on file to verify arrival against'));
+    }
+
+    const { geofenceRadiusMeters } = await getAppSettings();
+    const clientLocation = { lat: booking.clientLat, lng: booking.clientLng };
+    const workerLocation = { lat, lng };
+    const distance = distanceMeters(clientLocation, workerLocation);
+    const isVerified = isWithinRadiusMeters(clientLocation, workerLocation, geofenceRadiusMeters);
+
+    if (!isVerified) {
+      return res.status(409).json(
+        errorResponse(409, `You are ${Math.round(distance)}m from the job site — must be within ${geofenceRadiusMeters}m to check in`)
+      );
+    }
+
+    const [arrival, updated] = await prisma.$transaction([
+      prisma.arrivalVerification.create({
+        data: { bookingId: id, workerLat: lat, workerLng: lng, distanceMeters: distance, isVerified: true },
+      }),
+      prisma.booking.update({
+        where: { id },
+        data: { workerArrivedAt: new Date(), workerLat: lat, workerLng: lng },
+      }),
+    ]);
+
+    await notifyUser({
+      userId: updated.clientId,
+      type: 'BOOKING_ACCEPTED',
+      title: 'Worker Has Arrived',
+      message: 'Your worker has checked in at the job site.',
+      relatedId: id,
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: 'Arrival verified successfully',
+      data: {
+        id: updated.id,
+        workerArrivedAt: updated.workerArrivedAt,
+        arrivalVerification: {
+          id: arrival.id,
+          distanceMeters: arrival.distanceMeters,
+          isVerified: arrival.isVerified,
+          createdAt: arrival.createdAt,
+        },
+      },
+    });
+  } catch (error) {
+    console.error('Error verifying arrival:', error);
+    return res.status(500).json(errorResponse(500, 'Failed to verify arrival'));
+  }
+};
+
+/**
  * PATCH /api/bookings/:id/start
- * Worker marks booking as in progress
+ * Worker marks booking as in progress — requires a prior verified arrival.
  */
 export const startBooking = async (req: AuthRequest, res: Response) => {
   try {
@@ -599,10 +988,13 @@ export const startBooking = async (req: AuthRequest, res: Response) => {
       return res.status(409).json(errorResponse(409, `Cannot start booking with status ${booking.status}`));
     }
 
-    // NOTE: schema has no `startedAt` field; we record the state change via updatedAt automatically
+    if (!booking.workerArrivedAt) {
+      return res.status(409).json(errorResponse(409, 'You must check in as arrived before starting this job'));
+    }
+
     const updated = await prisma.booking.update({
       where: { id },
-      data: { status: 'IN_PROGRESS' },
+      data: { status: 'IN_PROGRESS', workerStartedAt: new Date() },
     });
 
     // Notify client
@@ -621,7 +1013,7 @@ export const startBooking = async (req: AuthRequest, res: Response) => {
       data: {
         id: updated.id,
         status: updated.status,
-        startedAt: updated.updatedAt, // use updatedAt as proxy since startedAt doesn't exist
+        workerStartedAt: updated.workerStartedAt,
       },
     });
   } catch (error) {
@@ -675,6 +1067,22 @@ export const submitQuote = async (req: AuthRequest, res: Response) => {
         quoteStatus: 'SUBMITTED',
         quotedAt: new Date(),
         status: 'QUOTE_SUBMITTED',
+      },
+    });
+
+    // Log the revised total (labor + materials) so getBookingDetail's
+    // pricingLogs shows the quote stage alongside the original estimate.
+    await prisma.pricingLog.create({
+      data: {
+        bookingId: id,
+        basePrice: updated.laborCost ?? booking.estimatedPrice,
+        finalEstimate: (updated.laborCost ?? 0) + (updated.materialsCost ?? 0),
+        breakdown: {
+          stage: 'QUOTE_SUBMITTED',
+          laborCost: updated.laborCost,
+          materialsCost: updated.materialsCost,
+          notes: updated.quoteNotes,
+        },
       },
     });
 
@@ -736,14 +1144,25 @@ export const approveQuote = async (req: AuthRequest, res: Response) => {
       return res.status(409).json(errorResponse(409, `Cannot approve quote for booking with status ${booking.status}`));
     }
 
-    const updated = await prisma.booking.update({
-      where: { id },
-      data: {
-        status: 'QUOTE_APPROVED',
-        quoteStatus: 'APPROVED',
-        approvedAt: new Date(),
-        finalPrice: booking.laborCost + booking.materialsCost,
-      },
+    const updated = await prisma.$transaction(async (tx) => {
+      const b = await tx.booking.update({
+        where: { id },
+        data: {
+          status: 'QUOTE_APPROVED',
+          quoteStatus: 'APPROVED',
+          approvedAt: new Date(),
+          finalPrice: booking.laborCost! + booking.materialsCost!,
+        },
+      });
+
+      // Re-affirm the hold — a prior DISPUTED→QUOTE_APPROVED admin
+      // resolution may have left this in a transient state.
+      await tx.payment.updateMany({
+        where: { bookingId: id, escrowStatus: { not: 'RELEASED' } },
+        data: { escrowStatus: 'HELD' },
+      });
+
+      return b;
     });
 
     // Notify worker (workerId is nullable on Booking — skip if unassigned)
@@ -774,8 +1193,10 @@ export const approveQuote = async (req: AuthRequest, res: Response) => {
 
 /**
  * PATCH /api/bookings/:id/quote/dispute
- * Client disputes quote and stores reason
- * Schema uses DISPUTED (not QUOTE_DISPUTED) as the BookingStatus value
+ * Client disputes quote: creates a Dispute record (status OPEN, raised by
+ * the client), moves the booking to DISPUTED, and notifies every admin so
+ * one of them can resolve it via PATCH /api/admin/disputes/:id/resolve.
+ * Schema uses DISPUTED (not QUOTE_DISPUTED) as the BookingStatus value.
  */
 export const disputeQuote = async (req: AuthRequest, res: Response) => {
   try {
@@ -807,14 +1228,24 @@ export const disputeQuote = async (req: AuthRequest, res: Response) => {
       return res.status(409).json(errorResponse(409, `Cannot dispute quote for booking with status ${booking.status}`));
     }
 
-    const updated = await prisma.booking.update({
-      where: { id },
-      data: {
-        status: 'DISPUTED',
-        quoteStatus: 'DISPUTED',
-        disputeReason: reason,
-      },
-    });
+    const [updated, dispute] = await prisma.$transaction([
+      prisma.booking.update({
+        where: { id },
+        data: {
+          status: 'DISPUTED',
+          quoteStatus: 'DISPUTED',
+          disputeReason: reason,
+        },
+      }),
+      prisma.dispute.create({
+        data: {
+          bookingId: id,
+          raisedById: req.user.userId,
+          reason: typeof reason === 'string' ? reason : 'Client disputed the submitted quote',
+          status: 'OPEN',
+        },
+      }),
+    ]);
 
     // Notify worker (workerId is nullable on Booking — skip if unassigned)
     if (booking.workerId) {
@@ -827,6 +1258,19 @@ export const disputeQuote = async (req: AuthRequest, res: Response) => {
       });
     }
 
+    const admins = await prisma.user.findMany({ where: { role: 'ADMIN', isDeleted: false }, select: { id: true } });
+    await Promise.all(
+      admins.map((admin) =>
+        notifyUser({
+          userId: admin.id,
+          type: 'QUOTE_DISPUTED',
+          title: 'New Dispute Raised',
+          message: `Booking ${formatDisplayId(id)} was disputed by the client: ${reason}`,
+          relatedId: dispute.id,
+        })
+      )
+    );
+
     return res.status(200).json({
       success: true,
       message: 'Quote disputed successfully',
@@ -834,6 +1278,7 @@ export const disputeQuote = async (req: AuthRequest, res: Response) => {
         id: updated.id,
         status: updated.status,
         disputeReason: updated.disputeReason,
+        disputeId: dispute.id,
       },
     });
   } catch (error) {
@@ -877,12 +1322,31 @@ export const completeBooking = async (req: AuthRequest, res: Response) => {
       return res.status(409).json(errorResponse(409, `Cannot complete booking with status ${booking.status}`));
     }
 
-    const updated = await prisma.booking.update({
-      where: { id },
-      data: {
-        status: 'PENDING_COMPLETION',
-        completionPhotoUrl,
-      },
+    const updated = await prisma.$transaction(async (tx) => {
+      const b = await tx.booking.update({
+        where: { id },
+        data: {
+          status: 'PENDING_COMPLETION',
+          completionPhotoUrl,
+          workerCompletedAt: new Date(),
+        },
+      });
+
+      // The worker's side of the job is done — free up their capacity and
+      // calendar slot now rather than waiting on the client's confirmation,
+      // which may be delayed or (via the 24h auto-settle job) skipped.
+      if (booking.workerId) {
+        const workerProfile = await tx.workerProfile.update({
+          where: { userId: booking.workerId },
+          data: { activeJobCount: { decrement: 1 } },
+        });
+
+        if (booking.timeSlot) {
+          await freeSlot(tx, workerProfile.id, booking.scheduledDate, booking.timeSlot);
+        }
+      }
+
+      return b;
     });
 
     // Notify client to review the submitted photo and confirm
@@ -911,9 +1375,11 @@ export const completeBooking = async (req: AuthRequest, res: Response) => {
 
 /**
  * PATCH /api/bookings/:id/confirm-completion
- * Client confirms the worker's submitted proof of work. This finalizes the
- * booking (COMPLETED, finalPrice, decrement activeJobCount) — the client
- * proceeds to payment (POST /api/payments/:bookingId) afterward.
+ * Client confirms the worker's submitted proof of work. Finalizes the
+ * booking (COMPLETED, finalPrice), captures the held payment authorization
+ * for the final amount, releases escrow to the worker, and notifies them
+ * that payout has been triggered. activeJobCount/slot were already freed in
+ * completeBooking (the worker's side of the job finishing), not here.
  */
 export const confirmCompletion = async (req: AuthRequest, res: Response) => {
   try {
@@ -940,42 +1406,33 @@ export const confirmCompletion = async (req: AuthRequest, res: Response) => {
       return res.status(409).json(errorResponse(409, `Cannot confirm completion for booking with status ${booking.status}`));
     }
 
-    const result = await prisma.$transaction(async (tx: any) => {
-      // addOns use `price` field per schema
-      const addonsCost = (booking.addOns || []).reduce((sum: number, addon: any) => sum + addon.price, 0);
-      const hasQuote = booking.laborCost != null && booking.materialsCost != null;
-      const finalPrice = hasQuote
-        ? (booking.laborCost ?? 0) + (booking.materialsCost ?? 0) + addonsCost
-        : booking.estimatedPrice;
+    // addOns use `price` field per schema
+    const addonsCost = (booking.addOns || []).reduce((sum: number, addon: any) => sum + addon.price, 0);
+    const hasQuote = booking.laborCost != null && booking.materialsCost != null;
+    const finalPrice = round2(
+      hasQuote ? (booking.laborCost ?? 0) + (booking.materialsCost ?? 0) + addonsCost : booking.estimatedPrice + addonsCost
+    );
 
-      // Update booking — schema has completionDate (not completedAt)
-      const updated = await tx.booking.update({
-        where: { id },
-        data: {
-          status: 'COMPLETED',
-          finalPrice,
-          completionDate: new Date(),
-        },
-      });
-
-      // Decrement activeJobCount
-      if (booking.workerId) {
-        await tx.workerProfile.update({
-          where: { userId: booking.workerId },
-          data: { activeJobCount: { decrement: 1 } },
-        });
-      }
-
-      return updated;
+    // Update booking — schema has completionDate (not completedAt)
+    const updated = await prisma.booking.update({
+      where: { id },
+      data: {
+        status: 'COMPLETED',
+        finalPrice,
+        completionDate: new Date(),
+      },
     });
 
-    // Notify worker
+    const payment = await captureAndReleasePayment(id, finalPrice, booking.workerId);
+
+    // captureAndReleasePayment already sends a "payment released" notification —
+    // this one separately confirms the job itself was accepted as done.
     if (booking.workerId) {
       await notifyUser({
         userId: booking.workerId,
         type: 'BOOKING_COMPLETED',
         title: 'Client Confirmed Completion',
-        message: 'The client confirmed your work. You can proceed to receive payment.',
+        message: 'The client confirmed your work is done.',
         relatedId: id,
       });
     }
@@ -984,10 +1441,16 @@ export const confirmCompletion = async (req: AuthRequest, res: Response) => {
       success: true,
       message: 'Completion confirmed successfully',
       data: {
-        id: result.id,
-        status: result.status,
-        finalPrice: result.finalPrice,
-        completedAt: result.completionDate,
+        id: updated.id,
+        status: updated.status,
+        finalPrice: updated.finalPrice,
+        completedAt: updated.completionDate,
+        payment: {
+          status: payment.status,
+          escrowStatus: payment.escrowStatus,
+          capturedAmount: payment.capturedAmount,
+          workerPayout: payment.workerPayout,
+        },
       },
     });
   } catch (error) {
@@ -1026,20 +1489,42 @@ export const cancelBooking = async (req: AuthRequest, res: Response) => {
       return res.status(409).json(errorResponse(409, `Cannot cancel booking with status ${booking.status}`));
     }
 
-    // If worker is cancelling AFTER accepting, decrement activeJobCount
-    if (booking.status === 'ACCEPTED' && booking.workerId === req.user.userId) {
-      await prisma.workerProfile.update({
-        where: { userId: booking.workerId },
-        data: { activeJobCount: { decrement: 1 } },
-      });
-    }
+    const cancelledByRole = req.user.role === 'WORKER' ? 'WORKER' : 'CLIENT';
 
-    const updated = await prisma.booking.update({
-      where: { id },
-      data: {
-        status: 'CANCELLED',
-        notes: reason, // schema has no cancelReason; storing in notes
-      },
+    const updated = await prisma.$transaction(async (tx) => {
+      // If worker is cancelling after accepting (job was occupying capacity
+      // and a calendar slot), free both up.
+      if (booking.status === 'ACCEPTED' && booking.workerId) {
+        const workerProfile = await tx.workerProfile.update({
+          where: { userId: booking.workerId },
+          data: { activeJobCount: { decrement: 1 } },
+        });
+        if (booking.timeSlot) {
+          await freeSlot(tx, workerProfile.id, booking.scheduledDate, booking.timeSlot);
+        }
+      }
+
+      await tx.cancellation.create({
+        data: {
+          bookingId: id,
+          cancelledBy: cancelledByRole,
+          cancelledById: req.user!.userId,
+          reason: typeof reason === 'string' ? reason : null,
+        },
+      });
+
+      return tx.booking.update({
+        where: { id },
+        data: {
+          status: 'CANCELLED',
+          notes: reason, // schema has no cancelReason; storing in notes
+        },
+      });
+    });
+
+    await cancelPendingExpiryJob(id);
+    await refundOrVoidPayment(id, reason || 'Booking cancelled').catch((error) => {
+      console.error(`Failed to void payment for cancelled booking ${id}:`, error);
     });
 
     // Notify the other party (workerId may be null if booking is unassigned)

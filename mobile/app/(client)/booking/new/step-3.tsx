@@ -1,341 +1,169 @@
-import React, { useState, useRef, useMemo } from "react";
-import { View, Text, ScrollView, Pressable } from "react-native";
+import React from "react";
+import { View, Text, ScrollView, ActivityIndicator } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
-// eslint-disable-next-line import/no-named-as-default
+import { AppIcon as Ionicons } from "../../../../components/icons/AppIcon";
 import ScreenHeader from "../../../../components/ui/ScreenHeader";
-// eslint-disable-next-line import/no-named-as-default
 import StepperHorizontal from "../../../../components/steppers/StepperHorizontal";
-// eslint-disable-next-line import/no-named-as-default
 import PrimaryButton from "../../../../components/ui/PrimaryButton";
-// eslint-disable-next-line import/no-named-as-default
-import InputField from "../../../../components/ui/InputField";
-import PriceBreakdownCard from "../../../../components/ui/PriceBreakdown";
-import {
-  useBookingStore,
-  type Booking,
-  type BookingState,
-} from "../../../../store/bookingStore";
-import { calculatePriceBreakdown } from "../../../../utils/pricing";
-import { validateDraftForSubmit } from "../../../../utils/bookingValidation";
-// eslint-disable-next-line import/no-named-as-default
-import PaymentMethodBottomSheet from "../../../../components/bottom-sheets/PaymentMethodBottomSheet";
-// eslint-disable-next-line import/no-named-as-default
-import GenericConfirmationModal from "../../../../components/modals/GenericConfirmationModal";
-import * as api from "../../../../services/api";
-import { serviceConfigs } from "../../../../constants/serviceData";
-import type { BottomSheetHandle } from "../../../../components/bottom-sheets/BottomSheetWrapper";
+import DiscoveredWorkerCard from "../../../../components/booking4step/DiscoveredWorkerCard";
+import SurpriseMeButton from "../../../../components/booking4step/SurpriseMeButton";
+import HoldTimerBadge from "../../../../components/booking4step/HoldTimerBadge";
+import { useBookingStore } from "../../../../store/bookingStore";
+import { useWorkerDiscovery } from "../../../../hooks/useWorkerDiscovery";
+import { colors } from "../../../../constants";
 import { useAlertModal } from "../../../../contexts/AlertModalContext";
+import { now } from "../../../../utils/now";
+import type { WorkerCard } from "../../../../types/booking4step.types";
+
+const BOOKING_STEPS = ["Scope", "Schedule", "Who", "Confirm"];
 
 export default function BookingStep3Screen() {
   const router = useRouter();
   const alertModal = useAlertModal();
-  const draft = useBookingStore((s: BookingState) => s.draft);
-  const setDraft = useBookingStore((s: BookingState) => s.setDraft);
-  const setBookingCreated = useBookingStore(
-    (s: BookingState) => s.setBookingCreated,
+  const draft = useBookingStore((s) => s.draft);
+  const setDraft = useBookingStore((s) => s.setDraft);
+
+  const readyToSearch =
+    !!draft.serviceType && !!draft.date && !!draft.timeSlot && draft.lat != null && draft.lng != null;
+
+  const { workers, loading, error } = useWorkerDiscovery(
+    {
+      serviceType: draft.serviceType ?? undefined,
+      date: draft.date ?? undefined,
+      timeSlot: draft.timeSlot ?? undefined,
+      condition: draft.condition ?? undefined,
+      rooms: draft.rooms?.map((r) => r.room),
+      lat: draft.lat,
+      lng: draft.lng,
+      limit: 20,
+    },
+    readyToSearch && !draft.workerLocked
   );
-  const [paymentMethod, setPaymentMethod] = useState<string | null>(
-    draft.paymentMethod,
-  );
-  const [confirmVisible, setConfirmVisible] = useState(false);
-  const [loading, setLoading] = useState(false);
-  const [tipAmount, setTipAmount] = useState<number>(draft.tip || 0);
-  const [customTip, setCustomTip] = useState<string>("");
-  const [showCustomTip, setShowCustomTip] = useState(false);
-  const paymentRef = useRef<BottomSheetHandle | null>(null);
 
-  const paymentLabel =
-    paymentMethod === "gcash"
-      ? "GCash"
-      : paymentMethod === "maya"
-        ? "Maya"
-        : paymentMethod === "bank"
-          ? "Bank Transfer"
-          : paymentMethod === "cash"
-            ? "Cash"
-            : null;
-
-  // Calculate price breakdown using utility
-  const priceBreakdown = useMemo(() => {
-    const baseAmount = draft.estimatedPrice > 0 ? draft.estimatedPrice : 400;
-    return calculatePriceBreakdown(baseAmount, 1, 0, tipAmount);
-  }, [draft.estimatedPrice, tipAmount]);
-
-  const handleConfirmBooking = () => {
-    setConfirmVisible(true);
+  const selectWorker = (worker: WorkerCard) => {
+    setDraft({
+      workerId: worker.id,
+      workerName: worker.fullName,
+      workerHourlyRate: worker.hourlyRate,
+      workerEstimatedTotal: worker.estimatedTotal,
+      workerAvatar: worker.avatar,
+      workerRating: worker.rating,
+      serviceTypeId: worker.matchedServiceTypeId,
+      selectedPackageIds: [],
+      isAutoMatched: false,
+      holdStartedAt: now(),
+    });
   };
 
-  const validation = validateDraftForSubmit(draft);
-
-  const onConfirm = async () => {
-    setConfirmVisible(false);
-
-    if (!draft.workerId) {
-      alertModal.error(
-        "Error",
-        "Missing worker information. Please go back and select a worker.",
-      );
-      return;
-    }
-    if (!draft.selectedTaskId) {
-      alertModal.error(
-        "Error",
-        "Missing service information. Please go back and select a service.",
-      );
-      return;
-    }
-
-    setLoading(true);
-    try {
-      setDraft({ paymentMethod });
-
-      // Create booking with correct API field names
-      const bookingData = {
-        workerId: draft.workerId,
-        serviceTaskId: draft.selectedTaskId,
-        location: draft.address || "",
-        city: draft.city || "",
-        scheduledDate: draft.date || new Date().toISOString().split("T")[0],
-        scheduledTime: draft.time || "",
-        description: draft.description || draft.category || "",
-        notes: draft.notes || draft.instructions || "",
-        estimatedPrice: draft.estimatedPrice || 0,
-        tip: tipAmount || 0,
-        addOns: (() => {
-          if (!draft.selectedAddOnIds || !draft.category) return [];
-          const cfg = serviceConfigs.find(
-            (c) =>
-              c.categoryName.toLowerCase() ===
-              (draft.category || "").toLowerCase(),
-          );
-          if (!cfg) return [];
-          return draft.selectedAddOnIds.map((id: string) => {
-            const ao = cfg.addOns.find((a) => a.id === id);
-            return ao
-              ? { id: ao.id, name: ao.name, price: ao.price }
-              : { id, name: id, price: 0 };
-          });
-        })(),
-      };
-
-      const response = await api.createBooking(bookingData);
-
-      // The API only returns a partial payload (id, clientName, workerName,
-      // scheduledDate, ...) - normalize it into the shape the store/UI expect
-      // (date, worker, service, amount) before saving, otherwise the booking
-      // detail screen renders with missing fields and crashes on an invalid date.
-      const createdBooking: Booking = {
-        id: response.id,
-        service: draft.category || "Service",
-        worker: response.workerName ?? "Unassigned",
-        workerId: draft.workerId ?? undefined,
-        date: response.scheduledDate ?? bookingData.scheduledDate,
-        time: response.scheduledTime || undefined,
-        address: draft.address || undefined,
-        status: "Pending",
-        amount: response.estimatedPrice ?? draft.estimatedPrice ?? 0,
-        category: draft.category ?? undefined,
-        selectedTaskId: draft.selectedTaskId ?? undefined,
-        selectedAddOnIds: draft.selectedAddOnIds,
-      };
-
-      // Update booking store
-      setBookingCreated(createdBooking);
-
-      router.push("/(client)/booking/success");
-    } catch (err) {
-      console.error("Booking creation error:", err);
-      alertModal.error("Error", "Failed to create booking. Please try again.");
-    } finally {
-      setLoading(false);
-    }
+  const chooseSurpriseMe = () => {
+    setDraft({
+      workerId: null,
+      workerName: null,
+      workerHourlyRate: null,
+      workerEstimatedTotal: null,
+      workerAvatar: null,
+      workerRating: null,
+      isAutoMatched: true,
+      holdStartedAt: null,
+    });
+    router.push("/(client)/booking/new/step-4");
   };
+
+  const canNext = !!draft.workerId || !!draft.isAutoMatched;
+
+  const handleNext = () => {
+    if (!canNext) {
+      alertModal.warning("Pick a pro", "Select a worker or tap Surprise Me to continue.");
+      return;
+    }
+    router.push("/(client)/booking/new/step-4");
+  };
+
+  // Worker was locked in from a profile/"book again" entry point — skip
+  // discovery entirely and go straight to confirming that worker.
+  if (draft.workerLocked && draft.workerId) {
+    return (
+      <SafeAreaView className="flex-1 bg-white">
+        <ScreenHeader title="Your pro" showBack />
+        <ScrollView className="flex-1" contentContainerStyle={{ padding: 24, paddingBottom: 40 }}>
+          <StepperHorizontal steps={BOOKING_STEPS} currentStep={2} />
+          <View className="bg-card rounded-2xl p-4 mt-4 flex-row items-center">
+            <View className="w-14 h-14 bg-brand rounded-full items-center justify-center mr-3">
+              <Ionicons name="person" size={28} color={colors.white} />
+            </View>
+            <View className="flex-1">
+              <Text className="text-text-primary font-bold text-base">{draft.workerName}</Text>
+              <Text className="text-text-secondary text-xs mt-0.5">Locked in for this booking</Text>
+            </View>
+            <Ionicons name="lock-closed" size={18} color={colors.text.muted} />
+          </View>
+          <View className="mt-8">
+            <PrimaryButton label="Next" fullWidth onPress={() => router.push("/(client)/booking/new/step-4")} />
+          </View>
+        </ScrollView>
+      </SafeAreaView>
+    );
+  }
 
   return (
     <SafeAreaView className="flex-1 bg-white">
-      <ScreenHeader title="Review & Payment" showBack />
-      <ScrollView
-        className="flex-1"
-        contentContainerStyle={{ padding: 24, paddingBottom: 40 }}
-      >
-        <StepperHorizontal
-          steps={["Service", "Schedule", "Payment"]}
-          currentStep={2}
-        />
-        {!validation.ok && (
-          <View className="bg-yellow-100 rounded-xl p-3 mb-4">
-            <Text className="text-yellow-900 font-semibold">
-              Booking incomplete
-            </Text>
-            {validation.errors.map((e) => (
-              <Text key={e} className="text-yellow-900 text-sm">
-                - {e}
+      <ScreenHeader title="Choose your pro" showBack />
+      <ScrollView className="flex-1" contentContainerStyle={{ padding: 24, paddingBottom: 40 }}>
+        <StepperHorizontal steps={BOOKING_STEPS} currentStep={2} />
+
+        {draft.isAutoMatched ? (
+          <View className="bg-accent/10 rounded-2xl p-4 mb-4 flex-row items-center">
+            <Text className="text-2xl mr-3">🎲</Text>
+            <View className="flex-1">
+              <Text className="text-accent font-bold text-sm">We&apos;ll surprise you!</Text>
+              <Text className="text-text-secondary text-xs mt-0.5">
+                Your best-matched available pro will be assigned when you submit.
               </Text>
-            ))}
-            <View className="mt-2 flex-row gap-2">
-              <Pressable
-                onPress={() => router.push("/(client)/booking/new/step-1")}
-              >
-                <Text className="text-accent">Go to Step 1</Text>
-              </Pressable>
-              <Pressable
-                onPress={() => router.push("/(client)/booking/new/step-2")}
-              >
-                <Text className="text-accent">Go to Step 2</Text>
-              </Pressable>
             </View>
           </View>
+        ) : (
+          <SurpriseMeButton onPress={chooseSurpriseMe} />
         )}
 
-        <View className="bg-card rounded-2xl p-4 mt-4">
-          <Text className="text-text-primary font-bold mb-2">Summary</Text>
-          <Text className="text-text-secondary text-sm">
-            Service: {draft.category}
-          </Text>
-          <Text className="text-text-secondary text-sm">
-            Address: {draft.address}
-          </Text>
-          <Text className="text-text-secondary text-sm">
-            Date: {draft.date} · Time: {draft.time}
-          </Text>
-        </View>
+        <HoldTimerBadge holdStartedAt={draft.holdStartedAt} workerName={draft.workerName} />
 
-        {draft.quoteRequired && (
-          <View className="bg-warning/10 rounded-2xl p-3 mt-3">
-            <Text className="text-warning text-xs">
-              This is an inspection-based service. The price below is an estimate — the worker will send you a final quote to approve before starting work.
+        {loading && (
+          <View className="py-10 items-center">
+            <ActivityIndicator size="small" />
+            <Text className="text-text-secondary mt-2 text-sm">Finding available pros...</Text>
+          </View>
+        )}
+
+        {!loading && error && (
+          <View className="py-10 items-center">
+            <Text className="text-error text-sm">{error}</Text>
+          </View>
+        )}
+
+        {!loading && !error && !draft.isAutoMatched && workers.length === 0 && (
+          <View className="py-10 items-center">
+            <Ionicons name="sad-outline" size={32} color={colors.text.muted} />
+            <Text className="text-text-secondary text-sm mt-2 text-center">
+              No pros available for this scope/time. Try a different time slot or tap Surprise Me.
             </Text>
           </View>
         )}
 
-        <Text className="text-text-secondary font-bold text-sm mb-1 mt-4">
-          Payment Method
-        </Text>
-        <Pressable
-          className="bg-card rounded-xl p-4 flex-row justify-between"
-          onPress={() => paymentRef.current?.expand()}
-        >
-          <Text
-            className={
-              paymentLabel ? "text-brand font-semibold" : "text-text-muted"
-            }
-          >
-            {paymentLabel ?? "Select payment method"}
-          </Text>
-        </Pressable>
-
-        <Text className="text-text-secondary font-bold text-sm mb-1 mt-4">
-          Add a Tip
-        </Text>
-        <View className="flex-row gap-2 flex-wrap mt-1">
-          {[0, 20, 50, 100].map((amount) => (
-            <Pressable
-              key={amount}
-              className={
-                tipAmount === amount
-                  ? "bg-accent rounded-xl px-4 py-2"
-                  : "bg-card rounded-xl px-4 py-2"
-              }
-              onPress={() => {
-                setTipAmount(amount);
-                setShowCustomTip(false);
-                setCustomTip("");
-                setDraft({ tip: amount });
-              }}
-            >
-              <Text
-                className={
-                  tipAmount === amount
-                    ? "text-white font-semibold text-sm"
-                    : "text-text-secondary text-sm"
-                }
-              >
-                {amount === 0 ? "No Tip" : `₱${amount}`}
-              </Text>
-            </Pressable>
-          ))}
-          <Pressable
-            className={
-              showCustomTip
-                ? "bg-accent rounded-xl px-4 py-2"
-                : "bg-card rounded-xl px-4 py-2"
-            }
-            onPress={() => setShowCustomTip(true)}
-          >
-            <Text
-              className={
-                showCustomTip
-                  ? "text-white font-semibold text-sm"
-                  : "text-text-secondary text-sm"
-              }
-            >
-              Custom
-            </Text>
-          </Pressable>
-        </View>
-
-        {showCustomTip && (
-          <View className="mt-3">
-            <InputField
-              label=""
-              value={customTip}
-              onChangeText={(value) => {
-                setCustomTip(value);
-                const parsedValue = parseFloat(value) || 0;
-                setTipAmount(parsedValue);
-                setDraft({ tip: parsedValue });
-              }}
-              placeholder="Enter custom amount"
-              keyboardType="numeric"
+        {!draft.isAutoMatched &&
+          workers.map((worker) => (
+            <DiscoveredWorkerCard
+              key={worker.id}
+              worker={worker}
+              selected={draft.workerId === worker.id}
+              onSelect={() => selectWorker(worker)}
             />
-          </View>
-        )}
+          ))}
 
-        <View className="mt-6">
-          <PriceBreakdownCard breakdown={priceBreakdown} detailed={true} />
-        </View>
-
-        <View className="mt-8">
-          <PrimaryButton
-            label={
-              draft.quoteRequired
-                ? "Submit request for quote"
-                : "Submit booking request"
-            }
-            fullWidth
-            disabled={!paymentMethod || loading || !validation.ok}
-            loading={loading}
-            onPress={() => {
-              if (!paymentMethod) {
-                alertModal.warning("Error", "Please select a payment method");
-                return;
-              }
-              handleConfirmBooking();
-            }}
-          />
+        <View className="mt-4">
+          <PrimaryButton label="Next" fullWidth disabled={!canNext} onPress={handleNext} />
         </View>
       </ScrollView>
-      <PaymentMethodBottomSheet
-        innerRef={paymentRef}
-        onSelect={(m) => {
-          setPaymentMethod(m);
-          setDraft({ paymentMethod: m });
-        }}
-      />
-      <GenericConfirmationModal
-        visible={confirmVisible}
-        title="Submit booking request"
-        message={
-          draft.quoteRequired
-            ? "The worker will inspect the job and send you a quote to approve before starting work. Payment will not be charged at this time."
-            : "You are about to submit a booking request. Payment will not be charged at this time."
-        }
-        confirmLabel="Submit Request"
-        cancelLabel="Cancel"
-        onConfirm={onConfirm}
-        onCancel={() => setConfirmVisible(false)}
-      />
     </SafeAreaView>
   );
 }

@@ -7,8 +7,9 @@ module.exports = {
     '^.+\\.tsx?$': ['ts-jest', { tsconfig: '<rootDir>/tsconfig.test.json' }],
   },
   moduleNameMapper: {
-    // Real verificationQueue needs a running Redis; tests don't have one.
+    // Real verificationQueue/bookingQueue need a running Redis; tests don't have one.
     '^@queues/verificationQueue$': '<rootDir>/tests/mocks/verificationQueue.ts',
+    '^@queues/bookingQueue$': '<rootDir>/tests/mocks/bookingQueue.ts',
     '^@/(.*)$': '<rootDir>/src/$1',
     '^@controllers/(.*)$': '<rootDir>/src/controllers/$1',
     '^@routes/(.*)$': '<rootDir>/src/routes/$1',

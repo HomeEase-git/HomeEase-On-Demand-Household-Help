@@ -9,13 +9,15 @@ const NAV_ITEMS = [
   { to: '/workers', page: 'workers', icon: 'fa-user-cog', label: 'Workers' },
   { to: '/verification', page: 'verification', icon: 'fa-id-card', label: 'Verification' },
   { to: '/price-control', page: 'price-control', icon: 'fa-sliders', label: 'Price Control' },
+  { to: '/service-catalog', page: 'service-catalog', icon: 'fa-list-check', label: 'Service Catalog' },
   { to: '/bookings', page: 'bookings', icon: 'fa-calendar-check', label: 'Bookings' },
+  { to: '/bookings/dispute', page: 'disputes', icon: 'fa-triangle-exclamation', label: 'Disputes' },
   { to: '/payments', page: 'payments', icon: 'fa-credit-card', label: 'Payments' },
+  { to: '/payments/payouts', page: 'payouts', icon: 'fa-money-bill-transfer', label: 'Payouts' },
   { to: '/reviews', page: 'reviews', icon: 'fa-star', label: 'Reviews' },
   { to: '/reports', page: 'reports', icon: 'fa-chart-bar', label: 'Reports' },
-  
-  
-  //{ to: '/settings', page: 'settings', icon: 'fa-cog', label: 'Settings' },
+  { to: '/analytics', page: 'analytics', icon: 'fa-chart-line', label: 'Analytics' },
+  { to: '/settings', page: 'settings', icon: 'fa-cog', label: 'Settings' },
 ]
 
 export default function Sidebar() {

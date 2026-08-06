@@ -83,6 +83,42 @@ export async function geocodeAddress(address: string): Promise<PlaceResult | nul
   };
 }
 
+/**
+ * Multi-result address search for autocomplete-style UI (as opposed to
+ * `geocodeAddress`, which only returns the single best match). Backed by
+ * Nominatim (OpenStreetMap) rather than Google Places — this app has no
+ * Google Maps/Places API key or SDK configured, and Nominatim is free/keyless
+ * and already the established geocoding provider (see `geocodeAddress`/
+ * `reverseGeocodeDetailed` above, used by the existing address-picker
+ * screen). Swap the fetch implementation here if a Google Places key is
+ * added later; callers only depend on the `PlaceResult[]` shape.
+ */
+export async function searchAddresses(query: string, limit = 5): Promise<PlaceResult[]> {
+  const normalized = query.trim();
+  if (normalized.length < 3) return [];
+
+  const response = await fetch(
+    `https://nominatim.openstreetmap.org/search?format=json&limit=${limit}&addressdetails=1&q=${encodeURIComponent(
+      normalized,
+    )}`,
+    { headers: NOMINATIM_HEADERS },
+  );
+
+  const data = await response.json();
+  if (!Array.isArray(data)) return [];
+
+  return data.map((result: any) => ({
+    formatted_address: result.display_name || normalized,
+    geometry: {
+      location: {
+        lat: parseFloat(result.lat),
+        lng: parseFloat(result.lon),
+      },
+    },
+    components: parseAddressComponents(result.address),
+  }));
+}
+
 export async function reverseGeocode(lat: number, lng: number): Promise<string | null> {
   const response = await fetch(
     `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}`,

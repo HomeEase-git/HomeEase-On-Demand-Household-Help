@@ -15,6 +15,8 @@ import * as api from "../../../services/api";
 import { colors } from "../../../constants";
 import StatusBadge from "../../../components/ui/StatusBadge";
 import { useAlertModal } from "../../../contexts/AlertModalContext";
+import { summarizeFlatRoomTypes } from "../../../utils/bookingPriceEstimate";
+import { ROOM_TYPE_LABELS, CONDITION_LABELS, type RoomType, type ConditionType } from "../../../types/booking4step.types";
 
 type BookingDetail = {
   id: string;
@@ -24,6 +26,11 @@ type BookingDetail = {
   location: string | null;
   scheduledDate: string;
   estimatedPrice: number;
+  rooms?: RoomType[];
+  condition?: ConditionType | null;
+  scopeAnswers?: Record<string, string | string[]> | null;
+  distanceMeters?: number | null;
+  payment?: { commissionAmount?: number; workerPayout?: number } | null;
 };
 
 export default function RequestDetailScreen() {
@@ -172,6 +179,42 @@ export default function RequestDetailScreen() {
           <Text className="text-text-muted text-xs mt-2">
             Date: {booking.scheduledDate}
           </Text>
+          {!!booking.rooms?.length && (
+            <View className="flex-row items-center mt-2">
+              <Ionicons name="home-outline" size={14} color={colors.text.muted} />
+              <Text className="text-text-secondary text-xs ml-1.5">
+                {summarizeFlatRoomTypes(booking.rooms, ROOM_TYPE_LABELS)}
+              </Text>
+            </View>
+          )}
+          {booking.condition && (
+            <View className="flex-row items-center mt-1.5">
+              <Ionicons name="sparkles-outline" size={14} color={colors.text.muted} />
+              <Text className="text-text-secondary text-xs ml-1.5">
+                {CONDITION_LABELS[booking.condition]} condition
+              </Text>
+            </View>
+          )}
+          {!!booking.scopeAnswers && Object.keys(booking.scopeAnswers).length > 0 && (
+            <View className="mt-1.5">
+              {Object.entries(booking.scopeAnswers).map(([label, value]) => (
+                <View key={label} className="flex-row items-center mt-1">
+                  <Ionicons name="construct-outline" size={14} color={colors.text.muted} />
+                  <Text className="text-text-secondary text-xs ml-1.5">
+                    {label}: {Array.isArray(value) ? value.join(", ") : value}
+                  </Text>
+                </View>
+              ))}
+            </View>
+          )}
+          {booking.distanceMeters != null && (
+            <View className="flex-row items-center mt-1.5">
+              <Ionicons name="navigate-outline" size={14} color={colors.text.muted} />
+              <Text className="text-text-secondary text-xs ml-1.5">
+                {(booking.distanceMeters / 1000).toFixed(1)} km away
+              </Text>
+            </View>
+          )}
         </View>
 
         {/* Workload warning */}
@@ -230,17 +273,17 @@ export default function RequestDetailScreen() {
             </View>
             <View className="flex-row justify-between py-1">
               <Text className="text-text-muted text-xs">
-                Platform Fee (10%)
+                Platform Fee & Tax
               </Text>
               <Text className="text-text-secondary text-xs">
-                -₱{parseFloat((booking.estimatedPrice * 0.1).toFixed(2))}
+                -₱{(booking.payment?.commissionAmount ?? booking.estimatedPrice * 0.1).toFixed(2)}
               </Text>
             </View>
             <View className="border-b border-divider my-1" />
             <View className="flex-row justify-between py-1">
               <Text className="text-text-muted text-xs">You Receive</Text>
               <Text className="text-success text-xs font-bold">
-                ₱{parseFloat((booking.estimatedPrice * 0.9).toFixed(2))}
+                ₱{(booking.payment?.workerPayout ?? booking.estimatedPrice * 0.9).toFixed(2)}
               </Text>
             </View>
           </View>

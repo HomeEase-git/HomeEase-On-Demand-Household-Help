@@ -160,6 +160,12 @@ CREATE INDEX "WorkerAvailability_workerProfileId_date_idx" ON "WorkerAvailabilit
 -- CreateIndex
 CREATE UNIQUE INDEX "worker_slot_unique" ON "Booking"("workerId", "scheduledDate", "timeSlot");
 
+-- RenameIndex
+-- Moved here from 20260803120638_add_platform_config_settings — this is the
+-- migration that actually creates "worker_slot_unique", so the rename must
+-- follow it, not precede it (see note in that migration).
+ALTER INDEX "worker_slot_unique" RENAME TO "Booking_workerId_scheduledDate_timeSlot_key";
+
 -- AddForeignKey
 ALTER TABLE "ArrivalVerification" ADD CONSTRAINT "ArrivalVerification_bookingId_fkey" FOREIGN KEY ("bookingId") REFERENCES "Booking"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 

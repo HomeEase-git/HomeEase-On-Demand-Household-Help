@@ -4,6 +4,7 @@ import { AppIcon as Ionicons } from "../icons/AppIcon";
 import StatusBadge from "../ui/StatusBadge";
 import type { StatusType } from "../ui/StatusBadge";
 import { colors, cardShadow } from "../../constants";
+
 type Request = {
   id: string;
   client: string;
@@ -11,6 +12,11 @@ type Request = {
   date: string;
   amount: number;
   status: string;
+  // Optional richer detail for the worker-facing Job Requests Stream —
+  // omitted callers (e.g. the home-screen preview) just don't render this row.
+  roomsSummary?: string;
+  distanceKm?: number | null;
+  payoutEstimate?: number | null;
 };
 
 type Props = {
@@ -19,28 +25,59 @@ type Props = {
 };
 
 export const RequestCard: React.FC<Props> = ({ request, onPress }) => {
+  const hasDetailRow = !!request.roomsSummary || request.distanceKm != null || request.payoutEstimate != null;
+
   return (
     <Pressable
-      className="bg-card rounded-2xl p-4 mb-3 flex-row items-center"
+      className="bg-card rounded-2xl p-4 mb-3"
       style={cardShadow}
       onPress={onPress}
     >
-      <View className="w-12 h-12 bg-card-light rounded-full items-center justify-center mr-3">
-        <Ionicons name="person-circle" size={40} color={colors.text.muted} />
+      <View className="flex-row items-center">
+        <View className="w-12 h-12 bg-card-light rounded-full items-center justify-center mr-3">
+          <Ionicons name="person-circle" size={40} color={colors.text.muted} />
+        </View>
+        <View className="flex-1">
+          <Text className="text-text-primary font-bold" numberOfLines={1}>
+            {request.client}
+          </Text>
+          <Text className="text-text-secondary text-xs" numberOfLines={1}>
+            {request.service}
+          </Text>
+          <Text className="text-text-muted text-xs">{request.date}</Text>
+        </View>
+        <View className="items-end">
+          <Text className="text-accent font-bold">₱{request.amount}</Text>
+          <StatusBadge status={request.status as StatusType} />
+        </View>
       </View>
-      <View className="flex-1">
-        <Text className="text-text-primary font-bold" numberOfLines={1}>
-          {request.client}
-        </Text>
-        <Text className="text-text-secondary text-xs" numberOfLines={1}>
-          {request.service}
-        </Text>
-        <Text className="text-text-muted text-xs">{request.date}</Text>
-      </View>
-      <View className="items-end">
-        <Text className="text-accent font-bold">₱{request.amount}</Text>
-        <StatusBadge status={request.status as StatusType} />
-      </View>
+
+      {hasDetailRow && (
+        <View className="flex-row items-center flex-wrap gap-x-3 gap-y-1 mt-3 pt-3 border-t border-divider">
+          {request.roomsSummary && (
+            <View className="flex-row items-center">
+              <Ionicons name="home-outline" size={13} color={colors.text.muted} />
+              <Text className="text-text-muted text-xs ml-1" numberOfLines={1}>
+                {request.roomsSummary}
+              </Text>
+            </View>
+          )}
+          {request.distanceKm != null && (
+            <View className="flex-row items-center">
+              <Ionicons name="navigate-outline" size={13} color={colors.text.muted} />
+              <Text className="text-text-muted text-xs ml-1">{request.distanceKm.toFixed(1)} km</Text>
+            </View>
+          )}
+          {request.payoutEstimate != null && (
+            <View className="flex-row items-center">
+              <Ionicons name="cash-outline" size={13} color={colors.success} />
+              <Text className="text-success text-xs font-semibold ml-1">
+                Payout ₱{Math.round(request.payoutEstimate)}
+              </Text>
+            </View>
+          )}
+        </View>
+      )}
     </Pressable>
   );
 };

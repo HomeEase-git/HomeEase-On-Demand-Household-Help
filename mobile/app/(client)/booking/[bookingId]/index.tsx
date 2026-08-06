@@ -3,6 +3,7 @@ import { View, Text, Image, ScrollView, Pressable, Linking } from "react-native"
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useFocusEffect, useRouter, useLocalSearchParams } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
+import { isAxiosError } from "axios";
 import ScreenHeader from "../../../../components/ui/ScreenHeader";
 import StatusBadge from "../../../../components/ui/StatusBadge";
 import StepperVertical from "../../../../components/steppers/StepperVertical";
@@ -12,6 +13,7 @@ import DangerButton from "../../../../components/ui/DangerButton";
 import PriceBreakdownCard from "../../../../components/ui/PriceBreakdown";
 import { LoadingSkeleton } from "../../../../components/feedback/LoadingSkeleton";
 import PaymentMethodBottomSheet from "../../../../components/bottom-sheets/PaymentMethodBottomSheet";
+import PaymongoCheckoutModal from "../../../../components/payment/PaymongoCheckoutModal";
 import type { BottomSheetHandle } from "../../../../components/bottom-sheets/BottomSheetWrapper";
 import {
   useBookingStore,
@@ -23,13 +25,16 @@ import {
   confirmBookingCompletion,
   createBookingPayment,
   releasePaymentEscrow,
+  createPaymongoCheckout,
+  getTransactionDetail,
 } from "../../../../services/api";
-import { calculatePriceBreakdown } from "../../../../utils/pricing";
 import { isExactCategoryMatch } from "../../../../utils/categoryMapping";
 import type { StatusType } from "../../../../components/ui/StatusBadge";
 import { colors } from "../../../../constants";
 import { useAlertModal } from "../../../../contexts/AlertModalContext";
 import { PAYMENT_METHOD_TYPE_MAP } from "../../../../utils/paymentMethodMap";
+
+const PAYMONGO_GATEWAY_METHODS = new Set(["GCASH", "MAYA"]);
 
 // Backend BookingStatus enum -> store's friendly status values
 const API_STATUS_MAP: Record<string, Booking["status"]> = {
@@ -47,7 +52,7 @@ const API_STATUS_MAP: Record<string, Booking["status"]> = {
 
 type ApiBookingDetail = {
   id: string;
-  worker: { id: string; fullName: string; phone?: string | null } | null;
+  worker: { id: string; fullName: string; phone?: string | null; avatar?: string | null; verified?: boolean } | null;
   service: string;
   category?: string;
   status: string;
@@ -66,7 +71,10 @@ type ApiBookingDetail = {
     accountIdentifier: string | null;
     status: string;
     totalAmount: number;
+    subtotal?: number;
+    tip?: number;
   } | null;
+  addOns?: { id: string; name: string; price: number }[];
   quote: {
     laborCost: number;
     materialsCost: number;
@@ -84,6 +92,8 @@ function mapApiBookingDetail(d: ApiBookingDetail): Booking {
     worker: d.worker?.fullName ?? "Unassigned",
     workerId: d.worker?.id,
     workerPhone: d.worker?.phone ?? undefined,
+    workerAvatar: d.worker?.avatar ?? undefined,
+    workerVerified: d.worker?.verified ?? undefined,
     date: d.scheduledDate,
     time: d.scheduledTime ?? undefined,
     address: d.location,
@@ -123,9 +133,16 @@ export default function BookingDetailScreen() {
   const { bookingId } = useLocalSearchParams<{ bookingId: string }>();
   const { bookings, prefillFromBooking } = useBookingStore();
   const booking = bookings.find((b) => b.id === bookingId);
+  // The shared store's Booking type only keeps payment.totalAmount (used by
+  // many other screens) — the real subtotal/addOns/tip breakdown is kept
+  // separately here so the price breakdown card can render the actual
+  // backend-persisted charge instead of recomputing an invented one.
+  const [rawDetail, setRawDetail] = useState<ApiBookingDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [confirmingCompletion, setConfirmingCompletion] = useState(false);
   const [processingPayment, setProcessingPayment] = useState(false);
+  const [checkoutUrl, setCheckoutUrl] = useState<string | null>(null);
+  const [checkoutVisible, setCheckoutVisible] = useState(false);
   const paymentSheetRef = useRef<BottomSheetHandle | null>(null);
 
   useFocusEffect(
@@ -137,6 +154,7 @@ export default function BookingDetailScreen() {
           const data: ApiBookingDetail = await getBookingDetail(bookingId);
           if (cancelled) return;
           const mapped = mapApiBookingDetail(data);
+          setRawDetail(data);
           useBookingStore.setState((s) => ({
             bookings: [...s.bookings.filter((b) => b.id !== mapped.id), mapped],
           }));
@@ -179,7 +197,15 @@ export default function BookingDetailScreen() {
     );
   }
 
-  const priceBreakdown = calculatePriceBreakdown(booking.amount, 1, 0, 0);
+  // Real, backend-persisted values only — payment.subtotal/tip/totalAmount
+  // are what PayMongo actually charged; fall back to the booking amount for
+  // the rare case a Payment row doesn't exist yet.
+  const priceBreakdown = {
+    subtotal: rawDetail?.payment?.subtotal ?? booking.amount,
+    addOns: rawDetail?.addOns?.map((a) => ({ name: a.name, price: a.price })) ?? [],
+    tip: rawDetail?.payment?.tip ?? 0,
+    total: booking.payment?.totalAmount ?? booking.amount,
+  };
 
   const statusCaption: Partial<Record<Booking["status"], string>> = {
     QuoteSubmitted: "Action required",
@@ -192,19 +218,62 @@ export default function BookingDetailScreen() {
     booking.status === "Active" || booking.status === "InProgress";
   const isCompleted = booking.status === "Completed";
   const isPendingCompletion = booking.status === "PendingCompletion";
-  // A payment record only gets a `status` once actually processed — before
-  // that, booking.payment (if present) just reflects the method settled at
-  // booking time, which we reuse instead of asking the client again.
-  const settledMethodType = !booking.payment?.status
-    ? booking.payment?.methodType
-    : undefined;
-  const needsPayment = isCompleted && !booking.payment?.status;
+  // A Payment row is created (status PENDING) as soon as the booking is
+  // made — see authorizePaymentForBooking — and confirmCompletion always
+  // captures/releases it server-side, so `payment.status` is COMPLETED by
+  // the time this screen would otherwise ask again. These only matter for
+  // the rare cases where no settlement happened automatically: a legacy
+  // booking with no Payment row at all, or one where server-side capture
+  // threw (e.g. a PayMongo outage) and left status stuck at PENDING.
+  const settledMethodType = booking.payment?.methodType;
+  const needsPayment = isCompleted && booking.payment?.status !== "COMPLETED";
   const hasQuote = booking.status === "QuoteSubmitted" && booking.quote;
+
+  // Polls the payment detail until the PayMongo webhook has resolved it to
+  // COMPLETED/FAILED (it processes within a second or two of the redirect in
+  // test mode), or gives up after ~15s so the UI doesn't hang forever.
+  const waitForPaymentOutcome = async (targetBookingId: string) => {
+    for (let attempt = 0; attempt < 10; attempt++) {
+      const detail = await getTransactionDetail(targetBookingId);
+      if (detail?.status === "Completed" || detail?.status === "Failed") {
+        return detail;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 1500));
+    }
+    return null;
+  };
+
+  const startPaymongoCheckout = async (methodType: string, accountIdentifier?: string) => {
+    try {
+      await createBookingPayment(booking.id, {
+        methodType: methodType as "GCASH" | "MAYA",
+        accountIdentifier,
+      });
+    } catch (error) {
+      // 409 = a Payment already exists for this booking. Expected when the
+      // client backed out of a previous PayMongo checkout without finishing
+      // it — that Payment is still PENDING, so we just reuse it below.
+      if (!(isAxiosError(error) && error.response?.status === 409)) {
+        throw error;
+      }
+    }
+
+    const { checkoutUrl: url } = await createPaymongoCheckout(booking.id);
+    setCheckoutUrl(url);
+    setCheckoutVisible(true);
+  };
 
   const processPayment = async (methodType: string, accountIdentifier?: string) => {
     if (processingPayment) return;
     setProcessingPayment(true);
     try {
+      if (PAYMONGO_GATEWAY_METHODS.has(methodType)) {
+        await startPaymongoCheckout(methodType, accountIdentifier);
+        // processingPayment stays true while the checkout WebView is open —
+        // handleCheckoutSuccess/Failed/Cancel below clear it.
+        return;
+      }
+
       const payment = await createBookingPayment(booking.id, {
         methodType: methodType as "GCASH" | "MAYA" | "CARD" | "BANK_TRANSFER" | "CASH",
         accountIdentifier,
@@ -236,28 +305,113 @@ export default function BookingDetailScreen() {
         "We couldn't process payment right now. You can try again from this screen.",
       );
     } finally {
+      if (!PAYMONGO_GATEWAY_METHODS.has(methodType)) {
+        setProcessingPayment(false);
+      }
+    }
+  };
+
+  const handleCheckoutSuccess = async () => {
+    setCheckoutVisible(false);
+    setCheckoutUrl(null);
+    try {
+      const detail = await waitForPaymentOutcome(booking.id);
+      if (detail?.status === "Completed") {
+        useBookingStore.setState((s) => ({
+          bookings: s.bookings.map((b) =>
+            b.id === booking.id
+              ? {
+                  ...b,
+                  payment: {
+                    methodType: detail.method ?? b.payment?.methodType ?? "GCASH",
+                    status: "COMPLETED",
+                    totalAmount: detail.amount ?? b.payment?.totalAmount,
+                  },
+                }
+              : b,
+          ),
+        }));
+        alertModal.success(
+          "Payment Released",
+          "The worker has been paid. Thank you!",
+        );
+      } else if (detail?.status === "Failed") {
+        alertModal.error(
+          "Payment failed",
+          "PayMongo declined this payment. You can try again from this screen.",
+        );
+      } else {
+        alertModal.info(
+          "Still processing",
+          "We're waiting for PayMongo to confirm your payment. Check back on this screen in a moment.",
+        );
+      }
+    } catch (error) {
+      console.error("Confirm PayMongo payment error:", error);
+      alertModal.error(
+        "Error",
+        "We couldn't confirm your payment status. Please check back shortly.",
+      );
+    } finally {
       setProcessingPayment(false);
     }
+  };
+
+  const handleCheckoutFailed = () => {
+    setCheckoutVisible(false);
+    setCheckoutUrl(null);
+    setProcessingPayment(false);
+    alertModal.error(
+      "Payment failed",
+      "The payment was not completed. You can try again from this screen.",
+    );
+  };
+
+  const handleCheckoutCancel = () => {
+    setCheckoutVisible(false);
+    setCheckoutUrl(null);
+    setProcessingPayment(false);
   };
 
   const handleConfirmCompletion = async () => {
     if (confirmingCompletion) return;
     setConfirmingCompletion(true);
     try {
-      await confirmBookingCompletion(booking.id);
+      // The backend already captures the held authorization and releases
+      // escrow as part of confirming completion (see captureAndReleasePayment
+      // in confirmCompletion) — for every payment method, not just cards.
+      // There's nothing left for the client to pay here; we just reflect the
+      // settled payment status it returns.
+      const response = await confirmBookingCompletion(booking.id);
+      const settledPayment = response.data?.data?.payment as
+        | { status?: string; escrowStatus?: string }
+        | undefined;
       useBookingStore.setState((s) => ({
         bookings: s.bookings.map((b) =>
-          b.id === booking.id ? { ...b, status: "Completed" as const } : b,
+          b.id === booking.id
+            ? {
+                ...b,
+                status: "Completed" as const,
+                payment: b.payment
+                  ? { ...b.payment, status: settledPayment?.status ?? b.payment.status }
+                  : b.payment,
+              }
+            : b,
         ),
       }));
-      // Payment method was already settled at booking time — process it
-      // automatically instead of asking the client to pick one again. Only
-      // fall back to the picker if we somehow don't have a settled method
-      // (e.g. a booking created before this was tracked).
-      if (settledMethodType) {
-        await processPayment(settledMethodType, booking.payment?.accountIdentifier);
+      if (settledPayment?.status === "COMPLETED") {
+        alertModal.success(
+          "Payment Released",
+          "The worker has been paid. Thank you!",
+        );
       } else {
-        paymentSheetRef.current?.expand();
+        // Rare: server-side capture didn't finish (e.g. a gateway hiccup on
+        // a card charge). Let the client retry from the "Proceed to Payment"
+        // action rather than silently reporting success.
+        alertModal.info(
+          "Completion confirmed",
+          "We're still finalizing payment — you can retry from this screen if it doesn't clear shortly.",
+        );
       }
     } catch (error) {
       console.error("Confirm completion error:", error);
@@ -410,12 +564,32 @@ export default function BookingDetailScreen() {
             Assigned Worker
           </Text>
           <View className="flex-row items-center">
-            <View className="w-12 h-12 rounded-full bg-accent/20 items-center justify-center">
-              <Ionicons name="person" size={24} color={colors.accent.DEFAULT} />
+            <View className="w-12 h-12 rounded-full bg-accent/20 items-center justify-center overflow-hidden">
+              {booking.workerAvatar ? (
+                <Image
+                  source={{ uri: booking.workerAvatar }}
+                  style={{ width: 48, height: 48 }}
+                  resizeMode="cover"
+                />
+              ) : (
+                <Ionicons name="person" size={24} color={colors.accent.DEFAULT} />
+              )}
             </View>
             <View className="ml-3 flex-1">
-              <Text className="text-primary font-semibold">{workerName}</Text>
-              <Text className="text-text-secondary text-xs">Professional</Text>
+              <View className="flex-row items-center">
+                <Text className="text-primary font-semibold">{workerName}</Text>
+                {booking.workerVerified && (
+                  <Ionicons
+                    name="checkmark-circle"
+                    size={14}
+                    color={colors.success}
+                    style={{ marginLeft: 4 }}
+                  />
+                )}
+              </View>
+              <Text className="text-text-secondary text-xs">
+                {booking.workerVerified ? "Verified Professional" : "Professional"}
+              </Text>
             </View>
             <Pressable
               onPress={() => {
@@ -491,7 +665,13 @@ export default function BookingDetailScreen() {
 
         {/* Price Breakdown */}
         <View className="mb-3">
-          <PriceBreakdownCard breakdown={priceBreakdown} detailed={true} />
+          <PriceBreakdownCard
+            subtotal={priceBreakdown.subtotal}
+            addOns={priceBreakdown.addOns}
+            tip={priceBreakdown.tip}
+            total={priceBreakdown.total}
+            detailed={true}
+          />
         </View>
 
         {/* Payment Method */}
@@ -662,6 +842,13 @@ export default function BookingDetailScreen() {
       <PaymentMethodBottomSheet
         innerRef={paymentSheetRef}
         onSelect={handleSelectPaymentMethod}
+      />
+      <PaymongoCheckoutModal
+        visible={checkoutVisible}
+        checkoutUrl={checkoutUrl}
+        onSuccess={handleCheckoutSuccess}
+        onFailed={handleCheckoutFailed}
+        onCancel={handleCheckoutCancel}
       />
     </SafeAreaView>
   );

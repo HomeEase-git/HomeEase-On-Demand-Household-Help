@@ -117,7 +117,7 @@ export default function ClientHomeScreen() {
           serviceTypes.map((serviceType: any) => ({
             id: serviceType.name.toLowerCase().replace(/\s+/g, "-"),
             name: serviceType.name,
-            count: serviceType.tasks?.length ?? 0,
+            count: serviceType.availableWorkerCount ?? 0,
           })),
         );
 

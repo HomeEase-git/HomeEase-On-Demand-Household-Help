@@ -1,13 +1,29 @@
 import React from "react";
-import { Tabs } from "expo-router";
+import { Tabs, Redirect } from "expo-router";
 import { AppIcon as Ionicons } from "../../components/icons/AppIcon";
 import { View } from "react-native";
 import NotificationBadge from "../../components/ui/NotificationBadge";
 import { useNotificationStore } from "../../store/notificationStore";
+import { useAuthStore } from "../../store/authStore";
 import { colors } from "../../constants";
 
 export default function WorkerLayout() {
   const unreadCount = useNotificationStore((s) => s.unreadCount);
+  const user = useAuthStore((s) => s.user);
+
+  // Gate the worker tabs behind admin approval — this runs on every entry
+  // into the (worker) group (deep link, back navigation, resumed session),
+  // not just the sign-in redirect, so there's no route into the app for an
+  // unverified worker.
+  if (user?.role === "worker" && user.kycStatus !== "APPROVED") {
+    if (user.kycStatus === "REJECTED") {
+      return <Redirect href="/(kyc)/rejected" />;
+    }
+    if (user.kycStatus === "SUBMITTED") {
+      return <Redirect href="/(kyc)/pending" />;
+    }
+    return <Redirect href="/(kyc)/landing" />;
+  }
 
   return (
     <Tabs

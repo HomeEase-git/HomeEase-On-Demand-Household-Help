@@ -14,6 +14,8 @@ type Worker = {
   reviews: number;
   status: string;
   distanceKm?: number;
+  activeJobCount?: number | null;
+  maxConcurrentJobs?: number | null;
 };
 
 type Props = {
@@ -22,7 +24,10 @@ type Props = {
 };
 
 export const WorkerCard: React.FC<Props> = ({ worker, onPress }) => {
-  const { isAtCapacity, activeJobCount } = useWorkerCapacity(worker.id);
+  const { isAtCapacity, activeJobCount } = useWorkerCapacity(
+    worker.activeJobCount,
+    worker.maxConcurrentJobs,
+  );
 
   const isUnavailable =
     worker.status === "unavailable" || worker.status === "busy" || isAtCapacity;
