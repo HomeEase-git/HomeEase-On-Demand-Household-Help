@@ -4,6 +4,7 @@ import SectionCard from '../components/common/SectionCard'
 import SearchBar from '../components/common/SearchBar'
 import LoadingState from '../components/common/LoadingState'
 import ErrorState from '../components/common/ErrorState'
+import Pagination from '../components/common/Pagination'
 import {
   fetchServiceTypes,
   createServiceType,
@@ -11,6 +12,8 @@ import {
   toggleServiceTypeActive,
 } from '../services/serviceTypes'
 import { useToast } from '../context/ToastContext'
+
+const PAGE_SIZE = 10
 
 const FIELD_TYPE_LABELS = {
   TEXT: 'Text',
@@ -60,6 +63,7 @@ export default function ServiceCatalog() {
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState(null)
   const [query, setQuery] = useState('')
+  const [page, setPage] = useState(1)
 
   const [open, setOpen] = useState(false)
   const [mode, setMode] = useState('add') // 'add' | 'edit'
@@ -92,6 +96,14 @@ export default function ServiceCatalog() {
     if (!q) return services
     return services.filter((s) => s.name.toLowerCase().includes(q))
   }, [services, query])
+
+  useEffect(() => {
+    setPage(1)
+  }, [query])
+
+  const totalPages = Math.max(1, Math.ceil(filteredServices.length / PAGE_SIZE))
+  const currentPage = Math.min(page, totalPages)
+  const pagedServices = filteredServices.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE)
 
   const closeModal = () => {
     setOpen(false)
@@ -259,7 +271,7 @@ export default function ServiceCatalog() {
                 </tr>
               </thead>
               <tbody>
-                {filteredServices.map((s) => (
+                {pagedServices.map((s) => (
                   <tr key={s.id}>
                     <td><strong>{s.name}</strong></td>
                     <td>{formatPeso(s.basePrice)}</td>
@@ -287,7 +299,7 @@ export default function ServiceCatalog() {
                         </button>
                         <button
                           type="button"
-                          className="action-btn"
+                          className={`action-btn ${s.isActive ? 'delete' : 'approve'}`}
                           title={s.isActive ? 'Deactivate' : 'Activate'}
                           aria-label={`${s.isActive ? 'Deactivate' : 'Activate'} ${s.name}`}
                           disabled={togglingId === s.id}
@@ -309,6 +321,17 @@ export default function ServiceCatalog() {
               </tbody>
             </table>
           </div>
+        )}
+        {!loading && !loadError && filteredServices.length > 0 && (
+          <Pagination
+            info={`Showing ${pagedServices.length ? (currentPage - 1) * PAGE_SIZE + 1 : 0}-${
+              (currentPage - 1) * PAGE_SIZE + pagedServices.length
+            } of ${filteredServices.length} services`}
+            hasPrev={currentPage > 1}
+            hasNext={currentPage < totalPages}
+            onPrev={() => setPage((p) => Math.max(1, p - 1))}
+            onNext={() => setPage((p) => Math.min(totalPages, p + 1))}
+          />
         )}
       </SectionCard>
 
@@ -402,7 +425,7 @@ export default function ServiceCatalog() {
                             <option key={value} value={value}>{label}</option>
                           ))}
                         </select>
-                        <button type="button" className="action-btn" title="Remove field" onClick={() => removeField(fieldIndex)}>
+                        <button type="button" className="action-btn delete" title="Remove field" onClick={() => removeField(fieldIndex)}>
                           <i className="fas fa-trash" />
                         </button>
                       </div>
@@ -429,7 +452,7 @@ export default function ServiceCatalog() {
                               />
                               <button
                                 type="button"
-                                className="action-btn"
+                                className="action-btn delete"
                                 title="Remove option"
                                 onClick={() => removeOption(fieldIndex, optionIndex)}
                               >

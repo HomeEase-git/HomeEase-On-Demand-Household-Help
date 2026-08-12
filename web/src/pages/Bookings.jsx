@@ -12,6 +12,7 @@ import ErrorState from '../components/common/ErrorState'
 import { useListQuery } from '../hooks/useListQuery'
 import { fetchBookings, cancelBookingAdmin } from '../services/bookings'
 import { useToast } from '../context/ToastContext'
+import { getBookingStatusVariant } from '../utils/statusBadge'
 
 const SUB_NAV = [
   { to: '/bookings', label: 'All Bookings' },
@@ -162,7 +163,7 @@ export default function Bookings() {
                         <td>{b.date}</td>
                         <td>{b.amount}</td>
                         <td>
-                          <Badge variant={b.status === 'Completed' ? 'approved' : 'pending'}>{b.status}</Badge>
+                          <Badge variant={getBookingStatusVariant(b.status)}>{b.status}</Badge>
                         </td>
                         <td>
                           <div className="row-actions">

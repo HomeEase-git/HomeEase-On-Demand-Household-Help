@@ -1,9 +1,10 @@
-﻿import { useEffect, useState } from 'react'
+﻿import { useEffect, useMemo, useState } from 'react'
 import PageHeader from '../components/common/PageHeader'
 import SubNav from '../components/common/SubNav'
 import SectionCard from '../components/common/SectionCard'
 import LoadingState from '../components/common/LoadingState'
 import ErrorState from '../components/common/ErrorState'
+import Pagination from '../components/common/Pagination'
 import { fetchReviews, updateReview } from '../services/reviews'
 import { useToast } from '../context/ToastContext'
 
@@ -12,11 +13,14 @@ const SUB_NAV = [
   { to: '/reviews/flagged', label: 'Flagged Reviews' },
 ]
 
+const PAGE_SIZE = 10
+
 export default function ReviewsFlagged() {
   const [flagged, setFlagged] = useState([])
   const [selected, setSelected] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
+  const [page, setPage] = useState(1)
   const { showSuccess, showError } = useToast()
 
   const loadFlaggedReviews = async () => {
@@ -37,6 +41,13 @@ export default function ReviewsFlagged() {
   useEffect(() => {
     loadFlaggedReviews()
   }, [])
+
+  const totalPages = Math.max(1, Math.ceil(flagged.length / PAGE_SIZE))
+  const currentPage = Math.min(page, totalPages)
+  const pagedFlagged = useMemo(
+    () => flagged.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE),
+    [flagged, currentPage]
+  )
 
   const updateLocalReview = (updated) => {
     setFlagged((prev) => prev.map((review) => (review.id === updated.id ? updated : review)))
@@ -113,7 +124,7 @@ export default function ReviewsFlagged() {
                     </td>
                   </tr>
                 ) : (
-                  flagged.map((review) => (
+                  pagedFlagged.map((review) => (
                     <tr key={review.id}>
                       <td>{review.displayId}</td>
                       <td>{review.worker}</td>
@@ -163,6 +174,17 @@ export default function ReviewsFlagged() {
               </tbody>
             </table>
           </div>
+        )}
+        {!loading && !error && flagged.length > 0 && (
+          <Pagination
+            info={`Showing ${pagedFlagged.length ? (currentPage - 1) * PAGE_SIZE + 1 : 0}-${
+              (currentPage - 1) * PAGE_SIZE + pagedFlagged.length
+            } of ${flagged.length} flagged reviews`}
+            hasPrev={currentPage > 1}
+            hasNext={currentPage < totalPages}
+            onPrev={() => setPage((p) => Math.max(1, p - 1))}
+            onNext={() => setPage((p) => Math.min(totalPages, p + 1))}
+          />
         )}
       </SectionCard>
 

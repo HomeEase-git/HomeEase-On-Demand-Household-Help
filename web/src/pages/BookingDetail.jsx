@@ -8,6 +8,7 @@ import ErrorState from '../components/common/ErrorState'
 import { useDetailQuery } from '../hooks/useListQuery'
 import { fetchBookingById, cancelBookingAdmin } from '../services/bookings'
 import { useToast } from '../context/ToastContext'
+import { getBookingStatusVariant } from '../utils/statusBadge'
 
 const SUB_NAV = [
   { to: '/bookings', label: 'All Bookings' },
@@ -53,7 +54,7 @@ export default function BookingDetail() {
     { label: 'Date & Time', value: booking.date },
     {
       label: 'Status',
-      value: <Badge variant={booking.status === 'Completed' ? 'approved' : 'pending'}>{booking.status}</Badge>,
+      value: <Badge variant={getBookingStatusVariant(booking.status)}>{booking.status}</Badge>,
     },
     { label: 'Amount', value: booking.amount },
   ]
