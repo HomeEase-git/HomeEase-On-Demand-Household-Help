@@ -1,15 +1,17 @@
-import React, { useEffect } from "react";
+import React, { useEffect, useState } from "react";
 import { View, Text, ScrollView, Animated, Easing } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { AppIcon as Ionicons } from "../../components/icons/AppIcon";
 import { useRouter } from "expo-router";
 import PrimaryButton from "../../components/ui/PrimaryButton";
+import { useAuthStore } from "../../store/authStore";
 import { colors } from "../../constants";
 
 export default function AccountCreatedSuccessScreen() {
   const router = useRouter();
-  const scaleAnim = React.useRef(new Animated.Value(0)).current;
-  const rotateAnim = React.useRef(new Animated.Value(0)).current;
+  const user = useAuthStore((s) => s.user);
+  const [scaleAnim] = useState(() => new Animated.Value(0));
+  const [rotateAnim] = useState(() => new Animated.Value(0));
 
   useEffect(() => {
     // Scale animation for the icon
@@ -39,7 +41,13 @@ export default function AccountCreatedSuccessScreen() {
   });
 
   const handleGetStarted = () => {
-    router.replace("/(kyc)/landing");
+    // Clients don't go through worker identity verification — they get a
+    // one-time gated agreement screen instead.
+    if (user?.role === "client") {
+      router.replace("/(auth)/client-agreement");
+    } else {
+      router.replace("/(kyc)/landing");
+    }
   };
 
   return (
@@ -94,8 +102,9 @@ export default function AccountCreatedSuccessScreen() {
         </View>
 
         <Text className="text-text-secondary text-center text-sm mb-12">
-          Next, complete your profile and KYC verification to unlock all
-          features.
+          {user?.role === "client"
+            ? "Next, review and accept the user agreement to start booking."
+            : "Next, complete your profile and KYC verification to unlock all features."}
         </Text>
 
         <PrimaryButton
@@ -103,10 +112,6 @@ export default function AccountCreatedSuccessScreen() {
           fullWidth
           onPress={handleGetStarted}
         />
-
-        <Text className="text-text-muted text-xs text-center mt-8">
-          You can also complete your profile later from the settings menu.
-        </Text>
       </ScrollView>
     </SafeAreaView>
   );

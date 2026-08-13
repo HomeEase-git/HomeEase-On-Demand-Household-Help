@@ -1,6 +1,7 @@
 import type { NotificationType } from '@prisma/client';
 import prisma from '@config/database';
 import { getIO } from '../socket';
+import { sendPushToUser } from '../services/pushNotificationService';
 
 type NotifyUserInput = {
   userId: string;
@@ -24,6 +25,16 @@ export const notifyUser = async (input: NotifyUserInput) => {
     // Socket.IO may not be initialized (e.g. scripts/tests) — notification is
     // still persisted, so this is safe to swallow.
   }
+
+  // Fire-and-forget — reaches the user even if the app is closed/backgrounded,
+  // unlike the socket emit above which only reaches an open app. Never awaited
+  // so a slow/failed push can't delay the caller's response.
+  void sendPushToUser({
+    userId: input.userId,
+    title: input.title,
+    body: input.message,
+    data: { notificationId: notification.id, type: input.type },
+  });
 
   return notification;
 };

@@ -112,6 +112,60 @@ export const markAllNotificationsRead = async (req: AuthRequest, res: Response) 
 };
 
 /**
+ * POST /api/notifications/push-token
+ * Register (or overwrite) the Expo push token for the current user's device.
+ * Single-device by design — a new login on another device replaces it.
+ */
+export const registerPushToken = async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      return res.status(401).json(errorResponse(401, 'Not authenticated'));
+    }
+
+    const { token } = req.body;
+
+    await prisma.user.update({
+      where: { id: req.user.userId },
+      data: { pushToken: token },
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: 'Push token registered',
+    });
+  } catch (error) {
+    console.error('Error registering push token:', error);
+    return res.status(500).json(errorResponse(500, 'Failed to register push token'));
+  }
+};
+
+/**
+ * DELETE /api/notifications/push-token
+ * Clear the current user's push token (called on logout) so a signed-out
+ * device stops receiving pushes meant for whoever logs in next.
+ */
+export const removePushToken = async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      return res.status(401).json(errorResponse(401, 'Not authenticated'));
+    }
+
+    await prisma.user.update({
+      where: { id: req.user.userId },
+      data: { pushToken: null },
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: 'Push token removed',
+    });
+  } catch (error) {
+    console.error('Error removing push token:', error);
+    return res.status(500).json(errorResponse(500, 'Failed to remove push token'));
+  }
+};
+
+/**
  * GET /api/notifications/unread-count
  * Get total unread notification count for the badge
  */

@@ -1,11 +1,11 @@
 import React from "react";
 import { View, Text, Pressable } from "react-native";
-import { AppIcon as Ionicons } from "../icons/AppIcon";
-import { colors } from "../../constants";
+import Avatar from "../ui/Avatar";
 
 type Conversation = {
   id: string;
   name: string;
+  avatar?: string | null;
   lastMessage: string;
   time: string;
   unread: number;
@@ -25,8 +25,8 @@ export const ConversationItem: React.FC<Props> = ({
       className="flex-row items-center py-4 border-b border-divider"
       onPress={onPress}
     >
-      <View className="w-12 h-12 bg-card-light rounded-full items-center justify-center mr-3">
-        <Ionicons name="person-circle" size={40} color={colors.text.muted} />
+      <View className="mr-3">
+        <Avatar uri={conversation.avatar} size="md" />
       </View>
       <View className="flex-1">
         <Text className="text-text-primary font-bold">{conversation.name}</Text>

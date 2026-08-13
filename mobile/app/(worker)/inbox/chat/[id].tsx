@@ -5,6 +5,7 @@ import { AppIcon as Ionicons } from "../../../../components/icons/AppIcon";
 import { useRouter, useLocalSearchParams } from "expo-router";
 import ChatBubbleSent from "../../../../components/chat/ChatBubbleSent";
 import ChatBubbleReceived from "../../../../components/chat/ChatBubbleReceived";
+import Avatar from "../../../../components/ui/Avatar";
 import ImageSourcePickerBottomSheet from "../../../../components/bottom-sheets/ImageSourcePickerBottomSheet";
 import type { BottomSheetHandle } from "../../../../components/bottom-sheets/BottomSheetWrapper";
 import { useMessageStore } from "../../../../store/messageStore";
@@ -81,6 +82,7 @@ export default function WorkerChatScreen() {
     } catch (error) {
       console.error("Send message error:", error);
       setInput(text);
+      alertModal.error("Error", "Failed to send message. Please try again.");
     } finally {
       setSending(false);
     }
@@ -112,13 +114,10 @@ export default function WorkerChatScreen() {
     <SafeAreaView className="flex-1 bg-white" edges={["top"]}>
       <View className="flex-row items-center px-4 py-3 border-b border-divider">
         <Pressable onPress={() => router.back()} className="mr-2">
-          <Ionicons name="chevron-back" size={24} color={colors.white} />
+          <Ionicons name="chevron-back" size={24} color={colors.text.primary} />
         </Pressable>
-        <Pressable
-          className="w-9 h-9 bg-card-light rounded-full items-center justify-center mr-3"
-          onPress={() => {}}
-        >
-          <Ionicons name="person-circle" size={32} color={colors.text.muted} />
+        <Pressable className="mr-3" onPress={() => {}}>
+          <Avatar uri={conversation?.avatar} size="sm" />
         </Pressable>
         <View className="flex-1">
           <Text className="text-text-primary font-bold">
@@ -126,7 +125,7 @@ export default function WorkerChatScreen() {
           </Text>
         </View>
         <Pressable onPress={call}>
-          <Ionicons name="call-outline" size={22} color={colors.white} />
+          <Ionicons name="call-outline" size={22} color={colors.text.primary} />
         </Pressable>
       </View>
 
@@ -166,7 +165,11 @@ export default function WorkerChatScreen() {
           onChangeText={setInput}
           multiline
         />
-        <Pressable className="bg-accent rounded-full p-2 ml-2" onPress={send}>
+        <Pressable
+          className={`bg-accent rounded-full p-2 ml-2 ${sending ? "opacity-50" : ""}`}
+          onPress={send}
+          disabled={sending}
+        >
           <Ionicons name="send" size={20} color={colors.white} />
         </Pressable>
       </View>

@@ -87,7 +87,16 @@ export default function Reviews() {
                         <td>{r.client}</td>
                         <td>{r.worker}</td>
                         <td>★ {r.rating}</td>
-                        <td>{r.comment}</td>
+                        <td>
+                          {r.comment}
+                          {r.photoUrls?.length > 0 && (
+                            <i
+                              className="fas fa-camera"
+                              title={`${r.photoUrls.length} photo(s) attached`}
+                              style={{ marginLeft: 6, color: 'var(--text-muted)' }}
+                            />
+                          )}
+                        </td>
                         <td>{r.createdAt}</td>
                         <td>
                           <Link

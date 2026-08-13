@@ -159,7 +159,14 @@ export default function Bookings() {
                         <td>{b.displayId}</td>
                         <td>{b.client}</td>
                         <td>{b.worker}</td>
-                        <td>{b.service}</td>
+                        <td>
+                          {b.service}{' '}
+                          {b.urgencyLevel && b.urgencyLevel !== 'STANDARD' && (
+                            <Badge variant={b.urgencyLevel === 'EMERGENCY' ? 'flagged' : 'pending'}>
+                              {b.urgencyLevel === 'EMERGENCY' ? 'Emergency' : 'Urgent'}
+                            </Badge>
+                          )}
+                        </td>
                         <td>{b.date}</td>
                         <td>{b.amount}</td>
                         <td>

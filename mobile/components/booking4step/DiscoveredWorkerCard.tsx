@@ -10,6 +10,8 @@ const BADGE_STYLES: Record<string, { bg: string; text: string; label: string }> 
   TOP_RATED: { bg: "bg-gold/20", text: "text-accent", label: "Top Rated" },
   NEW: { bg: "bg-brand/10", text: "text-brand", label: "New" },
   HEAVY_DUTY_READY: { bg: "bg-warning/10", text: "text-warning", label: "Heavy-Duty Ready" },
+  PRO_TIER: { bg: "bg-accent/10", text: "text-accent", label: "Pro" },
+  EXPERT_TIER: { bg: "bg-gold/20", text: "text-accent", label: "Expert" },
 };
 
 type Props = {

@@ -79,7 +79,7 @@ export default function WorkerProfileScreen() {
     } catch (error) {
       console.error("Load digital ID error:", error);
     }
-  }, [user?.id]);
+  }, [user]);
 
   useFocusEffect(
     useCallback(() => {

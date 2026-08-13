@@ -8,7 +8,6 @@ import ScreenHeader from "../../../components/ui/ScreenHeader";
 import InputField from "../../../components/ui/InputField";
 import DangerButton from "../../../components/ui/DangerButton";
 import OutlinedButton from "../../../components/ui/OutlinedButton";
-import GenericConfirmationModal from "../../../components/modals/GenericConfirmationModal";
 import { useAuthStore } from "../../../store/authStore";
 import { colors } from "../../../constants";
 import * as api from "../../../services/api";
@@ -20,17 +19,11 @@ export default function WorkerDeleteAccountScreen() {
   const logout = useAuthStore((s) => s.logout);
   const [confirmText, setConfirmText] = useState("");
   const [password, setPassword] = useState("");
-  const [modalVisible, setModalVisible] = useState(false);
   const [deleting, setDeleting] = useState(false);
 
   const canDelete = confirmText === "DELETE" && password.length > 0;
 
-  const handleDelete = () => {
-    setModalVisible(true);
-  };
-
-  const onConfirmDelete = async () => {
-    setModalVisible(false);
+  const handleDelete = async () => {
     setDeleting(true);
     try {
       await api.deleteAccount(password);
@@ -95,15 +88,6 @@ export default function WorkerDeleteAccountScreen() {
           <OutlinedButton label="Cancel" onPress={() => router.back()} />
         </View>
       </ScrollView>
-      <GenericConfirmationModal
-        visible={modalVisible}
-        title="Final confirmation"
-        message="Are you sure you want to delete your account? This cannot be undone."
-        confirmLabel="Delete"
-        cancelLabel="Cancel"
-        onConfirm={onConfirmDelete}
-        onCancel={() => setModalVisible(false)}
-      />
     </SafeAreaView>
   );
 }

@@ -51,8 +51,7 @@ async function fetchReceivingInstitutions(provider: TransferProvider): Promise<R
   return institutions;
 }
 
-// GCash/Maya only, matching the Xendit-era restriction — BANK_TRANSFER needs
-// a per-bank code and WorkerProfile only stores an account number/name today.
+// GCash/Maya are the only supported payout channels.
 const INSTITUTION_NAME_FRAGMENT_BY_METHOD: Record<string, string> = {
   GCASH: 'gcash',
   MAYA: 'maya', // matches both "Maya" and legacy "PayMaya" naming

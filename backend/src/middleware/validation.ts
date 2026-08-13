@@ -222,6 +222,36 @@ export const validateCreateCertification = (
   return next();
 };
 
+export const validateUpdateCertification = (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  const { name, issuer, issueDate, expiryDate, documentUrl } = req.body;
+
+  if (!name || typeof name !== 'string' || !name.trim()) {
+    return res.status(400).json(errorResponse(400, 'name is required and must be a non-empty string'));
+  }
+
+  if (!issuer || typeof issuer !== 'string' || !issuer.trim()) {
+    return res.status(400).json(errorResponse(400, 'issuer is required and must be a non-empty string'));
+  }
+
+  if (!issueDate || isNaN(new Date(issueDate).getTime())) {
+    return res.status(400).json(errorResponse(400, 'issueDate is required and must be a valid date'));
+  }
+
+  if (expiryDate !== undefined && expiryDate !== null && isNaN(new Date(expiryDate).getTime())) {
+    return res.status(400).json(errorResponse(400, 'expiryDate must be a valid date'));
+  }
+
+  if (documentUrl !== undefined && typeof documentUrl !== 'string') {
+    return res.status(400).json(errorResponse(400, 'documentUrl must be a string'));
+  }
+
+  return next();
+};
+
 const VALID_TIME_SLOTS = ['MORNING', 'AFTERNOON', 'EVENING'];
 
 export const validateUpdateAvailabilitySlots = (
@@ -285,6 +315,20 @@ export const validateUpdateHourlyRate = (
   return next();
 };
 
+export const validateRegisterPushToken = (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  const { token } = req.body;
+
+  if (!token || typeof token !== 'string' || !token.trim()) {
+    return res.status(400).json(errorResponse(400, 'token is required and must be a non-empty string'));
+  }
+
+  return next();
+};
+
 export const validateUpdatePayoutMethod = (
   req: Request,
   res: Response,
@@ -292,7 +336,7 @@ export const validateUpdatePayoutMethod = (
 ) => {
   const { payoutMethod, payoutAccountName, payoutAccountNumber } = req.body;
 
-  const allowedMethods = ['GCASH', 'MAYA', 'BANK_TRANSFER'];
+  const allowedMethods = ['GCASH', 'MAYA'];
   if (!payoutMethod || !allowedMethods.includes(payoutMethod)) {
     return res.status(400).json(errorResponse(400, `payoutMethod must be one of ${allowedMethods.join(', ')}`));
   }
@@ -311,6 +355,7 @@ export const validateUpdatePayoutMethod = (
 // Booking validators
 const VALID_TIME_SLOTS_BOOKING = ['MORNING', 'AFTERNOON', 'EVENING'];
 const VALID_CONDITIONS_BOOKING = ['TIDY', 'NORMAL', 'HEAVY'];
+const VALID_URGENCY_LEVELS_BOOKING = ['STANDARD', 'URGENT', 'EMERGENCY'];
 const VALID_ROOM_TYPES_BOOKING = [
   'BEDROOM', 'BATHROOM', 'KITCHEN', 'LIVING_ROOM', 'DINING_ROOM', 'OFFICE', 'GARAGE', 'BALCONY', 'OTHER',
 ];
@@ -337,6 +382,7 @@ export const validateCreateBooking = (
     lng,
     date,
     timeSlot,
+    urgencyLevel,
     addOns,
     priorities,
     tip,
@@ -383,6 +429,10 @@ export const validateCreateBooking = (
     return res.status(400).json(errorResponse(400, `condition must be one of ${VALID_CONDITIONS_BOOKING.join(', ')}`));
   }
 
+  if (urgencyLevel !== undefined && !VALID_URGENCY_LEVELS_BOOKING.includes(urgencyLevel)) {
+    return res.status(400).json(errorResponse(400, `urgencyLevel must be one of ${VALID_URGENCY_LEVELS_BOOKING.join(', ')}`));
+  }
+
   if (priorities !== undefined) {
     if (!Array.isArray(priorities) || !priorities.every((p: unknown) => typeof p === 'string')) {
       return res.status(400).json(errorResponse(400, 'priorities must be an array of strings'));
@@ -399,7 +449,7 @@ export const validateCreateBooking = (
     return res.status(400).json(errorResponse(400, 'tip must be a non-negative number'));
   }
 
-  const VALID_PAYMENT_METHOD_TYPES = ['GCASH', 'MAYA', 'CARD', 'BANK_TRANSFER', 'CASH'];
+  const VALID_PAYMENT_METHOD_TYPES = ['GCASH', 'MAYA', 'CASH'];
   if (paymentMethodType !== undefined) {
     if (typeof paymentMethodType !== 'string' || !VALID_PAYMENT_METHOD_TYPES.includes(paymentMethodType)) {
       return res.status(400).json(
@@ -538,16 +588,25 @@ export const validateAddReview = (
   res: Response,
   next: NextFunction
 ) => {
-  const { rating, comment } = req.body;
-  
+  const { rating, comment, photoUrls } = req.body;
+
   if (typeof rating !== 'number' || rating < 1 || rating > 5) {
     return res.status(400).json(errorResponse(400, 'rating must be a number between 1 and 5'));
   }
-  
+
   if (!comment || typeof comment !== 'string') {
     return res.status(400).json(errorResponse(400, 'comment is required and must be a string'));
   }
-  
+
+  if (
+    photoUrls !== undefined &&
+    (!Array.isArray(photoUrls) ||
+      photoUrls.length > 5 ||
+      !photoUrls.every((url) => typeof url === 'string'))
+  ) {
+    return res.status(400).json(errorResponse(400, 'photoUrls must be an array of up to 5 URL strings'));
+  }
+
   return next();
 };
 
@@ -569,7 +628,7 @@ export const validateRescheduleBooking = (
   return next();
 };
 
-const validPaymentMethodTypes = ['GCASH', 'MAYA', 'CARD', 'BANK_TRANSFER', 'CASH'];
+const validPaymentMethodTypes = ['GCASH', 'MAYA', 'CASH'];
 
 // Payment validators
 export const validateAddPaymentMethod = (
@@ -585,7 +644,7 @@ export const validateAddPaymentMethod = (
 
   if (!validPaymentMethodTypes.includes(type.toUpperCase())) {
     return res.status(400).json(
-      errorResponse(400, `Invalid type "${type}". Allowed values: GCASH, MAYA, CARD, BANK_TRANSFER, CASH`)
+      errorResponse(400, `Invalid type "${type}". Allowed values: GCASH, MAYA, CASH`)
     );
   }
 

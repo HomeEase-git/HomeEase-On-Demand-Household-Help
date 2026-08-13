@@ -7,6 +7,7 @@ export type WorkerJob = {
   clientName: string;
   clientId: string | null;
   clientPhone: string | null;
+  clientAvatar: string | null;
   service: string;
   status: BookingStatus;
   scheduledDate: string;
@@ -28,6 +29,7 @@ export type ApiWorkerBooking = {
   clientName: string;
   clientId: string | null;
   clientPhone: string | null;
+  clientAvatar?: string | null;
   service: string;
   status: string;
   scheduledDate: string;
@@ -49,6 +51,7 @@ export function mapApiJob(b: ApiWorkerBooking): WorkerJob {
     clientName: b.clientName,
     clientId: b.clientId ?? null,
     clientPhone: b.clientPhone ?? null,
+    clientAvatar: b.clientAvatar ?? null,
     service: b.service,
     status: API_STATUS_MAP[b.status] ?? "Pending",
     scheduledDate: b.scheduledDate,

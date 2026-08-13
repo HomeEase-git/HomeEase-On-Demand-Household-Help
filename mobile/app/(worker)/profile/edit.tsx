@@ -19,7 +19,6 @@ export default function WorkerEditProfileScreen() {
   const [phone, setPhone] = useState(user?.phone ?? "");
   const [email] = useState(user?.email ?? "");
   const [bio, setBio] = useState("");
-  const [years, setYears] = useState("");
   const [areaRadius, setAreaRadius] = useState("");
   const [trade, setTrade] = useState("");
   const [serviceArea, setServiceArea] = useState("");
@@ -59,7 +58,6 @@ export default function WorkerEditProfileScreen() {
   const nameRef = useRef<TextInput>(null);
   const phoneRef = useRef<TextInput>(null);
   const bioRef = useRef<TextInput>(null);
-  const yearsRef = useRef<TextInput>(null);
   const areaRef = useRef<TextInput>(null);
 
   const handleSubmit = async () => {
@@ -130,15 +128,6 @@ export default function WorkerEditProfileScreen() {
           value={bio}
           onChangeText={setBio}
           multiline
-          returnKeyType="next"
-          onSubmitEditing={() => yearsRef.current?.focus()}
-        />
-        <InputField
-          ref={yearsRef}
-          label="Years of Experience"
-          value={years}
-          onChangeText={setYears}
-          keyboardType="number-pad"
           returnKeyType="next"
           onSubmitEditing={() => areaRef.current?.focus()}
         />

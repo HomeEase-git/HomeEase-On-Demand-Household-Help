@@ -1,6 +1,7 @@
 import React from "react";
 import { View, Text, Pressable } from "react-native";
 import { AppIcon as Ionicons } from "../icons/AppIcon";
+import Avatar from "../ui/Avatar";
 import StatusBadge from "../ui/StatusBadge";
 import type { StatusType } from "../ui/StatusBadge";
 import { colors, cardShadow } from "../../constants";
@@ -8,6 +9,7 @@ import { colors, cardShadow } from "../../constants";
 type Request = {
   id: string;
   client: string;
+  clientAvatar?: string | null;
   service: string;
   date: string;
   amount: number;
@@ -34,8 +36,8 @@ export const RequestCard: React.FC<Props> = ({ request, onPress }) => {
       onPress={onPress}
     >
       <View className="flex-row items-center">
-        <View className="w-12 h-12 bg-card-light rounded-full items-center justify-center mr-3">
-          <Ionicons name="person-circle" size={40} color={colors.text.muted} />
+        <View className="mr-3">
+          <Avatar uri={request.clientAvatar} size="md" />
         </View>
         <View className="flex-1">
           <Text className="text-text-primary font-bold" numberOfLines={1}>

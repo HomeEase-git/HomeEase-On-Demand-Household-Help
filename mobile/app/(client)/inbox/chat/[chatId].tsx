@@ -5,6 +5,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { useRouter, useLocalSearchParams } from "expo-router";
 import ChatBubbleSent from "../../../../components/chat/ChatBubbleSent";
 import ChatBubbleReceived from "../../../../components/chat/ChatBubbleReceived";
+import Avatar from "../../../../components/ui/Avatar";
 import ImageSourcePickerBottomSheet from "../../../../components/bottom-sheets/ImageSourcePickerBottomSheet";
 import type { BottomSheetHandle } from "../../../../components/bottom-sheets/BottomSheetWrapper";
 import { useMessageStore } from "../../../../store/messageStore";
@@ -81,6 +82,7 @@ export default function ChatScreen() {
     } catch (error) {
       console.error("Send message error:", error);
       setInput(text);
+      alertModal.error("Error", "Failed to send message. Please try again.");
     } finally {
       setSending(false);
     }
@@ -115,7 +117,7 @@ export default function ChatScreen() {
           <Ionicons name="chevron-back" size={24} color={colors.text.primary} />
         </Pressable>
         <Pressable
-          className="w-9 h-9 bg-card-light rounded-full items-center justify-center mr-3"
+          className="mr-3"
           onPress={() =>
             userId &&
             router.push({
@@ -124,7 +126,7 @@ export default function ChatScreen() {
             })
           }
         >
-          <Ionicons name="person-circle" size={32} color={colors.text.muted} />
+          <Avatar uri={conversation?.avatar} size="sm" />
         </Pressable>
         <View className="flex-1">
           <Text className="text-text-primary font-bold">
@@ -184,7 +186,11 @@ export default function ChatScreen() {
           onChangeText={setInput}
           multiline
         />
-        <Pressable className="bg-accent rounded-full p-2 ml-2" onPress={send}>
+        <Pressable
+          className={`bg-accent rounded-full p-2 ml-2 ${sending ? "opacity-50" : ""}`}
+          onPress={send}
+          disabled={sending}
+        >
           <Ionicons name="send" size={20} color={colors.white} />
         </Pressable>
       </View>

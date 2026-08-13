@@ -1,13 +1,22 @@
 import React from "react";
-import { Tabs } from "expo-router";
+import { Tabs, Redirect } from "expo-router";
 import { AppIcon as Ionicons } from "../../components/icons/AppIcon";
 import { View } from "react-native";
 import NotificationBadge from "../../components/ui/NotificationBadge";
 import { useNotificationStore } from "../../store/notificationStore";
+import { useAuthStore } from "../../store/authStore";
 import { colors } from "../../constants";
 
 export default function ClientLayout() {
   const unreadCount = useNotificationStore((s) => s.unreadCount);
+  const user = useAuthStore((s) => s.user);
+
+  // Gate the client tabs behind accepting the user agreement — this runs on
+  // every entry into the (client) group, not just the sign-in redirect, so
+  // there's no route into the app for a client who hasn't accepted yet.
+  if (user?.role === "client" && !user.hasAcceptedTerms) {
+    return <Redirect href="/(auth)/client-agreement" />;
+  }
 
   return (
     <Tabs

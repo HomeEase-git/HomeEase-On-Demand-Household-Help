@@ -66,6 +66,7 @@ export default function RequestsScreen() {
         request={{
           id: item.id,
           client: item.clientName,
+          clientAvatar: item.clientAvatar,
           service: item.service,
           date: item.scheduledDate,
           amount: item.finalPrice ?? item.estimatedPrice,

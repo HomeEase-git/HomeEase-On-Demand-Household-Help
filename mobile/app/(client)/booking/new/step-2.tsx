@@ -15,12 +15,13 @@ import AddressPickerBottomSheet, {
 import type { BottomSheetHandle } from "../../../../components/bottom-sheets/BottomSheetWrapper";
 import DateGridPicker from "../../../../components/booking4step/DateGridPicker";
 import TimeSlotPicker from "../../../../components/ui/TimeSlotPicker";
+import UrgencySelector from "../../../../components/booking4step/UrgencySelector";
 import { useBookingStore } from "../../../../store/bookingStore";
 import { useSlotAvailabilityCounts } from "../../../../hooks/useWorkerDiscovery";
 import * as api from "../../../../services/api";
 import { addressStorage } from "../../../../utils/storage";
 import { geocodeAddress } from "../../../../utils/geo";
-import type { TimeSlot } from "../../../../types/booking4step.types";
+import type { TimeSlot, UrgencyLevel } from "../../../../types/booking4step.types";
 
 const BOOKING_STEPS = ["Scope", "Schedule", "Who", "Confirm"];
 
@@ -37,6 +38,7 @@ export default function BookingStep2Screen() {
   const [city, setCity] = useState<string | undefined>(draft.city);
   const [date, setDate] = useState<string | null>(draft.date);
   const [timeSlot, setTimeSlot] = useState<TimeSlot | null>(draft.timeSlot);
+  const [urgencyLevel, setUrgencyLevel] = useState<UrgencyLevel>(draft.urgencyLevel ?? "STANDARD");
 
   const [addresses, setAddresses] = useState<SavedAddress[]>([]);
   const [loadingAddresses, setLoadingAddresses] = useState(true);
@@ -121,7 +123,7 @@ export default function BookingStep2Screen() {
       return;
     }
 
-    setDraft({ address, lat, lng, city, date, timeSlot });
+    setDraft({ address, lat, lng, city, date, timeSlot, urgencyLevel });
     router.push("/(client)/booking/new/step-3");
   };
 
@@ -158,8 +160,11 @@ export default function BookingStep2Screen() {
           loadingCounts={loadingCounts}
         />
 
+        <Text className="text-text-primary font-bold text-lg mt-6 mb-3">How urgent is this?</Text>
+        <UrgencySelector value={urgencyLevel} onChange={setUrgencyLevel} />
+
         <View className="mt-8">
-          <PrimaryButton label="Next" fullWidth disabled={!canNext} onPress={handleNext} />
+          <PrimaryButton label="Next" fullWidth onPress={handleNext} />
         </View>
       </ScrollView>
 

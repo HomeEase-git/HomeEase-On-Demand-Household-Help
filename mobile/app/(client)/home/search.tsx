@@ -55,18 +55,17 @@ export default function SearchScreen() {
   }, [query]);
 
   useEffect(() => {
+    if (!debouncedQuery) return;
+
     let active = true;
 
-    if (!debouncedQuery) {
-      setResults([]);
-      setSearching(false);
-      setError(null);
-      return;
-    }
-
     addSearch(debouncedQuery);
-    setSearching(true);
-    setError(null);
+
+    Promise.resolve().then(() => {
+      if (!active) return;
+      setSearching(true);
+      setError(null);
+    });
 
     searchWorkers({
       query: debouncedQuery,

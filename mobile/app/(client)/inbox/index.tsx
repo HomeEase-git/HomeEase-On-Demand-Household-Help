@@ -10,9 +10,11 @@ import { useNotificationStore, notificationCategory } from "../../../store/notif
 import { useMessageStore } from "../../../store/messageStore";
 import { formatDate } from "../../../utils/formatDate";
 import * as api from "../../../services/api";
+import { useAlertModal } from "../../../contexts/AlertModalContext";
 
 export default function InboxScreen() {
   const router = useRouter();
+  const alertModal = useAlertModal();
   const [tab, setTab] = useState<"messages" | "notifications">("messages");
   const [loading, setLoading] = useState(true);
   const notifications = useNotificationStore((s) => s.notifications);
@@ -86,8 +88,17 @@ export default function InboxScreen() {
             </Text>
           </Pressable>
         </View>
-        {tab === "notifications" && (
-          <Pressable className="self-end mt-2" onPress={markAllRead}>
+        {tab === "notifications" && notifications.some((n) => !n.isRead) && (
+          <Pressable
+            className="self-end mt-2"
+            onPress={() =>
+              alertModal.confirm(
+                "Mark all as read?",
+                "This will mark every notification as read.",
+                { confirmText: "Mark all read", onConfirm: markAllRead },
+              )
+            }
+          >
             <Text className="text-accent text-sm">Mark all as read</Text>
           </Pressable>
         )}
@@ -109,6 +120,7 @@ export default function InboxScreen() {
                 conversation={{
                   id: item.userId,
                   name: item.name,
+                  avatar: item.avatar,
                   lastMessage: item.lastMessage,
                   time: item.lastMessageTime,
                   unread: item.unread,

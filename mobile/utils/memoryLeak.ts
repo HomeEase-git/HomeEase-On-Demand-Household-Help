@@ -170,16 +170,15 @@ export class ResourceCleanupManager {
  * Hook for resource cleanup
  */
 export function useCleanup() {
-  const managerRef = useRef(new ResourceCleanupManager());
-  const cleanupManagerRef = managerRef.current;
+  const [manager] = useState(() => new ResourceCleanupManager());
 
   useEffect(() => {
     return () => {
-      cleanupManagerRef.cleanup();
+      manager.cleanup();
     };
-  }, [cleanupManagerRef]);
+  }, [manager]);
 
-  return managerRef.current;
+  return manager;
 }
 
 /**

@@ -1,12 +1,13 @@
 import React from "react";
 import { View, Text } from "react-native";
-import { AppIcon as Ionicons } from "../icons/AppIcon";
+import Avatar from "../ui/Avatar";
 import StarRating from "../ui/StarRating";
-import { colors, cardShadow } from "../../constants";
+import { cardShadow } from "../../constants";
 
 type Review = {
   id: string;
   authorName: string;
+  authorAvatar?: string | null;
   rating: number;
   comment: string;
   date: string;
@@ -20,9 +21,8 @@ export const ReviewCard: React.FC<Props> = ({ review }) => {
   return (
     <View className="bg-card rounded-2xl p-4 mb-3" style={cardShadow}>
       <View className="flex-row items-center">
-        {/* TODO: Replace with reviewer profile photo */}
-        <View className="w-10 h-10 bg-card-light rounded-full items-center justify-center mr-3">
-          <Ionicons name="person" size={20} color={colors.text.muted} />
+        <View className="mr-3">
+          <Avatar uri={review.authorAvatar} size="sm" />
         </View>
         <View className="flex-1">
           <Text className="text-text-primary font-semibold">

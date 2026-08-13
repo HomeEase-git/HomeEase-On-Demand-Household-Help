@@ -148,10 +148,6 @@ function maskedAccountIdentifier(type: PaymentMethodType) {
     case PaymentMethodType.GCASH:
     case PaymentMethodType.MAYA:
       return "09XX XXX " + faker.string.numeric(4);
-    case PaymentMethodType.CARD:
-      return "**** **** **** " + faker.string.numeric(4);
-    case PaymentMethodType.BANK_TRANSFER:
-      return "Acct ***" + faker.string.numeric(4);
     default:
       return null;
   }
@@ -318,16 +314,6 @@ async function createClient(index: number) {
       isDefault: true,
     },
   });
-  await prisma.savedPaymentMethod.create({
-    data: {
-      clientProfileId: client.clientProfile!.id,
-      type: PaymentMethodType.CARD,
-      accountIdentifier: maskedAccountIdentifier(PaymentMethodType.CARD),
-      label: "Backup Card",
-      isDefault: false,
-    },
-  });
-
   return client;
 }
 
@@ -592,9 +578,9 @@ async function createBookingsAndPayments(
   }> = [
     { status: PaymentStatus.COMPLETED, escrowStatus: EscrowStatus.RELEASED, methodType: PaymentMethodType.CASH, refunded: false },
     { status: PaymentStatus.COMPLETED, escrowStatus: EscrowStatus.HELD, methodType: PaymentMethodType.GCASH, refunded: false },
-    { status: PaymentStatus.FAILED, escrowStatus: EscrowStatus.HELD, methodType: PaymentMethodType.CARD, refunded: false },
+    { status: PaymentStatus.FAILED, escrowStatus: EscrowStatus.HELD, methodType: PaymentMethodType.GCASH, refunded: false },
     { status: PaymentStatus.REFUNDED, escrowStatus: EscrowStatus.REFUNDED, methodType: PaymentMethodType.MAYA, refunded: true },
-    { status: PaymentStatus.PENDING, escrowStatus: EscrowStatus.HELD, methodType: PaymentMethodType.BANK_TRANSFER, refunded: false },
+    { status: PaymentStatus.PENDING, escrowStatus: EscrowStatus.HELD, methodType: PaymentMethodType.CASH, refunded: false },
   ];
   let paymentPlanIndex = 0;
   let disputedResolvedCount = 0;

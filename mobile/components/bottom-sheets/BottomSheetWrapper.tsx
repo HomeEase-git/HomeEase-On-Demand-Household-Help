@@ -37,7 +37,7 @@ const BottomSheetWrapper: React.FC<Props> = ({
   onClose,
 }) => {
   const insets = useSafeAreaInsets();
-  const translateY = React.useRef(new Animated.Value(HIDDEN_OFFSET)).current;
+  const [translateY] = React.useState(() => new Animated.Value(HIDDEN_OFFSET));
   const [visible, setVisible] = React.useState(false);
 
   const open = React.useCallback(() => {

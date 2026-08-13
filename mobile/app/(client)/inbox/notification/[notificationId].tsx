@@ -5,6 +5,7 @@ import { AppIcon as Ionicons } from "../../../../components/icons/AppIcon";
 import { useRouter, useLocalSearchParams } from "expo-router";
 import ScreenHeader from "../../../../components/ui/ScreenHeader";
 import PrimaryButton from "../../../../components/ui/PrimaryButton";
+import { EmptyState } from "../../../../components/feedback/EmptyState";
 import { colors } from "../../../../constants";
 import { formatDate } from "../../../../utils/formatDate";
 import { useNotificationStore, notificationCategory } from "../../../../store/notificationStore";
@@ -29,9 +30,11 @@ export default function NotificationDetailScreen() {
     return (
       <SafeAreaView className="flex-1 bg-white">
         <ScreenHeader title="Notification" showBack />
-        <View className="flex-1 items-center justify-center">
-          <Text className="text-text-secondary">Not found</Text>
-        </View>
+        <EmptyState
+          icon="notifications-outline"
+          title="Notification not found"
+          subtitle="This notification may have been removed."
+        />
       </SafeAreaView>
     );
   }

@@ -107,6 +107,18 @@ export default function Settings() {
         </p>
         <div className="detail-grid" style={{ marginTop: '0.75rem' }}>
           <div className="detail-block">
+            <label>Admin Fee Per Job (₱)</label>
+            <input
+              type="number"
+              min="0"
+              max="1000"
+              step="1"
+              value={settings.adminFeePerJob}
+              onChange={(e) => setSettings((prev) => ({ ...prev, adminFeePerJob: Number(e.target.value) }))}
+              className="input"
+            />
+          </div>
+          <div className="detail-block">
             <label>Commission Rate (%)</label>
             <input
               type="number"
@@ -164,6 +176,117 @@ export default function Settings() {
               max="5000"
               value={settings.geofenceRadiusMeters}
               onChange={(e) => setSettings((prev) => ({ ...prev, geofenceRadiusMeters: Number(e.target.value) }))}
+              className="input"
+            />
+          </div>
+          <div className="detail-block">
+            <label>Max Declines Before Cooldown</label>
+            <input
+              type="number"
+              min="1"
+              max="20"
+              value={settings.maxDeclinesBeforeCooldown}
+              onChange={(e) =>
+                setSettings((prev) => ({ ...prev, maxDeclinesBeforeCooldown: Number(e.target.value) }))
+              }
+              className="input"
+            />
+          </div>
+          <div className="detail-block">
+            <label>Decline Rolling Window (hours)</label>
+            <input
+              type="number"
+              min="1"
+              max="720"
+              value={settings.declineWindowHours}
+              onChange={(e) => setSettings((prev) => ({ ...prev, declineWindowHours: Number(e.target.value) }))}
+              className="input"
+            />
+          </div>
+          <div className="detail-block">
+            <label>Decline Cooldown Duration (hours)</label>
+            <input
+              type="number"
+              min="1"
+              max="720"
+              value={settings.declineCooldownHours}
+              onChange={(e) => setSettings((prev) => ({ ...prev, declineCooldownHours: Number(e.target.value) }))}
+              className="input"
+            />
+          </div>
+        </div>
+      </SectionCard>
+      <SectionCard title="Expertise Tiers">
+        <p className="page-subtitle">
+          Rates scale up for higher tiers, computed live from a worker&apos;s rating and completed-job count — not
+          manually assigned.
+        </p>
+        <div className="detail-grid" style={{ marginTop: '0.75rem' }}>
+          <div className="detail-block">
+            <label>Pro: Min Rating</label>
+            <input
+              type="number"
+              min="0"
+              max="5"
+              step="0.1"
+              value={settings.tierProMinRating}
+              onChange={(e) => setSettings((prev) => ({ ...prev, tierProMinRating: Number(e.target.value) }))}
+              className="input"
+            />
+          </div>
+          <div className="detail-block">
+            <label>Pro: Min Completed Jobs</label>
+            <input
+              type="number"
+              min="0"
+              value={settings.tierProMinJobs}
+              onChange={(e) => setSettings((prev) => ({ ...prev, tierProMinJobs: Number(e.target.value) }))}
+              className="input"
+            />
+          </div>
+          <div className="detail-block">
+            <label>Pro: Rate Multiplier</label>
+            <input
+              type="number"
+              min="1"
+              max="5"
+              step="0.05"
+              value={settings.tierProMultiplier}
+              onChange={(e) => setSettings((prev) => ({ ...prev, tierProMultiplier: Number(e.target.value) }))}
+              className="input"
+            />
+          </div>
+          <div className="detail-block">
+            <label>Expert: Min Rating</label>
+            <input
+              type="number"
+              min="0"
+              max="5"
+              step="0.1"
+              value={settings.tierExpertMinRating}
+              onChange={(e) => setSettings((prev) => ({ ...prev, tierExpertMinRating: Number(e.target.value) }))}
+              className="input"
+            />
+          </div>
+          <div className="detail-block">
+            <label>Expert: Min Completed Jobs</label>
+            <input
+              type="number"
+              min="0"
+              value={settings.tierExpertMinJobs}
+              onChange={(e) => setSettings((prev) => ({ ...prev, tierExpertMinJobs: Number(e.target.value) }))}
+              className="input"
+            />
+          </div>
+          <div className="detail-block">
+            <label>Expert: Rate Multiplier</label>
+            <input
+              type="number"
+              min="1"
+              max="5"
+              step="0.05"
+              value={settings.tierExpertMultiplier}
+              onChange={(e) => setSettings((prev) => ({ ...prev, tierExpertMultiplier: Number(e.target.value) }))}
               className="input"
             />
           </div>

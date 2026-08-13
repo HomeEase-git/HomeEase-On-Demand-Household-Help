@@ -21,13 +21,6 @@ const METHODS = [
     iconColor: colors.white,
   },
   {
-    id: "bank",
-    label: "Bank Transfer",
-    icon: "business-outline" as const,
-    bg: "bg-card-light",
-    iconColor: colors.brand.DEFAULT,
-  },
-  {
     id: "cash",
     label: "Cash",
     icon: "cash-outline" as const,

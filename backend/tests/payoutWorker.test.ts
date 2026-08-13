@@ -48,7 +48,7 @@ describe('payoutWorker.processSendPayout', () => {
     (paymongoDestinationBicFor as jest.Mock).mockReset();
   });
 
-  async function seedPendingPayout(channel: 'GCASH' | 'MAYA' | 'BANK_TRANSFER' = 'GCASH') {
+  async function seedPendingPayout(channel: 'GCASH' | 'MAYA' = 'GCASH') {
     const booking = await createTestBooking({ clientId, workerId, status: 'COMPLETED' });
     createdBookingIds.push(booking.id);
     const payment = await prisma.payment.create({
@@ -76,18 +76,6 @@ describe('payoutWorker.processSendPayout', () => {
       },
     });
   }
-
-  it('fails immediately without retrying for an unsupported payout channel', async () => {
-    const payout = await seedPendingPayout('BANK_TRANSFER');
-    (paymongoDestinationBicFor as jest.Mock).mockResolvedValueOnce(null);
-
-    await processSendPayout(fakeJob(0, 5), { payoutId: payout.id });
-
-    expect(createTransfer).not.toHaveBeenCalled();
-    const updated = await prisma.payout.findUnique({ where: { id: payout.id } });
-    expect(updated?.status).toBe('FAILED');
-    expect(updated?.failureReason).toContain('Unsupported payout channel');
-  });
 
   it('marks the payout PAID when PayMongo returns succeeded immediately', async () => {
     const payout = await seedPendingPayout('GCASH');

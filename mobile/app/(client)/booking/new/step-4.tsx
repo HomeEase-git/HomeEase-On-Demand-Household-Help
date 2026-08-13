@@ -46,11 +46,6 @@ const ACCOUNT_FIELD_CONFIG: Record<
     placeholder: "09XXXXXXXXX",
     keyboardType: "phone-pad",
   },
-  bank: {
-    title: "Bank Transfer Details",
-    description: "Enter the reference or account number you'll use for the transfer.",
-    placeholder: "Reference / Account Number",
-  },
 };
 
 export default function BookingStep4Screen() {
@@ -78,8 +73,7 @@ export default function BookingStep4Screen() {
     .map(([label, value]) => `${label}: ${Array.isArray(value) ? value.join(", ") : value}`)
     .join(" · ");
 
-  const requiresAccountValue =
-    paymentMethod === "gcash" || paymentMethod === "maya" || paymentMethod === "bank";
+  const requiresAccountValue = paymentMethod === "gcash" || paymentMethod === "maya";
 
   const handleSubmit = () => {
     if (!paymentMethod) {
@@ -122,6 +116,7 @@ export default function BookingStep4Screen() {
         lng: draft.lng!,
         date: draft.date!,
         timeSlot: draft.timeSlot!,
+        urgencyLevel: draft.urgencyLevel,
         addOns,
         packageIds: selectedPackageIds,
         priorities,

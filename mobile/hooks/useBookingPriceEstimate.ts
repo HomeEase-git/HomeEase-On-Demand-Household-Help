@@ -61,13 +61,15 @@ export function useBookingPriceEstimate(
           addOnsTotal,
           tip,
           scopeType,
+          urgencyLevel: draft.urgencyLevel,
+          workerTier: draft.workerTier,
         }),
       };
     }
 
     return {
       mode: 'range',
-      range: estimatePriceRange(rooms, condition, categoryRate, scopeType),
+      range: estimatePriceRange(rooms, condition, categoryRate, scopeType, draft.urgencyLevel),
     };
-  }, [rooms, condition, draft.workerHourlyRate, draft.date, scopeType, tip, categoryRate, addOnsTotal]);
+  }, [rooms, condition, draft.workerHourlyRate, draft.workerTier, draft.date, draft.urgencyLevel, scopeType, tip, categoryRate, addOnsTotal]);
 }

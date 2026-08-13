@@ -314,7 +314,7 @@ export default function SkillsScreen() {
                 })}
                 {availableToAdd.length === 0 && (
                   <Text className="text-text-muted text-sm">
-                    You've already added every available category.
+                    You&apos;ve already added every available category.
                   </Text>
                 )}
               </View>

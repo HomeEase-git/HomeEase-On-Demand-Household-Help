@@ -81,12 +81,20 @@ export default function PrivacySettingsScreen() {
               thumbColor={colors.white}
             />
           </View>
-          <View className="py-4 px-4 border-b border-divider">
+          <Pressable
+            className="py-4 px-4 border-b border-divider"
+            onPress={() =>
+              Linking.openURL(
+                "mailto:support@homeease.com?subject=" +
+                  encodeURIComponent("Data export request"),
+              ).catch(() => {})
+            }
+          >
             <Text className="text-primary">Download My Data</Text>
             <Text className="text-text-muted text-xs mt-1">
-              Export your data
+              Email support to request an export of your data
             </Text>
-          </View>
+          </Pressable>
           <Pressable
             className="py-4 px-4"
             onPress={() => router.push("/(client)/profile/delete-account")}

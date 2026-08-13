@@ -222,6 +222,22 @@ export default function ReviewsFlagged() {
                 <label>Review Comment</label>
                 <div className="value">{selected.comment}</div>
               </div>
+              {selected.photoUrls?.length > 0 && (
+                <div className="detail-block detail-block--full">
+                  <label>Photos</label>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 4 }}>
+                    {selected.photoUrls.map((url) => (
+                      <a key={url} href={url} target="_blank" rel="noreferrer">
+                        <img
+                          src={url}
+                          alt="Review attachment"
+                          style={{ width: 80, height: 80, objectFit: 'cover', borderRadius: 8 }}
+                        />
+                      </a>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
 
             <div className="modal-actions">

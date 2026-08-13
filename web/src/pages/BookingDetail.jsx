@@ -3,12 +3,12 @@ import { Link, Navigate, useParams } from 'react-router-dom'
 import PageHeader from '../components/common/PageHeader'
 import SubNav from '../components/common/SubNav'
 import Badge from '../components/common/Badge'
+import { getBookingStatusVariant } from '../utils/statusBadge'
 import LoadingState from '../components/common/LoadingState'
 import ErrorState from '../components/common/ErrorState'
 import { useDetailQuery } from '../hooks/useListQuery'
 import { fetchBookingById, cancelBookingAdmin } from '../services/bookings'
 import { useToast } from '../context/ToastContext'
-import { getBookingStatusVariant } from '../utils/statusBadge'
 
 const SUB_NAV = [
   { to: '/bookings', label: 'All Bookings' },
@@ -55,6 +55,17 @@ export default function BookingDetail() {
     {
       label: 'Status',
       value: <Badge variant={getBookingStatusVariant(booking.status)}>{booking.status}</Badge>,
+    },
+    {
+      label: 'Urgency',
+      value:
+        booking.urgencyLevel && booking.urgencyLevel !== 'STANDARD' ? (
+          <Badge variant={booking.urgencyLevel === 'EMERGENCY' ? 'flagged' : 'pending'}>
+            {booking.urgencyLevel === 'EMERGENCY' ? 'Emergency' : 'Urgent'}
+          </Badge>
+        ) : (
+          'Standard'
+        ),
     },
     { label: 'Amount', value: booking.amount },
   ]

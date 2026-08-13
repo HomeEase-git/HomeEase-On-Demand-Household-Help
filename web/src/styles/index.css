@@ -352,6 +352,8 @@ body {
   font: inherit;
   text-align: left;
   transition: background var(--transition), box-shadow var(--transition);
+  font: inherit;
+  text-align: left;
 }
 
 .user-menu:hover {

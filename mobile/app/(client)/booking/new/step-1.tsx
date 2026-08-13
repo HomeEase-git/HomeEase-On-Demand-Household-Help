@@ -284,7 +284,7 @@ export default function BookingStep1Screen() {
         </View>
 
         <View className="mt-8">
-          <PrimaryButton label="Next" fullWidth disabled={!canNext || loadingCategories} onPress={handleNext} />
+          <PrimaryButton label="Next" fullWidth disabled={loadingCategories} onPress={handleNext} />
         </View>
       </ScrollView>
       <ImageSourcePickerBottomSheet innerRef={photoSheetRef} onSelect={handlePickIssuePhoto} />

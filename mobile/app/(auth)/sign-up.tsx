@@ -136,14 +136,10 @@ export default function SignUpScreen() {
 
       toast.success("Account created successfully");
 
-      if (role === "worker") {
-        router.push({ pathname: "/(kyc)/landing", params: { role } });
-      } else {
-        router.push({
-          pathname: "/(auth)/otp-verification",
-          params: { email },
-        });
-      }
+      router.push({
+        pathname: "/(auth)/otp-verification",
+        params: { email, role },
+      });
     } catch (err: any) {
       const errorMsg = err?.message || "Something went wrong. Please try again.";
       toast.error(errorMsg);

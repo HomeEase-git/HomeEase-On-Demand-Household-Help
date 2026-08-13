@@ -102,7 +102,7 @@ export default function ResumeScreen() {
           currentStep={3}
         />
         <Text className="text-text-secondary text-sm mb-4">
-          Resume upload is required for workers and must be a PDF file.
+          Resume upload is recommended for workers and must be a PDF file.
         </Text>
 
         <View className="bg-card rounded-xl p-4 mb-6">
@@ -120,7 +120,6 @@ export default function ResumeScreen() {
           <UploadCard
             label="Upload Resume"
             subtitle="Select a PDF file from your device."
-            required
             preview={
               resumeFile.uri ? resumeFile.name || "Resume uploaded" : undefined
             }

@@ -32,7 +32,7 @@ const DEFAULT_FILTERS: SearchFilters = { sort: "rating", availableOnly: false };
 const PROMO_BANNERS = [
   { title: "20% Off Cleaning!", color: colors.banner1 },
   { title: "New Workers Near You!", color: colors.banner2 },
-  { title: "Book Now, Pay Later!", color: colors.banner3 },
+  { title: "Verified & Trusted Pros!", color: colors.banner3 },
 ];
 
 type ServiceCategory = {
@@ -52,6 +52,13 @@ type HomeWorker = {
   status: "available" | "unavailable";
   avatar: string | null;
 };
+
+function timeOfDayGreeting(): string {
+  const hour = new Date().getHours();
+  if (hour < 12) return "Good morning";
+  if (hour < 18) return "Good afternoon";
+  return "Good evening";
+}
 
 function normalizeHomeWorker(worker: any): HomeWorker {
   const rate =
@@ -180,7 +187,7 @@ export default function ClientHomeScreen() {
           <>
             <View className="bg-card rounded-2xl p-5 mx-4 mt-4">
               <Text className="text-text-primary font-bold text-xl">
-                Good morning, {firstName}! 👋
+                {timeOfDayGreeting()}, {firstName}! 👋
               </Text>
               <View className="flex-row items-center mt-2">
                 <Ionicons

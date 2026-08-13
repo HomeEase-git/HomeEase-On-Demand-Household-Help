@@ -2,8 +2,10 @@ import React, { useCallback, useState } from "react";
 import { View, Text, ScrollView } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
+import { isAxiosError } from "axios";
 import { useFocusEffect, useRouter, useLocalSearchParams } from "expo-router";
 import ScreenHeader from "../../../components/ui/ScreenHeader";
+import Avatar from "../../../components/ui/Avatar";
 import AddressMap from "../../../components/ui/AddressMap";
 import PrimaryButton from "../../../components/ui/PrimaryButton";
 import OutlinedButton from "../../../components/ui/OutlinedButton";
@@ -20,7 +22,7 @@ import { ROOM_TYPE_LABELS, CONDITION_LABELS, type RoomType, type ConditionType }
 
 type BookingDetail = {
   id: string;
-  client: { id: string; fullName: string; phone: string | null };
+  client: { id: string; fullName: string; phone: string | null; avatar?: string | null };
   service: string;
   status: string;
   location: string | null;
@@ -126,7 +128,18 @@ export default function RequestDetailScreen() {
       );
     } catch (error) {
       console.error("Accept booking error:", error);
-      alertModal.error("Error", "Failed to accept this job. Please try again.");
+      if (isAxiosError(error) && error.response?.status === 402) {
+        alertModal.error(
+          "Insufficient Wallet Balance",
+          error.message || "Please top up your wallet to accept this job.",
+          [
+            { text: "Top Up", onPress: () => router.push("/(worker)/earnings/wallet") },
+            { text: "Cancel" },
+          ],
+        );
+      } else {
+        alertModal.error("Error", "Failed to accept this job. Please try again.");
+      }
     } finally {
       setSubmitting(false);
     }
@@ -153,12 +166,8 @@ export default function RequestDetailScreen() {
       <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 100 }}>
         {/* Client info */}
         <View className="bg-card rounded-2xl p-4 mb-3 flex-row items-center">
-          <View className="w-14 h-14 bg-card-light rounded-full items-center justify-center mr-3">
-            <Ionicons
-              name="person-circle"
-              size={48}
-              color={colors.text.muted}
-            />
+          <View className="mr-3">
+            <Avatar uri={booking.client.avatar} size="lg" />
           </View>
           <View className="flex-1">
             <Text className="text-text-primary font-bold text-lg">

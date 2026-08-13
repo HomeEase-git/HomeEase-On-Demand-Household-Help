@@ -31,6 +31,7 @@ function formatReview(record: ReviewRecord) {
     workerId: record.worker?.user?.id ?? null,
     rating: record.rating.toFixed(1),
     comment: record.comment ?? '',
+    photoUrls: record.photoUrls,
     flagged: record.flagged,
     flagReason: record.flagReason,
     status: record.status,

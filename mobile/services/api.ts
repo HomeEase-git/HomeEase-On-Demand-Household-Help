@@ -175,6 +175,7 @@ export async function postSignUp(userData: {
       phone: response.phone,
       role: response.role.toLowerCase(),
       kycStatus: response.kycStatus,
+      hasAcceptedTerms: response.hasAcceptedTerms,
       token: response.token,
     };
   } catch (error) {
@@ -196,6 +197,7 @@ export async function postLogin(email: string, password: string) {
       phone: response.phone,
       role: response.role.toLowerCase(),
       kycStatus: response.kycStatus,
+      hasAcceptedTerms: response.hasAcceptedTerms,
       token: response.token,
     };
   } catch (error) {
@@ -331,6 +333,7 @@ export async function createBooking(details: CreateBookingPayload): Promise<Crea
       lng: details.lng,
       date: details.date,
       timeSlot: details.timeSlot,
+      urgencyLevel: details.urgencyLevel ?? undefined,
       addOns: details.addOns || [],
       packageIds: details.packageIds || [],
       priorities: details.priorities ?? [],
@@ -655,6 +658,7 @@ export async function getWorkerReviews(workerId: string, limit = 50) {
     const reviews = (response.reviews ?? []).map((r: any) => ({
       id: r.id,
       clientName: r.reviewer?.name ?? "Client",
+      clientAvatar: r.reviewer?.avatar ?? null,
       rating: Number(r.rating ?? 0),
       comment: r.comment ?? "",
       date: r.createdAt,
@@ -863,6 +867,10 @@ export async function getTransactions(page?: number, status?: 'PENDING' | 'COMPL
         method: p.methodType,
         status: titleCaseStatus(p.status ?? "Pending"),
         date: p.createdAt,
+        // Worker-only — the actual PayMongo transfer status, separate from
+        // `status` above (which only reflects the client's payment/escrow).
+        payoutStatus: p.payoutStatus ?? null,
+        payoutFailureReason: p.payoutFailureReason ?? null,
       })),
       total: response.pagination?.total ?? payments.length,
       page: response.pagination?.page ?? page ?? 1,
@@ -889,6 +897,7 @@ export async function getTransactionDetail(bookingId: string) {
       breakdown: response.priceBreakdown,
       date: response.createdAt,
       transactionId: response.transactionId,
+      failureMessage: response.failureMessage,
     };
   } catch (error) {
     if (isAxiosError(error) && error.response?.status === 404) return null;
@@ -938,9 +947,14 @@ export async function submitReview(
   bookingId: string,
   rating: number,
   comment: string,
+  photoUrls?: string[],
 ) {
   try {
-    const response = await api.post(`/bookings/${bookingId}/review`, { rating, comment });
+    const response = await api.post(`/bookings/${bookingId}/review`, {
+      rating,
+      comment,
+      ...(photoUrls && photoUrls.length > 0 ? { photoUrls } : {}),
+    });
     return response;
   } catch (error) {
     console.error('Submit review error:', error);
@@ -958,6 +972,7 @@ export async function getMyReviews(page?: number) {
       data: reviews.map((r: any) => ({
         id: r.id,
         workerName: r.workerName,
+        workerAvatar: r.workerAvatar ?? null,
         workerId: r.workerId,
         rating: r.rating,
         comment: r.comment ?? "",
@@ -1098,6 +1113,26 @@ export async function getUnreadNotificationCount() {
   }
 }
 
+export async function updatePushToken(token: string) {
+  try {
+    const response = await api.post('/notifications/push-token', { token });
+    return response;
+  } catch (error) {
+    console.error('Update push token error:', error);
+    throw error;
+  }
+}
+
+export async function removePushToken() {
+  try {
+    const response = await api.delete('/notifications/push-token');
+    return response;
+  } catch (error) {
+    console.error('Remove push token error:', error);
+    throw error;
+  }
+}
+
 // ============================================================================
 // WORKER ENDPOINTS
 // ============================================================================
@@ -1108,6 +1143,39 @@ export async function acceptBooking(bookingId: string) {
     return response;
   } catch (error) {
     console.error('Accept booking error:', error);
+    throw error;
+  }
+}
+
+export async function getMyWallet() {
+  try {
+    const response = await api.get('/workers/me/wallet');
+    return response as {
+      balance: number;
+      transactions: Array<{
+        id: string;
+        type: string;
+        status: string;
+        amount: number;
+        balanceAfter: number | null;
+        bookingId: string | null;
+        note: string | null;
+        failureMessage: string | null;
+        createdAt: string;
+      }>;
+    };
+  } catch (error) {
+    console.error('Get wallet error:', error);
+    throw error;
+  }
+}
+
+export async function topupWallet(amount: number, methodType: 'GCASH' | 'MAYA') {
+  try {
+    const response = await api.post('/workers/me/wallet/topup', { amount, methodType });
+    return response as { checkoutUrl: string; sourceId: string };
+  } catch (error) {
+    console.error('Top up wallet error:', error);
     throw error;
   }
 }
@@ -1216,6 +1284,32 @@ export async function uploadIssuePhoto(uri: string, mimeType?: string | null): P
     return response;
   } catch (error) {
     console.error('Upload issue photo error:', error);
+    throw error;
+  }
+}
+
+export async function uploadReviewPhoto(
+  bookingId: string,
+  uri: string,
+  mimeType?: string | null,
+): Promise<{ url: string }> {
+  try {
+    const filename = uri.split('/').pop() ?? `review-${Date.now()}.jpg`;
+    const resolvedMimeType = mimeType || 'image/jpeg';
+
+    const formData = new FormData();
+    formData.append('photo', {
+      uri,
+      name: filename,
+      type: resolvedMimeType,
+    } as any);
+
+    const response = await api.post(`/bookings/${bookingId}/review-photo/upload`, formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+    return response;
+  } catch (error) {
+    console.error('Upload review photo error:', error);
     throw error;
   }
 }
@@ -1527,6 +1621,25 @@ export async function addCertification(data: {
   }
 }
 
+export async function updateCertification(
+  certId: string,
+  data: {
+    name: string;
+    issuer: string;
+    issueDate: string;
+    expiryDate?: string | null;
+    documentUrl?: string;
+  },
+): Promise<Certification> {
+  try {
+    const response = await api.patch(`/workers/me/certifications/${certId}`, data);
+    return response.certification;
+  } catch (error) {
+    console.error('Update certification error:', error);
+    throw error;
+  }
+}
+
 export async function deleteCertification(certId: string) {
   try {
     await api.delete(`/workers/me/certifications/${certId}`);
@@ -1554,7 +1667,7 @@ export async function getPayoutMethod(): Promise<PayoutMethod> {
 }
 
 export async function updatePayoutMethod(data: {
-  payoutMethod: 'GCASH' | 'MAYA' | 'BANK_TRANSFER';
+  payoutMethod: 'GCASH' | 'MAYA';
   payoutAccountName?: string;
   payoutAccountNumber?: string;
 }): Promise<PayoutMethod> {
@@ -1725,6 +1838,8 @@ export async function getUserProfile() {
       role: response.role?.toLowerCase() || 'client',
       kycStatus: response.kycStatus,
       kycRejectionReason: response.kycRejectionReason,
+      hasAcceptedTerms: response.hasAcceptedTerms,
+      declineCooldownUntil: response.declineCooldownUntil,
       bio: response.bio,
       yearsOfExperience: response.yearsOfExperience,
       serviceArea: response.serviceArea,

@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import prisma from '@config/database';
 import { errorResponse } from '@utils/errorResponse';
 import { writeAuditLog } from '@utils/auditLog';
+import { invalidateAppSettingsCache } from '@services/appSettingsService';
 import type { JwtPayload } from '@/types/index';
 
 interface AuthRequest extends Request {
@@ -17,6 +18,16 @@ function formatSettings(record: {
   maxSlotsPerDay: number;
   pendingExpiryMinutes: number;
   geofenceRadiusMeters: number;
+  maxDeclinesBeforeCooldown: number;
+  declineWindowHours: number;
+  declineCooldownHours: number;
+  tierProMinRating: number;
+  tierProMinJobs: number;
+  tierProMultiplier: number;
+  tierExpertMinRating: number;
+  tierExpertMinJobs: number;
+  tierExpertMultiplier: number;
+  adminFeePerJob: number;
 }) {
   return {
     siteName: record.siteName,
@@ -27,6 +38,16 @@ function formatSettings(record: {
     maxSlotsPerDay: record.maxSlotsPerDay,
     pendingExpiryMinutes: record.pendingExpiryMinutes,
     geofenceRadiusMeters: record.geofenceRadiusMeters,
+    maxDeclinesBeforeCooldown: record.maxDeclinesBeforeCooldown,
+    declineWindowHours: record.declineWindowHours,
+    declineCooldownHours: record.declineCooldownHours,
+    tierProMinRating: record.tierProMinRating,
+    tierProMinJobs: record.tierProMinJobs,
+    tierProMultiplier: record.tierProMultiplier,
+    tierExpertMinRating: record.tierExpertMinRating,
+    tierExpertMinJobs: record.tierExpertMinJobs,
+    tierExpertMultiplier: record.tierExpertMultiplier,
+    adminFeePerJob: record.adminFeePerJob,
   };
 }
 
@@ -56,6 +77,16 @@ export const updateSettings = async (req: AuthRequest, res: Response) => {
       maxSlotsPerDay,
       pendingExpiryMinutes,
       geofenceRadiusMeters,
+      maxDeclinesBeforeCooldown,
+      declineWindowHours,
+      declineCooldownHours,
+      tierProMinRating,
+      tierProMinJobs,
+      tierProMultiplier,
+      tierExpertMinRating,
+      tierExpertMinJobs,
+      tierExpertMultiplier,
+      adminFeePerJob,
     } = req.body as {
       siteName?: string;
       supportEmail?: string;
@@ -65,6 +96,16 @@ export const updateSettings = async (req: AuthRequest, res: Response) => {
       maxSlotsPerDay?: number;
       pendingExpiryMinutes?: number;
       geofenceRadiusMeters?: number;
+      maxDeclinesBeforeCooldown?: number;
+      declineWindowHours?: number;
+      declineCooldownHours?: number;
+      tierProMinRating?: number;
+      tierProMinJobs?: number;
+      tierProMultiplier?: number;
+      tierExpertMinRating?: number;
+      tierExpertMinJobs?: number;
+      tierExpertMultiplier?: number;
+      adminFeePerJob?: number;
     };
 
     if (!siteName?.trim() || !supportEmail?.trim()) {
@@ -77,6 +118,16 @@ export const updateSettings = async (req: AuthRequest, res: Response) => {
       ['maxSlotsPerDay', maxSlotsPerDay, 1, 24],
       ['pendingExpiryMinutes', pendingExpiryMinutes, 5, 10080],
       ['geofenceRadiusMeters', geofenceRadiusMeters, 10, 5000],
+      ['maxDeclinesBeforeCooldown', maxDeclinesBeforeCooldown, 1, 20],
+      ['declineWindowHours', declineWindowHours, 1, 720],
+      ['declineCooldownHours', declineCooldownHours, 1, 720],
+      ['tierProMinRating', tierProMinRating, 0, 5],
+      ['tierProMinJobs', tierProMinJobs, 0, 10000],
+      ['tierProMultiplier', tierProMultiplier, 1, 5],
+      ['tierExpertMinRating', tierExpertMinRating, 0, 5],
+      ['tierExpertMinJobs', tierExpertMinJobs, 0, 10000],
+      ['tierExpertMultiplier', tierExpertMultiplier, 1, 5],
+      ['adminFeePerJob', adminFeePerJob, 0, 1000],
     ];
     for (const [field, value, min, max] of numericFields) {
       if (value != null && (typeof value !== 'number' || Number.isNaN(value) || value < min || value > max)) {
@@ -101,8 +152,20 @@ export const updateSettings = async (req: AuthRequest, res: Response) => {
         maxSlotsPerDay: maxSlotsPerDay ?? current.maxSlotsPerDay,
         pendingExpiryMinutes: pendingExpiryMinutes ?? current.pendingExpiryMinutes,
         geofenceRadiusMeters: geofenceRadiusMeters ?? current.geofenceRadiusMeters,
+        maxDeclinesBeforeCooldown: maxDeclinesBeforeCooldown ?? current.maxDeclinesBeforeCooldown,
+        declineWindowHours: declineWindowHours ?? current.declineWindowHours,
+        declineCooldownHours: declineCooldownHours ?? current.declineCooldownHours,
+        tierProMinRating: tierProMinRating ?? current.tierProMinRating,
+        tierProMinJobs: tierProMinJobs ?? current.tierProMinJobs,
+        tierProMultiplier: tierProMultiplier ?? current.tierProMultiplier,
+        tierExpertMinRating: tierExpertMinRating ?? current.tierExpertMinRating,
+        tierExpertMinJobs: tierExpertMinJobs ?? current.tierExpertMinJobs,
+        tierExpertMultiplier: tierExpertMultiplier ?? current.tierExpertMultiplier,
+        adminFeePerJob: adminFeePerJob ?? current.adminFeePerJob,
       },
     });
+
+    invalidateAppSettingsCache();
 
     await writeAuditLog({
       actorId: req.user?.userId,

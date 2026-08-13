@@ -68,3 +68,33 @@ export function getServiceBaseRate(category: string): number {
 export function isValidTipAmount(tip: number, subtotal: number): boolean {
   return tip >= 0 && tip <= subtotal * 0.5;
 }
+
+/**
+ * Fallback commission rate used only when neither a settled payout nor a
+ * server-computed estimate is available. The live rate is admin-configurable
+ * on the backend (AppSettings.commissionRate) — this is a display-only
+ * approximation, never used to actually charge or pay anyone.
+ */
+export const DEFAULT_COMMISSION_RATE = 0.1;
+
+type WorkerPayoutSource = {
+  finalPrice?: number | null;
+  estimatedPrice?: number | null;
+  workerPayoutEstimate?: number | null;
+  payment?: { workerPayout?: number | null } | null;
+};
+
+/**
+ * A worker's take-home amount for a job, so every screen agrees with the
+ * Earnings tab instead of each computing its own (in)consistent number.
+ * Prefers the settled Payment row's workerPayout, then the backend's live
+ * workerPayoutEstimate, then a local fallback using DEFAULT_COMMISSION_RATE.
+ */
+export function getWorkerNetAmount(job: WorkerPayoutSource): number {
+  const gross = job.finalPrice ?? job.estimatedPrice ?? 0;
+  return (
+    job.payment?.workerPayout ??
+    job.workerPayoutEstimate ??
+    gross * (1 - DEFAULT_COMMISSION_RATE)
+  );
+}
