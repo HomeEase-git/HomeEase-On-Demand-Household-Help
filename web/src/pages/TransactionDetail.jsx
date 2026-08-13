@@ -7,6 +7,7 @@ import ErrorState from '../components/common/ErrorState'
 import { useDetailQuery } from '../hooks/useListQuery'
 import { fetchPaymentById } from '../services/payments'
 import { formatPeso } from '../data/payments'
+import { getPaymentStatusVariant } from '../utils/statusBadge'
 
 const SUB_NAV = [
   { to: '/payments', label: 'All Transactions' },
@@ -39,7 +40,7 @@ export default function TransactionDetail() {
     { label: 'Method', value: tx.method },
     {
       label: 'Status',
-      value: <Badge variant={tx.status === 'Completed' ? 'approved' : 'pending'}>{tx.status}</Badge>,
+      value: <Badge variant={getPaymentStatusVariant(tx.status)}>{tx.status}</Badge>,
     },
     { label: 'Date', value: tx.date },
   ]

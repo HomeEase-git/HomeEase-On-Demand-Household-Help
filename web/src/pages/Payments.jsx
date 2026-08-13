@@ -12,10 +12,12 @@ import ErrorState from '../components/common/ErrorState'
 import { useListQuery } from '../hooks/useListQuery'
 import { fetchPayments } from '../services/payments'
 import { formatPeso } from '../data/payments'
+import { getPaymentStatusVariant } from '../utils/statusBadge'
 
 const SUB_NAV = [
   { to: '/payments', label: 'All Transactions' },
-  { to: '/payments/refunds', label: 'Refund Management' },
+  { to: '/payments/refunds', label: 'Refund History' },
+  { to: '/payments/payouts', label: 'Payout Distribution' },
 ]
 
 const STATUS_MAP = {
@@ -24,8 +26,6 @@ const STATUS_MAP = {
   Pending: 'pending',
   Failed: 'failed',
 }
-
-const PLATFORM_RATE = 0.15
 
 export default function Payments() {
   const fetchFn = useCallback(
@@ -51,6 +51,7 @@ export default function Payments() {
     goToPage,
   } = useListQuery(fetchFn, {
     initialParams: { page: 1, statusTab: 'All' },
+    pollIntervalMs: 8000,
   })
 
   const totals = useMemo(() => {
@@ -58,7 +59,11 @@ export default function Payments() {
     const platform = completed.reduce((sum, t) => sum + t.platformFee, 0)
     const workers = completed.reduce((sum, t) => sum + t.workerAmount, 0)
     const gross = completed.reduce((sum, t) => sum + t.userAmount, 0)
-    return { gross, workers, platform }
+    // Derived from the actual listed data rather than a hardcoded constant,
+    // so this always reflects AppSettings.commissionRate as configured —
+    // whatever an admin sets it to in Settings — instead of going stale.
+    const ratePercent = gross > 0 ? Math.round((platform / gross) * 100) : null
+    return { gross, workers, platform, ratePercent }
   }, [transactions])
 
   return (
@@ -91,9 +96,11 @@ export default function Payments() {
             <label>Platform Commission</label>
             <div className="value">
               {formatPeso(totals.platform)}{' '}
-              <span style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>
-                (~{Math.round(PLATFORM_RATE * 100)}% of completed payments)
-              </span>
+              {totals.ratePercent != null && (
+                <span style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>
+                  (~{totals.ratePercent}% of completed payments)
+                </span>
+              )}
             </div>
           </div>
         </div>
@@ -140,13 +147,18 @@ export default function Payments() {
                         <td>{t.method}</td>
                         <td>{t.date}</td>
                         <td>
-                          <Badge variant={t.status === 'Completed' ? 'approved' : 'pending'}>
+                          <Badge variant={getPaymentStatusVariant(t.status)}>
                             {t.status}
                           </Badge>
                         </td>
                         <td>
                           <div className="row-actions">
-                            <Link to={`/payments/transaction/${t.id}`} className="action-btn view" title="View">
+                            <Link
+                              to={`/payments/transaction/${t.id}`}
+                              className="action-btn view"
+                              title="View"
+                              aria-label={`View transaction ${t.displayId || t.id}`}
+                            >
                               <i className="fas fa-eye" />
                             </Link>
                           </div>

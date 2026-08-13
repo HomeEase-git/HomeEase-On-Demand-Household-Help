@@ -5,7 +5,11 @@ import SearchBar from '../components/common/SearchBar'
 import FilterTabs from '../components/common/FilterTabs'
 import LoadingState from '../components/common/LoadingState'
 import ErrorState from '../components/common/ErrorState'
+import Pagination from '../components/common/Pagination'
 import { fetchPricingRules, createPricingRule, updatePricingRule, deletePricingRule } from '../services/pricingRules'
+import { useToast } from '../context/ToastContext'
+
+const PAGE_SIZE = 10
 
 function formatPeso(amount) {
   const num = typeof amount === 'number' ? amount : Number(amount)
@@ -19,6 +23,7 @@ export default function PriceControl() {
   const [loadError, setLoadError] = useState(null)
   const [query, setQuery] = useState('')
   const [serviceTab, setServiceTab] = useState('All')
+  const [page, setPage] = useState(1)
 
   const [open, setOpen] = useState(false)
   const [mode, setMode] = useState('add') // 'add' | 'edit'
@@ -26,6 +31,9 @@ export default function PriceControl() {
   const [form, setForm] = useState({ city: '', serviceType: '', minPrice: '', maxPrice: '' })
   const [error, setError] = useState('')
   const [saving, setSaving] = useState(false)
+  const [deleteTarget, setDeleteTarget] = useState(null)
+  const [deleting, setDeleting] = useState(false)
+  const { showSuccess, showError } = useToast()
 
   const loadRules = async () => {
     setLoading(true)
@@ -60,6 +68,14 @@ export default function PriceControl() {
       return matchesService && matchesQuery
     })
   }, [rules, query, serviceTab])
+
+  useEffect(() => {
+    setPage(1)
+  }, [query, serviceTab])
+
+  const totalPages = Math.max(1, Math.ceil(filteredRules.length / PAGE_SIZE))
+  const currentPage = Math.min(page, totalPages)
+  const pagedRules = filteredRules.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE)
 
   const closeModal = () => {
     setOpen(false)
@@ -109,9 +125,11 @@ export default function PriceControl() {
       if (mode === 'add') {
         const created = await createPricingRule({ city, serviceType, minPrice, maxPrice })
         setRules((prev) => [created, ...prev])
+        showSuccess('Pricing rule added.')
       } else {
         const updated = await updatePricingRule(editingId, { city, serviceType, minPrice, maxPrice })
         setRules((prev) => prev.map((r) => (r.id === editingId ? updated : r)))
+        showSuccess('Pricing rule updated.')
       }
       closeModal()
     } catch (err) {
@@ -121,12 +139,19 @@ export default function PriceControl() {
     }
   }
 
-  const onDelete = async (rule) => {
+  const onDelete = async () => {
+    if (!deleteTarget) return
+
+    setDeleting(true)
     try {
-      await deletePricingRule(rule.id)
-      setRules((prev) => prev.filter((r) => r.id !== rule.id))
+      await deletePricingRule(deleteTarget.id)
+      setRules((prev) => prev.filter((r) => r.id !== deleteTarget.id))
+      showSuccess('Pricing rule deleted.')
+      setDeleteTarget(null)
     } catch (err) {
-      setLoadError(err.message || 'Failed to delete pricing rule')
+      showError(err.message || 'Failed to delete pricing rule')
+    } finally {
+      setDeleting(false)
     }
   }
 
@@ -163,7 +188,7 @@ export default function PriceControl() {
                 </tr>
               </thead>
               <tbody>
-                {filteredRules.map((r) => (
+                {pagedRules.map((r) => (
                   <tr key={r.id}>
                     <td><strong>{r.city}</strong></td>
                     <td>{r.serviceType}</td>
@@ -175,15 +200,17 @@ export default function PriceControl() {
                           type="button"
                           className="action-btn view"
                           title="Edit"
+                          aria-label={`Edit pricing rule for ${r.city} / ${r.serviceType}`}
                           onClick={() => openEdit(r)}
                         >
                           <i className="fas fa-pen" />
                         </button>
                         <button
                           type="button"
-                          className="action-btn"
+                          className="action-btn delete"
                           title="Delete"
-                          onClick={() => onDelete(r)}
+                          aria-label={`Delete pricing rule for ${r.city} / ${r.serviceType}`}
+                          onClick={() => setDeleteTarget(r)}
                         >
                           <i className="fas fa-trash" />
                         </button>
@@ -201,6 +228,17 @@ export default function PriceControl() {
               </tbody>
             </table>
           </div>
+        )}
+        {!loading && !loadError && filteredRules.length > 0 && (
+          <Pagination
+            info={`Showing ${pagedRules.length ? (currentPage - 1) * PAGE_SIZE + 1 : 0}-${
+              (currentPage - 1) * PAGE_SIZE + pagedRules.length
+            } of ${filteredRules.length} rules`}
+            hasPrev={currentPage > 1}
+            hasNext={currentPage < totalPages}
+            onPrev={() => setPage((p) => Math.max(1, p - 1))}
+            onNext={() => setPage((p) => Math.min(totalPages, p + 1))}
+          />
         )}
       </SectionCard>
 
@@ -269,6 +307,26 @@ export default function PriceControl() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {deleteTarget && (
+        <div className="modal-backdrop" onClick={() => !deleting && setDeleteTarget(null)} role="presentation">
+          <div className="modal" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true">
+            <h2 className="modal-title">Delete Pricing Rule</h2>
+            <p className="modal-body">
+              Delete the pricing rule for <strong>{deleteTarget.city}</strong> /{' '}
+              <strong>{deleteTarget.serviceType}</strong>? This cannot be undone.
+            </p>
+            <div className="modal-actions">
+              <button type="button" className="btn btn-outline" onClick={() => setDeleteTarget(null)} disabled={deleting}>
+                Cancel
+              </button>
+              <button type="button" className="btn btn-danger" onClick={onDelete} disabled={deleting}>
+                {deleting ? 'Deleting...' : 'Delete'}
+              </button>
+            </div>
           </div>
         </div>
       )}

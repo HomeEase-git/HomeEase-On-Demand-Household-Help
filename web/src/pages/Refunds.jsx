@@ -1,36 +1,49 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import PageHeader from '../components/common/PageHeader'
 import SubNav from '../components/common/SubNav'
 import SectionCard from '../components/common/SectionCard'
 import Badge from '../components/common/Badge'
 import LoadingState from '../components/common/LoadingState'
 import ErrorState from '../components/common/ErrorState'
-import { fetchDisputes, updateDispute } from '../services/disputes'
+import Pagination from '../components/common/Pagination'
+import { fetchDisputes } from '../services/disputes'
+
+const PAGE_SIZE = 10
 
 const SUB_NAV = [
   { to: '/payments', label: 'All Transactions' },
-  { to: '/payments/refunds', label: 'Refund Management' },
+  { to: '/payments/refunds', label: 'Refund History' },
+  { to: '/payments/payouts', label: 'Payout Distribution' },
 ]
 
 function formatPeso(amount) {
   return `₱${amount?.toLocaleString() ?? '0'}`
 }
 
+/**
+ * Read-only refund log. There's no standalone "refund" action or REFUNDED
+ * dispute status on the backend — a refund happens automatically as a side
+ * effect of resolving a dispute with the CANCEL_BOOKING action (see
+ * BookingDispute.jsx / adminDisputeController.resolveDispute), which
+ * releases the held payment back to the client. This page just lists those
+ * outcomes; to issue a refund, resolve the dispute from the Dispute
+ * Resolution Center instead.
+ */
 export default function Refunds() {
   const [refunds, setRefunds] = useState([])
-  const [selected, setSelected] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
+  const [page, setPage] = useState(1)
 
   const loadRefunds = async () => {
     setLoading(true)
     setError(null)
 
     try {
-      const response = await fetchDisputes({ status: 'open', page: 1, limit: 50 })
-      setRefunds(response.data)
+      const response = await fetchDisputes({ status: 'all', page: 1, limit: 50 })
+      setRefunds(response.data.filter((d) => d.status === 'RESOLVED_CANCELLED'))
     } catch (err) {
-      setError(err.message || 'Failed to load refunds')
+      setError(err.message || 'Failed to load refund history')
     } finally {
       setLoading(false)
     }
@@ -40,78 +53,56 @@ export default function Refunds() {
     loadRefunds()
   }, [])
 
-  const startProcess = (r) => {
-    setSelected(r)
-  }
-
-  const closeModal = () => setSelected(null)
-
-  const confirmRefund = async () => {
-    if (!selected) return
-
-    try {
-      const updated = await updateDispute(selected.id, {
-        status: 'REFUNDED',
-        resolution: 'Refund processed by admin',
-      })
-      setRefunds((prev) => prev.map((r) => (r.id === updated.id ? updated : r)))
-      setSelected(null)
-    } catch (err) {
-      setError(err.message || 'Failed to confirm refund')
-    }
-  }
+  const totalPages = Math.max(1, Math.ceil(refunds.length / PAGE_SIZE))
+  const currentPage = Math.min(page, totalPages)
+  const pagedRefunds = useMemo(
+    () => refunds.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE),
+    [refunds, currentPage]
+  )
 
   return (
     <>
-      <PageHeader title="Refund Management" subtitle="Process and track refunds" />
+      <PageHeader title="Refund History" subtitle="Refunds issued via dispute cancellation" />
       <SubNav items={SUB_NAV} />
       <SectionCard>
-        {loading && <LoadingState message="Loading refunds..." />}
+        <p style={{ color: 'var(--text-muted)', fontSize: '0.875rem', marginBottom: '1rem' }}>
+          Refunds happen automatically when a dispute is resolved with <strong>Cancel &amp; Refund</strong> in the{' '}
+          <a href="#/bookings/dispute">Dispute Resolution Center</a>. This is a read-only log of those outcomes.
+        </p>
+        {loading && <LoadingState message="Loading refund history..." />}
         {error && <ErrorState message={error} onRetry={loadRefunds} />}
         {!loading && !error && (
           <div className="table-wrap">
             <table className="table">
               <thead>
                 <tr>
-                  <th>Refund ID</th>
                   <th>Booking</th>
                   <th>Client</th>
                   <th>Worker</th>
                   <th>Amount</th>
+                  <th>Reason</th>
+                  <th>Resolved</th>
                   <th>Status</th>
-                  <th>Actions</th>
                 </tr>
               </thead>
               <tbody>
                 {refunds.length === 0 ? (
                   <tr>
                     <td colSpan={7} style={{ textAlign: 'center', color: 'var(--text-muted)' }}>
-                      No refund disputes found.
+                      No refunds issued yet.
                     </td>
                   </tr>
                 ) : (
-                  refunds.map((r) => (
+                  pagedRefunds.map((r) => (
                     <tr key={r.id}>
                       <td>{r.displayId}</td>
-                      <td>{r.booking}</td>
                       <td>{r.client}</td>
                       <td>{r.worker}</td>
-                      <td>{formatPeso(r.amount)}</td>
+                      <td>{formatPeso(Number(String(r.amount).replace(/[^\d.-]/g, '')))}</td>
+                      <td>{r.reason}</td>
+                      <td>{r.resolvedAt ? new Date(r.resolvedAt).toLocaleDateString() : '—'}</td>
                       <td>
-                        <Badge variant={r.status === 'REFUNDED' ? 'approved' : 'pending'}>
-                          {r.status}
-                        </Badge>
-                      </td>
-                      <td>
-                        <button
-                          type="button"
-                          className="btn btn-success"
-                          style={{ padding: '0.25rem 0.5rem', fontSize: '0.8125rem' }}
-                          disabled={r.status === 'REFUNDED'}
-                          onClick={() => startProcess(r)}
-                        >
-                          {r.status === 'REFUNDED' ? 'Refunded' : 'Process'}
-                        </button>
+                        <Badge variant="approved">Refunded</Badge>
                       </td>
                     </tr>
                   ))
@@ -120,49 +111,18 @@ export default function Refunds() {
             </table>
           </div>
         )}
+        {!loading && !error && refunds.length > 0 && (
+          <Pagination
+            info={`Showing ${pagedRefunds.length ? (currentPage - 1) * PAGE_SIZE + 1 : 0}-${
+              (currentPage - 1) * PAGE_SIZE + pagedRefunds.length
+            } of ${refunds.length} refunds`}
+            hasPrev={currentPage > 1}
+            hasNext={currentPage < totalPages}
+            onPrev={() => setPage((p) => Math.max(1, p - 1))}
+            onNext={() => setPage((p) => Math.min(totalPages, p + 1))}
+          />
+        )}
       </SectionCard>
-
-      {selected && (
-        <div className="modal-backdrop" onClick={closeModal} role="presentation">
-          <div
-            className="modal modal--landscape"
-            onClick={(e) => e.stopPropagation()}
-            role="dialog"
-            aria-modal="true"
-          >
-            <h2 className="modal-title">Process Refund {selected.displayId}</h2>
-            <p className="modal-body" style={{ marginBottom: '0.75rem' }}>
-              This refund was requested for booking <strong>{selected.booking}</strong>.
-            </p>
-            <div className="modal-detail-grid--2col">
-              <div className="detail-block">
-                <label>Client</label>
-                <div className="value">{selected.client}</div>
-              </div>
-              <div className="detail-block">
-                <label>Worker</label>
-                <div className="value">{selected.worker}</div>
-              </div>
-              <div className="detail-block">
-                <label>Booking Amount</label>
-                <div className="value">{formatPeso(selected.amount)}</div>
-              </div>
-              <div className="detail-block detail-block--full">
-                <label>Dispute Reason</label>
-                <div className="value">{selected.reason}</div>
-              </div>
-            </div>
-            <div className="modal-actions">
-              <button type="button" className="btn btn-outline" onClick={closeModal}>
-                Cancel
-              </button>
-              <button type="button" className="btn btn-danger" onClick={confirmRefund}>
-                Confirm Refund
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </>
   )
 }

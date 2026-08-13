@@ -1,4 +1,4 @@
-import { useCallback } from 'react'
+import { useCallback, useState } from 'react'
 import { Link } from 'react-router-dom'
 import PageHeader from '../components/common/PageHeader'
 import SubNav from '../components/common/SubNav'
@@ -10,7 +10,9 @@ import Badge from '../components/common/Badge'
 import LoadingState from '../components/common/LoadingState'
 import ErrorState from '../components/common/ErrorState'
 import { useListQuery } from '../hooks/useListQuery'
-import { fetchBookings } from '../services/bookings'
+import { fetchBookings, cancelBookingAdmin } from '../services/bookings'
+import { useToast } from '../context/ToastContext'
+import { getBookingStatusVariant } from '../utils/statusBadge'
 
 const SUB_NAV = [
   { to: '/bookings', label: 'All Bookings' },
@@ -24,7 +26,16 @@ const STATUS_MAP = {
   Cancelled: 'cancelled',
 }
 
+const TERMINAL_STATUSES = ['Completed', 'Cancelled', 'Rejected']
+
 export default function Bookings() {
+  const { showSuccess, showError } = useToast()
+  const [dateFrom, setDateFrom] = useState('')
+  const [dateTo, setDateTo] = useState('')
+  const [cancelTarget, setCancelTarget] = useState(null)
+  const [reason, setReason] = useState('')
+  const [submitting, setSubmitting] = useState(false)
+
   const fetchFn = useCallback(
     (params) =>
       fetchBookings({
@@ -32,6 +43,8 @@ export default function Bookings() {
         limit: 10,
         search: params.search || '',
         status: STATUS_MAP[params.statusTab] || 'all',
+        dateFrom: params.dateFrom || '',
+        dateTo: params.dateTo || '',
       }),
     []
   )
@@ -47,8 +60,43 @@ export default function Bookings() {
     setFilter,
     goToPage,
   } = useListQuery(fetchFn, {
-    initialParams: { page: 1, statusTab: 'All' },
+    initialParams: { page: 1, statusTab: 'All', dateFrom: '', dateTo: '' },
+    // Paused while the force-cancel modal is open so a background refresh
+    // can't swap the row out from under the admin mid-action.
+    pollIntervalMs: cancelTarget ? null : 8000,
   })
+
+  const applyDateRange = () => {
+    setFilter('dateFrom', dateFrom)
+    setFilter('dateTo', dateTo)
+  }
+
+  const clearDateRange = () => {
+    setDateFrom('')
+    setDateTo('')
+    setFilter('dateFrom', '')
+    setFilter('dateTo', '')
+  }
+
+  const closeCancelModal = () => {
+    setCancelTarget(null)
+    setReason('')
+  }
+
+  const handleForceCancel = async () => {
+    if (!cancelTarget) return
+    setSubmitting(true)
+    try {
+      await cancelBookingAdmin(cancelTarget.id, reason.trim() || 'Cancelled by admin')
+      showSuccess(`Booking ${cancelTarget.displayId} cancelled.`)
+      closeCancelModal()
+      reload()
+    } catch (err) {
+      showError(err.message || 'Failed to cancel booking')
+    } finally {
+      setSubmitting(false)
+    }
+  }
 
   return (
     <>
@@ -61,6 +109,32 @@ export default function Bookings() {
           activeTab={params.statusTab || 'All'}
           onTabChange={(tab) => setFilter('statusTab', tab)}
         />
+      </div>
+      <div className="toolbar" style={{ alignItems: 'center' }}>
+        <label style={{ fontSize: '0.8125rem', color: 'var(--text-muted)' }}>From</label>
+        <input
+          type="date"
+          className="form-input"
+          value={dateFrom}
+          onChange={(e) => setDateFrom(e.target.value)}
+          style={{ maxWidth: '160px' }}
+        />
+        <label style={{ fontSize: '0.8125rem', color: 'var(--text-muted)' }}>To</label>
+        <input
+          type="date"
+          className="form-input"
+          value={dateTo}
+          onChange={(e) => setDateTo(e.target.value)}
+          style={{ maxWidth: '160px' }}
+        />
+        <button type="button" className="btn btn-outline" onClick={applyDateRange}>
+          Apply
+        </button>
+        {(params.dateFrom || params.dateTo) && (
+          <button type="button" className="btn btn-outline" onClick={clearDateRange}>
+            Clear
+          </button>
+        )}
       </div>
       <SectionCard>
         {loading && <LoadingState message="Loading bookings..." />}
@@ -89,12 +163,30 @@ export default function Bookings() {
                         <td>{b.date}</td>
                         <td>{b.amount}</td>
                         <td>
-                          <Badge variant={b.status === 'Completed' ? 'approved' : 'pending'}>{b.status}</Badge>
+                          <Badge variant={getBookingStatusVariant(b.status)}>{b.status}</Badge>
                         </td>
                         <td>
-                          <Link to={`/bookings/detail/${b.id}`} className="action-btn view" title="View">
-                            <i className="fas fa-eye" />
-                          </Link>
+                          <div className="row-actions">
+                            <Link
+                              to={`/bookings/detail/${b.id}`}
+                              className="action-btn view"
+                              title="View"
+                              aria-label={`View booking ${b.displayId}`}
+                            >
+                              <i className="fas fa-eye" />
+                            </Link>
+                            {!TERMINAL_STATUSES.includes(b.status) && (
+                              <button
+                                type="button"
+                                className="action-btn delete"
+                                title="Force cancel"
+                                aria-label={`Force cancel booking ${b.displayId}`}
+                                onClick={() => setCancelTarget(b)}
+                              >
+                                <i className="fas fa-ban" />
+                              </button>
+                            )}
+                          </div>
                         </td>
                       </tr>
                     ))
@@ -112,6 +204,35 @@ export default function Bookings() {
           </>
         )}
       </SectionCard>
+
+      {cancelTarget && (
+        <div className="modal-backdrop" onClick={closeCancelModal} role="presentation">
+          <div className="modal" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true">
+            <h2 className="modal-title">Force cancel booking {cancelTarget.displayId}?</h2>
+            <p className="modal-body">This releases/refunds any held payment. This can&apos;t be undone.</p>
+            <label htmlFor="cancel-reason" style={{ display: 'block', margin: '0.75rem 0 0.35rem', fontWeight: 600 }}>
+              Reason
+            </label>
+            <textarea
+              id="cancel-reason"
+              className="form-input"
+              rows={3}
+              value={reason}
+              onChange={(e) => setReason(e.target.value)}
+              placeholder="Why is this booking being force-cancelled?"
+              style={{ width: '100%', resize: 'vertical' }}
+            />
+            <div className="modal-actions">
+              <button type="button" className="btn btn-outline" onClick={closeCancelModal} disabled={submitting}>
+                Keep Booking
+              </button>
+              <button type="button" className="btn btn-danger" onClick={handleForceCancel} disabled={submitting}>
+                {submitting ? 'Cancelling...' : 'Confirm Cancel'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   )
 }
