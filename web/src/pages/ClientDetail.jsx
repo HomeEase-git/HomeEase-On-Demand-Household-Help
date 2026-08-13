@@ -3,6 +3,7 @@ import { Link, Navigate, useParams } from 'react-router-dom'
 import PageHeader from '../components/common/PageHeader'
 import SectionCard from '../components/common/SectionCard'
 import Badge from '../components/common/Badge'
+import { getBookingStatusVariant } from '../utils/statusBadge'
 import LoadingState from '../components/common/LoadingState'
 import ErrorState from '../components/common/ErrorState'
 import { useDetailQuery } from '../hooks/useListQuery'
@@ -127,7 +128,7 @@ export default function ClientDetail() {
                     <td>{b.service}</td>
                     <td>{b.worker}</td>
                     <td>{b.date}</td>
-                    <td><Badge variant={b.status === 'COMPLETED' ? 'approved' : 'pending'}>{b.status}</Badge></td>
+                    <td><Badge variant={getBookingStatusVariant(b.status)}>{b.status}</Badge></td>
                     <td>
                       {ACTIVE_BOOKING_STATUSES.includes(b.status) ? (
                         <button

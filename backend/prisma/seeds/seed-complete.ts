@@ -198,7 +198,6 @@ const ALL_KYC_DOC_TYPES: KycDocumentType[] = [
 const PAYOUT_CHANNELS: PaymentMethodType[] = [
   PaymentMethodType.GCASH,
   PaymentMethodType.MAYA,
-  PaymentMethodType.BANK_TRANSFER,
 ];
 
 function phoneNumber() {
@@ -214,10 +213,6 @@ function maskedAccountIdentifier(type: PaymentMethodType) {
     case PaymentMethodType.GCASH:
     case PaymentMethodType.MAYA:
       return "09XX XXX " + faker.string.numeric(4);
-    case PaymentMethodType.CARD:
-      return "**** **** **** " + faker.string.numeric(4);
-    case PaymentMethodType.BANK_TRANSFER:
-      return "Acct ***" + faker.string.numeric(4);
     default:
       return null;
   }
@@ -439,16 +434,6 @@ async function createClient(index: number) {
       isDefault: true,
     },
   });
-  await prisma.savedPaymentMethod.create({
-    data: {
-      clientProfileId: client.clientProfile!.id,
-      type: PaymentMethodType.CARD,
-      accountIdentifier: maskedAccountIdentifier(PaymentMethodType.CARD),
-      label: "Backup Card",
-      isDefault: false,
-    },
-  });
-
   return client;
 }
 
@@ -524,10 +509,7 @@ async function createWorker(
           resumeUrl: "https://example-storage.dev/resumes/placeholder.pdf",
           payoutMethod,
           payoutAccountName: fullName,
-          payoutAccountNumber:
-            payoutMethod === PaymentMethodType.BANK_TRANSFER
-              ? faker.finance.accountNumber(10)
-              : phoneNumber(),
+          payoutAccountNumber: phoneNumber(),
           serviceTypes: { connect: [{ id: category.id }] },
         },
       },

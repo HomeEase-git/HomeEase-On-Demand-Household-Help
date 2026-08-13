@@ -4,6 +4,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { AppIcon as Ionicons } from "../../../../components/icons/AppIcon";
 import ScreenHeader from "../../../../components/ui/ScreenHeader";
+import Avatar from "../../../../components/ui/Avatar";
 import StepperHorizontal from "../../../../components/steppers/StepperHorizontal";
 import PrimaryButton from "../../../../components/ui/PrimaryButton";
 import DiscoveredWorkerCard from "../../../../components/booking4step/DiscoveredWorkerCard";
@@ -46,6 +47,7 @@ export default function BookingStep3Screen() {
       workerId: worker.id,
       workerName: worker.fullName,
       workerHourlyRate: worker.hourlyRate,
+      workerTier: worker.tier ?? "STANDARD",
       workerEstimatedTotal: worker.estimatedTotal,
       workerAvatar: worker.avatar,
       workerRating: worker.rating,
@@ -61,6 +63,7 @@ export default function BookingStep3Screen() {
       workerId: null,
       workerName: null,
       workerHourlyRate: null,
+      workerTier: null,
       workerEstimatedTotal: null,
       workerAvatar: null,
       workerRating: null,
@@ -89,8 +92,8 @@ export default function BookingStep3Screen() {
         <ScrollView className="flex-1" contentContainerStyle={{ padding: 24, paddingBottom: 40 }}>
           <StepperHorizontal steps={BOOKING_STEPS} currentStep={2} />
           <View className="bg-card rounded-2xl p-4 mt-4 flex-row items-center">
-            <View className="w-14 h-14 bg-brand rounded-full items-center justify-center mr-3">
-              <Ionicons name="person" size={28} color={colors.white} />
+            <View className="mr-3">
+              <Avatar uri={draft.workerAvatar} size="lg" />
             </View>
             <View className="flex-1">
               <Text className="text-text-primary font-bold text-base">{draft.workerName}</Text>
@@ -161,7 +164,7 @@ export default function BookingStep3Screen() {
           ))}
 
         <View className="mt-4">
-          <PrimaryButton label="Next" fullWidth disabled={!canNext} onPress={handleNext} />
+          <PrimaryButton label="Next" fullWidth onPress={handleNext} />
         </View>
       </ScrollView>
     </SafeAreaView>

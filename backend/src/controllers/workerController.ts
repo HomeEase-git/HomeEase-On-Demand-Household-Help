@@ -6,6 +6,7 @@ import { toDayStart } from '@services/workerAvailabilityService';
 import { distanceKm } from '@utils/geo';
 import { getAppSettings } from '@services/appSettingsService';
 import { parseWorkerResume } from '@services/resumeParseService';
+import { computeWorkerTier, tierMultiplier } from '@utils/workerTier';
 import type { JwtPayload } from '@/types/index';
 
 interface AuthRequest extends Request {
@@ -173,6 +174,19 @@ export const searchWorkers = async (req: AuthRequest, res: Response) => {
     const start = (pageNum - 1) * limitNum;
     const page_ = withinRadius.slice(start, start + limitNum);
 
+    // Expertise tier — computed live from rating + completed-job count (see
+    // utils/workerTier.ts). Batched over just this page, not all candidates.
+    // Independent of each other, so run in parallel rather than serially.
+    const [tierSettings, completedCounts] = await Promise.all([
+      getAppSettings(),
+      prisma.booking.groupBy({
+        by: ['workerId'],
+        where: { workerId: { in: page_.map((p) => p.worker.userId) }, status: 'COMPLETED' },
+        _count: { _all: true },
+      }),
+    ]);
+    const completedByWorkerId = new Map(completedCounts.map((c) => [c.workerId as string, c._count._all]));
+
     const cards = page_.map(({ worker, distance }) => {
       const matchedServiceType =
         worker.serviceTypes.find((st) => serviceTypeName && st.name.toLowerCase() === serviceTypeName.toLowerCase()) ??
@@ -188,6 +202,11 @@ export const searchWorkers = async (req: AuthRequest, res: Response) => {
       if (worker.totalReviews === 0) badges.push('NEW');
       if (condition === 'HEAVY' && worker.acceptsHeavyCondition) badges.push('HEAVY_DUTY_READY');
 
+      const completedJobs = completedByWorkerId.get(worker.userId) ?? 0;
+      const tier = computeWorkerTier(worker.rating, completedJobs, tierSettings);
+      if (tier === 'PRO') badges.push('PRO_TIER');
+      if (tier === 'EXPERT') badges.push('EXPERT_TIER');
+
       return {
         id: worker.userId,
         fullName: worker.user.fullName,
@@ -196,7 +215,9 @@ export const searchWorkers = async (req: AuthRequest, res: Response) => {
         totalReviews: worker.totalReviews,
         distance,
         hourlyRate: worker.hourlyRate,
-        estimatedTotal,
+        estimatedTotal:
+          estimatedTotal != null ? Math.round(estimatedTotal * tierMultiplier(tier, tierSettings) * 100) / 100 : null,
+        tier,
         // Lets the client fetch this worker's packages for the selected
         // category later in the booking flow without an extra round-trip.
         matchedServiceTypeId: matchedServiceType?.id ?? null,
@@ -285,6 +306,12 @@ export const getWorkerDetail = async (req: AuthRequest, res: Response) => {
       return res.status(404).json(errorResponse(404, 'Worker not found'));
     }
 
+    const [tierSettings, completedJobs] = await Promise.all([
+      getAppSettings(),
+      prisma.booking.count({ where: { workerId: worker.userId, status: 'COMPLETED' } }),
+    ]);
+    const tier = computeWorkerTier(worker.rating, completedJobs, tierSettings);
+
     return res.status(200).json({
       success: true,
       message: 'Worker details retrieved successfully',
@@ -296,6 +323,7 @@ export const getWorkerDetail = async (req: AuthRequest, res: Response) => {
         avatar: worker.user.avatar,
         bio: worker.bio,
         rating: worker.rating,
+        tier,
         serviceAreaRadius: worker.serviceAreaRadius,
         address: worker.address,
         city: worker.city,
@@ -440,6 +468,7 @@ export const getWorkerReviews = async (req: AuthRequest, res: Response) => {
       id: review.id,
       rating: review.rating,
       comment: review.comment,
+      photoUrls: review.photoUrls,
       reviewer: {
         id: review.client.id,
         name: review.client.fullName,
@@ -1383,6 +1412,60 @@ export const createCertification = async (req: AuthRequest, res: Response) => {
   } catch (error) {
     console.error('Error creating certification:', error);
     return res.status(500).json(errorResponse(500, 'Failed to add certification'));
+  }
+};
+
+/**
+ * PATCH /api/workers/me/certifications/:certId
+ * Update an existing certification belonging to the authenticated worker
+ * (worker only). Editing resets verificationStatus back to PENDING since the
+ * content changed and needs re-review, clearing any prior rejection.
+ */
+export const updateCertification = async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      return res.status(401).json(errorResponse(401, 'Not authenticated'));
+    }
+
+    const certId = req.params.certId as string;
+    const { name, issuer, issueDate, expiryDate, documentUrl } = req.body;
+
+    const workerProfile = await prisma.workerProfile.findUnique({
+      where: { userId: req.user.userId },
+      select: { id: true },
+    });
+
+    if (!workerProfile) {
+      return res.status(404).json(errorResponse(404, 'Worker profile not found'));
+    }
+
+    const existing = await prisma.certification.findUnique({ where: { id: certId } });
+    if (!existing || existing.workerProfileId !== workerProfile.id) {
+      return res.status(404).json(errorResponse(404, 'Certification not found'));
+    }
+
+    const certification = await prisma.certification.update({
+      where: { id: certId },
+      data: {
+        title: name.trim(),
+        issuer: issuer.trim(),
+        issueDate: new Date(issueDate),
+        expiryDate: expiryDate ? new Date(expiryDate) : null,
+        documentUrl: documentUrl ?? existing.documentUrl,
+        verificationStatus: 'PENDING',
+        rejectionReason: null,
+        reviewedAt: null,
+      },
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: 'Certification updated successfully',
+      data: { certification: formatCertification(certification) },
+    });
+  } catch (error) {
+    console.error('Error updating certification:', error);
+    return res.status(500).json(errorResponse(500, 'Failed to update certification'));
   }
 };
 

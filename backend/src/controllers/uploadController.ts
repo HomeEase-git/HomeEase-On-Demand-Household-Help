@@ -228,6 +228,51 @@ export const uploadIssuePhoto = async (req: AuthRequest, res: Response) => {
   }
 };
 
+/**
+ * POST /api/bookings/:id/review-photo/upload
+ * Uploads a client-attached review photo to Supabase Storage and returns its
+ * public URL. Reuses the booking-photos bucket (same media category, no new
+ * bucket to provision). Not persisted here — the returned URL is collected
+ * client-side and included in the `POST /bookings/:id/review` payload as
+ * `photoUrls`.
+ */
+export const uploadReviewPhoto = async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      return res.status(401).json(errorResponse(401, 'Not authenticated'));
+    }
+
+    if (!req.file) {
+      return res.status(400).json(errorResponse(400, 'No image file provided'));
+    }
+
+    const extension = req.file.mimetype.split('/')[1] || 'jpg';
+    const fileName = `${req.user.userId}/${randomUUID()}.${extension}`;
+
+    const { error: uploadError } = await supabase.storage
+      .from(BOOKING_PHOTO_BUCKET)
+      .upload(fileName, req.file.buffer, {
+        contentType: req.file.mimetype,
+      });
+
+    if (uploadError) {
+      console.error('Error uploading review photo to Supabase:', uploadError);
+      return res.status(500).json(errorResponse(500, 'Failed to upload photo'));
+    }
+
+    const { data } = supabase.storage.from(BOOKING_PHOTO_BUCKET).getPublicUrl(fileName);
+
+    return res.status(201).json({
+      success: true,
+      message: 'Photo uploaded successfully',
+      data: { url: data.publicUrl },
+    });
+  } catch (error) {
+    console.error('Error uploading review photo:', error);
+    return res.status(500).json(errorResponse(500, 'Failed to upload photo'));
+  }
+};
+
 export const kycFileUpload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: MAX_FILE_SIZE },

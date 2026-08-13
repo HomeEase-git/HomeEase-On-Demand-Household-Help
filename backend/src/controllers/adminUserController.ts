@@ -5,6 +5,8 @@ import { errorResponse } from '@utils/errorResponse';
 import { formatDisplayId, formatPeso } from '@utils/formatters';
 import { buildPaginationMeta, getPaginationParams } from '@utils/pagination';
 import { writeAuditLog } from '@utils/auditLog';
+import { getAppSettings } from '@services/appSettingsService';
+import { computeWorkerTier } from '@utils/workerTier';
 import type { JwtPayload } from '@/types/index';
 
 interface AuthRequest extends Request {
@@ -185,6 +187,7 @@ async function formatWorker(user: {
     totalReviews: number;
     kycStatus: string;
     serviceTypes: Array<{ name: string }>;
+    declineCooldownUntil?: Date | null;
   } | null;
 }) {
   const completedBookings = await prisma.booking.findMany({
@@ -193,6 +196,11 @@ async function formatWorker(user: {
   });
 
   const earnings = completedBookings.reduce((sum, b) => sum + ((b.finalPrice ?? b.estimatedPrice) ?? 0), 0);
+
+  const tierSettings = await getAppSettings();
+  const tier = user.workerProfile
+    ? computeWorkerTier(user.workerProfile.rating, completedBookings.length, tierSettings)
+    : 'STANDARD';
 
   const verificationStatus = user.workerProfile?.kycStatus ?? 'PENDING';
   const statusLabel =
@@ -210,11 +218,13 @@ async function formatWorker(user: {
     services: user.workerProfile?.serviceTypes?.map((t) => t.name).join(', ') ?? '—',
     rating: user.workerProfile?.rating.toFixed(1) ?? '0.0',
     reviews: user.workerProfile?.totalReviews ?? 0,
+    tier,
     status: statusLabel,
     verification: statusLabel,
     // Real account status (ACTIVE/SUSPENDED/BANNED) — distinct from the KYC
     // verification label above, which `status`/`verification` both carry.
     accountStatus: user.status.toLowerCase(),
+    declineCooldownUntil: user.workerProfile?.declineCooldownUntil ?? null,
     earnings: formatPeso(earnings),
     joined: user.createdAt.toLocaleDateString('en-US', {
       month: 'short',
@@ -271,6 +281,14 @@ export const getWorkerById = async (req: Request, res: Response) => {
 
     const worker = await formatWorker(user);
 
+    const { declineWindowHours } = await getAppSettings();
+    const recentDeclineCount = await prisma.declinedWorker.count({
+      where: {
+        workerId: id,
+        declinedAt: { gte: new Date(Date.now() - declineWindowHours * 60 * 60 * 1000) },
+      },
+    });
+
     const recentBookings = await prisma.booking.findMany({
       where: { workerId: id },
       include: { client: { select: { fullName: true } }, serviceTask: { select: { name: true } } },
@@ -282,6 +300,7 @@ export const getWorkerById = async (req: Request, res: Response) => {
       success: true,
       data: {
         ...worker,
+        recentDeclineCount,
         recentBookings: recentBookings.map((b) => ({
           id: formatDisplayId(b.id),
           bookingId: b.id,

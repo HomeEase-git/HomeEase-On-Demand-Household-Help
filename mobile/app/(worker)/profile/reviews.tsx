@@ -12,6 +12,7 @@ import * as api from "../../../services/api";
 type ReviewItem = {
   id: string;
   authorName: string;
+  authorAvatar?: string | null;
   rating: number;
   comment: string;
   date: string;
@@ -34,6 +35,7 @@ export default function WorkerReviewsScreen() {
           result.reviews.map((r: any) => ({
             id: r.id,
             authorName: r.clientName,
+            authorAvatar: r.clientAvatar,
             rating: r.rating,
             comment: r.comment,
             date: r.date,

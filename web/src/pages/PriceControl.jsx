@@ -5,8 +5,11 @@ import SearchBar from '../components/common/SearchBar'
 import FilterTabs from '../components/common/FilterTabs'
 import LoadingState from '../components/common/LoadingState'
 import ErrorState from '../components/common/ErrorState'
+import Pagination from '../components/common/Pagination'
 import { fetchPricingRules, createPricingRule, updatePricingRule, deletePricingRule } from '../services/pricingRules'
 import { useToast } from '../context/ToastContext'
+
+const PAGE_SIZE = 10
 
 function formatPeso(amount) {
   const num = typeof amount === 'number' ? amount : Number(amount)
@@ -20,6 +23,7 @@ export default function PriceControl() {
   const [loadError, setLoadError] = useState(null)
   const [query, setQuery] = useState('')
   const [serviceTab, setServiceTab] = useState('All')
+  const [page, setPage] = useState(1)
 
   const [open, setOpen] = useState(false)
   const [mode, setMode] = useState('add') // 'add' | 'edit'
@@ -64,6 +68,14 @@ export default function PriceControl() {
       return matchesService && matchesQuery
     })
   }, [rules, query, serviceTab])
+
+  useEffect(() => {
+    setPage(1)
+  }, [query, serviceTab])
+
+  const totalPages = Math.max(1, Math.ceil(filteredRules.length / PAGE_SIZE))
+  const currentPage = Math.min(page, totalPages)
+  const pagedRules = filteredRules.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE)
 
   const closeModal = () => {
     setOpen(false)
@@ -176,7 +188,7 @@ export default function PriceControl() {
                 </tr>
               </thead>
               <tbody>
-                {filteredRules.map((r) => (
+                {pagedRules.map((r) => (
                   <tr key={r.id}>
                     <td><strong>{r.city}</strong></td>
                     <td>{r.serviceType}</td>
@@ -195,7 +207,7 @@ export default function PriceControl() {
                         </button>
                         <button
                           type="button"
-                          className="action-btn"
+                          className="action-btn delete"
                           title="Delete"
                           aria-label={`Delete pricing rule for ${r.city} / ${r.serviceType}`}
                           onClick={() => setDeleteTarget(r)}
@@ -216,6 +228,17 @@ export default function PriceControl() {
               </tbody>
             </table>
           </div>
+        )}
+        {!loading && !loadError && filteredRules.length > 0 && (
+          <Pagination
+            info={`Showing ${pagedRules.length ? (currentPage - 1) * PAGE_SIZE + 1 : 0}-${
+              (currentPage - 1) * PAGE_SIZE + pagedRules.length
+            } of ${filteredRules.length} rules`}
+            hasPrev={currentPage > 1}
+            hasNext={currentPage < totalPages}
+            onPrev={() => setPage((p) => Math.max(1, p - 1))}
+            onNext={() => setPage((p) => Math.min(totalPages, p + 1))}
+          />
         )}
       </SectionCard>
 

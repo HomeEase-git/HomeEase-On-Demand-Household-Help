@@ -27,7 +27,7 @@ export default function OtpVerificationScreen() {
   const [otp, setOtp] = useState("");
   const [otpError, setOtpError] = useState("");
   const [countdown, setCountdown] = useState(COUNTDOWN_SECONDS);
-  const [canResend, setCanResend] = useState(false);
+  const canResend = countdown <= 0;
 
   const handleOtpChange = (value: string) => {
     setOtp(value);
@@ -35,15 +35,17 @@ export default function OtpVerificationScreen() {
   };
 
   useEffect(() => {
-    if (countdown <= 0) {
-      setCanResend(true);
-      return;
-    }
+    if (countdown <= 0) return;
     const timer = setInterval(() => setCountdown((c) => c - 1), 1000);
     return () => clearInterval(timer);
   }, [countdown]);
 
   const handleVerify = async () => {
+    if (!email) {
+      setOtpError("Missing email address. Please sign up again.");
+      return;
+    }
+
     if (otp.length !== 6) {
       setOtpError("Please enter a complete 6-digit OTP");
       return;
@@ -51,7 +53,7 @@ export default function OtpVerificationScreen() {
 
     setLoading(true);
     try {
-      const response = await verifyOtp(email || "user@example.com", otp);
+      const response = await verifyOtp(email, otp);
 
       if (response.success) {
         // Store token if needed
@@ -71,7 +73,6 @@ export default function OtpVerificationScreen() {
     try {
       await sendOtpEmail(email);
       setCountdown(COUNTDOWN_SECONDS);
-      setCanResend(false);
       setOtp("");
       setOtpError("");
       alertModal.success("Success", "OTP sent to your email");

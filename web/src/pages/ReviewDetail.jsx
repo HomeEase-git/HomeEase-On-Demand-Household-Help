@@ -70,6 +70,22 @@ export default function ReviewDetail() {
             <label>Comment</label>
             <div className="value">{review.comment}</div>
           </div>
+          {review.photoUrls?.length > 0 && (
+            <div className="detail-block detail-block--full">
+              <label>Photos</label>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 4 }}>
+                {review.photoUrls.map((url) => (
+                  <a key={url} href={url} target="_blank" rel="noreferrer">
+                    <img
+                      src={url}
+                      alt="Review attachment"
+                      style={{ width: 80, height: 80, objectFit: 'cover', borderRadius: 8 }}
+                    />
+                  </a>
+                ))}
+              </div>
+            </div>
+          )}
           {review.flagged && (
             <div className="detail-block detail-block--full">
               <label>Flag Reason</label>

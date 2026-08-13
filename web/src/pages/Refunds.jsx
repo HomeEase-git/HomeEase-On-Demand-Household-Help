@@ -1,10 +1,11 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import PageHeader from '../components/common/PageHeader'
 import SubNav from '../components/common/SubNav'
 import SectionCard from '../components/common/SectionCard'
 import Badge from '../components/common/Badge'
 import LoadingState from '../components/common/LoadingState'
 import ErrorState from '../components/common/ErrorState'
+import Pagination from '../components/common/Pagination'
 import { fetchDisputes } from '../services/disputes'
 
 const SUB_NAV = [
@@ -12,6 +13,8 @@ const SUB_NAV = [
   { to: '/payments/refunds', label: 'Refund History' },
   { to: '/payments/payouts', label: 'Payout Distribution' },
 ]
+
+const PAGE_SIZE = 10
 
 function formatPeso(amount) {
   return `₱${amount?.toLocaleString() ?? '0'}`
@@ -30,6 +33,7 @@ export default function Refunds() {
   const [refunds, setRefunds] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
+  const [page, setPage] = useState(1)
 
   const loadRefunds = async () => {
     setLoading(true)
@@ -48,6 +52,13 @@ export default function Refunds() {
   useEffect(() => {
     loadRefunds()
   }, [])
+
+  const totalPages = Math.max(1, Math.ceil(refunds.length / PAGE_SIZE))
+  const currentPage = Math.min(page, totalPages)
+  const pagedRefunds = useMemo(
+    () => refunds.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE),
+    [refunds, currentPage]
+  )
 
   return (
     <>
@@ -82,7 +93,7 @@ export default function Refunds() {
                     </td>
                   </tr>
                 ) : (
-                  refunds.map((r) => (
+                  pagedRefunds.map((r) => (
                     <tr key={r.id}>
                       <td>{r.displayId}</td>
                       <td>{r.client}</td>
@@ -99,6 +110,17 @@ export default function Refunds() {
               </tbody>
             </table>
           </div>
+        )}
+        {!loading && !error && refunds.length > 0 && (
+          <Pagination
+            info={`Showing ${pagedRefunds.length ? (currentPage - 1) * PAGE_SIZE + 1 : 0}-${
+              (currentPage - 1) * PAGE_SIZE + pagedRefunds.length
+            } of ${refunds.length} refunds`}
+            hasPrev={currentPage > 1}
+            hasNext={currentPage < totalPages}
+            onPrev={() => setPage((p) => Math.max(1, p - 1))}
+            onNext={() => setPage((p) => Math.min(totalPages, p + 1))}
+          />
         )}
       </SectionCard>
     </>

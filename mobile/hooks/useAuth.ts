@@ -1,13 +1,26 @@
 import { useCallback } from 'react';
 import { useAuthStore } from '../store/authStore';
-import { 
-  postLogin, 
-  postSignUp, 
-  sendPasswordResetEmail, 
+import {
+  postLogin,
+  postSignUp,
+  sendPasswordResetEmail,
   verifyOtp,
-  sendOtpEmail 
+  sendOtpEmail
 } from '../services/api';
 import { normalizeError } from '../utils/apiErrors';
+import { notificationService } from '../services/notificationService';
+
+/**
+ * Prompts for notification permission (no-ops if already decided) and, if
+ * granted, obtains + registers the push token against the now-authenticated
+ * session. Fire-and-forget from the caller's perspective — a denied/failed
+ * permission request should never block login/signup.
+ */
+function registerForPushNotifications() {
+  notificationService.requestPermissions().catch((error) => {
+    console.error('[useAuth] Failed to set up push notifications:', error);
+  });
+}
 
 export function useAuth() {
   const store = useAuthStore();
@@ -25,9 +38,11 @@ export function useAuth() {
         email: response.email,
         role: response.role,
         kycStatus: response.kycStatus,
+        hasAcceptedTerms: response.hasAcceptedTerms,
       });
       store.setToken(response.token);
-      
+      registerForPushNotifications();
+
       return { success: true, data: response };
     } catch (err) {
       const error = normalizeError(err);
@@ -58,6 +73,7 @@ export function useAuth() {
         phone: response.phone,
         role: response.role,
         kycStatus: response.kycStatus,
+        hasAcceptedTerms: response.hasAcceptedTerms,
       });
       store.setToken(response.token);
 
@@ -101,6 +117,7 @@ export function useAuth() {
       
       if (response.success && response.token) {
         store.setToken(response.token);
+        registerForPushNotifications();
       }
       
       return { success: true, data: response };

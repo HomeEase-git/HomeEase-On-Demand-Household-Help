@@ -8,6 +8,8 @@ import type { JwtPayload } from '@/types/index';
 import { calculateCommission, calculateWithholdingTax } from '../utils/pricing';
 import { createSource, createSourcePayment } from '../services/paymongoService';
 import { getAppSettings } from '@services/appSettingsService';
+import { translatePaymongoFailureReason } from '@utils/paymongoFailureMessages';
+import { handleWalletTopupChargeable, handleWalletTopupFailed } from './walletController';
 
 interface AuthRequest extends Request {
   user?: JwtPayload;
@@ -31,7 +33,7 @@ export const createPayment = async (req: AuthRequest, res: Response) => {
 
     const bookingId = req.params.bookingId as string;
     const currentUserId = req.user.userId;
-    const validPaymentMethodTypes = ['GCASH', 'MAYA', 'CARD', 'BANK_TRANSFER', 'CASH'] as const;
+    const validPaymentMethodTypes = ['GCASH', 'MAYA', 'CASH'] as const;
     const rawMethodType = typeof req.body?.methodType === 'string' ? req.body.methodType.trim() : '';
     const paymentMethodId = typeof req.body?.paymentMethodId === 'string' ? req.body.paymentMethodId.trim() : '';
     const requestAccountIdentifier = typeof req.body?.accountIdentifier === 'string' ? req.body.accountIdentifier.trim() : '';
@@ -84,7 +86,7 @@ export const createPayment = async (req: AuthRequest, res: Response) => {
     } else if (rawMethodType) {
       if (!validPaymentMethodTypes.includes(rawMethodType as (typeof validPaymentMethodTypes)[number])) {
         return res.status(400).json(
-          errorResponse(400, `Invalid methodType "${rawMethodType}". Allowed values: GCASH, MAYA, CARD, BANK_TRANSFER, CASH`)
+          errorResponse(400, `Invalid methodType "${rawMethodType}". Allowed values: GCASH, MAYA, CASH`)
         );
       }
 
@@ -97,7 +99,7 @@ export const createPayment = async (req: AuthRequest, res: Response) => {
       accountIdentifier = booking.paymentAccountIdentifier ?? (requestAccountIdentifier || null);
     } else {
       return res.status(400).json(
-        errorResponse(400, 'methodType is required and must be one of: GCASH, MAYA, CARD, BANK_TRANSFER, CASH')
+        errorResponse(400, 'methodType is required and must be one of: GCASH, MAYA, CASH')
       );
     }
 
@@ -242,6 +244,9 @@ export const getPaymentDetail = async (req: AuthRequest, res: Response) => {
         releasedAt: payment.releasedAt,
         // schema has paymongoPaymentId, not paymentMethodReference
         transactionId: payment.paymongoPaymentId ?? null,
+        ...(payment.status === 'FAILED'
+          ? { failureReason: payment.failureReason, failureMessage: translatePaymongoFailureReason(payment.failureReason) }
+          : {}),
       },
     });
   } catch (error) {
@@ -295,6 +300,7 @@ export const listMyPayments = async (req: AuthRequest, res: Response) => {
               serviceTask: { select: { name: true } },
             },
           },
+          payout: { select: { status: true, failureReason: true } },
         },
         orderBy: { createdAt: 'desc' },
         skip,
@@ -316,6 +322,20 @@ export const listMyPayments = async (req: AuthRequest, res: Response) => {
       escrowStatus: p.escrowStatus,
       methodType: p.methodType,
       createdAt: p.createdAt,
+      // Only meaningful for workers — tracks the actual PayMongo transfer to
+      // their account, separate from `status` (which only reflects the
+      // client's payment/escrow, not whether the worker has been paid).
+      ...(currentRole === 'WORKER'
+        ? {
+            payoutStatus: p.payout?.status ?? null,
+            payoutFailureReason: p.payout?.failureReason ?? null,
+            payoutFailureMessage: p.payout?.failureReason
+              ? translatePaymongoFailureReason(p.payout.failureReason)
+              : null,
+          }
+        : p.status === 'FAILED'
+          ? { failureReason: p.failureReason, failureMessage: translatePaymongoFailureReason(p.failureReason) }
+          : {}),
     }));
 
     return res.status(200).json({
@@ -608,8 +628,7 @@ function verifyPaymongoSignature(rawBody: Buffer, signatureHeader: string | unde
  * GCash/Maya have no manual-capture primitive, so "capture" for these
  * methods just means the charge succeeded; the money still isn't released
  * to the worker until the client confirms completion (see
- * paymentLifecycleService.captureAndReleasePayment), same as the CARD and
- * cash/bank paths.
+ * paymentLifecycleService.captureAndReleasePayment), same as the cash path.
  */
 async function handleSourceChargeable(sourceId: string | undefined) {
   if (!sourceId) return;
@@ -649,17 +668,20 @@ async function handleSourceChargeable(sourceId: string | undefined) {
     console.error('Failed to charge chargeable PayMongo source:', chargeError);
     await prisma.payment.update({
       where: { id: payment.id },
-      data: { status: 'FAILED' },
+      data: {
+        status: 'FAILED',
+        failureReason: chargeError instanceof Error ? chargeError.message : 'Charge failed',
+      },
     });
   }
 }
 
-async function handlePaymentFailed(sourceId: string | undefined) {
+async function handlePaymentFailed(sourceId: string | undefined, failureReason?: string | null) {
   if (!sourceId) return;
 
   await prisma.payment.updateMany({
     where: { paymongoSourceId: sourceId, status: 'PENDING' },
-    data: { status: 'FAILED' },
+    data: { status: 'FAILED', failureReason: failureReason ?? null },
   });
 }
 
@@ -701,11 +723,19 @@ export const handlePayMongoWebhook = async (req: Request, res: Response) => {
 
     switch (type) {
       case 'source.chargeable':
+        // A chargeable source is either a booking checkout or a wallet
+        // top-up — each handler is a no-op if it finds no matching row for
+        // this source id, so it's safe to try both.
         await handleSourceChargeable(resource?.id);
+        await handleWalletTopupChargeable(resource?.id);
         break;
-      case 'payment.failed':
-        await handlePaymentFailed(resource?.attributes?.source?.id);
+      case 'payment.failed': {
+        const failedSourceId = resource?.attributes?.source?.id;
+        const reason = resource?.attributes?.failed_reason ?? resource?.attributes?.reason ?? null;
+        await handlePaymentFailed(failedSourceId, reason);
+        await handleWalletTopupFailed(failedSourceId, reason);
         break;
+      }
       default:
         break;
     }
@@ -817,7 +847,7 @@ export const handlePaymongoTransferWebhook = async (req: Request, res: Response)
         userId: resolved.workerId,
         type: 'PAYOUT_FAILED',
         title: 'Payout Failed',
-        message: `We couldn't send your ₱${resolved.amount.toFixed(2)} payout. Our team has been notified.`,
+        message: `We couldn't send your ₱${resolved.amount.toFixed(2)} payout. ${translatePaymongoFailureReason(failureReason)}`,
         relatedId: resolved.bookingId,
       });
     }

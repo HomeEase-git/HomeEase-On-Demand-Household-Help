@@ -4,7 +4,6 @@ import { Text, View } from "react-native";
 export type StatusType =
   | "Pending"
   | "Accepted"
-  | "Active"
   | "Ongoing"
   | "InProgress"
   | "QuoteSubmitted"
@@ -40,7 +39,7 @@ export const StatusBadge: React.FC<Props> = ({ status }) => {
       containerClass += " bg-error/20";
       textClass += " text-error";
       break;
-    case "Active":
+    case "Ongoing":
     case "InProgress":
       containerClass += " bg-accent/20";
       textClass += " text-accent";

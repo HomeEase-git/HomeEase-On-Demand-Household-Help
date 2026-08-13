@@ -6,6 +6,7 @@ import { useRouter, useFocusEffect } from "expo-router";
 import ScreenHeader from "../../../../components/ui/ScreenHeader";
 import AddressCard from "../../../../components/cards/AddressCard";
 import EmptyState from "../../../../components/feedback/EmptyState";
+import { Skeleton } from "../../../../components/ui/Skeleton";
 import { colors } from "../../../../constants";
 import * as api from "../../../../services/api";
 import { addressStorage } from "../../../../utils/storage";
@@ -83,8 +84,13 @@ export default function AddressesScreen() {
     <SafeAreaView className="flex-1 bg-white">
       <ScreenHeader title="My Addresses" showBack />
       {loading ? (
-        <View className="flex-1 items-center justify-center">
-          <Text className="text-text-secondary">Loading addresses...</Text>
+        <View className="p-4">
+          {Array.from({ length: 3 }).map((_, i) => (
+            <View key={i} className="bg-card rounded-2xl p-4 mb-3">
+              <Skeleton width="40%" height={14} marginBottom={8} />
+              <Skeleton width="80%" height={12} marginBottom={0} />
+            </View>
+          ))}
         </View>
       ) : addresses.length === 0 ? (
         <EmptyState

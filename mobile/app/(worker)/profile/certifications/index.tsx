@@ -17,20 +17,17 @@ export default function CertificationsScreen() {
   const [certs, setCerts] = useState<Certification[]>([]);
   const [loading, setLoading] = useState(true);
 
-  const loadCerts = async () => {
-    setLoading(true);
-    try {
-      const stored = await api.getMyCertifications();
-      setCerts(stored);
-    } catch (error) {
-      console.error("Load certifications error:", error);
-    } finally {
-      setLoading(false);
-    }
-  };
-
   useEffect(() => {
-    loadCerts();
+    (async () => {
+      try {
+        const stored = await api.getMyCertifications();
+        setCerts(stored);
+      } catch (error) {
+        console.error("Load certifications error:", error);
+      } finally {
+        setLoading(false);
+      }
+    })();
   }, []);
 
   const handleDelete = async (id: string) => {
@@ -82,7 +79,10 @@ export default function CertificationsScreen() {
                 router.push(`/(worker)/profile/certifications/${item.id}`)
               }
               onEdit={() =>
-                router.push("/(worker)/profile/certifications/upload")
+                router.push({
+                  pathname: "/(worker)/profile/certifications/upload",
+                  params: { certId: item.id },
+                })
               }
               onDelete={() => handleDelete(item.id)}
             />

@@ -44,7 +44,7 @@ export default function ResetPasswordScreen() {
   const [newPasswordError, setNewPasswordError] = useState("");
   const [confirmPasswordError, setConfirmPasswordError] = useState("");
   const [countdown, setCountdown] = useState(RESEND_COUNTDOWN_SECONDS);
-  const [canResend, setCanResend] = useState(false);
+  const canResend = countdown <= 0;
   const [resending, setResending] = useState(false);
 
   const strength = requirements.filter((r) => r.test(newPassword)).length;
@@ -52,10 +52,7 @@ export default function ResetPasswordScreen() {
     otp.length === 6 && strength === 3 && newPassword === confirmPassword;
 
   useEffect(() => {
-    if (countdown <= 0) {
-      setCanResend(true);
-      return;
-    }
+    if (countdown <= 0) return;
     const timer = setInterval(() => setCountdown((c) => c - 1), 1000);
     return () => clearInterval(timer);
   }, [countdown]);
@@ -71,7 +68,6 @@ export default function ResetPasswordScreen() {
     try {
       await sendPasswordResetEmail(email);
       setCountdown(RESEND_COUNTDOWN_SECONDS);
-      setCanResend(false);
       setOtp("");
       setOtpError("");
       alertModal.success("Success", "A new code has been sent to your email");

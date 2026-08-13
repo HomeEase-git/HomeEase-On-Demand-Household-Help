@@ -74,8 +74,6 @@ enum PayoutStatus {
 enum PaymentMethodType {
   GCASH
   MAYA
-  CARD
-  BANK_TRANSFER
   CASH
 }
 
@@ -139,6 +137,12 @@ enum TimeSlot {
   EVENING
 }
 
+enum UrgencyLevel {
+  STANDARD
+  URGENT
+  EMERGENCY
+}
+
 enum RoomType {
   BEDROOM
   BATHROOM
@@ -186,6 +190,10 @@ model User {
   isVerified              Boolean @default(false) // basic email/phone verification, not KYC
   avatar                  String?
   notificationPreferences Json?
+  // Expo push token for the device the user most recently logged in on —
+  // single-device by design (matches the mobile client's single in-memory
+  // token model). Overwritten on each login/registration; cleared on logout.
+  pushToken               String?
 
   // Soft delete — isDeleted/deletedAt is the single gate used everywhere to
   // exclude a user from active queries. `status` records *why* — self-deleted,
@@ -305,6 +313,11 @@ model WorkerProfile {
   availableDays     Int[]   @default([1, 2, 3, 4, 5]) // 0=Sun, 1=Mon ... 6=Sat
   serviceAreaRadius Int     @default(30) // in kilometers
 
+  // Set when the worker hits AppSettings.maxDeclinesBeforeCooldown declines
+  // within the rolling declineWindowHours — excluded from auto-match
+  // candidates (see matchingService.findAutoMatchWorker) until this passes.
+  declineCooldownUntil DateTime?
+
   // Job preferences — used by auto-matching to filter candidate workers
   acceptsHeavyCondition Boolean    @default(false)
   acceptsPets           Boolean    @default(false)
@@ -351,6 +364,7 @@ model WorkerProfile {
   resumeParseResult ResumeParseResult?
   availability      WorkerAvailability[]
   packages          WorkerPackage[]
+  wallet            WorkerWallet?
 
   @@index([userId])
   @@index([kycStatus])
@@ -652,6 +666,7 @@ model Booking {
   scheduledDate  DateTime
   scheduledTime  String?
   timeSlot       TimeSlot?
+  urgencyLevel   UrgencyLevel @default(STANDARD)
   completionDate DateTime?
 
   // Status
@@ -805,6 +820,8 @@ model PricingLog {
   basePrice     Float
   conditionFee  Float? @default(0)
   distanceFee   Float? @default(0)
+  urgencyFee    Float? @default(0)
+  tierFee       Float? @default(0)
   addOnsTotal   Float? @default(0)
   finalEstimate Float
   breakdown     Json? // full itemized snapshot for support/audit lookups
@@ -872,6 +889,10 @@ model Payment {
   refundReason String?
   refundedAt   DateTime?
 
+  // Set when status becomes FAILED — raw reason from PayMongo's webhook
+  // payload (translated for end users via utils/paymongoFailureMessages.ts).
+  failureReason String?
+
   // PayMongo references
   paymongoPaymentId String?
   paymongoSourceId  String?
@@ -881,15 +902,17 @@ model Payment {
   // if the final price changed (e.g. quote approval, add-ons).
   authorizedAmount Float?
   authorizedAt     DateTime?
-  authorizationId  String?
   capturedAmount   Float?
   capturedAt       DateTime?
+  // Deprecated — populated only on CARD-era rows from before CARD support
+  // was removed; no longer written to.
+  authorizationId  String?
   paymentIntentId  String?
   clientSecret     String?
 
   // Payment method used
   methodType        PaymentMethodType
-  accountIdentifier String? // masked GCash number, last 4 of card, etc.
+  accountIdentifier String? // masked GCash/Maya number, etc.
 
   payout Payout?
 
@@ -913,7 +936,7 @@ model Payout {
   workerId  String // soft reference — User.id of the worker being paid
 
   amount        Float
-  channel       PaymentMethodType // GCASH/MAYA/BANK_TRANSFER — CARD/CASH are not valid payout channels
+  channel       PaymentMethodType // GCASH/MAYA — CASH is not a valid payout channel
   accountName   String? // snapshot of WorkerProfile.payoutAccountName at send time
   accountNumber String // snapshot of WorkerProfile.payoutAccountNumber at send time
 
@@ -937,6 +960,59 @@ model Payout {
   @@index([bookingId])
   @@index([workerId])
   @@index([status])
+}
+
+// Prepaid balance a worker maintains to cover the per-job admin fee deducted
+// at booking acceptance (see bookingController.acceptBooking) — distinct
+// from Payout, which is the platform paying the worker their job earnings.
+model WorkerWallet {
+  id              String        @id @default(cuid())
+  workerProfileId String        @unique
+  workerProfile   WorkerProfile @relation(fields: [workerProfileId], references: [id], onDelete: Cascade)
+
+  balance Float @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  transactions WalletTransaction[]
+}
+
+enum WalletTransactionType {
+  TOPUP
+  ADMIN_FEE_DEDUCTION
+  REFUND
+  ADMIN_ADJUSTMENT
+}
+
+enum WalletTransactionStatus {
+  PENDING
+  COMPLETED
+  FAILED
+}
+
+model WalletTransaction {
+  id       String       @id @default(cuid())
+  walletId String
+  wallet   WorkerWallet @relation(fields: [walletId], references: [id], onDelete: Cascade)
+
+  type   WalletTransactionType
+  status WalletTransactionStatus @default(PENDING)
+
+  // Signed: credits (TOPUP, REFUND, positive ADMIN_ADJUSTMENT) are positive,
+  // debits (ADMIN_FEE_DEDUCTION, negative ADMIN_ADJUSTMENT) are negative.
+  amount       Float
+  balanceAfter Float?
+
+  bookingId          String? // soft reference — links a deduction/refund to the job it was for
+  paymongoCheckoutId String? @unique // set for TOPUP rows, keys the webhook back to this transaction
+  failureReason      String?
+  note               String? // admin's reason, for ADMIN_ADJUSTMENT rows
+
+  createdAt DateTime @default(now())
+
+  @@index([walletId])
+  @@index([bookingId])
 }
 
 model SavedPaymentMethod {
@@ -969,8 +1045,9 @@ model Review {
   clientId String
   client   User   @relation(fields: [clientId], references: [id], onDelete: Cascade)
 
-  rating  Float // 1.0 to 5.0
-  comment String?
+  rating    Float // 1.0 to 5.0
+  comment   String?
+  photoUrls String[] @default([]) // client-attached photos, uploaded via POST /bookings/:id/review-photo/upload
 
   // Moderation — admin-side flagging/hiding, see ReviewStatus
   flagged    Boolean      @default(false)
@@ -1084,6 +1161,28 @@ model AppSettings {
   maxSlotsPerDay       Int   @default(2)
   pendingExpiryMinutes Int   @default(60)
   geofenceRadiusMeters Int   @default(100)
+
+  // Worker decline-limit cooldown (see bookingController.declineBooking) —
+  // hit maxDeclinesBeforeCooldown declines within declineWindowHours and the
+  // worker is excluded from auto-match for declineCooldownHours.
+  maxDeclinesBeforeCooldown Int @default(3)
+  declineWindowHours        Int @default(168) // 7 days
+  declineCooldownHours      Int @default(24)
+
+  // Expertise-tier pricing (see utils/workerTier.ts) — tier is computed on
+  // the fly from WorkerProfile.rating + completed-job count, not stored;
+  // these thresholds/multipliers are the only admin-configurable part.
+  tierProMinRating    Float @default(4.5)
+  tierProMinJobs      Int   @default(20)
+  tierProMultiplier   Float @default(1.15)
+  tierExpertMinRating Float @default(4.8)
+  tierExpertMinJobs   Int   @default(50)
+  tierExpertMultiplier Float @default(1.3)
+
+  // Prepaid wallet admin-fee gate (see walletService.ts, bookingController.acceptBooking)
+  // — flat fee in pesos, independent of job price so it isn't affected by
+  // later quote/add-on changes.
+  adminFeePerJob Float @default(20)
 
   updatedAt DateTime @updatedAt
 }

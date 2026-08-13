@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { View, Text, ScrollView } from "react-native";
+import { View, Text, ScrollView, Linking } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { AppIcon as Ionicons } from "../../../components/icons/AppIcon";
 import { useRouter } from "expo-router";
@@ -9,19 +9,31 @@ import PrimaryButton from "../../../components/ui/PrimaryButton";
 import { colors } from "../../../constants";
 import { useAlertModal } from "../../../contexts/AlertModalContext";
 
+const SUPPORT_EMAIL = "support@homeease.com";
+
 export default function WorkerContactUsScreen() {
   const router = useRouter();
   const alertModal = useAlertModal();
   const [subject, setSubject] = useState("");
   const [message, setMessage] = useState("");
 
-  const handleSend = () => {
+  const handleSend = async () => {
     if (!subject.trim() || !message.trim()) {
       alertModal.error("Error", "Please fill in all fields");
       return;
     }
-    alertModal.success("Sent", "We'll reply within 24hrs");
-    router.back();
+
+    const mailUrl = `mailto:${SUPPORT_EMAIL}?subject=${encodeURIComponent(
+      subject.trim(),
+    )}&body=${encodeURIComponent(message.trim())}`;
+
+    try {
+      await Linking.openURL(mailUrl);
+      router.back();
+    } catch (error) {
+      console.error("Open mail client error:", error);
+      alertModal.error("Error", "No email app found. Please email us directly at " + SUPPORT_EMAIL);
+    }
   };
 
   return (
@@ -67,7 +79,7 @@ export default function WorkerContactUsScreen() {
           placeholder="Your message..."
           multiline
         />
-        <PrimaryButton label="Send Message" fullWidth onPress={handleSend} />
+        <PrimaryButton label="Send via Email" fullWidth onPress={handleSend} />
       </ScrollView>
     </SafeAreaView>
   );

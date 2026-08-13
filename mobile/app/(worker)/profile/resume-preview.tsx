@@ -52,7 +52,7 @@ export default function ResumePreviewScreen() {
   }, []);
 
   useEffect(() => {
-    load(false);
+    Promise.resolve().then(() => load(false));
   }, [load]);
 
   const handleUseProfileData = () => {

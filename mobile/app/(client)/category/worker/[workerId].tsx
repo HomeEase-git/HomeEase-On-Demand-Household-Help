@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { View, Text, ScrollView, Pressable, ActivityIndicator } from "react-native";
+import { View, Text, ScrollView, Pressable, ActivityIndicator, Image } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { AppIcon as Ionicons } from "../../../../components/icons/AppIcon";
 import { useRouter, useLocalSearchParams } from "expo-router";
@@ -95,7 +95,15 @@ export default function WorkerProfileScreen() {
         showsVerticalScrollIndicator={false}
       >
         <View className="w-full h-64 bg-card-dark items-center justify-center">
-          <Ionicons name="person-circle" size={100} color={colors.text.muted} />
+          {worker.avatar ? (
+            <Image
+              source={{ uri: worker.avatar }}
+              style={{ width: "100%", height: "100%" }}
+              resizeMode="cover"
+            />
+          ) : (
+            <Ionicons name="person-circle" size={100} color={colors.text.muted} />
+          )}
         </View>
 
         <View className="bg-card rounded-2xl p-4 mx-4 -mt-8">
@@ -255,6 +263,7 @@ export default function WorkerProfileScreen() {
                 review={{
                   id: r.id,
                   authorName: r.clientName,
+                  authorAvatar: r.clientAvatar,
                   rating: r.rating,
                   comment: r.comment,
                   date: r.date,

@@ -69,8 +69,8 @@ export interface OtpVerificationRequest {
 // BOOKING TYPES
 // ============================================================================
 
-export type BookingStatus = 'Pending' | 'Accepted' | 'Active' | 'InProgress' | 
-                            'QuoteSubmitted' | 'QuoteApproved' | 'Disputed' | 
+export type BookingStatus = 'Pending' | 'Accepted' | 'InProgress' |
+                            'QuoteSubmitted' | 'QuoteApproved' | 'Disputed' |
                             'Completed' | 'Cancelled';
 
 export interface Booking {
@@ -202,6 +202,7 @@ export interface WorkerDigitalId {
 export interface WorkerReview {
   id: string;
   clientName: string;
+  clientAvatar?: string | null;
   rating: number;
   comment: string;
   date: string;

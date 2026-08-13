@@ -1,7 +1,7 @@
 import type { Prisma, PaymentMethodType } from '@prisma/client';
 import prisma from '@config/database';
 import { calculateCommission, calculateWithholdingTax } from '@utils/pricing';
-import { createPaymentIntent, capturePaymentIntent, createRefund } from '@services/paymongoService';
+import { createRefund } from '@services/paymongoService';
 import { notifyUser } from '@utils/notify';
 import { getAppSettings } from '@services/appSettingsService';
 import { schedulePayout } from '@queues/payoutQueue';
@@ -19,14 +19,13 @@ export interface BookingForPayment {
  * Creates the Payment row at booking-creation time in an "authorized" state:
  * status PENDING, escrowStatus HELD, authorizedAmount/authorizedAt set.
  *
- * For CARD, opens a real manual-capture PayMongo PaymentIntent — genuine
- * deferred authorization. GCASH/MAYA still need the client to complete a
- * Source checkout (see paymentController.createPaymongoCheckout, unchanged);
- * once PayMongo reports the source chargeable, the webhook charges it and
- * marks the Payment COMPLETED but leaves escrowStatus HELD until this
- * booking is actually confirmed complete (see captureAndReleasePayment).
- * BANK_TRANSFER/CASH have no gateway automation — the amount is recorded as
- * authorized for bookkeeping and settled off-platform.
+ * GCASH/MAYA need the client to complete a Source checkout (see
+ * paymentController.createPaymongoCheckout, unchanged); once PayMongo
+ * reports the source chargeable, the webhook charges it and marks the
+ * Payment COMPLETED but leaves escrowStatus HELD until this booking is
+ * actually confirmed complete (see captureAndReleasePayment). CASH has no
+ * gateway automation — the amount is recorded as authorized for bookkeeping
+ * and settled off-platform.
  */
 export async function authorizePaymentForBooking(
   tx: Prisma.TransactionClient,
@@ -41,27 +40,6 @@ export async function authorizePaymentForBooking(
   const withholdingTax = calculateWithholdingTax(subtotal, commissionRate, withholdingTaxRate);
   const workerPayout = subtotal - commission - withholdingTax + tip;
   const totalAmount = subtotal + tip;
-
-  let authorizationId: string | null = null;
-  let paymentIntentId: string | null = null;
-  let clientSecret: string | null = null;
-
-  if (methodType === 'CARD') {
-    try {
-      const intent = await createPaymentIntent({
-        amountPesos: totalAmount,
-        description: `HomeEase booking ${booking.id}`,
-      });
-      authorizationId = intent.id;
-      paymentIntentId = intent.id;
-      clientSecret = intent.clientKey;
-    } catch (error) {
-      // Don't block booking creation on a gateway hiccup — the client can
-      // retry the card charge later; the Payment row still records the
-      // authorized amount for the booking to proceed.
-      console.error('Failed to create PayMongo payment intent:', error);
-    }
-  }
 
   return tx.payment.create({
     data: {
@@ -78,9 +56,6 @@ export async function authorizePaymentForBooking(
       escrowStatus: 'HELD',
       authorizedAmount: totalAmount,
       authorizedAt: new Date(),
-      authorizationId,
-      paymentIntentId,
-      clientSecret,
       methodType,
       accountIdentifier: booking.paymentAccountIdentifier ?? null,
     },
@@ -101,15 +76,14 @@ export async function authorizePaymentForBooking(
  * reusing the estimate-time figures — otherwise admin financial reporting
  * would silently go stale on any quote/add-on job.
  *
- * Known limitation: only CARD supports collecting a price increase at this
- * step (via capturePaymentIntent, which can capture up to the originally
- * authorized amount). GCash/Maya are charged in full up front
- * (handleSourceChargeable, paymentController.ts) and CASH/BANK_TRANSFER
- * settle off-platform — for those methods this recompute updates the
- * platform's bookkeeping (commission/tax/payout math) to match the final
- * agreed price, but does not and cannot collect any difference from the
- * client. A quote/add-on that increases the price on a non-CARD booking
- * needs a separate manual-collection step; not built here.
+ * Known limitation: no payment method here supports collecting a price
+ * increase at this step. GCash/Maya are charged in full up front
+ * (handleSourceChargeable, paymentController.ts) and CASH settles
+ * off-platform — for both this recompute updates the platform's bookkeeping
+ * (commission/tax/payout math) to match the final agreed price, but does not
+ * and cannot collect any difference from the client. A quote/add-on that
+ * increases the price needs a separate manual-collection step; not built
+ * here.
  */
 export async function captureAndReleasePayment(
   bookingId: string,
@@ -133,17 +107,6 @@ export async function captureAndReleasePayment(
   const workerPayout = subtotal - commissionAmount - withholdingTaxAmount + tip;
   const totalAmount = subtotal + tip;
 
-  let capturedPaymongoPaymentId: string | null = null;
-  if (payment.methodType === 'CARD' && payment.paymentIntentId && payment.status !== 'COMPLETED') {
-    // Capture the full total (subtotal + tip) — the intent was authorized
-    // for totalAmount at booking-creation time (authorizePaymentForBooking),
-    // so capturing just the subtotal would under-capture by the tip amount.
-    const captured = await capturePaymentIntent(payment.paymentIntentId, totalAmount);
-    // The captured PaymentIntent's resulting Payment resource id — needed to
-    // issue a real refund later if this booking's escrow ends up reversed.
-    capturedPaymongoPaymentId = captured?.attributes?.payments?.[0]?.id ?? null;
-  }
-
   const updated = await prisma.payment.update({
     where: { id: payment.id },
     data: {
@@ -159,7 +122,6 @@ export async function captureAndReleasePayment(
       status: 'COMPLETED',
       escrowStatus: 'RELEASED',
       releasedAt: new Date(),
-      ...(capturedPaymongoPaymentId ? { paymongoPaymentId: capturedPaymongoPaymentId } : {}),
     },
   });
 
@@ -212,8 +174,8 @@ export async function captureAndReleasePayment(
 /**
  * Releases a held escrow back to the client without paying the worker —
  * used for cancellations/refunds. An authorization that was never charged
- * (CARD never captured, or a GCash/Maya source never confirmed) simply
- * expires/voids on PayMongo's side, nothing to reverse. But money CAN
+ * (a GCash/Maya source never confirmed) simply expires/voids on PayMongo's
+ * side, nothing to reverse. But money CAN
  * already be with the platform while escrow is still HELD: GCash/Maya are
  * charged as soon as the source becomes chargeable (handleSourceChargeable,
  * paymentController.ts), well before the job — and completion capture also

@@ -3,12 +3,11 @@ import { bookingStorage } from '../utils/storage';
 import { isValidHHmm, TimeHHmm } from '../utils/time';
 import { validateDraftForSubmit as validateDraftUtil } from '../utils/bookingValidation';
 import { mapServiceToCategory } from '../utils/categoryMapping';
-import type { ConditionType, RoomSelection, ServiceScopeType, TimeSlot } from '../types/booking4step.types';
+import type { ConditionType, RoomSelection, ServiceScopeType, TimeSlot, UrgencyLevel, WorkerTier } from '../types/booking4step.types';
 
 export type BookingStatus =
   | 'Pending'
   | 'Accepted'
-  | 'Active'
   | 'InProgress'
   | 'QuoteSubmitted'
   | 'QuoteApproved'
@@ -111,12 +110,14 @@ export type DraftBooking = {
   scopeAnswers?: Record<string, string | string[]>; // CUSTOM-scope answers, keyed by ScopeField.label
   issuePhotoUrls?: string[]; // photos of the issue the client attached in Step 1, uploaded via POST /bookings/issue-photo/upload
   timeSlot: TimeSlot | null;
+  urgencyLevel: UrgencyLevel;
   priorities: string[]; // max MAX_PRIORITIES, see types/booking4step.types.ts
   addOnToggles: string[]; // AddOnToggleKey[] — free preference toggles, sent as zero-priced addOns
   // Worker selected via Step 3 (WHO) — separate from workerId/workerName above,
   // which pre-date this flow and are still used by the "book from profile" /
   // "book again" entry points that lock a worker before Step 1.
   workerHourlyRate?: number | null;
+  workerTier?: WorkerTier | null;
   workerEstimatedTotal?: number | null;
   workerAvatar?: string | null;
   workerRating?: number | null;
@@ -217,6 +218,7 @@ const initialDraft: DraftBooking = {
   selectedPackageIds: [],
   rooms: [],
   condition: null,
+  urgencyLevel: 'STANDARD',
   scopeType: null,
   hasCondition: true,
   scopeAnswers: {},

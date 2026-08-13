@@ -7,6 +7,7 @@ import FilterTabs from '../components/common/FilterTabs'
 import SectionCard from '../components/common/SectionCard'
 import Pagination from '../components/common/Pagination'
 import Badge from '../components/common/Badge'
+import { getPaymentStatusVariant } from '../utils/statusBadge'
 import LoadingState from '../components/common/LoadingState'
 import ErrorState from '../components/common/ErrorState'
 import { useListQuery } from '../hooks/useListQuery'
@@ -146,7 +147,7 @@ export default function Payments() {
                         <td>{t.method}</td>
                         <td>{t.date}</td>
                         <td>
-                          <Badge variant={t.status === 'Completed' ? 'approved' : 'pending'}>
+                          <Badge variant={getPaymentStatusVariant(t.status)}>
                             {t.status}
                           </Badge>
                         </td>

@@ -26,24 +26,21 @@ export default function PackagesScreen() {
   const [description, setDescription] = useState("");
   const [price, setPrice] = useState("");
 
-  const load = async () => {
-    setLoading(true);
-    try {
-      const [pkgs, types] = await Promise.all([
-        api.getMyPackages(),
-        api.getMyServiceTypes(),
-      ]);
-      setPackages(pkgs);
-      setMyServiceTypes(types);
-    } catch (error) {
-      console.error("Load packages error:", error);
-    } finally {
-      setLoading(false);
-    }
-  };
-
   useEffect(() => {
-    load();
+    (async () => {
+      try {
+        const [pkgs, types] = await Promise.all([
+          api.getMyPackages(),
+          api.getMyServiceTypes(),
+        ]);
+        setPackages(pkgs);
+        setMyServiceTypes(types);
+      } catch (error) {
+        console.error("Load packages error:", error);
+      } finally {
+        setLoading(false);
+      }
+    })();
   }, []);
 
   const resetForm = () => {

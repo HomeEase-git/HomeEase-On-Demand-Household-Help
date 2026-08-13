@@ -1,6 +1,8 @@
 import type * as Notifications from 'expo-notifications';
 import Constants from 'expo-constants';
 import { isRunningInExpoGo } from 'expo';
+import { authStorage } from '../utils/storage';
+import { updatePushToken, removePushToken } from './api';
 
 /**
  * Push Notification Types
@@ -162,8 +164,7 @@ class NotificationService {
 
       console.log(`[Notifications] ✓ Push token obtained: ${this.token.token.substring(0, 20)}...`);
 
-      // TODO: Send token to backend once endpoint is available
-      // await this.sendTokenToBackend(this.token);
+      await this.sendTokenToBackend(this.token);
     } catch (error) {
       console.error('[Notifications] Failed to obtain push token:', error);
     }
@@ -177,18 +178,37 @@ class NotificationService {
   }
 
   /**
-   * Send token to backend (called after backend endpoint is ready)
-   *
-   * @param token - Push token to send
+   * Send the obtained push token to the backend so server-initiated events
+   * (new booking, message, payment, etc.) can reach this device even while
+   * the app is closed. No-ops if there's no logged-in session yet — this can
+   * run on a cold boot before auth restores, and the token gets (re)sent
+   * right after a successful login/verification anyway (see useAuth.ts).
    */
   async sendTokenToBackend(token: PushNotificationToken): Promise<void> {
     try {
-      // This would be called from the API service
-      // when backend exposes /api/users/{id}/notification-token endpoint
-      console.log('[Notifications] Would send token to backend:', token.token);
-      // await api.updateNotificationToken(token.token, token.platform);
+      const authToken = await authStorage.getToken();
+      if (!authToken) {
+        console.log('[Notifications] No session yet — deferring push token registration');
+        return;
+      }
+      await updatePushToken(token.token);
+      console.log('[Notifications] ✓ Push token sent to backend');
     } catch (error) {
       console.error('[Notifications] Failed to send token to backend:', error);
+    }
+  }
+
+  /**
+   * Clear the push token both locally and on the backend — call on logout so
+   * a signed-out device stops receiving pushes meant for the next user.
+   */
+  async clearTokenFromBackend(): Promise<void> {
+    try {
+      await removePushToken();
+    } catch (error) {
+      console.error('[Notifications] Failed to remove push token from backend:', error);
+    } finally {
+      this.token = null;
     }
   }
 

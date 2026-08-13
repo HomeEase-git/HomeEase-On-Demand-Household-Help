@@ -98,6 +98,7 @@ export default function WorkerReviewsScreen() {
                 review={{
                   id: item.id,
                   authorName: item.clientName,
+                  authorAvatar: item.clientAvatar,
                   rating: item.rating,
                   comment: item.comment,
                   date: item.date,

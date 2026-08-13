@@ -1,0 +1,2 @@
+-- AlterTable
+ALTER TABLE "PricingLog" ADD COLUMN     "tierFee" DOUBLE PRECISION DEFAULT 0;

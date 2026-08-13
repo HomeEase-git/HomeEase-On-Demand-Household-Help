@@ -18,7 +18,7 @@ export default function AddPaymentMethodScreen() {
   const router = useRouter();
   const alertModal = useAlertModal();
   const [type, setType] = useState<
-    "GCASH" | "MAYA" | "CARD" | "BANK_TRANSFER" | "CASH"
+    "GCASH" | "MAYA" | "BANK_TRANSFER" | "CASH"
   >("GCASH");
   const [accountIdentifier, setAccountIdentifier] = useState("");
   const [label, setLabel] = useState("");
@@ -55,7 +55,6 @@ export default function AddPaymentMethodScreen() {
   const types = [
     { label: "GCash", value: "GCASH" as const },
     { label: "Maya", value: "MAYA" as const },
-    { label: "Card", value: "CARD" as const },
     { label: "Bank", value: "BANK_TRANSFER" as const },
     { label: "Cash", value: "CASH" as const },
   ];
@@ -92,7 +91,7 @@ export default function AddPaymentMethodScreen() {
         <InputField
           ref={accountRef}
           label="Account Identifier"
-          placeholder="e.g., +63912345678 (for GCash), Card last 4 digits, etc."
+          placeholder="e.g., +63912345678 (for GCash/Maya), account number, etc."
           value={accountIdentifier}
           onChangeText={setAccountIdentifier}
           returnKeyType="next"

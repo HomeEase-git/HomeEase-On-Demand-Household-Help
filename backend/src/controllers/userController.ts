@@ -30,11 +30,16 @@ export const getUserProfile = async (req: AuthRequest, res: Response) => {
         isVerified: true,
         createdAt: true,
         updatedAt: true,
-        workerProfile: { select: { kycStatus: true } },
+        workerProfile: { select: { kycStatus: true, declineCooldownUntil: true } },
         verificationRequests: {
           orderBy: { submittedAt: 'desc' },
           take: 1,
           select: { rejectionReason: true },
+        },
+        contractAcceptances: {
+          where: { contractType: 'CLIENT_USER_AGREEMENT' },
+          select: { id: true },
+          take: 1,
         },
       },
     });
@@ -43,7 +48,7 @@ export const getUserProfile = async (req: AuthRequest, res: Response) => {
       return res.status(404).json(errorResponse(404, 'User not found'));
     }
 
-    const { workerProfile, verificationRequests, ...userFields } = user;
+    const { workerProfile, verificationRequests, contractAcceptances, ...userFields } = user;
     const kycStatus = user.role === 'WORKER' ? (workerProfile?.kycStatus ?? 'PENDING') : undefined;
 
     return res.status(200).json({
@@ -56,6 +61,13 @@ export const getUserProfile = async (req: AuthRequest, res: Response) => {
         // The admin's actual reason, so a rejected worker isn't shown a
         // generic canned message regardless of why they were rejected.
         kycRejectionReason: kycStatus === 'REJECTED' ? (verificationRequests[0]?.rejectionReason ?? null) : undefined,
+        // Gates the client-agreement screen — undefined for workers, who
+        // have their own contract flow tied to KYC instead.
+        hasAcceptedTerms: user.role === 'CLIENT' ? contractAcceptances.length > 0 : undefined,
+        // Worker decline-limit cooldown — undefined/null unless currently
+        // excluded from auto-match (see matchingService.findAutoMatchWorker).
+        declineCooldownUntil:
+          user.role === 'WORKER' ? (workerProfile?.declineCooldownUntil ?? null) : undefined,
       },
     });
   } catch (error) {
@@ -756,7 +768,7 @@ export const getMyReviews = async (req: AuthRequest, res: Response) => {
               id: true,
               workerId: true,
               serviceTask: { select: { name: true } },
-              worker: { select: { fullName: true } },
+              worker: { select: { fullName: true, avatar: true } },
             },
           },
         },
@@ -772,9 +784,11 @@ export const getMyReviews = async (req: AuthRequest, res: Response) => {
       bookingId: review.booking.id,
       workerId: review.booking.workerId,
       workerName: review.booking.worker?.fullName ?? 'Worker',
+      workerAvatar: review.booking.worker?.avatar ?? null,
       serviceType: review.booking.serviceTask?.name ?? 'Service',
       rating: review.rating,
       comment: review.comment,
+      photoUrls: review.photoUrls,
       createdAt: review.createdAt,
     }));
 

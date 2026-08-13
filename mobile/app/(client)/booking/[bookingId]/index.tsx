@@ -17,6 +17,7 @@ import PaymongoCheckoutModal from "../../../../components/payment/PaymongoChecko
 import type { BottomSheetHandle } from "../../../../components/bottom-sheets/BottomSheetWrapper";
 import {
   useBookingStore,
+  API_STATUS_MAP,
   type Booking,
   type BookingState,
 } from "../../../../store/bookingStore";
@@ -35,20 +36,6 @@ import { useAlertModal } from "../../../../contexts/AlertModalContext";
 import { PAYMENT_METHOD_TYPE_MAP } from "../../../../utils/paymentMethodMap";
 
 const PAYMONGO_GATEWAY_METHODS = new Set(["GCASH", "MAYA"]);
-
-// Backend BookingStatus enum -> store's friendly status values
-const API_STATUS_MAP: Record<string, Booking["status"]> = {
-  PENDING: "Pending",
-  ACCEPTED: "Accepted",
-  REJECTED: "Cancelled",
-  IN_PROGRESS: "InProgress",
-  QUOTE_SUBMITTED: "QuoteSubmitted",
-  QUOTE_APPROVED: "QuoteApproved",
-  DISPUTED: "Disputed",
-  PENDING_COMPLETION: "PendingCompletion",
-  COMPLETED: "Completed",
-  CANCELLED: "Cancelled",
-};
 
 type ApiBookingDetail = {
   id: string;
@@ -215,7 +202,7 @@ export default function BookingDetailScreen() {
 
   const canCancel = booking.status === "Pending";
   const canTrack =
-    booking.status === "Active" || booking.status === "InProgress";
+    booking.status === "Accepted" || booking.status === "InProgress";
   const isCompleted = booking.status === "Completed";
   const isPendingCompletion = booking.status === "PendingCompletion";
   // A Payment row is created (status PENDING) as soon as the booking is
@@ -275,7 +262,7 @@ export default function BookingDetailScreen() {
       }
 
       const payment = await createBookingPayment(booking.id, {
-        methodType: methodType as "GCASH" | "MAYA" | "CARD" | "BANK_TRANSFER" | "CASH",
+        methodType: methodType as "GCASH" | "MAYA" | "CASH",
         accountIdentifier,
       });
       await releasePaymentEscrow(payment.id);
@@ -338,7 +325,7 @@ export default function BookingDetailScreen() {
       } else if (detail?.status === "Failed") {
         alertModal.error(
           "Payment failed",
-          "PayMongo declined this payment. You can try again from this screen.",
+          detail.failureMessage || "PayMongo declined this payment. You can try again from this screen.",
         );
       } else {
         alertModal.info(
@@ -379,9 +366,9 @@ export default function BookingDetailScreen() {
     try {
       // The backend already captures the held authorization and releases
       // escrow as part of confirming completion (see captureAndReleasePayment
-      // in confirmCompletion) — for every payment method, not just cards.
-      // There's nothing left for the client to pay here; we just reflect the
-      // settled payment status it returns.
+      // in confirmCompletion) — for every payment method. There's nothing
+      // left for the client to pay here; we just reflect the settled payment
+      // status it returns.
       const response = await confirmBookingCompletion(booking.id);
       const settledPayment = response.data?.data?.payment as
         | { status?: string; escrowStatus?: string }
@@ -405,9 +392,9 @@ export default function BookingDetailScreen() {
           "The worker has been paid. Thank you!",
         );
       } else {
-        // Rare: server-side capture didn't finish (e.g. a gateway hiccup on
-        // a card charge). Let the client retry from the "Proceed to Payment"
-        // action rather than silently reporting success.
+        // Rare: server-side capture didn't finish (e.g. a gateway hiccup).
+        // Let the client retry from the "Proceed to Payment" action rather
+        // than silently reporting success.
         alertModal.info(
           "Completion confirmed",
           "We're still finalizing payment — you can retry from this screen if it doesn't clear shortly.",
@@ -452,7 +439,7 @@ export default function BookingDetailScreen() {
       label: "In Progress",
       timestamp: "",
       status:
-        booking.status === "Active" || booking.status === "InProgress"
+        booking.status === "InProgress"
           ? ("active" as const)
           : booking.status === "QuoteSubmitted" ||
               booking.status === "QuoteApproved" ||

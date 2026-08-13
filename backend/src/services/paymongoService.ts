@@ -92,70 +92,6 @@ export async function createSourcePayment(params: CreateSourcePaymentParams) {
   return res.data.data;
 }
 
-interface CreatePaymentIntentParams {
-  amountPesos: number;
-  description: string;
-}
-
-interface PaymongoPaymentIntent {
-  id: string;
-  clientKey: string;
-  status: string;
-}
-
-/**
- * Opens a manual-capture Payment Intent for CARD bookings — this is the only
- * PayMongo primitive that genuinely supports authorize-now/capture-later.
- * GCash/Maya (Sources API) and Cash/Bank Transfer have no equivalent, so
- * "authorization" for those methods is bookkeeping only (see
- * paymentLifecycleService for how each method type is handled).
- * `capture_type: manual` holds the funds once the client confirms the card
- * on their end (via PayMongo's client-side SDK using clientKey) until
- * capturePaymentIntent is called.
- */
-export async function createPaymentIntent(params: CreatePaymentIntentParams): Promise<PaymongoPaymentIntent> {
-  const res = await secretClient().post('/payment_intents', {
-    data: {
-      attributes: {
-        amount: Math.round(params.amountPesos * 100),
-        currency: 'PHP',
-        description: params.description,
-        capture_type: 'manual',
-        payment_method_allowed: ['card'],
-      },
-    },
-  });
-
-  const data = res.data.data;
-  return {
-    id: data.id,
-    clientKey: data.attributes.client_key,
-    status: data.attributes.status,
-  };
-}
-
-/**
- * Captures a previously-authorized (requires_capture) Payment Intent.
- * amountPesos may be less than or equal to the original authorized amount
- * (PayMongo allows partial capture); it is never allowed to exceed it.
- */
-export async function capturePaymentIntent(paymentIntentId: string, amountPesos: number) {
-  const res = await secretClient().post(`/payment_intents/${paymentIntentId}/capture`, {
-    data: {
-      attributes: {
-        amount: Math.round(amountPesos * 100),
-      },
-    },
-  });
-
-  return res.data.data;
-}
-
-export async function retrievePaymentIntent(paymentIntentId: string) {
-  const res = await secretClient().get(`/payment_intents/${paymentIntentId}`);
-  return res.data.data;
-}
-
 interface CreateRefundParams {
   paymongoPaymentId: string;
   amountPesos: number;
@@ -164,10 +100,9 @@ interface CreateRefundParams {
 
 /**
  * Refunds a previously-charged PayMongo Payment (the resource created by
- * createSourcePayment for GCash/Maya, or the resulting payment on a captured
- * PaymentIntent for CARD) — used when escrow needs to be released back to
- * the client after money has already actually moved, as opposed to voiding
- * an authorization that was never captured/charged.
+ * createSourcePayment for GCash/Maya) — used when escrow needs to be
+ * released back to the client after money has already actually moved, as
+ * opposed to voiding an authorization that was never captured/charged.
  */
 export async function createRefund(params: CreateRefundParams) {
   const res = await secretClient().post('/refunds', {

@@ -56,7 +56,7 @@ export default function DigitalIdScreen() {
         <ScrollView contentContainerStyle={{ padding: 24 }}>
           <View className="bg-card-light rounded-2xl p-6 items-center">
             <Text className="text-primary font-semibold text-lg mb-2">
-              Couldn't load your Digital ID
+              Couldn&apos;t load your Digital ID
             </Text>
             <Text className="text-text-secondary text-sm text-center">
               Please try again in a moment.

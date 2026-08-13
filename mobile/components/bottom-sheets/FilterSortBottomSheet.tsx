@@ -28,11 +28,13 @@ export const FilterSortBottomSheet: React.FC<Props> = ({
 }) => {
   const [sort, setSort] = useState<SortOption>(value.sort);
   const [availableOnly, setAvailableOnly] = useState(value.availableOnly);
+  const [prevValue, setPrevValue] = useState(value);
 
-  React.useEffect(() => {
+  if (value.sort !== prevValue.sort || value.availableOnly !== prevValue.availableOnly) {
+    setPrevValue(value);
     setSort(value.sort);
     setAvailableOnly(value.availableOnly);
-  }, [value.sort, value.availableOnly]);
+  }
 
   const handleApply = () => {
     onApply?.({ sort, availableOnly });

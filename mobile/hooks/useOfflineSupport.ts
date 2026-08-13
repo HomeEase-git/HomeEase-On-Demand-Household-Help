@@ -191,7 +191,7 @@ export function useOfflineData<T>(
   }, [fetchFn, cacheKey, isOnline, ttlSeconds]);
 
   useEffect(() => {
-    fetchData();
+    Promise.resolve().then(() => fetchData());
   }, [fetchData, isOnline]);
 
   return {

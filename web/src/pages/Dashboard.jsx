@@ -36,14 +36,15 @@ export default function Dashboard() {
   const { stats, recentActivity, topWorkers, bookingsTrend } = dashboard
 
   const statCards = [
+    // No standalone page combines both clients and workers, so this one stays non-clickable.
     { label: 'Total Users', value: String(stats.totalUsers), icon: 'fa-users', color: 'purple' },
-    { label: 'Total Clients', value: String(stats.totalClients), icon: 'fa-users', color: 'purple' },
-    { label: 'Total Workers', value: String(stats.totalWorkers), icon: 'fa-user-cog', color: 'blue' },
-    { label: 'Pending Approvals', value: String(stats.pendingApprovals), icon: 'fa-check-circle', color: 'green' },
-    { label: 'Active Bookings', value: String(stats.activeBookings), icon: 'fa-calendar-check', color: 'purple' },
-    { label: 'Open Disputes', value: String(stats.openDisputes), icon: 'fa-triangle-exclamation', color: 'orange' },
-    { label: 'Total Revenue', value: stats.totalRevenue, icon: 'fa-peso-sign', color: 'blue' },
-    { label: 'Total Worker Payouts', value: stats.totalPayouts, icon: 'fa-money-bill-transfer', color: 'green' },
+    { label: 'Total Clients', value: String(stats.totalClients), icon: 'fa-users', color: 'purple', to: '/users' },
+    { label: 'Total Workers', value: String(stats.totalWorkers), icon: 'fa-user-cog', color: 'blue', to: '/workers' },
+    { label: 'Pending Approvals', value: String(stats.pendingApprovals), icon: 'fa-check-circle', color: 'green', to: '/verification' },
+    { label: 'Active Bookings', value: String(stats.activeBookings), icon: 'fa-calendar-check', color: 'purple', to: '/bookings' },
+    { label: 'Open Disputes', value: String(stats.openDisputes), icon: 'fa-triangle-exclamation', color: 'orange', to: '/bookings/dispute' },
+    { label: 'Total Revenue', value: stats.totalRevenue, icon: 'fa-peso-sign', color: 'blue', to: '/payments' },
+    { label: 'Total Worker Payouts', value: stats.totalPayouts, icon: 'fa-money-bill-transfer', color: 'green', to: '/payments/payouts' },
   ]
 
   return (

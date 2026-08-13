@@ -1,44 +1,48 @@
-import * as Linking from 'expo-linking';
 import { router } from 'expo-router';
-import { notificationService, NotificationPayload } from '../services/notificationService';
-import { useNotificationStore } from '../store/notificationStore';
+import { notificationService } from '../services/notificationService';
+import { useNotificationStore, notificationCategory } from '../store/notificationStore';
 import { useAuthStore } from '../store/authStore';
 
 /**
  * Notification routing utilities
- * 
+ *
  * Handles:
- * - Parsing notification payloads
- * - Routing to appropriate screens via deep links
+ * - Parsing remote push payloads (see backend's notify.ts — `data` is always
+ *   `{ notificationId, type }`, matching the real `Notification` row; title
+ *   and body live on the OS notification content itself, not inside `data`)
+ * - Routing to the notification-detail screen, which already knows how to
+ *   render/deep-link onward per notification type via `notificationCategory`
  * - Updating notification stores
  * - Sound/haptics feedback
  */
 
+type RemotePushData = { notificationId?: string; type?: string };
+
 /**
  * Handle notification received while app in foreground
- * Shows local notification with appropriate styling
  */
 export function setupNotificationReceivedHandler(): void {
   notificationService.onNotificationReceived(async (notification) => {
     try {
-      const payload = notification.request.content.data as NotificationPayload;
+      const { title, body, data } = notification.request.content;
+      const payloadData = (data ?? {}) as RemotePushData;
 
-      console.log(`[NotificationHandler] Received: ${payload.type} - ${payload.title}`);
+      console.log(`[NotificationHandler] Received: ${payloadData.type} - ${title}`);
 
-      // Update notification store
-      const { receiveNotification } = useNotificationStore.getState();
-      receiveNotification({
-        id: notification.request.identifier,
-        title: payload.title,
-        message: payload.body,
-        type: payload.type,
-        relatedId: null,
-        isRead: false,
-        createdAt: new Date().toISOString(),
-      });
+      if (payloadData.notificationId) {
+        const { receiveNotification } = useNotificationStore.getState();
+        receiveNotification({
+          id: payloadData.notificationId,
+          title: title ?? 'Notification',
+          message: body ?? '',
+          type: payloadData.type ?? 'system',
+          relatedId: null,
+          isRead: false,
+          createdAt: new Date().toISOString(),
+        });
+      }
 
-      // Play sound/haptics
-      await playNotificationFeedback(payload.type);
+      await playNotificationFeedback(payloadData.type);
     } catch (error) {
       console.error('[NotificationHandler] Error handling received notification:', error);
     }
@@ -46,26 +50,31 @@ export function setupNotificationReceivedHandler(): void {
 }
 
 /**
- * Handle notification interaction (tap)
- * Routes to appropriate screen using deep linking
+ * Handle notification interaction (tap) — opens the app's own notification
+ * detail screen by id, same destination as tapping it from the in-app inbox
+ * list, rather than trying to deep-link straight to a booking/chat/etc. for
+ * every notification type.
  */
 export function setupNotificationInteractionHandler(): void {
   notificationService.onNotificationInteraction(async (notification) => {
     try {
-      const payload = notification.request.content.data as NotificationPayload;
+      const payloadData = (notification.request.content.data ?? {}) as RemotePushData;
+      const { notificationId } = payloadData;
 
-      console.log(`[NotificationHandler] Interaction: ${payload.type}`);
-
-      // Route based on notification type
-      if (payload.deepLink && typeof payload.deepLink === 'string') {
-        await Linking.openURL(payload.deepLink);
-      } else {
-        routeNotification(payload);
+      if (!notificationId) {
+        console.warn('[NotificationHandler] Notification tap had no notificationId, ignoring');
+        return;
       }
 
-      // Mark as read
+      const isWorker = useAuthStore.getState().user?.role === 'worker';
+      router.push(
+        isWorker
+          ? `/(worker)/inbox/notification/${notificationId}`
+          : `/(client)/inbox/notification/${notificationId}`,
+      );
+
       const { markAsRead } = useNotificationStore.getState();
-      markAsRead(notification.request.identifier);
+      markAsRead(notificationId);
     } catch (error) {
       console.error('[NotificationHandler] Error handling notification interaction:', error);
     }
@@ -73,87 +82,16 @@ export function setupNotificationInteractionHandler(): void {
 }
 
 /**
- * Route notification to appropriate screen based on type.
- * Uses expo-router's imperative `router` (real, file-based paths) rather
- * than a raw React Navigation ref, since expo-router's screens aren't
- * registered under hand-picked names like 'booking-detail'.
+ * Play haptic and/or sound feedback for notification, keyed off the same
+ * booking/payment/review/message/system category the detail screens use.
  */
-function routeNotification(payload: any): void {
-  const { type, data } = payload;
-  const isWorker = useAuthStore.getState().user?.role === 'worker';
-
-  try {
-    switch (type) {
-      case 'booking':
-        if (isWorker) {
-          router.push(
-            data?.bookingId ? `/(worker)/requests/${data.bookingId}` : '/(worker)/requests',
-          );
-        } else if (data?.bookingId) {
-          router.push(`/(client)/booking/${data.bookingId}`);
-        } else {
-          router.push('/(client)/booking');
-        }
-        break;
-
-      case 'message':
-        if (isWorker) {
-          router.push(
-            data?.conversationId
-              ? `/(worker)/inbox/chat/${data.conversationId}`
-              : '/(worker)/inbox',
-          );
-        } else if (data?.conversationId) {
-          router.push(`/(client)/inbox/chat/${data.conversationId}`);
-        } else {
-          router.push('/(client)/inbox');
-        }
-        break;
-
-      case 'payment':
-        if (isWorker) {
-          router.push(
-            data?.transactionId ? `/(worker)/earnings/${data.transactionId}` : '/(worker)/earnings',
-          );
-        } else if (data?.transactionId) {
-          router.push(`/(client)/profile/transactions/${data.transactionId}`);
-        } else {
-          router.push('/(client)/profile/transactions');
-        }
-        break;
-
-      case 'review':
-        if (isWorker) {
-          router.push('/(worker)/inbox');
-        } else if (data?.bookingId) {
-          router.push(`/(client)/profile/rate-review/${data.bookingId}`);
-        } else {
-          router.push('/(client)/booking');
-        }
-        break;
-
-      case 'system':
-        router.push(isWorker ? '/(worker)/inbox' : '/(client)/inbox');
-        break;
-
-      default:
-        console.warn(`[NotificationHandler] Unknown notification type: ${type}`);
-        router.push(isWorker ? '/(worker)/inbox' : '/(client)/inbox');
-    }
-  } catch (error) {
-    console.error('[NotificationHandler] Navigation error:', error);
-  }
-}
-
-/**
- * Play haptic and/or sound feedback for notification
- */
-async function playNotificationFeedback(type: string): Promise<void> {
+async function playNotificationFeedback(type: string | undefined): Promise<void> {
   try {
     // Import haptics if available
     const { default: haptics } = await import('expo-haptics');
+    const category = notificationCategory(type ?? 'system');
 
-    switch (type) {
+    switch (category) {
       case 'booking':
         haptics?.notificationAsync(haptics.NotificationFeedbackType.Success);
         break;
@@ -168,59 +106,6 @@ async function playNotificationFeedback(type: string): Promise<void> {
     }
   } catch (error) {
     console.log('[NotificationHandler] Haptics not available:', error);
-  }
-}
-
-/**
- * Create notification payload from API response
- * 
- * Standardizes different notification types into consistent format
- */
-export function createNotificationPayload(
-  type: string,
-  data: Record<string, any>
-): NotificationPayload {
-  const basePayload = {
-    type: type as any,
-    data,
-    deepLink: data.deepLink,
-  };
-
-  switch (type) {
-    case 'booking':
-      return {
-        ...basePayload,
-        title: data.title || 'Booking Update',
-        body: data.message || 'Your booking has been updated',
-      };
-
-    case 'message':
-      return {
-        ...basePayload,
-        title: data.senderName || 'New Message',
-        body: data.message || 'You have a new message',
-      };
-
-    case 'payment':
-      return {
-        ...basePayload,
-        title: 'Payment Processed',
-        body: data.message || 'Your payment has been received',
-      };
-
-    case 'review':
-      return {
-        ...basePayload,
-        title: 'Review Request',
-        body: data.message || 'Please rate your recent booking',
-      };
-
-    default:
-      return {
-        ...basePayload,
-        title: data.title || 'Update',
-        body: data.message || 'You have a new notification',
-      };
   }
 }
 

@@ -12,8 +12,8 @@
  * product's "live pricing calculator" spec so the client sees something
  * responsive to their choices before a worker or final price exists.
  */
-import type { ConditionType, RoomSelection, RoomType, ServiceScopeType } from '../types/booking4step.types';
-import { CONDITION_MULTIPLIER } from '../types/booking4step.types';
+import type { ConditionType, RoomSelection, RoomType, ServiceScopeType, UrgencyLevel, WorkerTier } from '../types/booking4step.types';
+import { CONDITION_MULTIPLIER, URGENCY_MODIFIER, TIER_MULTIPLIER } from '../types/booking4step.types';
 
 // Flat duration baseline used for CUSTOM-scope services (Appliance Repair,
 // Pest Control, ...), where there's no room count to derive duration from.
@@ -77,17 +77,21 @@ export function estimatePriceRange(
   rooms: RoomSelection[],
   condition: ConditionType | null,
   categoryRate: number,
-  scopeType?: ServiceScopeType | null
+  scopeType?: ServiceScopeType | null,
+  urgencyLevel?: UrgencyLevel | null
 ): PriceRangeEstimate {
   const durationHours = estimateDurationHours(rooms, condition, scopeType === 'CUSTOM' ? CUSTOM_SCOPE_FLAT_HOURS : undefined);
-  const low = round2(durationHours * categoryRate * PEAK_MODIFIER_ADVANCE);
-  const high = round2(durationHours * categoryRate * PEAK_MODIFIER_TODAY);
+  const urgencyModifier = URGENCY_MODIFIER[urgencyLevel ?? 'STANDARD'];
+  const low = round2(durationHours * categoryRate * PEAK_MODIFIER_ADVANCE * urgencyModifier);
+  const high = round2(durationHours * categoryRate * PEAK_MODIFIER_TODAY * urgencyModifier);
   return { low, high, durationHours };
 }
 
 export interface PricePointEstimate {
   durationHours: number;
   peakModifier: number;
+  urgencyModifier: number;
+  tierModifier: number;
   laborCost: number;
   addOnsTotal: number;
   tip: number;
@@ -98,7 +102,8 @@ export interface PricePointEstimate {
 /**
  * Post-worker-selection estimate (Steps 3-4): a specific worker's hourly
  * rate and the chosen date are both known, so this collapses to a point
- * estimate: duration * rate * peakModifier + add-ons + tip.
+ * estimate: duration * rate * peakModifier * urgencyModifier * tierModifier
+ * + add-ons + tip.
  */
 export function estimatePricePoint(params: {
   rooms: RoomSelection[];
@@ -108,6 +113,8 @@ export function estimatePricePoint(params: {
   addOnsTotal?: number;
   tip?: number;
   scopeType?: ServiceScopeType | null;
+  urgencyLevel?: UrgencyLevel | null;
+  workerTier?: WorkerTier | null;
 }): PricePointEstimate {
   const durationHours = estimateDurationHours(
     params.rooms,
@@ -115,13 +122,15 @@ export function estimatePricePoint(params: {
     params.scopeType === 'CUSTOM' ? CUSTOM_SCOPE_FLAT_HOURS : undefined
   );
   const peakModifier = peakModifierForDate(params.dateIso);
-  const laborCost = round2(durationHours * params.workerHourlyRate * peakModifier);
+  const urgencyModifier = URGENCY_MODIFIER[params.urgencyLevel ?? 'STANDARD'];
+  const tierModifier = TIER_MULTIPLIER[params.workerTier ?? 'STANDARD'];
+  const laborCost = round2(durationHours * params.workerHourlyRate * peakModifier * urgencyModifier * tierModifier);
   const addOnsTotal = round2(params.addOnsTotal ?? 0);
   const tip = round2(params.tip ?? 0);
   const subtotal = round2(laborCost + addOnsTotal);
   const total = round2(subtotal + tip);
 
-  return { durationHours, peakModifier, laborCost, addOnsTotal, tip, subtotal, total };
+  return { durationHours, peakModifier, urgencyModifier, tierModifier, laborCost, addOnsTotal, tip, subtotal, total };
 }
 
 export function formatRoomSummary(rooms: RoomSelection[], labels: Record<RoomType, string>): string {

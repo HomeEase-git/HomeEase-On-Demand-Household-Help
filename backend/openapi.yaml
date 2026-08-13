@@ -845,7 +845,7 @@ paths:
               type: object
               required: [type, accountIdentifier]
               properties:
-                type: { type: string, enum: [GCASH, MAYA, CARD, BANK_TRANSFER, CASH] }
+                type: { type: string, enum: [GCASH, MAYA, CASH] }
                 accountIdentifier: { type: string, description: Masked account number/phone }
       responses:
         '201': { description: Saved }
@@ -1242,7 +1242,7 @@ paths:
               type: object
               required: [payoutMethod]
               properties:
-                payoutMethod: { type: string, enum: [GCASH, MAYA, BANK_TRANSFER] }
+                payoutMethod: { type: string, enum: [GCASH, MAYA] }
                 payoutAccountName: { type: string }
                 payoutAccountNumber: { type: string }
       responses:
@@ -1483,6 +1483,30 @@ paths:
       summary: Get the authenticated user's unread notification count
       responses:
         '200': { description: OK }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /notifications/push-token:
+    post:
+      tags: [Notifications]
+      summary: Register (or overwrite) the current device's Expo push token
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [token]
+              properties:
+                token: { type: string }
+      responses:
+        '200': { description: Registered }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+    delete:
+      tags: [Notifications]
+      summary: Clear the current user's push token (called on logout)
+      responses:
+        '200': { description: Removed }
         '401': { $ref: '#/components/responses/Unauthorized' }
 
   /notifications/read-all:
@@ -2358,7 +2382,7 @@ components:
         tip: { type: number }
         paymentMethodType:
           type: string
-          enum: [GCASH, MAYA, CARD, BANK_TRANSFER, CASH]
+          enum: [GCASH, MAYA, CASH]
         paymentAccountIdentifier: { type: string }
 
     CreateBookingResponse:
@@ -2391,4 +2415,4 @@ components:
             clientSecret:
               type: string
               nullable: true
-              description: PayMongo Payment Intent client key (CARD only) for client-side confirmation
+              description: Deprecated — always null now that CARD payments are no longer supported

@@ -7,6 +7,7 @@ import EmptyState from "../../../components/feedback/EmptyState";
 import { LoadingSkeleton } from "../../../components/feedback/LoadingSkeleton";
 import { mapApiJob, type ApiWorkerBooking, type WorkerJob } from "../../../store/workerStore";
 import * as api from "../../../services/api";
+import { getWorkerNetAmount } from "../../../utils/pricing";
 
 type RecordTab = "Completed" | "Cancelled" | "Ongoing";
 
@@ -55,9 +56,13 @@ export default function RecordsScreen() {
         record={{
           id: item.id,
           client: item.clientName,
+          clientAvatar: item.clientAvatar,
           service: item.service,
           date: item.scheduledDate,
-          amount: item.finalPrice ?? item.estimatedPrice,
+          amount:
+            tabForJob(item) === "Completed"
+              ? getWorkerNetAmount(item)
+              : item.finalPrice ?? item.estimatedPrice,
           status: tabForJob(item),
         }}
         onPress={() => handleRecordPress(item.id)}

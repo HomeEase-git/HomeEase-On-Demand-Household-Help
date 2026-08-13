@@ -1,9 +1,10 @@
 import React, { useEffect, useState } from "react";
-import { View, Text, ScrollView } from "react-native";
+import { View, Text, ScrollView, Share } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter, useLocalSearchParams } from "expo-router";
 import ScreenHeader from "../../../../../components/ui/ScreenHeader";
 import PrimaryButton from "../../../../../components/ui/PrimaryButton";
+import OutlinedButton from "../../../../../components/ui/OutlinedButton";
 import { Skeleton } from "../../../../../components/ui/Skeleton";
 import * as api from "../../../../../services/api";
 
@@ -91,6 +92,19 @@ export default function ReceiptScreen() {
     day: "numeric",
   });
 
+  const handleShare = () => {
+    Share.share({
+      message:
+        `HomeEase Receipt\n` +
+        `Reference: ${transaction.transactionId ?? transaction.id}\n` +
+        `Booking ID: ${transaction.bookingId}\n` +
+        `Date: ${formattedDate}\n` +
+        `Payment Method: ${transaction.method ?? "—"}\n` +
+        `Status: ${transaction.status}\n` +
+        `Total Paid: ₱${transaction.amount?.toFixed(2)}`,
+    }).catch((error) => console.error("Share receipt error:", error));
+  };
+
   return (
     <SafeAreaView className="flex-1 bg-white">
       <ScreenHeader title="Receipt" showBack />
@@ -139,8 +153,9 @@ export default function ReceiptScreen() {
           </View>
         </View>
 
-        {/* Done Button */}
-        <View className="px-4 mt-6">
+        {/* Actions */}
+        <View className="px-4 mt-6 gap-3">
+          <OutlinedButton label="Share Receipt" onPress={handleShare} />
           <PrimaryButton label="Done" fullWidth onPress={() => router.back()} />
         </View>
       </ScrollView>

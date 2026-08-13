@@ -17,7 +17,7 @@ import {
   addAddon,
   submitReview,
 } from '../controllers/bookingController';
-import { bookingPhotoUpload, uploadBookingCompletionPhoto, uploadIssuePhoto } from '../controllers/uploadController';
+import { bookingPhotoUpload, uploadBookingCompletionPhoto, uploadIssuePhoto, uploadReviewPhoto } from '../controllers/uploadController';
 import { authMiddleware } from '../middleware/auth';
 import { restrictTo } from '../middleware/role';
 import {
@@ -89,6 +89,10 @@ router.patch('/:id/reschedule', validateRescheduleBooking, rescheduleBooking);
 
 // Add addon (worker only)
 router.post('/:id/addons', restrictTo('WORKER'), validateAddAddon, addAddon);
+
+// Upload a review photo (client only) — no reviewId yet, returned URL is
+// included in the submit-review payload as photoUrls.
+router.post('/:id/review-photo/upload', restrictTo('CLIENT'), bookingPhotoUpload, uploadReviewPhoto);
 
 // Submit review (client only)
 router.post('/:id/review', restrictTo('CLIENT'), validateAddReview, submitReview);
