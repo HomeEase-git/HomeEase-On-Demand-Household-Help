@@ -1,29 +1,35 @@
+import { lazy, Suspense } from 'react'
 import { Routes, Route, Navigate } from 'react-router-dom'
 import MainLayout from './components/layout/MainLayout'
 import ProtectedRoute from './components/auth/ProtectedRoute'
-import Dashboard from './pages/Dashboard'
-import Analytics from './pages/Analytics'
-import Users from './pages/Users'
-import ClientDetail from './pages/ClientDetail'
-import WorkerDetail from './pages/WorkerDetail'
-import Workers from './pages/Workers'
-import Verification from './pages/Verification'
-import VerificationDetail from './pages/VerificationDetail'
-import Bookings from './pages/Bookings'
-import BookingDetail from './pages/BookingDetail'
-import BookingDispute from './pages/BookingDispute'
-import Payments from './pages/Payments'
-import TransactionDetail from './pages/TransactionDetail'
-import Refunds from './pages/Refunds'
-import Payouts from './pages/Payouts'
-import Reviews from './pages/Reviews'
-import ReviewsFlagged from './pages/ReviewsFlagged'
-import ReviewDetail from './pages/ReviewDetail'
-import Reports from './pages/Reports'
-import Settings from './pages/Settings'
+import LoadingState from './components/common/LoadingState'
 import Login from './pages/Login'
-import PriceControl from './pages/PriceControl'
-import ServiceCatalog from './pages/ServiceCatalog'
+
+// Every other page is lazy-loaded so the initial bundle only ships what's
+// needed to reach the login/dashboard shell — a page's code downloads the
+// first time it's actually navigated to, not all 24 of them upfront.
+const Dashboard = lazy(() => import('./pages/Dashboard'))
+const Analytics = lazy(() => import('./pages/Analytics'))
+const Users = lazy(() => import('./pages/Users'))
+const ClientDetail = lazy(() => import('./pages/ClientDetail'))
+const WorkerDetail = lazy(() => import('./pages/WorkerDetail'))
+const Workers = lazy(() => import('./pages/Workers'))
+const Verification = lazy(() => import('./pages/Verification'))
+const VerificationDetail = lazy(() => import('./pages/VerificationDetail'))
+const Bookings = lazy(() => import('./pages/Bookings'))
+const BookingDetail = lazy(() => import('./pages/BookingDetail'))
+const BookingDispute = lazy(() => import('./pages/BookingDispute'))
+const Payments = lazy(() => import('./pages/Payments'))
+const TransactionDetail = lazy(() => import('./pages/TransactionDetail'))
+const Refunds = lazy(() => import('./pages/Refunds'))
+const Payouts = lazy(() => import('./pages/Payouts'))
+const Reviews = lazy(() => import('./pages/Reviews'))
+const ReviewsFlagged = lazy(() => import('./pages/ReviewsFlagged'))
+const ReviewDetail = lazy(() => import('./pages/ReviewDetail'))
+const Reports = lazy(() => import('./pages/Reports'))
+const Settings = lazy(() => import('./pages/Settings'))
+const PriceControl = lazy(() => import('./pages/PriceControl'))
+const ServiceCatalog = lazy(() => import('./pages/ServiceCatalog'))
 
 export default function App() {
   return (
@@ -37,35 +43,46 @@ export default function App() {
           </ProtectedRoute>
         }
       >
-        <Route index element={<Navigate to="/dashboard" replace />} />
-        <Route path="dashboard" element={<Dashboard />} />
-        <Route path="analytics" element={<Analytics />} />
-        <Route path="users" element={<Users />} />
-        <Route path="users/clients" element={<Users />} />
-        <Route path="users/workers" element={<Navigate to="/workers" replace />} />
-        <Route path="users/client/:id" element={<ClientDetail />} />
-        <Route path="workers" element={<Workers />} />
-        <Route path="workers/:id" element={<WorkerDetail />} />
-        <Route path="verification" element={<Verification />} />
-        <Route path="verification/detail/:id" element={<VerificationDetail />} />
-        <Route path="bookings" element={<Bookings />} />
-        <Route path="bookings/detail/:id" element={<BookingDetail />} />
-        <Route path="bookings/dispute" element={<BookingDispute />} />
-        <Route path="payments" element={<Payments />} />
-        <Route path="payments/transaction/:id" element={<TransactionDetail />} />
-        <Route path="payments/refunds" element={<Refunds />} />
-        <Route path="payments/payouts" element={<Payouts />} />
-        <Route path="reviews" element={<Reviews />} />
-        <Route path="reviews/flagged" element={<ReviewsFlagged />} />
-        <Route path="reviews/detail/:id" element={<ReviewDetail />} />
-        <Route path="reports" element={<Navigate to="/reports/logs" replace />} />
-        <Route path="reports/logs" element={<Reports />} />
-        <Route path="reports/service" element={<Reports />} />
-        <Route path="reports/activity" element={<Reports />} />
-        <Route path="reports/export" element={<Reports />} />
-        <Route path="price-control" element={<PriceControl />} />
-        <Route path="service-catalog" element={<ServiceCatalog />} />
-        <Route path="settings" element={<Settings />} />
+        <Route
+          index
+          element={<Navigate to="/dashboard" replace />}
+        />
+        {[
+          { path: 'dashboard', element: <Dashboard /> },
+          { path: 'analytics', element: <Analytics /> },
+          { path: 'users', element: <Users /> },
+          { path: 'users/clients', element: <Users /> },
+          { path: 'users/workers', element: <Navigate to="/workers" replace /> },
+          { path: 'users/client/:id', element: <ClientDetail /> },
+          { path: 'workers', element: <Workers /> },
+          { path: 'workers/:id', element: <WorkerDetail /> },
+          { path: 'verification', element: <Verification /> },
+          { path: 'verification/detail/:id', element: <VerificationDetail /> },
+          { path: 'bookings', element: <Bookings /> },
+          { path: 'bookings/detail/:id', element: <BookingDetail /> },
+          { path: 'bookings/dispute', element: <BookingDispute /> },
+          { path: 'payments', element: <Payments /> },
+          { path: 'payments/transaction/:id', element: <TransactionDetail /> },
+          { path: 'payments/refunds', element: <Refunds /> },
+          { path: 'payments/payouts', element: <Payouts /> },
+          { path: 'reviews', element: <Reviews /> },
+          { path: 'reviews/flagged', element: <ReviewsFlagged /> },
+          { path: 'reviews/detail/:id', element: <ReviewDetail /> },
+          { path: 'reports', element: <Navigate to="/reports/logs" replace /> },
+          { path: 'reports/logs', element: <Reports /> },
+          { path: 'reports/service', element: <Reports /> },
+          { path: 'reports/activity', element: <Reports /> },
+          { path: 'reports/export', element: <Reports /> },
+          { path: 'price-control', element: <PriceControl /> },
+          { path: 'service-catalog', element: <ServiceCatalog /> },
+          { path: 'settings', element: <Settings /> },
+        ].map(({ path, element }) => (
+          <Route
+            key={path}
+            path={path}
+            element={<Suspense fallback={<LoadingState message="Loading page..." />}>{element}</Suspense>}
+          />
+        ))}
         <Route path="*" element={<Navigate to="/dashboard" replace />} />
       </Route>
     </Routes>

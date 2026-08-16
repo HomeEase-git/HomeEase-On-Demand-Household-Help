@@ -8,7 +8,6 @@ import ErrorState from '../components/common/ErrorState'
 import { useDetailQuery } from '../hooks/useListQuery'
 import { fetchPaymentById } from '../services/payments'
 import { formatPeso } from '../data/payments'
-import { getPaymentStatusVariant } from '../utils/statusBadge'
 
 const SUB_NAV = [
   { to: '/payments', label: 'All Transactions' },

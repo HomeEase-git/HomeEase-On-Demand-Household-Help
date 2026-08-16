@@ -61,7 +61,9 @@ const createApiClient = (): ApiClient => {
       request.headers.Authorization = `Bearer ${token}`;
     }
 
-    console.log('[API →]', request.method?.toUpperCase(), (request.baseURL || '') + request.url);
+    if (__DEV__) {
+      console.log('[API →]', request.method?.toUpperCase(), (request.baseURL || '') + request.url);
+    }
 
     return request;
   });
@@ -600,9 +602,15 @@ export async function searchWorkers(filters: {
   origin?: LatLng;
   radiusKm?: number;
   page?: number;
+  // How many raw candidates to fetch from the server before client-side
+  // filter/sort/paginate. Defaults to 50 for the full discovery/search
+  // screens; callers that only show a short preview (e.g. the home screen's
+  // "Available Workers" section) can pass a much smaller number instead of
+  // downloading 50 full worker records just to display 3.
+  fetchLimit?: number;
 }) {
   try {
-    const params: Record<string, string | number> = { limit: 50 };
+    const params: Record<string, string | number> = { limit: filters.fetchLimit ?? 50 };
     if (filters.categoryId) params.category = filters.categoryId;
     if (filters.minRating !== undefined) params.minRating = filters.minRating;
 
@@ -1891,12 +1899,31 @@ function delay(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+// Service catalog is effectively static (admin-managed, rarely changes), but
+// was being independently re-fetched with its own loading spinner in 5
+// different screens/components. Cache it in memory for the app session —
+// `servicesPromise` also dedupes concurrent calls if two screens mount at
+// once on first load, so they share one in-flight request instead of firing
+// two.
+let cachedServiceTypes: any[] | null = null;
+let servicesPromise: Promise<any[]> | null = null;
+
 export async function getServiceTypes() {
-  try {
-    const response = await api.get('/services');
-    return Array.isArray(response) ? response : [];
-  } catch (error) {
-    console.error('Get service types error:', error);
-    throw error;
-  }
+  if (cachedServiceTypes) return cachedServiceTypes;
+  if (servicesPromise) return servicesPromise;
+
+  servicesPromise = (async () => {
+    try {
+      const response = await api.get('/services');
+      cachedServiceTypes = Array.isArray(response) ? response : [];
+      return cachedServiceTypes;
+    } catch (error) {
+      console.error('Get service types error:', error);
+      throw error;
+    } finally {
+      servicesPromise = null;
+    }
+  })();
+
+  return servicesPromise;
 }

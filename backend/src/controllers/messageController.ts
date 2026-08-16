@@ -28,51 +28,74 @@ export const getConversations = async (req: AuthRequest, res: Response) => {
     // Capture userId to avoid repeated req.user narrowing issues inside callbacks
     const currentUserId = req.user.userId;
 
-    // Get all messages for this user (either sender or receiver)
-    const messages = await prisma.message.findMany({
-      where: {
-        OR: [
-          { senderId: currentUserId },
-          { receiverId: currentUserId },
-        ],
-      },
-      include: {
-        sender: {
-          select: { id: true, fullName: true, avatar: true, phone: true }, // schema field is `avatar`, not `profileImage`
-        },
-        receiver: {
+    // Latest message per conversation partner, computed and paginated in the
+    // DB via a window function — the previous version pulled every message
+    // this user has ever sent/received into memory to group and paginate in
+    // JS, which grows unbounded with the user's whole message history.
+    const [latestMessages, totalRow] = await Promise.all([
+      prisma.$queryRaw<
+        Array<{
+          id: string;
+          senderId: string;
+          receiverId: string;
+          content: string;
+          isRead: boolean;
+          createdAt: Date;
+          otherUserId: string;
+        }>
+      >`
+        SELECT id, "senderId", "receiverId", content, "isRead", "createdAt", "otherUserId"
+        FROM (
+          SELECT
+            m.id,
+            m."senderId",
+            m."receiverId",
+            m.content,
+            m."isRead",
+            m."createdAt",
+            CASE WHEN m."senderId" = ${currentUserId} THEN m."receiverId" ELSE m."senderId" END AS "otherUserId",
+            ROW_NUMBER() OVER (
+              PARTITION BY CASE WHEN m."senderId" = ${currentUserId} THEN m."receiverId" ELSE m."senderId" END
+              ORDER BY m."createdAt" DESC
+            ) AS rn
+          FROM "Message" m
+          WHERE m."senderId" = ${currentUserId} OR m."receiverId" = ${currentUserId}
+        ) ranked
+        WHERE rn = 1
+        ORDER BY "createdAt" DESC
+        LIMIT ${limitNum} OFFSET ${skip}
+      `,
+      prisma.$queryRaw<Array<{ count: bigint }>>`
+        SELECT COUNT(DISTINCT CASE WHEN "senderId" = ${currentUserId} THEN "receiverId" ELSE "senderId" END) AS count
+        FROM "Message"
+        WHERE "senderId" = ${currentUserId} OR "receiverId" = ${currentUserId}
+      `,
+    ]);
+
+    const total = Number(totalRow[0]?.count ?? 0);
+
+    // Only look up user details for the conversation partners on THIS page.
+    const otherUserIds = latestMessages.map((m) => m.otherUserId);
+    const otherUsers = otherUserIds.length
+      ? await prisma.user.findMany({
+          where: { id: { in: otherUserIds } },
           select: { id: true, fullName: true, avatar: true, phone: true },
-        },
-      },
-      orderBy: { createdAt: 'desc' },
+        })
+      : [];
+    const userById = new Map(otherUsers.map((u) => [u.id, u]));
+
+    const conversations = latestMessages.map((msg) => {
+      const otherUser = userById.get(msg.otherUserId);
+      return {
+        userId: msg.otherUserId,
+        userName: otherUser?.fullName ?? 'Unknown',
+        userImage: otherUser?.avatar ?? null,
+        userPhone: otherUser?.phone ?? null,
+        lastMessage: msg.content,
+        lastMessageTime: msg.createdAt,
+        unreadCount: !msg.isRead && msg.receiverId === currentUserId ? 1 : 0,
+      };
     });
-
-    // Group by conversation (sender/receiver pair)
-    const conversationMap = new Map<string, any>();
-
-    messages.forEach((msg: any) => {
-      const key = [currentUserId, msg.senderId === currentUserId ? msg.receiverId : msg.senderId]
-        .sort()
-        .join('_');
-
-      if (!conversationMap.has(key)) {
-        const otherUser = msg.senderId === currentUserId ? msg.receiver : msg.sender;
-        conversationMap.set(key, {
-          userId: otherUser.id,
-          userName: otherUser.fullName,
-          userImage: otherUser.avatar,
-          userPhone: otherUser.phone,
-          lastMessage: msg.content,
-          lastMessageTime: msg.createdAt,
-          unreadCount: !msg.isRead && msg.receiverId === currentUserId ? 1 : 0,
-        });
-      }
-    });
-
-    // Convert to array and paginate
-    let conversations = Array.from(conversationMap.values());
-    const total = conversations.length;
-    conversations = conversations.slice(skip, skip + limitNum);
 
     return res.status(200).json({
       success: true,

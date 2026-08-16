@@ -16,8 +16,6 @@ const SUB_NAV = [
   { to: '/payments/payouts', label: 'Payout Distribution' },
 ]
 
-const PAGE_SIZE = 10
-
 function formatPeso(amount) {
   return `₱${amount?.toLocaleString() ?? '0'}`
 }

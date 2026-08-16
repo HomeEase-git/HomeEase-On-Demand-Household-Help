@@ -31,7 +31,7 @@ function buildClientSearchWhere(search: string, status?: string): Prisma.UserWhe
   return where;
 }
 
-async function formatClient(user: {
+type ClientRow = {
   id: string;
   fullName: string;
   email: string;
@@ -39,33 +39,56 @@ async function formatClient(user: {
   isDeleted: boolean;
   status: string;
   createdAt: Date;
-}) {
-  const bookings = await prisma.booking.findMany({
-    where: { clientId: user.id },
-    select: { finalPrice: true, estimatedPrice: true, status: true },
+};
+
+/**
+ * Formats a page of clients, fetching every client's bookings in ONE query
+ * (grouped in JS by clientId) instead of one `booking.findMany` per client —
+ * that per-row query was the biggest N+1 in the admin API, firing on every
+ * page load of the Users table.
+ */
+async function formatClientsBatch(users: ClientRow[]) {
+  const bookingsByClient = new Map<
+    string,
+    Array<{ finalPrice: number | null; estimatedPrice: number | null; status: string }>
+  >();
+
+  if (users.length > 0) {
+    const bookings = await prisma.booking.findMany({
+      where: { clientId: { in: users.map((u) => u.id) } },
+      select: { clientId: true, finalPrice: true, estimatedPrice: true, status: true },
+    });
+    for (const b of bookings) {
+      const list = bookingsByClient.get(b.clientId);
+      if (list) list.push(b);
+      else bookingsByClient.set(b.clientId, [b]);
+    }
+  }
+
+  return users.map((user) => {
+    const bookings = bookingsByClient.get(user.id) ?? [];
+    const totalSpent = bookings
+      .filter((b) => b.status === 'COMPLETED')
+      .reduce((sum, b) => sum + ((b.finalPrice ?? b.estimatedPrice) ?? 0), 0);
+
+    return {
+      id: user.id,
+      displayId: formatDisplayId(user.id),
+      name: user.fullName,
+      email: user.email,
+      phone: user.phone ?? '—',
+      // Real 3-state account status (ACTIVE/SUSPENDED/BANNED) — lowercased for
+      // the frontend's existing badge-variant convention.
+      status: user.status.toLowerCase(),
+      bookings: bookings.length,
+      spent: formatPeso(totalSpent),
+      joined: user.createdAt.toLocaleDateString('en-US', {
+        month: 'short',
+        day: 'numeric',
+        year: 'numeric',
+      }),
+    };
   });
-
-  const totalSpent = bookings
-    .filter((b) => b.status === 'COMPLETED')
-    .reduce((sum, b) => sum + ((b.finalPrice ?? b.estimatedPrice) ?? 0), 0);
-
-  return {
-    id: user.id,
-    displayId: formatDisplayId(user.id),
-    name: user.fullName,
-    email: user.email,
-    phone: user.phone ?? '—',
-    // Real 3-state account status (ACTIVE/SUSPENDED/BANNED) — lowercased for
-    // the frontend's existing badge-variant convention.
-    status: user.status.toLowerCase(),
-    bookings: bookings.length,
-    spent: formatPeso(totalSpent),
-    joined: user.createdAt.toLocaleDateString('en-US', {
-      month: 'short',
-      day: 'numeric',
-      year: 'numeric',
-    }),
-  };
 }
 
 export const listClients = async (req: Request, res: Response) => {
@@ -86,7 +109,7 @@ export const listClients = async (req: Request, res: Response) => {
       }),
     ]);
 
-    const data = await Promise.all(users.map(formatClient));
+    const data = await formatClientsBatch(users);
 
     return res.json({
       success: true,
@@ -111,7 +134,7 @@ export const getClientById = async (req: Request, res: Response) => {
       return res.status(404).json(errorResponse(404, 'Client not found'));
     }
 
-    const client = await formatClient(user);
+    const [client] = await formatClientsBatch([user]);
 
     const recentBookings = await prisma.booking.findMany({
       where: { clientId: id },
@@ -174,7 +197,7 @@ function buildWorkerSearchWhere(search: string, status?: string): Prisma.UserWhe
   return where;
 }
 
-async function formatWorker(user: {
+type WorkerRow = {
   id: string;
   fullName: string;
   email: string;
@@ -189,49 +212,72 @@ async function formatWorker(user: {
     serviceTypes: Array<{ name: string }>;
     declineCooldownUntil?: Date | null;
   } | null;
-}) {
-  const completedBookings = await prisma.booking.findMany({
-    where: { workerId: user.id, status: 'COMPLETED' },
-    select: { finalPrice: true, estimatedPrice: true },
-  });
+};
 
-  const earnings = completedBookings.reduce((sum, b) => sum + ((b.finalPrice ?? b.estimatedPrice) ?? 0), 0);
+/**
+ * Formats a page of workers, fetching every worker's completed bookings in
+ * ONE query (grouped in JS by workerId) instead of one `booking.findMany`
+ * per worker — mirrors the same N+1 fix as formatClientsBatch above.
+ */
+async function formatWorkersBatch(users: WorkerRow[]) {
+  const bookingsByWorker = new Map<string, Array<{ finalPrice: number | null; estimatedPrice: number | null }>>();
 
+  if (users.length > 0) {
+    const completedBookings = await prisma.booking.findMany({
+      where: { workerId: { in: users.map((u) => u.id) }, status: 'COMPLETED' },
+      select: { workerId: true, finalPrice: true, estimatedPrice: true },
+    });
+    for (const b of completedBookings) {
+      if (!b.workerId) continue; // where-filtered to non-null, but the field is nullable in the schema
+      const list = bookingsByWorker.get(b.workerId);
+      if (list) list.push(b);
+      else bookingsByWorker.set(b.workerId, [b]);
+    }
+  }
+
+  // Settings are cached in-memory (60s TTL) so one call up front is enough —
+  // no need to re-fetch per worker.
   const tierSettings = await getAppSettings();
-  const tier = user.workerProfile
-    ? computeWorkerTier(user.workerProfile.rating, completedBookings.length, tierSettings)
-    : 'STANDARD';
 
-  const verificationStatus = user.workerProfile?.kycStatus ?? 'PENDING';
-  const statusLabel =
-    verificationStatus === 'APPROVED'
-      ? 'Verified'
-      : verificationStatus === 'REJECTED'
-        ? 'Rejected'
-        : 'Pending';
+  return users.map((user) => {
+    const completedBookings = bookingsByWorker.get(user.id) ?? [];
+    const earnings = completedBookings.reduce((sum, b) => sum + ((b.finalPrice ?? b.estimatedPrice) ?? 0), 0);
 
-  return {
-    id: user.id,
-    displayId: formatDisplayId(user.id),
-    name: user.fullName,
-    email: user.email,
-    services: user.workerProfile?.serviceTypes?.map((t) => t.name).join(', ') ?? '—',
-    rating: user.workerProfile?.rating.toFixed(1) ?? '0.0',
-    reviews: user.workerProfile?.totalReviews ?? 0,
-    tier,
-    status: statusLabel,
-    verification: statusLabel,
-    // Real account status (ACTIVE/SUSPENDED/BANNED) — distinct from the KYC
-    // verification label above, which `status`/`verification` both carry.
-    accountStatus: user.status.toLowerCase(),
-    declineCooldownUntil: user.workerProfile?.declineCooldownUntil ?? null,
-    earnings: formatPeso(earnings),
-    joined: user.createdAt.toLocaleDateString('en-US', {
-      month: 'short',
-      day: 'numeric',
-      year: 'numeric',
-    }),
-  };
+    const tier = user.workerProfile
+      ? computeWorkerTier(user.workerProfile.rating, completedBookings.length, tierSettings)
+      : 'STANDARD';
+
+    const verificationStatus = user.workerProfile?.kycStatus ?? 'PENDING';
+    const statusLabel =
+      verificationStatus === 'APPROVED'
+        ? 'Verified'
+        : verificationStatus === 'REJECTED'
+          ? 'Rejected'
+          : 'Pending';
+
+    return {
+      id: user.id,
+      displayId: formatDisplayId(user.id),
+      name: user.fullName,
+      email: user.email,
+      services: user.workerProfile?.serviceTypes?.map((t) => t.name).join(', ') ?? '—',
+      rating: user.workerProfile?.rating.toFixed(1) ?? '0.0',
+      reviews: user.workerProfile?.totalReviews ?? 0,
+      tier,
+      status: statusLabel,
+      verification: statusLabel,
+      // Real account status (ACTIVE/SUSPENDED/BANNED) — distinct from the KYC
+      // verification label above, which `status`/`verification` both carry.
+      accountStatus: user.status.toLowerCase(),
+      declineCooldownUntil: user.workerProfile?.declineCooldownUntil ?? null,
+      earnings: formatPeso(earnings),
+      joined: user.createdAt.toLocaleDateString('en-US', {
+        month: 'short',
+        day: 'numeric',
+        year: 'numeric',
+      }),
+    };
+  });
 }
 
 export const listWorkers = async (req: Request, res: Response) => {
@@ -253,7 +299,7 @@ export const listWorkers = async (req: Request, res: Response) => {
       }),
     ]);
 
-    const data = await Promise.all(users.map(formatWorker));
+    const data = await formatWorkersBatch(users);
 
     return res.json({
       success: true,
@@ -279,7 +325,7 @@ export const getWorkerById = async (req: Request, res: Response) => {
       return res.status(404).json(errorResponse(404, 'Worker not found'));
     }
 
-    const worker = await formatWorker(user);
+    const [worker] = await formatWorkersBatch([user]);
 
     const { declineWindowHours } = await getAppSettings();
     const recentDeclineCount = await prisma.declinedWorker.count({

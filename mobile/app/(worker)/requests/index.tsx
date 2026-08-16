@@ -12,7 +12,10 @@ import { ROOM_TYPE_LABELS } from "../../../types/booking4step.types";
 import { usePolling } from "../../../hooks/usePolling";
 
 const TABS = ["Pending", "Accepted"] as const;
-const POLL_INTERVAL_MS = 8000;
+// A real-time socket layer already pushes updates here — this poll is a
+// belt-and-suspenders fallback, not the primary refresh path, so it doesn't
+// need to be this frequent.
+const POLL_INTERVAL_MS = 25000;
 
 export default function RequestsScreen() {
   const router = useRouter();

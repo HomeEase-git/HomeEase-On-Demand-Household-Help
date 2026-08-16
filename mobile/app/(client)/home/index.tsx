@@ -115,7 +115,9 @@ export default function ClientHomeScreen() {
       try {
         const [serviceTypes, workersResponse] = await Promise.all([
           getServiceTypes(),
-          searchWorkers({ sortBy: filters.sort, availableOnly: filters.availableOnly }),
+          // Only the top 3 are shown below — a small fetchLimit avoids
+          // downloading a full 50-worker page just for this preview.
+          searchWorkers({ sortBy: filters.sort, availableOnly: filters.availableOnly, fetchLimit: 6 }),
         ]);
 
         if (!active) return;

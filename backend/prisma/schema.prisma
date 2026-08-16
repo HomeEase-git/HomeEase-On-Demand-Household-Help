@@ -222,6 +222,9 @@ model User {
   @@index([role])
   @@index([isDeleted])
   @@index([status])
+  // Admin Users/Workers list endpoints filter on role+isDeleted together and
+  // always sort by createdAt desc — covers both the filter and the sort.
+  @@index([role, isDeleted, createdAt])
 }
 
 enum UserStatus {
@@ -369,6 +372,10 @@ model WorkerProfile {
   @@index([userId])
   @@index([kycStatus])
   @@index([isAvailable])
+  // Worker discovery search filters on both together on every request —
+  // covers that combo directly instead of relying on a bitmap-AND of the
+  // two single-column indexes above.
+  @@index([isAvailable, kycStatus])
 }
 
 // Per-date/slot availability record used by auto-matching to find candidate

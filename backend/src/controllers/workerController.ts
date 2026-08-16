@@ -290,9 +290,9 @@ export const getWorkerDetail = async (req: AuthRequest, res: Response) => {
           },
         },
         serviceTypes: true,
-        reviews: {
-          orderBy: { createdAt: 'desc' },
-        },
+        // Only the count is used below (reviewCount) — select just that
+        // instead of pulling every review row (comment, photos, etc.) for it.
+        _count: { select: { reviews: true } },
         certifications: true,
         resumeParseResult: true,
       },
@@ -341,7 +341,7 @@ export const getWorkerDetail = async (req: AuthRequest, res: Response) => {
         certifications: worker.certifications,
         services: worker.serviceTypes,
         verificationStatus: worker.kycStatus === 'APPROVED' ? 'VERIFIED' : 'PENDING',
-        reviewCount: worker.reviews.length,
+        reviewCount: worker._count.reviews,
         activeJobCount: worker.activeJobCount,
         maxConcurrentJobs: worker.maxConcurrentJobs,
       },

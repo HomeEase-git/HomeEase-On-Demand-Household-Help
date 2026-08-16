@@ -1814,19 +1814,21 @@ export const submitReview = async (req: AuthRequest, res: Response) => {
       },
     });
 
-    // Update worker's average rating
-    const allReviews = await prisma.review.findMany({
+    // Update worker's average rating — aggregate in the DB instead of
+    // pulling every review row (comment, photoUrls, etc.) just to reduce it.
+    const ratingStats = await prisma.review.aggregate({
       where: { workerId: workerProfile.id },
+      _avg: { rating: true },
+      _count: true,
     });
 
-    const avgRating =
-      allReviews.reduce((sum: number, r: any) => sum + r.rating, 0) / allReviews.length;
+    const avgRating = ratingStats._avg.rating ?? 0;
 
     await prisma.workerProfile.update({
       where: { id: workerProfile.id },
       data: {
         rating: Math.round(avgRating * 10) / 10,
-        totalReviews: allReviews.length,
+        totalReviews: ratingStats._count,
       },
     });
 

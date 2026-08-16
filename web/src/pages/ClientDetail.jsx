@@ -10,7 +10,6 @@ import { useDetailQuery } from '../hooks/useListQuery'
 import { fetchClientById, suspendUser, reinstateUser } from '../services/users'
 import { cancelBookingAdmin } from '../services/bookings'
 import { useToast } from '../context/ToastContext'
-import { getBookingStatusVariant } from '../utils/statusBadge'
 
 const ACTIVE_BOOKING_STATUSES = ['PENDING', 'ACCEPTED', 'IN_PROGRESS', 'QUOTE_SUBMITTED', 'QUOTE_APPROVED', 'DISPUTED', 'PENDING_COMPLETION']
 

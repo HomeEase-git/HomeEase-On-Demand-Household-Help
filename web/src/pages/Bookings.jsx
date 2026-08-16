@@ -63,7 +63,7 @@ export default function Bookings() {
     initialParams: { page: 1, statusTab: 'All', dateFrom: '', dateTo: '' },
     // Paused while the force-cancel modal is open so a background refresh
     // can't swap the row out from under the admin mid-action.
-    pollIntervalMs: cancelTarget ? null : 8000,
+    pollIntervalMs: cancelTarget ? null : 25000,
   })
 
   const applyDateRange = () => {

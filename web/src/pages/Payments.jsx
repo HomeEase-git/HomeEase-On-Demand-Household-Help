@@ -13,7 +13,6 @@ import ErrorState from '../components/common/ErrorState'
 import { useListQuery } from '../hooks/useListQuery'
 import { fetchPayments } from '../services/payments'
 import { formatPeso } from '../data/payments'
-import { getPaymentStatusVariant } from '../utils/statusBadge'
 
 const SUB_NAV = [
   { to: '/payments', label: 'All Transactions' },
@@ -52,7 +51,7 @@ export default function Payments() {
     goToPage,
   } = useListQuery(fetchFn, {
     initialParams: { page: 1, statusTab: 'All' },
-    pollIntervalMs: 8000,
+    pollIntervalMs: 25000,
   })
 
   const totals = useMemo(() => {

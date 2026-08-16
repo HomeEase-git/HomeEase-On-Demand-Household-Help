@@ -46,7 +46,7 @@ export default function Payouts() {
 
   const { data: payouts, meta, params, loading, error, reload, setSearch, setFilter, goToPage } = useListQuery(
     fetchFn,
-    { initialParams: { page: 1, dateFrom: '', dateTo: '' }, pollIntervalMs: 8000 }
+    { initialParams: { page: 1, dateFrom: '', dateTo: '' }, pollIntervalMs: 25000 }
   )
 
   const applyDateRange = () => {
