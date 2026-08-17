@@ -25,8 +25,7 @@ export default function BookingStep3Screen() {
   const draft = useBookingStore((s) => s.draft);
   const setDraft = useBookingStore((s) => s.setDraft);
 
-  const readyToSearch =
-    !!draft.serviceType && !!draft.date && !!draft.timeSlot && draft.lat != null && draft.lng != null;
+  const readyToSearch = !!draft.serviceType && !!draft.date && !!draft.timeSlot;
 
   const { workers, loading, error } = useWorkerDiscovery(
     {
@@ -35,8 +34,6 @@ export default function BookingStep3Screen() {
       timeSlot: draft.timeSlot ?? undefined,
       condition: draft.condition ?? undefined,
       rooms: draft.rooms?.map((r) => r.room),
-      lat: draft.lat,
-      lng: draft.lng,
       limit: 20,
     },
     readyToSearch && !draft.workerLocked

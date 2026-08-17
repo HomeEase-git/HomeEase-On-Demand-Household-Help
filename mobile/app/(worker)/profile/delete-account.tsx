@@ -49,8 +49,8 @@ export default function WorkerDeleteAccountScreen() {
       <ScreenHeader title="Delete Account" showBack />
       <ScrollView contentContainerStyle={{ padding: 24 }}>
         <View className="items-center mb-6">
-          <View className="w-24 h-24 bg-error/20 rounded-full items-center justify-center">
-            <Ionicons name="warning" size={60} color={colors.error} />
+          <View className="w-20 h-20 bg-error/10 rounded-full items-center justify-center">
+            <Ionicons name="warning" size={40} color={colors.error} />
           </View>
         </View>
         <Text className="text-error text-2xl font-bold text-center mb-4">

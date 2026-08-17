@@ -1267,28 +1267,6 @@ paths:
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
 
-  /bookings/{id}/reschedule:
-    patch:
-      tags: [Bookings]
-      summary: Reschedule a booking to a new date/time slot
-      parameters: [{ $ref: '#/components/parameters/BookingId' }]
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [newDate, newTime]
-              properties:
-                newDate: { type: string, format: date }
-                newTime: { $ref: '#/components/schemas/TimeSlot' }
-      responses:
-        '200': { description: Rescheduled }
-        '400': { $ref: '#/components/responses/BadRequest' }
-        '403': { $ref: '#/components/responses/Forbidden' }
-        '404': { $ref: '#/components/responses/NotFound' }
-        '409': { $ref: '#/components/responses/Conflict' }
-
   /bookings/{id}/addons:
     post:
       tags: [Bookings]

@@ -6,6 +6,7 @@ import ScreenHeader from "../../../../../components/ui/ScreenHeader";
 import PrimaryButton from "../../../../../components/ui/PrimaryButton";
 import OutlinedButton from "../../../../../components/ui/OutlinedButton";
 import { Skeleton } from "../../../../../components/ui/Skeleton";
+import { cardShadow } from "../../../../../constants";
 import * as api from "../../../../../services/api";
 
 type TransactionDetail = Awaited<ReturnType<typeof api.getTransactionDetail>>;
@@ -49,7 +50,7 @@ export default function ReceiptScreen() {
       <SafeAreaView className="flex-1 bg-white">
         <ScreenHeader title="Receipt" showBack />
         <View className="px-4 py-4">
-          <View className="mx-4 mt-4 rounded-2xl border border-divider overflow-hidden">
+          <View className="mx-4 mt-4 rounded-2xl border border-divider overflow-hidden" style={cardShadow}>
             <View className="bg-card p-6 items-center">
               <Skeleton width="40%" height={22} marginBottom={8} />
               <Skeleton width="30%" height={12} marginBottom={0} />
@@ -110,11 +111,14 @@ export default function ReceiptScreen() {
       <ScreenHeader title="Receipt" showBack />
       <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 40 }}>
         {/* Receipt Card */}
-        <View className="bg-white mx-4 mt-4 rounded-2xl border border-divider overflow-hidden">
+        <View
+          className="bg-white mx-4 mt-4 rounded-2xl border border-divider overflow-hidden"
+          style={cardShadow}
+        >
           {/* Header */}
           <View className="bg-accent p-6 items-center">
             <Text className="text-text-primary font-bold text-2xl">HomeEase</Text>
-            <Text className="text-primary/80 text-sm mt-1">
+            <Text className="text-text-primary/80 text-sm mt-1">
               Official Receipt
             </Text>
           </View>
@@ -167,7 +171,7 @@ function Row({ label, value }: { label: string; value: string }) {
   return (
     <View className="flex-row justify-between py-2 border-b border-divider last:border-0">
       <Text className="text-text-secondary text-sm">{label}</Text>
-      <Text className="text-primary font-semibold">{value}</Text>
+      <Text className="text-text-primary font-semibold">{value}</Text>
     </View>
   );
 }

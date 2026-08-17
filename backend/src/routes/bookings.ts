@@ -13,7 +13,6 @@ import {
   completeBooking,
   confirmCompletion,
   cancelBooking,
-  rescheduleBooking,
   addAddon,
   submitReview,
 } from '../controllers/bookingController';
@@ -28,7 +27,6 @@ import {
   validateDisputeQuote,
   validateAddAddon,
   validateAddReview,
-  validateRescheduleBooking,
   validateArriveBooking,
 } from '../middleware/validation';
 
@@ -83,9 +81,6 @@ router.patch('/:id/confirm-completion', restrictTo('CLIENT'), confirmCompletion)
 
 // Cancel booking (client or worker)
 router.patch('/:id/cancel', validateBookingStatusUpdate, cancelBooking);
-
-// Reschedule booking (client or worker)
-router.patch('/:id/reschedule', validateRescheduleBooking, rescheduleBooking);
 
 // Add addon (worker only)
 router.post('/:id/addons', restrictTo('WORKER'), validateAddAddon, addAddon);

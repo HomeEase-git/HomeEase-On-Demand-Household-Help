@@ -109,10 +109,8 @@ export default function BookingStep2Screen() {
       date: date ?? undefined,
       condition: draft.condition ?? undefined,
       rooms: draft.rooms?.map((r) => r.room),
-      lat,
-      lng,
     },
-    hasScope && !!date && lat != null && lng != null
+    hasScope && !!date
   );
 
   const canNext = !!address && lat != null && lng != null && !!date && !!timeSlot;

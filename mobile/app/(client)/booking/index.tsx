@@ -15,6 +15,7 @@ import {
 import { getBookings } from "../../../services/api";
 import { colors } from "../../../constants";
 import { useAlertModal } from "../../../contexts/AlertModalContext";
+import { useTabRefresh } from "../../../hooks/useTabRefresh";
 
 const TABS = ["Pending", "Active", "Completed", "Cancelled"] as const;
 
@@ -66,6 +67,8 @@ export default function MyBookingsScreen() {
       loadBookings();
     }, []),
   );
+
+  useTabRefresh("client:booking", loadBookings);
 
   const filtered = bookings.filter((b) => tabForStatus(b.status) === activeTab);
 

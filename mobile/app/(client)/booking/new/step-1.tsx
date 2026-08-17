@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { View, Text, ScrollView, ActivityIndicator, Image, Pressable } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
@@ -6,6 +6,7 @@ import ScreenHeader from "../../../../components/ui/ScreenHeader";
 import StepperHorizontal from "../../../../components/steppers/StepperHorizontal";
 import InputField from "../../../../components/ui/InputField";
 import PrimaryButton from "../../../../components/ui/PrimaryButton";
+import OutlinedButton from "../../../../components/ui/OutlinedButton";
 import InvalidationBanner from "../../../../components/ui/InvalidationBanner";
 import ServiceCategorySelector, {
   type ServiceCategoryOption,
@@ -51,7 +52,7 @@ export default function BookingStep1Screen() {
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
   const photoSheetRef = useRef<BottomSheetHandle | null>(null);
 
-  useEffect(() => {
+  const loadCategories = useCallback(() => {
     let active = true;
     (async () => {
       setLoadingCategories(true);
@@ -104,6 +105,12 @@ export default function BookingStep1Screen() {
     return () => {
       active = false;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    const cancel = loadCategories();
+    return cancel;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -202,7 +209,8 @@ export default function BookingStep1Screen() {
         <Text className="text-text-primary font-bold text-lg mt-2 mb-3">Service</Text>
         {loadError ? (
           <View className="py-6 items-center">
-            <Text className="text-error">{loadError}</Text>
+            <Text className="text-error mb-3">{loadError}</Text>
+            <OutlinedButton label="Retry" onPress={loadCategories} />
           </View>
         ) : (
           <ServiceCategorySelector

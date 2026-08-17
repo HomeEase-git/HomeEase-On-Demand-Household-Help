@@ -115,11 +115,6 @@ export interface CreateBookingRequest {
   inspectionFeeAmount?: number;
 }
 
-export interface RescheduleBookingRequest {
-  newDate: string;
-  newTime: string;
-}
-
 export interface CancelBookingRequest {
   reason?: string;
 }

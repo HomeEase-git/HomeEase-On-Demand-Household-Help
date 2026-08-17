@@ -3,7 +3,7 @@ import { View, Text, Pressable } from "react-native";
 import { AppIcon as Ionicons } from "../icons/AppIcon";
 import BottomSheetWrapper, { BottomSheetHandle } from "./BottomSheetWrapper";
 import PrimaryButton from "../ui/PrimaryButton";
-import { colors } from "../../constants";
+import { colors, cardShadow } from "../../constants";
 
 const METHODS = [
   {
@@ -56,9 +56,10 @@ export const PaymentMethodBottomSheet: React.FC<Props> = ({
       {METHODS.map((m) => (
         <Pressable
           key={m.id}
-          className={`bg-card-light rounded-xl p-4 mb-2 flex-row items-center ${
-            selected === m.id ? "border-2 border-accent" : ""
+          className={`bg-white rounded-2xl p-4 mb-2 flex-row items-center border-2 ${
+            selected === m.id ? "border-accent" : "border-transparent"
           }`}
+          style={cardShadow}
           onPress={() => setSelected(m.id)}
         >
           <View
@@ -66,7 +67,7 @@ export const PaymentMethodBottomSheet: React.FC<Props> = ({
           >
             <Ionicons name={m.icon} size={20} color={m.iconColor} />
           </View>
-          <Text className="text-brand font-semibold ml-3 flex-1">
+          <Text className="text-text-primary font-semibold ml-3 flex-1">
             {m.label}
           </Text>
           {selected === m.id && (

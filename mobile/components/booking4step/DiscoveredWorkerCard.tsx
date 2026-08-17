@@ -44,9 +44,6 @@ export default function DiscoveredWorkerCard({ worker, selected, onSelect }: Pro
           <View className="flex-row items-center mt-1">
             <StarRating rating={worker.rating} size={13} />
             <Text className="text-text-muted text-xs ml-1">({worker.totalReviews})</Text>
-            {worker.distance != null && (
-              <Text className="text-text-muted text-xs ml-2">· {worker.distance.toFixed(1)} km away</Text>
-            )}
           </View>
 
           {worker.badges.length > 0 && (

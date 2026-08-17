@@ -135,7 +135,6 @@ export type WorkerCard = {
   avatar: string | null;
   rating: number;
   totalReviews: number;
-  distance: number | null;
   hourlyRate: number | null;
   estimatedTotal: number | null;
   matchedServiceTypeId: string | null;

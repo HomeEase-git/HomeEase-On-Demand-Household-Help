@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 import { View, Text, ScrollView } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { useRouter, useLocalSearchParams } from "expo-router";
+import { useRouter } from "expo-router";
 import ScreenHeader from "../../components/ui/ScreenHeader";
 import InputField from "../../components/ui/InputField";
 import PrimaryButton from "../../components/ui/PrimaryButton";
@@ -12,8 +12,6 @@ import { useAlertModal } from "../../contexts/AlertModalContext";
 export default function ForgotPasswordScreen() {
   const router = useRouter();
   const alertModal = useAlertModal();
-  const params = useLocalSearchParams<{ role?: string }>();
-  const role = (params.role as string) || "client";
 
   const [email, setEmail] = useState("");
   const [loading, setLoading] = useState(false);
@@ -40,7 +38,7 @@ export default function ForgotPasswordScreen() {
       await sendPasswordResetEmail(email);
       router.push({
         pathname: "/(auth)/password-reset-sent",
-        params: { email, role },
+        params: { email },
       });
     } catch (err: any) {
       alertModal.error(

@@ -7,7 +7,7 @@ import ScreenHeader from "../../../../components/ui/ScreenHeader";
 import InputField from "../../../../components/ui/InputField";
 import PrimaryButton from "../../../../components/ui/PrimaryButton";
 import OutlinedButton from "../../../../components/ui/OutlinedButton";
-import { colors } from "../../../../constants";
+import { colors, cardShadow } from "../../../../constants";
 import { addressStorage } from "../../../../utils/storage";
 import { geocodeAddress } from "../../../../utils/geo";
 import * as api from "../../../../services/api";
@@ -107,25 +107,33 @@ export default function AddressEditScreen() {
     <SafeAreaView className="flex-1 bg-white">
       <ScreenHeader title={isNew ? "Add Address" : "Edit Address"} showBack />
       <ScrollView contentContainerStyle={{ padding: 24 }}>
-        <Text className="text-primary text-sm mb-2">Label</Text>
-        <View className="flex-row gap-2 mb-4">
-          {LABEL_OPTIONS.map((l) => (
-            <Pressable
-              key={l}
-              className={`px-4 py-2 rounded-xl ${label === l ? "bg-accent" : "bg-card"}`}
-              onPress={() => setLabel(l)}
-            >
-              <Text
-                className={
-                  label === l
-                    ? "text-white font-semibold"
-                    : "text-text-secondary"
-                }
+        <View className="items-center mb-5">
+          <View className="w-16 h-16 rounded-full bg-accent/10 items-center justify-center">
+            <Ionicons name="location-outline" size={30} color={colors.accent.DEFAULT} />
+          </View>
+        </View>
+
+        <View className="bg-card rounded-2xl p-4 mb-4" style={cardShadow}>
+          <Text className="text-text-primary text-sm mb-2 font-semibold">Label</Text>
+          <View className="flex-row gap-2">
+            {LABEL_OPTIONS.map((l) => (
+              <Pressable
+                key={l}
+                className={`px-4 py-2 rounded-xl ${label === l ? "bg-accent" : "bg-white"}`}
+                onPress={() => setLabel(l)}
               >
-                {l}
-              </Text>
-            </Pressable>
-          ))}
+                <Text
+                  className={
+                    label === l
+                      ? "text-white font-semibold"
+                      : "text-text-secondary"
+                  }
+                >
+                  {l}
+                </Text>
+              </Pressable>
+            ))}
+          </View>
         </View>
 
         <InputField

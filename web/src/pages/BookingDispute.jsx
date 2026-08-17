@@ -58,8 +58,10 @@ export default function BookingDispute() {
   const [submitting, setSubmitting] = useState(false)
   const { showSuccess, showError } = useToast()
 
-  const loadDisputes = async () => {
-    setLoading(true)
+  // `silent` skips the loading flag so the 5s background poll refresh
+  // doesn't yank the table out from under the admin every time it fires.
+  const loadDisputes = async (silent = false) => {
+    if (!silent) setLoading(true)
     setError(null)
 
     try {
@@ -76,9 +78,9 @@ export default function BookingDispute() {
       setDisputes(rows)
       setMeta(response.meta)
     } catch (err) {
-      setError(err.message || 'Failed to load disputes')
+      if (!silent) setError(err.message || 'Failed to load disputes')
     } finally {
-      setLoading(false)
+      if (!silent) setLoading(false)
     }
   }
 
@@ -94,7 +96,7 @@ export default function BookingDispute() {
   // Keep the queue current for other admins working disputes concurrently —
   // paused while a dispute is open so a background refresh can't disrupt an
   // in-progress review/resolution.
-  usePolling(loadDisputes, POLL_INTERVAL_MS, { paused: !!selectedId })
+  usePolling(() => loadDisputes(true), POLL_INTERVAL_MS, { paused: !!selectedId })
 
   const selected = useMemo(() => disputes.find((d) => d.id === selectedId) || null, [disputes, selectedId])
 

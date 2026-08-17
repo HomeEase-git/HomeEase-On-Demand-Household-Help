@@ -4,6 +4,7 @@ import { AppIcon as Ionicons } from "../icons/AppIcon";
 import StatusBadge from "../ui/StatusBadge";
 import type { StatusType } from "../ui/StatusBadge";
 import { colors, cardShadow } from "../../constants";
+import { getCategoryIcon } from "../../utils/categoryIcons";
 
 type Booking = {
   id: string;
@@ -31,7 +32,7 @@ export const BookingCard: React.FC<Props> = ({ booking, onPress }) => {
     >
       <View className="w-10 h-10 bg-accent/20 rounded-full items-center justify-center mr-3">
         <Ionicons
-          name="construct-outline"
+          name={getCategoryIcon(booking.service)}
           size={20}
           color={colors.accent.DEFAULT}
         />

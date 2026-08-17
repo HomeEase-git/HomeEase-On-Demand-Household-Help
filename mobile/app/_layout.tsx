@@ -12,6 +12,7 @@ import { useAuthStore } from "../store/authStore";
 import { useBookingStore } from "../store/bookingStore";
 import { useMessageStore } from "../store/messageStore";
 import { useNotificationStore } from "../store/notificationStore";
+import { useWorkerStore } from "../store/workerStore";
 import * as api from "../services/api";
 import { connectSocket, disconnectSocket } from "../services/socket";
 import {
@@ -65,6 +66,8 @@ export default function RootLayout() {
     socket.on("notification:new", (notification) => {
       useNotificationStore.getState().receiveNotification(notification);
 
+      const currentUser = useAuthStore.getState().user;
+
       // Live-update the cached KYC status so a worker sitting on the waiting
       // screen (which has no buttons/refresh control) advances automatically
       // as soon as an admin decides, instead of needing to relaunch the app.
@@ -72,7 +75,6 @@ export default function RootLayout() {
         notification.type === "VERIFICATION_APPROVED" ||
         notification.type === "VERIFICATION_REJECTED"
       ) {
-        const currentUser = useAuthStore.getState().user;
         if (currentUser?.role === "worker") {
           useAuthStore
             .getState()
@@ -82,6 +84,19 @@ export default function RootLayout() {
                 : "REJECTED",
             );
         }
+      }
+
+      // A new job request (or one leaving the worker's list — cancelled,
+      // auto-approved, etc.) should update the jobs list even when the
+      // Requests screen isn't focused/polling (e.g. worker sitting on Home).
+      const JOB_LIST_AFFECTING_TYPES = [
+        "BOOKING_REQUEST",
+        "BOOKING_CANCELLED",
+        "QUOTE_AUTO_APPROVED",
+        "BOOKING_AUTO_COMPLETED",
+      ];
+      if (currentUser?.role === "worker" && JOB_LIST_AFFECTING_TYPES.includes(notification.type)) {
+        useWorkerStore.getState().refreshJobs();
       }
     });
 

@@ -3,13 +3,16 @@ import { Tabs, Redirect } from "expo-router";
 import { AppIcon as Ionicons } from "../../components/icons/AppIcon";
 import { View } from "react-native";
 import NotificationBadge from "../../components/ui/NotificationBadge";
+import { TabRefreshOverlay } from "../../components/ui/TabRefreshOverlay";
 import { useNotificationStore } from "../../store/notificationStore";
 import { useAuthStore } from "../../store/authStore";
+import { useTabRefreshStore } from "../../store/tabRefreshStore";
 import { colors } from "../../constants";
 
 export default function WorkerLayout() {
   const unreadCount = useNotificationStore((s) => s.unreadCount);
   const user = useAuthStore((s) => s.user);
+  const triggerRefresh = useTabRefreshStore((s) => s.triggerRefresh);
 
   // Gate the worker tabs behind admin approval — this runs on every entry
   // into the (worker) group (deep link, back navigation, resumed session),
@@ -25,100 +28,121 @@ export default function WorkerLayout() {
     return <Redirect href="/(kyc)/landing" />;
   }
 
+  // Re-tapping the already-active tab pops its stack back to the root screen
+  // and triggers a refresh, instead of doing nothing (the default behavior).
+  const refreshOnRepeatTap = ({ navigation, route }: any) => ({
+    tabPress: (e: any) => {
+      if (navigation.isFocused()) {
+        e.preventDefault();
+        navigation.navigate(route.name, { screen: "index" });
+        triggerRefresh(`worker:${route.name}`);
+      }
+    },
+  });
+
   return (
-    <Tabs
-      backBehavior="history"
-      screenOptions={{
-        headerShown: false,
-        tabBarStyle: {
-          backgroundColor: colors.brand.DEFAULT,
-          borderTopColor: colors.divider,
-        },
-        tabBarActiveTintColor: colors.accent.DEFAULT,
-        tabBarInactiveTintColor: colors.white,
-      }}
-    >
-      <Tabs.Screen
-        name="home"
-        options={{
-          title: "Home",
-          tabBarIcon: ({ focused, color, size }) => (
-            <Ionicons
-              name={focused ? "home" : "home-outline"}
-              size={size}
-              color={color}
-            />
-          ),
+    <View style={{ flex: 1 }}>
+      <Tabs
+        backBehavior="history"
+        screenOptions={{
+          headerShown: false,
+          tabBarStyle: {
+            backgroundColor: colors.brand.DEFAULT,
+            borderTopColor: colors.divider,
+          },
+          tabBarActiveTintColor: colors.accent.DEFAULT,
+          tabBarInactiveTintColor: colors.white,
         }}
-      />
-      <Tabs.Screen
-        name="requests"
-        options={{
-          title: "Requests",
-          tabBarIcon: ({ focused, color, size }) => (
-            <Ionicons
-              name={focused ? "clipboard" : "clipboard-outline"}
-              size={size}
-              color={color}
-            />
-          ),
-        }}
-      />
-      <Tabs.Screen
-        name="records"
-        options={{
-          title: "Records",
-          tabBarIcon: ({ focused, color, size }) => (
-            <Ionicons
-              name={focused ? "documents" : "documents-outline"}
-              size={size}
-              color={color}
-            />
-          ),
-        }}
-      />
-      <Tabs.Screen
-        name="earnings"
-        options={{
-          title: "Earnings",
-          tabBarIcon: ({ focused, color, size }) => (
-            <Ionicons
-              name={focused ? "wallet" : "wallet-outline"}
-              size={size}
-              color={color}
-            />
-          ),
-        }}
-      />
-      <Tabs.Screen
-        name="inbox"
-        options={{
-          title: "Inbox",
-          tabBarIcon: ({ focused, color, size }) => (
-            <View>
+      >
+        <Tabs.Screen
+          name="home"
+          options={{
+            title: "Home",
+            tabBarIcon: ({ focused, color, size }) => (
               <Ionicons
-                name={focused ? "chatbubbles" : "chatbubbles-outline"}
+                name={focused ? "home" : "home-outline"}
                 size={size}
                 color={color}
               />
-              <NotificationBadge count={unreadCount} />
-            </View>
-          ),
-        }}
-      />
-      <Tabs.Screen
-        name="profile"
-        options={{
-          title: "Profile",
-          tabBarIcon: ({ focused, color, size }) => (
-            <Ionicons
-              name={focused ? "person-circle" : "person-circle-outline"}
-              size={size}
-              color={color}
-            />
-          ),
-        }}
-      />
-    </Tabs>
+            ),
+          }}
+          listeners={refreshOnRepeatTap}
+        />
+        <Tabs.Screen
+          name="requests"
+          options={{
+            title: "Requests",
+            tabBarIcon: ({ focused, color, size }) => (
+              <Ionicons
+                name={focused ? "clipboard" : "clipboard-outline"}
+                size={size}
+                color={color}
+              />
+            ),
+          }}
+          listeners={refreshOnRepeatTap}
+        />
+        <Tabs.Screen
+          name="records"
+          options={{
+            title: "Records",
+            tabBarIcon: ({ focused, color, size }) => (
+              <Ionicons
+                name={focused ? "documents" : "documents-outline"}
+                size={size}
+                color={color}
+              />
+            ),
+          }}
+          listeners={refreshOnRepeatTap}
+        />
+        <Tabs.Screen
+          name="earnings"
+          options={{
+            title: "Earnings",
+            tabBarIcon: ({ focused, color, size }) => (
+              <Ionicons
+                name={focused ? "wallet" : "wallet-outline"}
+                size={size}
+                color={color}
+              />
+            ),
+          }}
+          listeners={refreshOnRepeatTap}
+        />
+        <Tabs.Screen
+          name="inbox"
+          options={{
+            title: "Inbox",
+            tabBarIcon: ({ focused, color, size }) => (
+              <View>
+                <Ionicons
+                  name={focused ? "chatbubbles" : "chatbubbles-outline"}
+                  size={size}
+                  color={color}
+                />
+                <NotificationBadge count={unreadCount} />
+              </View>
+            ),
+          }}
+          listeners={refreshOnRepeatTap}
+        />
+        <Tabs.Screen
+          name="profile"
+          options={{
+            title: "Profile",
+            tabBarIcon: ({ focused, color, size }) => (
+              <Ionicons
+                name={focused ? "person-circle" : "person-circle-outline"}
+                size={size}
+                color={color}
+              />
+            ),
+          }}
+          listeners={refreshOnRepeatTap}
+        />
+      </Tabs>
+      <TabRefreshOverlay />
+    </View>
   );
 }

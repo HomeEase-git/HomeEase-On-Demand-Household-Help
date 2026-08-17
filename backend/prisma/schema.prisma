@@ -112,7 +112,6 @@ enum NotificationType {
   BOOKING_ACCEPTED
   BOOKING_REJECTED
   BOOKING_CANCELLED
-  BOOKING_RESCHEDULED
   BOOKING_COMPLETED
   PAYMENT_RECEIVED
   PAYMENT_REFUNDED
@@ -124,6 +123,10 @@ enum NotificationType {
   QUOTE_SUBMITTED
   QUOTE_APPROVED
   QUOTE_DISPUTED
+  QUOTE_REMINDER
+  QUOTE_AUTO_APPROVED
+  COMPLETION_REMINDER
+  BOOKING_AUTO_COMPLETED
   VERIFICATION_SUBMITTED
   VERIFICATION_APPROVED
   VERIFICATION_REJECTED
@@ -222,6 +225,9 @@ model User {
   @@index([role])
   @@index([isDeleted])
   @@index([status])
+  // Admin Users/Workers list endpoints filter on role+isDeleted together and
+  // always sort by createdAt desc — covers both the filter and the sort.
+  @@index([role, isDeleted, createdAt])
 }
 
 enum UserStatus {
@@ -334,8 +340,19 @@ model WorkerProfile {
   state   String?
   zipCode String?
 
-  // Live GPS location — updated while a worker is en route/on a job, used
-  // for arrival verification and distance-based matching.
+  // Geocoded from address/city/state/zipCode when the worker saves their
+  // profile (see workerController.updateWorkerProfile) — the worker's fixed
+  // service base, used to compute the distance-based pricing fee at booking
+  // time (see bookingController.createBooking). Bookings are scheduled in
+  // advance, not dispatched to a live position, so this is a static "shipping
+  // fee" style distance rather than real-time proximity.
+  addressLat Float?
+  addressLng Float?
+
+  // Live GPS location — updated at arrival check-in (see
+  // bookingController.arriveBooking) and used for the arrival geofence
+  // check. Deliberately not used for matching/search or pricing (this app
+  // has no reliable live-location source for workers before they arrive).
   currentLat         Float?
   currentLng         Float?
   lastLocationUpdate DateTime?
@@ -369,6 +386,10 @@ model WorkerProfile {
   @@index([userId])
   @@index([kycStatus])
   @@index([isAvailable])
+  // Worker discovery search filters on both together on every request —
+  // covers that combo directly instead of relying on a bitmap-AND of the
+  // two single-column indexes above.
+  @@index([isAvailable, kycStatus])
 }
 
 // Per-date/slot availability record used by auto-matching to find candidate
@@ -685,6 +706,11 @@ model Booking {
   approvedAt    DateTime?
   disputeReason String?
 
+  // Set once the 12h "please approve/dispute this quote" reminder fires
+  // (see bookingWorker.remindAndAutoApproveQuotes) — prevents re-sending it
+  // on every hourly sweep tick, distinct from the 24h auto-approve itself.
+  quoteReminderSentAt DateTime?
+
   // Dispute resolution audit — who (admin userId, no FK to keep this a soft
   // reference like VerificationRequest.reviewedById) resolved it and when.
   disputeResolvedById String?
@@ -707,6 +733,11 @@ model Booking {
   workerStartedAt   DateTime?
   workerCompletedAt DateTime?
 
+  // Set once the 12h "please confirm this job is done" reminder fires (see
+  // bookingWorker.autoSettleCompletedBookings) — prevents re-sending it on
+  // every hourly sweep tick, distinct from the 24h auto-confirm itself.
+  completionReminderSentAt DateTime?
+
   // Payment method chosen by the client at booking time — settled upfront so
   // the client isn't asked to pick a method again after confirming completion.
   paymentMethodType        PaymentMethodType?
@@ -717,8 +748,12 @@ model Booking {
   city     String
   notes    String?
 
-  // GPS snapshots — client location at booking time, worker's last known
-  // position, and the derived distance between them (meters).
+  // GPS snapshots. clientLat/clientLng is the booking address. workerLat/
+  // workerLng starts as a copy of WorkerProfile.addressLat/addressLng at
+  // booking-creation time (used to derive distanceMeters, the input to the
+  // pricing distanceFee — see bookingController.createBooking) and is later
+  // overwritten with the worker's real GPS once they check in as arrived
+  // (see ArrivalVerification / bookingController.arriveBooking).
   clientLat      Float?
   clientLng      Float?
   workerLat      Float?

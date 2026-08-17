@@ -45,6 +45,8 @@ export const validateUpdateWorkerProfile = (
     city,
     state,
     zipCode,
+    addressLat,
+    addressLng,
     resumeUrl,
     digitalIdTrade,
     digitalIdServiceArea,
@@ -75,6 +77,18 @@ export const validateUpdateWorkerProfile = (
 
   if (zipCode !== undefined && typeof zipCode !== 'string') {
     return res.status(400).json(errorResponse(400, 'zipCode must be a string'));
+  }
+
+  // Geocoded client-side (see mobile utils/geo.ts geocodeAddress) when
+  // address/city/state/zipCode change — sent together, but each is optional
+  // independently in case a future caller wants to clear the address without
+  // re-geocoding.
+  if (addressLat !== undefined && addressLat !== null && typeof addressLat !== 'number') {
+    return res.status(400).json(errorResponse(400, 'addressLat must be a number'));
+  }
+
+  if (addressLng !== undefined && addressLng !== null && typeof addressLng !== 'number') {
+    return res.status(400).json(errorResponse(400, 'addressLng must be a number'));
   }
 
   if (resumeUrl !== undefined && typeof resumeUrl !== 'string') {
@@ -187,6 +201,32 @@ export const validateCreateSkill = (
 
   if (typeof rate !== 'number' || rate <= 0) {
     return res.status(400).json(errorResponse(400, 'rate must be a positive number'));
+  }
+
+  return next();
+};
+
+export const validateUpdateSkill = (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  const { name, category, rate } = req.body;
+
+  if (name !== undefined && (typeof name !== 'string' || !name.trim())) {
+    return res.status(400).json(errorResponse(400, 'name must be a non-empty string'));
+  }
+
+  if (category !== undefined && (typeof category !== 'string' || !category.trim())) {
+    return res.status(400).json(errorResponse(400, 'category must be a non-empty string'));
+  }
+
+  if (rate !== undefined && (typeof rate !== 'number' || rate <= 0)) {
+    return res.status(400).json(errorResponse(400, 'rate must be a positive number'));
+  }
+
+  if (name === undefined && category === undefined && rate === undefined) {
+    return res.status(400).json(errorResponse(400, 'At least one field must be provided'));
   }
 
   return next();
@@ -566,20 +606,21 @@ export const validateAddAddon = (
   res: Response,
   next: NextFunction
 ) => {
-  const { title, description, cost } = req.body;
-  
-  if (!title || typeof title !== 'string') {
-    return res.status(400).json(errorResponse(400, 'title is required and must be a string'));
+  // Field names match the BookingAddOn schema (name/price) and what
+  // bookingController.addAddon actually reads — this previously validated
+  // title/description/cost, which the controller never read, so every
+  // request that passed validation crashed on the Prisma insert (name/price
+  // are required, non-nullable columns).
+  const { name, price } = req.body;
+
+  if (!name || typeof name !== 'string') {
+    return res.status(400).json(errorResponse(400, 'name is required and must be a string'));
   }
-  
-  if (description && typeof description !== 'string') {
-    return res.status(400).json(errorResponse(400, 'description must be a string'));
+
+  if (typeof price !== 'number' || price <= 0) {
+    return res.status(400).json(errorResponse(400, 'price is required and must be a positive number'));
   }
-  
-  if (typeof cost !== 'number' || cost <= 0) {
-    return res.status(400).json(errorResponse(400, 'cost is required and must be a positive number'));
-  }
-  
+
   return next();
 };
 
@@ -607,24 +648,6 @@ export const validateAddReview = (
     return res.status(400).json(errorResponse(400, 'photoUrls must be an array of up to 5 URL strings'));
   }
 
-  return next();
-};
-
-export const validateRescheduleBooking = (
-  req: Request,
-  res: Response,
-  next: NextFunction
-) => {
-  const { newDate, newTime } = req.body;
-  
-  if (!newDate) {
-    return res.status(400).json(errorResponse(400, 'newDate is required'));
-  }
-  
-  if (!newTime || typeof newTime !== 'string') {
-    return res.status(400).json(errorResponse(400, 'newTime is required and must be a string'));
-  }
-  
   return next();
 };
 

@@ -7,13 +7,15 @@ export const BOOKING_QUEUE_NAME = 'booking-lifecycle';
 export const JOB_NAMES = {
   EXPIRE_PENDING: 'expire-pending-booking',
   AUTO_SETTLE_COMPLETED: 'auto-settle-completed-bookings',
+  QUOTE_TIMEOUT_SWEEP: 'quote-timeout-sweep',
   RESET_AVAILABILITY: 'reset-expired-availability-slots',
 } as const;
 
-// Stable jobIds for the two repeatable ticks so re-registering them on every
+// Stable jobIds for the repeatable ticks so re-registering them on every
 // boot (see index.ts) upserts the schedule instead of piling up duplicates.
 export const REPEATABLE_JOB_IDS = {
   AUTO_SETTLE_COMPLETED: 'auto-settle-completed-bookings-hourly',
+  QUOTE_TIMEOUT_SWEEP: 'quote-timeout-sweep-hourly',
   RESET_AVAILABILITY: 'reset-expired-availability-slots-daily',
 } as const;
 
@@ -60,10 +62,10 @@ export async function cancelPendingExpiryJob(bookingId: string): Promise<void> {
 }
 
 /**
- * Registers the two repeatable ticks (hourly settle, daily availability
- * reset). Idempotent — BullMQ upserts by (name, repeat pattern, jobId), so
- * calling this on every server boot is safe and keeps the schedule in sync
- * with the pattern defined here.
+ * Registers the repeatable ticks (hourly settle, hourly quote sweep, daily
+ * availability reset). Idempotent — BullMQ upserts by (name, repeat pattern,
+ * jobId), so calling this on every server boot is safe and keeps the
+ * schedule in sync with the pattern defined here.
  */
 export async function registerRepeatableBookingJobs(): Promise<void> {
   await bookingQueue.add(
@@ -71,6 +73,17 @@ export async function registerRepeatableBookingJobs(): Promise<void> {
     {},
     {
       jobId: REPEATABLE_JOB_IDS.AUTO_SETTLE_COMPLETED,
+      repeat: { pattern: '0 * * * *' }, // every hour, on the hour
+      removeOnComplete: true,
+      removeOnFail: true,
+    }
+  );
+
+  await bookingQueue.add(
+    JOB_NAMES.QUOTE_TIMEOUT_SWEEP,
+    {},
+    {
+      jobId: REPEATABLE_JOB_IDS.QUOTE_TIMEOUT_SWEEP,
       repeat: { pattern: '0 * * * *' }, // every hour, on the hour
       removeOnComplete: true,
       removeOnFail: true,

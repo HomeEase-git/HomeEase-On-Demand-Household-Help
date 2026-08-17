@@ -1,7 +1,7 @@
 import React from "react";
 import { Modal, View, Text, Pressable } from "react-native";
 import { AppIcon as Ionicons } from "../icons/AppIcon";
-import { colors } from "../../constants";
+import { colors, cardShadow } from "../../constants";
 
 type Props = {
   visible: boolean;
@@ -24,18 +24,23 @@ export const ModalWrapper: React.FC<Props> = ({
       onRequestClose={onClose}
     >
       <Pressable
-        className="flex-1 bg-black/60 justify-end items-center"
+        className="flex-1 bg-black/60 justify-center items-center px-4"
         onPress={onClose}
       >
         <Pressable
-          className="bg-card rounded-2xl p-6 mx-4 w-full max-w-sm"
+          className="bg-card rounded-2xl p-6 w-full max-w-sm"
+          style={cardShadow}
           onPress={(e) => e.stopPropagation()}
         >
           {title && (
             <View className="flex-row justify-between items-center mb-4">
               <Text className="text-text-primary font-bold text-lg">{title}</Text>
-              <Pressable onPress={onClose}>
-                <Ionicons name="close" size={24} color={colors.white} />
+              <Pressable
+                className="w-8 h-8 rounded-full bg-card-light items-center justify-center"
+                hitSlop={8}
+                onPress={onClose}
+              >
+                <Ionicons name="close" size={18} color={colors.text.secondary} />
               </Pressable>
             </View>
           )}

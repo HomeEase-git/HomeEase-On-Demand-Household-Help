@@ -8,7 +8,7 @@ import {
   Image,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { useRouter, useLocalSearchParams } from "expo-router";
+import { useRouter } from "expo-router";
 import { InputField } from "../../components/ui/InputField";
 import { PrimaryButton } from "../../components/ui/PrimaryButton";
 import { OutlinedButton } from "../../components/ui/OutlinedButton";
@@ -18,8 +18,6 @@ import { useToastContext } from "../../contexts/ToastContext";
 
 export default function SignInScreen() {
   const router = useRouter();
-  const params = useLocalSearchParams<{ role?: string }>();
-  const role = (params.role as string) || "client";
   const { login, loading, clearError } = useAuth();
   const toast = useToastContext();
 
@@ -75,7 +73,7 @@ export default function SignInScreen() {
         | "/(kyc)/rejected"
         | "/(kyc)/pending"
         | "/(kyc)/landing" = "/(client)/home";
-      if (role === "worker") {
+      if (result.data?.role === "worker") {
         const kycStatus = result.data?.kycStatus;
         if (kycStatus === "APPROVED") {
           destination = "/(worker)/home";
@@ -153,12 +151,7 @@ export default function SignInScreen() {
         <Pressable
           className="self-end mb-6"
           disabled={loading}
-          onPress={() =>
-            router.push({
-              pathname: "/(auth)/forgot-password",
-              params: { role },
-            })
-          }
+          onPress={() => router.push("/(auth)/forgot-password")}
         >
           <Text className="text-accent font-semibold">Forgot Password?</Text>
         </Pressable>

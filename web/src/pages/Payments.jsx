@@ -51,7 +51,7 @@ export default function Payments() {
     goToPage,
   } = useListQuery(fetchFn, {
     initialParams: { page: 1, statusTab: 'All' },
-    pollIntervalMs: 8000,
+    pollIntervalMs: 25000,
   })
 
   const totals = useMemo(() => {

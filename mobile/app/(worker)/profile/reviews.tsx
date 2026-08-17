@@ -8,6 +8,7 @@ import StarRating from "../../../components/ui/StarRating";
 import { SkeletonList, ReviewCardSkeleton } from "../../../components/ui/Skeleton";
 import { useAuthStore } from "../../../store/authStore";
 import * as api from "../../../services/api";
+import { cardShadow } from "../../../constants";
 
 type ReviewItem = {
   id: string;
@@ -93,7 +94,7 @@ export default function WorkerReviewsScreen() {
         keyExtractor={(item) => item.id}
         contentContainerStyle={{ padding: 16, paddingBottom: 24 }}
         ListHeaderComponent={
-          <View className="bg-card rounded-2xl p-4 mx-0 mb-4 items-center">
+          <View className="bg-card rounded-2xl p-4 mx-0 mb-4 items-center" style={cardShadow}>
             <Text className="text-text-primary font-bold text-3xl">
               {averageRating}
             </Text>

@@ -12,13 +12,10 @@ import FilterSortBottomSheet, {
 import type { BottomSheetHandle } from "../../../components/bottom-sheets/BottomSheetWrapper";
 import LoadingSkeleton from "../../../components/feedback/LoadingSkeleton";
 import { useSearchStore } from "../../../store/searchStore";
-import { getCurrentPosition } from "../../../services/location";
-import type { LatLng } from "../../../utils/geo";
 import { useAlertModal } from "../../../contexts/AlertModalContext";
 
 const DEFAULT_FILTERS: SearchFilters = { sort: "rating", availableOnly: false };
 const DEBOUNCE_MS = 400;
-const NEARBY_RADIUS_KM = 10;
 
 export default function SearchScreen() {
   const router = useRouter();
@@ -29,18 +26,11 @@ export default function SearchScreen() {
   const [searching, setSearching] = useState(false);
   const [results, setResults] = useState<any[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const [origin, setOrigin] = useState<LatLng | null>(null);
   const filterRef = useRef<BottomSheetHandle | null>(null);
   const recentSearches = useSearchStore((s) => s.recentSearches);
   const addSearch = useSearchStore((s) => s.addSearch);
   const clearSearches = useSearchStore((s) => s.clearSearches);
   const restoreSearches = useSearchStore((s) => s.restoreSearches);
-
-  useEffect(() => {
-    getCurrentPosition()
-      .then(setOrigin)
-      .catch(() => setOrigin(null));
-  }, []);
 
   useEffect(() => {
     restoreSearches();
@@ -72,8 +62,6 @@ export default function SearchScreen() {
       page: 1,
       sortBy: filters.sort,
       availableOnly: filters.availableOnly,
-      origin: filters.sort === "nearest" && origin ? origin : undefined,
-      radiusKm: NEARBY_RADIUS_KM,
     })
       .then((response) => {
         if (!active) return;
@@ -92,7 +80,7 @@ export default function SearchScreen() {
     return () => {
       active = false;
     };
-  }, [debouncedQuery, filters, origin]);
+  }, [debouncedQuery, filters]);
 
   const handleChangeQuery = (text: string) => {
     setQuery(text);
@@ -192,7 +180,6 @@ export default function SearchScreen() {
         innerRef={filterRef}
         value={filters}
         onApply={handleApplyFilters}
-        showNearest={origin != null}
       />
     </SafeAreaView>
   );

@@ -1,12 +1,12 @@
 import React, { useEffect, useState } from "react";
-import { View, Text, FlatList, Pressable } from "react-native";
+import { View, Text, FlatList, Pressable, ActivityIndicator } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import ScreenHeader from "../../../../components/ui/ScreenHeader";
 import CertificationCard from "../../../../components/cards/CertificationCard";
 import EmptyState from "../../../../components/feedback/EmptyState";
-import { colors } from "../../../../constants";
+import { colors, cardShadow } from "../../../../constants";
 import * as api from "../../../../services/api";
 import type { Certification } from "../../../../services/api";
 import { useAlertModal } from "../../../../contexts/AlertModalContext";
@@ -55,7 +55,8 @@ export default function CertificationsScreen() {
       <ScreenHeader title="My Certifications" showBack />
       {loading ? (
         <View className="flex-1 items-center justify-center">
-          <Text className="text-text-secondary">Loading certifications...</Text>
+          <ActivityIndicator color={colors.accent.DEFAULT} />
+          <Text className="text-text-secondary mt-3">Loading certifications...</Text>
         </View>
       ) : certs.length === 0 ? (
         <EmptyState
@@ -91,6 +92,7 @@ export default function CertificationsScreen() {
       )}
       <Pressable
         className="absolute bottom-6 right-6 w-14 h-14 bg-accent rounded-full items-center justify-center"
+        style={cardShadow}
         onPress={() => router.push("/(worker)/profile/certifications/upload")}
       >
         <Ionicons name="add" size={28} color={colors.white} />

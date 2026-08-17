@@ -9,9 +9,8 @@ import { colors } from "../../constants";
 
 export default function PasswordResetSentScreen() {
   const router = useRouter();
-  const params = useLocalSearchParams<{ email?: string; role?: string }>();
+  const params = useLocalSearchParams<{ email?: string }>();
   const email = (params.email as string) || "your email";
-  const role = (params.role as string) || "client";
 
   const maskEmail = (email: string) => {
     const [localPart, domain] = email.split("@");
