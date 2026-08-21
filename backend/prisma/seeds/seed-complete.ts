@@ -762,7 +762,7 @@ async function createAuditLogs(admin: { id: string; fullName: string }) {
       action: "PAYOUT_TRANSFER_FAILED",
       category: "SYSTEM_ERROR",
       level: "ERROR",
-      message: "PayMongo transfer failed: insufficient platform balance.",
+      message: "Xendit payout failed: insufficient platform balance.",
       metadata: { errorCode: "INSUFFICIENT_BALANCE" },
     },
     {
@@ -812,7 +812,10 @@ async function createBookingsAndPayments(
     isAutoMatched?: boolean;
     disputeStatus?: "OPEN" | "UNDER_REVIEW" | "RESOLVED" | "REJECTED";
     payoutStatus?: PayoutStatus;
-    legacyXendit?: boolean;
+    // Simulates a payout that got as far as receiving a Xendit disbursement
+    // id before the payout webhook reported it FAILED (vs. a failure that
+    // never reached Xendit at all, e.g. an unsupported channel).
+    disbursementFailedWithId?: boolean;
     paymentStatusOverride?: PaymentStatus;
     cancelledBy?: Role;
     noTask?: boolean;
@@ -834,7 +837,7 @@ async function createBookingsAndPayments(
     { status: BookingStatus.COMPLETED, payoutStatus: PayoutStatus.PENDING, isAutoMatched: true },
     { status: BookingStatus.COMPLETED, payoutStatus: PayoutStatus.PROCESSING },
     { status: BookingStatus.COMPLETED, payoutStatus: PayoutStatus.PAID },
-    { status: BookingStatus.COMPLETED, payoutStatus: PayoutStatus.FAILED, legacyXendit: true },
+    { status: BookingStatus.COMPLETED, payoutStatus: PayoutStatus.FAILED, disbursementFailedWithId: true },
     { status: BookingStatus.COMPLETED, paymentStatusOverride: PaymentStatus.FAILED },
     { status: BookingStatus.COMPLETED, paymentStatusOverride: PaymentStatus.REFUNDED },
     { status: BookingStatus.COMPLETED, paymentStatusOverride: PaymentStatus.PENDING },
@@ -1132,8 +1135,8 @@ async function createBookingsAndPayments(
           releasedAt: escrowStatus === EscrowStatus.RELEASED ? faker.date.recent({ days: 2 }) : null,
           refundReason: refunded ? "Client reported no-show; refunded per policy." : null,
           refundedAt: refunded ? faker.date.recent({ days: 1 }) : null,
-          paymongoPaymentId: methodType !== PaymentMethodType.CASH ? `pay_${faker.string.alphanumeric(20)}` : null,
-          paymongoSourceId: methodType !== PaymentMethodType.CASH ? `src_${faker.string.alphanumeric(20)}` : null,
+          xenditPaymentId: methodType !== PaymentMethodType.CASH ? `ewc_${faker.string.alphanumeric(20)}` : null,
+          xenditInvoiceId: methodType !== PaymentMethodType.CASH ? `${faker.string.alphanumeric(24)}` : null,
           authorizedAmount: subtotal,
           authorizedAt,
           authorizationId,
@@ -1160,16 +1163,20 @@ async function createBookingsAndPayments(
             accountName: wp.payoutAccountName,
             accountNumber: wp.payoutAccountNumber ?? phoneNumber(),
             status: payoutStatus,
-            paymongoTransferId:
-              payoutStatus !== PayoutStatus.FAILED ? `trsf_${faker.string.alphanumeric(20)}` : null,
-            paymongoTransferStatus:
-              payoutStatus === PayoutStatus.PAID
-                ? "succeeded"
-                : payoutStatus === PayoutStatus.PROCESSING
-                ? "pending"
+            xenditDisbursementId:
+              payoutStatus === PayoutStatus.PAID ||
+              payoutStatus === PayoutStatus.PROCESSING ||
+              scenario.disbursementFailedWithId
+                ? `disb-${faker.string.alphanumeric(16)}`
                 : null,
-            xenditDisbursementId: scenario.legacyXendit ? `disb-${faker.string.alphanumeric(16)}` : null,
-            xenditStatus: scenario.legacyXendit ? "FAILED" : null,
+            xenditStatus:
+              payoutStatus === PayoutStatus.PAID
+                ? "COMPLETED"
+                : payoutStatus === PayoutStatus.PROCESSING
+                ? "ACCEPTED"
+                : payoutStatus === PayoutStatus.FAILED && scenario.disbursementFailedWithId
+                ? "FAILED"
+                : null,
             failureReason: payoutStatus === PayoutStatus.FAILED ? "Bank rejected transfer: invalid account." : null,
             attempts: payoutStatus === PayoutStatus.PENDING ? 0 : payoutStatus === PayoutStatus.FAILED ? 2 : 1,
             processingAt: payoutStatus !== PayoutStatus.PENDING ? faker.date.recent({ days: 2 }) : null,

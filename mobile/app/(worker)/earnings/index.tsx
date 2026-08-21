@@ -6,6 +6,7 @@ import { AppIcon as Ionicons } from "../../../components/icons/AppIcon";
 import TransactionItem from "../../../components/list-items/TransactionItem";
 import * as api from "../../../services/api";
 import { colors } from "../../../constants";
+import { useTabRefresh } from "../../../hooks/useTabRefresh";
 
 type TransactionListItem = {
   id: string;
@@ -38,6 +39,8 @@ export default function EarningsScreen() {
       load();
     }, [load]),
   );
+
+  useTabRefresh("worker:earnings", load);
 
   const completed = transactions.filter((t) => t.status === "Completed");
   const pending = transactions.filter((t) => t.status === "Pending");

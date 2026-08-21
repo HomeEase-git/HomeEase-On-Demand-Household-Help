@@ -10,18 +10,40 @@ import PrimaryButton from "../../../../components/ui/PrimaryButton";
 import * as api from "../../../../services/api";
 import type { WorkerDetail, WorkerReview } from "../../../../types/api.types";
 import { useBookingStore } from "../../../../store/bookingStore";
-import {
-  mapServiceToCategory,
-  isExactCategoryMatch,
-} from "../../../../utils/categoryMapping";
-import { colors } from "../../../../constants";
-import { useAlertModal } from "../../../../contexts/AlertModalContext";
+import { mapServiceToCategory } from "../../../../utils/categoryMapping";
+import { colors, cardShadow } from "../../../../constants";
+
+const DAY_LABELS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+const DAY_ORDER = [1, 2, 3, 4, 5, 6, 0]; // Mon -> Sun display order
+
+function sortedAvailableDayLabels(days: (string | number)[]): string[] {
+  const unique = Array.from(new Set(days.map((d) => Number(d))));
+  return unique
+    .filter((d) => d >= 0 && d <= 6)
+    .sort((a, b) => DAY_ORDER.indexOf(a) - DAY_ORDER.indexOf(b))
+    .map((d) => DAY_LABELS[d]);
+}
+
+function SectionTitle({
+  icon,
+  label,
+}: {
+  icon: keyof typeof Ionicons.glyphMap;
+  label: string;
+}) {
+  return (
+    <View className="flex-row items-center mb-2">
+      <Ionicons name={icon} size={16} color={colors.brand.DEFAULT} />
+      <Text className="text-text-primary font-bold ml-1.5">{label}</Text>
+    </View>
+  );
+}
 
 export default function WorkerProfileScreen() {
   const router = useRouter();
-  const alertModal = useAlertModal();
   const { workerId } = useLocalSearchParams<{ workerId: string }>();
   const setDraft = useBookingStore((s) => s.setDraft);
+  const clearDraft = useBookingStore((s) => s.clearDraft);
 
   const [worker, setWorker] = useState<WorkerDetail | null>(null);
   const [reviews, setReviews] = useState<WorkerReview[]>([]);
@@ -60,7 +82,7 @@ export default function WorkerProfileScreen() {
       <SafeAreaView className="flex-1 bg-white">
         <ScreenHeader title="Worker" showBack />
         <View className="flex-1 items-center justify-center">
-          <ActivityIndicator size="small" />
+          <ActivityIndicator size="small" color={colors.brand.DEFAULT} />
         </View>
       </SafeAreaView>
     );
@@ -86,12 +108,18 @@ export default function WorkerProfileScreen() {
 
   return (
     <SafeAreaView className="flex-1 bg-white">
-      <View className="absolute top-0 left-0 right-0 z-10 pt-2">
-        <ScreenHeader title="" showBack />
+      <View className="absolute top-2 left-4 z-10">
+        <Pressable
+          className="w-10 h-10 rounded-full items-center justify-center bg-black/35"
+          onPress={() => router.back()}
+          hitSlop={8}
+        >
+          <Ionicons name="chevron-back" size={22} color={colors.white} />
+        </Pressable>
       </View>
       <ScrollView
         className="flex-1"
-        contentContainerStyle={{ paddingBottom: 100 }}
+        contentContainerStyle={{ paddingBottom: 120 }}
         showsVerticalScrollIndicator={false}
       >
         <View className="w-full h-64 bg-card-dark items-center justify-center">
@@ -102,11 +130,13 @@ export default function WorkerProfileScreen() {
               resizeMode="cover"
             />
           ) : (
-            <Ionicons name="person-circle" size={100} color={colors.text.muted} />
+            <View className="w-24 h-24 rounded-full bg-white/60 items-center justify-center">
+              <Ionicons name="person" size={56} color={colors.text.muted} />
+            </View>
           )}
         </View>
 
-        <View className="bg-card rounded-2xl p-4 mx-4 -mt-8">
+        <View className="bg-card rounded-2xl p-4 mx-4 -mt-8" style={cardShadow}>
           <View className="flex-row items-center">
             <Text className="text-text-primary font-bold text-xl">{worker.name}</Text>
             {worker.verificationStatus === "VERIFIED" && (
@@ -136,15 +166,20 @@ export default function WorkerProfileScreen() {
               ({worker.reviews} reviews)
             </Text>
           </Pressable>
-          <View className="flex-row flex-wrap gap-2 mt-2">
+          <View className="flex-row flex-wrap gap-2 mt-3">
             <View className="bg-accent/20 rounded-full px-3 py-1">
-              <Text className="text-accent text-xs">{worker.service}</Text>
+              <Text className="text-accent text-xs font-semibold">{worker.service}</Text>
             </View>
             <View
-              className={`rounded-full px-3 py-1 ${
-                worker.status === "available" ? "bg-success/20" : "bg-error/20"
+              className={`flex-row items-center rounded-full px-3 py-1 ${
+                worker.status === "available" ? "bg-success/15" : "bg-error/15"
               }`}
             >
+              <View
+                className={`w-1.5 h-1.5 rounded-full mr-1.5 ${
+                  worker.status === "available" ? "bg-success" : "bg-error"
+                }`}
+              />
               <Text
                 className={`text-xs font-semibold ${
                   worker.status === "available" ? "text-success" : "text-error"
@@ -171,35 +206,49 @@ export default function WorkerProfileScreen() {
             )}
           </View>
           {worker.activeJobCount > 0 && (
-            <Text
-              className={`${
-                worker.activeJobCount === 1
-                  ? "text-warning text-xs mt-1"
-                  : "text-error text-xs mt-1"
+            <View
+              className={`flex-row items-center self-start rounded-full px-2.5 py-1 mt-2 ${
+                worker.activeJobCount === 1 ? "bg-warning/15" : "bg-error/15"
               }`}
             >
-              {worker.activeJobCount === 1
-                ? "Currently handling 1 job"
-                : `Currently handling ${worker.activeJobCount} jobs`}
-            </Text>
-          )}
-          {typeof worker.rate === "number" && (
-            <Text className="text-accent font-bold text-lg mt-2">
-              ₱{worker.rate}/hr
-            </Text>
-          )}
-          {worker.serviceAreaRadius > 0 && (
-            <View className="flex-row items-center mt-2">
-              <Ionicons name="location-outline" size={14} color={colors.text.muted} />
-              <Text className="text-text-muted text-xs ml-1">
-                Serves within {worker.serviceAreaRadius} km
+              <Ionicons
+                name="briefcase-outline"
+                size={12}
+                color={worker.activeJobCount === 1 ? colors.warning : colors.error}
+              />
+              <Text
+                className={`text-xs ml-1 ${
+                  worker.activeJobCount === 1 ? "text-warning" : "text-error"
+                }`}
+              >
+                {worker.activeJobCount === 1
+                  ? "Currently handling 1 job"
+                  : `Currently handling ${worker.activeJobCount} jobs`}
               </Text>
             </View>
           )}
+          <View className="flex-row items-center justify-between mt-3 pt-3 border-t border-divider">
+            {typeof worker.rate === "number" ? (
+              <Text className="text-accent font-bold text-lg">
+                ₱{worker.rate}
+                <Text className="text-text-muted text-xs font-normal">/hr</Text>
+              </Text>
+            ) : (
+              <View />
+            )}
+            {worker.serviceAreaRadius > 0 && (
+              <View className="flex-row items-center">
+                <Ionicons name="location-outline" size={14} color={colors.text.muted} />
+                <Text className="text-text-muted text-xs ml-1">
+                  Serves within {worker.serviceAreaRadius} km
+                </Text>
+              </View>
+            )}
+          </View>
         </View>
 
-        <View className="bg-card rounded-2xl p-4 mx-4 mt-3">
-          <Text className="text-text-primary font-bold mb-2">About</Text>
+        <View className="bg-card rounded-2xl p-4 mx-4 mt-3" style={cardShadow}>
+          <SectionTitle icon="information-circle-outline" label="About" />
           <Text className="text-text-secondary text-sm">
             {worker.bio ||
               worker.resumeParseResult?.summary ||
@@ -208,20 +257,20 @@ export default function WorkerProfileScreen() {
         </View>
 
         {worker.availableDays.length > 0 && (
-          <View className="bg-card rounded-2xl p-4 mx-4 mt-3">
-            <Text className="text-text-primary font-bold mb-2">Availability</Text>
+          <View className="bg-card rounded-2xl p-4 mx-4 mt-3" style={cardShadow}>
+            <SectionTitle icon="calendar-outline" label="Availability" />
             <View className="flex-row flex-wrap gap-2">
-              {worker.availableDays.map((day) => (
-                <View key={day} className="bg-card-light rounded-full px-3 py-1">
-                  <Text className="text-text-secondary text-xs">{day}</Text>
+              {sortedAvailableDayLabels(worker.availableDays).map((label) => (
+                <View key={label} className="bg-card-light rounded-full px-3 py-1">
+                  <Text className="text-text-secondary text-xs">{label}</Text>
                 </View>
               ))}
             </View>
           </View>
         )}
 
-        <View className="bg-card rounded-2xl p-4 mx-4 mt-3">
-          <Text className="text-text-primary font-bold mb-2">Skills</Text>
+        <View className="bg-card rounded-2xl p-4 mx-4 mt-3" style={cardShadow}>
+          <SectionTitle icon="construct-outline" label="Skills" />
           <View className="flex-row flex-wrap gap-2">
             {worker.skills.map((skill) => (
               <View
@@ -234,10 +283,11 @@ export default function WorkerProfileScreen() {
           </View>
         </View>
 
-        <View className="bg-card rounded-2xl p-4 mx-4 mt-3">
+        <View className="bg-card rounded-2xl p-4 mx-4 mt-3" style={cardShadow}>
           <View className="flex-row justify-between items-center mb-2">
-            <Text className="text-text-primary font-bold">Reviews</Text>
+            <SectionTitle icon="star-outline" label="Reviews" />
             <Pressable
+              className="flex-row items-center"
               onPress={() =>
                 router.push({
                   pathname: "/(client)/category/worker/[workerId]/reviews",
@@ -249,7 +299,8 @@ export default function WorkerProfileScreen() {
                 })
               }
             >
-              <Text className="text-accent text-sm">See All</Text>
+              <Text className="text-accent text-sm font-semibold">See All</Text>
+              <Ionicons name="chevron-forward" size={14} color={colors.accent.DEFAULT} />
             </Pressable>
           </View>
           {reviews.length === 0 ? (
@@ -273,10 +324,8 @@ export default function WorkerProfileScreen() {
           )}
         </View>
 
-        <View className="bg-card rounded-2xl p-4 mx-4 mt-3">
-          <Text className="text-text-primary font-bold mb-3">
-            Certifications
-          </Text>
+        <View className="bg-card rounded-2xl p-4 mx-4 mt-3" style={cardShadow}>
+          <SectionTitle icon="ribbon-outline" label="Certifications" />
           {verifiedCertifications.length === 0 ? (
             <Text className="text-text-secondary text-sm text-center py-4">
               {pendingCertificationCount > 0
@@ -317,30 +366,49 @@ export default function WorkerProfileScreen() {
         </View>
       </ScrollView>
 
-      <View className="absolute bottom-0 left-0 right-0 bg-white p-4 border-t border-divider">
-        <PrimaryButton
-          label="Book Now"
-          fullWidth
-          onPress={() => {
-            if (!isExactCategoryMatch(worker.service)) {
-              alertModal.warning(
-                "Booking unavailable",
-                "This worker's service type couldn't be matched to a bookable category. Please try again later or contact support.",
-              );
-              return;
-            }
-
-            const normalizedCategory = mapServiceToCategory(worker.service);
-            setDraft({
-              category: normalizedCategory,
-              workerId: worker.id,
-              workerName: worker.name,
-              workerLocked: true,
-              entrySource: "worker_profile",
-            });
-            router.push("/(client)/booking/new/step-1");
-          }}
-        />
+      <View
+        className="absolute bottom-0 left-0 right-0 bg-white px-4 pt-3 pb-4 border-t border-divider flex-row items-center gap-3"
+        style={{ ...cardShadow, shadowOffset: { width: 0, height: -2 } }}
+      >
+        {typeof worker.rate === "number" && (
+          <View>
+            <Text className="text-text-muted text-xs">Rate</Text>
+            <Text className="text-text-primary font-bold text-base">
+              ₱{worker.rate}
+              <Text className="text-text-muted text-xs font-normal">/hr</Text>
+            </Text>
+          </View>
+        )}
+        <View className="flex-1">
+          <PrimaryButton
+            label="Book Now"
+            fullWidth
+            onPress={() => {
+              // Start from a clean draft — otherwise an abandoned booking
+              // attempt (different category/address/payment method) would
+              // leak into this new worker-locked booking.
+              clearDraft();
+              const normalizedCategory = mapServiceToCategory(worker.service);
+              const primaryServiceType = worker.services[0];
+              setDraft({
+                category: normalizedCategory,
+                serviceType: worker.service,
+                serviceTypeId: primaryServiceType?.id ?? null,
+                categoryBasePrice: primaryServiceType?.basePrice ?? null,
+                workerId: worker.id,
+                workerName: worker.name,
+                workerLocked: true,
+                workerServiceTypes: worker.services,
+                workerHourlyRate: worker.hourlyRate ?? null,
+                workerTier: worker.tier ?? "STANDARD",
+                workerAvatar: worker.avatar ?? null,
+                workerRating: worker.rating ?? null,
+                entrySource: "worker_profile",
+              });
+              router.push("/(client)/booking/new/step-1");
+            }}
+          />
+        </View>
       </View>
     </SafeAreaView>
   );

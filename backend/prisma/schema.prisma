@@ -65,10 +65,10 @@ enum EscrowStatus {
 }
 
 enum PayoutStatus {
-  PENDING // Payout row created, not yet sent to PayMongo
-  PROCESSING // PayMongo transfer created, awaiting callback confirmation
-  PAID // PayMongo confirmed the transfer succeeded
-  FAILED // PayMongo confirmed failure, or a platform-side error before send
+  PENDING // Payout row created, not yet sent to Xendit
+  PROCESSING // Xendit disbursement created, awaiting webhook confirmation
+  PAID // Xendit confirmed the payout succeeded
+  FAILED // Xendit confirmed failure, or a platform-side error before send
 }
 
 enum PaymentMethodType {
@@ -112,7 +112,6 @@ enum NotificationType {
   BOOKING_ACCEPTED
   BOOKING_REJECTED
   BOOKING_CANCELLED
-  BOOKING_RESCHEDULED
   BOOKING_COMPLETED
   PAYMENT_RECEIVED
   PAYMENT_REFUNDED
@@ -124,6 +123,10 @@ enum NotificationType {
   QUOTE_SUBMITTED
   QUOTE_APPROVED
   QUOTE_DISPUTED
+  QUOTE_REMINDER
+  QUOTE_AUTO_APPROVED
+  COMPLETION_REMINDER
+  BOOKING_AUTO_COMPLETED
   VERIFICATION_SUBMITTED
   VERIFICATION_APPROVED
   VERIFICATION_REJECTED
@@ -337,8 +340,19 @@ model WorkerProfile {
   state   String?
   zipCode String?
 
-  // Live GPS location — updated while a worker is en route/on a job, used
-  // for arrival verification and distance-based matching.
+  // Geocoded from address/city/state/zipCode when the worker saves their
+  // profile (see workerController.updateWorkerProfile) — the worker's fixed
+  // service base, used to compute the distance-based pricing fee at booking
+  // time (see bookingController.createBooking). Bookings are scheduled in
+  // advance, not dispatched to a live position, so this is a static "shipping
+  // fee" style distance rather than real-time proximity.
+  addressLat Float?
+  addressLng Float?
+
+  // Live GPS location — updated at arrival check-in (see
+  // bookingController.arriveBooking) and used for the arrival geofence
+  // check. Deliberately not used for matching/search or pricing (this app
+  // has no reliable live-location source for workers before they arrive).
   currentLat         Float?
   currentLng         Float?
   lastLocationUpdate DateTime?
@@ -692,6 +706,11 @@ model Booking {
   approvedAt    DateTime?
   disputeReason String?
 
+  // Set once the 12h "please approve/dispute this quote" reminder fires
+  // (see bookingWorker.remindAndAutoApproveQuotes) — prevents re-sending it
+  // on every hourly sweep tick, distinct from the 24h auto-approve itself.
+  quoteReminderSentAt DateTime?
+
   // Dispute resolution audit — who (admin userId, no FK to keep this a soft
   // reference like VerificationRequest.reviewedById) resolved it and when.
   disputeResolvedById String?
@@ -714,6 +733,11 @@ model Booking {
   workerStartedAt   DateTime?
   workerCompletedAt DateTime?
 
+  // Set once the 12h "please confirm this job is done" reminder fires (see
+  // bookingWorker.autoSettleCompletedBookings) — prevents re-sending it on
+  // every hourly sweep tick, distinct from the 24h auto-confirm itself.
+  completionReminderSentAt DateTime?
+
   // Payment method chosen by the client at booking time — settled upfront so
   // the client isn't asked to pick a method again after confirming completion.
   paymentMethodType        PaymentMethodType?
@@ -724,8 +748,12 @@ model Booking {
   city     String
   notes    String?
 
-  // GPS snapshots — client location at booking time, worker's last known
-  // position, and the derived distance between them (meters).
+  // GPS snapshots. clientLat/clientLng is the booking address. workerLat/
+  // workerLng starts as a copy of WorkerProfile.addressLat/addressLng at
+  // booking-creation time (used to derive distanceMeters, the input to the
+  // pricing distanceFee — see bookingController.createBooking) and is later
+  // overwritten with the worker's real GPS once they check in as arrived
+  // (see ArrivalVerification / bookingController.arriveBooking).
   clientLat      Float?
   clientLng      Float?
   workerLat      Float?
@@ -896,13 +924,17 @@ model Payment {
   refundReason String?
   refundedAt   DateTime?
 
-  // Set when status becomes FAILED — raw reason from PayMongo's webhook
-  // payload (translated for end users via utils/paymongoFailureMessages.ts).
+  // Set when status becomes FAILED — raw reason from Xendit's webhook
+  // payload (translated for end users via utils/xenditFailureMessages.ts).
   failureReason String?
 
-  // PayMongo references
-  paymongoPaymentId String?
-  paymongoSourceId  String?
+  // Xendit references. xenditInvoiceId is set at checkout-creation time and
+  // is what the invoice-paid webhook uses to find this row. xenditPaymentId
+  // is populated only once the webhook reports the invoice PAID (Xendit's
+  // payment_id, e.g. "ewc_...") and is surfaced to the client as the
+  // receipt's transactionId.
+  xenditInvoiceId String?
+  xenditPaymentId String?
 
   // Authorize/capture flow — amount is held (authorized) at booking time and
   // captured on completion; capturedAmount may differ from authorizedAmount
@@ -931,7 +963,7 @@ model Payment {
   @@index([escrowStatus])
 }
 
-// Tracks the actual disbursement of a worker's payout via PayMongo, separate
+// Tracks the actual disbursement of a worker's payout via Xendit, separate
 // from Payment.escrowStatus (which only tracks the platform's own escrow
 // ledger — RELEASED means "the worker's cut is owed", not "the worker has
 // been paid"). One Payout per Payment, created once escrow is released.
@@ -947,15 +979,11 @@ model Payout {
   accountName   String? // snapshot of WorkerProfile.payoutAccountName at send time
   accountNumber String // snapshot of WorkerProfile.payoutAccountNumber at send time
 
-  status                PayoutStatus @default(PENDING)
-  paymongoTransferId    String?      @unique
-  paymongoTransferStatus String? // raw status string from PayMongo, for debugging
-  // Deprecated — populated only on Xendit-era rows from before the PayMongo
-  // disbursement migration; no longer written to.
-  xenditDisbursementId  String?      @unique
-  xenditStatus          String?
-  failureReason         String?
-  attempts              Int          @default(0)
+  status               PayoutStatus @default(PENDING)
+  xenditDisbursementId String?      @unique // Xendit Payouts API `id` (e.g. "disb-...")
+  xenditStatus         String? // raw status from Xendit (ACCEPTED/COMPLETED/FAILED/...), for debugging
+  failureReason        String?
+  attempts             Int          @default(0)
 
   processingAt DateTime?
   paidAt       DateTime?
@@ -1011,8 +1039,8 @@ model WalletTransaction {
   amount       Float
   balanceAfter Float?
 
-  bookingId          String? // soft reference — links a deduction/refund to the job it was for
-  paymongoCheckoutId String? @unique // set for TOPUP rows, keys the webhook back to this transaction
+  bookingId       String? // soft reference — links a deduction/refund to the job it was for
+  xenditInvoiceId String? @unique // set for TOPUP rows, keys the invoice-paid webhook back to this transaction
   failureReason      String?
   note               String? // admin's reason, for ADMIN_ADJUSTMENT rows
 

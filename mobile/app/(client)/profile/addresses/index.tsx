@@ -7,7 +7,7 @@ import ScreenHeader from "../../../../components/ui/ScreenHeader";
 import AddressCard from "../../../../components/cards/AddressCard";
 import EmptyState from "../../../../components/feedback/EmptyState";
 import { Skeleton } from "../../../../components/ui/Skeleton";
-import { colors } from "../../../../constants";
+import { colors, cardShadow } from "../../../../constants";
 import * as api from "../../../../services/api";
 import { addressStorage } from "../../../../utils/storage";
 import { useAlertModal } from "../../../../contexts/AlertModalContext";
@@ -86,7 +86,7 @@ export default function AddressesScreen() {
       {loading ? (
         <View className="p-4">
           {Array.from({ length: 3 }).map((_, i) => (
-            <View key={i} className="bg-card rounded-2xl p-4 mb-3">
+            <View key={i} className="bg-card rounded-2xl p-4 mb-3" style={cardShadow}>
               <Skeleton width="40%" height={14} marginBottom={8} />
               <Skeleton width="80%" height={12} marginBottom={0} />
             </View>
@@ -123,6 +123,7 @@ export default function AddressesScreen() {
       )}
       <Pressable
         className="absolute bottom-6 right-6 w-14 h-14 bg-accent rounded-full items-center justify-center"
+        style={cardShadow}
         onPress={() => router.push("/(client)/profile/addresses/new")}
       >
         <Ionicons name="add" size={28} color={colors.white} />

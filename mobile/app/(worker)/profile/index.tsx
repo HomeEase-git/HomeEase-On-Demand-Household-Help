@@ -12,28 +12,50 @@ import * as api from "../../../services/api";
 import type { WorkerDetail } from "../../../types/api.types";
 import { colors, cardShadow } from "../../../constants";
 import { useAlertModal } from "../../../contexts/AlertModalContext";
+import { useTabRefresh } from "../../../hooks/useTabRefresh";
 
-const MENU = [
-  { label: "Edit Profile", path: "/(worker)/profile/edit" },
-  { label: "Digital ID", path: "/(worker)/profile/digital-id" },
-  { label: "My Skills & Services", path: "/(worker)/profile/skills" },
-  { label: "My Packages", path: "/(worker)/profile/packages" },
-  { label: "Set Availability", path: "/(worker)/profile/availability" },
-  { label: "My Certifications", path: "/(worker)/profile/certifications" },
-  { label: "My Reviews", path: "/(worker)/profile/reviews" },
-  { label: "Resume Analysis (AI)", path: "/(worker)/profile/resume-preview" },
-  { label: "Payout Method", path: "/(worker)/earnings/payout" },
-  { label: "Change Password", path: "/(worker)/profile/change-password" },
+const MENU_GROUPS = [
   {
-    label: "Notification Preferences",
-    path: "/(worker)/profile/notification-preferences",
+    title: "Professional Profile",
+    items: [
+      { label: "Edit Profile", path: "/(worker)/profile/edit", icon: "person-outline" },
+      { label: "Digital ID", path: "/(worker)/profile/digital-id", icon: "card-outline" },
+      { label: "My Skills & Services", path: "/(worker)/profile/skills", icon: "construct-outline" },
+      { label: "My Packages", path: "/(worker)/profile/packages", icon: "cube-outline" },
+      { label: "Set Availability", path: "/(worker)/profile/availability", icon: "calendar-outline" },
+      { label: "My Certifications", path: "/(worker)/profile/certifications", icon: "ribbon-outline" },
+      { label: "My Reviews", path: "/(worker)/profile/reviews", icon: "star-outline" },
+      { label: "Resume Analysis (AI)", path: "/(worker)/profile/resume-preview", icon: "sparkles-outline" },
+    ],
   },
-  { label: "Privacy Settings", path: "/(worker)/profile/privacy-settings" },
-  { label: "Help & Support", path: "/(worker)/profile/help-support" },
-  { label: "Terms and Conditions", path: "/(worker)/profile/terms" },
-  { label: "Privacy Policy", path: "/(worker)/profile/privacy-policy" },
-  { label: "About HomeEase", path: "/(worker)/profile/about" },
-];
+  {
+    title: "Earnings",
+    items: [
+      { label: "Payout Method", path: "/(worker)/earnings/payout", icon: "wallet-outline" },
+    ],
+  },
+  {
+    title: "Account",
+    items: [
+      { label: "Change Password", path: "/(worker)/profile/change-password", icon: "lock-closed-outline" },
+      {
+        label: "Notification Preferences",
+        path: "/(worker)/profile/notification-preferences",
+        icon: "notifications-outline",
+      },
+      { label: "Privacy Settings", path: "/(worker)/profile/privacy-settings", icon: "shield-checkmark-outline" },
+    ],
+  },
+  {
+    title: "Support & Legal",
+    items: [
+      { label: "Help & Support", path: "/(worker)/profile/help-support", icon: "help-circle-outline" },
+      { label: "Terms and Conditions", path: "/(worker)/profile/terms", icon: "document-text-outline" },
+      { label: "Privacy Policy", path: "/(worker)/profile/privacy-policy", icon: "shield-outline" },
+      { label: "About HomeEase", path: "/(worker)/profile/about", icon: "information-circle-outline" },
+    ],
+  },
+] as const;
 
 export default function WorkerProfileScreen() {
   const router = useRouter();
@@ -86,6 +108,8 @@ export default function WorkerProfileScreen() {
       load();
     }, [load]),
   );
+
+  useTabRefresh("worker:profile", load);
 
   const displayName = user?.name ?? "Worker";
   const displayEmail = user?.email ?? "—";
@@ -199,35 +223,61 @@ export default function WorkerProfileScreen() {
           </View>
         </View>
 
-        <View
-          className="bg-card rounded-2xl mx-4 mt-3 overflow-hidden"
-          style={cardShadow}
-        >
-          {MENU.map((item) => (
-            <Pressable
-              key={item.label}
-              className="flex-row items-center py-4 px-4 border-b border-divider last:border-0"
-              onPress={() => router.push(item.path as any)}
+        {MENU_GROUPS.map((group) => (
+          <View key={group.title}>
+            <Text className="text-text-muted text-xs font-semibold uppercase tracking-wide mx-4 mt-4 mb-1">
+              {group.title}
+            </Text>
+            <View
+              className="bg-card rounded-2xl mx-4 overflow-hidden"
+              style={cardShadow}
             >
-              <Text className="text-text-primary flex-1">{item.label}</Text>
-              <Ionicons
-                name="chevron-forward"
-                size={20}
-                color={colors.text.muted}
-              />
-            </Pressable>
-          ))}
+              {group.items.map((item) => (
+                <Pressable
+                  key={item.label}
+                  className="flex-row items-center py-3.5 px-4 border-b border-divider last:border-0"
+                  onPress={() => router.push(item.path as any)}
+                >
+                  <View className="w-9 h-9 rounded-full bg-accent/10 items-center justify-center mr-3">
+                    <Ionicons name={item.icon} size={18} color={colors.accent.DEFAULT} />
+                  </View>
+                  <Text className="text-text-primary flex-1">{item.label}</Text>
+                  <Ionicons
+                    name="chevron-forward"
+                    size={20}
+                    color={colors.text.muted}
+                  />
+                </Pressable>
+              ))}
+            </View>
+          </View>
+        ))}
+
+        <Text className="text-text-muted text-xs font-semibold uppercase tracking-wide mx-4 mt-4 mb-1">
+          Danger Zone
+        </Text>
+        <View
+          className="bg-error/10 rounded-2xl mx-4 overflow-hidden"
+        >
           <Pressable
-            className="py-4 px-4 border-t border-divider"
+            className="flex-row items-center py-4 px-4"
             onPress={() => setLogoutVisible(true)}
           >
-            <Text className="text-error font-semibold">Log Out</Text>
+            <View className="w-9 h-9 rounded-full bg-error/10 items-center justify-center mr-3">
+              <Ionicons name="log-out-outline" size={18} color={colors.error} />
+            </View>
+            <Text className="text-error flex-1 font-semibold">Log Out</Text>
+            <Ionicons name="chevron-forward" size={20} color={colors.error} />
           </Pressable>
           <Pressable
-            className="py-4 px-4"
+            className="flex-row items-center py-4 px-4 border-t border-divider"
             onPress={() => router.push("/(worker)/profile/delete-account")}
           >
-            <Text className="text-error font-semibold">Delete Account</Text>
+            <View className="w-9 h-9 rounded-full bg-error/10 items-center justify-center mr-3">
+              <Ionicons name="trash-outline" size={18} color={colors.error} />
+            </View>
+            <Text className="text-error flex-1 font-semibold">Delete Account</Text>
+            <Ionicons name="chevron-forward" size={20} color={colors.error} />
           </Pressable>
         </View>
       </ScrollView>

@@ -135,7 +135,6 @@ export type WorkerCard = {
   avatar: string | null;
   rating: number;
   totalReviews: number;
-  distance: number | null;
   hourlyRate: number | null;
   estimatedTotal: number | null;
   matchedServiceTypeId: string | null;
@@ -169,7 +168,7 @@ export type CreateBookingPayload = {
   priorities?: string[];
   tip?: number;
   notes?: string;
-  paymentMethodType?: 'GCASH' | 'MAYA' | 'CARD' | 'BANK_TRANSFER' | 'CASH';
+  paymentMethodType?: 'GCASH' | 'MAYA' | 'CASH';
   paymentAccountIdentifier?: string;
   scopeAnswers?: Record<string, string | string[]>;
   issuePhotoUrls?: string[];

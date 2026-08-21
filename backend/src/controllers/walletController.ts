@@ -3,8 +3,8 @@ import prisma from '@config/database';
 import { errorResponse } from '@utils/errorResponse';
 import { notifyUser } from '@utils/notify';
 import { getOrCreateWallet } from '@services/walletService';
-import { createSource, createSourcePayment } from '@services/paymongoService';
-import { translatePaymongoFailureReason } from '@utils/paymongoFailureMessages';
+import { createInvoice } from '@services/xenditService';
+import { translateXenditFailureReason } from '@utils/xenditFailureMessages';
 import type { JwtPayload } from '@/types/index';
 
 interface AuthRequest extends Request {
@@ -48,7 +48,7 @@ export const getMyWallet = async (req: AuthRequest, res: Response) => {
           balanceAfter: t.balanceAfter,
           bookingId: t.bookingId,
           note: t.note,
-          failureMessage: t.status === 'FAILED' ? translatePaymongoFailureReason(t.failureReason) : null,
+          failureMessage: t.status === 'FAILED' ? translateXenditFailureReason(t.failureReason) : null,
           createdAt: t.createdAt,
         })),
       },
@@ -61,11 +61,11 @@ export const getMyWallet = async (req: AuthRequest, res: Response) => {
 
 /**
  * POST /api/workers/me/wallet/topup
- * Starts a PayMongo GCash/Maya checkout to top up the worker's wallet.
- * Mirrors paymentController.createPaymongoCheckout — a PENDING
- * WalletTransaction is created up front, keyed by the PayMongo source id, so
- * the shared webhook handler (see handleWalletTopupChargeable below) can
- * find it once PayMongo reports the source as chargeable.
+ * Starts a Xendit Invoice checkout to top up the worker's wallet. Mirrors
+ * paymentController.createXenditCheckout — a PENDING WalletTransaction is
+ * created up front, keyed by the Xendit invoice id, so the shared webhook
+ * handler (see handleWalletTopupPaid below) can find it once Xendit reports
+ * the invoice as paid.
  */
 export const topupWallet = async (req: AuthRequest, res: Response) => {
   try {
@@ -91,16 +91,18 @@ export const topupWallet = async (req: AuthRequest, res: Response) => {
 
     const wallet = await getOrCreateWallet(workerProfile.id);
 
-    const redirectBase = process.env.PAYMONGO_REDIRECT_BASE_URL || 'https://homeease.app';
-    const source = await createSource({
+    const redirectBase = process.env.XENDIT_REDIRECT_BASE_URL || 'https://homeease.app';
+    const invoice = await createInvoice({
+      // Just a Xendit-side dedup/display hint — our webhook looks up the
+      // WalletTransaction by xenditInvoiceId, not this external_id.
+      externalId: `wallet-topup-${workerProfile.id}-${Date.now()}`,
       amountPesos: amount,
-      type: methodType === 'GCASH' ? 'gcash' : 'paymaya',
       description: `HomeEase wallet top-up (${workerProfile.id})`,
       // Reuses the same redirect prefixes as booking checkout — the mobile
-      // WebView (PaymongoCheckoutModal) intercepts by prefix only, it has no
+      // WebView (XenditCheckoutModal) intercepts by prefix only, it has no
       // booking-specific logic, so both flows share it.
-      successRedirect: `${redirectBase}/payment-redirect/success`,
-      failedRedirect: `${redirectBase}/payment-redirect/failed`,
+      successRedirectUrl: `${redirectBase}/payment-redirect/success`,
+      failureRedirectUrl: `${redirectBase}/payment-redirect/failed`,
     });
 
     await prisma.walletTransaction.create({
@@ -109,14 +111,14 @@ export const topupWallet = async (req: AuthRequest, res: Response) => {
         type: 'TOPUP',
         status: 'PENDING',
         amount,
-        paymongoCheckoutId: source.id,
+        xenditInvoiceId: invoice.id,
       },
     });
 
     return res.status(200).json({
       success: true,
-      message: 'PayMongo checkout created',
-      data: { checkoutUrl: source.checkoutUrl, sourceId: source.id },
+      message: 'Xendit checkout created',
+      data: { checkoutUrl: invoice.invoiceUrl, invoiceId: invoice.id },
     });
   } catch (error) {
     console.error('Error creating wallet top-up checkout:', error);
@@ -125,68 +127,55 @@ export const topupWallet = async (req: AuthRequest, res: Response) => {
 };
 
 /**
- * Called from paymentController.handlePayMongoWebhook's `source.chargeable`
- * case, after handleSourceChargeable finds no matching booking Payment for
- * this source id — the same PayMongo source-chargeable event covers both
- * booking checkouts and wallet top-ups, distinguished only by which table
- * has a row for that source id.
+ * Called from paymentController.handleXenditInvoiceWebhook's `PAID` case,
+ * after handleInvoicePaid finds no matching booking Payment for this invoice
+ * id — the same Xendit invoice-paid event covers both booking checkouts and
+ * wallet top-ups, distinguished only by which table has a row for that
+ * invoice id. Capture is atomic on Xendit's side, so unlike the old PayMongo
+ * flow there's no separate "charge the source" call here — the wallet is
+ * credited directly once the webhook confirms payment.
  */
-export async function handleWalletTopupChargeable(sourceId: string | undefined) {
-  if (!sourceId) return;
+export async function handleWalletTopupPaid(invoice: any) {
+  const invoiceId = invoice?.id as string | undefined;
+  if (!invoiceId) return;
 
   const walletTx = await prisma.walletTransaction.findFirst({
-    where: { paymongoCheckoutId: sourceId, status: 'PENDING', type: 'TOPUP' },
+    where: { xenditInvoiceId: invoiceId, status: 'PENDING', type: 'TOPUP' },
     include: { wallet: { include: { workerProfile: { select: { userId: true } } } } },
   });
   if (!walletTx) return;
 
-  try {
-    await createSourcePayment({
-      amountPesos: walletTx.amount,
-      sourceId,
-      description: `HomeEase wallet top-up ${walletTx.id}`,
+  await prisma.$transaction(async (tx) => {
+    const updatedWallet = await tx.workerWallet.update({
+      where: { id: walletTx.walletId },
+      data: { balance: { increment: walletTx.amount } },
     });
-
-    await prisma.$transaction(async (tx) => {
-      const updatedWallet = await tx.workerWallet.update({
-        where: { id: walletTx.walletId },
-        data: { balance: { increment: walletTx.amount } },
-      });
-      await tx.walletTransaction.update({
-        where: { id: walletTx.id },
-        data: { status: 'COMPLETED', balanceAfter: updatedWallet.balance },
-      });
-    });
-
-    await notifyUser({
-      userId: walletTx.wallet.workerProfile.userId,
-      type: 'PAYOUT_SENT',
-      title: 'Wallet Topped Up',
-      message: `₱${walletTx.amount.toFixed(2)} was added to your wallet.`,
-      relatedId: walletTx.id,
-    });
-  } catch (chargeError) {
-    console.error('Failed to charge wallet top-up source:', chargeError);
-    await prisma.walletTransaction.update({
+    await tx.walletTransaction.update({
       where: { id: walletTx.id },
-      data: {
-        status: 'FAILED',
-        failureReason: chargeError instanceof Error ? chargeError.message : 'Charge failed',
-      },
+      data: { status: 'COMPLETED', balanceAfter: updatedWallet.balance },
     });
-  }
+  });
+
+  await notifyUser({
+    userId: walletTx.wallet.workerProfile.userId,
+    type: 'PAYOUT_SENT',
+    title: 'Wallet Topped Up',
+    message: `₱${walletTx.amount.toFixed(2)} was added to your wallet.`,
+    relatedId: walletTx.id,
+  });
 }
 
 /**
- * Called from paymentController.handlePayMongoWebhook's `payment.failed`
- * case, alongside handlePaymentFailed — same dual-path reasoning as above.
+ * Called from paymentController.handleXenditInvoiceWebhook's
+ * EXPIRED/FAILED case, alongside handleInvoiceFailed — same dual-path
+ * reasoning as above.
  */
-export async function handleWalletTopupFailed(sourceId: string | undefined, failureReason?: string | null) {
-  if (!sourceId) return;
+export async function handleWalletTopupFailed(invoiceId: string | undefined, failureReason?: string | null) {
+  if (!invoiceId) return;
 
   await prisma.walletTransaction.updateMany({
-    where: { paymongoCheckoutId: sourceId, status: 'PENDING', type: 'TOPUP' },
-    data: { status: 'FAILED', failureReason: failureReason ?? 'PayMongo reported failure' },
+    where: { xenditInvoiceId: invoiceId, status: 'PENDING', type: 'TOPUP' },
+    data: { status: 'FAILED', failureReason: failureReason ?? 'Xendit reported failure' },
   });
 }
 

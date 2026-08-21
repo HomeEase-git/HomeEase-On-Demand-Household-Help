@@ -9,7 +9,7 @@ import Avatar from "../../../components/ui/Avatar";
 import AddressMap from "../../../components/ui/AddressMap";
 import PrimaryButton from "../../../components/ui/PrimaryButton";
 import OutlinedButton from "../../../components/ui/OutlinedButton";
-import GenericConfirmationModal from "../../../components/modals/GenericConfirmationModal";
+import DeclineReasonModal from "../../../components/modals/DeclineReasonModal";
 import { Skeleton } from "../../../components/ui/Skeleton";
 import { useWorkerStore } from "../../../store/workerStore";
 import { API_STATUS_MAP } from "../../../store/bookingStore";
@@ -145,11 +145,11 @@ export default function RequestDetailScreen() {
     }
   };
 
-  const handleDeclineConfirm = async () => {
-    setDeclineVisible(false);
+  const handleDeclineConfirm = async (reason: string) => {
     setSubmitting(true);
     try {
-      await api.declineBooking(booking.id);
+      await api.declineBooking(booking.id, reason);
+      setDeclineVisible(false);
       alertModal.success("Declined", "The job request has been declined.");
       router.back();
     } catch (error) {
@@ -333,12 +333,9 @@ export default function RequestDetailScreen() {
         )}
       </ScrollView>
 
-      <GenericConfirmationModal
+      <DeclineReasonModal
         visible={declineVisible}
-        title="Decline this job?"
-        message="Please confirm you want to decline this request."
-        confirmLabel="Yes, Decline"
-        cancelLabel="Keep It"
+        loading={submitting}
         onConfirm={handleDeclineConfirm}
         onCancel={() => setDeclineVisible(false)}
       />

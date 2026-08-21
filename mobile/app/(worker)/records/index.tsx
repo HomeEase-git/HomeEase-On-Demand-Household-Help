@@ -8,6 +8,7 @@ import { LoadingSkeleton } from "../../../components/feedback/LoadingSkeleton";
 import { mapApiJob, type ApiWorkerBooking, type WorkerJob } from "../../../store/workerStore";
 import * as api from "../../../services/api";
 import { getWorkerNetAmount } from "../../../utils/pricing";
+import { useTabRefresh } from "../../../hooks/useTabRefresh";
 
 type RecordTab = "Completed" | "Cancelled" | "Ongoing";
 
@@ -40,6 +41,8 @@ export default function RecordsScreen() {
       load();
     }, [load]),
   );
+
+  useTabRefresh("worker:records", load);
 
   const filtered = jobs.filter((j) => tabForJob(j) === tab);
 

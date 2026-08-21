@@ -3,7 +3,6 @@ import type { ConditionType, RoomType, TimeSlot } from '@prisma/client';
 import prisma from '@config/database';
 import { errorResponse } from '@utils/errorResponse';
 import { toDayStart } from '@services/workerAvailabilityService';
-import { distanceKm } from '@utils/geo';
 import { getAppSettings } from '@services/appSettingsService';
 import { parseWorkerResume } from '@services/resumeParseService';
 import { computeWorkerTier, tierMultiplier } from '@utils/workerTier';
@@ -26,7 +25,6 @@ const VALID_ROOM_TYPES: RoomType[] = [
   'BALCONY',
   'OTHER',
 ];
-const DEFAULT_SEARCH_RADIUS_KM = 30;
 // Search has no specific ServiceTask (that's picked in a later booking step),
 // so estimatedTotal for an hourly-rate worker uses a flat assumed duration —
 // documented here since it's the one non-obvious number in the card payload.
@@ -36,15 +34,14 @@ const DEFAULT_ESTIMATE_HOURS = 2;
  * GET /api/workers
  * Worker discovery search (public). Query params:
  *   serviceType, date (YYYY-MM-DD), timeSlot, condition, rooms (comma-separated
- *   RoomType), lat, lng, radius (km, default 30), page, limit
+ *   RoomType), page, limit
  *   — plus legacy category/minRating/maxPrice, kept for existing callers.
  *
  * Filters to isAvailable + kycStatus APPROVED workers under capacity, with an
- * open (date, timeSlot) slot when both are given, within radius km of
- * (lat, lng) when both are given, offering serviceType, and — when
- * condition/rooms are given — matching the worker's job preferences.
- * Distance can't be filtered/sorted in SQL without a geo extension, so the
- * radius/rating/distance pass happens in memory over a bounded candidate set.
+ * open (date, timeSlot) slot when both are given, offering serviceType, and —
+ * when condition/rooms are given — matching the worker's job preferences.
+ * Sorted by rating (there's no reliable worker location data to sort/filter
+ * by proximity — see matchingService.ts for the same reasoning on auto-match).
  */
 export const searchWorkers = async (req: AuthRequest, res: Response) => {
   try {
@@ -55,11 +52,9 @@ export const searchWorkers = async (req: AuthRequest, res: Response) => {
       timeSlot,
       condition,
       rooms,
-      lat,
-      lng,
-      radius,
       minRating,
       maxPrice,
+      workerId,
       page = '1',
       limit = '10',
     } = req.query;
@@ -77,13 +72,6 @@ export const searchWorkers = async (req: AuthRequest, res: Response) => {
       return res.status(400).json(errorResponse(400, 'date must be a valid YYYY-MM-DD date'));
     }
 
-    const clientLat = lat !== undefined ? parseFloat(lat as string) : null;
-    const clientLng = lng !== undefined ? parseFloat(lng as string) : null;
-    const hasLocation = clientLat != null && !isNaN(clientLat) && clientLng != null && !isNaN(clientLng);
-    const radiusKm = radius !== undefined && !isNaN(parseFloat(radius as string))
-      ? parseFloat(radius as string)
-      : DEFAULT_SEARCH_RADIUS_KM;
-
     const requestedRooms = typeof rooms === 'string'
       ? rooms.split(',').map((r) => r.trim().toUpperCase()).filter((r): r is RoomType => VALID_ROOM_TYPES.includes(r as RoomType))
       : [];
@@ -94,6 +82,14 @@ export const searchWorkers = async (req: AuthRequest, res: Response) => {
       isAvailable: true,
       kycStatus: 'APPROVED',
     };
+
+    // Scopes discovery to a single already-known worker — used by the client
+    // app to check a specific (e.g. profile-locked) worker's real open slots
+    // for a date, via the same authoritative WorkerAvailability filtering
+    // below, rather than a separate bespoke endpoint.
+    if (typeof workerId === 'string' && workerId) {
+      whereClause.userId = workerId;
+    }
 
     if (serviceTypeName) {
       whereClause.serviceTypes = { some: { name: { contains: serviceTypeName, mode: 'insensitive' } } };
@@ -151,28 +147,14 @@ export const searchWorkers = async (req: AuthRequest, res: Response) => {
       ? filtered.filter((w) => w.preferredRoomTypes.length === 0 || w.preferredRoomTypes.some((r) => requestedRooms.includes(r)))
       : filtered;
 
-    const withDistance = roomFiltered.map((w) => {
-      const distance =
-        hasLocation && w.currentLat != null && w.currentLng != null
-          ? distanceKm({ lat: clientLat as number, lng: clientLng as number }, { lat: w.currentLat, lng: w.currentLng })
-          : null;
-      return { worker: w, distance };
+    roomFiltered.sort((a, b) => {
+      if (b.rating !== a.rating) return b.rating - a.rating;
+      return b.totalReviews - a.totalReviews;
     });
 
-    const withinRadius = hasLocation
-      ? withDistance.filter((w) => w.distance != null && w.distance <= radiusKm)
-      : withDistance;
-
-    withinRadius.sort((a, b) => {
-      if (b.worker.rating !== a.worker.rating) return b.worker.rating - a.worker.rating;
-      const distA = a.distance ?? Number.POSITIVE_INFINITY;
-      const distB = b.distance ?? Number.POSITIVE_INFINITY;
-      return distA - distB;
-    });
-
-    const total = withinRadius.length;
+    const total = roomFiltered.length;
     const start = (pageNum - 1) * limitNum;
-    const page_ = withinRadius.slice(start, start + limitNum);
+    const page_ = roomFiltered.slice(start, start + limitNum);
 
     // Expertise tier — computed live from rating + completed-job count (see
     // utils/workerTier.ts). Batched over just this page, not all candidates.
@@ -181,13 +163,13 @@ export const searchWorkers = async (req: AuthRequest, res: Response) => {
       getAppSettings(),
       prisma.booking.groupBy({
         by: ['workerId'],
-        where: { workerId: { in: page_.map((p) => p.worker.userId) }, status: 'COMPLETED' },
+        where: { workerId: { in: page_.map((w) => w.userId) }, status: 'COMPLETED' },
         _count: { _all: true },
       }),
     ]);
     const completedByWorkerId = new Map(completedCounts.map((c) => [c.workerId as string, c._count._all]));
 
-    const cards = page_.map(({ worker, distance }) => {
+    const cards = page_.map((worker) => {
       const matchedServiceType =
         worker.serviceTypes.find((st) => serviceTypeName && st.name.toLowerCase() === serviceTypeName.toLowerCase()) ??
         worker.serviceTypes[0];
@@ -213,7 +195,6 @@ export const searchWorkers = async (req: AuthRequest, res: Response) => {
         avatar: worker.user.avatar,
         rating: worker.rating,
         totalReviews: worker.totalReviews,
-        distance,
         hourlyRate: worker.hourlyRate,
         estimatedTotal:
           estimatedTotal != null ? Math.round(estimatedTotal * tierMultiplier(tier, tierSettings) * 100) / 100 : null,
@@ -221,9 +202,11 @@ export const searchWorkers = async (req: AuthRequest, res: Response) => {
         // Lets the client fetch this worker's packages for the selected
         // category later in the booking flow without an extra round-trip.
         matchedServiceTypeId: matchedServiceType?.id ?? null,
-        // At-capacity workers are already filtered out of `withinRadius`
-        // above — these are exposed so a still-available worker's current
-        // load can be shown (e.g. "1 active job"), not to signal fullness.
+        service: matchedServiceType?.name ?? 'General service',
+        serviceTypeNames: worker.serviceTypes.map((st) => st.name),
+        // At-capacity workers are already filtered out above — these are
+        // exposed so a still-available worker's current load can be shown
+        // (e.g. "1 active job"), not to signal fullness.
         activeJobCount: worker.activeJobCount,
         maxConcurrentJobs: worker.maxConcurrentJobs,
         badges,
@@ -633,6 +616,55 @@ export const updateAvailability = async (req: AuthRequest, res: Response) => {
 };
 
 /**
+ * GET /api/workers/me/profile
+ * Self-service profile read (worker only) — unlike GET /workers/:workerId
+ * (the public detail view), this includes addressLat/addressLng, which
+ * should never be exposed on the public endpoint since it's the worker's
+ * precise home/service coordinates, not just a text address.
+ */
+export const getMyWorkerProfile = async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      return res.status(401).json(errorResponse(401, 'Not authenticated'));
+    }
+
+    const profile = await prisma.workerProfile.findUnique({
+      where: { userId: req.user.userId },
+      select: {
+        bio: true,
+        serviceAreaRadius: true,
+        address: true,
+        city: true,
+        state: true,
+        zipCode: true,
+        addressLat: true,
+        addressLng: true,
+        resumeUrl: true,
+        digitalIdTrade: true,
+        digitalIdServiceArea: true,
+        licenseNumber: true,
+        kycStatus: true,
+        kycSubmittedAt: true,
+        kycApprovedAt: true,
+      },
+    });
+
+    if (!profile) {
+      return res.status(404).json(errorResponse(404, 'Worker profile not found'));
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: 'Profile retrieved successfully',
+      data: profile,
+    });
+  } catch (error) {
+    console.error('Error fetching worker profile:', error);
+    return res.status(500).json(errorResponse(500, 'Failed to fetch profile'));
+  }
+};
+
+/**
  * PATCH /api/workers/me/profile
  * Update worker profile fields (worker only)
  */
@@ -649,6 +681,8 @@ export const updateWorkerProfile = async (req: AuthRequest, res: Response) => {
       city,
       state,
       zipCode,
+      addressLat,
+      addressLng,
       resumeUrl,
       digitalIdTrade,
       digitalIdServiceArea,
@@ -667,6 +701,11 @@ export const updateWorkerProfile = async (req: AuthRequest, res: Response) => {
     if (city !== undefined) updateData.city = city;
     if (state !== undefined) updateData.state = state;
     if (zipCode !== undefined) updateData.zipCode = zipCode;
+    // addressLat/addressLng are the geocoded coordinates for the address
+    // above — used to compute the distance-based pricing fee at booking
+    // time (see bookingController.createBooking). Not matching/search input.
+    if (addressLat !== undefined) updateData.addressLat = addressLat;
+    if (addressLng !== undefined) updateData.addressLng = addressLng;
     if (resumeUrl !== undefined) updateData.resumeUrl = resumeUrl;
     if (digitalIdTrade !== undefined) updateData.digitalIdTrade = digitalIdTrade;
     if (digitalIdServiceArea !== undefined) updateData.digitalIdServiceArea = digitalIdServiceArea;
@@ -687,6 +726,8 @@ export const updateWorkerProfile = async (req: AuthRequest, res: Response) => {
         city: updated.city,
         state: updated.state,
         zipCode: updated.zipCode,
+        addressLat: updated.addressLat,
+        addressLng: updated.addressLng,
         kycStatus: updated.kycStatus,
         kycSubmittedAt: updated.kycSubmittedAt,
         kycApprovedAt: updated.kycApprovedAt,
@@ -1225,6 +1266,53 @@ export const createSkill = async (req: AuthRequest, res: Response) => {
   } catch (error) {
     console.error('Error creating skill:', error);
     return res.status(500).json(errorResponse(500, 'Failed to add skill'));
+  }
+};
+
+/**
+ * PATCH /api/workers/me/skills/:skillId
+ * Update a skill on the authenticated worker's profile (worker only)
+ */
+export const updateSkill = async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      return res.status(401).json(errorResponse(401, 'Not authenticated'));
+    }
+
+    const skillId = req.params.skillId as string;
+    const { name, category, rate } = req.body;
+
+    const workerProfile = await prisma.workerProfile.findUnique({
+      where: { userId: req.user.userId },
+      select: { id: true },
+    });
+
+    if (!workerProfile) {
+      return res.status(404).json(errorResponse(404, 'Worker profile not found'));
+    }
+
+    const existingSkill = await prisma.skill.findUnique({ where: { id: skillId } });
+    if (!existingSkill || existingSkill.workerProfileId !== workerProfile.id) {
+      return res.status(404).json(errorResponse(404, 'Skill not found'));
+    }
+
+    const skill = await prisma.skill.update({
+      where: { id: skillId },
+      data: {
+        ...(name !== undefined && { name: name.trim() }),
+        ...(category !== undefined && { category: category.trim() }),
+        ...(rate !== undefined && { rate }),
+      },
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: 'Skill updated successfully',
+      data: { skill },
+    });
+  } catch (error) {
+    console.error('Error updating skill:', error);
+    return res.status(500).json(errorResponse(500, 'Failed to update skill'));
   }
 };
 

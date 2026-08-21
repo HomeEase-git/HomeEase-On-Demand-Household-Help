@@ -31,7 +31,6 @@ const URGENCY_FEE_MULTIPLIER: Record<string, number> = { STANDARD: 0, URGENT: 0.
 // Distance-based surcharge beyond a free radius around the worker.
 const FREE_DISTANCE_KM = 5;
 const PER_KM_FEE = 10;
-const DEFAULT_MATCH_RADIUS_KM = 30;
 
 const round2 = (n: number): number => Math.round(n * 100) / 100;
 
@@ -184,7 +183,6 @@ export const createBooking = async (req: AuthRequest, res: Response) => {
 
     let resolvedWorkerId = requestedWorkerId ?? null;
     let isAutoMatched = false;
-    let matchDistanceKm: number | null = null;
 
     if (!resolvedWorkerId) {
       const match = await findAutoMatchWorker({
@@ -195,8 +193,6 @@ export const createBooking = async (req: AuthRequest, res: Response) => {
         condition: effectiveCondition,
         rooms,
         hasPets,
-        clientLocation,
-        radiusKm: DEFAULT_MATCH_RADIUS_KM,
       });
 
       if (!match) {
@@ -205,7 +201,6 @@ export const createBooking = async (req: AuthRequest, res: Response) => {
 
       resolvedWorkerId = match.workerId;
       isAutoMatched = true;
-      matchDistanceKm = match.distanceKm;
     }
 
     const workerProfile = await prisma.workerProfile.findUnique({ where: { userId: resolvedWorkerId } });
@@ -231,11 +226,15 @@ export const createBooking = async (req: AuthRequest, res: Response) => {
       return res.status(409).json(errorResponse(409, 'Selected slot is no longer available'));
     }
 
+    // Distance fee is based on the worker's fixed service address, not a
+    // live position — bookings are scheduled in advance, not dispatched to
+    // wherever the worker happens to be right now, so this is a static
+    // "shipping fee" style distance rather than real-time proximity (see
+    // WorkerProfile.addressLat/addressLng comment).
     const workerDistanceKm =
-      matchDistanceKm ??
-      (workerProfile.currentLat != null && workerProfile.currentLng != null
-        ? distanceKm(clientLocation, { lat: workerProfile.currentLat, lng: workerProfile.currentLng })
-        : null);
+      workerProfile.addressLat != null && workerProfile.addressLng != null
+        ? distanceKm(clientLocation, { lat: workerProfile.addressLat, lng: workerProfile.addressLng })
+        : null;
 
     // Expertise tier — computed live from rating + completed-job count (see
     // utils/workerTier.ts), not stored, so it never drifts from those numbers.
@@ -326,8 +325,8 @@ export const createBooking = async (req: AuthRequest, res: Response) => {
             city: cityName,
             clientLat: lat,
             clientLng: lng,
-            workerLat: workerProfile.currentLat ?? null,
-            workerLng: workerProfile.currentLng ?? null,
+            workerLat: workerProfile.addressLat ?? null,
+            workerLng: workerProfile.addressLng ?? null,
             distanceMeters: workerDistanceKm != null ? Math.round(workerDistanceKm * 1000) : null,
             status: 'PENDING',
           },
@@ -911,8 +910,6 @@ export const declineBooking = async (req: AuthRequest, res: Response) => {
           timeSlot: updated.timeSlot,
           condition: updated.condition,
           rooms: updated.rooms,
-          clientLocation: { lat: updated.clientLat ?? 0, lng: updated.clientLng ?? 0 },
-          radiusKm: DEFAULT_MATCH_RADIUS_KM,
           excludeWorkerIds: updatedDeclinedWorkerIds,
         }).catch(() => null)
       : null;
@@ -1633,69 +1630,6 @@ export const cancelBooking = async (req: AuthRequest, res: Response) => {
 };
 
 /**
- * PATCH /api/bookings/:id/reschedule
- * Reschedule booking to new date/time
- * NOTE: schema only has scheduledDate (no scheduledTime field)
- */
-export const rescheduleBooking = async (req: AuthRequest, res: Response) => {
-  try {
-    if (!req.user) {
-      return res.status(401).json(errorResponse(401, 'Not authenticated'));
-    }
-
-    const id = req.params.id as string;
-    const { newDate } = req.body;
-
-    const booking = await prisma.booking.findUnique({
-      where: { id },
-    });
-
-    if (!booking) {
-      return res.status(404).json(errorResponse(404, 'Booking not found'));
-    }
-
-    // Check ownership
-    if (booking.clientId !== req.user.userId && booking.workerId !== req.user.userId) {
-      return res.status(403).json(errorResponse(403, 'You do not have permission to reschedule this booking'));
-    }
-
-    const updated = await prisma.booking.update({
-      where: { id },
-      data: {
-        scheduledDate: new Date(newDate),
-      },
-    });
-
-    // Notify the other party (workerId may be null if booking is unassigned)
-    const notificationUserId =
-      booking.clientId === req.user.userId ? booking.workerId : booking.clientId;
-
-    if (notificationUserId) {
-      await notifyUser({
-        userId: notificationUserId,
-        // No BOOKING_RESCHEDULED in schema; BOOKING_ACCEPTED is closest
-        type: 'BOOKING_RESCHEDULED',
-        title: 'Booking Rescheduled',
-        message: `Booking has been rescheduled to ${newDate}`,
-        relatedId: id,
-      });
-    }
-
-    return res.status(200).json({
-      success: true,
-      message: 'Booking rescheduled successfully',
-      data: {
-        id: updated.id,
-        scheduledDate: updated.scheduledDate,
-      },
-    });
-  } catch (error) {
-    console.error('Error rescheduling booking:', error);
-    return res.status(500).json(errorResponse(500, 'Failed to reschedule booking'));
-  }
-};
-
-/**
  * POST /api/bookings/:id/addons
  * Add scope-creep addon items mid-job
  * Schema model: BookingAddOn with fields: name, price (not title/description/cost)
@@ -1720,6 +1654,14 @@ export const addAddon = async (req: AuthRequest, res: Response) => {
     // Only worker can add addons
     if (booking.workerId !== req.user.userId) {
       return res.status(403).json(errorResponse(403, 'Only assigned worker can add addons'));
+    }
+
+    // Mid-job only — before IN_PROGRESS there's no job happening yet to add
+    // scope-creep items to, and once the worker has submitted completion
+    // (PENDING_COMPLETION onward) the final price is already being settled.
+    const ADDON_ALLOWED_STATUSES = ['IN_PROGRESS', 'QUOTE_SUBMITTED', 'QUOTE_APPROVED'];
+    if (!ADDON_ALLOWED_STATUSES.includes(booking.status)) {
+      return res.status(409).json(errorResponse(409, `Cannot add an addon to a booking with status ${booking.status}`));
     }
 
     // prisma client accessor is bookingAddOn (capital O)

@@ -12,6 +12,7 @@ import { useNotificationStore } from "../../../store/notificationStore";
 import * as api from "../../../services/api";
 import { colors } from "../../../constants";
 import { getWorkerNetAmount } from "../../../utils/pricing";
+import { useTabRefresh } from "../../../hooks/useTabRefresh";
 
 const todayStr = () => new Date().toISOString().slice(0, 10);
 
@@ -56,6 +57,8 @@ export default function WorkerHomeScreen() {
       load();
     }, [load]),
   );
+
+  useTabRefresh("worker:home", load);
 
   return (
     <SafeAreaView className="flex-1 bg-white" edges={["top"]}>

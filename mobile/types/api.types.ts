@@ -115,11 +115,6 @@ export interface CreateBookingRequest {
   inspectionFeeAmount?: number;
 }
 
-export interface RescheduleBookingRequest {
-  newDate: string;
-  newTime: string;
-}
-
 export interface CancelBookingRequest {
   reason?: string;
 }
@@ -167,6 +162,12 @@ export interface WorkerDetail extends Worker {
   availableDays: string[];
   maxConcurrentJobs: number;
   hourlyRate?: number | null;
+  // Every ServiceType this worker offers (not just the primary `service`
+  // shown on the card) — lets a "book this worker" entry point (the profile
+  // screen) restrict the booking flow's category picker to services this
+  // worker actually offers, and resolve the right ServiceType id per pick.
+  services: { id: string; name: string; basePrice: number }[];
+  tier?: 'STANDARD' | 'PRO' | 'EXPERT';
 }
 
 export interface WorkerFilters {

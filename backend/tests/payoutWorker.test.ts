@@ -3,9 +3,9 @@ jest.mock('@queues/payoutQueue', () => ({
   PAYOUT_JOB_NAMES: { SEND_PAYOUT: 'send-payout' },
 }));
 
-jest.mock('@services/paymongoDisbursementService', () => ({
-  createTransfer: jest.fn(),
-  paymongoDestinationBicFor: jest.fn(),
+jest.mock('@services/xenditDisbursementService', () => ({
+  createPayout: jest.fn(),
+  xenditChannelCodeFor: jest.fn(),
 }));
 
 import type { Job } from 'bullmq';
@@ -13,7 +13,7 @@ import prisma from '@config/database';
 import { processSendPayout } from '@workers/payoutWorker';
 import { createTestUser, deleteTestUser, createTestBooking, deleteTestBooking } from './helpers';
 
-const { createTransfer, paymongoDestinationBicFor } = require('@services/paymongoDisbursementService');
+const { createPayout, xenditChannelCodeFor } = require('@services/xenditDisbursementService');
 
 function fakeJob(attemptsMade: number, attempts: number): Job {
   return { attemptsMade, opts: { attempts } } as unknown as Job;
@@ -44,8 +44,8 @@ describe('payoutWorker.processSendPayout', () => {
   });
 
   beforeEach(() => {
-    (createTransfer as jest.Mock).mockReset();
-    (paymongoDestinationBicFor as jest.Mock).mockReset();
+    (createPayout as jest.Mock).mockReset();
+    (xenditChannelCodeFor as jest.Mock).mockReset();
   });
 
   async function seedPendingPayout(channel: 'GCASH' | 'MAYA' = 'GCASH') {
@@ -77,35 +77,48 @@ describe('payoutWorker.processSendPayout', () => {
     });
   }
 
-  it('marks the payout PAID when PayMongo returns succeeded immediately', async () => {
+  it('marks the payout PAID when Xendit returns COMPLETED immediately', async () => {
     const payout = await seedPendingPayout('GCASH');
-    (paymongoDestinationBicFor as jest.Mock).mockResolvedValueOnce('PH_GCASH_BIC');
-    (createTransfer as jest.Mock).mockResolvedValueOnce({ id: 'tr_immediate', status: 'succeeded' });
+    (xenditChannelCodeFor as jest.Mock).mockReturnValueOnce('PH_GCASH');
+    (createPayout as jest.Mock).mockResolvedValueOnce({ id: 'disb_immediate', status: 'COMPLETED' });
 
     await processSendPayout(fakeJob(0, 5), { payoutId: payout.id });
 
     const updated = await prisma.payout.findUnique({ where: { id: payout.id } });
     expect(updated?.status).toBe('PAID');
-    expect(updated?.paymongoTransferId).toBe('tr_immediate');
+    expect(updated?.xenditDisbursementId).toBe('disb_immediate');
     expect(updated?.paidAt).not.toBeNull();
   });
 
-  it('leaves the payout PROCESSING when PayMongo returns pending', async () => {
+  it('leaves the payout PROCESSING when Xendit returns ACCEPTED (the realistic synchronous response, hand-confirmed against the live sandbox)', async () => {
     const payout = await seedPendingPayout('GCASH');
-    (paymongoDestinationBicFor as jest.Mock).mockResolvedValueOnce('PH_GCASH_BIC');
-    (createTransfer as jest.Mock).mockResolvedValueOnce({ id: 'tr_pending', status: 'pending' });
+    (xenditChannelCodeFor as jest.Mock).mockReturnValueOnce('PH_GCASH');
+    (createPayout as jest.Mock).mockResolvedValueOnce({ id: 'disb_accepted', status: 'ACCEPTED' });
 
     await processSendPayout(fakeJob(0, 5), { payoutId: payout.id });
 
     const updated = await prisma.payout.findUnique({ where: { id: payout.id } });
     expect(updated?.status).toBe('PROCESSING');
-    expect(updated?.paymongoTransferId).toBe('tr_pending');
+    expect(updated?.xenditDisbursementId).toBe('disb_accepted');
+  });
+
+  it('marks the payout FAILED when Xendit returns FAILED immediately', async () => {
+    const payout = await seedPendingPayout('GCASH');
+    (xenditChannelCodeFor as jest.Mock).mockReturnValueOnce('PH_GCASH');
+    (createPayout as jest.Mock).mockResolvedValueOnce({ id: 'disb_failed', status: 'FAILED' });
+
+    await processSendPayout(fakeJob(0, 5), { payoutId: payout.id });
+
+    const updated = await prisma.payout.findUnique({ where: { id: payout.id } });
+    expect(updated?.status).toBe('FAILED');
+    expect(updated?.xenditDisbursementId).toBe('disb_failed');
+    expect(updated?.failureReason).toBeTruthy();
   });
 
   it('resets to PENDING and rethrows on a non-final failed attempt', async () => {
     const payout = await seedPendingPayout('GCASH');
-    (paymongoDestinationBicFor as jest.Mock).mockResolvedValueOnce('PH_GCASH_BIC');
-    (createTransfer as jest.Mock).mockRejectedValueOnce(new Error('network blip'));
+    (xenditChannelCodeFor as jest.Mock).mockReturnValueOnce('PH_GCASH');
+    (createPayout as jest.Mock).mockRejectedValueOnce(new Error('network blip'));
 
     await expect(processSendPayout(fakeJob(0, 5), { payoutId: payout.id })).rejects.toThrow('network blip');
 
@@ -116,8 +129,8 @@ describe('payoutWorker.processSendPayout', () => {
 
   it('marks FAILED and does not rethrow past what BullMQ expects on the final attempt', async () => {
     const payout = await seedPendingPayout('GCASH');
-    (paymongoDestinationBicFor as jest.Mock).mockResolvedValueOnce('PH_GCASH_BIC');
-    (createTransfer as jest.Mock).mockRejectedValueOnce(new Error('destination rejected'));
+    (xenditChannelCodeFor as jest.Mock).mockReturnValueOnce('PH_GCASH');
+    (createPayout as jest.Mock).mockRejectedValueOnce(new Error('destination rejected'));
 
     await expect(processSendPayout(fakeJob(4, 5), { payoutId: payout.id })).rejects.toThrow('destination rejected');
 
@@ -132,6 +145,6 @@ describe('payoutWorker.processSendPayout', () => {
 
     await processSendPayout(fakeJob(0, 5), { payoutId: payout.id });
 
-    expect(createTransfer).not.toHaveBeenCalled();
+    expect(createPayout).not.toHaveBeenCalled();
   });
 });

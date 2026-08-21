@@ -70,7 +70,7 @@ export async function creditWalletTx(
   workerProfileId: string,
   amount: number,
   type: WalletTransactionType,
-  opts: { bookingId?: string; note?: string; paymongoCheckoutId?: string } = {}
+  opts: { bookingId?: string; note?: string; xenditInvoiceId?: string } = {}
 ) {
   const wallet = await ensureWallet(client, workerProfileId);
 
@@ -88,7 +88,7 @@ export async function creditWalletTx(
       balanceAfter: updated.balance,
       bookingId: opts.bookingId,
       note: opts.note,
-      paymongoCheckoutId: opts.paymongoCheckoutId,
+      xenditInvoiceId: opts.xenditInvoiceId,
     },
   });
 
@@ -108,7 +108,7 @@ export async function creditWallet(
   workerProfileId: string,
   amount: number,
   type: WalletTransactionType,
-  opts?: { bookingId?: string; note?: string; paymongoCheckoutId?: string }
+  opts?: { bookingId?: string; note?: string; xenditInvoiceId?: string }
 ) {
   return prisma.$transaction((tx) => creditWalletTx(tx, workerProfileId, amount, type, opts));
 }

@@ -13,7 +13,7 @@ import DangerButton from "../../../../components/ui/DangerButton";
 import PriceBreakdownCard from "../../../../components/ui/PriceBreakdown";
 import { LoadingSkeleton } from "../../../../components/feedback/LoadingSkeleton";
 import PaymentMethodBottomSheet from "../../../../components/bottom-sheets/PaymentMethodBottomSheet";
-import PaymongoCheckoutModal from "../../../../components/payment/PaymongoCheckoutModal";
+import XenditCheckoutModal from "../../../../components/payment/XenditCheckoutModal";
 import type { BottomSheetHandle } from "../../../../components/bottom-sheets/BottomSheetWrapper";
 import {
   useBookingStore,
@@ -26,16 +26,15 @@ import {
   confirmBookingCompletion,
   createBookingPayment,
   releasePaymentEscrow,
-  createPaymongoCheckout,
+  createXenditCheckout,
   getTransactionDetail,
 } from "../../../../services/api";
-import { isExactCategoryMatch } from "../../../../utils/categoryMapping";
 import type { StatusType } from "../../../../components/ui/StatusBadge";
 import { colors } from "../../../../constants";
 import { useAlertModal } from "../../../../contexts/AlertModalContext";
 import { PAYMENT_METHOD_TYPE_MAP } from "../../../../utils/paymentMethodMap";
 
-const PAYMONGO_GATEWAY_METHODS = new Set(["GCASH", "MAYA"]);
+const XENDIT_GATEWAY_METHODS = new Set(["GCASH", "MAYA"]);
 
 type ApiBookingDetail = {
   id: string;
@@ -185,7 +184,7 @@ export default function BookingDetailScreen() {
   }
 
   // Real, backend-persisted values only — payment.subtotal/tip/totalAmount
-  // are what PayMongo actually charged; fall back to the booking amount for
+  // are what Xendit actually charged; fall back to the booking amount for
   // the rare case a Payment row doesn't exist yet.
   const priceBreakdown = {
     subtotal: rawDetail?.payment?.subtotal ?? booking.amount,
@@ -211,12 +210,12 @@ export default function BookingDetailScreen() {
   // the time this screen would otherwise ask again. These only matter for
   // the rare cases where no settlement happened automatically: a legacy
   // booking with no Payment row at all, or one where server-side capture
-  // threw (e.g. a PayMongo outage) and left status stuck at PENDING.
+  // threw (e.g. a Xendit outage) and left status stuck at PENDING.
   const settledMethodType = booking.payment?.methodType;
   const needsPayment = isCompleted && booking.payment?.status !== "COMPLETED";
   const hasQuote = booking.status === "QuoteSubmitted" && booking.quote;
 
-  // Polls the payment detail until the PayMongo webhook has resolved it to
+  // Polls the payment detail until the Xendit webhook has resolved it to
   // COMPLETED/FAILED (it processes within a second or two of the redirect in
   // test mode), or gives up after ~15s so the UI doesn't hang forever.
   const waitForPaymentOutcome = async (targetBookingId: string) => {
@@ -230,7 +229,7 @@ export default function BookingDetailScreen() {
     return null;
   };
 
-  const startPaymongoCheckout = async (methodType: string, accountIdentifier?: string) => {
+  const startXenditCheckout = async (methodType: string, accountIdentifier?: string) => {
     try {
       await createBookingPayment(booking.id, {
         methodType: methodType as "GCASH" | "MAYA",
@@ -238,14 +237,14 @@ export default function BookingDetailScreen() {
       });
     } catch (error) {
       // 409 = a Payment already exists for this booking. Expected when the
-      // client backed out of a previous PayMongo checkout without finishing
+      // client backed out of a previous Xendit checkout without finishing
       // it — that Payment is still PENDING, so we just reuse it below.
       if (!(isAxiosError(error) && error.response?.status === 409)) {
         throw error;
       }
     }
 
-    const { checkoutUrl: url } = await createPaymongoCheckout(booking.id);
+    const { checkoutUrl: url } = await createXenditCheckout(booking.id);
     setCheckoutUrl(url);
     setCheckoutVisible(true);
   };
@@ -254,8 +253,8 @@ export default function BookingDetailScreen() {
     if (processingPayment) return;
     setProcessingPayment(true);
     try {
-      if (PAYMONGO_GATEWAY_METHODS.has(methodType)) {
-        await startPaymongoCheckout(methodType, accountIdentifier);
+      if (XENDIT_GATEWAY_METHODS.has(methodType)) {
+        await startXenditCheckout(methodType, accountIdentifier);
         // processingPayment stays true while the checkout WebView is open —
         // handleCheckoutSuccess/Failed/Cancel below clear it.
         return;
@@ -292,7 +291,7 @@ export default function BookingDetailScreen() {
         "We couldn't process payment right now. You can try again from this screen.",
       );
     } finally {
-      if (!PAYMONGO_GATEWAY_METHODS.has(methodType)) {
+      if (!XENDIT_GATEWAY_METHODS.has(methodType)) {
         setProcessingPayment(false);
       }
     }
@@ -325,16 +324,16 @@ export default function BookingDetailScreen() {
       } else if (detail?.status === "Failed") {
         alertModal.error(
           "Payment failed",
-          detail.failureMessage || "PayMongo declined this payment. You can try again from this screen.",
+          detail.failureMessage || "The payment was declined. You can try again from this screen.",
         );
       } else {
         alertModal.info(
           "Still processing",
-          "We're waiting for PayMongo to confirm your payment. Check back on this screen in a moment.",
+          "We're still confirming your payment. Check back on this screen in a moment.",
         );
       }
     } catch (error) {
-      console.error("Confirm PayMongo payment error:", error);
+      console.error("Confirm Xendit payment error:", error);
       alertModal.error(
         "Error",
         "We couldn't confirm your payment status. Please check back shortly.",
@@ -795,13 +794,6 @@ export default function BookingDetailScreen() {
               label="Book Again"
               fullWidth
               onPress={() => {
-                if (!isExactCategoryMatch(booking.category ?? booking.service)) {
-                  alertModal.warning(
-                    "Booking unavailable",
-                    "This booking's service type couldn't be matched to a bookable category. Please try a different booking or contact support.",
-                  );
-                  return;
-                }
                 prefillFromBooking(booking);
                 router.push("/(client)/booking/new/step-1");
               }}
@@ -830,7 +822,7 @@ export default function BookingDetailScreen() {
         innerRef={paymentSheetRef}
         onSelect={handleSelectPaymentMethod}
       />
-      <PaymongoCheckoutModal
+      <XenditCheckoutModal
         visible={checkoutVisible}
         checkoutUrl={checkoutUrl}
         onSuccess={handleCheckoutSuccess}

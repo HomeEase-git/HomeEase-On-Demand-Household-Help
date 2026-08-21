@@ -19,7 +19,9 @@ export const GenericSuccessModal: React.FC<Props> = ({
   return (
     <ModalWrapper visible={visible} onClose={onClose}>
       <View className="items-center mb-4">
-        <Ionicons name="checkmark-circle" size={48} color={colors.success} />
+        <View className="w-16 h-16 rounded-full bg-success/10 items-center justify-center">
+          <Ionicons name="checkmark-circle" size={36} color={colors.success} />
+        </View>
       </View>
       <Text className="text-text-primary font-bold text-lg text-center">
         {title}

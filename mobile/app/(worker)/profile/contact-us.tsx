@@ -6,7 +6,7 @@ import { useRouter } from "expo-router";
 import ScreenHeader from "../../../components/ui/ScreenHeader";
 import InputField from "../../../components/ui/InputField";
 import PrimaryButton from "../../../components/ui/PrimaryButton";
-import { colors } from "../../../constants";
+import { colors, cardShadow } from "../../../constants";
 import { useAlertModal } from "../../../contexts/AlertModalContext";
 
 const SUPPORT_EMAIL = "support@homeease.com";
@@ -40,32 +40,32 @@ export default function WorkerContactUsScreen() {
     <SafeAreaView className="flex-1 bg-white">
       <ScreenHeader title="Contact Us" showBack />
       <ScrollView contentContainerStyle={{ padding: 24 }}>
-        <View className="bg-card rounded-2xl p-4 mb-4">
-          <View className="flex-row items-center mb-3">
-            <Ionicons
-              name="mail-outline"
-              size={20}
-              color={colors.brand.DEFAULT}
-            />
-            <Text className="text-primary ml-2">support@homeease.com</Text>
+        <Text className="text-text-muted text-xs font-semibold uppercase tracking-wide mb-1">
+          Reach Us
+        </Text>
+        <View className="bg-card rounded-2xl mb-6 overflow-hidden" style={cardShadow}>
+          <View className="flex-row items-center py-3.5 px-4 border-b border-divider">
+            <View className="w-9 h-9 rounded-full bg-accent/10 items-center justify-center mr-3">
+              <Ionicons name="mail-outline" size={18} color={colors.accent.DEFAULT} />
+            </View>
+            <Text className="text-text-primary flex-1">support@homeease.com</Text>
           </View>
-          <View className="flex-row items-center mb-3">
-            <Ionicons
-              name="call-outline"
-              size={20}
-              color={colors.brand.DEFAULT}
-            />
-            <Text className="text-primary ml-2">(044) 123-4567</Text>
+          <View className="flex-row items-center py-3.5 px-4 border-b border-divider">
+            <View className="w-9 h-9 rounded-full bg-accent/10 items-center justify-center mr-3">
+              <Ionicons name="call-outline" size={18} color={colors.accent.DEFAULT} />
+            </View>
+            <Text className="text-text-primary flex-1">(044) 123-4567</Text>
           </View>
-          <View className="flex-row items-center">
-            <Ionicons
-              name="time-outline"
-              size={20}
-              color={colors.brand.DEFAULT}
-            />
-            <Text className="text-primary ml-2">Mon-Fri 8AM-5PM</Text>
+          <View className="flex-row items-center py-3.5 px-4">
+            <View className="w-9 h-9 rounded-full bg-accent/10 items-center justify-center mr-3">
+              <Ionicons name="time-outline" size={18} color={colors.accent.DEFAULT} />
+            </View>
+            <Text className="text-text-primary flex-1">Mon-Fri 8AM-5PM</Text>
           </View>
         </View>
+        <Text className="text-text-muted text-xs font-semibold uppercase tracking-wide mb-1">
+          Send a Message
+        </Text>
         <InputField
           label="Subject"
           value={subject}

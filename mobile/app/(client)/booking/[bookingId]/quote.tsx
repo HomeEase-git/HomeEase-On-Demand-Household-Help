@@ -1,5 +1,5 @@
-import React, { useState } from "react";
-import { View, Text, ScrollView, Pressable } from "react-native";
+import React, { useEffect, useState } from "react";
+import { View, Text, ScrollView, Pressable, ActivityIndicator } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { AppIcon as Ionicons } from "../../../../components/icons/AppIcon";
 import { useRouter, useLocalSearchParams } from "expo-router";
@@ -8,10 +8,38 @@ import InputField from "../../../../components/ui/InputField";
 import PrimaryButton from "../../../../components/ui/PrimaryButton";
 import DangerButton from "../../../../components/ui/DangerButton";
 import OutlinedButton from "../../../../components/ui/OutlinedButton";
-import { useBookingStore } from "../../../../store/bookingStore";
-import { approveQuote as apiApproveQuote, disputeQuote as apiDisputeQuote } from "../../../../services/api";
+import { useBookingStore, API_STATUS_MAP, type Booking } from "../../../../store/bookingStore";
+import {
+  approveQuote as apiApproveQuote,
+  disputeQuote as apiDisputeQuote,
+  getBookingDetail,
+} from "../../../../services/api";
 import { colors } from "../../../../constants";
 import { useAlertModal } from "../../../../contexts/AlertModalContext";
+
+// Matches the shape of GET /bookings/:id — this screen needs to hydrate the
+// store itself when opened directly (e.g. a push notification deep link)
+// without [bookingId]/index.tsx loading first (see mapApiBookingDetail there
+// for the fuller version; this one only needs the quote-relevant fields).
+function mapDetailToBooking(d: any): Booking {
+  return {
+    id: d.id,
+    service: d.service,
+    worker: d.worker?.fullName ?? "Unassigned",
+    date: d.scheduledDate,
+    status: API_STATUS_MAP[d.status] ?? "Pending",
+    amount: d.finalPrice ?? d.estimatedPrice,
+    quote: d.quote
+      ? {
+          laborCost: d.quote.laborCost,
+          materialsCost: d.quote.materialsCost,
+          totalAmount: d.finalPrice ?? 0,
+          notes: d.quote.notes ?? "",
+          submittedAt: d.quote.quotedAt ?? d.scheduledDate,
+        }
+      : undefined,
+  };
+}
 
 export default function QuoteReviewScreen() {
   const router = useRouter();
@@ -25,8 +53,44 @@ export default function QuoteReviewScreen() {
   const [showDisputeForm, setShowDisputeForm] = useState(false);
   const [disputeReason, setDisputeReason] = useState("");
   const [loading, setLoading] = useState(false);
+  const [checkingBooking, setCheckingBooking] = useState(!booking);
+  const [notFound, setNotFound] = useState(false);
 
-  if (!booking || !quote) {
+  useEffect(() => {
+    if (booking || !bookingId) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const detail = await getBookingDetail(bookingId);
+        if (cancelled) return;
+        const mapped = mapDetailToBooking(detail);
+        useBookingStore.setState((s) => ({
+          bookings: [...s.bookings.filter((b) => b.id !== mapped.id), mapped],
+        }));
+      } catch (error) {
+        console.error("Load booking for quote review error:", error);
+        if (!cancelled) setNotFound(true);
+      } finally {
+        if (!cancelled) setCheckingBooking(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [booking, bookingId]);
+
+  if (checkingBooking) {
+    return (
+      <SafeAreaView className="flex-1 bg-white">
+        <ScreenHeader title="Review Quote" showBack />
+        <View className="flex-1 items-center justify-center">
+          <ActivityIndicator size="small" color={colors.accent.DEFAULT} />
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  if (!booking || !quote || notFound) {
     return (
       <SafeAreaView className="flex-1 bg-white">
         <ScreenHeader title="Review Quote" showBack />

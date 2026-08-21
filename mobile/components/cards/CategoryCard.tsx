@@ -2,6 +2,7 @@ import React from "react";
 import { View, Text, Pressable } from "react-native";
 import { AppIcon as Ionicons } from "../icons/AppIcon";
 import { colors, cardShadow } from "../../constants";
+import { getCategoryIcon } from "../../utils/categoryIcons";
 
 type Category = { id: string; name: string; count: number };
 
@@ -17,10 +18,9 @@ export const CategoryCard: React.FC<Props> = ({ category, onPress }) => {
       style={cardShadow}
       onPress={onPress}
     >
-      {/* TODO: Replace with category-specific icon SVG */}
       <View className="w-14 h-14 bg-accent/20 rounded-full items-center justify-center mb-2">
         <Ionicons
-          name="construct-outline"
+          name={getCategoryIcon(category.name)}
           size={28}
           color={colors.accent.DEFAULT}
         />

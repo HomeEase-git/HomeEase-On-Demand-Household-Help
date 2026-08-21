@@ -5,7 +5,6 @@ import { AbortableRequest } from '../utils/apiErrorHandling';
 import { KycDocumentKey } from '../utils/kycDocumentConfig';
 import { mapKycDocumentType } from '../utils/kycDocumentTypeMap';
 import type { WorkerDetail, WorkerDigitalId, ParsedResume } from "../types/api.types";
-import type { LatLng } from "../utils/geo";
 import type {
   CreateBookingPayload,
   CreateBookingResponse,
@@ -19,6 +18,7 @@ type NormalizedWorkerListItem = {
   id: string;
   name: string;
   service: string;
+  serviceTypeNames: string[];
   rating: number;
   reviews: number;
   basePrice: number | null;
@@ -371,19 +371,6 @@ export async function updateBookingStatus(bookingId: string, status: string) {
   }
 }
 
-export async function rescheduleBooking(bookingId: string, newDate: string, newTime: string) {
-  try {
-    const response = await api.patch(`/bookings/${bookingId}/reschedule`, {
-      newDate,
-      newTime,
-    });
-    return response;
-  } catch (error) {
-    console.error('Reschedule booking error:', error);
-    throw error;
-  }
-}
-
 export async function cancelBooking(bookingId: string, reason?: string) {
   try {
     const response = await api.patch(`/bookings/${bookingId}/cancel`, { reason });
@@ -457,9 +444,9 @@ export interface DiscoverWorkersFilters {
   timeSlot?: TimeSlot;
   condition?: ConditionType;
   rooms?: RoomType[];
-  lat?: number;
-  lng?: number;
-  radius?: number; // km, backend defaults to 30
+  // Scopes results to a single worker — used to check a specific (e.g.
+  // profile-locked) worker's real open slots rather than discovering a list.
+  workerId?: string;
   page?: number;
   limit?: number;
 }
@@ -470,11 +457,11 @@ export interface DiscoverWorkersResult {
 }
 
 /**
- * GET /workers with the Phase 2 discovery contract (scope + time + geo
- * filters, server-side KYC/capacity/slot filtering, sorted rating desc then
- * distance asc). Used by Step 2 (live pro-count per time slot) and Step 3
- * (full worker card list) — unlike the legacy `getWorkers`/`searchWorkers`
- * above, filtering/sorting/pagination all happen server-side here.
+ * GET /workers with the Phase 2 discovery contract (scope + time filters,
+ * server-side KYC/capacity/slot filtering, sorted rating desc). Used by
+ * Step 2 (live pro-count per time slot) and Step 3 (full worker card list)
+ * — unlike the legacy `getWorkers`/`searchWorkers` above, filtering/
+ * sorting/pagination all happen server-side here.
  */
 export async function discoverWorkers(filters: DiscoverWorkersFilters): Promise<DiscoverWorkersResult> {
   try {
@@ -484,9 +471,7 @@ export async function discoverWorkers(filters: DiscoverWorkersFilters): Promise<
     if (filters.timeSlot) params.timeSlot = filters.timeSlot;
     if (filters.condition) params.condition = filters.condition;
     if (filters.rooms?.length) params.rooms = filters.rooms.join(',');
-    if (filters.lat !== undefined) params.lat = filters.lat;
-    if (filters.lng !== undefined) params.lng = filters.lng;
-    if (filters.radius !== undefined) params.radius = filters.radius;
+    if (filters.workerId) params.workerId = filters.workerId;
     if (filters.page) params.page = filters.page;
     if (filters.limit) params.limit = filters.limit;
 
@@ -517,6 +502,9 @@ function normalizeWorkerListItem(worker: any): NormalizedWorkerListItem {
       worker.serviceType ??
       worker.serviceTypes?.[0]?.name ??
       "General service",
+    serviceTypeNames: Array.isArray(worker.serviceTypeNames)
+      ? worker.serviceTypeNames
+      : [],
     rating: Number(worker.rating ?? 0),
     reviews: Number(worker.reviews ?? worker.reviewCount ?? 0),
     basePrice:
@@ -535,7 +523,10 @@ function normalizeWorkerListItem(worker: any): NormalizedWorkerListItem {
 export async function getWorkerDetail(workerId: string): Promise<WorkerDetail | null> {
   try {
     const response = await api.get(`/workers/${workerId}`);
-    const service = response.services?.[0]?.name ?? "General service";
+    const services: { id: string; name: string; basePrice: number }[] = Array.isArray(response.services)
+      ? response.services.map((s: any) => ({ id: s.id, name: s.name, basePrice: s.basePrice }))
+      : [];
+    const service = services[0]?.name ?? "General service";
     const skills = response.resumeParseResult?.parsedSkills?.length
       ? response.resumeParseResult.parsedSkills
       : [service];
@@ -544,9 +535,11 @@ export async function getWorkerDetail(workerId: string): Promise<WorkerDetail | 
       id: response.id,
       name: response.name,
       service,
+      services,
+      tier: response.tier ?? undefined,
       rating: Number(response.rating ?? 0),
       reviews: Number(response.reviewCount ?? 0),
-      rate: typeof response.services?.[0]?.basePrice === "number" ? response.services[0].basePrice : undefined,
+      rate: typeof services[0]?.basePrice === "number" ? services[0].basePrice : undefined,
       status: response.isAvailable ? "available" : "busy",
       avatar: response.avatar ?? undefined,
       bio: response.bio ?? "",
@@ -598,9 +591,7 @@ export async function searchWorkers(filters: {
   categoryId?: string;
   minRating?: number;
   availableOnly?: boolean;
-  sortBy?: "rating" | "priceLow" | "priceHigh" | "nearest";
-  origin?: LatLng;
-  radiusKm?: number;
+  sortBy?: "rating" | "priceLow" | "priceHigh";
   page?: number;
   // How many raw candidates to fetch from the server before client-side
   // filter/sort/paginate. Defaults to 50 for the full discovery/search
@@ -627,7 +618,8 @@ export async function searchWorkers(filters: {
       results = results.filter(
         (w) =>
           w.name.toLowerCase().includes(q) ||
-          w.service.toLowerCase().includes(q)
+          w.service.toLowerCase().includes(q) ||
+          w.serviceTypeNames.some((s) => s.toLowerCase().includes(q))
       );
     }
 
@@ -635,8 +627,6 @@ export async function searchWorkers(filters: {
       results = results.filter((w) => w.status === "available");
     }
 
-    // The backend doesn't return worker coordinates, so "nearest" sort and
-    // radius filtering aren't possible here — falls back to rating sort.
     if (filters.sortBy === "priceLow") {
       results = [...results].sort((a, b) => a.rate - b.rate);
     } else if (filters.sortBy === "priceHigh") {
@@ -875,7 +865,7 @@ export async function getTransactions(page?: number, status?: 'PENDING' | 'COMPL
         method: p.methodType,
         status: titleCaseStatus(p.status ?? "Pending"),
         date: p.createdAt,
-        // Worker-only — the actual PayMongo transfer status, separate from
+        // Worker-only — the actual Xendit payout status, separate from
         // `status` above (which only reflects the client's payment/escrow).
         payoutStatus: p.payoutStatus ?? null,
         payoutFailureReason: p.payoutFailureReason ?? null,
@@ -937,12 +927,12 @@ export async function releasePaymentEscrow(paymentId: string) {
   }
 }
 
-export async function createPaymongoCheckout(bookingId: string) {
+export async function createXenditCheckout(bookingId: string) {
   try {
-    const response = await api.post(`/payments/${bookingId}/paymongo/checkout`);
-    return response as { checkoutUrl: string; sourceId: string };
+    const response = await api.post(`/payments/${bookingId}/xendit/checkout`);
+    return response as { checkoutUrl: string; invoiceId: string };
   } catch (error) {
-    console.error('Create PayMongo checkout error:', error);
+    console.error('Create Xendit checkout error:', error);
     throw error;
   }
 }
@@ -1181,7 +1171,7 @@ export async function getMyWallet() {
 export async function topupWallet(amount: number, methodType: 'GCASH' | 'MAYA') {
   try {
     const response = await api.post('/workers/me/wallet/topup', { amount, methodType });
-    return response as { checkoutUrl: string; sourceId: string };
+    return response as { checkoutUrl: string; invoiceId: string };
   } catch (error) {
     console.error('Top up wallet error:', error);
     throw error;
@@ -1244,6 +1234,19 @@ export async function submitQuote(
     return response;
   } catch (error) {
     console.error('Submit quote error:', error);
+    throw error;
+  }
+}
+
+// Mid-job scope-creep item — worker only, and only while the job is active
+// (IN_PROGRESS/QUOTE_SUBMITTED/QUOTE_APPROVED, enforced server-side). Shows
+// up in the client's price breakdown immediately (see getBookingDetail).
+export async function addBookingAddOn(bookingId: string, data: { name: string; price: number }) {
+  try {
+    const response = await api.post(`/bookings/${bookingId}/addons`, data);
+    return response;
+  } catch (error) {
+    console.error('Add booking addon error:', error);
     throw error;
   }
 }
@@ -1410,6 +1413,37 @@ export async function updateHourlyRate(hourlyRate: number): Promise<{ hourlyRate
   }
 }
 
+export interface MyWorkerProfileDetails {
+  bio: string | null;
+  serviceAreaRadius: number | null;
+  address: string | null;
+  city: string | null;
+  state: string | null;
+  zipCode: string | null;
+  addressLat: number | null;
+  addressLng: number | null;
+  resumeUrl: string | null;
+  digitalIdTrade: string | null;
+  digitalIdServiceArea: string | null;
+  licenseNumber: string | null;
+  kycStatus: string;
+  kycSubmittedAt: string | null;
+  kycApprovedAt: string | null;
+}
+
+// Self-service read, distinct from getWorkerDetail(workerId) (the public
+// profile view) — this is the only place addressLat/addressLng (precise
+// home/service coordinates) are exposed, since that endpoint is public.
+export async function getMyWorkerProfileDetails(): Promise<MyWorkerProfileDetails> {
+  try {
+    const response = await api.get('/workers/me/profile');
+    return response;
+  } catch (error) {
+    console.error('Get my worker profile error:', error);
+    throw error;
+  }
+}
+
 export async function updateWorkerProfileDetails(data: {
   bio?: string;
   serviceAreaRadius?: number;
@@ -1417,6 +1451,8 @@ export async function updateWorkerProfileDetails(data: {
   city?: string;
   state?: string;
   zipCode?: string;
+  addressLat?: number;
+  addressLng?: number;
   resumeUrl?: string;
   digitalIdTrade?: string;
   digitalIdServiceArea?: string;
@@ -1459,6 +1495,19 @@ export async function addSkill(data: { name: string; category: string; rate: num
     return response.skill;
   } catch (error) {
     console.error('Add skill error:', error);
+    throw error;
+  }
+}
+
+export async function updateSkill(
+  skillId: string,
+  data: { name?: string; category?: string; rate?: number },
+): Promise<Skill> {
+  try {
+    const response = await api.patch(`/workers/me/skills/${skillId}`, data);
+    return response.skill;
+  } catch (error) {
+    console.error('Update skill error:', error);
     throw error;
   }
 }

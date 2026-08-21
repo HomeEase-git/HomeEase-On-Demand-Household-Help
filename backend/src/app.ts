@@ -32,13 +32,6 @@ const allowedOrigins = (process.env.ALLOWED_ORIGINS || 'http://localhost:3000')
   .filter(Boolean);
 
 // Middleware
-// PayMongo webhook signature verification needs the raw request bytes, so these
-// routes must capture them before the global JSON parser consumes the stream.
-// The transfer callback is assumed to be signed the same way as the collections
-// webhook (Paymongo-Signature HMAC) — confirm against a real payload once
-// PayMongo's Wallet/Disbursements product is enabled and adjust if it differs.
-app.use('/api/payments/paymongo/webhook', express.raw({ type: 'application/json' }));
-app.use('/api/payments/paymongo/transfers/callback', express.raw({ type: 'application/json' }));
 app.use(express.json({ limit: jsonBodyLimit }));
 app.use(express.urlencoded({ extended: true, limit: jsonBodyLimit }));
 app.use(

@@ -7,6 +7,7 @@ import {
   getWorkerAvailability,
   getWorkerBlockedDates,
   updateAvailability,
+  getMyWorkerProfile,
   updateWorkerProfile,
   addServiceTypes,
   listMyServiceTypes,
@@ -14,6 +15,7 @@ import {
   getWorkerCapacity,
   listMySkills,
   createSkill,
+  updateSkill,
   deleteSkill,
   listMyCertifications,
   getCertification,
@@ -40,6 +42,7 @@ import {
   validateUpdateWorkerProfile,
   validateAddServiceTypes,
   validateCreateSkill,
+  validateUpdateSkill,
   validateCreateCertification,
   validateUpdateCertification,
   validateUpdatePayoutMethod,
@@ -70,6 +73,8 @@ router.patch(
   validateUpdateAvailability,
   updateAvailability
 );
+
+router.get('/me/profile', authMiddleware, restrictTo('WORKER'), getMyWorkerProfile);
 
 router.patch(
   '/me/profile',
@@ -111,6 +116,7 @@ router.get(
 
 router.get('/me/skills', authMiddleware, restrictTo('WORKER'), listMySkills);
 router.post('/me/skills', authMiddleware, restrictTo('WORKER'), validateCreateSkill, createSkill);
+router.patch('/me/skills/:skillId', authMiddleware, restrictTo('WORKER'), validateUpdateSkill, updateSkill);
 router.delete('/me/skills/:skillId', authMiddleware, restrictTo('WORKER'), deleteSkill);
 
 router.get('/me/certifications', authMiddleware, restrictTo('WORKER'), listMyCertifications);

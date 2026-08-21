@@ -12,6 +12,7 @@ import ScreenHeader from "../../../../components/ui/ScreenHeader";
 import InputField from "../../../../components/ui/InputField";
 import PrimaryButton from "../../../../components/ui/PrimaryButton";
 import * as api from "../../../../services/api";
+import { cardShadow } from "../../../../constants";
 import { useAlertModal } from "../../../../contexts/AlertModalContext";
 
 export default function AddPaymentMethodScreen() {
@@ -63,29 +64,31 @@ export default function AddPaymentMethodScreen() {
     <SafeAreaView className="flex-1 bg-white">
       <ScreenHeader title="Add Payment Method" showBack />
       <ScrollView contentContainerStyle={{ padding: 24 }}>
-        <Text className="text-primary text-sm mb-2 font-semibold">
-          Payment Type
-        </Text>
-        <View className="flex-row flex-wrap gap-2 mb-4">
-          {types.map((t) => (
-            <Pressable
-              key={t.value}
-              className={`px-3 py-2 rounded-lg ${
-                type === t.value ? "bg-accent" : "bg-card"
-              }`}
-              onPress={() => setType(t.value)}
-            >
-              <Text
-                className={
-                  type === t.value
-                    ? "text-white font-semibold text-sm"
-                    : "text-text-secondary text-sm"
-                }
+        <View className="bg-card rounded-2xl p-4 mb-4" style={cardShadow}>
+          <Text className="text-text-primary text-sm mb-2 font-semibold">
+            Payment Type
+          </Text>
+          <View className="flex-row flex-wrap gap-2">
+            {types.map((t) => (
+              <Pressable
+                key={t.value}
+                className={`px-3 py-2 rounded-lg ${
+                  type === t.value ? "bg-accent" : "bg-white"
+                }`}
+                onPress={() => setType(t.value)}
               >
-                {t.label}
-              </Text>
-            </Pressable>
-          ))}
+                <Text
+                  className={
+                    type === t.value
+                      ? "text-white font-semibold text-sm"
+                      : "text-text-secondary text-sm"
+                  }
+                >
+                  {t.label}
+                </Text>
+              </Pressable>
+            ))}
+          </View>
         </View>
 
         <InputField

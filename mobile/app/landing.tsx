@@ -44,12 +44,7 @@ export default function LandingScreen() {
           />
           <OutlinedButton
             label="I already have an account"
-            onPress={() =>
-              router.push({
-                pathname: "/role-selection",
-                params: { intent: "signin" },
-              })
-            }
+            onPress={() => router.push("/(auth)/sign-in")}
           />
         </View>
       </ScrollView>

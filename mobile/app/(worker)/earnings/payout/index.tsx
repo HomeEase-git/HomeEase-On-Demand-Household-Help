@@ -5,6 +5,7 @@ import { useRouter } from "expo-router";
 import ScreenHeader from "../../../../components/ui/ScreenHeader";
 import { Skeleton } from "../../../../components/ui/Skeleton";
 import * as api from "../../../../services/api";
+import { cardShadow } from "../../../../constants";
 
 type TransactionListItem = {
   id: string;
@@ -20,7 +21,7 @@ const METHOD_LABELS: Record<string, { label: string; icon: string; color: string
   BANK_TRANSFER: { label: "Bank Transfer", icon: "B", color: "bg-blue-500" },
 };
 
-// Real PayMongo transfer status per job — there's no batched "balance", each
+// Real Xendit payout status per job — there's no batched "balance", each
 // completed job's payout is queued and sent individually (see
 // paymentLifecycleService.schedulePayout), so this is the honest signal for
 // "have I actually been paid" rather than an invented balance/next-date figure.
@@ -66,7 +67,7 @@ export default function PayoutMethodScreen() {
     <SafeAreaView className="flex-1 bg-white">
       <ScreenHeader title="Payout Method" showBack />
       <View className="px-4 py-6">
-        <View className="bg-card rounded-2xl p-4 flex-row items-center mb-4">
+        <View className="bg-card rounded-2xl p-4 flex-row items-center mb-4" style={cardShadow}>
           <View className={`w-12 h-12 ${methodInfo?.color ?? "bg-card-light"} rounded-full items-center justify-center mr-3`}>
             <Text className="text-text-primary font-bold text-lg">{methodInfo?.icon ?? "?"}</Text>
           </View>
@@ -87,7 +88,7 @@ export default function PayoutMethodScreen() {
         {loading ? (
           <View>
             {Array.from({ length: 4 }).map((_, i) => (
-              <View key={i} className="bg-card rounded-xl p-3 mb-2">
+              <View key={i} className="bg-card rounded-2xl p-3 mb-2">
                 <Skeleton width="60%" height={14} marginBottom={0} />
               </View>
             ))}
@@ -101,9 +102,9 @@ export default function PayoutMethodScreen() {
             renderItem={({ item }) => {
               const payoutStatus = item.payoutStatus ? PAYOUT_STATUS_LABELS[item.payoutStatus] : null;
               return (
-                <View className="bg-card rounded-xl p-3 mb-2">
+                <View className="bg-card rounded-2xl p-3 mb-2" style={cardShadow}>
                   <View className="flex-row items-center justify-between">
-                    <Text className="text-primary">
+                    <Text className="text-text-primary">
                       ₱{item.amount} ·{" "}
                       {new Date(item.date).toLocaleDateString("en-PH", {
                         year: "numeric",

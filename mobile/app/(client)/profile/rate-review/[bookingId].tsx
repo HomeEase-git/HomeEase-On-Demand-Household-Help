@@ -13,10 +13,9 @@ import { EmptyState } from "../../../../components/feedback/EmptyState";
 import ImageSourcePickerBottomSheet from "../../../../components/bottom-sheets/ImageSourcePickerBottomSheet";
 import type { BottomSheetHandle } from "../../../../components/bottom-sheets/BottomSheetWrapper";
 import { AppIcon as Ionicons } from "../../../../components/icons/AppIcon";
-import { colors } from "../../../../constants";
+import { colors, cardShadow } from "../../../../constants";
 import { useBookingStore, API_STATUS_MAP, type Booking } from "../../../../store/bookingStore";
 import { submitReview as apiSubmitReview, getBookingDetail, uploadReviewPhoto } from "../../../../services/api";
-import { isExactCategoryMatch } from "../../../../utils/categoryMapping";
 import { useAlertModal } from "../../../../contexts/AlertModalContext";
 
 const MAX_REVIEW_PHOTOS = 5;
@@ -138,14 +137,6 @@ export default function RateBookingScreen() {
       return;
     }
 
-    if (!isExactCategoryMatch(booking.category ?? booking.service)) {
-      alertModal.warning(
-        "Booking unavailable",
-        "This booking's service type couldn't be matched to a bookable category. Please try a different booking or contact support.",
-      );
-      return;
-    }
-
     prefillFromBooking(booking);
     router.push("/(client)/booking/new/step-1");
   };
@@ -172,9 +163,9 @@ export default function RateBookingScreen() {
     <SafeAreaView className="flex-1 bg-white">
       <ScreenHeader title="Rate & Review" showBack />
       <ScrollView contentContainerStyle={{ padding: 24 }}>
-        <View className="bg-card rounded-2xl p-4 mb-4 flex-row items-center">
+        <View className="bg-card rounded-2xl p-4 mb-4 flex-row items-center" style={cardShadow}>
           <View className="w-12 h-12 bg-card-light rounded-full items-center justify-center mr-3">
-            <Text className="text-primary text-lg">👤</Text>
+            <Text className="text-text-primary text-lg">👤</Text>
           </View>
           <View>
             <Text className="text-text-primary font-bold">

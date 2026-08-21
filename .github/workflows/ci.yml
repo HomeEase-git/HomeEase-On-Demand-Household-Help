@@ -33,12 +33,9 @@ jobs:
       JWT_EXPIRY: 1h
       RESEND_API_KEY: ci-test-key
       RESEND_FROM_EMAIL: test@example.com
-      PAYMONGO_SECRET_KEY: ci-test-secret
-      PAYMONGO_PUBLIC_KEY: ci-test-public
-      PAYMONGO_WEBHOOK_SECRET: ci-test-webhook-secret
-      PAYMONGO_REDIRECT_BASE_URL: https://example.invalid/paymongo-redirect
       XENDIT_SECRET_KEY: ci-test-secret
-      XENDIT_CALLBACK_TOKEN: ci-test-callback-token
+      XENDIT_WEBHOOK_TOKEN: ci-test-webhook-token
+      XENDIT_REDIRECT_BASE_URL: https://example.invalid/xendit-redirect
       SEMAPHORE_API_KEY: ci-test-key
       SEMAPHORE_SENDER_NAME: HomeEase
       SUPABASE_URL: https://example.supabase.co

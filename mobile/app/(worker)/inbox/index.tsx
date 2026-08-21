@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import { View, Text, FlatList, Pressable, ActivityIndicator } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
@@ -11,6 +11,7 @@ import { useMessageStore } from "../../../store/messageStore";
 import { formatDate } from "../../../utils/formatDate";
 import * as api from "../../../services/api";
 import { useAlertModal } from "../../../contexts/AlertModalContext";
+import { useTabRefresh } from "../../../hooks/useTabRefresh";
 
 export default function WorkerInboxScreen() {
   const router = useRouter();
@@ -24,31 +25,33 @@ export default function WorkerInboxScreen() {
   const conversations = useMessageStore((s) => s.conversations);
   const setConversations = useMessageStore((s) => s.setConversations);
 
-  useEffect(() => {
-    let active = true;
-
-    async function load() {
-      setLoading(true);
-      try {
-        const result = await api.getConversations();
-        if (!active) return;
-        setConversations(result);
-      } catch (error) {
-        console.error("Load conversations error:", error);
-      } finally {
-        if (active) setLoading(false);
-      }
+  const loadConversations = useCallback(async () => {
+    setLoading(true);
+    try {
+      const result = await api.getConversations();
+      setConversations(result);
+    } catch (error) {
+      console.error("Load conversations error:", error);
+    } finally {
+      setLoading(false);
     }
-
-    load();
-    return () => {
-      active = false;
-    };
   }, [setConversations]);
+
+  useEffect(() => {
+    async function run() {
+      await loadConversations();
+    }
+    run();
+  }, [loadConversations]);
 
   useEffect(() => {
     fetchNotifications();
   }, [fetchNotifications]);
+
+  useTabRefresh("worker:inbox", useCallback(() => {
+    loadConversations();
+    fetchNotifications();
+  }, [loadConversations, fetchNotifications]));
 
   return (
     <SafeAreaView className="flex-1 bg-white">

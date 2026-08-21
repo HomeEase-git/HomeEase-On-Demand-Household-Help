@@ -6,7 +6,7 @@ info:
     Full REST API surface for the HomeEase household-services marketplace:
     auth, client/worker profiles, worker discovery, the booking lifecycle
     (creation/auto-match through accept/arrive/start/quote/complete/review),
-    payments & PayMongo escrow, messaging, notifications, KYC verification,
+    payments & Xendit escrow, messaging, notifications, KYC verification,
     and the admin back office (users, bookings, disputes, payments, pricing
     rules, reviews, reports, analytics, audit logs, settings).
 servers:
@@ -1267,28 +1267,6 @@ paths:
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
 
-  /bookings/{id}/reschedule:
-    patch:
-      tags: [Bookings]
-      summary: Reschedule a booking to a new date/time slot
-      parameters: [{ $ref: '#/components/parameters/BookingId' }]
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [newDate, newTime]
-              properties:
-                newDate: { type: string, format: date }
-                newTime: { $ref: '#/components/schemas/TimeSlot' }
-      responses:
-        '200': { description: Rescheduled }
-        '400': { $ref: '#/components/responses/BadRequest' }
-        '403': { $ref: '#/components/responses/Forbidden' }
-        '404': { $ref: '#/components/responses/NotFound' }
-        '409': { $ref: '#/components/responses/Conflict' }
-
   /bookings/{id}/addons:
     post:
       tags: [Bookings]
@@ -1374,14 +1352,14 @@ paths:
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
 
-  /payments/{bookingId}/paymongo/checkout:
+  /payments/{bookingId}/xendit/checkout:
     post:
       tags: [Payments]
-      summary: Create a PayMongo Source checkout (GCash/Maya) for an existing pending payment
+      summary: Create a Xendit Invoice checkout (GCash/Maya) for an existing pending payment
       parameters: [{ $ref: '#/components/parameters/BookingId' }]
       responses:
         '200':
-          description: OK — returns the PayMongo checkout redirect URL
+          description: OK — returns the Xendit hosted checkout URL
           content:
             application/json:
               schema:
@@ -1393,6 +1371,7 @@ paths:
                         type: object
                         properties:
                           checkoutUrl: { type: string, format: uri }
+                          invoiceId: { type: string }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
@@ -1894,10 +1873,10 @@ paths:
         '200': { description: Reinstated }
         '404': { $ref: '#/components/responses/NotFound' }
 
-  /payments/paymongo/webhook:
+  /payments/xendit/invoice-webhook:
     post:
       tags: [Webhooks]
-      summary: PayMongo webhook (signature-verified via the Paymongo-Signature header)
+      summary: Xendit invoice status webhook (token-verified via the x-callback-token header)
       security: []
       requestBody:
         required: true
@@ -1905,16 +1884,41 @@ paths:
           application/json:
             schema:
               type: object
-              description: Raw PayMongo event payload — signature verified against the raw body, not parsed JSON.
+              description: Xendit invoice payload — verified via a direct comparison of the x-callback-token header against XENDIT_WEBHOOK_TOKEN.
       responses:
         '200': { description: Acknowledged }
         '401':
-          description: Invalid signature
+          description: Invalid callback token
           content:
             application/json:
               schema: { type: object }
         '500':
-          description: Webhook not configured (missing PAYMONGO_WEBHOOK_SECRET)
+          description: Webhook not configured (missing XENDIT_WEBHOOK_TOKEN)
+          content:
+            application/json:
+              schema: { type: object }
+
+  /payments/xendit/payout-webhook:
+    post:
+      tags: [Webhooks]
+      summary: Xendit payout status webhook (token-verified via the x-callback-token header)
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              description: Xendit payout payload — verified via a direct comparison of the x-callback-token header against XENDIT_WEBHOOK_TOKEN.
+      responses:
+        '200': { description: Acknowledged }
+        '401':
+          description: Invalid callback token
+          content:
+            application/json:
+              schema: { type: object }
+        '500':
+          description: Webhook not configured (missing XENDIT_WEBHOOK_TOKEN)
           content:
             application/json:
               schema: { type: object }

@@ -14,7 +14,6 @@ type Worker = {
   reviews: number;
   status: string;
   avatar?: string | null;
-  distanceKm?: number;
   activeJobCount?: number | null;
   maxConcurrentJobs?: number | null;
 };
@@ -55,11 +54,6 @@ export const WorkerCard: React.FC<Props> = ({ worker, onPress }) => {
             ({worker.reviews} reviews)
           </Text>
         </View>
-        {typeof worker.distanceKm === "number" && (
-          <Text className="text-text-muted text-xs mt-0.5">
-            {worker.distanceKm.toFixed(1)} km away
-          </Text>
-        )}
         {activeJobCount > 0 && (
           <Text
             className={`text-xs mt-0.5 ${

@@ -19,7 +19,7 @@ const SOURCE_PREFIXES: [string, string][] = [
   ['REVIEW_', 'Review'],
   ['PRICING_RULE_', 'Pricing'],
   ['PAYMENT_', 'Payment'],
-  ['PAYMONGO_', 'Payment'],
+  ['XENDIT_', 'Payment'],
   ['USER_STATUS_', 'User'],
   ['SETTINGS_', 'Settings'],
 ];

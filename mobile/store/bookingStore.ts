@@ -91,6 +91,11 @@ export type DraftBooking = {
   entrySource?: 'worker_profile' | 'new_booking' | 'book_again' | null;
   workerLocked?: boolean;
   workerName?: string | null;
+  // Every ServiceType the locked worker actually offers (id + name) — set
+  // when entering via the worker profile's "Book Now". Step 1 uses this to
+  // restrict the category picker to services this worker can perform, and
+  // to resolve the matching serviceTypeId for whichever one is picked.
+  workerServiceTypes?: { id: string; name: string }[] | null;
   lat?: number;
   lng?: number;
   lastInvalidationReason?: string | null;
@@ -208,6 +213,7 @@ const initialDraft: DraftBooking = {
   entrySource: null,
   workerLocked: false,
   workerName: null,
+  workerServiceTypes: null,
   lat: undefined,
   lng: undefined,
   lastInvalidationReason: null,

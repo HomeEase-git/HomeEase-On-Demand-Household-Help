@@ -54,6 +54,7 @@ export const authStorage = {
     cachedToken = token;
     try {
       await AsyncStorage.setItem(STORAGE_KEYS.AUTH_TOKEN, token);
+      cachedToken = token;
     } catch (error) {
       console.error('Error saving auth token:', error);
     }
@@ -96,6 +97,7 @@ export const authStorage = {
     try {
       await AsyncStorage.removeItem(STORAGE_KEYS.AUTH_TOKEN);
       await AsyncStorage.removeItem(STORAGE_KEYS.AUTH_USER);
+      cachedToken = null;
     } catch (error) {
       console.error('Error clearing auth:', error);
     }

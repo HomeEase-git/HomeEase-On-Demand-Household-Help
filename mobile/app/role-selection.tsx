@@ -2,24 +2,17 @@ import React from "react";
 import { View, Text, ScrollView, Pressable, Image } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { AppIcon as Ionicons } from "../components/icons/AppIcon";
-import { useRouter, useLocalSearchParams } from "expo-router";
+import { useRouter } from "expo-router";
 import { colors } from "../constants";
 import { icons } from "@/constants/icons";
 
 type Role = "client" | "worker";
-type Intent = "signin" | "signup";
 
 export default function RoleSelectionScreen() {
   const router = useRouter();
-  const params = useLocalSearchParams<{ intent?: string }>();
-  const intent = (params.intent as Intent) || "signup";
 
   const handleRoleSelect = (role: Role) => {
-    if (intent === "signin") {
-      router.push({ pathname: "/(auth)/sign-in", params: { role } });
-    } else {
-      router.push({ pathname: "/(auth)/sign-up", params: { role } });
-    }
+    router.push({ pathname: "/(auth)/sign-up", params: { role } });
   };
 
   return (

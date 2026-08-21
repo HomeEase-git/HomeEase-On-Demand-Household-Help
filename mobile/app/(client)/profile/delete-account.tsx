@@ -59,7 +59,7 @@ export default function DeleteAccountScreen() {
         <Text className="text-error text-2xl font-bold text-center mb-4">
           Delete Your Account?
         </Text>
-        <View className="bg-error/10 border border-error rounded-xl p-4 mb-4">
+        <View className="bg-error/10 border border-error rounded-2xl p-4 mb-4">
           <Text className="text-error text-sm">
             This will permanently remove your account, bookings, and data. This
             action cannot be undone.
