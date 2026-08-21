@@ -4,9 +4,9 @@ import { WebView, WebViewNavigation } from "react-native-webview";
 import { Ionicons } from "@expo/vector-icons";
 import { colors } from "../../constants";
 
-// Must match PAYMONGO_REDIRECT_BASE_URL in the backend's .env plus the paths
-// paymentController.ts's createPaymongoCheckout appends. PayMongo requires a
-// real http(s) URL for Source redirects (custom app schemes are rejected as
+// Must match XENDIT_REDIRECT_BASE_URL in the backend's .env plus the paths
+// paymentController.ts's createXenditCheckout appends. Xendit requires a
+// real http(s) URL for Invoice redirects (custom app schemes are rejected as
 // invalid format), so this placeholder domain never needs to actually
 // resolve — we intercept navigation to it below and cancel the load before
 // the WebView ever tries to reach it.
@@ -21,7 +21,7 @@ type Props = {
   onCancel: () => void;
 };
 
-export default function PaymongoCheckoutModal({
+export default function XenditCheckoutModal({
   visible,
   checkoutUrl,
   onSuccess,

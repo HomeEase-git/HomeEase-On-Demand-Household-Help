@@ -54,6 +54,7 @@ export const searchWorkers = async (req: AuthRequest, res: Response) => {
       rooms,
       minRating,
       maxPrice,
+      workerId,
       page = '1',
       limit = '10',
     } = req.query;
@@ -81,6 +82,14 @@ export const searchWorkers = async (req: AuthRequest, res: Response) => {
       isAvailable: true,
       kycStatus: 'APPROVED',
     };
+
+    // Scopes discovery to a single already-known worker — used by the client
+    // app to check a specific (e.g. profile-locked) worker's real open slots
+    // for a date, via the same authoritative WorkerAvailability filtering
+    // below, rather than a separate bespoke endpoint.
+    if (typeof workerId === 'string' && workerId) {
+      whereClause.userId = workerId;
+    }
 
     if (serviceTypeName) {
       whereClause.serviceTypes = { some: { name: { contains: serviceTypeName, mode: 'insensitive' } } };

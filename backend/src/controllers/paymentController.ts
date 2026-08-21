@@ -6,10 +6,10 @@ import { notifyUser } from '@utils/notify';
 import { writeAuditLog } from '@utils/auditLog';
 import type { JwtPayload } from '@/types/index';
 import { calculateCommission, calculateWithholdingTax } from '../utils/pricing';
-import { createSource, createSourcePayment } from '../services/paymongoService';
+import { createInvoice } from '../services/xenditService';
 import { getAppSettings } from '@services/appSettingsService';
-import { translatePaymongoFailureReason } from '@utils/paymongoFailureMessages';
-import { handleWalletTopupChargeable, handleWalletTopupFailed } from './walletController';
+import { translateXenditFailureReason } from '@utils/xenditFailureMessages';
+import { handleWalletTopupPaid, handleWalletTopupFailed } from './walletController';
 
 interface AuthRequest extends Request {
   user?: JwtPayload;
@@ -37,8 +37,8 @@ export const createPayment = async (req: AuthRequest, res: Response) => {
     const rawMethodType = typeof req.body?.methodType === 'string' ? req.body.methodType.trim() : '';
     const paymentMethodId = typeof req.body?.paymentMethodId === 'string' ? req.body.paymentMethodId.trim() : '';
     const requestAccountIdentifier = typeof req.body?.accountIdentifier === 'string' ? req.body.accountIdentifier.trim() : '';
-    const paymongoPaymentId = typeof req.body?.paymongoPaymentId === 'string' ? req.body.paymongoPaymentId.trim() : null;
-    const paymongoSourceId = typeof req.body?.paymongoSourceId === 'string' ? req.body.paymongoSourceId.trim() : null;
+    const xenditPaymentId = typeof req.body?.xenditPaymentId === 'string' ? req.body.xenditPaymentId.trim() : null;
+    const xenditInvoiceId = typeof req.body?.xenditInvoiceId === 'string' ? req.body.xenditInvoiceId.trim() : null;
 
     const booking = await prisma.booking.findUnique({
       where: { id: bookingId },
@@ -118,7 +118,7 @@ export const createPayment = async (req: AuthRequest, res: Response) => {
         return res.status(409).json(errorResponse(409, 'Payment already exists for this booking'));
       }
 
-      // A previous PayMongo attempt failed (e.g. the client cancelled or the
+      // A previous Xendit attempt failed (e.g. the client cancelled or the
       // e-wallet declined it) — clear it so the client can retry the payment.
       await prisma.payment.delete({ where: { id: existingPayment.id } });
     }
@@ -152,8 +152,8 @@ export const createPayment = async (req: AuthRequest, res: Response) => {
         escrowStatus: 'HELD',
         methodType: methodType as any,
         accountIdentifier,
-        paymongoPaymentId,
-        paymongoSourceId,
+        xenditPaymentId,
+        xenditInvoiceId,
       },
     });
 
@@ -242,10 +242,10 @@ export const getPaymentDetail = async (req: AuthRequest, res: Response) => {
         // schema has no receivedAt; use createdAt as proxy
         receivedAt: payment.createdAt,
         releasedAt: payment.releasedAt,
-        // schema has paymongoPaymentId, not paymentMethodReference
-        transactionId: payment.paymongoPaymentId ?? null,
+        // schema has xenditPaymentId, not paymentMethodReference
+        transactionId: payment.xenditPaymentId ?? null,
         ...(payment.status === 'FAILED'
-          ? { failureReason: payment.failureReason, failureMessage: translatePaymongoFailureReason(payment.failureReason) }
+          ? { failureReason: payment.failureReason, failureMessage: translateXenditFailureReason(payment.failureReason) }
           : {}),
       },
     });
@@ -322,7 +322,7 @@ export const listMyPayments = async (req: AuthRequest, res: Response) => {
       escrowStatus: p.escrowStatus,
       methodType: p.methodType,
       createdAt: p.createdAt,
-      // Only meaningful for workers — tracks the actual PayMongo transfer to
+      // Only meaningful for workers — tracks the actual Xendit payout to
       // their account, separate from `status` (which only reflects the
       // client's payment/escrow, not whether the worker has been paid).
       ...(currentRole === 'WORKER'
@@ -330,11 +330,11 @@ export const listMyPayments = async (req: AuthRequest, res: Response) => {
             payoutStatus: p.payout?.status ?? null,
             payoutFailureReason: p.payout?.failureReason ?? null,
             payoutFailureMessage: p.payout?.failureReason
-              ? translatePaymongoFailureReason(p.payout.failureReason)
+              ? translateXenditFailureReason(p.payout.failureReason)
               : null,
           }
         : p.status === 'FAILED'
-          ? { failureReason: p.failureReason, failureMessage: translatePaymongoFailureReason(p.failureReason) }
+          ? { failureReason: p.failureReason, failureMessage: translateXenditFailureReason(p.failureReason) }
           : {}),
     }));
 
@@ -505,16 +505,20 @@ export const refundPayment = async (req: AuthRequest, res: Response) => {
 };
 
 /**
- * POST /api/payments/:bookingId/paymongo/checkout
- * Create a real PayMongo Source (GCash/Maya) for an already-created, still-PENDING
- * Payment, and return the hosted checkout URL for the mobile app to open in a
- * WebView. The actual charge happens later, server-side, once the webhook
- * reports the source as chargeable (see handlePayMongoWebhook below).
+ * POST /api/payments/:bookingId/xendit/checkout
+ * Create a Xendit Invoice for an already-created, still-PENDING Payment, and
+ * return the hosted checkout URL for the mobile app to open in a WebView.
+ * Unlike PayMongo's Source, a Xendit Invoice's hosted page supports every PH
+ * payment channel (GCash, Maya, cards, GrabPay, etc) at once — methodType
+ * here only gates when this flow is offered client-side, it isn't sent to
+ * Xendit as a channel restriction. Capture is atomic on Xendit's side, so
+ * there is no separate "charge" step; the invoice-paid webhook below is what
+ * actually marks the Payment COMPLETED.
  */
-export const createPaymongoCheckout = async (req: AuthRequest, res: Response) => {
+export const createXenditCheckout = async (req: AuthRequest, res: Response) => {
   try {
     if (!req.user || req.user.role !== 'CLIENT') {
-      return res.status(403).json(errorResponse(403, 'Only clients can start a PayMongo checkout'));
+      return res.status(403).json(errorResponse(403, 'Only clients can start a Xendit checkout'));
     }
 
     const bookingId = req.params.bookingId as string;
@@ -522,7 +526,7 @@ export const createPaymongoCheckout = async (req: AuthRequest, res: Response) =>
 
     const payment = await prisma.payment.findUnique({
       where: { bookingId },
-      include: { booking: true },
+      include: { booking: { include: { client: true } } },
     });
 
     if (!payment) {
@@ -538,221 +542,183 @@ export const createPaymongoCheckout = async (req: AuthRequest, res: Response) =>
     }
 
     if (payment.methodType !== 'GCASH' && payment.methodType !== 'MAYA') {
-      return res.status(400).json(errorResponse(400, 'PayMongo checkout is only available for GCash and Maya'));
+      return res.status(400).json(errorResponse(400, 'Xendit checkout is only available for GCash and Maya'));
     }
 
-    // PayMongo rejects non-http(s) redirect URLs, so this points at a
-    // placeholder domain that the mobile WebView intercepts and cancels
-    // before it ever actually loads (see PaymongoCheckoutModal.tsx).
-    const redirectBase = process.env.PAYMONGO_REDIRECT_BASE_URL || 'https://homeease.app';
+    // Xendit's success_redirect_url/failure_redirect_url must be real http(s)
+    // URLs, so this points at a placeholder domain that the mobile WebView
+    // intercepts and cancels before it ever actually loads (see
+    // XenditCheckoutModal.tsx).
+    const redirectBase = process.env.XENDIT_REDIRECT_BASE_URL || 'https://homeease.app';
 
-    const source = await createSource({
+    const invoice = await createInvoice({
+      externalId: payment.id,
       amountPesos: payment.totalAmount,
-      type: payment.methodType === 'GCASH' ? 'gcash' : 'paymaya',
       description: `HomeEase booking ${bookingId}`,
-      successRedirect: `${redirectBase}/payment-redirect/success?bookingId=${bookingId}`,
-      failedRedirect: `${redirectBase}/payment-redirect/failed?bookingId=${bookingId}`,
+      payerEmail: payment.booking.client.email ?? undefined,
+      successRedirectUrl: `${redirectBase}/payment-redirect/success?bookingId=${bookingId}`,
+      failureRedirectUrl: `${redirectBase}/payment-redirect/failed?bookingId=${bookingId}`,
     });
 
     await prisma.payment.update({
       where: { id: payment.id },
-      data: { paymongoSourceId: source.id },
+      data: { xenditInvoiceId: invoice.id },
     });
 
     return res.status(200).json({
       success: true,
-      message: 'PayMongo checkout created',
+      message: 'Xendit checkout created',
       data: {
-        checkoutUrl: source.checkoutUrl,
-        sourceId: source.id,
+        checkoutUrl: invoice.invoiceUrl,
+        invoiceId: invoice.id,
       },
     });
   } catch (error) {
-    console.error('Error creating PayMongo checkout:', error);
+    console.error('Error creating Xendit checkout:', error);
     await writeAuditLog({
       actorId: req.user?.userId,
       actorName: req.user?.email,
       actorRole: req.user?.role,
-      action: 'PAYMONGO_CHECKOUT_ERROR',
+      action: 'XENDIT_CHECKOUT_ERROR',
       category: 'SYSTEM_ERROR',
       level: 'ERROR',
-      message: `PayMongo checkout creation failed: ${error instanceof Error ? error.message : 'unknown error'}`,
+      message: `Xendit checkout creation failed: ${error instanceof Error ? error.message : 'unknown error'}`,
     });
-    return res.status(500).json(errorResponse(500, 'Failed to create PayMongo checkout'));
+    return res.status(500).json(errorResponse(500, 'Failed to create Xendit checkout'));
   }
 };
 
 /**
- * Verifies a PayMongo `Paymongo-Signature` header against the raw request body.
- *
- * Header format: `t=<timestamp>,te=<test-mode hmac>,li=<live-mode hmac>`.
- * PayMongo signs `${timestamp}.${rawBody}` with HMAC-SHA256 using the webhook's
- * signing secret; only one of te/li will match depending on whether the secret
- * configured here is the test-mode or live-mode secret for that endpoint.
+ * Compares the `x-callback-token` header Xendit sends on every webhook
+ * against the configured secret (the static token set in the Xendit
+ * dashboard's Webhooks settings). Unlike PayMongo there is no HMAC/timestamp
+ * — it's a plain shared-secret header — but crypto.timingSafeEqual is still
+ * used for the comparison to avoid a timing side-channel on the token value.
  */
-function verifyPaymongoSignature(rawBody: Buffer, signatureHeader: string | undefined, secret: string): boolean {
-  if (!signatureHeader) return false;
+function verifyXenditCallbackToken(headerToken: string | string[] | undefined, secret: string): boolean {
+  if (typeof headerToken !== 'string' || !headerToken) return false;
 
-  const parts = Object.fromEntries(
-    signatureHeader.split(',').map((part) => {
-      const [key, value] = part.split('=');
-      return [key?.trim(), value?.trim()];
-    })
-  );
+  const headerBuffer = Buffer.from(headerToken, 'utf8');
+  const secretBuffer = Buffer.from(secret, 'utf8');
 
-  const timestamp = parts.t;
-  const candidateSignatures = [parts.te, parts.li].filter(Boolean) as string[];
+  // timingSafeEqual requires equal-length buffers; a length mismatch is
+  // itself proof of an invalid token, safe to short-circuit on.
+  if (headerBuffer.length !== secretBuffer.length) return false;
 
-  if (!timestamp || candidateSignatures.length === 0) return false;
-
-  const expected = crypto
-    .createHmac('sha256', secret)
-    .update(`${timestamp}.${rawBody.toString('utf8')}`)
-    .digest('hex');
-
-  const expectedBuffer = Buffer.from(expected, 'utf8');
-
-  return candidateSignatures.some((candidate) => {
-    const candidateBuffer = Buffer.from(candidate, 'utf8');
-    return (
-      candidateBuffer.length === expectedBuffer.length &&
-      crypto.timingSafeEqual(candidateBuffer, expectedBuffer)
-    );
-  });
+  return crypto.timingSafeEqual(headerBuffer, secretBuffer);
 }
 
 /**
- * Charges a chargeable e-wallet Source and marks the corresponding Payment
- * COMPLETED, but leaves escrow HELD. Payment rows are now created (and this
- * checkout started) at booking-creation time, well before the job is done —
- * GCash/Maya have no manual-capture primitive, so "capture" for these
- * methods just means the charge succeeded; the money still isn't released
- * to the worker until the client confirms completion (see
- * paymentLifecycleService.captureAndReleasePayment), same as the cash path.
+ * Marks the Payment matching this Xendit invoice COMPLETED, but leaves
+ * escrow HELD — same escrow semantics as before: charged != released. Money
+ * still isn't released to the worker until the client confirms job
+ * completion (see paymentLifecycleService.captureAndReleasePayment).
+ *
+ * `invoice` is the raw Xendit invoice payload from the webhook body — shape
+ * UNCONFIRMED against a real payload (docs domains were network-blocked
+ * when this was built); this reads the fields the hand-validated
+ * GET /v2/invoices/{id} response returned (`id`, `status`, `payment_id`,
+ * `paid_amount`, `paid_at`) and defensively no-ops if any are missing rather
+ * than throwing.
  */
-async function handleSourceChargeable(sourceId: string | undefined) {
-  if (!sourceId) return;
+async function handleInvoicePaid(invoice: any) {
+  const invoiceId = invoice?.id as string | undefined;
+  if (!invoiceId) return;
 
   const payment = await prisma.payment.findFirst({
-    where: { paymongoSourceId: sourceId },
+    where: { xenditInvoiceId: invoiceId },
     include: { booking: true },
   });
 
   if (!payment || payment.status !== 'PENDING') return;
 
-  try {
-    const created = await createSourcePayment({
-      amountPesos: payment.totalAmount,
-      sourceId,
-      description: `HomeEase booking ${payment.bookingId}`,
-    });
+  await prisma.payment.update({
+    where: { id: payment.id },
+    data: {
+      xenditPaymentId: invoice.payment_id ?? null,
+      status: 'COMPLETED',
+      capturedAmount: invoice.paid_amount ?? payment.totalAmount,
+      capturedAt: invoice.paid_at ? new Date(invoice.paid_at) : new Date(),
+    },
+  });
 
-    await prisma.payment.update({
-      where: { id: payment.id },
-      data: {
-        paymongoPaymentId: created.id,
-        status: 'COMPLETED',
-        capturedAmount: payment.totalAmount,
-        capturedAt: new Date(),
-      },
-    });
-
-    await notifyUser({
-      userId: payment.booking.clientId,
-      type: 'PAYMENT_RECEIVED',
-      title: 'Payment Confirmed',
-      message: 'Your payment was received and is held until the job is completed.',
-      relatedId: payment.bookingId,
-    });
-  } catch (chargeError) {
-    console.error('Failed to charge chargeable PayMongo source:', chargeError);
-    await prisma.payment.update({
-      where: { id: payment.id },
-      data: {
-        status: 'FAILED',
-        failureReason: chargeError instanceof Error ? chargeError.message : 'Charge failed',
-      },
-    });
-  }
+  await notifyUser({
+    userId: payment.booking.clientId,
+    type: 'PAYMENT_RECEIVED',
+    title: 'Payment Confirmed',
+    message: 'Your payment was received and is held until the job is completed.',
+    relatedId: payment.bookingId,
+  });
 }
 
-async function handlePaymentFailed(sourceId: string | undefined, failureReason?: string | null) {
-  if (!sourceId) return;
+async function handleInvoiceFailed(invoice: any) {
+  const invoiceId = invoice?.id as string | undefined;
+  if (!invoiceId) return;
 
   await prisma.payment.updateMany({
-    where: { paymongoSourceId: sourceId, status: 'PENDING' },
-    data: { status: 'FAILED', failureReason: failureReason ?? null },
+    where: { xenditInvoiceId: invoiceId, status: 'PENDING' },
+    data: { status: 'FAILED', failureReason: invoice?.status ?? 'EXPIRED' },
   });
 }
 
 /**
- * POST /api/payments/paymongo/webhook
- * Handle PayMongo webhook events (signature-verified).
- *
- * `source.chargeable` is the authoritative trigger for e-wallet payments —
- * PayMongo fires it (and separately redirects the client's WebView) once the
- * user authorizes the GCash/Maya charge; this handler is what actually
- * captures the money via createSourcePayment. `payment.failed` covers the
- * decline/cancel path.
+ * POST /api/payments/xendit/invoice-webhook
+ * Handles Xendit's invoice status webhook (token-verified via
+ * x-callback-token). Dispatches on the invoice's `status` field —
+ * UNCONFIRMED whether Xendit wraps the invoice in an envelope (e.g.
+ * { event, data }) or posts it flat; this defensively unwraps `body.data` if
+ * present, else treats the body itself as the invoice. Confirm the real
+ * shape against the Xendit dashboard's webhook logs/test tool or a live
+ * payment and simplify this once verified.
  */
-export const handlePayMongoWebhook = async (req: Request, res: Response) => {
+export const handleXenditInvoiceWebhook = async (req: Request, res: Response) => {
   try {
-    const webhookSecret = process.env.PAYMONGO_WEBHOOK_SECRET;
-    const rawBody = req.body;
-
-    if (!webhookSecret || !Buffer.isBuffer(rawBody)) {
-      console.error('PayMongo webhook misconfigured: missing PAYMONGO_WEBHOOK_SECRET or raw body middleware');
+    const webhookToken = process.env.XENDIT_WEBHOOK_TOKEN;
+    if (!webhookToken) {
+      console.error('Xendit invoice webhook misconfigured: missing XENDIT_WEBHOOK_TOKEN');
       return res.status(500).json({ success: false, message: 'Webhook not configured' });
     }
 
-    const signatureHeader = req.headers['paymongo-signature'] as string | undefined;
-
-    if (!verifyPaymongoSignature(rawBody, signatureHeader, webhookSecret)) {
+    if (!verifyXenditCallbackToken(req.headers['x-callback-token'], webhookToken)) {
       await writeAuditLog({
-        action: 'PAYMONGO_WEBHOOK_INVALID_SIGNATURE',
+        action: 'XENDIT_WEBHOOK_INVALID_TOKEN',
         category: 'SYSTEM_ERROR',
         level: 'WARN',
-        message: 'Rejected PayMongo webhook: signature verification failed',
+        message: 'Rejected Xendit invoice webhook: callback token mismatch',
       });
-      return res.status(401).json({ success: false, message: 'Invalid signature' });
+      return res.status(401).json({ success: false, message: 'Invalid callback token' });
     }
 
-    const event = JSON.parse(rawBody.toString('utf8'));
-    const type = event?.data?.attributes?.type;
-    const resource = event?.data?.attributes?.data;
+    const invoice = (req.body && typeof req.body === 'object' && 'data' in req.body ? (req.body as any).data : req.body) ?? {};
+    const status = (invoice?.status as string | undefined)?.toUpperCase();
 
-    switch (type) {
-      case 'source.chargeable':
-        // A chargeable source is either a booking checkout or a wallet
-        // top-up — each handler is a no-op if it finds no matching row for
-        // this source id, so it's safe to try both.
-        await handleSourceChargeable(resource?.id);
-        await handleWalletTopupChargeable(resource?.id);
+    switch (status) {
+      case 'PAID':
+        await handleInvoicePaid(invoice);
+        await handleWalletTopupPaid(invoice);
         break;
-      case 'payment.failed': {
-        const failedSourceId = resource?.attributes?.source?.id;
-        const reason = resource?.attributes?.failed_reason ?? resource?.attributes?.reason ?? null;
-        await handlePaymentFailed(failedSourceId, reason);
-        await handleWalletTopupFailed(failedSourceId, reason);
+      case 'EXPIRED':
+      case 'FAILED':
+        await handleInvoiceFailed(invoice);
+        await handleWalletTopupFailed(invoice?.id, status);
         break;
-      }
       default:
         break;
     }
 
-    console.log('PayMongo webhook verified:', type);
+    console.log('Xendit invoice webhook verified:', status);
 
     return res.status(200).json({
       success: true,
       message: 'Webhook received',
     });
   } catch (error) {
-    console.error('Error handling webhook:', error);
+    console.error('Error handling Xendit invoice webhook:', error);
     await writeAuditLog({
-      action: 'PAYMONGO_WEBHOOK_ERROR',
+      action: 'XENDIT_WEBHOOK_ERROR',
       category: 'SYSTEM_ERROR',
       level: 'ERROR',
-      message: `PayMongo webhook handling failed: ${error instanceof Error ? error.message : 'unknown error'}`,
+      message: `Xendit invoice webhook handling failed: ${error instanceof Error ? error.message : 'unknown error'}`,
     });
     return res.status(500).json({
       success: false,
@@ -762,66 +728,56 @@ export const handlePayMongoWebhook = async (req: Request, res: Response) => {
 };
 
 /**
- * POST /api/payments/paymongo/transfers/callback
- * Handles PayMongo transfer (disbursement) status callbacks. The
- * `callback_url` submitted with each transfer is assumed to be signed the
- * same way as the collections webhook (`Paymongo-Signature` HMAC over the
- * raw body, using PAYMONGO_WEBHOOK_SECRET) — PayMongo's docs don't spell
- * this out explicitly for transfers, so confirm against a real payload once
- * the Wallet/Disbursements product is enabled and adjust here if it differs.
- * Looks up the Payout by PayMongo's transfer id, falling back to
- * reference_number (== Payout.id) in case the callback beats our own write
- * of paymongoTransferId after createTransfer() returns.
+ * POST /api/payments/xendit/payout-webhook
+ * Handles Xendit Payout status callbacks (token-verified via
+ * x-callback-token). Looks up the Payout by Xendit's payout id, falling back
+ * to reference_id (== Payout.id) in case the callback beats our own write of
+ * xenditDisbursementId after createPayout() returns. Status vocabulary
+ * UNCONFIRMED beyond ACCEPTED (the synchronous response, hand-validated) —
+ * COMPLETED/FAILED assumed as the terminal webhook states; confirm against a
+ * real payout webhook payload and adjust the branches below if it differs.
  */
-export const handlePaymongoTransferWebhook = async (req: Request, res: Response) => {
+export const handleXenditPayoutWebhook = async (req: Request, res: Response) => {
   try {
-    const webhookSecret = process.env.PAYMONGO_WEBHOOK_SECRET;
-    const rawBody = req.body;
-
-    if (!webhookSecret || !Buffer.isBuffer(rawBody)) {
-      console.error('PayMongo transfer webhook misconfigured: missing PAYMONGO_WEBHOOK_SECRET or raw body middleware');
+    const webhookToken = process.env.XENDIT_WEBHOOK_TOKEN;
+    if (!webhookToken) {
+      console.error('Xendit payout webhook misconfigured: missing XENDIT_WEBHOOK_TOKEN');
       return res.status(500).json({ success: false, message: 'Webhook not configured' });
     }
 
-    const signatureHeader = req.headers['paymongo-signature'] as string | undefined;
-
-    if (!verifyPaymongoSignature(rawBody, signatureHeader, webhookSecret)) {
+    if (!verifyXenditCallbackToken(req.headers['x-callback-token'], webhookToken)) {
       await writeAuditLog({
-        action: 'PAYMONGO_TRANSFER_WEBHOOK_INVALID_SIGNATURE',
+        action: 'XENDIT_PAYOUT_WEBHOOK_INVALID_TOKEN',
         category: 'SYSTEM_ERROR',
         level: 'WARN',
-        message: 'Rejected PayMongo transfer webhook: signature verification failed',
+        message: 'Rejected Xendit payout webhook: callback token mismatch',
       });
-      return res.status(401).json({ success: false, message: 'Invalid signature' });
+      return res.status(401).json({ success: false, message: 'Invalid callback token' });
     }
 
-    const event = JSON.parse(rawBody.toString('utf8'));
-    // The transfer callback payload shape isn't fully documented — defensively
-    // accept either a bare transfer object or one wrapped in data/data.attributes,
-    // mirroring the collections webhook's envelope.
-    const resource = event?.data?.attributes ?? event?.data ?? event;
-    const transferId = resource?.id as string | undefined;
-    const referenceNumber = resource?.reference_number as string | undefined;
-    const status = (resource?.status as string | undefined)?.toLowerCase();
-    const failureReason = resource?.failure_reason as string | undefined;
+    const resource = (req.body && typeof req.body === 'object' && 'data' in req.body ? (req.body as any).data : req.body) ?? {};
+    const payoutId = resource?.id as string | undefined;
+    const referenceId = resource?.reference_id as string | undefined;
+    const status = (resource?.status as string | undefined)?.toUpperCase();
+    const failureReason = resource?.failure_code ?? resource?.failure_reason;
 
-    const payout = transferId
-      ? await prisma.payout.findFirst({ where: { paymongoTransferId: transferId } })
+    const found = payoutId
+      ? await prisma.payout.findFirst({ where: { xenditDisbursementId: payoutId } })
       : null;
-    const resolved = payout ?? (referenceNumber ? await prisma.payout.findUnique({ where: { id: referenceNumber } }) : null);
+    const resolved = found ?? (referenceId ? await prisma.payout.findUnique({ where: { id: referenceId } }) : null);
 
     if (!resolved) {
-      console.warn('PayMongo transfer webhook: no matching Payout for', { transferId, referenceNumber });
+      console.warn('Xendit payout webhook: no matching Payout for', { payoutId, referenceId });
       return res.status(200).json({ success: true, message: 'No matching payout' });
     }
 
-    if (status === 'succeeded') {
+    if (status === 'COMPLETED' || status === 'SUCCEEDED') {
       await prisma.payout.update({
         where: { id: resolved.id },
         data: {
           status: 'PAID',
-          paymongoTransferStatus: status,
-          paymongoTransferId: transferId ?? resolved.paymongoTransferId,
+          xenditStatus: status,
+          xenditDisbursementId: payoutId ?? resolved.xenditDisbursementId,
           paidAt: new Date(),
         },
       });
@@ -832,14 +788,14 @@ export const handlePaymongoTransferWebhook = async (req: Request, res: Response)
         message: `₱${resolved.amount.toFixed(2)} has been sent to your ${resolved.channel} account`,
         relatedId: resolved.bookingId,
       });
-    } else if (status === 'failed') {
+    } else if (status === 'FAILED') {
       await prisma.payout.update({
         where: { id: resolved.id },
         data: {
           status: 'FAILED',
-          paymongoTransferStatus: status,
-          paymongoTransferId: transferId ?? resolved.paymongoTransferId,
-          failureReason: failureReason ?? 'PayMongo reported failure',
+          xenditStatus: status,
+          xenditDisbursementId: payoutId ?? resolved.xenditDisbursementId,
+          failureReason: failureReason ?? 'Xendit reported failure',
           failedAt: new Date(),
         },
       });
@@ -847,19 +803,19 @@ export const handlePaymongoTransferWebhook = async (req: Request, res: Response)
         userId: resolved.workerId,
         type: 'PAYOUT_FAILED',
         title: 'Payout Failed',
-        message: `We couldn't send your ₱${resolved.amount.toFixed(2)} payout. ${translatePaymongoFailureReason(failureReason)}`,
+        message: `We couldn't send your ₱${resolved.amount.toFixed(2)} payout. ${translateXenditFailureReason(failureReason)}`,
         relatedId: resolved.bookingId,
       });
     }
 
     return res.status(200).json({ success: true, message: 'Webhook received' });
   } catch (error) {
-    console.error('Error handling PayMongo transfer webhook:', error);
+    console.error('Error handling Xendit payout webhook:', error);
     await writeAuditLog({
-      action: 'PAYMONGO_TRANSFER_WEBHOOK_ERROR',
+      action: 'XENDIT_PAYOUT_WEBHOOK_ERROR',
       category: 'SYSTEM_ERROR',
       level: 'ERROR',
-      message: `PayMongo transfer webhook handling failed: ${error instanceof Error ? error.message : 'unknown error'}`,
+      message: `Xendit payout webhook handling failed: ${error instanceof Error ? error.message : 'unknown error'}`,
     });
     return res.status(500).json({ success: false, message: 'Failed to handle webhook' });
   }

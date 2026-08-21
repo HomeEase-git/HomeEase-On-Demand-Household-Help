@@ -168,7 +168,7 @@ export type CreateBookingPayload = {
   priorities?: string[];
   tip?: number;
   notes?: string;
-  paymentMethodType?: 'GCASH' | 'MAYA' | 'CARD' | 'BANK_TRANSFER' | 'CASH';
+  paymentMethodType?: 'GCASH' | 'MAYA' | 'CASH';
   paymentAccountIdentifier?: string;
   scopeAnswers?: Record<string, string | string[]>;
   issuePhotoUrls?: string[];

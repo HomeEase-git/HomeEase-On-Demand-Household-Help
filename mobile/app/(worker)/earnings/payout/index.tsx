@@ -21,7 +21,7 @@ const METHOD_LABELS: Record<string, { label: string; icon: string; color: string
   BANK_TRANSFER: { label: "Bank Transfer", icon: "B", color: "bg-blue-500" },
 };
 
-// Real PayMongo transfer status per job — there's no batched "balance", each
+// Real Xendit payout status per job — there's no batched "balance", each
 // completed job's payout is queued and sent individually (see
 // paymentLifecycleService.schedulePayout), so this is the honest signal for
 // "have I actually been paid" rather than an invented balance/next-date figure.

@@ -1,7 +1,7 @@
 import type { Prisma, PaymentMethodType } from '@prisma/client';
 import prisma from '@config/database';
 import { calculateCommission, calculateWithholdingTax } from '@utils/pricing';
-import { createRefund } from '@services/paymongoService';
+import { createRefund } from '@services/xenditService';
 import { notifyUser } from '@utils/notify';
 import { getAppSettings } from '@services/appSettingsService';
 import { schedulePayout } from '@queues/payoutQueue';
@@ -19,13 +19,13 @@ export interface BookingForPayment {
  * Creates the Payment row at booking-creation time in an "authorized" state:
  * status PENDING, escrowStatus HELD, authorizedAmount/authorizedAt set.
  *
- * GCASH/MAYA need the client to complete a Source checkout (see
- * paymentController.createPaymongoCheckout, unchanged); once PayMongo
- * reports the source chargeable, the webhook charges it and marks the
- * Payment COMPLETED but leaves escrowStatus HELD until this booking is
- * actually confirmed complete (see captureAndReleasePayment). CASH has no
- * gateway automation — the amount is recorded as authorized for bookkeeping
- * and settled off-platform.
+ * GCASH/MAYA need the client to complete a Xendit Invoice checkout (see
+ * paymentController.createXenditCheckout, unchanged); once Xendit reports
+ * the invoice paid, the webhook (handleInvoicePaid) marks the Payment
+ * COMPLETED but leaves escrowStatus HELD until this booking is actually
+ * confirmed complete (see captureAndReleasePayment). CASH has no gateway
+ * automation — the amount is recorded as authorized for bookkeeping and
+ * settled off-platform.
  */
 export async function authorizePaymentForBooking(
   tx: Prisma.TransactionClient,
@@ -78,7 +78,7 @@ export async function authorizePaymentForBooking(
  *
  * Known limitation: no payment method here supports collecting a price
  * increase at this step. GCash/Maya are charged in full up front
- * (handleSourceChargeable, paymentController.ts) and CASH settles
+ * (handleInvoicePaid, paymentController.ts) and CASH settles
  * off-platform — for both this recompute updates the platform's bookkeeping
  * (commission/tax/payout math) to match the final agreed price, but does not
  * and cannot collect any difference from the client. A quote/add-on that
@@ -126,7 +126,7 @@ export async function captureAndReleasePayment(
   });
 
   if (workerId) {
-    // Wrapped so a Redis/PayMongo hiccup here never fails escrow release
+    // Wrapped so a Redis/Xendit hiccup here never fails escrow release
     // itself — the escrow update above already committed.
     try {
       const workerProfile = await prisma.workerProfile.findUnique({
@@ -174,28 +174,28 @@ export async function captureAndReleasePayment(
 /**
  * Releases a held escrow back to the client without paying the worker —
  * used for cancellations/refunds. An authorization that was never charged
- * (a GCash/Maya source never confirmed) simply expires/voids on PayMongo's
- * side, nothing to reverse. But money CAN
- * already be with the platform while escrow is still HELD: GCash/Maya are
- * charged as soon as the source becomes chargeable (handleSourceChargeable,
- * paymentController.ts), well before the job — and completion capture also
- * sets status COMPLETED — so `status === 'COMPLETED'` with a real
- * `paymongoPaymentId` means a genuine refund must be issued via PayMongo,
- * not just a DB status flip.
+ * (a GCash/Maya invoice never paid) simply expires on Xendit's side, nothing
+ * to reverse. But money CAN already be with the platform while escrow is
+ * still HELD: GCash/Maya are charged as soon as the invoice is paid
+ * (handleInvoicePaid, paymentController.ts), well before the job — and
+ * completion capture also sets status COMPLETED — so `status === 'COMPLETED'`
+ * with a real `xenditInvoiceId` means a genuine refund must be issued via
+ * Xendit, not just a DB status flip. Xendit's refund call is keyed by the
+ * invoice id, not a separate payment id.
  */
 export async function refundOrVoidPayment(bookingId: string, reason: string) {
   const payment = await prisma.payment.findUnique({ where: { bookingId } });
   if (!payment) return null;
   if (payment.escrowStatus !== 'HELD') return payment;
 
-  if (payment.status === 'COMPLETED' && payment.paymongoPaymentId) {
+  if (payment.status === 'COMPLETED' && payment.xenditInvoiceId) {
     // Don't mark REFUNDED in our DB unless the gateway refund actually
     // succeeded — leaving escrowStatus HELD on failure so it's visible for
     // manual follow-up rather than silently lying about the client's money.
     await createRefund({
-      paymongoPaymentId: payment.paymongoPaymentId,
+      xenditInvoiceId: payment.xenditInvoiceId,
       amountPesos: payment.capturedAmount ?? payment.totalAmount,
-      notes: reason,
+      reason,
     });
   }
 

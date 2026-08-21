@@ -98,7 +98,7 @@ export default function Payouts() {
       />
       <SubNav items={SUB_NAV} />
       <p style={{ color: 'var(--text-muted)', fontSize: '0.875rem', margin: '0.5rem 0 1rem' }}>
-        Payouts are sent to the worker&apos;s configured GCash/Maya account via PayMongo once a booking&apos;s held
+        Payouts are sent to the worker&apos;s configured GCash/Maya account via Xendit once a booking&apos;s held
         payment is released. Failed sends can be retried below.
       </p>
       {meta.legacyUnpayoutCount > 0 && (

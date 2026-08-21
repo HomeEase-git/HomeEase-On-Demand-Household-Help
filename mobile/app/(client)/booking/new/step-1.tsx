@@ -114,6 +114,16 @@ export default function BookingStep1Screen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // When entering via "Book Now" on a worker's profile, only offer the
+  // categories that worker actually provides — picking anything else would
+  // leave step-2/step-4 unable to find this worker available at any slot.
+  const displayCategories =
+    draft.workerLocked && draft.workerServiceTypes && draft.workerServiceTypes.length > 0
+      ? categories.filter((c) =>
+          draft.workerServiceTypes!.some((ws) => ws.name.toLowerCase() === c.name.toLowerCase())
+        )
+      : categories;
+
   const isRoomBased = (selectedCategory?.scopeType ?? "ROOM_BASED") === "ROOM_BASED";
   const showCondition = selectedCategory?.hasCondition ?? true;
 
@@ -179,6 +189,10 @@ export default function BookingStep1Screen() {
     setDraft({
       category: selectedCategory!.name,
       serviceType: selectedCategory!.name,
+      serviceTypeId: draft.workerLocked
+        ? (draft.workerServiceTypes?.find((ws) => ws.name.toLowerCase() === selectedCategory!.name.toLowerCase())
+            ?.id ?? null)
+        : (draft.serviceTypeId ?? null),
       categoryBasePrice: selectedCategory!.basePrice,
       description,
       rooms: isRoomBased ? rooms : [],
@@ -214,11 +228,17 @@ export default function BookingStep1Screen() {
           </View>
         ) : (
           <ServiceCategorySelector
-            categories={categories}
+            categories={displayCategories}
             selectedId={selectedCategory?.id ?? null}
             loading={loadingCategories}
             onSelect={handleCategorySelect}
           />
+        )}
+
+        {draft.workerLocked && draft.workerServiceTypes && draft.workerServiceTypes.length > 0 && !loadingCategories && displayCategories.length === 0 && (
+          <Text className="text-error text-sm mt-2">
+            This pro&apos;s listed services aren&apos;t currently bookable. Please go back and pick a different pro.
+          </Text>
         )}
 
         {selectedCategory && isRoomBased && (

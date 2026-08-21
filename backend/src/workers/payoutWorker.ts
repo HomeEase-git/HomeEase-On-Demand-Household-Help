@@ -4,9 +4,16 @@ import { redisConnection as connection } from '@config/redis';
 import { notifyUser } from '@utils/notify';
 import { writeAuditLog } from '@utils/auditLog';
 import { PAYOUT_QUEUE_NAME, PAYOUT_JOB_NAMES, type SendPayoutJobData } from '@queues/payoutQueue';
-import { createTransfer, paymongoDestinationBicFor } from '@services/paymongoDisbursementService';
+import { createPayout, xenditChannelCodeFor } from '@services/xenditDisbursementService';
 
-const TERMINAL_SUCCESS_STATUSES = new Set(['succeeded']);
+// Xendit's synchronous payout response is ACCEPTED — this is NOT terminal
+// (unlike PayMongo's 'succeeded', which was). A hand-validated manual test
+// showed a payout can sit at ACCEPTED well past its estimated_arrival_time;
+// the actual terminal state (COMPLETED or FAILED) arrives later via the
+// payout webhook (see paymentController.handleXenditPayoutWebhook).
+// SUCCEEDED is included defensively in case Xendit uses it interchangeably
+// with COMPLETED — UNCONFIRMED, prune once real payloads are observed.
+const TERMINAL_SUCCESS_STATUSES = new Set(['COMPLETED', 'SUCCEEDED']);
 
 export async function processSendPayout(job: Job, data: SendPayoutJobData): Promise<void> {
   const payout = await prisma.payout.findUnique({ where: { id: data.payoutId } });
@@ -15,8 +22,8 @@ export async function processSendPayout(job: Job, data: SendPayoutJobData): Prom
   // Already terminal — a retried/duplicate job shouldn't resend.
   if (payout.status === 'PAID' || payout.status === 'PROCESSING') return;
 
-  const destinationBic = await paymongoDestinationBicFor(payout.channel, payout.amount);
-  if (!destinationBic) {
+  const channelCode = xenditChannelCodeFor(payout.channel);
+  if (!channelCode) {
     await prisma.payout.update({
       where: { id: payout.id },
       data: {
@@ -34,24 +41,28 @@ export async function processSendPayout(job: Job, data: SendPayoutJobData): Prom
   });
 
   try {
-    const transfer = await createTransfer({
-      referenceNumber: payout.id,
+    const xenditPayout = await createPayout({
+      referenceId: payout.id,
       amountPesos: payout.amount,
-      destinationBic,
+      channelCode,
       accountNumber: payout.accountNumber,
       accountHolderName: payout.accountName || 'HomeEase Worker',
       description: `HomeEase payout for booking ${payout.bookingId}`,
-      callbackUrl: `${process.env.APP_URL}/api/payments/paymongo/transfers/callback`,
     });
 
-    const isImmediatelyPaid = TERMINAL_SUCCESS_STATUSES.has(transfer.status.toLowerCase());
+    const normalizedStatus = xenditPayout.status.toUpperCase();
+    const isImmediatelyPaid = TERMINAL_SUCCESS_STATUSES.has(normalizedStatus);
+    const isImmediatelyFailed = normalizedStatus === 'FAILED';
 
     await prisma.payout.update({
       where: { id: payout.id },
       data: {
-        paymongoTransferId: transfer.id,
-        paymongoTransferStatus: transfer.status,
+        xenditDisbursementId: xenditPayout.id,
+        xenditStatus: xenditPayout.status,
         ...(isImmediatelyPaid ? { status: 'PAID', paidAt: new Date() } : {}),
+        ...(isImmediatelyFailed
+          ? { status: 'FAILED', failureReason: 'Xendit reported immediate failure', failedAt: new Date() }
+          : {}),
       },
     });
 
@@ -63,7 +74,17 @@ export async function processSendPayout(job: Job, data: SendPayoutJobData): Prom
         message: `₱${payout.amount.toFixed(2)} has been sent to your ${payout.channel} account`,
         relatedId: payout.bookingId,
       });
+    } else if (isImmediatelyFailed) {
+      await notifyUser({
+        userId: payout.workerId,
+        type: 'PAYOUT_FAILED',
+        title: 'Payout Failed',
+        message: `We couldn't send your ₱${payout.amount.toFixed(2)} payout. Our team has been notified.`,
+        relatedId: payout.bookingId,
+      });
     }
+    // Otherwise (ACCEPTED/PENDING) the payout stays PROCESSING — the payout
+    // webhook (handleXenditPayoutWebhook) will flip it to PAID/FAILED later.
   } catch (error) {
     const isFinalAttempt = job.attemptsMade + 1 >= (job.opts.attempts ?? 1);
     const message = error instanceof Error ? error.message : 'Unknown disbursement error';

@@ -5,7 +5,7 @@ import { useFocusEffect } from "expo-router";
 import ScreenHeader from "../../../../components/ui/ScreenHeader";
 import PrimaryButton from "../../../../components/ui/PrimaryButton";
 import { Skeleton } from "../../../../components/ui/Skeleton";
-import PaymongoCheckoutModal from "../../../../components/payment/PaymongoCheckoutModal";
+import XenditCheckoutModal from "../../../../components/payment/XenditCheckoutModal";
 import * as api from "../../../../services/api";
 import { colors } from "../../../../constants";
 import { useAlertModal } from "../../../../contexts/AlertModalContext";
@@ -202,7 +202,7 @@ export default function WalletScreen() {
         )}
       </ScrollView>
 
-      <PaymongoCheckoutModal
+      <XenditCheckoutModal
         visible={checkoutVisible}
         checkoutUrl={checkoutUrl}
         onSuccess={handleCheckoutSuccess}

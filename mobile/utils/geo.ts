@@ -61,7 +61,7 @@ export async function geocodeAddress(address: string): Promise<PlaceResult | nul
   if (!normalized) return null;
 
   const response = await fetch(
-    `https://nominatim.openstreetmap.org/search?format=json&limit=1&addressdetails=1&q=${encodeURIComponent(
+    `https://nominatim.openstreetmap.org/search?format=json&limit=1&addressdetails=1&countrycodes=ph&q=${encodeURIComponent(
       normalized,
     )}`,
     { headers: NOMINATIM_HEADERS },
@@ -98,7 +98,7 @@ export async function searchAddresses(query: string, limit = 5): Promise<PlaceRe
   if (normalized.length < 3) return [];
 
   const response = await fetch(
-    `https://nominatim.openstreetmap.org/search?format=json&limit=${limit}&addressdetails=1&q=${encodeURIComponent(
+    `https://nominatim.openstreetmap.org/search?format=json&limit=${limit}&addressdetails=1&countrycodes=ph&q=${encodeURIComponent(
       normalized,
     )}`,
     { headers: NOMINATIM_HEADERS },

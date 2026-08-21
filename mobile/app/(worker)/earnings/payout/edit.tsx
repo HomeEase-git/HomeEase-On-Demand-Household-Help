@@ -8,10 +8,12 @@ import PrimaryButton from "../../../../components/ui/PrimaryButton";
 import * as api from "../../../../services/api";
 import { useAlertModal } from "../../../../contexts/AlertModalContext";
 
-// Bank Transfer isn't offered here — PayMongo disbursement only resolves
-// GCash/Maya institution codes, so a new Bank Transfer payout would always
-// fail silently server-side. (A worker with a legacy Bank Transfer payout
-// method on file will have it overwritten the next time they save here.)
+// Bank Transfer isn't offered here — GCash/Maya are the only payout
+// channels HomeEase currently supports, by deliberate product scope, not a
+// gateway limitation (Xendit's Payouts API does support bank channels).
+// Expanding to bank transfer is a separate, explicit future decision. (A
+// worker with a legacy Bank Transfer payout method on file will have it
+// overwritten the next time they save here.)
 const METHODS: { id: "GCASH" | "MAYA"; label: string; icon: string }[] = [
   { id: "GCASH", label: "GCash", icon: "G" },
   { id: "MAYA", label: "Maya", icon: "M" },

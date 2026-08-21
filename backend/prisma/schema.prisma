@@ -65,10 +65,10 @@ enum EscrowStatus {
 }
 
 enum PayoutStatus {
-  PENDING // Payout row created, not yet sent to PayMongo
-  PROCESSING // PayMongo transfer created, awaiting callback confirmation
-  PAID // PayMongo confirmed the transfer succeeded
-  FAILED // PayMongo confirmed failure, or a platform-side error before send
+  PENDING // Payout row created, not yet sent to Xendit
+  PROCESSING // Xendit disbursement created, awaiting webhook confirmation
+  PAID // Xendit confirmed the payout succeeded
+  FAILED // Xendit confirmed failure, or a platform-side error before send
 }
 
 enum PaymentMethodType {
@@ -924,13 +924,17 @@ model Payment {
   refundReason String?
   refundedAt   DateTime?
 
-  // Set when status becomes FAILED — raw reason from PayMongo's webhook
-  // payload (translated for end users via utils/paymongoFailureMessages.ts).
+  // Set when status becomes FAILED — raw reason from Xendit's webhook
+  // payload (translated for end users via utils/xenditFailureMessages.ts).
   failureReason String?
 
-  // PayMongo references
-  paymongoPaymentId String?
-  paymongoSourceId  String?
+  // Xendit references. xenditInvoiceId is set at checkout-creation time and
+  // is what the invoice-paid webhook uses to find this row. xenditPaymentId
+  // is populated only once the webhook reports the invoice PAID (Xendit's
+  // payment_id, e.g. "ewc_...") and is surfaced to the client as the
+  // receipt's transactionId.
+  xenditInvoiceId String?
+  xenditPaymentId String?
 
   // Authorize/capture flow — amount is held (authorized) at booking time and
   // captured on completion; capturedAmount may differ from authorizedAmount
@@ -959,7 +963,7 @@ model Payment {
   @@index([escrowStatus])
 }
 
-// Tracks the actual disbursement of a worker's payout via PayMongo, separate
+// Tracks the actual disbursement of a worker's payout via Xendit, separate
 // from Payment.escrowStatus (which only tracks the platform's own escrow
 // ledger — RELEASED means "the worker's cut is owed", not "the worker has
 // been paid"). One Payout per Payment, created once escrow is released.
@@ -975,15 +979,11 @@ model Payout {
   accountName   String? // snapshot of WorkerProfile.payoutAccountName at send time
   accountNumber String // snapshot of WorkerProfile.payoutAccountNumber at send time
 
-  status                PayoutStatus @default(PENDING)
-  paymongoTransferId    String?      @unique
-  paymongoTransferStatus String? // raw status string from PayMongo, for debugging
-  // Deprecated — populated only on Xendit-era rows from before the PayMongo
-  // disbursement migration; no longer written to.
-  xenditDisbursementId  String?      @unique
-  xenditStatus          String?
-  failureReason         String?
-  attempts              Int          @default(0)
+  status               PayoutStatus @default(PENDING)
+  xenditDisbursementId String?      @unique // Xendit Payouts API `id` (e.g. "disb-...")
+  xenditStatus         String? // raw status from Xendit (ACCEPTED/COMPLETED/FAILED/...), for debugging
+  failureReason        String?
+  attempts             Int          @default(0)
 
   processingAt DateTime?
   paidAt       DateTime?
@@ -1039,8 +1039,8 @@ model WalletTransaction {
   amount       Float
   balanceAfter Float?
 
-  bookingId          String? // soft reference — links a deduction/refund to the job it was for
-  paymongoCheckoutId String? @unique // set for TOPUP rows, keys the webhook back to this transaction
+  bookingId       String? // soft reference — links a deduction/refund to the job it was for
+  xenditInvoiceId String? @unique // set for TOPUP rows, keys the invoice-paid webhook back to this transaction
   failureReason      String?
   note               String? // admin's reason, for ADMIN_ADJUSTMENT rows
 

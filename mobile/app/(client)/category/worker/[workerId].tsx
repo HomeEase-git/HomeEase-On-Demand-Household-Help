@@ -10,12 +10,8 @@ import PrimaryButton from "../../../../components/ui/PrimaryButton";
 import * as api from "../../../../services/api";
 import type { WorkerDetail, WorkerReview } from "../../../../types/api.types";
 import { useBookingStore } from "../../../../store/bookingStore";
-import {
-  mapServiceToCategory,
-  isExactCategoryMatch,
-} from "../../../../utils/categoryMapping";
+import { mapServiceToCategory } from "../../../../utils/categoryMapping";
 import { colors, cardShadow } from "../../../../constants";
-import { useAlertModal } from "../../../../contexts/AlertModalContext";
 
 const DAY_LABELS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const DAY_ORDER = [1, 2, 3, 4, 5, 6, 0]; // Mon -> Sun display order
@@ -45,9 +41,9 @@ function SectionTitle({
 
 export default function WorkerProfileScreen() {
   const router = useRouter();
-  const alertModal = useAlertModal();
   const { workerId } = useLocalSearchParams<{ workerId: string }>();
   const setDraft = useBookingStore((s) => s.setDraft);
+  const clearDraft = useBookingStore((s) => s.clearDraft);
 
   const [worker, setWorker] = useState<WorkerDetail | null>(null);
   const [reviews, setReviews] = useState<WorkerReview[]>([]);
@@ -388,20 +384,25 @@ export default function WorkerProfileScreen() {
             label="Book Now"
             fullWidth
             onPress={() => {
-              if (!isExactCategoryMatch(worker.service)) {
-                alertModal.warning(
-                  "Booking unavailable",
-                  "This worker's service type couldn't be matched to a bookable category. Please try again later or contact support.",
-                );
-                return;
-              }
-
+              // Start from a clean draft — otherwise an abandoned booking
+              // attempt (different category/address/payment method) would
+              // leak into this new worker-locked booking.
+              clearDraft();
               const normalizedCategory = mapServiceToCategory(worker.service);
+              const primaryServiceType = worker.services[0];
               setDraft({
                 category: normalizedCategory,
+                serviceType: worker.service,
+                serviceTypeId: primaryServiceType?.id ?? null,
+                categoryBasePrice: primaryServiceType?.basePrice ?? null,
                 workerId: worker.id,
                 workerName: worker.name,
                 workerLocked: true,
+                workerServiceTypes: worker.services,
+                workerHourlyRate: worker.hourlyRate ?? null,
+                workerTier: worker.tier ?? "STANDARD",
+                workerAvatar: worker.avatar ?? null,
+                workerRating: worker.rating ?? null,
                 entrySource: "worker_profile",
               });
               router.push("/(client)/booking/new/step-1");

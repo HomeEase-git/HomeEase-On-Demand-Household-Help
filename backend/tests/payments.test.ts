@@ -1,28 +1,15 @@
 import request from 'supertest';
-import crypto from 'crypto';
 import app from '@/app';
 import prisma from '@config/database';
 import { createTestUser, deleteTestUser, createTestBooking, deleteTestBooking } from './helpers';
 
-jest.mock('@services/paymongoService', () => ({
-  ...jest.requireActual('@services/paymongoService'),
-  createSourcePayment: jest.fn(),
-}));
+const WEBHOOK_PATH = '/api/payments/xendit/invoice-webhook';
 
-// eslint-disable-next-line @typescript-eslint/no-var-requires
-const { createSourcePayment } = require('@services/paymongoService');
-
-const WEBHOOK_PATH = '/api/payments/paymongo/webhook';
-
-function signWebhook(payload: object) {
-  const secret = process.env.PAYMONGO_WEBHOOK_SECRET as string;
-  const rawBody = JSON.stringify(payload);
-  const timestamp = Math.floor(Date.now() / 1000).toString();
-  const signature = crypto.createHmac('sha256', secret).update(`${timestamp}.${rawBody}`).digest('hex');
-  return { rawBody, header: `t=${timestamp},te=${signature}` };
+function xenditHeaders() {
+  return { 'x-callback-token': process.env.XENDIT_WEBHOOK_TOKEN as string };
 }
 
-describe('PayMongo webhook — signature verification and event handling', () => {
+describe('Xendit invoice webhook — token verification and event handling', () => {
   const createdUserIds: string[] = [];
   const createdBookingIds: string[] = [];
   let clientId: string;
@@ -46,7 +33,7 @@ describe('PayMongo webhook — signature verification and event handling', () =>
     await prisma.$disconnect();
   });
 
-  async function seedPendingPayment(sourceId: string) {
+  async function seedPendingPayment(invoiceId: string) {
     const booking = await createTestBooking({ clientId, workerId, status: 'ACCEPTED' });
     createdBookingIds.push(booking.id);
     const payment = await prisma.payment.create({
@@ -59,49 +46,38 @@ describe('PayMongo webhook — signature verification and event handling', () =>
         totalAmount: 1000,
         status: 'PENDING',
         methodType: 'GCASH',
-        paymongoSourceId: sourceId,
+        xenditInvoiceId: invoiceId,
       },
     });
     return { booking, payment };
   }
 
-  it('rejects a webhook with a missing signature header', async () => {
-    const payload = { data: { attributes: { type: 'payment.failed', data: { attributes: { source: { id: 'src_missing' } } } } } };
+  it('rejects a webhook with a missing callback token', async () => {
+    const payload = { id: 'inv_missing', status: 'FAILED' };
 
-    const res = await request(app)
-      .post(WEBHOOK_PATH)
-      .set('Content-Type', 'application/json')
-      .send(JSON.stringify(payload));
+    const res = await request(app).post(WEBHOOK_PATH).send(payload);
 
     expect(res.status).toBe(401);
   });
 
-  it('rejects a webhook with an invalid signature', async () => {
-    const payload = { data: { attributes: { type: 'payment.failed', data: { attributes: { source: { id: 'src_bad' } } } } } };
+  it('rejects a webhook with an incorrect callback token', async () => {
+    const payload = { id: 'inv_bad', status: 'FAILED' };
 
     const res = await request(app)
       .post(WEBHOOK_PATH)
-      .set('Content-Type', 'application/json')
-      .set('paymongo-signature', 't=1700000000,te=0000000000000000000000000000000000000000000000000000000000000000')
-      .send(JSON.stringify(payload));
+      .set('x-callback-token', 'wrong-token')
+      .send(payload);
 
     expect(res.status).toBe(401);
   });
 
-  it('marks a pending payment FAILED on a signed payment.failed event', async () => {
-    const sourceId = `src_test_failed_${Date.now()}`;
-    const { payment } = await seedPendingPayment(sourceId);
+  it('marks a pending payment FAILED on a token-verified EXPIRED status', async () => {
+    const invoiceId = `inv_test_failed_${Date.now()}`;
+    const { payment } = await seedPendingPayment(invoiceId);
 
-    const payload = {
-      data: { attributes: { type: 'payment.failed', data: { attributes: { source: { id: sourceId } } } } },
-    };
-    const { rawBody, header } = signWebhook(payload);
+    const payload = { id: invoiceId, status: 'EXPIRED' };
 
-    const res = await request(app)
-      .post(WEBHOOK_PATH)
-      .set('Content-Type', 'application/json')
-      .set('paymongo-signature', header)
-      .send(rawBody);
+    const res = await request(app).post(WEBHOOK_PATH).set(xenditHeaders()).send(payload);
 
     expect(res.status).toBe(200);
 
@@ -109,51 +85,47 @@ describe('PayMongo webhook — signature verification and event handling', () =>
     expect(updated?.status).toBe('FAILED');
   });
 
-  it('captures a chargeable source and marks the payment COMPLETED', async () => {
-    const sourceId = `src_test_chargeable_${Date.now()}`;
-    const { payment } = await seedPendingPayment(sourceId);
+  it('marks a pending payment COMPLETED on a token-verified PAID status', async () => {
+    const invoiceId = `inv_test_paid_${Date.now()}`;
+    const { payment } = await seedPendingPayment(invoiceId);
 
-    (createSourcePayment as jest.Mock).mockReset().mockResolvedValueOnce({ id: 'pay_mock_123' });
-
+    // Capture is atomic on Xendit's side — no separate "charge" call to
+    // mock, the webhook payload itself carries the paid amount/payment id.
     const payload = {
-      data: { attributes: { type: 'source.chargeable', data: { id: sourceId } } },
+      id: invoiceId,
+      status: 'PAID',
+      payment_id: 'ewc_mock_123',
+      paid_amount: payment.totalAmount,
+      paid_at: new Date().toISOString(),
     };
-    const { rawBody, header } = signWebhook(payload);
 
-    const res = await request(app)
-      .post(WEBHOOK_PATH)
-      .set('Content-Type', 'application/json')
-      .set('paymongo-signature', header)
-      .send(rawBody);
+    const res = await request(app).post(WEBHOOK_PATH).set(xenditHeaders()).send(payload);
 
     expect(res.status).toBe(200);
-    expect(createSourcePayment).toHaveBeenCalledWith(
-      expect.objectContaining({ sourceId, amountPesos: payment.totalAmount })
-    );
 
     const updated = await prisma.payment.findUnique({ where: { id: payment.id } });
     expect(updated?.status).toBe('COMPLETED');
-    expect(updated?.paymongoPaymentId).toBe('pay_mock_123');
+    expect(updated?.xenditPaymentId).toBe('ewc_mock_123');
     expect(updated?.capturedAmount).toBe(payment.totalAmount);
   });
 
-  it('does not re-charge a payment that is no longer PENDING', async () => {
-    const sourceId = `src_test_already_${Date.now()}`;
-    const { payment } = await seedPendingPayment(sourceId);
+  it('does not re-complete a payment that is no longer PENDING', async () => {
+    const invoiceId = `inv_test_already_${Date.now()}`;
+    const { payment } = await seedPendingPayment(invoiceId);
     await prisma.payment.update({ where: { id: payment.id }, data: { status: 'COMPLETED' } });
 
-    (createSourcePayment as jest.Mock).mockReset();
+    const payload = {
+      id: invoiceId,
+      status: 'PAID',
+      payment_id: 'ewc_should_not_apply',
+      paid_amount: payment.totalAmount,
+    };
 
-    const payload = { data: { attributes: { type: 'source.chargeable', data: { id: sourceId } } } };
-    const { rawBody, header } = signWebhook(payload);
-
-    const res = await request(app)
-      .post(WEBHOOK_PATH)
-      .set('Content-Type', 'application/json')
-      .set('paymongo-signature', header)
-      .send(rawBody);
+    const res = await request(app).post(WEBHOOK_PATH).set(xenditHeaders()).send(payload);
 
     expect(res.status).toBe(200);
-    expect(createSourcePayment).not.toHaveBeenCalled();
+
+    const updated = await prisma.payment.findUnique({ where: { id: payment.id } });
+    expect(updated?.xenditPaymentId).not.toBe('ewc_should_not_apply');
   });
 });

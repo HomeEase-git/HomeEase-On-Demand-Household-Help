@@ -5,9 +5,9 @@ import {
   listMyPayments,
   releaseEscrow,
   refundPayment,
-  createPaymongoCheckout,
-  handlePayMongoWebhook,
-  handlePaymongoTransferWebhook,
+  createXenditCheckout,
+  handleXenditInvoiceWebhook,
+  handleXenditPayoutWebhook,
 } from '../controllers/paymentController';
 import { authMiddleware } from '../middleware/auth';
 import { restrictTo } from '../middleware/role';
@@ -18,11 +18,11 @@ import {
 
 const router = Router();
 
-// PayMongo webhook (no auth required)
-router.post('/paymongo/webhook', handlePayMongoWebhook);
+// Xendit invoice-paid webhook (no auth required — token-verified)
+router.post('/xendit/invoice-webhook', handleXenditInvoiceWebhook);
 
-// PayMongo transfer (disbursement) callback (no auth required — signature-verified)
-router.post('/paymongo/transfers/callback', handlePaymongoTransferWebhook);
+// Xendit payout status webhook (no auth required — token-verified)
+router.post('/xendit/payout-webhook', handleXenditPayoutWebhook);
 
 // All other routes require auth
 router.use(authMiddleware);
@@ -42,7 +42,7 @@ router.post('/:id/release', restrictTo('CLIENT'), validateReleaseEscrow, release
 // Refund payment (client only)
 router.post('/:id/refund', restrictTo('CLIENT'), validateRefundPayment, refundPayment);
 
-// Create PayMongo Source checkout (GCash/Maya) for an existing pending payment (client only)
-router.post('/:bookingId/paymongo/checkout', restrictTo('CLIENT'), createPaymongoCheckout);
+// Create Xendit Invoice checkout (GCash/Maya) for an existing pending payment (client only)
+router.post('/:bookingId/xendit/checkout', restrictTo('CLIENT'), createXenditCheckout);
 
 export default router;

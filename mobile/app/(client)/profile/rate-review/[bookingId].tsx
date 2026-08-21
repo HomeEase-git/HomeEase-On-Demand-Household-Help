@@ -16,7 +16,6 @@ import { AppIcon as Ionicons } from "../../../../components/icons/AppIcon";
 import { colors, cardShadow } from "../../../../constants";
 import { useBookingStore, API_STATUS_MAP, type Booking } from "../../../../store/bookingStore";
 import { submitReview as apiSubmitReview, getBookingDetail, uploadReviewPhoto } from "../../../../services/api";
-import { isExactCategoryMatch } from "../../../../utils/categoryMapping";
 import { useAlertModal } from "../../../../contexts/AlertModalContext";
 
 const MAX_REVIEW_PHOTOS = 5;
@@ -135,14 +134,6 @@ export default function RateBookingScreen() {
   const handleBookAgain = () => {
     if (!booking) {
       alertModal.error("Error", "Booking not found");
-      return;
-    }
-
-    if (!isExactCategoryMatch(booking.category ?? booking.service)) {
-      alertModal.warning(
-        "Booking unavailable",
-        "This booking's service type couldn't be matched to a bookable category. Please try a different booking or contact support.",
-      );
       return;
     }
 

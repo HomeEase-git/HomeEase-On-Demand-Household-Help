@@ -13,9 +13,10 @@ import { serviceConfigs } from '../constants/serviceData';
  * bookable serviceConfig but don't match its categoryName/categoryId exactly.
  * Keys are normalized (trimmed, lowercased); values are serviceConfig categoryIds.
  *
- * Categories with no entry here (e.g. "Painting", "Pest Control", "Appliance
- * Repair") have no bookable flow in the app yet — that's not a naming gap,
- * there's genuinely no serviceConfig to route them to.
+ * This is only a display-name normalization for a handful of legacy labels.
+ * Every ServiceType an admin creates is bookable regardless of whether it has
+ * an entry here — `booking/new/step-1.tsx` resolves categories live against
+ * `GET /services`, not against this local list.
  */
 const CATEGORY_ALIASES: Record<string, string> = {
   'aircon & refrigeration': 'aircon',
@@ -98,17 +99,6 @@ export function isValidCategory(workerService: string | null | undefined): boole
 }
 
 /**
- * Checks if a worker service name matches an exact known category.
- * Used to validate worker-profile-to-booking routing before committing to workerLocked: true.
- *
- * @param workerService - The service name from a worker profile
- * @returns true if the service matches a known categoryName or categoryId (case/whitespace-insensitive)
- */
-export function isExactCategoryMatch(workerService: string | null | undefined): boolean {
-  return findMatchingConfig(workerService) !== undefined;
-}
-
-/**
  * Finds the local serviceConfig (tasks/addOns) matching a category name, alias-aware.
  * Use this instead of a raw `categoryName` string comparison when looking up
  * addOns/tasks for a category that may be an alias (e.g. "Aircon & Refrigeration").
@@ -120,4 +110,4 @@ export function resolveServiceConfig(categoryName: string | null | undefined) {
   return findMatchingConfig(categoryName);
 }
 
-export default { mapServiceToCategory, isValidCategory, isExactCategoryMatch, resolveServiceConfig };
+export default { mapServiceToCategory, isValidCategory, resolveServiceConfig };

@@ -444,6 +444,9 @@ export interface DiscoverWorkersFilters {
   timeSlot?: TimeSlot;
   condition?: ConditionType;
   rooms?: RoomType[];
+  // Scopes results to a single worker — used to check a specific (e.g.
+  // profile-locked) worker's real open slots rather than discovering a list.
+  workerId?: string;
   page?: number;
   limit?: number;
 }
@@ -468,6 +471,7 @@ export async function discoverWorkers(filters: DiscoverWorkersFilters): Promise<
     if (filters.timeSlot) params.timeSlot = filters.timeSlot;
     if (filters.condition) params.condition = filters.condition;
     if (filters.rooms?.length) params.rooms = filters.rooms.join(',');
+    if (filters.workerId) params.workerId = filters.workerId;
     if (filters.page) params.page = filters.page;
     if (filters.limit) params.limit = filters.limit;
 
@@ -519,7 +523,10 @@ function normalizeWorkerListItem(worker: any): NormalizedWorkerListItem {
 export async function getWorkerDetail(workerId: string): Promise<WorkerDetail | null> {
   try {
     const response = await api.get(`/workers/${workerId}`);
-    const service = response.services?.[0]?.name ?? "General service";
+    const services: { id: string; name: string; basePrice: number }[] = Array.isArray(response.services)
+      ? response.services.map((s: any) => ({ id: s.id, name: s.name, basePrice: s.basePrice }))
+      : [];
+    const service = services[0]?.name ?? "General service";
     const skills = response.resumeParseResult?.parsedSkills?.length
       ? response.resumeParseResult.parsedSkills
       : [service];
@@ -528,9 +535,11 @@ export async function getWorkerDetail(workerId: string): Promise<WorkerDetail | 
       id: response.id,
       name: response.name,
       service,
+      services,
+      tier: response.tier ?? undefined,
       rating: Number(response.rating ?? 0),
       reviews: Number(response.reviewCount ?? 0),
-      rate: typeof response.services?.[0]?.basePrice === "number" ? response.services[0].basePrice : undefined,
+      rate: typeof services[0]?.basePrice === "number" ? services[0].basePrice : undefined,
       status: response.isAvailable ? "available" : "busy",
       avatar: response.avatar ?? undefined,
       bio: response.bio ?? "",
@@ -856,7 +865,7 @@ export async function getTransactions(page?: number, status?: 'PENDING' | 'COMPL
         method: p.methodType,
         status: titleCaseStatus(p.status ?? "Pending"),
         date: p.createdAt,
-        // Worker-only — the actual PayMongo transfer status, separate from
+        // Worker-only — the actual Xendit payout status, separate from
         // `status` above (which only reflects the client's payment/escrow).
         payoutStatus: p.payoutStatus ?? null,
         payoutFailureReason: p.payoutFailureReason ?? null,
@@ -918,12 +927,12 @@ export async function releasePaymentEscrow(paymentId: string) {
   }
 }
 
-export async function createPaymongoCheckout(bookingId: string) {
+export async function createXenditCheckout(bookingId: string) {
   try {
-    const response = await api.post(`/payments/${bookingId}/paymongo/checkout`);
-    return response as { checkoutUrl: string; sourceId: string };
+    const response = await api.post(`/payments/${bookingId}/xendit/checkout`);
+    return response as { checkoutUrl: string; invoiceId: string };
   } catch (error) {
-    console.error('Create PayMongo checkout error:', error);
+    console.error('Create Xendit checkout error:', error);
     throw error;
   }
 }
@@ -1162,7 +1171,7 @@ export async function getMyWallet() {
 export async function topupWallet(amount: number, methodType: 'GCASH' | 'MAYA') {
   try {
     const response = await api.post('/workers/me/wallet/topup', { amount, methodType });
-    return response as { checkoutUrl: string; sourceId: string };
+    return response as { checkoutUrl: string; invoiceId: string };
   } catch (error) {
     console.error('Top up wallet error:', error);
     throw error;
