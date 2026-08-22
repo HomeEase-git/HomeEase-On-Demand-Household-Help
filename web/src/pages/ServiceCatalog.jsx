@@ -12,6 +12,8 @@ import {
   toggleServiceTypeActive,
 } from '../services/serviceTypes'
 import { useToast } from '../context/ToastContext'
+import IconPicker from '../components/common/IconPicker'
+import { msIconFor } from '../constants/serviceIcons'
 
 const PAGE_SIZE = 10
 
@@ -38,6 +40,7 @@ function emptyForm() {
     basePrice: '',
     scopeType: 'ROOM_BASED',
     hasCondition: true,
+    icon: null,
     fields: [],
   }
 }
@@ -49,6 +52,7 @@ function serviceToForm(service) {
     basePrice: String(service.basePrice),
     scopeType: service.scopeType,
     hasCondition: service.hasCondition,
+    icon: service.icon || null,
     fields: (service.scopeFields || []).map((f) => ({
       label: f.label,
       fieldType: f.fieldType,
@@ -195,6 +199,7 @@ export default function ServiceCatalog() {
       basePrice,
       scopeType: form.scopeType,
       hasCondition: form.hasCondition,
+      icon: form.icon,
       scopeFields:
         form.scopeType === 'CUSTOM'
           ? form.fields.map((f) => ({
@@ -262,6 +267,7 @@ export default function ServiceCatalog() {
             <table className="table">
               <thead>
                 <tr>
+                  <th></th>
                   <th>Name</th>
                   <th>Base Price (₱)</th>
                   <th>Scope</th>
@@ -273,6 +279,11 @@ export default function ServiceCatalog() {
               <tbody>
                 {pagedServices.map((s) => (
                   <tr key={s.id}>
+                    <td>
+                      <span className="icon-picker-trigger__swatch" style={{ width: 32, height: 32 }}>
+                        <span className="msym" style={{ fontSize: 18 }}>{s.icon ? msIconFor(s.icon) : 'help_outline'}</span>
+                      </span>
+                    </td>
                     <td><strong>{s.name}</strong></td>
                     <td>{formatPeso(s.basePrice)}</td>
                     <td>
@@ -313,7 +324,7 @@ export default function ServiceCatalog() {
                 ))}
                 {filteredServices.length === 0 && (
                   <tr>
-                    <td colSpan={6} style={{ color: 'var(--text-muted)', padding: '1rem' }}>
+                    <td colSpan={7} style={{ color: 'var(--text-muted)', padding: '1rem' }}>
                       No services found.
                     </td>
                   </tr>
@@ -367,6 +378,11 @@ export default function ServiceCatalog() {
               </div>
 
               <div className="form-field">
+                <label>Icon</label>
+                <IconPicker value={form.icon} onChange={(icon) => setForm((p) => ({ ...p, icon }))} />
+              </div>
+
+              <div className="form-field">
                 <label htmlFor="sc-price">Base Price (₱)</label>
                 <input
                   id="sc-price"
@@ -414,18 +430,26 @@ export default function ServiceCatalog() {
                           value={field.label}
                           onChange={(e) => updateField(fieldIndex, { label: e.target.value })}
                           placeholder="Field label, e.g. Appliance Type"
+                          aria-label={`Custom field ${fieldIndex + 1} label`}
                           style={{ flex: 1, padding: '0.5rem 0.75rem', border: '1px solid var(--border)', borderRadius: 8 }}
                         />
                         <select
                           value={field.fieldType}
                           onChange={(e) => updateField(fieldIndex, { fieldType: e.target.value })}
+                          aria-label={`Custom field ${fieldIndex + 1} type`}
                           style={{ padding: '0.5rem 0.75rem', border: '1px solid var(--border)', borderRadius: 8 }}
                         >
                           {Object.entries(FIELD_TYPE_LABELS).map(([value, label]) => (
                             <option key={value} value={value}>{label}</option>
                           ))}
                         </select>
-                        <button type="button" className="action-btn delete" title="Remove field" onClick={() => removeField(fieldIndex)}>
+                        <button
+                          type="button"
+                          className="action-btn delete"
+                          title="Remove field"
+                          aria-label={`Remove custom field ${fieldIndex + 1}`}
+                          onClick={() => removeField(fieldIndex)}
+                        >
                           <i className="fas fa-trash" />
                         </button>
                       </div>
@@ -448,12 +472,14 @@ export default function ServiceCatalog() {
                                 value={option}
                                 onChange={(e) => updateOption(fieldIndex, optionIndex, e.target.value)}
                                 placeholder="Option label"
+                                aria-label={`Custom field ${fieldIndex + 1} option ${optionIndex + 1}`}
                                 style={{ flex: 1, padding: '0.4rem 0.6rem', border: '1px solid var(--border)', borderRadius: 8 }}
                               />
                               <button
                                 type="button"
                                 className="action-btn delete"
                                 title="Remove option"
+                                aria-label={`Remove custom field ${fieldIndex + 1} option ${optionIndex + 1}`}
                                 onClick={() => removeOption(fieldIndex, optionIndex)}
                               >
                                 <i className="fas fa-xmark" />

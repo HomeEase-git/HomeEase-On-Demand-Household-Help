@@ -563,6 +563,13 @@ model ServiceType {
   scopeType    ServiceScopeType @default(ROOM_BASED)
   hasCondition Boolean          @default(true)
 
+  // Ionicons outline name (e.g. "water-outline") picked from the curated
+  // list in backend/src/constants/serviceIcons.ts — mobile renders this via
+  // <Ionicons name={icon} />. Null means the category predates this field or
+  // was never assigned one; mobile falls back to its static name-based guess
+  // (utils/categoryIcons.ts) in that case.
+  icon String?
+
   // Relations
   workers     WorkerProfile[]
   tasks       ServiceTask[]

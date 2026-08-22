@@ -1,6 +1,7 @@
-import { Link, Navigate, useParams } from 'react-router-dom'
+import { Link, useParams } from 'react-router-dom'
 import PageHeader from '../components/common/PageHeader'
 import SubNav from '../components/common/SubNav'
+import SectionCard from '../components/common/SectionCard'
 import Badge from '../components/common/Badge'
 import { getPaymentStatusVariant } from '../utils/statusBadge'
 import LoadingState from '../components/common/LoadingState'
@@ -26,7 +27,11 @@ export default function TransactionDetail() {
   }
 
   if (!tx) {
-    return <Navigate to="/payments" replace />
+    return (
+      <SectionCard>
+        <p style={{ color: 'var(--text-muted)' }}>Transaction not found. <Link to="/payments">Back to Transactions</Link></p>
+      </SectionCard>
+    )
   }
 
   const details = [

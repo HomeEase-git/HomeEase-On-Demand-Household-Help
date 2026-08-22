@@ -67,6 +67,7 @@ export default function BookingStep1Screen() {
           description: t.description,
           scopeType: t.scopeType ?? "ROOM_BASED",
           hasCondition: t.hasCondition ?? true,
+          icon: t.icon ?? null,
           scopeFields: Array.isArray(t.scopeFields)
             ? t.scopeFields.map((f: any) => ({
                 id: f.id,

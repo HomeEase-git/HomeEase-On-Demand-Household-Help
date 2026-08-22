@@ -4,10 +4,13 @@ import SectionCard from '../components/common/SectionCard'
 import homeEaseLogo from '../components/Assets/HomeEase Logo.jpg'
 import { useAuth } from '../context/AuthContext'
 
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+
 export default function Login() {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
+  const [fieldErrors, setFieldErrors] = useState({})
   const [isSubmitting, setIsSubmitting] = useState(false)
   const navigate = useNavigate()
   const location = useLocation()
@@ -22,10 +25,18 @@ export default function Login() {
   const handleSubmit = async (e) => {
     e.preventDefault()
     setError('')
-    setIsSubmitting(true)
 
+    const nextFieldErrors = {}
+    const trimmedEmail = email.trim()
+    if (!trimmedEmail) nextFieldErrors.email = 'Email is required.'
+    else if (!EMAIL_PATTERN.test(trimmedEmail)) nextFieldErrors.email = 'Enter a valid email address.'
+    if (!password) nextFieldErrors.password = 'Password is required.'
+    setFieldErrors(nextFieldErrors)
+    if (Object.keys(nextFieldErrors).length > 0) return
+
+    setIsSubmitting(true)
     try {
-      await login(email.trim(), password)
+      await login(trimmedEmail, password)
       navigate(from, { replace: true })
     } catch (err) {
       setError(err.message || 'Login failed')
@@ -46,18 +57,23 @@ export default function Login() {
         <p className="page-subtitle" style={{ textAlign: 'center', marginBottom: '1.75rem' }}>
           Sign in to your HomeEase admin account
         </p>
-        <form className="auth-form" onSubmit={handleSubmit}>
+        <form className="auth-form" onSubmit={handleSubmit} noValidate>
           <div className="form-field">
             <label htmlFor="email">Email</label>
             <input
               id="email"
               type="email"
               value={email}
-              onChange={(e) => setEmail(e.target.value)}
+              onChange={(e) => {
+                setEmail(e.target.value)
+                if (fieldErrors.email) setFieldErrors((prev) => ({ ...prev, email: undefined }))
+              }}
               placeholder="Enter Email "
               autoComplete="email"
-              required
+              aria-invalid={!!fieldErrors.email}
+              aria-describedby={fieldErrors.email ? 'email-error' : undefined}
             />
+            {fieldErrors.email && <span id="email-error" className="field-error">{fieldErrors.email}</span>}
           </div>
           <div className="form-field">
             <label htmlFor="password">Password</label>
@@ -65,11 +81,16 @@ export default function Login() {
               id="password"
               type="password"
               value={password}
-              onChange={(e) => setPassword(e.target.value)}
+              onChange={(e) => {
+                setPassword(e.target.value)
+                if (fieldErrors.password) setFieldErrors((prev) => ({ ...prev, password: undefined }))
+              }}
               placeholder="Enter password"
               autoComplete="current-password"
-              required
+              aria-invalid={!!fieldErrors.password}
+              aria-describedby={fieldErrors.password ? 'password-error' : undefined}
             />
+            {fieldErrors.password && <span id="password-error" className="field-error">{fieldErrors.password}</span>}
           </div>
           {error && <div className="form-error">{error}</div>}
           <button

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Link, Navigate, useParams } from 'react-router-dom'
+import { Link, useParams } from 'react-router-dom'
 import PageHeader from '../components/common/PageHeader'
 import SectionCard from '../components/common/SectionCard'
 import Badge from '../components/common/Badge'
@@ -76,7 +76,13 @@ export default function WorkerDetail() {
 
   if (loading) return <LoadingState message="Loading worker..." />
   if (error) return <ErrorState message={error} onRetry={reload} />
-  if (!worker) return <Navigate to="/workers" replace />
+  if (!worker) {
+    return (
+      <SectionCard>
+        <p style={{ color: 'var(--text-muted)' }}>Worker not found. <Link to="/workers">Back to Workers</Link></p>
+      </SectionCard>
+    )
+  }
 
   const isSuspended = worker.accountStatus !== 'active'
 

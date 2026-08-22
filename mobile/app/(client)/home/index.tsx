@@ -52,6 +52,7 @@ type ServiceCategory = {
   id: string;
   name: string;
   count: number;
+  icon: string | null;
 };
 
 type HomeWorker = {
@@ -139,6 +140,7 @@ export default function ClientHomeScreen() {
           id: serviceType.name.toLowerCase().replace(/\s+/g, "-"),
           name: serviceType.name,
           count: serviceType.availableWorkerCount ?? 0,
+          icon: serviceType.icon ?? null,
         })),
       );
 

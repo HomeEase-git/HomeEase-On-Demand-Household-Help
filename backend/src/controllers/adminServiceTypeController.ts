@@ -3,6 +3,7 @@ import { Prisma, ScopeFieldType, ServiceScopeType } from '@prisma/client';
 import prisma from '@config/database';
 import { errorResponse } from '@utils/errorResponse';
 import { writeAuditLog } from '@utils/auditLog';
+import { VALID_SERVICE_ICONS } from '@/constants/serviceIcons';
 import type { JwtPayload } from '@/types/index';
 
 interface AuthRequest extends Request {
@@ -33,6 +34,7 @@ function validateServiceTypeInput(body: {
   scopeType?: string;
   hasCondition?: boolean;
   scopeFields?: ScopeFieldInput[];
+  icon?: string | null;
 }): string | null {
   if (!body.name?.trim()) {
     return 'Name is required.';
@@ -45,6 +47,9 @@ function validateServiceTypeInput(body: {
   }
   if (body.hasCondition !== undefined && typeof body.hasCondition !== 'boolean') {
     return 'hasCondition must be a boolean.';
+  }
+  if (body.icon != null && !VALID_SERVICE_ICONS.includes(body.icon as (typeof VALID_SERVICE_ICONS)[number])) {
+    return `icon must be one of the curated set: ${VALID_SERVICE_ICONS.join(', ')}.`;
   }
 
   const scopeType = (body.scopeType as ServiceScopeType) ?? 'ROOM_BASED';
@@ -105,16 +110,17 @@ export const listServiceTypesAdmin = async (_req: Request, res: Response) => {
 
 export const createServiceType = async (req: AuthRequest, res: Response) => {
   try {
-    const { name, description, basePrice, scopeType, hasCondition, scopeFields } = req.body as {
+    const { name, description, basePrice, scopeType, hasCondition, scopeFields, icon } = req.body as {
       name?: string;
       description?: string;
       basePrice?: number;
       scopeType?: string;
       hasCondition?: boolean;
       scopeFields?: ScopeFieldInput[];
+      icon?: string | null;
     };
 
-    const validationError = validateServiceTypeInput({ name, basePrice, scopeType, hasCondition, scopeFields });
+    const validationError = validateServiceTypeInput({ name, basePrice, scopeType, hasCondition, scopeFields, icon });
     if (validationError) {
       return res.status(400).json(errorResponse(400, validationError));
     }
@@ -128,6 +134,7 @@ export const createServiceType = async (req: AuthRequest, res: Response) => {
         basePrice: basePrice!,
         scopeType: resolvedScopeType,
         hasCondition: hasCondition ?? true,
+        icon: icon || null,
         scopeFields:
           resolvedScopeType === 'CUSTOM'
             ? { create: buildScopeFieldsCreate(scopeFields) }
@@ -158,7 +165,7 @@ export const createServiceType = async (req: AuthRequest, res: Response) => {
 export const updateServiceType = async (req: AuthRequest, res: Response) => {
   try {
     const id = req.params.id as string;
-    const { name, description, basePrice, scopeType, hasCondition, scopeFields, isActive } = req.body as {
+    const { name, description, basePrice, scopeType, hasCondition, scopeFields, isActive, icon } = req.body as {
       name?: string;
       description?: string;
       basePrice?: number;
@@ -166,9 +173,10 @@ export const updateServiceType = async (req: AuthRequest, res: Response) => {
       hasCondition?: boolean;
       scopeFields?: ScopeFieldInput[];
       isActive?: boolean;
+      icon?: string | null;
     };
 
-    const validationError = validateServiceTypeInput({ name, basePrice, scopeType, hasCondition, scopeFields });
+    const validationError = validateServiceTypeInput({ name, basePrice, scopeType, hasCondition, scopeFields, icon });
     if (validationError) {
       return res.status(400).json(errorResponse(400, validationError));
     }
@@ -197,6 +205,7 @@ export const updateServiceType = async (req: AuthRequest, res: Response) => {
           scopeType: resolvedScopeType,
           hasCondition: hasCondition ?? true,
           isActive: isActive ?? existing.isActive,
+          icon: icon !== undefined ? icon || null : existing.icon,
           scopeFields:
             resolvedScopeType === 'CUSTOM'
               ? { create: buildScopeFieldsCreate(scopeFields) }
