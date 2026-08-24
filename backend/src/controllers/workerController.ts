@@ -3,9 +3,11 @@ import type { ConditionType, RoomType, TimeSlot } from '@prisma/client';
 import prisma from '@config/database';
 import { errorResponse } from '@utils/errorResponse';
 import { toDayStart } from '@services/workerAvailabilityService';
-import { distanceKm } from '@utils/geo';
 import { getAppSettings } from '@services/appSettingsService';
 import { parseWorkerResume } from '@services/resumeParseService';
+import { computeWorkerTier, tierMultiplier } from '@utils/workerTier';
+import { normalizeTin, maskTin } from '@utils/taxId';
+import { getCertificateDownloadUrl } from '@services/taxCertificateService';
 import type { JwtPayload } from '@/types/index';
 
 interface AuthRequest extends Request {
@@ -25,7 +27,6 @@ const VALID_ROOM_TYPES: RoomType[] = [
   'BALCONY',
   'OTHER',
 ];
-const DEFAULT_SEARCH_RADIUS_KM = 30;
 // Search has no specific ServiceTask (that's picked in a later booking step),
 // so estimatedTotal for an hourly-rate worker uses a flat assumed duration —
 // documented here since it's the one non-obvious number in the card payload.
@@ -35,15 +36,14 @@ const DEFAULT_ESTIMATE_HOURS = 2;
  * GET /api/workers
  * Worker discovery search (public). Query params:
  *   serviceType, date (YYYY-MM-DD), timeSlot, condition, rooms (comma-separated
- *   RoomType), lat, lng, radius (km, default 30), page, limit
+ *   RoomType), page, limit
  *   — plus legacy category/minRating/maxPrice, kept for existing callers.
  *
  * Filters to isAvailable + kycStatus APPROVED workers under capacity, with an
- * open (date, timeSlot) slot when both are given, within radius km of
- * (lat, lng) when both are given, offering serviceType, and — when
- * condition/rooms are given — matching the worker's job preferences.
- * Distance can't be filtered/sorted in SQL without a geo extension, so the
- * radius/rating/distance pass happens in memory over a bounded candidate set.
+ * open (date, timeSlot) slot when both are given, offering serviceType, and —
+ * when condition/rooms are given — matching the worker's job preferences.
+ * Sorted by rating (there's no reliable worker location data to sort/filter
+ * by proximity — see matchingService.ts for the same reasoning on auto-match).
  */
 export const searchWorkers = async (req: AuthRequest, res: Response) => {
   try {
@@ -54,11 +54,9 @@ export const searchWorkers = async (req: AuthRequest, res: Response) => {
       timeSlot,
       condition,
       rooms,
-      lat,
-      lng,
-      radius,
       minRating,
       maxPrice,
+      workerId,
       page = '1',
       limit = '10',
     } = req.query;
@@ -76,13 +74,6 @@ export const searchWorkers = async (req: AuthRequest, res: Response) => {
       return res.status(400).json(errorResponse(400, 'date must be a valid YYYY-MM-DD date'));
     }
 
-    const clientLat = lat !== undefined ? parseFloat(lat as string) : null;
-    const clientLng = lng !== undefined ? parseFloat(lng as string) : null;
-    const hasLocation = clientLat != null && !isNaN(clientLat) && clientLng != null && !isNaN(clientLng);
-    const radiusKm = radius !== undefined && !isNaN(parseFloat(radius as string))
-      ? parseFloat(radius as string)
-      : DEFAULT_SEARCH_RADIUS_KM;
-
     const requestedRooms = typeof rooms === 'string'
       ? rooms.split(',').map((r) => r.trim().toUpperCase()).filter((r): r is RoomType => VALID_ROOM_TYPES.includes(r as RoomType))
       : [];
@@ -93,6 +84,14 @@ export const searchWorkers = async (req: AuthRequest, res: Response) => {
       isAvailable: true,
       kycStatus: 'APPROVED',
     };
+
+    // Scopes discovery to a single already-known worker — used by the client
+    // app to check a specific (e.g. profile-locked) worker's real open slots
+    // for a date, via the same authoritative WorkerAvailability filtering
+    // below, rather than a separate bespoke endpoint.
+    if (typeof workerId === 'string' && workerId) {
+      whereClause.userId = workerId;
+    }
 
     if (serviceTypeName) {
       whereClause.serviceTypes = { some: { name: { contains: serviceTypeName, mode: 'insensitive' } } };
@@ -150,30 +149,29 @@ export const searchWorkers = async (req: AuthRequest, res: Response) => {
       ? filtered.filter((w) => w.preferredRoomTypes.length === 0 || w.preferredRoomTypes.some((r) => requestedRooms.includes(r)))
       : filtered;
 
-    const withDistance = roomFiltered.map((w) => {
-      const distance =
-        hasLocation && w.currentLat != null && w.currentLng != null
-          ? distanceKm({ lat: clientLat as number, lng: clientLng as number }, { lat: w.currentLat, lng: w.currentLng })
-          : null;
-      return { worker: w, distance };
+    roomFiltered.sort((a, b) => {
+      if (b.rating !== a.rating) return b.rating - a.rating;
+      return b.totalReviews - a.totalReviews;
     });
 
-    const withinRadius = hasLocation
-      ? withDistance.filter((w) => w.distance != null && w.distance <= radiusKm)
-      : withDistance;
-
-    withinRadius.sort((a, b) => {
-      if (b.worker.rating !== a.worker.rating) return b.worker.rating - a.worker.rating;
-      const distA = a.distance ?? Number.POSITIVE_INFINITY;
-      const distB = b.distance ?? Number.POSITIVE_INFINITY;
-      return distA - distB;
-    });
-
-    const total = withinRadius.length;
+    const total = roomFiltered.length;
     const start = (pageNum - 1) * limitNum;
-    const page_ = withinRadius.slice(start, start + limitNum);
+    const page_ = roomFiltered.slice(start, start + limitNum);
 
-    const cards = page_.map(({ worker, distance }) => {
+    // Expertise tier — computed live from rating + completed-job count (see
+    // utils/workerTier.ts). Batched over just this page, not all candidates.
+    // Independent of each other, so run in parallel rather than serially.
+    const [tierSettings, completedCounts] = await Promise.all([
+      getAppSettings(),
+      prisma.booking.groupBy({
+        by: ['workerId'],
+        where: { workerId: { in: page_.map((w) => w.userId) }, status: 'COMPLETED' },
+        _count: { _all: true },
+      }),
+    ]);
+    const completedByWorkerId = new Map(completedCounts.map((c) => [c.workerId as string, c._count._all]));
+
+    const cards = page_.map((worker) => {
       const matchedServiceType =
         worker.serviceTypes.find((st) => serviceTypeName && st.name.toLowerCase() === serviceTypeName.toLowerCase()) ??
         worker.serviceTypes[0];
@@ -188,21 +186,29 @@ export const searchWorkers = async (req: AuthRequest, res: Response) => {
       if (worker.totalReviews === 0) badges.push('NEW');
       if (condition === 'HEAVY' && worker.acceptsHeavyCondition) badges.push('HEAVY_DUTY_READY');
 
+      const completedJobs = completedByWorkerId.get(worker.userId) ?? 0;
+      const tier = computeWorkerTier(worker.rating, completedJobs, tierSettings);
+      if (tier === 'PRO') badges.push('PRO_TIER');
+      if (tier === 'EXPERT') badges.push('EXPERT_TIER');
+
       return {
         id: worker.userId,
         fullName: worker.user.fullName,
         avatar: worker.user.avatar,
         rating: worker.rating,
         totalReviews: worker.totalReviews,
-        distance,
         hourlyRate: worker.hourlyRate,
-        estimatedTotal,
+        estimatedTotal:
+          estimatedTotal != null ? Math.round(estimatedTotal * tierMultiplier(tier, tierSettings) * 100) / 100 : null,
+        tier,
         // Lets the client fetch this worker's packages for the selected
         // category later in the booking flow without an extra round-trip.
         matchedServiceTypeId: matchedServiceType?.id ?? null,
-        // At-capacity workers are already filtered out of `withinRadius`
-        // above — these are exposed so a still-available worker's current
-        // load can be shown (e.g. "1 active job"), not to signal fullness.
+        service: matchedServiceType?.name ?? 'General service',
+        serviceTypeNames: worker.serviceTypes.map((st) => st.name),
+        // At-capacity workers are already filtered out above — these are
+        // exposed so a still-available worker's current load can be shown
+        // (e.g. "1 active job"), not to signal fullness.
         activeJobCount: worker.activeJobCount,
         maxConcurrentJobs: worker.maxConcurrentJobs,
         badges,
@@ -269,9 +275,9 @@ export const getWorkerDetail = async (req: AuthRequest, res: Response) => {
           },
         },
         serviceTypes: true,
-        reviews: {
-          orderBy: { createdAt: 'desc' },
-        },
+        // Only the count is used below (reviewCount) — select just that
+        // instead of pulling every review row (comment, photos, etc.) for it.
+        _count: { select: { reviews: true } },
         certifications: true,
         resumeParseResult: true,
       },
@@ -285,6 +291,12 @@ export const getWorkerDetail = async (req: AuthRequest, res: Response) => {
       return res.status(404).json(errorResponse(404, 'Worker not found'));
     }
 
+    const [tierSettings, completedJobs] = await Promise.all([
+      getAppSettings(),
+      prisma.booking.count({ where: { workerId: worker.userId, status: 'COMPLETED' } }),
+    ]);
+    const tier = computeWorkerTier(worker.rating, completedJobs, tierSettings);
+
     return res.status(200).json({
       success: true,
       message: 'Worker details retrieved successfully',
@@ -296,6 +308,7 @@ export const getWorkerDetail = async (req: AuthRequest, res: Response) => {
         avatar: worker.user.avatar,
         bio: worker.bio,
         rating: worker.rating,
+        tier,
         serviceAreaRadius: worker.serviceAreaRadius,
         address: worker.address,
         city: worker.city,
@@ -313,7 +326,7 @@ export const getWorkerDetail = async (req: AuthRequest, res: Response) => {
         certifications: worker.certifications,
         services: worker.serviceTypes,
         verificationStatus: worker.kycStatus === 'APPROVED' ? 'VERIFIED' : 'PENDING',
-        reviewCount: worker.reviews.length,
+        reviewCount: worker._count.reviews,
         activeJobCount: worker.activeJobCount,
         maxConcurrentJobs: worker.maxConcurrentJobs,
       },
@@ -440,6 +453,7 @@ export const getWorkerReviews = async (req: AuthRequest, res: Response) => {
       id: review.id,
       rating: review.rating,
       comment: review.comment,
+      photoUrls: review.photoUrls,
       reviewer: {
         id: review.client.id,
         name: review.client.fullName,
@@ -604,6 +618,55 @@ export const updateAvailability = async (req: AuthRequest, res: Response) => {
 };
 
 /**
+ * GET /api/workers/me/profile
+ * Self-service profile read (worker only) — unlike GET /workers/:workerId
+ * (the public detail view), this includes addressLat/addressLng, which
+ * should never be exposed on the public endpoint since it's the worker's
+ * precise home/service coordinates, not just a text address.
+ */
+export const getMyWorkerProfile = async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      return res.status(401).json(errorResponse(401, 'Not authenticated'));
+    }
+
+    const profile = await prisma.workerProfile.findUnique({
+      where: { userId: req.user.userId },
+      select: {
+        bio: true,
+        serviceAreaRadius: true,
+        address: true,
+        city: true,
+        state: true,
+        zipCode: true,
+        addressLat: true,
+        addressLng: true,
+        resumeUrl: true,
+        digitalIdTrade: true,
+        digitalIdServiceArea: true,
+        licenseNumber: true,
+        kycStatus: true,
+        kycSubmittedAt: true,
+        kycApprovedAt: true,
+      },
+    });
+
+    if (!profile) {
+      return res.status(404).json(errorResponse(404, 'Worker profile not found'));
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: 'Profile retrieved successfully',
+      data: profile,
+    });
+  } catch (error) {
+    console.error('Error fetching worker profile:', error);
+    return res.status(500).json(errorResponse(500, 'Failed to fetch profile'));
+  }
+};
+
+/**
  * PATCH /api/workers/me/profile
  * Update worker profile fields (worker only)
  */
@@ -620,6 +683,8 @@ export const updateWorkerProfile = async (req: AuthRequest, res: Response) => {
       city,
       state,
       zipCode,
+      addressLat,
+      addressLng,
       resumeUrl,
       digitalIdTrade,
       digitalIdServiceArea,
@@ -638,6 +703,11 @@ export const updateWorkerProfile = async (req: AuthRequest, res: Response) => {
     if (city !== undefined) updateData.city = city;
     if (state !== undefined) updateData.state = state;
     if (zipCode !== undefined) updateData.zipCode = zipCode;
+    // addressLat/addressLng are the geocoded coordinates for the address
+    // above — used to compute the distance-based pricing fee at booking
+    // time (see bookingController.createBooking). Not matching/search input.
+    if (addressLat !== undefined) updateData.addressLat = addressLat;
+    if (addressLng !== undefined) updateData.addressLng = addressLng;
     if (resumeUrl !== undefined) updateData.resumeUrl = resumeUrl;
     if (digitalIdTrade !== undefined) updateData.digitalIdTrade = digitalIdTrade;
     if (digitalIdServiceArea !== undefined) updateData.digitalIdServiceArea = digitalIdServiceArea;
@@ -658,6 +728,8 @@ export const updateWorkerProfile = async (req: AuthRequest, res: Response) => {
         city: updated.city,
         state: updated.state,
         zipCode: updated.zipCode,
+        addressLat: updated.addressLat,
+        addressLng: updated.addressLng,
         kycStatus: updated.kycStatus,
         kycSubmittedAt: updated.kycSubmittedAt,
         kycApprovedAt: updated.kycApprovedAt,
@@ -1200,6 +1272,53 @@ export const createSkill = async (req: AuthRequest, res: Response) => {
 };
 
 /**
+ * PATCH /api/workers/me/skills/:skillId
+ * Update a skill on the authenticated worker's profile (worker only)
+ */
+export const updateSkill = async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      return res.status(401).json(errorResponse(401, 'Not authenticated'));
+    }
+
+    const skillId = req.params.skillId as string;
+    const { name, category, rate } = req.body;
+
+    const workerProfile = await prisma.workerProfile.findUnique({
+      where: { userId: req.user.userId },
+      select: { id: true },
+    });
+
+    if (!workerProfile) {
+      return res.status(404).json(errorResponse(404, 'Worker profile not found'));
+    }
+
+    const existingSkill = await prisma.skill.findUnique({ where: { id: skillId } });
+    if (!existingSkill || existingSkill.workerProfileId !== workerProfile.id) {
+      return res.status(404).json(errorResponse(404, 'Skill not found'));
+    }
+
+    const skill = await prisma.skill.update({
+      where: { id: skillId },
+      data: {
+        ...(name !== undefined && { name: name.trim() }),
+        ...(category !== undefined && { category: category.trim() }),
+        ...(rate !== undefined && { rate }),
+      },
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: 'Skill updated successfully',
+      data: { skill },
+    });
+  } catch (error) {
+    console.error('Error updating skill:', error);
+    return res.status(500).json(errorResponse(500, 'Failed to update skill'));
+  }
+};
+
+/**
  * DELETE /api/workers/me/skills/:skillId
  * Remove a skill from the authenticated worker's profile (worker only)
  */
@@ -1387,6 +1506,60 @@ export const createCertification = async (req: AuthRequest, res: Response) => {
 };
 
 /**
+ * PATCH /api/workers/me/certifications/:certId
+ * Update an existing certification belonging to the authenticated worker
+ * (worker only). Editing resets verificationStatus back to PENDING since the
+ * content changed and needs re-review, clearing any prior rejection.
+ */
+export const updateCertification = async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      return res.status(401).json(errorResponse(401, 'Not authenticated'));
+    }
+
+    const certId = req.params.certId as string;
+    const { name, issuer, issueDate, expiryDate, documentUrl } = req.body;
+
+    const workerProfile = await prisma.workerProfile.findUnique({
+      where: { userId: req.user.userId },
+      select: { id: true },
+    });
+
+    if (!workerProfile) {
+      return res.status(404).json(errorResponse(404, 'Worker profile not found'));
+    }
+
+    const existing = await prisma.certification.findUnique({ where: { id: certId } });
+    if (!existing || existing.workerProfileId !== workerProfile.id) {
+      return res.status(404).json(errorResponse(404, 'Certification not found'));
+    }
+
+    const certification = await prisma.certification.update({
+      where: { id: certId },
+      data: {
+        title: name.trim(),
+        issuer: issuer.trim(),
+        issueDate: new Date(issueDate),
+        expiryDate: expiryDate ? new Date(expiryDate) : null,
+        documentUrl: documentUrl ?? existing.documentUrl,
+        verificationStatus: 'PENDING',
+        rejectionReason: null,
+        reviewedAt: null,
+      },
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: 'Certification updated successfully',
+      data: { certification: formatCertification(certification) },
+    });
+  } catch (error) {
+    console.error('Error updating certification:', error);
+    return res.status(500).json(errorResponse(500, 'Failed to update certification'));
+  }
+};
+
+/**
  * DELETE /api/workers/me/certifications/:certId
  * Remove a certification from the authenticated worker's profile (worker only)
  */
@@ -1493,6 +1666,118 @@ export const updatePayoutMethod = async (req: AuthRequest, res: Response) => {
   } catch (error) {
     console.error('Error updating payout method:', error);
     return res.status(500).json(errorResponse(500, 'Failed to update payout method'));
+  }
+};
+
+/**
+ * GET /api/workers/me/tax-info
+ * Get the authenticated worker's TIN-on-file, masked (worker only). Masked
+ * because this is echoed back to the same screen the worker just typed it
+ * into — full plaintext isn't needed for a "yes I have one saved" check.
+ */
+export const getTaxInfo = async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      return res.status(401).json(errorResponse(401, 'Not authenticated'));
+    }
+
+    const worker = await prisma.workerProfile.findUnique({
+      where: { userId: req.user.userId },
+      select: { tin: true, tinVerifiedAt: true },
+    });
+
+    if (!worker) {
+      return res.status(404).json(errorResponse(404, 'Worker profile not found'));
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: 'Tax info retrieved successfully',
+      data: {
+        tinOnFile: !!worker.tin,
+        maskedTin: worker.tin ? maskTin(worker.tin) : null,
+        tinVerifiedAt: worker.tinVerifiedAt,
+      },
+    });
+  } catch (error) {
+    console.error('Error fetching tax info:', error);
+    return res.status(500).json(errorResponse(500, 'Failed to fetch tax info'));
+  }
+};
+
+/**
+ * PATCH /api/workers/me/tax-info
+ * Set the authenticated worker's TIN (worker only). Format validated by
+ * validateUpdateTaxInfo before this runs. A worker's TIN is not required to
+ * use the app — it's only required before a 2307 certificate can be
+ * generated for them (see taxCertificateService.generateQuarterlyCertificates).
+ */
+export const updateTaxInfo = async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      return res.status(401).json(errorResponse(401, 'Not authenticated'));
+    }
+
+    const { tin } = req.body as { tin: string };
+    const normalized = normalizeTin(tin);
+
+    const updated = await prisma.workerProfile.update({
+      where: { userId: req.user.userId },
+      data: { tin: normalized, tinVerifiedAt: null },
+      select: { tin: true, tinVerifiedAt: true },
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: 'Tax info updated successfully',
+      data: { tinOnFile: true, maskedTin: maskTin(updated.tin!), tinVerifiedAt: updated.tinVerifiedAt },
+    });
+  } catch (error: any) {
+    if (error?.code === 'P2002') {
+      return res.status(409).json(errorResponse(409, 'This TIN is already on file for another worker'));
+    }
+    console.error('Error updating tax info:', error);
+    return res.status(500).json(errorResponse(500, 'Failed to update tax info'));
+  }
+};
+
+/**
+ * GET /api/workers/me/tax-certificates
+ * Lists the authenticated worker's ISSUED Form 2307 certificates with a
+ * fresh short-lived signed download URL per certificate (worker only). Draft
+ * certificates (generated but not yet issued) are never returned here.
+ */
+export const getMyTaxCertificates = async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      return res.status(401).json(errorResponse(401, 'Not authenticated'));
+    }
+
+    const certificates = await prisma.taxCertificate.findMany({
+      where: { workerId: req.user.userId, status: 'ISSUED' },
+      orderBy: { periodStart: 'desc' },
+    });
+
+    const data = await Promise.all(
+      certificates.map(async (cert) => ({
+        id: cert.id,
+        periodStart: cert.periodStart,
+        periodEnd: cert.periodEnd,
+        totalIncomePayments: cert.totalIncomePayments,
+        totalTaxWithheld: cert.totalTaxWithheld,
+        issuedAt: cert.issuedAt,
+        downloadUrl: await getCertificateDownloadUrl(cert.pdfPath),
+      }))
+    );
+
+    return res.status(200).json({
+      success: true,
+      message: 'Tax certificates retrieved successfully',
+      data,
+    });
+  } catch (error) {
+    console.error('Error fetching tax certificates:', error);
+    return res.status(500).json(errorResponse(500, 'Failed to fetch tax certificates'));
   }
 };
 

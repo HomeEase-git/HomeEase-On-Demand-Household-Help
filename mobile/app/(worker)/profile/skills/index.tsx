@@ -8,7 +8,7 @@ import SkillCard from "../../../../components/cards/SkillCard";
 import InputField from "../../../../components/ui/InputField";
 import PrimaryButton from "../../../../components/ui/PrimaryButton";
 import OutlinedButton from "../../../../components/ui/OutlinedButton";
-import { colors } from "../../../../constants";
+import { colors, cardShadow } from "../../../../constants";
 import * as api from "../../../../services/api";
 import type { Skill, WorkerServiceType } from "../../../../services/api";
 import { useAlertModal } from "../../../../contexts/AlertModalContext";
@@ -20,6 +20,7 @@ export default function SkillsScreen() {
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [editingSkill, setEditingSkill] = useState<Skill | null>(null);
   const [skillName, setSkillName] = useState("");
   const [skillCategory, setSkillCategory] = useState("");
   const [skillRate, setSkillRate] = useState("");
@@ -64,7 +65,31 @@ export default function SkillsScreen() {
     loadServiceTypes();
   }, []);
 
-  const handleAddSkill = async () => {
+  const closeSkillModal = () => {
+    setShowModal(false);
+    setEditingSkill(null);
+    setSkillName("");
+    setSkillCategory("");
+    setSkillRate("");
+  };
+
+  const openAddSkillModal = () => {
+    setEditingSkill(null);
+    setSkillName("");
+    setSkillCategory("");
+    setSkillRate("");
+    setShowModal(true);
+  };
+
+  const openEditSkillModal = (skill: Skill) => {
+    setEditingSkill(skill);
+    setSkillName(skill.name);
+    setSkillCategory(skill.category);
+    setSkillRate(String(skill.rate));
+    setShowModal(true);
+  };
+
+  const handleSaveSkill = async () => {
     if (!skillName.trim() || !skillCategory.trim() || !skillRate.trim()) {
       alertModal.error("Error", "Please fill in all fields.");
       return;
@@ -76,19 +101,28 @@ export default function SkillsScreen() {
     }
     setSaving(true);
     try {
-      const newSkill = await api.addSkill({
-        name: skillName.trim(),
-        category: skillCategory.trim(),
-        rate,
-      });
-      setSkills((prev) => [...prev, newSkill]);
-      setSkillName("");
-      setSkillCategory("");
-      setSkillRate("");
-      setShowModal(false);
+      if (editingSkill) {
+        const updated = await api.updateSkill(editingSkill.id, {
+          name: skillName.trim(),
+          category: skillCategory.trim(),
+          rate,
+        });
+        setSkills((prev) => prev.map((s) => (s.id === updated.id ? updated : s)));
+      } else {
+        const newSkill = await api.addSkill({
+          name: skillName.trim(),
+          category: skillCategory.trim(),
+          rate,
+        });
+        setSkills((prev) => [...prev, newSkill]);
+      }
+      closeSkillModal();
     } catch (error) {
-      console.error("Add skill error:", error);
-      alertModal.error("Error", "Failed to add skill. Please try again.");
+      console.error("Save skill error:", error);
+      alertModal.error(
+        "Error",
+        editingSkill ? "Failed to update skill. Please try again." : "Failed to add skill. Please try again.",
+      );
     } finally {
       setSaving(false);
     }
@@ -224,14 +258,15 @@ export default function SkillsScreen() {
         renderItem={({ item }) => (
           <SkillCard
             skill={item}
-            onEdit={() => alertModal.info("Edit", "Edit skill coming soon.")}
+            onEdit={() => openEditSkillModal(item)}
             onDelete={() => handleDeleteSkill(item.id)}
           />
         )}
       />
       <Pressable
         className="absolute bottom-6 right-6 w-14 h-14 bg-accent rounded-full items-center justify-center"
-        onPress={() => setShowModal(true)}
+        style={cardShadow}
+        onPress={openAddSkillModal}
       >
         <Ionicons name="add" size={28} color={colors.white} />
       </Pressable>
@@ -240,8 +275,10 @@ export default function SkillsScreen() {
         <View className="flex-1 bg-black/40 justify-end">
           <View className="bg-white rounded-t-3xl p-6 pb-8">
             <View className="flex-row justify-between items-center mb-6">
-              <Text className="text-text-primary text-xl font-bold">Add Skill</Text>
-              <Pressable onPress={() => setShowModal(false)}>
+              <Text className="text-text-primary text-xl font-bold">
+                {editingSkill ? "Edit Skill" : "Add Skill"}
+              </Text>
+              <Pressable onPress={closeSkillModal}>
                 <Ionicons name="close" size={24} color={colors.text.primary} />
               </Pressable>
             </View>
@@ -266,15 +303,15 @@ export default function SkillsScreen() {
             />
             <View className="gap-3 mt-2">
               <PrimaryButton
-                label="Add Skill"
+                label={editingSkill ? "Save Changes" : "Add Skill"}
                 fullWidth
-                onPress={handleAddSkill}
+                onPress={handleSaveSkill}
                 disabled={saving}
                 loading={saving}
               />
               <OutlinedButton
                 label="Cancel"
-                onPress={() => setShowModal(false)}
+                onPress={closeSkillModal}
               />
             </View>
           </View>
@@ -314,7 +351,7 @@ export default function SkillsScreen() {
                 })}
                 {availableToAdd.length === 0 && (
                   <Text className="text-text-muted text-sm">
-                    You've already added every available category.
+                    You&apos;ve already added every available category.
                   </Text>
                 )}
               </View>

@@ -37,7 +37,7 @@ const BottomSheetWrapper: React.FC<Props> = ({
   onClose,
 }) => {
   const insets = useSafeAreaInsets();
-  const translateY = React.useRef(new Animated.Value(HIDDEN_OFFSET)).current;
+  const [translateY] = React.useState(() => new Animated.Value(HIDDEN_OFFSET));
   const [visible, setVisible] = React.useState(false);
 
   const open = React.useCallback(() => {
@@ -111,15 +111,22 @@ const BottomSheetWrapper: React.FC<Props> = ({
             },
           ]}
         >
-          <View className="px-4 pb-8 pt-3">
+          <View className="items-center pt-2.5 pb-1">
+            <View className="w-10 h-1 rounded-full bg-divider" />
+          </View>
+          <View className="px-4 pb-8 pt-2">
             {title && (
               <View className="flex-row items-center justify-between mb-4">
                 <Text className="text-text-primary font-bold text-lg">{title}</Text>
-                <Pressable onPress={close}>
+                <Pressable
+                  className="w-8 h-8 rounded-full bg-card-light items-center justify-center"
+                  hitSlop={8}
+                  onPress={close}
+                >
                   <Ionicons
                     name="close"
-                    size={24}
-                    color={colors.brand.DEFAULT}
+                    size={18}
+                    color={colors.text.secondary}
                   />
                 </Pressable>
               </View>
@@ -143,10 +150,13 @@ const styles = StyleSheet.create({
   },
   sheet: {
     backgroundColor: colors.card.DEFAULT,
-    borderColor: colors.brand.DEFAULT,
-    borderWidth: 2,
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
+    shadowColor: "#000000",
+    shadowOffset: { width: 0, height: -4 },
+    shadowOpacity: 0.12,
+    shadowRadius: 12,
+    elevation: 12,
   },
 });
 

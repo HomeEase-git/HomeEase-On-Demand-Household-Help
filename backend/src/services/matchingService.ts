@@ -1,11 +1,9 @@
 import prisma from '@config/database';
-import { distanceKm, type LatLng } from '@utils/geo';
 import type { ConditionType, RoomType, TimeSlot } from '@prisma/client';
 
 export interface MatchCandidate {
   workerId: string;
   rating: number;
-  distanceKm: number;
   completedJobs: number;
 }
 
@@ -13,14 +11,16 @@ export interface ScoredCandidate extends MatchCandidate {
   score: number;
 }
 
-// 40% rating, 30% distance, 20% completed jobs, 10% randomness — per the
-// "surprise-me" auto-match spec. All four factors are normalized to [0, 1]
-// before weighting so none of them can dominate purely from having a wider
-// natural range (e.g. completedJobs is unbounded, rating is capped at 5).
+// 60% rating, 30% completed jobs, 10% randomness — per the "surprise-me"
+// auto-match spec. Distance was dropped from scoring: worker live-location
+// (currentLat/currentLng) is never populated by any client in practice, so
+// distance-based filtering/scoring silently excluded every worker. All
+// factors are normalized to [0, 1] before weighting so none of them can
+// dominate purely from having a wider natural range (e.g. completedJobs is
+// unbounded, rating is capped at 5).
 export const MATCH_WEIGHTS = {
-  rating: 0.4,
-  distance: 0.3,
-  completedJobs: 0.2,
+  rating: 0.6,
+  completedJobs: 0.3,
   randomness: 0.1,
 } as const;
 
@@ -32,23 +32,19 @@ const clamp01 = (n: number): number => Math.min(1, Math.max(0, n));
  */
 export function scoreCandidates(
   candidates: MatchCandidate[],
-  radiusKm: number,
   random: () => number = Math.random
 ): ScoredCandidate[] {
   if (candidates.length === 0) return [];
 
   const maxCompleted = Math.max(1, ...candidates.map((c) => c.completedJobs));
-  const safeRadiusKm = Math.max(radiusKm, 0.001);
 
   return candidates.map((c) => {
     const ratingScore = clamp01(c.rating / 5);
-    const distanceScore = clamp01(1 - c.distanceKm / safeRadiusKm);
     const completedScore = clamp01(c.completedJobs / maxCompleted);
     const randomScore = clamp01(random());
 
     const score =
       MATCH_WEIGHTS.rating * ratingScore +
-      MATCH_WEIGHTS.distance * distanceScore +
       MATCH_WEIGHTS.completedJobs * completedScore +
       MATCH_WEIGHTS.randomness * randomScore;
 
@@ -63,10 +59,9 @@ export function scoreCandidates(
  */
 export function selectBestCandidate(
   candidates: MatchCandidate[],
-  radiusKm: number,
   random: () => number = Math.random
 ): ScoredCandidate | null {
-  const scored = scoreCandidates(candidates, radiusKm, random);
+  const scored = scoreCandidates(candidates, random);
   if (scored.length === 0) return null;
 
   return scored.reduce((best, current) => (current.score > best.score ? current : best));
@@ -80,8 +75,6 @@ export interface AutoMatchParams {
   condition?: ConditionType | null;
   rooms?: RoomType[];
   hasPets?: boolean;
-  clientLocation: LatLng;
-  radiusKm: number;
   excludeWorkerIds?: string[];
 }
 
@@ -89,7 +82,6 @@ export interface AutoMatchResult {
   workerId: string;
   workerProfileId: string;
   score: number;
-  distanceKm: number;
 }
 
 /**
@@ -100,7 +92,6 @@ export interface AutoMatchResult {
  *  - offers the requested serviceType
  *  - has an explicit open WorkerAvailability row for (date, timeSlot) —
  *    not blocked, not already booked
- *  - has a live location (currentLat/currentLng) within radiusKm
  *  - accepts HEAVY-condition jobs if this one is HEAVY
  *  - accepts pets if the booking involves pets
  *  - not in excludeWorkerIds (declined workers on a re-match attempt)
@@ -112,8 +103,6 @@ export async function findAutoMatchWorker(params: AutoMatchParams): Promise<Auto
     timeSlot,
     condition,
     hasPets,
-    clientLocation,
-    radiusKm,
     excludeWorkerIds = [],
   } = params;
 
@@ -127,8 +116,9 @@ export async function findAutoMatchWorker(params: AutoMatchParams): Promise<Auto
       kycStatus: 'APPROVED',
       isAvailable: true,
       userId: excludeWorkerIds.length > 0 ? { notIn: excludeWorkerIds } : undefined,
-      currentLat: { not: null },
-      currentLng: { not: null },
+      // Excludes workers currently serving a decline-limit cooldown (see
+      // bookingController.declineBooking) from auto-match candidates.
+      OR: [{ declineCooldownUntil: null }, { declineCooldownUntil: { lte: new Date() } }],
       serviceTypes: { some: { name: { equals: serviceType, mode: 'insensitive' } } },
       ...(condition === 'HEAVY' ? { acceptsHeavyCondition: true } : {}),
       ...(hasPets ? { acceptsPets: true } : {}),
@@ -145,37 +135,26 @@ export async function findAutoMatchWorker(params: AutoMatchParams): Promise<Auto
       id: true,
       userId: true,
       rating: true,
-      currentLat: true,
-      currentLng: true,
     },
   });
 
-  // activeJobCount can change between the initial filter and here in theory,
-  // but this function runs inside the caller's transaction, so re-check.
-  const eligible = workers.filter((w) => w.currentLat != null && w.currentLng != null);
-  if (eligible.length === 0) return null;
-
-  const withinRadius = eligible.filter(
-    (w) => distanceKm(clientLocation, { lat: w.currentLat as number, lng: w.currentLng as number }) <= radiusKm
-  );
-  if (withinRadius.length === 0) return null;
+  if (workers.length === 0) return null;
 
   const completedCounts = await prisma.booking.groupBy({
     by: ['workerId'],
-    where: { workerId: { in: withinRadius.map((w) => w.userId) }, status: 'COMPLETED' },
+    where: { workerId: { in: workers.map((w) => w.userId) }, status: 'COMPLETED' },
     _count: { _all: true },
   });
   const completedByWorkerId = new Map(completedCounts.map((c) => [c.workerId as string, c._count._all]));
 
-  const candidates: (MatchCandidate & { workerProfileId: string })[] = withinRadius.map((w) => ({
+  const candidates: (MatchCandidate & { workerProfileId: string })[] = workers.map((w) => ({
     workerId: w.userId,
     workerProfileId: w.id,
     rating: w.rating,
-    distanceKm: distanceKm(clientLocation, { lat: w.currentLat as number, lng: w.currentLng as number }),
     completedJobs: completedByWorkerId.get(w.userId) ?? 0,
   }));
 
-  const best = selectBestCandidate(candidates, radiusKm);
+  const best = selectBestCandidate(candidates);
   if (!best) return null;
 
   const matched = candidates.find((c) => c.workerId === best.workerId);
@@ -185,6 +164,5 @@ export async function findAutoMatchWorker(params: AutoMatchParams): Promise<Auto
     workerId: matched.workerId,
     workerProfileId: matched.workerProfileId,
     score: best.score,
-    distanceKm: matched.distanceKm,
   };
 }

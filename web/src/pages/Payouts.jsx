@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react'
+import { useCallback, useMemo, useState } from 'react'
 import PageHeader from '../components/common/PageHeader'
 import SubNav from '../components/common/SubNav'
 import SearchBar from '../components/common/SearchBar'
@@ -11,6 +11,7 @@ import { fetchPayouts, downloadPayoutsCsv, retryPayout } from '../services/payme
 import { formatPeso } from '../data/payments'
 import { useToast } from '../context/ToastContext'
 import Badge from '../components/common/Badge'
+import CopyableId from '../components/common/CopyableId'
 
 const STATUS_BADGE_VARIANT = {
   Paid: 'approved',
@@ -23,6 +24,8 @@ const SUB_NAV = [
   { to: '/payments', label: 'All Transactions' },
   { to: '/payments/refunds', label: 'Refund History' },
   { to: '/payments/payouts', label: 'Payout Distribution' },
+  { to: '/payments/tax-certificates', label: 'Tax Certificates' },
+  { to: '/payments/tax-remittance', label: 'Tax Remittance' },
 ]
 
 export default function Payouts() {
@@ -31,6 +34,7 @@ export default function Payouts() {
   const [dateTo, setDateTo] = useState('')
   const [exporting, setExporting] = useState(false)
   const [retryingId, setRetryingId] = useState(null)
+  const [selectedId, setSelectedId] = useState(null)
 
   const fetchFn = useCallback(
     (params) =>
@@ -46,8 +50,10 @@ export default function Payouts() {
 
   const { data: payouts, meta, params, loading, error, reload, setSearch, setFilter, goToPage } = useListQuery(
     fetchFn,
-    { initialParams: { page: 1, dateFrom: '', dateTo: '' }, pollIntervalMs: 8000 }
+    { initialParams: { page: 1, dateFrom: '', dateTo: '' }, pollIntervalMs: 25000 }
   )
+
+  const selected = useMemo(() => payouts.find((p) => p.id === selectedId) || null, [payouts, selectedId])
 
   const applyDateRange = () => {
     setFilter('dateFrom', dateFrom)
@@ -98,7 +104,7 @@ export default function Payouts() {
       />
       <SubNav items={SUB_NAV} />
       <p style={{ color: 'var(--text-muted)', fontSize: '0.875rem', margin: '0.5rem 0 1rem' }}>
-        Payouts are sent to the worker&apos;s configured GCash/Maya account via PayMongo once a booking&apos;s held
+        Payouts are sent to the worker&apos;s configured GCash/Maya account via Xendit once a booking&apos;s held
         payment is released. Failed sends can be retried below.
       </p>
       {meta.legacyUnpayoutCount > 0 && (
@@ -141,13 +147,13 @@ export default function Payouts() {
               <table className="table">
                 <thead>
                   <tr>
-                    <th>Payout ID</th><th>Booking</th><th>Worker</th><th>Client</th><th>Payout Amount</th><th>Commission</th><th>Method</th><th>Status</th><th>Released</th><th></th>
+                    <th>Payout ID</th><th>Booking</th><th>Worker</th><th>Client</th><th>Payout Amount</th><th>Commission</th><th>Method</th><th>Status</th><th>Xendit Ref</th><th>Released</th><th></th>
                   </tr>
                 </thead>
                 <tbody>
                   {payouts.length === 0 ? (
                     <tr>
-                      <td colSpan={10} style={{ textAlign: 'center', color: 'var(--text-muted)' }}>No payouts found.</td>
+                      <td colSpan={11} style={{ textAlign: 'center', color: 'var(--text-muted)' }}>No payouts found.</td>
                     </tr>
                   ) : (
                     payouts.map((p) => (
@@ -162,18 +168,32 @@ export default function Payouts() {
                         <td title={p.failureReason || undefined}>
                           <Badge variant={STATUS_BADGE_VARIANT[p.status] ?? 'pending'}>{p.status}</Badge>
                         </td>
+                        <td>
+                          <CopyableId value={p.xenditDisbursementId} title={p.xenditStatus ? `Xendit status: ${p.xenditStatus}` : undefined} />
+                        </td>
                         <td>{p.releasedDate}</td>
                         <td>
-                          {p.status === 'Failed' && (
+                          <div className="row-actions">
                             <button
                               type="button"
-                              className="btn btn-outline"
-                              disabled={retryingId === p.id}
-                              onClick={() => handleRetry(p.id)}
+                              className="action-btn view"
+                              title="View payout details"
+                              aria-label={`View details for payout ${p.displayId}`}
+                              onClick={() => setSelectedId(p.id)}
                             >
-                              {retryingId === p.id ? 'Retrying...' : 'Retry'}
+                              <i className="fas fa-eye" />
                             </button>
-                          )}
+                            {p.status === 'Failed' && (
+                              <button
+                                type="button"
+                                className="btn btn-outline"
+                                disabled={retryingId === p.id}
+                                onClick={() => handleRetry(p.id)}
+                              >
+                                {retryingId === p.id ? 'Retrying...' : 'Retry'}
+                              </button>
+                            )}
+                          </div>
                         </td>
                       </tr>
                     ))
@@ -191,6 +211,85 @@ export default function Payouts() {
           </>
         )}
       </SectionCard>
+
+      {selected && (
+        <div className="modal-backdrop" onClick={() => setSelectedId(null)} role="presentation">
+          <div
+            className="modal modal--landscape"
+            onClick={(e) => e.stopPropagation()}
+            role="dialog"
+            aria-modal="true"
+          >
+            <h2 className="modal-title">Payout — {selected.displayId}</h2>
+            <p className="modal-body" style={{ marginBottom: '0.75rem' }}>
+              <strong>Status:</strong> <Badge variant={STATUS_BADGE_VARIANT[selected.status] ?? 'pending'}>{selected.status}</Badge>
+            </p>
+            <div className="modal-detail-grid--2col">
+              <div className="detail-block">
+                <label>Booking</label>
+                <div className="value">{selected.booking}</div>
+              </div>
+              <div className="detail-block">
+                <label>Worker</label>
+                <div className="value">{selected.worker}</div>
+              </div>
+              <div className="detail-block">
+                <label>Client</label>
+                <div className="value">{selected.client}</div>
+              </div>
+              <div className="detail-block">
+                <label>Method</label>
+                <div className="value">{selected.method}</div>
+              </div>
+              <div className="detail-block">
+                <label>Payout Amount</label>
+                <div className="value">{formatPeso(selected.payoutAmount)}</div>
+              </div>
+              <div className="detail-block">
+                <label>Commission</label>
+                <div className="value">{selected.commissionAmount != null ? formatPeso(selected.commissionAmount) : '—'}</div>
+              </div>
+              <div className="detail-block">
+                <label>Released</label>
+                <div className="value">{selected.releasedDate}</div>
+              </div>
+              <div className="detail-block">
+                <label>Attempts</label>
+                <div className="value">{selected.attempts ?? 0}</div>
+              </div>
+              <div className="detail-block">
+                <label>Xendit Disbursement ID</label>
+                <div className="value">{selected.xenditDisbursementId || '—'}</div>
+              </div>
+              <div className="detail-block">
+                <label>Xendit Status</label>
+                <div className="value">{selected.xenditStatus || '—'}</div>
+              </div>
+              {selected.failureReason && (
+                <div className="detail-block detail-block--full">
+                  <label>Failure Reason</label>
+                  <div className="value">{selected.failureReason}</div>
+                </div>
+              )}
+            </div>
+            <div className="modal-actions" style={{ justifyContent: 'space-between' }}>
+              <button type="button" className="btn btn-outline" onClick={() => setSelectedId(null)}>
+                Close
+              </button>
+              {selected.status === 'Failed' && (
+                <button
+                  type="button"
+                  className="btn btn-outline"
+                  disabled={retryingId === selected.id}
+                  onClick={() => handleRetry(selected.id)}
+                >
+                  {retryingId === selected.id ? 'Retrying...' : 'Retry'}
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </>
   )
 }

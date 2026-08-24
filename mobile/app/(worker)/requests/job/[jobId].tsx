@@ -8,6 +8,7 @@ import StatusBadge from "../../../../components/ui/StatusBadge";
 import StepperVertical from "../../../../components/steppers/StepperVertical";
 import PrimaryButton from "../../../../components/ui/PrimaryButton";
 import OutlinedButton from "../../../../components/ui/OutlinedButton";
+import DangerButton from "../../../../components/ui/DangerButton";
 import UploadCard from "../../../../components/ui/UploadCard";
 import StarRating from "../../../../components/ui/StarRating";
 import ImageSourcePickerBottomSheet from "../../../../components/bottom-sheets/ImageSourcePickerBottomSheet";
@@ -19,7 +20,9 @@ import { getCurrentPosition, LocationPermissionDeniedError } from "../../../../s
 import { useAlertModal } from "../../../../contexts/AlertModalContext";
 import { usePolling } from "../../../../hooks/usePolling";
 
-const POLL_INTERVAL_MS = 8000;
+// A real-time socket layer already pushes updates here — this poll is a
+// belt-and-suspenders fallback, not the primary refresh path.
+const POLL_INTERVAL_MS = 25000;
 
 type BookingDetail = {
   id: string;
@@ -151,6 +154,9 @@ export default function JobDetailScreen() {
   const isCompleted = status === "Completed";
   const amount = job.finalPrice ?? job.estimatedPrice;
   const hasArrived = !!(job.workerArrivedAt || job.timeline?.workerArrivedAt);
+  // Matches the backend's ADDON_ALLOWED_STATUSES (bookingController.addAddon).
+  const canAddAddon = isInProgress || isQuoteSubmitted || isQuoteApproved;
+  const canCancelJob = isAccepted || isInProgress || isQuoteSubmitted || isQuoteApproved || isDisputed;
 
   // Prefer the real settled amounts off the Payment row once one exists;
   // fall back to a rough 10%-commission estimate for jobs still pre-payout.
@@ -356,6 +362,12 @@ export default function JobDetailScreen() {
 
         {/* Actions */}
         <View className="gap-3 mt-4">
+          {canAddAddon && (
+            <OutlinedButton
+              label="+ Add Item"
+              onPress={() => router.push(`/(worker)/requests/addon/${job.id}`)}
+            />
+          )}
           {isAccepted && !hasArrived && (
             <PrimaryButton
               label="I've Arrived"
@@ -465,6 +477,13 @@ export default function JobDetailScreen() {
             label="Message Client"
             onPress={handleMessageClient}
           />
+          {canCancelJob && (
+            <DangerButton
+              label="Cancel Job"
+              fullWidth
+              onPress={() => router.push(`/(worker)/requests/cancel/${job.id}`)}
+            />
+          )}
         </View>
       </ScrollView>
       <ImageSourcePickerBottomSheet

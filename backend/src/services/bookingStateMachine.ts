@@ -17,7 +17,11 @@
  */
 export const VALID_TRANSITIONS: Record<string, string[]> = {
   PENDING: ['ACCEPTED', 'REJECTED', 'CANCELLED'],
-  ACCEPTED: ['IN_PROGRESS', 'CANCELLED', 'REJECTED'],
+  // REJECTED is a PENDING-only outcome (see bookingController.declineBooking,
+  // which hard-guards to that status) — a worker backing out after accepting
+  // goes through CANCELLED (bookingController.cancelBooking) instead, which
+  // is what actually charges/refunds the accept-time admin fee correctly.
+  ACCEPTED: ['IN_PROGRESS', 'CANCELLED'],
   IN_PROGRESS: ['QUOTE_SUBMITTED', 'CANCELLED'],
   QUOTE_SUBMITTED: ['QUOTE_APPROVED', 'DISPUTED', 'CANCELLED'],
   QUOTE_APPROVED: ['PENDING_COMPLETION', 'CANCELLED'],

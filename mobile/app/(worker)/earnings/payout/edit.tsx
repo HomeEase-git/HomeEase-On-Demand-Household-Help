@@ -8,15 +8,20 @@ import PrimaryButton from "../../../../components/ui/PrimaryButton";
 import * as api from "../../../../services/api";
 import { useAlertModal } from "../../../../contexts/AlertModalContext";
 
-const METHODS: { id: "GCASH" | "MAYA" | "BANK_TRANSFER"; label: string; icon: string }[] = [
+// Bank Transfer isn't offered here — GCash/Maya are the only payout
+// channels HomeEase currently supports, by deliberate product scope, not a
+// gateway limitation (Xendit's Payouts API does support bank channels).
+// Expanding to bank transfer is a separate, explicit future decision. (A
+// worker with a legacy Bank Transfer payout method on file will have it
+// overwritten the next time they save here.)
+const METHODS: { id: "GCASH" | "MAYA"; label: string; icon: string }[] = [
   { id: "GCASH", label: "GCash", icon: "G" },
   { id: "MAYA", label: "Maya", icon: "M" },
-  { id: "BANK_TRANSFER", label: "Bank Transfer", icon: "B" },
 ];
 
 export default function PayoutEditScreen() {
   const router = useRouter();
-  const [selected, setSelected] = useState<"GCASH" | "MAYA" | "BANK_TRANSFER">("GCASH");
+  const [selected, setSelected] = useState<"GCASH" | "MAYA">("GCASH");
   const [accountName, setAccountName] = useState("");
   const [accountNumber, setAccountNumber] = useState("");
   const [loading, setLoading] = useState(true);
@@ -29,7 +34,12 @@ export default function PayoutEditScreen() {
       try {
         const current = await api.getPayoutMethod();
         if (!active) return;
-        if (current.payoutMethod) setSelected(current.payoutMethod);
+        // A legacy Bank Transfer method on file isn't offered as a choice
+        // anymore — fall back to GCash rather than selecting an option that
+        // isn't in the list.
+        if (current.payoutMethod === "GCASH" || current.payoutMethod === "MAYA") {
+          setSelected(current.payoutMethod);
+        }
         if (current.payoutAccountName) setAccountName(current.payoutAccountName);
         if (current.payoutAccountNumber) setAccountNumber(current.payoutAccountNumber);
       } catch (error) {
@@ -103,11 +113,11 @@ export default function PayoutEditScreen() {
             placeholder="e.g. Juan Dela Cruz"
           />
           <InputField
-            label={selected === "BANK_TRANSFER" ? "Bank Account Number" : "Mobile Number"}
+            label="Mobile Number"
             value={accountNumber}
             onChangeText={setAccountNumber}
-            placeholder={selected === "BANK_TRANSFER" ? "e.g. 1234567890" : "e.g. 09171234567"}
-            keyboardType={selected === "BANK_TRANSFER" ? "default" : "phone-pad"}
+            placeholder="e.g. 09171234567"
+            keyboardType="phone-pad"
           />
         </View>
         <PrimaryButton

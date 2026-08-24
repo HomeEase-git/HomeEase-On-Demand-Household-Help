@@ -7,7 +7,7 @@ import PackageCard from "../../../../components/cards/PackageCard";
 import InputField from "../../../../components/ui/InputField";
 import PrimaryButton from "../../../../components/ui/PrimaryButton";
 import OutlinedButton from "../../../../components/ui/OutlinedButton";
-import { colors } from "../../../../constants";
+import { colors, cardShadow } from "../../../../constants";
 import * as api from "../../../../services/api";
 import type { WorkerPackage, WorkerServiceType } from "../../../../services/api";
 import { useAlertModal } from "../../../../contexts/AlertModalContext";
@@ -26,24 +26,21 @@ export default function PackagesScreen() {
   const [description, setDescription] = useState("");
   const [price, setPrice] = useState("");
 
-  const load = async () => {
-    setLoading(true);
-    try {
-      const [pkgs, types] = await Promise.all([
-        api.getMyPackages(),
-        api.getMyServiceTypes(),
-      ]);
-      setPackages(pkgs);
-      setMyServiceTypes(types);
-    } catch (error) {
-      console.error("Load packages error:", error);
-    } finally {
-      setLoading(false);
-    }
-  };
-
   useEffect(() => {
-    load();
+    (async () => {
+      try {
+        const [pkgs, types] = await Promise.all([
+          api.getMyPackages(),
+          api.getMyServiceTypes(),
+        ]);
+        setPackages(pkgs);
+        setMyServiceTypes(types);
+      } catch (error) {
+        console.error("Load packages error:", error);
+      } finally {
+        setLoading(false);
+      }
+    })();
   }, []);
 
   const resetForm = () => {
@@ -168,6 +165,7 @@ export default function PackagesScreen() {
       />
       <Pressable
         className="absolute bottom-6 right-6 w-14 h-14 bg-accent rounded-full items-center justify-center"
+        style={cardShadow}
         onPress={openCreateModal}
       >
         <Ionicons name="add" size={28} color={colors.white} />

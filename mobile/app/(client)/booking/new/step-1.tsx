@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { View, Text, ScrollView, ActivityIndicator, Image, Pressable } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
@@ -6,6 +6,7 @@ import ScreenHeader from "../../../../components/ui/ScreenHeader";
 import StepperHorizontal from "../../../../components/steppers/StepperHorizontal";
 import InputField from "../../../../components/ui/InputField";
 import PrimaryButton from "../../../../components/ui/PrimaryButton";
+import OutlinedButton from "../../../../components/ui/OutlinedButton";
 import InvalidationBanner from "../../../../components/ui/InvalidationBanner";
 import ServiceCategorySelector, {
   type ServiceCategoryOption,
@@ -51,7 +52,7 @@ export default function BookingStep1Screen() {
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
   const photoSheetRef = useRef<BottomSheetHandle | null>(null);
 
-  useEffect(() => {
+  const loadCategories = useCallback(() => {
     let active = true;
     (async () => {
       setLoadingCategories(true);
@@ -66,6 +67,7 @@ export default function BookingStep1Screen() {
           description: t.description,
           scopeType: t.scopeType ?? "ROOM_BASED",
           hasCondition: t.hasCondition ?? true,
+          icon: t.icon ?? null,
           scopeFields: Array.isArray(t.scopeFields)
             ? t.scopeFields.map((f: any) => ({
                 id: f.id,
@@ -106,6 +108,22 @@ export default function BookingStep1Screen() {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useEffect(() => {
+    const cancel = loadCategories();
+    return cancel;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // When entering via "Book Now" on a worker's profile, only offer the
+  // categories that worker actually provides — picking anything else would
+  // leave step-2/step-4 unable to find this worker available at any slot.
+  const displayCategories =
+    draft.workerLocked && draft.workerServiceTypes && draft.workerServiceTypes.length > 0
+      ? categories.filter((c) =>
+          draft.workerServiceTypes!.some((ws) => ws.name.toLowerCase() === c.name.toLowerCase())
+        )
+      : categories;
 
   const isRoomBased = (selectedCategory?.scopeType ?? "ROOM_BASED") === "ROOM_BASED";
   const showCondition = selectedCategory?.hasCondition ?? true;
@@ -172,6 +190,10 @@ export default function BookingStep1Screen() {
     setDraft({
       category: selectedCategory!.name,
       serviceType: selectedCategory!.name,
+      serviceTypeId: draft.workerLocked
+        ? (draft.workerServiceTypes?.find((ws) => ws.name.toLowerCase() === selectedCategory!.name.toLowerCase())
+            ?.id ?? null)
+        : (draft.serviceTypeId ?? null),
       categoryBasePrice: selectedCategory!.basePrice,
       description,
       rooms: isRoomBased ? rooms : [],
@@ -202,15 +224,22 @@ export default function BookingStep1Screen() {
         <Text className="text-text-primary font-bold text-lg mt-2 mb-3">Service</Text>
         {loadError ? (
           <View className="py-6 items-center">
-            <Text className="text-error">{loadError}</Text>
+            <Text className="text-error mb-3">{loadError}</Text>
+            <OutlinedButton label="Retry" onPress={loadCategories} />
           </View>
         ) : (
           <ServiceCategorySelector
-            categories={categories}
+            categories={displayCategories}
             selectedId={selectedCategory?.id ?? null}
             loading={loadingCategories}
             onSelect={handleCategorySelect}
           />
+        )}
+
+        {draft.workerLocked && draft.workerServiceTypes && draft.workerServiceTypes.length > 0 && !loadingCategories && displayCategories.length === 0 && (
+          <Text className="text-error text-sm mt-2">
+            This pro&apos;s listed services aren&apos;t currently bookable. Please go back and pick a different pro.
+          </Text>
         )}
 
         {selectedCategory && isRoomBased && (
@@ -284,7 +313,7 @@ export default function BookingStep1Screen() {
         </View>
 
         <View className="mt-8">
-          <PrimaryButton label="Next" fullWidth disabled={!canNext || loadingCategories} onPress={handleNext} />
+          <PrimaryButton label="Next" fullWidth disabled={loadingCategories} onPress={handleNext} />
         </View>
       </ScrollView>
       <ImageSourcePickerBottomSheet innerRef={photoSheetRef} onSelect={handlePickIssuePhoto} />

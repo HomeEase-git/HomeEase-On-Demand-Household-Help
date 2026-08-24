@@ -12,13 +12,14 @@ import ScreenHeader from "../../../../components/ui/ScreenHeader";
 import InputField from "../../../../components/ui/InputField";
 import PrimaryButton from "../../../../components/ui/PrimaryButton";
 import * as api from "../../../../services/api";
+import { cardShadow } from "../../../../constants";
 import { useAlertModal } from "../../../../contexts/AlertModalContext";
 
 export default function AddPaymentMethodScreen() {
   const router = useRouter();
   const alertModal = useAlertModal();
   const [type, setType] = useState<
-    "GCASH" | "MAYA" | "CARD" | "BANK_TRANSFER" | "CASH"
+    "GCASH" | "MAYA" | "BANK_TRANSFER" | "CASH"
   >("GCASH");
   const [accountIdentifier, setAccountIdentifier] = useState("");
   const [label, setLabel] = useState("");
@@ -55,7 +56,6 @@ export default function AddPaymentMethodScreen() {
   const types = [
     { label: "GCash", value: "GCASH" as const },
     { label: "Maya", value: "MAYA" as const },
-    { label: "Card", value: "CARD" as const },
     { label: "Bank", value: "BANK_TRANSFER" as const },
     { label: "Cash", value: "CASH" as const },
   ];
@@ -64,35 +64,37 @@ export default function AddPaymentMethodScreen() {
     <SafeAreaView className="flex-1 bg-white">
       <ScreenHeader title="Add Payment Method" showBack />
       <ScrollView contentContainerStyle={{ padding: 24 }}>
-        <Text className="text-primary text-sm mb-2 font-semibold">
-          Payment Type
-        </Text>
-        <View className="flex-row flex-wrap gap-2 mb-4">
-          {types.map((t) => (
-            <Pressable
-              key={t.value}
-              className={`px-3 py-2 rounded-lg ${
-                type === t.value ? "bg-accent" : "bg-card"
-              }`}
-              onPress={() => setType(t.value)}
-            >
-              <Text
-                className={
-                  type === t.value
-                    ? "text-white font-semibold text-sm"
-                    : "text-text-secondary text-sm"
-                }
+        <View className="bg-card rounded-2xl p-4 mb-4" style={cardShadow}>
+          <Text className="text-text-primary text-sm mb-2 font-semibold">
+            Payment Type
+          </Text>
+          <View className="flex-row flex-wrap gap-2">
+            {types.map((t) => (
+              <Pressable
+                key={t.value}
+                className={`px-3 py-2 rounded-lg ${
+                  type === t.value ? "bg-accent" : "bg-white"
+                }`}
+                onPress={() => setType(t.value)}
               >
-                {t.label}
-              </Text>
-            </Pressable>
-          ))}
+                <Text
+                  className={
+                    type === t.value
+                      ? "text-white font-semibold text-sm"
+                      : "text-text-secondary text-sm"
+                  }
+                >
+                  {t.label}
+                </Text>
+              </Pressable>
+            ))}
+          </View>
         </View>
 
         <InputField
           ref={accountRef}
           label="Account Identifier"
-          placeholder="e.g., +63912345678 (for GCash), Card last 4 digits, etc."
+          placeholder="e.g., +63912345678 (for GCash/Maya), account number, etc."
           value={accountIdentifier}
           onChangeText={setAccountIdentifier}
           returnKeyType="next"

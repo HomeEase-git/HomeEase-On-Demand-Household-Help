@@ -13,7 +13,7 @@ import {
 import { useAuthStore } from "../../../store/authStore";
 import { parseMyResume } from "../../../services/api";
 import type { ParsedResume } from "../../../types/api.types";
-import { colors } from "../../../constants";
+import { colors, cardShadow } from "../../../constants";
 import { useAlertModal } from "../../../contexts/AlertModalContext";
 
 const LEVEL_COLOR: Record<string, { bg: string; text: string }> = {
@@ -52,7 +52,7 @@ export default function ResumePreviewScreen() {
   }, []);
 
   useEffect(() => {
-    load(false);
+    Promise.resolve().then(() => load(false));
   }, [load]);
 
   const handleUseProfileData = () => {
@@ -119,14 +119,14 @@ export default function ResumePreviewScreen() {
         contentContainerStyle={{ padding: 16, paddingBottom: 40 }}
       >
         {/* AI Header */}
-        <View className="bg-accent rounded-2xl p-4 mb-4">
+        <View className="bg-accent rounded-2xl p-4 mb-4" style={cardShadow}>
           <View className="flex-row items-center">
             <Ionicons name="sparkles" size={24} color={colors.white} />
-            <Text className="text-text-primary font-bold text-base ml-2">
+            <Text className="text-white font-bold text-base ml-2">
               AI-Powered Resume Analysis
             </Text>
           </View>
-          <Text className="text-primary/70 text-xs mt-1">
+          <Text className="text-white/70 text-xs mt-1">
             {result.parsedAt
               ? `Analyzed ${new Date(result.parsedAt).toLocaleDateString()}`
               : "Analyzed just now"}
@@ -134,7 +134,7 @@ export default function ResumePreviewScreen() {
         </View>
 
         {/* Profile Overview */}
-        <View className="bg-card rounded-2xl p-4 mb-4">
+        <View className="bg-card rounded-2xl p-4 mb-4" style={cardShadow}>
           <Text className="text-text-primary font-bold text-base mb-3">
             Profile Overview
           </Text>
@@ -174,7 +174,7 @@ export default function ResumePreviewScreen() {
         </View>
 
         {/* Skills */}
-        <View className="bg-card rounded-2xl p-4 mb-4">
+        <View className="bg-card rounded-2xl p-4 mb-4" style={cardShadow}>
           <Text className="text-text-primary font-bold text-base mb-3">
             Extracted Skills
           </Text>
@@ -188,7 +188,7 @@ export default function ResumePreviewScreen() {
                     : ""
                 }`}
               >
-                <Text className="text-primary text-sm flex-1">{skill}</Text>
+                <Text className="text-text-primary text-sm flex-1">{skill}</Text>
                 <View className={`${levelColors.bg} rounded-full px-2 py-0.5`}>
                   <Text className={`${levelColors.text} text-xs font-semibold`}>
                     {masteryLevel}

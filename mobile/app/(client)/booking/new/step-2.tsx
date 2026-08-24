@@ -15,12 +15,13 @@ import AddressPickerBottomSheet, {
 import type { BottomSheetHandle } from "../../../../components/bottom-sheets/BottomSheetWrapper";
 import DateGridPicker from "../../../../components/booking4step/DateGridPicker";
 import TimeSlotPicker from "../../../../components/ui/TimeSlotPicker";
+import UrgencySelector from "../../../../components/booking4step/UrgencySelector";
 import { useBookingStore } from "../../../../store/bookingStore";
 import { useSlotAvailabilityCounts } from "../../../../hooks/useWorkerDiscovery";
 import * as api from "../../../../services/api";
 import { addressStorage } from "../../../../utils/storage";
 import { geocodeAddress } from "../../../../utils/geo";
-import type { TimeSlot } from "../../../../types/booking4step.types";
+import { TIME_SLOTS, type TimeSlot, type UrgencyLevel } from "../../../../types/booking4step.types";
 
 const BOOKING_STEPS = ["Scope", "Schedule", "Who", "Confirm"];
 
@@ -37,6 +38,7 @@ export default function BookingStep2Screen() {
   const [city, setCity] = useState<string | undefined>(draft.city);
   const [date, setDate] = useState<string | null>(draft.date);
   const [timeSlot, setTimeSlot] = useState<TimeSlot | null>(draft.timeSlot);
+  const [urgencyLevel, setUrgencyLevel] = useState<UrgencyLevel>(draft.urgencyLevel ?? "STANDARD");
 
   const [addresses, setAddresses] = useState<SavedAddress[]>([]);
   const [loadingAddresses, setLoadingAddresses] = useState(true);
@@ -101,17 +103,29 @@ export default function BookingStep2Screen() {
   };
 
   const hasScope = !!draft.serviceType;
+  // When entering via a locked (profile-picked) worker, scope the slot-count
+  // check to that specific worker instead of "how many pros total" — a
+  // locked worker's own real WorkerAvailability rows are what step-4's
+  // createBooking will actually check, so surfacing per-slot availability
+  // here (via the same TimeSlotPicker "N pros/None available" UI) catches a
+  // dead slot before the user fills in steps 3-4, instead of a confusing
+  // failure at final submit.
   const { counts, loading: loadingCounts } = useSlotAvailabilityCounts(
     {
       serviceType: draft.serviceType ?? undefined,
       date: date ?? undefined,
       condition: draft.condition ?? undefined,
       rooms: draft.rooms?.map((r) => r.room),
-      lat,
-      lng,
+      workerId: draft.workerLocked ? (draft.workerId ?? undefined) : undefined,
     },
-    hasScope && !!date && lat != null && lng != null
+    hasScope && !!date
   );
+
+  const noSlotsForLockedWorker =
+    draft.workerLocked &&
+    !!date &&
+    !loadingCounts &&
+    TIME_SLOTS.every((slot) => counts[slot] === 0);
 
   const canNext = !!address && lat != null && lng != null && !!date && !!timeSlot;
 
@@ -121,7 +135,7 @@ export default function BookingStep2Screen() {
       return;
     }
 
-    setDraft({ address, lat, lng, city, date, timeSlot });
+    setDraft({ address, lat, lng, city, date, timeSlot, urgencyLevel });
     router.push("/(client)/booking/new/step-3");
   };
 
@@ -158,8 +172,18 @@ export default function BookingStep2Screen() {
           loadingCounts={loadingCounts}
         />
 
+        {noSlotsForLockedWorker && (
+          <Text className="text-error text-sm mt-2">
+            {draft.workerName ?? "This pro"} isn&apos;t available on this date for the selected service. Try a
+            different date, or go back and choose another pro.
+          </Text>
+        )}
+
+        <Text className="text-text-primary font-bold text-lg mt-6 mb-3">How urgent is this?</Text>
+        <UrgencySelector value={urgencyLevel} onChange={setUrgencyLevel} />
+
         <View className="mt-8">
-          <PrimaryButton label="Next" fullWidth disabled={!canNext} onPress={handleNext} />
+          <PrimaryButton label="Next" fullWidth onPress={handleNext} />
         </View>
       </ScrollView>
 

@@ -1,5 +1,5 @@
 import React, { useEffect, useRef } from "react";
-import { View, Text, BackHandler } from "react-native";
+import { View, Text, BackHandler, Linking } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { useAuthStore } from "../../store/authStore";
@@ -72,6 +72,15 @@ export default function KycPendingScreen() {
           You&apos;ll be notified once approved.
         </Text>
       </View>
+      <Text className="text-text-muted text-xs text-center mt-6">
+        Taking longer than expected?{" "}
+        <Text
+          className="text-accent underline"
+          onPress={() => Linking.openURL("mailto:support@homeease.com")}
+        >
+          Contact Support
+        </Text>
+      </Text>
     </SafeAreaView>
   );
 }

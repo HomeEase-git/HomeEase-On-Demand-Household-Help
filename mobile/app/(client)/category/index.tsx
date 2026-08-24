@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import {
   View,
   Text,
@@ -11,11 +11,13 @@ import { useRouter } from "expo-router";
 import SearchBar from "../../../components/ui/SearchBar";
 import CategoryCard from "../../../components/cards/CategoryCard";
 import { getServiceTypes } from "../../../services/api";
+import { useTabRefresh } from "../../../hooks/useTabRefresh";
 
 type ServiceCategory = {
   id: string;
   name: string;
   count: number;
+  icon: string | null;
 };
 
 export default function CategoryIndexScreen() {
@@ -26,35 +28,33 @@ export default function CategoryIndexScreen() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    let active = true;
-
-    async function loadCategories() {
-      setLoading(true);
-      setError(null);
-      try {
-        const serviceTypes = await getServiceTypes();
-        if (!active) return;
-        const categories = serviceTypes.map((serviceType: any) => ({
-          id: serviceType.name.toLowerCase().replace(/\s+/g, "-"),
-          name: serviceType.name,
-          count: serviceType.availableWorkerCount ?? 0,
-        }));
-        setServiceCategories(categories);
-      } catch (err) {
-        if (!active) return;
-        setError("Unable to load services. Please try again.");
-      } finally {
-        if (!active) return;
-        setLoading(false);
-      }
+  const loadCategories = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const serviceTypes = await getServiceTypes();
+      const categories = serviceTypes.map((serviceType: any) => ({
+        id: serviceType.name.toLowerCase().replace(/\s+/g, "-"),
+        name: serviceType.name,
+        count: serviceType.availableWorkerCount ?? 0,
+        icon: serviceType.icon ?? null,
+      }));
+      setServiceCategories(categories);
+    } catch (err) {
+      setError("Unable to load services. Please try again.");
+    } finally {
+      setLoading(false);
     }
-
-    loadCategories();
-    return () => {
-      active = false;
-    };
   }, []);
+
+  useEffect(() => {
+    async function run() {
+      await loadCategories();
+    }
+    run();
+  }, [loadCategories]);
+
+  useTabRefresh("client:category", loadCategories);
 
   return (
     <SafeAreaView className="flex-1 bg-white">
@@ -62,7 +62,7 @@ export default function CategoryIndexScreen() {
         <Text className="text-text-primary text-2xl font-bold">Services</Text>
         <Pressable
           className="mt-3"
-          onPress={() => router.push("/(client)/home/search")}
+          onPress={() => router.push("/(client)/category/search")}
         >
           <SearchBar placeholder="Search services..." />
         </Pressable>

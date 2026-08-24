@@ -1,4 +1,5 @@
 import * as ImageManipulator from 'expo-image-manipulator';
+import { File } from 'expo-file-system';
 
 export type CompressionResult = {
   uri: string;
@@ -95,28 +96,18 @@ export async function validateImageSize(
 
 /**
  * Get file size in bytes from URI.
- * 
- * Uses native file system access to get accurate file size.
- * Handles both local (file://) and content:// URIs.
- * 
- * Note: Currently returns placeholder. Should integrate with expo-file-system
- * for production: const fileInfo = await FileSystem.getInfoAsync(uri);
- * 
+ *
+ * Uses expo-file-system's File class to read the actual file size.
+ *
  * @param uri - File URI
- * @returns File size in bytes (placeholder: 1)
+ * @returns File size in bytes (0 if the file doesn't exist or can't be read)
  */
 async function getFileSizeFromUri(uri: string): Promise<number> {
   if (!/^[a-z][a-z0-9+.-]*:\/\//i.test(uri)) {
     throw new Error('Invalid image URI');
   }
 
-  // TODO: Integrate with expo-file-system for actual file size
-  // import { FileSystem } from 'expo-file-system';
-  // const fileInfo = await FileSystem.getInfoAsync(uri);
-  // return fileInfo.size || 0;
-  
-  // Placeholder implementation
-  return 1;
+  return new File(uri).size;
 }
 
 /**

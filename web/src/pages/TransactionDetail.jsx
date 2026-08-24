@@ -1,12 +1,15 @@
-import { Link, Navigate, useParams } from 'react-router-dom'
+import { Link, useParams } from 'react-router-dom'
 import PageHeader from '../components/common/PageHeader'
 import SubNav from '../components/common/SubNav'
+import SectionCard from '../components/common/SectionCard'
 import Badge from '../components/common/Badge'
+import { getPaymentStatusVariant } from '../utils/statusBadge'
 import LoadingState from '../components/common/LoadingState'
 import ErrorState from '../components/common/ErrorState'
 import { useDetailQuery } from '../hooks/useListQuery'
 import { fetchPaymentById } from '../services/payments'
 import { formatPeso } from '../data/payments'
+import CopyableId from '../components/common/CopyableId'
 
 const SUB_NAV = [
   { to: '/payments', label: 'All Transactions' },
@@ -25,7 +28,11 @@ export default function TransactionDetail() {
   }
 
   if (!tx) {
-    return <Navigate to="/payments" replace />
+    return (
+      <SectionCard>
+        <p style={{ color: 'var(--text-muted)' }}>Transaction not found. <Link to="/payments">Back to Transactions</Link></p>
+      </SectionCard>
+    )
   }
 
   const details = [
@@ -39,9 +46,10 @@ export default function TransactionDetail() {
     { label: 'Method', value: tx.method },
     {
       label: 'Status',
-      value: <Badge variant={tx.status === 'Completed' ? 'approved' : 'pending'}>{tx.status}</Badge>,
+      value: <Badge variant={getPaymentStatusVariant(tx.status)}>{tx.status}</Badge>,
     },
     { label: 'Date', value: tx.date },
+    { label: 'Xendit Invoice ID', value: <CopyableId value={tx.xenditInvoiceId} /> },
   ]
 
   return (

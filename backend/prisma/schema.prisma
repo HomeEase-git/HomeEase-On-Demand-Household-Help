@@ -65,17 +65,15 @@ enum EscrowStatus {
 }
 
 enum PayoutStatus {
-  PENDING // Payout row created, not yet sent to PayMongo
-  PROCESSING // PayMongo transfer created, awaiting callback confirmation
-  PAID // PayMongo confirmed the transfer succeeded
-  FAILED // PayMongo confirmed failure, or a platform-side error before send
+  PENDING // Payout row created, not yet sent to Xendit
+  PROCESSING // Xendit disbursement created, awaiting webhook confirmation
+  PAID // Xendit confirmed the payout succeeded
+  FAILED // Xendit confirmed failure, or a platform-side error before send
 }
 
 enum PaymentMethodType {
   GCASH
   MAYA
-  CARD
-  BANK_TRANSFER
   CASH
 }
 
@@ -114,7 +112,6 @@ enum NotificationType {
   BOOKING_ACCEPTED
   BOOKING_REJECTED
   BOOKING_CANCELLED
-  BOOKING_RESCHEDULED
   BOOKING_COMPLETED
   PAYMENT_RECEIVED
   PAYMENT_REFUNDED
@@ -126,6 +123,10 @@ enum NotificationType {
   QUOTE_SUBMITTED
   QUOTE_APPROVED
   QUOTE_DISPUTED
+  QUOTE_REMINDER
+  QUOTE_AUTO_APPROVED
+  COMPLETION_REMINDER
+  BOOKING_AUTO_COMPLETED
   VERIFICATION_SUBMITTED
   VERIFICATION_APPROVED
   VERIFICATION_REJECTED
@@ -137,6 +138,12 @@ enum TimeSlot {
   MORNING
   AFTERNOON
   EVENING
+}
+
+enum UrgencyLevel {
+  STANDARD
+  URGENT
+  EMERGENCY
 }
 
 enum RoomType {
@@ -186,6 +193,10 @@ model User {
   isVerified              Boolean @default(false) // basic email/phone verification, not KYC
   avatar                  String?
   notificationPreferences Json?
+  // Expo push token for the device the user most recently logged in on —
+  // single-device by design (matches the mobile client's single in-memory
+  // token model). Overwritten on each login/registration; cleared on logout.
+  pushToken               String?
 
   // Soft delete — isDeleted/deletedAt is the single gate used everywhere to
   // exclude a user from active queries. `status` records *why* — self-deleted,
@@ -214,6 +225,9 @@ model User {
   @@index([role])
   @@index([isDeleted])
   @@index([status])
+  // Admin Users/Workers list endpoints filter on role+isDeleted together and
+  // always sort by createdAt desc — covers both the filter and the sort.
+  @@index([role, isDeleted, createdAt])
 }
 
 enum UserStatus {
@@ -305,6 +319,11 @@ model WorkerProfile {
   availableDays     Int[]   @default([1, 2, 3, 4, 5]) // 0=Sun, 1=Mon ... 6=Sat
   serviceAreaRadius Int     @default(30) // in kilometers
 
+  // Set when the worker hits AppSettings.maxDeclinesBeforeCooldown declines
+  // within the rolling declineWindowHours — excluded from auto-match
+  // candidates (see matchingService.findAutoMatchWorker) until this passes.
+  declineCooldownUntil DateTime?
+
   // Job preferences — used by auto-matching to filter candidate workers
   acceptsHeavyCondition Boolean    @default(false)
   acceptsPets           Boolean    @default(false)
@@ -321,8 +340,19 @@ model WorkerProfile {
   state   String?
   zipCode String?
 
-  // Live GPS location — updated while a worker is en route/on a job, used
-  // for arrival verification and distance-based matching.
+  // Geocoded from address/city/state/zipCode when the worker saves their
+  // profile (see workerController.updateWorkerProfile) — the worker's fixed
+  // service base, used to compute the distance-based pricing fee at booking
+  // time (see bookingController.createBooking). Bookings are scheduled in
+  // advance, not dispatched to a live position, so this is a static "shipping
+  // fee" style distance rather than real-time proximity.
+  addressLat Float?
+  addressLng Float?
+
+  // Live GPS location — updated at arrival check-in (see
+  // bookingController.arriveBooking) and used for the arrival geofence
+  // check. Deliberately not used for matching/search or pricing (this app
+  // has no reliable live-location source for workers before they arrive).
   currentLat         Float?
   currentLng         Float?
   lastLocationUpdate DateTime?
@@ -340,6 +370,12 @@ model WorkerProfile {
   payoutAccountName   String?
   payoutAccountNumber String?
 
+  // BIR Tax Identification Number — required before a Form 2307 withholding
+  // certificate can be generated for this worker (see taxCertificateService).
+  // Format: 000-000-000 or 000-000-000-000 with branch code (see utils/taxId.ts).
+  tin           String?   @unique
+  tinVerifiedAt DateTime?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -351,10 +387,15 @@ model WorkerProfile {
   resumeParseResult ResumeParseResult?
   availability      WorkerAvailability[]
   packages          WorkerPackage[]
+  wallet            WorkerWallet?
 
   @@index([userId])
   @@index([kycStatus])
   @@index([isAvailable])
+  // Worker discovery search filters on both together on every request —
+  // covers that combo directly instead of relying on a bitmap-AND of the
+  // two single-column indexes above.
+  @@index([isAvailable, kycStatus])
 }
 
 // Per-date/slot availability record used by auto-matching to find candidate
@@ -528,6 +569,13 @@ model ServiceType {
   scopeType    ServiceScopeType @default(ROOM_BASED)
   hasCondition Boolean          @default(true)
 
+  // Ionicons outline name (e.g. "water-outline") picked from the curated
+  // list in backend/src/constants/serviceIcons.ts — mobile renders this via
+  // <Ionicons name={icon} />. Null means the category predates this field or
+  // was never assigned one; mobile falls back to its static name-based guess
+  // (utils/categoryIcons.ts) in that case.
+  icon String?
+
   // Relations
   workers     WorkerProfile[]
   tasks       ServiceTask[]
@@ -652,6 +700,7 @@ model Booking {
   scheduledDate  DateTime
   scheduledTime  String?
   timeSlot       TimeSlot?
+  urgencyLevel   UrgencyLevel @default(STANDARD)
   completionDate DateTime?
 
   // Status
@@ -669,6 +718,11 @@ model Booking {
   quoteNotes    String?
   approvedAt    DateTime?
   disputeReason String?
+
+  // Set once the 12h "please approve/dispute this quote" reminder fires
+  // (see bookingWorker.remindAndAutoApproveQuotes) — prevents re-sending it
+  // on every hourly sweep tick, distinct from the 24h auto-approve itself.
+  quoteReminderSentAt DateTime?
 
   // Dispute resolution audit — who (admin userId, no FK to keep this a soft
   // reference like VerificationRequest.reviewedById) resolved it and when.
@@ -692,6 +746,11 @@ model Booking {
   workerStartedAt   DateTime?
   workerCompletedAt DateTime?
 
+  // Set once the 12h "please confirm this job is done" reminder fires (see
+  // bookingWorker.autoSettleCompletedBookings) — prevents re-sending it on
+  // every hourly sweep tick, distinct from the 24h auto-confirm itself.
+  completionReminderSentAt DateTime?
+
   // Payment method chosen by the client at booking time — settled upfront so
   // the client isn't asked to pick a method again after confirming completion.
   paymentMethodType        PaymentMethodType?
@@ -702,8 +761,12 @@ model Booking {
   city     String
   notes    String?
 
-  // GPS snapshots — client location at booking time, worker's last known
-  // position, and the derived distance between them (meters).
+  // GPS snapshots. clientLat/clientLng is the booking address. workerLat/
+  // workerLng starts as a copy of WorkerProfile.addressLat/addressLng at
+  // booking-creation time (used to derive distanceMeters, the input to the
+  // pricing distanceFee — see bookingController.createBooking) and is later
+  // overwritten with the worker's real GPS once they check in as arrived
+  // (see ArrivalVerification / bookingController.arriveBooking).
   clientLat      Float?
   clientLng      Float?
   workerLat      Float?
@@ -805,6 +868,8 @@ model PricingLog {
   basePrice     Float
   conditionFee  Float? @default(0)
   distanceFee   Float? @default(0)
+  urgencyFee    Float? @default(0)
+  tierFee       Float? @default(0)
   addOnsTotal   Float? @default(0)
   finalEstimate Float
   breakdown     Json? // full itemized snapshot for support/audit lookups
@@ -853,8 +918,8 @@ model Payment {
   commissionRate   Float @default(0.10)
   commissionAmount Float
 
-  // Withholding tax (BIR compliance for professional fees)
-  withholdingTaxRate   Float @default(0.05)
+  // Withholding tax (BIR compliance — contractor-category workers, ATC WC158)
+  withholdingTaxRate   Float @default(0.02)
   withholdingTaxAmount Float
 
   // Worker receives
@@ -872,24 +937,34 @@ model Payment {
   refundReason String?
   refundedAt   DateTime?
 
-  // PayMongo references
-  paymongoPaymentId String?
-  paymongoSourceId  String?
+  // Set when status becomes FAILED — raw reason from Xendit's webhook
+  // payload (translated for end users via utils/xenditFailureMessages.ts).
+  failureReason String?
+
+  // Xendit references. xenditInvoiceId is set at checkout-creation time and
+  // is what the invoice-paid webhook uses to find this row. xenditPaymentId
+  // is populated only once the webhook reports the invoice PAID (Xendit's
+  // payment_id, e.g. "ewc_...") and is surfaced to the client as the
+  // receipt's transactionId.
+  xenditInvoiceId String?
+  xenditPaymentId String?
 
   // Authorize/capture flow — amount is held (authorized) at booking time and
   // captured on completion; capturedAmount may differ from authorizedAmount
   // if the final price changed (e.g. quote approval, add-ons).
   authorizedAmount Float?
   authorizedAt     DateTime?
-  authorizationId  String?
   capturedAmount   Float?
   capturedAt       DateTime?
+  // Deprecated — populated only on CARD-era rows from before CARD support
+  // was removed; no longer written to.
+  authorizationId  String?
   paymentIntentId  String?
   clientSecret     String?
 
   // Payment method used
   methodType        PaymentMethodType
-  accountIdentifier String? // masked GCash number, last 4 of card, etc.
+  accountIdentifier String? // masked GCash/Maya number, etc.
 
   payout Payout?
 
@@ -901,7 +976,7 @@ model Payment {
   @@index([escrowStatus])
 }
 
-// Tracks the actual disbursement of a worker's payout via PayMongo, separate
+// Tracks the actual disbursement of a worker's payout via Xendit, separate
 // from Payment.escrowStatus (which only tracks the platform's own escrow
 // ledger — RELEASED means "the worker's cut is owed", not "the worker has
 // been paid"). One Payout per Payment, created once escrow is released.
@@ -913,19 +988,15 @@ model Payout {
   workerId  String // soft reference — User.id of the worker being paid
 
   amount        Float
-  channel       PaymentMethodType // GCASH/MAYA/BANK_TRANSFER — CARD/CASH are not valid payout channels
+  channel       PaymentMethodType // GCASH/MAYA — CASH is not a valid payout channel
   accountName   String? // snapshot of WorkerProfile.payoutAccountName at send time
   accountNumber String // snapshot of WorkerProfile.payoutAccountNumber at send time
 
-  status                PayoutStatus @default(PENDING)
-  paymongoTransferId    String?      @unique
-  paymongoTransferStatus String? // raw status string from PayMongo, for debugging
-  // Deprecated — populated only on Xendit-era rows from before the PayMongo
-  // disbursement migration; no longer written to.
-  xenditDisbursementId  String?      @unique
-  xenditStatus          String?
-  failureReason         String?
-  attempts              Int          @default(0)
+  status               PayoutStatus @default(PENDING)
+  xenditDisbursementId String?      @unique // Xendit Payouts API `id` (e.g. "disb-...")
+  xenditStatus         String? // raw status from Xendit (ACCEPTED/COMPLETED/FAILED/...), for debugging
+  failureReason        String?
+  attempts             Int          @default(0)
 
   processingAt DateTime?
   paidAt       DateTime?
@@ -937,6 +1008,59 @@ model Payout {
   @@index([bookingId])
   @@index([workerId])
   @@index([status])
+}
+
+// Prepaid balance a worker maintains to cover the per-job admin fee deducted
+// at booking acceptance (see bookingController.acceptBooking) — distinct
+// from Payout, which is the platform paying the worker their job earnings.
+model WorkerWallet {
+  id              String        @id @default(cuid())
+  workerProfileId String        @unique
+  workerProfile   WorkerProfile @relation(fields: [workerProfileId], references: [id], onDelete: Cascade)
+
+  balance Float @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  transactions WalletTransaction[]
+}
+
+enum WalletTransactionType {
+  TOPUP
+  ADMIN_FEE_DEDUCTION
+  REFUND
+  ADMIN_ADJUSTMENT
+}
+
+enum WalletTransactionStatus {
+  PENDING
+  COMPLETED
+  FAILED
+}
+
+model WalletTransaction {
+  id       String       @id @default(cuid())
+  walletId String
+  wallet   WorkerWallet @relation(fields: [walletId], references: [id], onDelete: Cascade)
+
+  type   WalletTransactionType
+  status WalletTransactionStatus @default(PENDING)
+
+  // Signed: credits (TOPUP, REFUND, positive ADMIN_ADJUSTMENT) are positive,
+  // debits (ADMIN_FEE_DEDUCTION, negative ADMIN_ADJUSTMENT) are negative.
+  amount       Float
+  balanceAfter Float?
+
+  bookingId       String? // soft reference — links a deduction/refund to the job it was for
+  xenditInvoiceId String? @unique // set for TOPUP rows, keys the invoice-paid webhook back to this transaction
+  failureReason      String?
+  note               String? // admin's reason, for ADMIN_ADJUSTMENT rows
+
+  createdAt DateTime @default(now())
+
+  @@index([walletId])
+  @@index([bookingId])
 }
 
 model SavedPaymentMethod {
@@ -969,8 +1093,9 @@ model Review {
   clientId String
   client   User   @relation(fields: [clientId], references: [id], onDelete: Cascade)
 
-  rating  Float // 1.0 to 5.0
-  comment String?
+  rating    Float // 1.0 to 5.0
+  comment   String?
+  photoUrls String[] @default([]) // client-attached photos, uploaded via POST /bookings/:id/review-photo/upload
 
   // Moderation — admin-side flagging/hiding, see ReviewStatus
   flagged    Boolean      @default(false)
@@ -1080,10 +1205,102 @@ model AppSettings {
   // Platform configuration — live business rules read at runtime by the
   // booking/payment/worker-availability flows (see appSettingsService).
   commissionRate       Float @default(0.10)
-  withholdingTaxRate   Float @default(0.05)
+  withholdingTaxRate   Float @default(0.02)
   maxSlotsPerDay       Int   @default(2)
   pendingExpiryMinutes Int   @default(60)
   geofenceRadiusMeters Int   @default(100)
 
+  // Worker decline-limit cooldown (see bookingController.declineBooking) —
+  // hit maxDeclinesBeforeCooldown declines within declineWindowHours and the
+  // worker is excluded from auto-match for declineCooldownHours.
+  maxDeclinesBeforeCooldown Int @default(3)
+  declineWindowHours        Int @default(168) // 7 days
+  declineCooldownHours      Int @default(24)
+
+  // Expertise-tier pricing (see utils/workerTier.ts) — tier is computed on
+  // the fly from WorkerProfile.rating + completed-job count, not stored;
+  // these thresholds/multipliers are the only admin-configurable part.
+  tierProMinRating    Float @default(4.5)
+  tierProMinJobs      Int   @default(20)
+  tierProMultiplier   Float @default(1.15)
+  tierExpertMinRating Float @default(4.8)
+  tierExpertMinJobs   Int   @default(50)
+  tierExpertMultiplier Float @default(1.3)
+
+  // Prepaid wallet admin-fee gate (see walletService.ts, bookingController.acceptBooking)
+  // — flat fee in pesos, independent of job price so it isn't affected by
+  // later quote/add-on changes.
+  adminFeePerJob Float @default(20)
+
   updatedAt DateTime @updatedAt
+}
+
+enum TaxCertificateStatus {
+  DRAFT // aggregated + PDF generated, not yet released to the worker
+  ISSUED // visible to the worker in-app (see workerController.getMyTaxCertificates)
+}
+
+// BIR Form 2307 (Certificate of Creditable Tax Withheld at Source) data —
+// one row per worker per reporting period. Generated from Payment rows by
+// taxCertificateService; see that file for the caveat that the rendered PDF
+// is not guaranteed to match BIR's exact official template.
+model TaxCertificate {
+  id       String @id @default(cuid())
+  workerId String // soft reference — User.id of the worker, same convention as Payout.workerId
+
+  periodStart DateTime
+  periodEnd   DateTime
+
+  // Snapshots at generation time — same "don't let a later profile edit
+  // silently rewrite an already-issued record" convention as
+  // Payout.accountName/accountNumber.
+  workerName String
+  workerTin  String
+
+  totalIncomePayments Float // sum of (Payment.subtotal - Payment.commissionAmount) captured in the period
+  totalTaxWithheld    Float // sum of Payment.withholdingTaxAmount captured in the period
+
+  pdfPath String // Supabase Storage object path in a PRIVATE bucket — a signed URL is minted on read, never stored here
+  status  TaxCertificateStatus @default(DRAFT)
+
+  issuedAt    DateTime?
+  generatedBy String // soft reference — User.id of the admin who triggered generation
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([workerId, periodStart, periodEnd])
+  @@index([workerId])
+  @@index([status])
+}
+
+enum TaxRemittanceStatus {
+  PENDING
+  REMITTED
+}
+
+// Bookkeeping/audit trail for the platform's own BIR remittance of withheld
+// tax — there is no public BIR e-filing API, so actual filing/payment
+// happens outside the app (eFPS or an authorized bank); this just tracks
+// that it happened. One row per reporting period, aggregated across all
+// workers. See taxRemittanceService.
+model TaxRemittance {
+  id String @id @default(cuid())
+
+  periodStart DateTime
+  periodEnd   DateTime
+
+  totalTaxWithheld Float // sum of Payment.withholdingTaxAmount captured in the period, across all workers
+
+  status          TaxRemittanceStatus @default(PENDING)
+  referenceNumber String? // BIR/bank OR number, set once actually filed/paid
+  remittedAt      DateTime?
+  remittedBy      String? // soft reference — User.id of the admin who marked this remitted
+  notes           String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([periodStart, periodEnd])
+  @@index([status])
 }

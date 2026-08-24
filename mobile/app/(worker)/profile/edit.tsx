@@ -7,7 +7,9 @@ import InputField from "../../../components/ui/InputField";
 import PrimaryButton from "../../../components/ui/PrimaryButton";
 import { useAuthStore } from "../../../store/authStore";
 import * as api from "../../../services/api";
+import { cardShadow } from "../../../constants";
 import { useAlertModal } from "../../../contexts/AlertModalContext";
+import { geocodeAddress } from "../../../utils/geo";
 
 export default function WorkerEditProfileScreen() {
   const router = useRouter();
@@ -19,23 +21,39 @@ export default function WorkerEditProfileScreen() {
   const [phone, setPhone] = useState(user?.phone ?? "");
   const [email] = useState(user?.email ?? "");
   const [bio, setBio] = useState("");
-  const [years, setYears] = useState("");
   const [areaRadius, setAreaRadius] = useState("");
   const [trade, setTrade] = useState("");
   const [serviceArea, setServiceArea] = useState("");
   const [licenseNumber, setLicenseNumber] = useState("");
 
+  // Service address — geocoded on save so the backend can compute the
+  // distance-based pricing fee between this fixed address and a client's
+  // booking location (bookings are scheduled in advance, not dispatched to
+  // wherever the worker currently is).
+  const [address, setAddress] = useState("");
+  const [city, setCity] = useState("");
+  const [addressState, setAddressState] = useState("");
+  const [zipCode, setZipCode] = useState("");
+  const [addressCoords, setAddressCoords] = useState<{ lat: number; lng: number } | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+
   useEffect(() => {
     let active = true;
-    async function loadWorkerDetail() {
-      if (!user?.id) return;
+    async function loadWorkerProfile() {
       try {
-        const detail = await api.getWorkerDetail(user.id);
+        const detail = await api.getMyWorkerProfileDetails();
         if (!active || !detail) return;
         setBio(detail.bio ?? "");
         setAreaRadius(detail.serviceAreaRadius ? String(detail.serviceAreaRadius) : "");
+        setAddress(detail.address ?? "");
+        setCity(detail.city ?? "");
+        setAddressState(detail.state ?? "");
+        setZipCode(detail.zipCode ?? "");
+        if (detail.addressLat != null && detail.addressLng != null) {
+          setAddressCoords({ lat: detail.addressLat, lng: detail.addressLng });
+        }
       } catch (error) {
-        console.error("Load worker detail for edit error:", error);
+        console.error("Load worker profile for edit error:", error);
       }
     }
     async function loadDigitalId() {
@@ -49,7 +67,7 @@ export default function WorkerEditProfileScreen() {
         console.error("Load digital ID for edit error:", error);
       }
     }
-    loadWorkerDetail();
+    loadWorkerProfile();
     loadDigitalId();
     return () => {
       active = false;
@@ -59,8 +77,14 @@ export default function WorkerEditProfileScreen() {
   const nameRef = useRef<TextInput>(null);
   const phoneRef = useRef<TextInput>(null);
   const bioRef = useRef<TextInput>(null);
-  const yearsRef = useRef<TextInput>(null);
   const areaRef = useRef<TextInput>(null);
+
+  // Re-geocode whenever the address text changes so a stale coordinate pair
+  // never gets sent alongside edited text.
+  const addressChanged = (updater: () => void) => {
+    updater();
+    setAddressCoords(null);
+  };
 
   const handleSubmit = async () => {
     if (!name.trim()) {
@@ -72,15 +96,47 @@ export default function WorkerEditProfileScreen() {
       return;
     }
 
+    setSubmitting(true);
     try {
       const updatedUser = await api.updateUserProfile({
         fullName: name.trim(),
         phone: phone.trim(),
       });
 
+      const trimmedAddress = address.trim();
+      const trimmedCity = city.trim();
+      let coords = addressCoords;
+
+      if (trimmedAddress && trimmedCity && !coords) {
+        const fullAddress = [trimmedAddress, trimmedCity, addressState.trim(), zipCode.trim()]
+          .filter(Boolean)
+          .join(", ");
+        try {
+          const geocoded = await geocodeAddress(fullAddress);
+          if (geocoded) {
+            coords = geocoded.geometry.location;
+            setAddressCoords(coords);
+          }
+        } catch (error) {
+          console.error("Geocode worker address error:", error);
+        }
+        if (!coords) {
+          alertModal.info(
+            "Address saved, pricing not updated",
+            "We couldn't verify that address, so distance-based pricing won't use it yet. Everything else was saved."
+          );
+        }
+      }
+
       await api.updateWorkerProfileDetails({
         bio: bio.trim(),
         serviceAreaRadius: parseInt(areaRadius, 10) || undefined,
+        address: trimmedAddress,
+        city: trimmedCity,
+        state: addressState.trim(),
+        zipCode: zipCode.trim(),
+        addressLat: coords?.lat,
+        addressLng: coords?.lng,
         digitalIdTrade: trade.trim(),
         digitalIdServiceArea: serviceArea.trim(),
         licenseNumber: licenseNumber.trim(),
@@ -94,6 +150,8 @@ export default function WorkerEditProfileScreen() {
     } catch (error) {
       console.error("Update profile error:", error);
       alertModal.error("Error", "Failed to update profile.");
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -131,15 +189,6 @@ export default function WorkerEditProfileScreen() {
           onChangeText={setBio}
           multiline
           returnKeyType="next"
-          onSubmitEditing={() => yearsRef.current?.focus()}
-        />
-        <InputField
-          ref={yearsRef}
-          label="Years of Experience"
-          value={years}
-          onChangeText={setYears}
-          keyboardType="number-pad"
-          returnKeyType="next"
           onSubmitEditing={() => areaRef.current?.focus()}
         />
         <InputField
@@ -149,11 +198,47 @@ export default function WorkerEditProfileScreen() {
           onChangeText={setAreaRadius}
           keyboardType="number-pad"
           returnKeyType="done"
-          onSubmitEditing={handleSubmit}
         />
 
-        <View className="bg-card-light rounded-2xl p-4 mb-5">
-          <Text className="text-primary font-semibold">Digital ID details</Text>
+        <View className="bg-card-light rounded-2xl p-4 mb-5" style={cardShadow}>
+          <Text className="text-text-primary font-semibold">Service address</Text>
+          <Text className="text-text-secondary text-sm mt-1 mb-3">
+            Where you&apos;re based — used to calculate the distance fee on
+            bookings scheduled near you, not to track your live location.
+          </Text>
+
+          <InputField
+            label="Street address"
+            value={address}
+            onChangeText={(v) => addressChanged(() => setAddress(v))}
+            placeholder="123 Rizal St."
+          />
+          <InputField
+            label="City"
+            value={city}
+            onChangeText={(v) => addressChanged(() => setCity(v))}
+            placeholder="Quezon City"
+          />
+          <InputField
+            label="Province / State"
+            value={addressState}
+            onChangeText={(v) => addressChanged(() => setAddressState(v))}
+            placeholder="Metro Manila"
+          />
+          <InputField
+            label="ZIP Code"
+            value={zipCode}
+            onChangeText={(v) => addressChanged(() => setZipCode(v))}
+            keyboardType="number-pad"
+            placeholder="1100"
+          />
+          {addressCoords && (
+            <Text className="text-success text-xs mt-1">Address verified for pricing.</Text>
+          )}
+        </View>
+
+        <View className="bg-card-light rounded-2xl p-4 mb-5" style={cardShadow}>
+          <Text className="text-text-primary font-semibold">Digital ID details</Text>
           <Text className="text-text-secondary text-sm mt-1 mb-3">
             Shown on your Digital ID card alongside your verified photo and
             name.
@@ -179,7 +264,13 @@ export default function WorkerEditProfileScreen() {
           />
         </View>
 
-        <PrimaryButton label="Save Changes" fullWidth onPress={handleSubmit} />
+        <PrimaryButton
+          label="Save Changes"
+          fullWidth
+          onPress={handleSubmit}
+          disabled={submitting}
+          loading={submitting}
+        />
       </ScrollView>
     </SafeAreaView>
   );

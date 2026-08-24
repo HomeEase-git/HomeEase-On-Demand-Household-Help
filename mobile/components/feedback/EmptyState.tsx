@@ -24,8 +24,8 @@ export const EmptyState: React.FC<Props> = ({
     <View className="flex-1 items-center justify-center py-16 px-6">
       <View className="mb-4">
         {illustration ?? (
-          <View className="w-20 h-20 rounded-full bg-card items-center justify-center">
-            <Ionicons name={icon} size={32} color={colors.text.muted} />
+          <View className="w-20 h-20 rounded-full bg-accent/10 items-center justify-center">
+            <Ionicons name={icon} size={32} color={colors.accent.DEFAULT} />
           </View>
         )}
       </View>
@@ -33,13 +33,24 @@ export const EmptyState: React.FC<Props> = ({
         {title}
       </Text>
       {subtitle && (
-        <Text className="text-text-secondary text-sm text-center mt-1">
+        <Text className="text-text-secondary text-sm text-center mt-1 max-w-xs">
           {subtitle}
         </Text>
       )}
       {actionLabel && onAction && (
-        <Pressable className="mt-4" onPress={onAction}>
-          <Text className="text-accent font-semibold">{actionLabel}</Text>
+        <Pressable
+          className="flex-row items-center justify-center bg-accent rounded-full px-5 py-3 mt-5 self-center"
+          style={{
+            shadowColor: colors.accent.DEFAULT,
+            shadowOffset: { width: 0, height: 3 },
+            shadowOpacity: 0.3,
+            shadowRadius: 8,
+            elevation: 5,
+          }}
+          onPress={onAction}
+        >
+          <Text className="text-white font-semibold text-center">{actionLabel}</Text>
+          <Ionicons name="arrow-forward" size={14} color={colors.white} style={{ marginLeft: 6 }} />
         </Pressable>
       )}
     </View>

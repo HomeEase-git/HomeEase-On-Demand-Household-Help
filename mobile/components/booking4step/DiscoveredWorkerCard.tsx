@@ -10,6 +10,8 @@ const BADGE_STYLES: Record<string, { bg: string; text: string; label: string }> 
   TOP_RATED: { bg: "bg-gold/20", text: "text-accent", label: "Top Rated" },
   NEW: { bg: "bg-brand/10", text: "text-brand", label: "New" },
   HEAVY_DUTY_READY: { bg: "bg-warning/10", text: "text-warning", label: "Heavy-Duty Ready" },
+  PRO_TIER: { bg: "bg-accent/10", text: "text-accent", label: "Pro" },
+  EXPERT_TIER: { bg: "bg-gold/20", text: "text-accent", label: "Expert" },
 };
 
 type Props = {
@@ -42,9 +44,6 @@ export default function DiscoveredWorkerCard({ worker, selected, onSelect }: Pro
           <View className="flex-row items-center mt-1">
             <StarRating rating={worker.rating} size={13} />
             <Text className="text-text-muted text-xs ml-1">({worker.totalReviews})</Text>
-            {worker.distance != null && (
-              <Text className="text-text-muted text-xs ml-2">· {worker.distance.toFixed(1)} km away</Text>
-            )}
           </View>
 
           {worker.badges.length > 0 && (

@@ -26,12 +26,12 @@ type Props = {
 
 const VARIANT_CONFIG: Record<
   AlertModalVariant,
-  { icon: React.ComponentProps<typeof Ionicons>["name"]; color: string }
+  { icon: React.ComponentProps<typeof Ionicons>["name"]; color: string; bg: string }
 > = {
-  info: { icon: "information-circle", color: colors.brand.DEFAULT },
-  success: { icon: "checkmark-circle", color: colors.success },
-  warning: { icon: "warning", color: colors.warning },
-  error: { icon: "alert-circle", color: colors.error },
+  info: { icon: "information-circle", color: colors.brand.DEFAULT, bg: "bg-brand/10" },
+  success: { icon: "checkmark-circle", color: colors.success, bg: "bg-success/10" },
+  warning: { icon: "warning", color: colors.warning, bg: "bg-warning/10" },
+  error: { icon: "alert-circle", color: colors.error, bg: "bg-error/10" },
 };
 
 export const AlertModal: React.FC<Props> = ({
@@ -42,7 +42,7 @@ export const AlertModal: React.FC<Props> = ({
   buttons,
   onRequestClose,
 }) => {
-  const { icon, color } = VARIANT_CONFIG[variant];
+  const { icon, color, bg } = VARIANT_CONFIG[variant];
   const resolvedButtons: AlertModalButton[] =
     buttons && buttons.length > 0 ? buttons : [{ text: "OK", style: "default" }];
 
@@ -54,13 +54,15 @@ export const AlertModal: React.FC<Props> = ({
   return (
     <ModalWrapper visible={visible} onClose={onRequestClose}>
       <View className="items-center mb-4">
-        <Ionicons name={icon} size={48} color={color} />
+        <View className={`w-16 h-16 rounded-full ${bg} items-center justify-center`}>
+          <Ionicons name={icon} size={36} color={color} />
+        </View>
       </View>
       <Text className="text-text-primary font-bold text-lg text-center">
         {title}
       </Text>
       {!!message && (
-        <Text className="text-brand text-center mt-2">{message}</Text>
+        <Text className="text-text-secondary text-center mt-2">{message}</Text>
       )}
       <View
         className={
@@ -78,6 +80,7 @@ export const AlertModal: React.FC<Props> = ({
               <View key={key} className={isFullWidth ? "" : "flex-1"}>
                 <OutlinedButton
                   label={button.text}
+                  fullWidth={isFullWidth}
                   onPress={() => handlePress(button)}
                 />
               </View>

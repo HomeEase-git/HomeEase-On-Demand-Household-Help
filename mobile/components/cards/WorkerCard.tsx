@@ -1,9 +1,9 @@
 import React from "react";
 import { View, Text, Pressable } from "react-native";
-import { AppIcon as Ionicons } from "../icons/AppIcon";
+import Avatar from "../ui/Avatar";
 import StarRating from "../ui/StarRating";
 import { useWorkerCapacity } from "../../hooks/useWorkerCapacity";
-import { colors, cardShadow } from "../../constants";
+import { cardShadow } from "../../constants";
 
 type Worker = {
   id: string;
@@ -13,7 +13,7 @@ type Worker = {
   rating: number;
   reviews: number;
   status: string;
-  distanceKm?: number;
+  avatar?: string | null;
   activeJobCount?: number | null;
   maxConcurrentJobs?: number | null;
 };
@@ -38,8 +38,8 @@ export const WorkerCard: React.FC<Props> = ({ worker, onPress }) => {
       style={cardShadow}
       onPress={onPress}
     >
-      <View className="w-12 h-12 bg-brand rounded-full items-center justify-center mr-3">
-        <Ionicons name="person-circle" size={40} color={colors.white} />
+      <View className="mr-3">
+        <Avatar uri={worker.avatar} size="md" />
       </View>
       <View className="flex-1">
         <Text className="text-text-primary font-bold" numberOfLines={1}>
@@ -54,11 +54,6 @@ export const WorkerCard: React.FC<Props> = ({ worker, onPress }) => {
             ({worker.reviews} reviews)
           </Text>
         </View>
-        {typeof worker.distanceKm === "number" && (
-          <Text className="text-text-muted text-xs mt-0.5">
-            {worker.distanceKm.toFixed(1)} km away
-          </Text>
-        )}
         {activeJobCount > 0 && (
           <Text
             className={`text-xs mt-0.5 ${

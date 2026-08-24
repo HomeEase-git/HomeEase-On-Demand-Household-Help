@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Link, Navigate, useNavigate, useParams } from 'react-router-dom'
+import { Link, useNavigate, useParams } from 'react-router-dom'
 import PageHeader from '../components/common/PageHeader'
 import SectionCard from '../components/common/SectionCard'
 import DocumentViewer from '../components/common/DocumentViewer'
@@ -15,6 +15,7 @@ import {
   approveDocument,
   rejectDocument,
 } from '../services/verification'
+import { humanizeEnum, humanizeList } from '../utils/verificationLabels'
 
 export default function VerificationDetail() {
   const { id } = useParams()
@@ -95,7 +96,11 @@ export default function VerificationDetail() {
   }
 
   if (!verification) {
-    return <Navigate to="/verification" replace />
+    return (
+      <SectionCard>
+        <p style={{ color: 'var(--text-muted)' }}>Verification not found. <Link to="/verification">Back to Verification</Link></p>
+      </SectionCard>
+    )
   }
 
   const isPending = verification.status === 'PENDING' || verification.status === 'AI_REVIEWED'
@@ -103,10 +108,13 @@ export default function VerificationDetail() {
   const details = [
     { label: 'Applicant', value: verification.name },
     { label: 'Email', value: verification.email },
-    { label: 'Type', value: verification.type },
+    { label: 'Type', value: humanizeEnum(verification.type) },
     { label: 'Submitted', value: verification.submitted },
-    { label: 'Document Type', value: verification.documentType },
-    { label: 'Services / Reason', value: verification.services },
+    verification.serviceCategories?.length
+      ? { label: 'Service Category', value: verification.serviceCategories.join(', ') }
+      : null,
+    { label: 'Document Type', value: humanizeEnum(verification.documentType) },
+    { label: 'Services / Reason', value: humanizeList(verification.services) },
     {
       label: 'Status',
       value: (
@@ -132,9 +140,7 @@ export default function VerificationDetail() {
         {details.map(({ label, value }) => (
           <div key={label} className="detail-block">
             <label>{label}</label>
-            <div className="value" style={label === 'Type' ? { textTransform: 'capitalize' } : undefined}>
-              {value}
-            </div>
+            <div className="value">{value}</div>
           </div>
         ))}
       </div>

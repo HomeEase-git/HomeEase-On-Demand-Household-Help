@@ -69,8 +69,8 @@ export interface OtpVerificationRequest {
 // BOOKING TYPES
 // ============================================================================
 
-export type BookingStatus = 'Pending' | 'Accepted' | 'Active' | 'InProgress' | 
-                            'QuoteSubmitted' | 'QuoteApproved' | 'Disputed' | 
+export type BookingStatus = 'Pending' | 'Accepted' | 'InProgress' |
+                            'QuoteSubmitted' | 'QuoteApproved' | 'Disputed' |
                             'Completed' | 'Cancelled';
 
 export interface Booking {
@@ -113,11 +113,6 @@ export interface CreateBookingRequest {
   estimatedDurationHours?: number;
   inspectionFeeCharged?: boolean;
   inspectionFeeAmount?: number;
-}
-
-export interface RescheduleBookingRequest {
-  newDate: string;
-  newTime: string;
 }
 
 export interface CancelBookingRequest {
@@ -167,6 +162,12 @@ export interface WorkerDetail extends Worker {
   availableDays: string[];
   maxConcurrentJobs: number;
   hourlyRate?: number | null;
+  // Every ServiceType this worker offers (not just the primary `service`
+  // shown on the card) — lets a "book this worker" entry point (the profile
+  // screen) restrict the booking flow's category picker to services this
+  // worker actually offers, and resolve the right ServiceType id per pick.
+  services: { id: string; name: string; basePrice: number }[];
+  tier?: 'STANDARD' | 'PRO' | 'EXPERT';
 }
 
 export interface WorkerFilters {
@@ -202,6 +203,7 @@ export interface WorkerDigitalId {
 export interface WorkerReview {
   id: string;
   clientName: string;
+  clientAvatar?: string | null;
   rating: number;
   comment: string;
   date: string;

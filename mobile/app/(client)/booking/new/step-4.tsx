@@ -46,11 +46,6 @@ const ACCOUNT_FIELD_CONFIG: Record<
     placeholder: "09XXXXXXXXX",
     keyboardType: "phone-pad",
   },
-  bank: {
-    title: "Bank Transfer Details",
-    description: "Enter the reference or account number you'll use for the transfer.",
-    placeholder: "Reference / Account Number",
-  },
 };
 
 export default function BookingStep4Screen() {
@@ -78,17 +73,26 @@ export default function BookingStep4Screen() {
     .map(([label, value]) => `${label}: ${Array.isArray(value) ? value.join(", ") : value}`)
     .join(" · ");
 
-  const requiresAccountValue =
-    paymentMethod === "gcash" || paymentMethod === "maya" || paymentMethod === "bank";
+  const requiresAccountValue = paymentMethod === "gcash" || paymentMethod === "maya";
+  // PH mobile number, local (09XXXXXXXXX) or international (+639XXXXXXXXX)
+  // format — matches the "09XXXXXXXXX" placeholder shown for both methods.
+  const PH_MOBILE_NUMBER_PATTERN = /^(09\d{9}|\+639\d{9})$/;
 
   const handleSubmit = () => {
     if (!paymentMethod) {
       alertModal.warning("Payment method required", "Please select a payment method.");
       return;
     }
-    if (requiresAccountValue && !accountValue.trim()) {
-      alertModal.warning("Payment details", "Please enter the required payment details for this method.");
-      return;
+    if (requiresAccountValue) {
+      const trimmed = accountValue.trim();
+      if (!trimmed) {
+        alertModal.warning("Payment details", "Please enter the required payment details for this method.");
+        return;
+      }
+      if (!PH_MOBILE_NUMBER_PATTERN.test(trimmed)) {
+        alertModal.warning("Payment details", "Enter a valid mobile number, e.g. 09XXXXXXXXX.");
+        return;
+      }
     }
     if (!validation.ok) {
       alertModal.error("Booking incomplete", validation.errors.join("\n"));
@@ -122,6 +126,7 @@ export default function BookingStep4Screen() {
         lng: draft.lng!,
         date: draft.date!,
         timeSlot: draft.timeSlot!,
+        urgencyLevel: draft.urgencyLevel,
         addOns,
         packageIds: selectedPackageIds,
         priorities,

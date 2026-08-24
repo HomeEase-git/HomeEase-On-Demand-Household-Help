@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import { View, Text, FlatList, Pressable, ActivityIndicator } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
@@ -10,9 +10,12 @@ import { useNotificationStore, notificationCategory } from "../../../store/notif
 import { useMessageStore } from "../../../store/messageStore";
 import { formatDate } from "../../../utils/formatDate";
 import * as api from "../../../services/api";
+import { useAlertModal } from "../../../contexts/AlertModalContext";
+import { useTabRefresh } from "../../../hooks/useTabRefresh";
 
 export default function WorkerInboxScreen() {
   const router = useRouter();
+  const alertModal = useAlertModal();
   const [tab, setTab] = useState<"messages" | "notifications">("messages");
   const [loading, setLoading] = useState(true);
   const notifications = useNotificationStore((s) => s.notifications);
@@ -22,31 +25,33 @@ export default function WorkerInboxScreen() {
   const conversations = useMessageStore((s) => s.conversations);
   const setConversations = useMessageStore((s) => s.setConversations);
 
-  useEffect(() => {
-    let active = true;
-
-    async function load() {
-      setLoading(true);
-      try {
-        const result = await api.getConversations();
-        if (!active) return;
-        setConversations(result);
-      } catch (error) {
-        console.error("Load conversations error:", error);
-      } finally {
-        if (active) setLoading(false);
-      }
+  const loadConversations = useCallback(async () => {
+    setLoading(true);
+    try {
+      const result = await api.getConversations();
+      setConversations(result);
+    } catch (error) {
+      console.error("Load conversations error:", error);
+    } finally {
+      setLoading(false);
     }
-
-    load();
-    return () => {
-      active = false;
-    };
   }, [setConversations]);
+
+  useEffect(() => {
+    async function run() {
+      await loadConversations();
+    }
+    run();
+  }, [loadConversations]);
 
   useEffect(() => {
     fetchNotifications();
   }, [fetchNotifications]);
+
+  useTabRefresh("worker:inbox", useCallback(() => {
+    loadConversations();
+    fetchNotifications();
+  }, [loadConversations, fetchNotifications]));
 
   return (
     <SafeAreaView className="flex-1 bg-white">
@@ -86,8 +91,17 @@ export default function WorkerInboxScreen() {
             </Text>
           </Pressable>
         </View>
-        {tab === "notifications" && (
-          <Pressable className="self-end mt-2" onPress={markAllRead}>
+        {tab === "notifications" && notifications.some((n) => !n.isRead) && (
+          <Pressable
+            className="self-end mt-2"
+            onPress={() =>
+              alertModal.confirm(
+                "Mark all as read?",
+                "This will mark every notification as read.",
+                { confirmText: "Mark all read", onConfirm: markAllRead },
+              )
+            }
+          >
             <Text className="text-accent text-sm">Mark all as read</Text>
           </Pressable>
         )}
@@ -109,6 +123,7 @@ export default function WorkerInboxScreen() {
                 conversation={{
                   id: item.userId,
                   name: item.name,
+                  avatar: item.avatar,
                   lastMessage: item.lastMessage,
                   time: item.lastMessageTime,
                   unread: item.unread,

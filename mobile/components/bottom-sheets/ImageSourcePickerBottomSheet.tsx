@@ -1,8 +1,11 @@
 import React from "react";
 import { View, Text, Pressable } from "react-native";
 import * as ImagePicker from "expo-image-picker";
+import { AppIcon as Ionicons } from "../icons/AppIcon";
 import BottomSheetWrapper, { BottomSheetHandle } from "./BottomSheetWrapper";
+import OutlinedButton from "../ui/OutlinedButton";
 import { useAlertModal } from "../../contexts/AlertModalContext";
+import { colors, cardShadow } from "../../constants";
 
 type Props = {
   innerRef: React.RefObject<BottomSheetHandle | null>;
@@ -75,25 +78,34 @@ export const ImageSourcePickerBottomSheet: React.FC<Props> = ({
       title="Choose source"
     >
       <Pressable
-        className="bg-card-light rounded-xl py-4 px-4 mb-2"
+        className="bg-white rounded-2xl py-4 px-4 mb-2 flex-row items-center"
+        style={cardShadow}
         disabled={loading}
         onPress={openCamera}
       >
-        <Text className="text-brand font-semibold">Take Photo</Text>
+        <View className="w-9 h-9 rounded-full bg-accent/10 items-center justify-center mr-3">
+          <Ionicons name="camera-outline" size={18} color={colors.accent.DEFAULT} />
+        </View>
+        <Text className="text-text-primary font-semibold">Take Photo</Text>
       </Pressable>
       <Pressable
-        className="bg-card-light rounded-xl py-4 px-4"
+        className="bg-white rounded-2xl py-4 px-4 flex-row items-center"
+        style={cardShadow}
         disabled={loading}
         onPress={openGallery}
       >
-        <Text className="text-brand font-semibold">Choose from Gallery</Text>
+        <View className="w-9 h-9 rounded-full bg-accent/10 items-center justify-center mr-3">
+          <Ionicons name="image-outline" size={18} color={colors.accent.DEFAULT} />
+        </View>
+        <Text className="text-text-primary font-semibold">Choose from Gallery</Text>
       </Pressable>
-      <Pressable
-        className="py-4 mt-2"
-        onPress={() => innerRef.current?.close()}
-      >
-        <Text className="text-brand text-center">Cancel</Text>
-      </Pressable>
+      <View className="mt-2">
+        <OutlinedButton
+          label="Cancel"
+          fullWidth
+          onPress={() => innerRef.current?.close()}
+        />
+      </View>
     </BottomSheetWrapper>
   );
 };

@@ -2,9 +2,10 @@ import React, { useEffect, useState } from "react";
 import { View, Text, ScrollView, Switch } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
+import { Ionicons } from "@expo/vector-icons";
 import ScreenHeader from "../../../components/ui/ScreenHeader";
 import PrimaryButton from "../../../components/ui/PrimaryButton";
-import { colors } from "../../../constants";
+import { colors, cardShadow } from "../../../constants";
 import * as api from "../../../services/api";
 import { useAlertModal } from "../../../contexts/AlertModalContext";
 
@@ -60,18 +61,26 @@ export default function NotificationPreferencesScreen() {
     <SafeAreaView className="flex-1 bg-white">
       <ScreenHeader title="Notifications" showBack />
       <ScrollView contentContainerStyle={{ padding: 24 }}>
-        <View className="bg-card rounded-2xl overflow-hidden">
+        <Text className="text-text-muted text-xs font-semibold uppercase tracking-wide mb-1">
+          Notification Types
+        </Text>
+        <View className="bg-card rounded-2xl overflow-hidden" style={cardShadow}>
           {[
-            { label: "Booking Updates", value: booking, set: setBooking },
-            { label: "New Messages", value: messages, set: setMessages },
-            { label: "Promotions & Offers", value: promos, set: setPromos },
-            { label: "System Announcements", value: system, set: setSystem },
+            { label: "Booking Updates", icon: "calendar-outline", value: booking, set: setBooking },
+            { label: "New Messages", icon: "chatbubble-ellipses-outline", value: messages, set: setMessages },
+            { label: "Promotions & Offers", icon: "pricetag-outline", value: promos, set: setPromos },
+            { label: "System Announcements", icon: "megaphone-outline", value: system, set: setSystem },
           ].map((item) => (
             <View
               key={item.label}
-              className="flex-row justify-between items-center py-4 px-4 border-b border-divider last:border-0"
+              className="flex-row justify-between items-center py-3.5 px-4 border-b border-divider last:border-0"
             >
-              <Text className="text-primary">{item.label}</Text>
+              <View className="flex-row items-center flex-1 mr-3">
+                <View className="w-9 h-9 rounded-full bg-accent/10 items-center justify-center mr-3">
+                  <Ionicons name={item.icon as any} size={18} color={colors.accent.DEFAULT} />
+                </View>
+                <Text className="text-text-primary flex-1">{item.label}</Text>
+              </View>
               <Switch
                 value={item.value}
                 onValueChange={item.set}

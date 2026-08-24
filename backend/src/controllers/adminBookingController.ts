@@ -9,6 +9,8 @@ import { notifyUser } from '@utils/notify';
 import { refundOrVoidPayment } from '@services/paymentLifecycleService';
 import { freeSlot } from '@services/workerAvailabilityService';
 import { cancelPendingExpiryJob } from '@queues/bookingQueue';
+import { getAppSettings } from '@services/appSettingsService';
+import { creditWalletTx } from '@services/walletService';
 import type { JwtPayload } from '@/types/index';
 
 interface AuthRequest extends Request {
@@ -50,6 +52,7 @@ function formatBooking(record: {
   scheduledDate: Date | null;
   createdAt: Date;
   status: string;
+  urgencyLevel?: string;
 }) {
   const amount = record.finalPrice ?? record.estimatedPrice ?? null;
 
@@ -59,6 +62,7 @@ function formatBooking(record: {
     client: record.client?.fullName ?? '—',
     worker: record.worker?.fullName ?? '—',
     service: record.serviceTask?.name ?? '—',
+    urgencyLevel: record.urgencyLevel ?? 'STANDARD',
     date: record.scheduledDate
       ? record.scheduledDate.toLocaleDateString('en-US', {
           month: 'short',
@@ -138,6 +142,7 @@ export const getBookingById = async (req: Request, res: Response) => {
         worker: booking.worker?.fullName ?? '—',
         workerId: booking.worker?.id ?? null,
         service: booking.serviceTask?.name ?? '—',
+        urgencyLevel: booking.urgencyLevel,
         date: booking.scheduledDate
           ? booking.scheduledDate.toLocaleString('en-US', {
               month: 'short',
@@ -197,6 +202,13 @@ export const cancelBookingAdmin = async (req: AuthRequest, res: Response) => {
         });
         if (booking.timeSlot) {
           await freeSlot(tx, workerProfile.id, booking.scheduledDate, booking.timeSlot);
+        }
+
+        // Admin-initiated cancellation isn't the worker's fault — refund the
+        // admin fee deducted at acceptance.
+        const { adminFeePerJob } = await getAppSettings();
+        if (adminFeePerJob > 0) {
+          await creditWalletTx(tx, workerProfile.id, adminFeePerJob, 'REFUND', { bookingId: id });
         }
       }
 

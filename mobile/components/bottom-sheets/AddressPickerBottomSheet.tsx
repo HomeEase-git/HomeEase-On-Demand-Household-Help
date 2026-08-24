@@ -2,7 +2,7 @@ import React from "react";
 import { View, Text, Pressable, ScrollView, ActivityIndicator } from "react-native";
 import { AppIcon as Ionicons } from "../icons/AppIcon";
 import BottomSheetWrapper, { BottomSheetHandle } from "./BottomSheetWrapper";
-import { colors } from "../../constants";
+import { colors, cardShadow } from "../../constants";
 
 export type SavedAddress = {
   id: string;
@@ -54,9 +54,10 @@ export const AddressPickerBottomSheet: React.FC<Props> = ({
                 key={item.id}
                 disabled={resolvingId != null}
                 onPress={() => onSelect(item)}
-                className={`bg-card-light rounded-xl p-4 mb-2 flex-row items-start border-2 ${
+                className={`bg-white rounded-2xl p-4 mb-2 flex-row items-start border-2 ${
                   isSelected ? "border-accent" : "border-transparent"
                 }`}
+                style={cardShadow}
               >
                 <Ionicons name="location-outline" size={20} color={colors.text.muted} style={{ marginTop: 2 }} />
                 <View className="flex-1 ml-3">
@@ -85,7 +86,7 @@ export const AddressPickerBottomSheet: React.FC<Props> = ({
 
       <Pressable
         onPress={onAddNew}
-        className="flex-row items-center justify-center rounded-xl py-4 mt-2 border-2 border-dashed border-divider"
+        className="flex-row items-center justify-center rounded-2xl py-4 mt-2 border-2 border-dashed border-divider"
       >
         <Ionicons name="add" size={18} color={colors.accent.DEFAULT} />
         <Text className="text-accent font-semibold ml-1.5">Add new address</Text>

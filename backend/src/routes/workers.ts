@@ -7,6 +7,7 @@ import {
   getWorkerAvailability,
   getWorkerBlockedDates,
   updateAvailability,
+  getMyWorkerProfile,
   updateWorkerProfile,
   addServiceTypes,
   listMyServiceTypes,
@@ -14,13 +15,18 @@ import {
   getWorkerCapacity,
   listMySkills,
   createSkill,
+  updateSkill,
   deleteSkill,
   listMyCertifications,
   getCertification,
   createCertification,
+  updateCertification,
   deleteCertification,
   getPayoutMethod,
   updatePayoutMethod,
+  getTaxInfo,
+  updateTaxInfo,
+  getMyTaxCertificates,
   getMyAvailabilitySlots,
   updateAvailabilitySlots,
   updateHourlyRate,
@@ -31,6 +37,7 @@ import {
   deletePackage,
   getWorkerPackages,
 } from '../controllers/workerController';
+import { getMyWallet, topupWallet } from '../controllers/walletController';
 import { authMiddleware } from '../middleware/auth';
 import { restrictTo } from '../middleware/role';
 import {
@@ -38,8 +45,11 @@ import {
   validateUpdateWorkerProfile,
   validateAddServiceTypes,
   validateCreateSkill,
+  validateUpdateSkill,
   validateCreateCertification,
+  validateUpdateCertification,
   validateUpdatePayoutMethod,
+  validateUpdateTaxInfo,
   validateUpdateAvailabilitySlots,
   validateUpdateHourlyRate,
   validateCreatePackage,
@@ -67,6 +77,8 @@ router.patch(
   validateUpdateAvailability,
   updateAvailability
 );
+
+router.get('/me/profile', authMiddleware, restrictTo('WORKER'), getMyWorkerProfile);
 
 router.patch(
   '/me/profile',
@@ -108,6 +120,7 @@ router.get(
 
 router.get('/me/skills', authMiddleware, restrictTo('WORKER'), listMySkills);
 router.post('/me/skills', authMiddleware, restrictTo('WORKER'), validateCreateSkill, createSkill);
+router.patch('/me/skills/:skillId', authMiddleware, restrictTo('WORKER'), validateUpdateSkill, updateSkill);
 router.delete('/me/skills/:skillId', authMiddleware, restrictTo('WORKER'), deleteSkill);
 
 router.get('/me/certifications', authMiddleware, restrictTo('WORKER'), listMyCertifications);
@@ -119,7 +132,17 @@ router.post(
   validateCreateCertification,
   createCertification
 );
+router.patch(
+  '/me/certifications/:certId',
+  authMiddleware,
+  restrictTo('WORKER'),
+  validateUpdateCertification,
+  updateCertification
+);
 router.delete('/me/certifications/:certId', authMiddleware, restrictTo('WORKER'), deleteCertification);
+
+router.get('/me/wallet', authMiddleware, restrictTo('WORKER'), getMyWallet);
+router.post('/me/wallet/topup', authMiddleware, restrictTo('WORKER'), topupWallet);
 
 router.get('/me/payout', authMiddleware, restrictTo('WORKER'), getPayoutMethod);
 router.patch(
@@ -129,6 +152,10 @@ router.patch(
   validateUpdatePayoutMethod,
   updatePayoutMethod
 );
+
+router.get('/me/tax-info', authMiddleware, restrictTo('WORKER'), getTaxInfo);
+router.patch('/me/tax-info', authMiddleware, restrictTo('WORKER'), validateUpdateTaxInfo, updateTaxInfo);
+router.get('/me/tax-certificates', authMiddleware, restrictTo('WORKER'), getMyTaxCertificates);
 
 router.get('/me/availability-slots', authMiddleware, restrictTo('WORKER'), getMyAvailabilitySlots);
 router.patch(

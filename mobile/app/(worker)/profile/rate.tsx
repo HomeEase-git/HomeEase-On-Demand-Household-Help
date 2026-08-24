@@ -10,6 +10,7 @@ import HourlyRateSlider from "../../../components/booking4step/HourlyRateSlider"
 import { useAuthStore } from "../../../store/authStore";
 import * as api from "../../../services/api";
 import { colors } from "../../../constants/colors";
+import { cardShadow } from "../../../constants/shadows";
 import { useAlertModal } from "../../../contexts/AlertModalContext";
 
 const DEFAULT_RATE = 35;
@@ -84,7 +85,7 @@ export default function HourlyRateScreen() {
           Shown to clients in search results and used to calculate their estimated total. Platform allows ₱20-₱100/hr.
         </Text>
 
-        <View className="bg-card rounded-2xl p-5">
+        <View className="bg-card rounded-2xl p-5" style={cardShadow}>
           <HourlyRateSlider value={rate} onChange={setRate} />
         </View>
 

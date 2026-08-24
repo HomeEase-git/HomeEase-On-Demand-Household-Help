@@ -1,7 +1,9 @@
 import React, { useState } from "react";
 import { View, Text, Pressable } from "react-native";
+import { AppIcon as Ionicons } from "../icons/AppIcon";
 import BottomSheetWrapper, { BottomSheetHandle } from "./BottomSheetWrapper";
 import PrimaryButton from "../ui/PrimaryButton";
+import { colors, cardShadow } from "../../constants";
 
 type Props = {
   innerRef: React.RefObject<BottomSheetHandle | null>;
@@ -27,16 +29,22 @@ export const DateTimePickerBottomSheet: React.FC<Props> = ({
       snapPoints={["40%"]}
       title={mode === "date" ? "Select date" : "Select time"}
     >
-      <Text className="text-brand mb-4">
+      <Text className="text-text-secondary text-sm mb-4">
         {mode === "date"
           ? "Pick a date (use DateTimePicker in production)"
           : "Pick a time"}
       </Text>
       <Pressable
-        className="bg-card-light rounded-xl p-4 mb-4"
+        className="bg-white rounded-2xl p-4 mb-4 flex-row items-center"
+        style={cardShadow}
         onPress={() => setValue(mode === "date" ? "2026-03-07" : "10:00")}
       >
-        <Text className="text-brand">{value}</Text>
+        <Ionicons
+          name={mode === "date" ? "calendar-outline" : "time-outline"}
+          size={20}
+          color={colors.accent.DEFAULT}
+        />
+        <Text className="text-text-primary font-semibold ml-3">{value}</Text>
       </Pressable>
       <PrimaryButton label="Confirm" fullWidth onPress={handleConfirm} />
     </BottomSheetWrapper>

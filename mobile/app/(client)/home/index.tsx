@@ -1,4 +1,4 @@
-import React, { useRef, useState, useEffect } from "react";
+import React, { useRef, useState, useEffect, useCallback } from "react";
 import {
   View,
   Text,
@@ -26,19 +26,33 @@ import {
 import { Skeleton } from "../../../components/ui/Skeleton";
 import type { BottomSheetHandle } from "../../../components/bottom-sheets/BottomSheetWrapper";
 import { colors } from "../../../constants";
+import { useTabRefresh } from "../../../hooks/useTabRefresh";
 
 const DEFAULT_FILTERS: SearchFilters = { sort: "rating", availableOnly: false };
 
 const PROMO_BANNERS = [
-  { title: "20% Off Cleaning!", color: colors.banner1 },
-  { title: "New Workers Near You!", color: colors.banner2 },
-  { title: "Book Now, Pay Later!", color: colors.banner3 },
+  {
+    title: "20% Off Cleaning!",
+    color: colors.banner1,
+    image: require("../../../assets/images/banner/Banner1.jpg"),
+  },
+  {
+    title: "New Workers Near You!",
+    color: colors.banner2,
+    image: require("../../../assets/images/banner/Banner2.jpg"),
+  },
+  {
+    title: "Verified & Trusted Pros!",
+    color: colors.banner3,
+    image: require("../../../assets/images/banner/Banner3.jpg"),
+  },
 ];
 
 type ServiceCategory = {
   id: string;
   name: string;
   count: number;
+  icon: string | null;
 };
 
 type HomeWorker = {
@@ -52,6 +66,13 @@ type HomeWorker = {
   status: "available" | "unavailable";
   avatar: string | null;
 };
+
+function timeOfDayGreeting(): string {
+  const hour = new Date().getHours();
+  if (hour < 12) return "Good morning";
+  if (hour < 18) return "Good afternoon";
+  return "Good evening";
+}
 
 function normalizeHomeWorker(worker: any): HomeWorker {
   const rate =
@@ -99,43 +120,48 @@ export default function ClientHomeScreen() {
 
   const firstName = user?.name?.split(" ")[0] ?? "there";
 
-  useEffect(() => {
-    let active = true;
+  const loadHomeData = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const [serviceTypes, workersResponse] = await Promise.all([
+        getServiceTypes(),
+        // Only the top 3 are shown below — a small fetchLimit avoids
+        // downloading a full 50-worker page just for this preview.
+        searchWorkers({
+          sortBy: filters.sort,
+          availableOnly: filters.availableOnly,
+          fetchLimit: 6,
+        }),
+      ]);
 
-    async function loadHomeData() {
-      setLoading(true);
-      setError(null);
-      try {
-        const [serviceTypes, workersResponse] = await Promise.all([
-          getServiceTypes(),
-          searchWorkers({ sortBy: filters.sort, availableOnly: filters.availableOnly }),
-        ]);
+      setServiceCategories(
+        serviceTypes.map((serviceType: any) => ({
+          id: serviceType.name.toLowerCase().replace(/\s+/g, "-"),
+          name: serviceType.name,
+          count: serviceType.availableWorkerCount ?? 0,
+          icon: serviceType.icon ?? null,
+        })),
+      );
 
-        if (!active) return;
-
-        setServiceCategories(
-          serviceTypes.map((serviceType: any) => ({
-            id: serviceType.name.toLowerCase().replace(/\s+/g, "-"),
-            name: serviceType.name,
-            count: serviceType.availableWorkerCount ?? 0,
-          })),
-        );
-
-        setWorkers((workersResponse.data ?? []).slice(0, 3).map(normalizeHomeWorker));
-      } catch (err) {
-        if (!active) return;
-        setError("Unable to load home content. Please try again.");
-      } finally {
-        if (!active) return;
-        setLoading(false);
-      }
+      setWorkers(
+        (workersResponse.data ?? []).slice(0, 3).map(normalizeHomeWorker),
+      );
+    } catch (err) {
+      setError("Unable to load home content. Please try again.");
+    } finally {
+      setLoading(false);
     }
-
-    loadHomeData();
-    return () => {
-      active = false;
-    };
   }, [filters]);
+
+  useEffect(() => {
+    async function run() {
+      await loadHomeData();
+    }
+    run();
+  }, [loadHomeData]);
+
+  useTabRefresh("client:home", loadHomeData);
 
   return (
     <SafeAreaView className="flex-1 bg-white" edges={["top"]}>
@@ -180,7 +206,7 @@ export default function ClientHomeScreen() {
           <>
             <View className="bg-card rounded-2xl p-5 mx-4 mt-4">
               <Text className="text-text-primary font-bold text-xl">
-                Good morning, {firstName}! 👋
+                {timeOfDayGreeting()}, {firstName}! 👋
               </Text>
               <View className="flex-row items-center mt-2">
                 <Ionicons
@@ -192,19 +218,6 @@ export default function ClientHomeScreen() {
                   Central Luzon, Philippines
                 </Text>
               </View>
-            </View>
-
-            <View className="mx-4 mt-3">
-              <Pressable onPress={() => router.push("/(client)/home/search")}>
-                <SearchBar
-                  placeholder="Search services or workers..."
-                  onFilterPress={() => filterRef.current?.expand()}
-                  filterActive={
-                    filters.sort !== DEFAULT_FILTERS.sort ||
-                    filters.availableOnly !== DEFAULT_FILTERS.availableOnly
-                  }
-                />
-              </Pressable>
             </View>
 
             <View className="mx-4">

@@ -20,16 +20,17 @@ export const AddressMap: React.FC<Props> = ({
 }) => {
   const [coords, setCoords] = useState<LatLng | null>(null);
   const [status, setStatus] = useState<Status>(address ? "loading" : "missing");
+  const [prevAddress, setPrevAddress] = useState(address);
+
+  if (address !== prevAddress) {
+    setPrevAddress(address);
+    setStatus(address ? "loading" : "missing");
+    setCoords(null);
+  }
 
   useEffect(() => {
+    if (!address) return;
     let active = true;
-    if (!address) {
-      setStatus("missing");
-      setCoords(null);
-      return;
-    }
-    setStatus("loading");
-    setCoords(null);
     geocodeAddress(address)
       .then((result) => {
         if (!active) return;

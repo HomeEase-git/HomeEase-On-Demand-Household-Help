@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 import { View, Text, ScrollView } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { useRouter, useLocalSearchParams } from "expo-router";
+import { useRouter } from "expo-router";
 import ScreenHeader from "../../components/ui/ScreenHeader";
 import InputField from "../../components/ui/InputField";
 import PrimaryButton from "../../components/ui/PrimaryButton";
@@ -12,8 +12,6 @@ import { useAlertModal } from "../../contexts/AlertModalContext";
 export default function ForgotPasswordScreen() {
   const router = useRouter();
   const alertModal = useAlertModal();
-  const params = useLocalSearchParams<{ role?: string }>();
-  const role = (params.role as string) || "client";
 
   const [email, setEmail] = useState("");
   const [loading, setLoading] = useState(false);
@@ -40,7 +38,7 @@ export default function ForgotPasswordScreen() {
       await sendPasswordResetEmail(email);
       router.push({
         pathname: "/(auth)/password-reset-sent",
-        params: { email, role },
+        params: { email },
       });
     } catch (err: any) {
       alertModal.error(
@@ -64,7 +62,7 @@ export default function ForgotPasswordScreen() {
           Forgot Password?
         </Text>
         <Text className="text-text-secondary mt-2 mb-6">
-          {"Enter your email and we'll send you a reset link to your inbox."}
+          {"Enter your email and we'll send you a 6-digit reset code."}
         </Text>
 
         <InputField
@@ -81,14 +79,14 @@ export default function ForgotPasswordScreen() {
         />
 
         <PrimaryButton
-          label="Send Reset Link"
+          label="Send Reset Code"
           fullWidth
           onPress={handleSend}
           loading={loading}
         />
 
         <Text className="text-text-secondary text-xs text-center mt-6">
-          {"We'll send you an email with a link to reset your password. Make sure to check your spam folder if you don't see it."}
+          {"We'll send you an email with a 6-digit code to reset your password. Make sure to check your spam folder if you don't see it."}
         </Text>
       </ScrollView>
     </SafeAreaView>

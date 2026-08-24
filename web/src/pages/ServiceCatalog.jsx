@@ -4,6 +4,7 @@ import SectionCard from '../components/common/SectionCard'
 import SearchBar from '../components/common/SearchBar'
 import LoadingState from '../components/common/LoadingState'
 import ErrorState from '../components/common/ErrorState'
+import Pagination from '../components/common/Pagination'
 import {
   fetchServiceTypes,
   createServiceType,
@@ -11,6 +12,10 @@ import {
   toggleServiceTypeActive,
 } from '../services/serviceTypes'
 import { useToast } from '../context/ToastContext'
+import IconPicker from '../components/common/IconPicker'
+import { msIconFor } from '../constants/serviceIcons'
+
+const PAGE_SIZE = 10
 
 const FIELD_TYPE_LABELS = {
   TEXT: 'Text',
@@ -35,6 +40,7 @@ function emptyForm() {
     basePrice: '',
     scopeType: 'ROOM_BASED',
     hasCondition: true,
+    icon: null,
     fields: [],
   }
 }
@@ -46,6 +52,7 @@ function serviceToForm(service) {
     basePrice: String(service.basePrice),
     scopeType: service.scopeType,
     hasCondition: service.hasCondition,
+    icon: service.icon || null,
     fields: (service.scopeFields || []).map((f) => ({
       label: f.label,
       fieldType: f.fieldType,
@@ -60,6 +67,7 @@ export default function ServiceCatalog() {
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState(null)
   const [query, setQuery] = useState('')
+  const [page, setPage] = useState(1)
 
   const [open, setOpen] = useState(false)
   const [mode, setMode] = useState('add') // 'add' | 'edit'
@@ -92,6 +100,14 @@ export default function ServiceCatalog() {
     if (!q) return services
     return services.filter((s) => s.name.toLowerCase().includes(q))
   }, [services, query])
+
+  useEffect(() => {
+    setPage(1)
+  }, [query])
+
+  const totalPages = Math.max(1, Math.ceil(filteredServices.length / PAGE_SIZE))
+  const currentPage = Math.min(page, totalPages)
+  const pagedServices = filteredServices.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE)
 
   const closeModal = () => {
     setOpen(false)
@@ -183,6 +199,7 @@ export default function ServiceCatalog() {
       basePrice,
       scopeType: form.scopeType,
       hasCondition: form.hasCondition,
+      icon: form.icon,
       scopeFields:
         form.scopeType === 'CUSTOM'
           ? form.fields.map((f) => ({
@@ -250,6 +267,7 @@ export default function ServiceCatalog() {
             <table className="table">
               <thead>
                 <tr>
+                  <th></th>
                   <th>Name</th>
                   <th>Base Price (₱)</th>
                   <th>Scope</th>
@@ -259,8 +277,13 @@ export default function ServiceCatalog() {
                 </tr>
               </thead>
               <tbody>
-                {filteredServices.map((s) => (
+                {pagedServices.map((s) => (
                   <tr key={s.id}>
+                    <td>
+                      <span className="icon-picker-trigger__swatch" style={{ width: 32, height: 32 }}>
+                        <span className="msym" style={{ fontSize: 18 }}>{s.icon ? msIconFor(s.icon) : 'help_outline'}</span>
+                      </span>
+                    </td>
                     <td><strong>{s.name}</strong></td>
                     <td>{formatPeso(s.basePrice)}</td>
                     <td>
@@ -287,7 +310,7 @@ export default function ServiceCatalog() {
                         </button>
                         <button
                           type="button"
-                          className="action-btn"
+                          className={`action-btn ${s.isActive ? 'delete' : 'approve'}`}
                           title={s.isActive ? 'Deactivate' : 'Activate'}
                           aria-label={`${s.isActive ? 'Deactivate' : 'Activate'} ${s.name}`}
                           disabled={togglingId === s.id}
@@ -301,7 +324,7 @@ export default function ServiceCatalog() {
                 ))}
                 {filteredServices.length === 0 && (
                   <tr>
-                    <td colSpan={6} style={{ color: 'var(--text-muted)', padding: '1rem' }}>
+                    <td colSpan={7} style={{ color: 'var(--text-muted)', padding: '1rem' }}>
                       No services found.
                     </td>
                   </tr>
@@ -309,6 +332,17 @@ export default function ServiceCatalog() {
               </tbody>
             </table>
           </div>
+        )}
+        {!loading && !loadError && filteredServices.length > 0 && (
+          <Pagination
+            info={`Showing ${pagedServices.length ? (currentPage - 1) * PAGE_SIZE + 1 : 0}-${
+              (currentPage - 1) * PAGE_SIZE + pagedServices.length
+            } of ${filteredServices.length} services`}
+            hasPrev={currentPage > 1}
+            hasNext={currentPage < totalPages}
+            onPrev={() => setPage((p) => Math.max(1, p - 1))}
+            onNext={() => setPage((p) => Math.min(totalPages, p + 1))}
+          />
         )}
       </SectionCard>
 
@@ -341,6 +375,11 @@ export default function ServiceCatalog() {
                   onChange={(e) => setForm((p) => ({ ...p, description: e.target.value }))}
                   placeholder="Shown to clients when browsing services"
                 />
+              </div>
+
+              <div className="form-field">
+                <label>Icon</label>
+                <IconPicker value={form.icon} onChange={(icon) => setForm((p) => ({ ...p, icon }))} />
               </div>
 
               <div className="form-field">
@@ -391,18 +430,26 @@ export default function ServiceCatalog() {
                           value={field.label}
                           onChange={(e) => updateField(fieldIndex, { label: e.target.value })}
                           placeholder="Field label, e.g. Appliance Type"
+                          aria-label={`Custom field ${fieldIndex + 1} label`}
                           style={{ flex: 1, padding: '0.5rem 0.75rem', border: '1px solid var(--border)', borderRadius: 8 }}
                         />
                         <select
                           value={field.fieldType}
                           onChange={(e) => updateField(fieldIndex, { fieldType: e.target.value })}
+                          aria-label={`Custom field ${fieldIndex + 1} type`}
                           style={{ padding: '0.5rem 0.75rem', border: '1px solid var(--border)', borderRadius: 8 }}
                         >
                           {Object.entries(FIELD_TYPE_LABELS).map(([value, label]) => (
                             <option key={value} value={value}>{label}</option>
                           ))}
                         </select>
-                        <button type="button" className="action-btn" title="Remove field" onClick={() => removeField(fieldIndex)}>
+                        <button
+                          type="button"
+                          className="action-btn delete"
+                          title="Remove field"
+                          aria-label={`Remove custom field ${fieldIndex + 1}`}
+                          onClick={() => removeField(fieldIndex)}
+                        >
                           <i className="fas fa-trash" />
                         </button>
                       </div>
@@ -425,12 +472,14 @@ export default function ServiceCatalog() {
                                 value={option}
                                 onChange={(e) => updateOption(fieldIndex, optionIndex, e.target.value)}
                                 placeholder="Option label"
+                                aria-label={`Custom field ${fieldIndex + 1} option ${optionIndex + 1}`}
                                 style={{ flex: 1, padding: '0.4rem 0.6rem', border: '1px solid var(--border)', borderRadius: 8 }}
                               />
                               <button
                                 type="button"
-                                className="action-btn"
+                                className="action-btn delete"
                                 title="Remove option"
+                                aria-label={`Remove custom field ${fieldIndex + 1} option ${optionIndex + 1}`}
                                 onClick={() => removeOption(fieldIndex, optionIndex)}
                               >
                                 <i className="fas fa-xmark" />

@@ -1,5 +1,5 @@
 import { Request, Response } from 'express';
-import type { ConditionType, PaymentMethodType, RoomType, TimeSlot } from '@prisma/client';
+import type { ConditionType, PaymentMethodType, RoomType, TimeSlot, UrgencyLevel } from '@prisma/client';
 import prisma from '@config/database';
 import { errorResponse } from '@utils/errorResponse';
 import { notifyUser } from '@utils/notify';
@@ -14,6 +14,8 @@ import { calculateWorkerPayout } from '@utils/pricing';
 import { schedulePendingExpiry, cancelPendingExpiryJob } from '@queues/bookingQueue';
 import { VALID_TRANSITIONS, isValidTransition } from '@services/bookingStateMachine';
 import { getAppSettings } from '@services/appSettingsService';
+import { computeWorkerTier, tierMultiplier } from '@utils/workerTier';
+import { debitWalletTx, creditWalletTx, InsufficientBalanceError } from '@services/walletService';
 import type { JwtPayload } from '@/types/index';
 
 export { VALID_TRANSITIONS, isValidTransition };
@@ -25,10 +27,10 @@ interface AuthRequest extends Request {
 // Condition-based surcharge on the base price — HEAVY jobs take more effort;
 // TIDY/NORMAL carry no adjustment.
 const CONDITION_FEE_MULTIPLIER: Record<string, number> = { TIDY: 0, NORMAL: 0, HEAVY: 0.25 };
+const URGENCY_FEE_MULTIPLIER: Record<string, number> = { STANDARD: 0, URGENT: 0.15, EMERGENCY: 0.3 };
 // Distance-based surcharge beyond a free radius around the worker.
 const FREE_DISTANCE_KM = 5;
 const PER_KM_FEE = 10;
-const DEFAULT_MATCH_RADIUS_KM = 30;
 
 const round2 = (n: number): number => Math.round(n * 100) / 100;
 
@@ -73,6 +75,7 @@ export const createBooking = async (req: AuthRequest, res: Response) => {
       lng,
       date,
       timeSlot,
+      urgencyLevel,
       addOns,
       packageIds,
       priorities,
@@ -95,6 +98,7 @@ export const createBooking = async (req: AuthRequest, res: Response) => {
       lng: number;
       date: string;
       timeSlot: TimeSlot;
+      urgencyLevel?: UrgencyLevel;
       addOns?: Array<{ id?: string; name?: string; price: number }>;
       packageIds?: string[];
       priorities?: string[];
@@ -105,6 +109,12 @@ export const createBooking = async (req: AuthRequest, res: Response) => {
       scopeAnswers?: Record<string, string | string[]>;
       issuePhotoUrls?: string[];
     };
+
+    const VALID_URGENCY_LEVELS: UrgencyLevel[] = ['STANDARD', 'URGENT', 'EMERGENCY'];
+    if (urgencyLevel !== undefined && !VALID_URGENCY_LEVELS.includes(urgencyLevel)) {
+      return res.status(400).json(errorResponse(400, 'urgencyLevel must be one of STANDARD, URGENT, EMERGENCY'));
+    }
+    const effectiveUrgencyLevel: UrgencyLevel = urgencyLevel ?? 'STANDARD';
 
     const scheduledDate = toDayStart(date);
     const clientLocation = { lat, lng };
@@ -173,7 +183,6 @@ export const createBooking = async (req: AuthRequest, res: Response) => {
 
     let resolvedWorkerId = requestedWorkerId ?? null;
     let isAutoMatched = false;
-    let matchDistanceKm: number | null = null;
 
     if (!resolvedWorkerId) {
       const match = await findAutoMatchWorker({
@@ -184,8 +193,6 @@ export const createBooking = async (req: AuthRequest, res: Response) => {
         condition: effectiveCondition,
         rooms,
         hasPets,
-        clientLocation,
-        radiusKm: DEFAULT_MATCH_RADIUS_KM,
       });
 
       if (!match) {
@@ -194,7 +201,6 @@ export const createBooking = async (req: AuthRequest, res: Response) => {
 
       resolvedWorkerId = match.workerId;
       isAutoMatched = true;
-      matchDistanceKm = match.distanceKm;
     }
 
     const workerProfile = await prisma.workerProfile.findUnique({ where: { userId: resolvedWorkerId } });
@@ -220,11 +226,23 @@ export const createBooking = async (req: AuthRequest, res: Response) => {
       return res.status(409).json(errorResponse(409, 'Selected slot is no longer available'));
     }
 
+    // Distance fee is based on the worker's fixed service address, not a
+    // live position — bookings are scheduled in advance, not dispatched to
+    // wherever the worker happens to be right now, so this is a static
+    // "shipping fee" style distance rather than real-time proximity (see
+    // WorkerProfile.addressLat/addressLng comment).
     const workerDistanceKm =
-      matchDistanceKm ??
-      (workerProfile.currentLat != null && workerProfile.currentLng != null
-        ? distanceKm(clientLocation, { lat: workerProfile.currentLat, lng: workerProfile.currentLng })
-        : null);
+      workerProfile.addressLat != null && workerProfile.addressLng != null
+        ? distanceKm(clientLocation, { lat: workerProfile.addressLat, lng: workerProfile.addressLng })
+        : null;
+
+    // Expertise tier — computed live from rating + completed-job count (see
+    // utils/workerTier.ts), not stored, so it never drifts from those numbers.
+    const appSettings = await getAppSettings();
+    const workerCompletedJobs = await prisma.booking.count({
+      where: { workerId: resolvedWorkerId, status: 'COMPLETED' },
+    });
+    const workerTier = computeWorkerTier(workerProfile.rating, workerCompletedJobs, appSettings);
 
     // Free job-preference toggles carry no price of their own — clamp
     // server-side so a tampered client can't slip a nonzero price through
@@ -250,7 +268,9 @@ export const createBooking = async (req: AuthRequest, res: Response) => {
     const addOnsTotal = addOnsList.reduce((sum, a) => sum + (typeof a.price === 'number' ? a.price : 0), 0);
     const conditionFee = round2(basePrice * (CONDITION_FEE_MULTIPLIER[effectiveCondition ?? 'NORMAL'] ?? 0));
     const distanceFee = round2(workerDistanceKm != null ? Math.max(0, workerDistanceKm - FREE_DISTANCE_KM) * PER_KM_FEE : 0);
-    const estimatedPrice = round2(basePrice + conditionFee + distanceFee);
+    const urgencyFee = round2(basePrice * (URGENCY_FEE_MULTIPLIER[effectiveUrgencyLevel] ?? 0));
+    const tierFee = round2(basePrice * (tierMultiplier(workerTier, appSettings) - 1));
+    const estimatedPrice = round2(basePrice + conditionFee + distanceFee + urgencyFee + tierFee);
     const finalEstimate = round2(estimatedPrice + addOnsTotal);
 
     const priceCheck = await validatePriceWithinPricingRule(cityName, resolvedServiceTypeName, finalEstimate);
@@ -292,6 +312,7 @@ export const createBooking = async (req: AuthRequest, res: Response) => {
             issuePhotoUrls: effectiveIssuePhotoUrls,
             scheduledDate,
             timeSlot,
+            urgencyLevel: effectiveUrgencyLevel,
             isAutoMatched,
             declinedWorkerIds: [],
             expiresAt: new Date(Date.now() + 60 * 60 * 1000),
@@ -304,8 +325,8 @@ export const createBooking = async (req: AuthRequest, res: Response) => {
             city: cityName,
             clientLat: lat,
             clientLng: lng,
-            workerLat: workerProfile.currentLat ?? null,
-            workerLng: workerProfile.currentLng ?? null,
+            workerLat: workerProfile.addressLat ?? null,
+            workerLng: workerProfile.addressLng ?? null,
             distanceMeters: workerDistanceKm != null ? Math.round(workerDistanceKm * 1000) : null,
             status: 'PENDING',
           },
@@ -332,15 +353,21 @@ export const createBooking = async (req: AuthRequest, res: Response) => {
             basePrice,
             conditionFee,
             distanceFee,
+            urgencyFee,
+            tierFee,
             addOnsTotal,
             finalEstimate,
             breakdown: {
               basePrice,
               conditionFee,
               distanceFee,
+              urgencyFee,
+              tierFee,
               addOnsTotal,
               finalEstimate,
               condition: effectiveCondition,
+              urgencyLevel: effectiveUrgencyLevel,
+              workerTier,
               distanceKm: workerDistanceKm,
               isAutoMatched,
             },
@@ -375,10 +402,12 @@ export const createBooking = async (req: AuthRequest, res: Response) => {
           status: booking.status,
           scheduledDate: booking.scheduledDate,
           timeSlot: booking.timeSlot,
+          urgencyLevel: booking.urgencyLevel,
+          workerTier,
           estimatedPrice: booking.estimatedPrice,
           estimatedDurationHours: booking.estimatedDurationHours,
           expiresAt: booking.expiresAt,
-          pricing: { basePrice, conditionFee, distanceFee, addOnsTotal, finalEstimate },
+          pricing: { basePrice, conditionFee, distanceFee, urgencyFee, tierFee, addOnsTotal, finalEstimate },
           payment: { id: payment.id, status: payment.status, escrowStatus: payment.escrowStatus, clientSecret: payment.clientSecret },
         },
       });
@@ -472,6 +501,7 @@ export const listBookings = async (req: AuthRequest, res: Response) => {
       clientName: b.client.fullName,
       clientId: b.client.id,
       clientPhone: b.client.phone,
+      clientAvatar: b.client.avatar ?? null,
       workerName: b.worker?.fullName ?? null,
       workerId: b.worker?.id ?? null,
       workerPhone: b.worker?.phone ?? null,
@@ -482,6 +512,7 @@ export const listBookings = async (req: AuthRequest, res: Response) => {
       status: b.status,
       scheduledDate: b.scheduledDate,
       timeSlot: b.timeSlot,
+      urgencyLevel: b.urgencyLevel,
       rooms: b.rooms,
       condition: b.condition,
       location: b.location,
@@ -529,7 +560,7 @@ export const getBookingDetail = async (req: AuthRequest, res: Response) => {
     const booking = await prisma.booking.findUnique({
       where: { id },
       include: {
-        client: { select: { id: true, fullName: true, email: true, phone: true } },
+        client: { select: { id: true, fullName: true, email: true, phone: true, avatar: true } },
         worker: {
           select: {
             id: true,
@@ -593,6 +624,7 @@ export const getBookingDetail = async (req: AuthRequest, res: Response) => {
         scheduledDate: booking.scheduledDate,
         scheduledTime: booking.scheduledTime,
         timeSlot: booking.timeSlot,
+        urgencyLevel: booking.urgencyLevel,
         rooms: booking.rooms,
         condition: booking.condition,
         scopeAnswers: booking.scopeAnswers,
@@ -693,6 +725,7 @@ export const acceptBooking = async (req: AuthRequest, res: Response) => {
     }
 
     const currentUserId = req.user.userId;
+    const { adminFeePerJob } = await getAppSettings();
 
     // Wrap in transaction to prevent double-counting
     try {
@@ -708,6 +741,12 @@ export const acceptBooking = async (req: AuthRequest, res: Response) => {
 
         if (workerProfile.activeJobCount >= workerProfile.maxConcurrentJobs) {
           throw new Error('Worker is at maximum capacity');
+        }
+
+        // Admin-fee gate — blocks acceptance if the worker's prepaid wallet
+        // can't cover the flat per-job fee (see walletService.ts).
+        if (adminFeePerJob > 0) {
+          await debitWalletTx(tx, workerProfile.id, adminFeePerJob, 'ADMIN_FEE_DEDUCTION', { bookingId: id });
         }
 
         // Update booking status
@@ -754,6 +793,17 @@ export const acceptBooking = async (req: AuthRequest, res: Response) => {
       if (txError.message === 'Worker is at maximum capacity') {
         return res.status(409).json(errorResponse(409, txError.message));
       }
+      if (txError instanceof InsufficientBalanceError) {
+        // 402 is a deliberately distinct status from the other errors here
+        // (403/404/409) so the mobile app can point the worker at the
+        // wallet top-up screen instead of showing a generic error toast.
+        return res.status(402).json(
+          errorResponse(
+            402,
+            `Insufficient wallet balance to accept this job. A ₱${adminFeePerJob} admin fee is required — please top up your wallet.`
+          )
+        );
+      }
       throw txError;
     }
   } catch (error) {
@@ -798,6 +848,7 @@ export const declineBooking = async (req: AuthRequest, res: Response) => {
     }
 
     const updatedDeclinedWorkerIds = Array.from(new Set([...booking.declinedWorkerIds, workerId]));
+    const { maxDeclinesBeforeCooldown, declineWindowHours, declineCooldownHours } = await getAppSettings();
 
     const updated = await prisma.$transaction(async (tx) => {
       await tx.declinedWorker.upsert({
@@ -809,6 +860,20 @@ export const declineBooking = async (req: AuthRequest, res: Response) => {
       const workerProfile = await tx.workerProfile.findUnique({ where: { userId: workerId }, select: { id: true } });
       if (workerProfile && booking.timeSlot) {
         await freeSlot(tx, workerProfile.id, booking.scheduledDate, booking.timeSlot);
+      }
+
+      // Decline-limit cooldown — count this worker's declines in the rolling
+      // window; once they hit the threshold, exclude them from auto-match
+      // for a while (see matchingService.findAutoMatchWorker).
+      const windowStart = new Date(Date.now() - declineWindowHours * 60 * 60 * 1000);
+      const recentDeclineCount = await tx.declinedWorker.count({
+        where: { workerId, declinedAt: { gte: windowStart } },
+      });
+      if (workerProfile && recentDeclineCount >= maxDeclinesBeforeCooldown) {
+        await tx.workerProfile.update({
+          where: { id: workerProfile.id },
+          data: { declineCooldownUntil: new Date(Date.now() + declineCooldownHours * 60 * 60 * 1000) },
+        });
       }
 
       return tx.booking.update({
@@ -845,8 +910,6 @@ export const declineBooking = async (req: AuthRequest, res: Response) => {
           timeSlot: updated.timeSlot,
           condition: updated.condition,
           rooms: updated.rooms,
-          clientLocation: { lat: updated.clientLat ?? 0, lng: updated.clientLng ?? 0 },
-          radiusKm: DEFAULT_MATCH_RADIUS_KM,
           excludeWorkerIds: updatedDeclinedWorkerIds,
         }).catch(() => null)
       : null;
@@ -1502,6 +1565,16 @@ export const cancelBooking = async (req: AuthRequest, res: Response) => {
         if (booking.timeSlot) {
           await freeSlot(tx, workerProfile.id, booking.scheduledDate, booking.timeSlot);
         }
+
+        // Refund the admin fee deducted at acceptance — but only when the
+        // cancellation isn't the worker's own choice; a worker who backs out
+        // of a job they already accepted forfeits the fee.
+        if (cancelledByRole !== 'WORKER') {
+          const { adminFeePerJob } = await getAppSettings();
+          if (adminFeePerJob > 0) {
+            await creditWalletTx(tx, workerProfile.id, adminFeePerJob, 'REFUND', { bookingId: id });
+          }
+        }
       }
 
       await tx.cancellation.create({
@@ -1557,69 +1630,6 @@ export const cancelBooking = async (req: AuthRequest, res: Response) => {
 };
 
 /**
- * PATCH /api/bookings/:id/reschedule
- * Reschedule booking to new date/time
- * NOTE: schema only has scheduledDate (no scheduledTime field)
- */
-export const rescheduleBooking = async (req: AuthRequest, res: Response) => {
-  try {
-    if (!req.user) {
-      return res.status(401).json(errorResponse(401, 'Not authenticated'));
-    }
-
-    const id = req.params.id as string;
-    const { newDate } = req.body;
-
-    const booking = await prisma.booking.findUnique({
-      where: { id },
-    });
-
-    if (!booking) {
-      return res.status(404).json(errorResponse(404, 'Booking not found'));
-    }
-
-    // Check ownership
-    if (booking.clientId !== req.user.userId && booking.workerId !== req.user.userId) {
-      return res.status(403).json(errorResponse(403, 'You do not have permission to reschedule this booking'));
-    }
-
-    const updated = await prisma.booking.update({
-      where: { id },
-      data: {
-        scheduledDate: new Date(newDate),
-      },
-    });
-
-    // Notify the other party (workerId may be null if booking is unassigned)
-    const notificationUserId =
-      booking.clientId === req.user.userId ? booking.workerId : booking.clientId;
-
-    if (notificationUserId) {
-      await notifyUser({
-        userId: notificationUserId,
-        // No BOOKING_RESCHEDULED in schema; BOOKING_ACCEPTED is closest
-        type: 'BOOKING_RESCHEDULED',
-        title: 'Booking Rescheduled',
-        message: `Booking has been rescheduled to ${newDate}`,
-        relatedId: id,
-      });
-    }
-
-    return res.status(200).json({
-      success: true,
-      message: 'Booking rescheduled successfully',
-      data: {
-        id: updated.id,
-        scheduledDate: updated.scheduledDate,
-      },
-    });
-  } catch (error) {
-    console.error('Error rescheduling booking:', error);
-    return res.status(500).json(errorResponse(500, 'Failed to reschedule booking'));
-  }
-};
-
-/**
  * POST /api/bookings/:id/addons
  * Add scope-creep addon items mid-job
  * Schema model: BookingAddOn with fields: name, price (not title/description/cost)
@@ -1644,6 +1654,14 @@ export const addAddon = async (req: AuthRequest, res: Response) => {
     // Only worker can add addons
     if (booking.workerId !== req.user.userId) {
       return res.status(403).json(errorResponse(403, 'Only assigned worker can add addons'));
+    }
+
+    // Mid-job only — before IN_PROGRESS there's no job happening yet to add
+    // scope-creep items to, and once the worker has submitted completion
+    // (PENDING_COMPLETION onward) the final price is already being settled.
+    const ADDON_ALLOWED_STATUSES = ['IN_PROGRESS', 'QUOTE_SUBMITTED', 'QUOTE_APPROVED'];
+    if (!ADDON_ALLOWED_STATUSES.includes(booking.status)) {
+      return res.status(409).json(errorResponse(409, `Cannot add an addon to a booking with status ${booking.status}`));
     }
 
     // prisma client accessor is bookingAddOn (capital O)
@@ -1686,7 +1704,7 @@ export const submitReview = async (req: AuthRequest, res: Response) => {
     }
 
     const id = req.params.id as string;
-    const { rating, comment } = req.body;
+    const { rating, comment, photoUrls } = req.body;
 
     // `worker` on Booking is a User relation — include it directly (no nested `.user`)
     const booking = await prisma.booking.findUnique({
@@ -1734,22 +1752,25 @@ export const submitReview = async (req: AuthRequest, res: Response) => {
         clientId: req.user.userId,
         rating,
         comment,
+        photoUrls: Array.isArray(photoUrls) ? photoUrls : [],
       },
     });
 
-    // Update worker's average rating
-    const allReviews = await prisma.review.findMany({
+    // Update worker's average rating — aggregate in the DB instead of
+    // pulling every review row (comment, photoUrls, etc.) just to reduce it.
+    const ratingStats = await prisma.review.aggregate({
       where: { workerId: workerProfile.id },
+      _avg: { rating: true },
+      _count: true,
     });
 
-    const avgRating =
-      allReviews.reduce((sum: number, r: any) => sum + r.rating, 0) / allReviews.length;
+    const avgRating = ratingStats._avg.rating ?? 0;
 
     await prisma.workerProfile.update({
       where: { id: workerProfile.id },
       data: {
         rating: Math.round(avgRating * 10) / 10,
-        totalReviews: allReviews.length,
+        totalReviews: ratingStats._count,
       },
     });
 
@@ -1769,6 +1790,7 @@ export const submitReview = async (req: AuthRequest, res: Response) => {
         id: review.id,
         rating: review.rating,
         comment: review.comment,
+        photoUrls: review.photoUrls,
         workerNewRating: avgRating,
       },
     });

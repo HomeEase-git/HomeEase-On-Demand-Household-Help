@@ -125,6 +125,9 @@ export const signup = async (req: Request, res: Response) => {
         // New worker accounts always start unverified — surfaced so the
         // mobile app can route into the KYC flow instead of the worker tabs.
         kycStatus: user.role === 'WORKER' ? 'PENDING' : undefined,
+        // Gates the client-agreement screen — a brand-new account can't have
+        // accepted anything yet.
+        hasAcceptedTerms: user.role === 'CLIENT' ? false : undefined,
         token,
         refreshToken,
       },
@@ -201,6 +204,18 @@ export const login = async (req: Request, res: Response) => {
       message: `${user.fullName} logged in`,
     });
 
+    // Gates the client-agreement screen — undefined for workers, who have
+    // their own contract flow tied to KYC instead.
+    const hasAcceptedTerms =
+      user.role === 'CLIENT'
+        ? Boolean(
+            await prisma.contractAcceptance.findFirst({
+              where: { userId: user.id, contractType: 'CLIENT_USER_AGREEMENT' },
+              select: { id: true },
+            }),
+          )
+        : undefined;
+
     return res.json({
       success: true,
       message: 'Login successful',
@@ -214,6 +229,7 @@ export const login = async (req: Request, res: Response) => {
         // Lets the app gate worker access until admin approval — client
         // accounts don't have a workerProfile so this stays undefined.
         kycStatus: user.role === 'WORKER' ? (user.workerProfile?.kycStatus ?? 'PENDING') : undefined,
+        hasAcceptedTerms,
         token,
         refreshToken,
       },

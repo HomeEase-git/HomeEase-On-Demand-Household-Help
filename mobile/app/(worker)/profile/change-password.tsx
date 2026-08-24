@@ -3,10 +3,13 @@ import { ScrollView } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { isAxiosError } from "axios";
+import { View } from "react-native";
+import { AppIcon as Ionicons } from "../../../components/icons/AppIcon";
 import ScreenHeader from "../../../components/ui/ScreenHeader";
 import InputField from "../../../components/ui/InputField";
 import PrimaryButton from "../../../components/ui/PrimaryButton";
 import * as api from "../../../services/api";
+import { colors } from "../../../constants";
 import { useAlertModal } from "../../../contexts/AlertModalContext";
 
 export default function WorkerChangePasswordScreen() {
@@ -57,6 +60,11 @@ export default function WorkerChangePasswordScreen() {
     <SafeAreaView className="flex-1 bg-white">
       <ScreenHeader title="Change Password" showBack />
       <ScrollView contentContainerStyle={{ padding: 24 }}>
+        <View className="items-center mb-6">
+          <View className="w-16 h-16 bg-accent/10 rounded-full items-center justify-center">
+            <Ionicons name="lock-closed-outline" size={30} color={colors.accent.DEFAULT} />
+          </View>
+        </View>
         <InputField
           label="Current Password"
           value={current}
@@ -87,13 +95,15 @@ export default function WorkerChangePasswordScreen() {
           secureTextEntry
           error={confirmError}
         />
-        <PrimaryButton
-          label="Update Password"
-          fullWidth
-          onPress={handleUpdate}
-          loading={saving}
-          disabled={saving}
-        />
+        <View className="mt-2">
+          <PrimaryButton
+            label="Update Password"
+            fullWidth
+            onPress={handleUpdate}
+            loading={saving}
+            disabled={saving}
+          />
+        </View>
       </ScrollView>
     </SafeAreaView>
   );

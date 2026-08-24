@@ -1,12 +1,14 @@
 import { create } from "zustand";
 import { API_STATUS_MAP, type BookingStatus } from "./bookingStore";
 import type { ConditionType, RoomType, TimeSlot } from "../types/booking4step.types";
+import { getBookings } from "../services/api";
 
 export type WorkerJob = {
   id: string;
   clientName: string;
   clientId: string | null;
   clientPhone: string | null;
+  clientAvatar: string | null;
   service: string;
   status: BookingStatus;
   scheduledDate: string;
@@ -28,6 +30,7 @@ export type ApiWorkerBooking = {
   clientName: string;
   clientId: string | null;
   clientPhone: string | null;
+  clientAvatar?: string | null;
   service: string;
   status: string;
   scheduledDate: string;
@@ -49,6 +52,7 @@ export function mapApiJob(b: ApiWorkerBooking): WorkerJob {
     clientName: b.clientName,
     clientId: b.clientId ?? null,
     clientPhone: b.clientPhone ?? null,
+    clientAvatar: b.clientAvatar ?? null,
     service: b.service,
     status: API_STATUS_MAP[b.status] ?? "Pending",
     scheduledDate: b.scheduledDate,
@@ -69,6 +73,7 @@ type WorkerState = {
   jobs: WorkerJob[];
   setJobs: (jobs: WorkerJob[]) => void;
   updateJobStatus: (id: string, status: BookingStatus) => void;
+  refreshJobs: () => Promise<void>;
 };
 
 export const useWorkerStore = create<WorkerState>((set) => ({
@@ -78,4 +83,15 @@ export const useWorkerStore = create<WorkerState>((set) => ({
     set((state) => ({
       jobs: state.jobs.map((j) => (j.id === id ? { ...j, status } : j)),
     })),
+  // Shared with the socket "notification:new" listener (app/_layout.tsx) so
+  // a BOOKING_REQUEST push updates the jobs list even when the Requests
+  // screen isn't the focused/polling screen (e.g. worker sitting on Home).
+  refreshJobs: async () => {
+    try {
+      const bookings = await getBookings();
+      set({ jobs: (bookings as ApiWorkerBooking[]).map(mapApiJob) });
+    } catch (error) {
+      console.error("Refresh worker jobs error:", error);
+    }
+  },
 }));

@@ -37,12 +37,11 @@ export default function PackageSelector({
   }, [selected, packages]);
 
   useEffect(() => {
-    if (!workerId) {
-      setPackages([]);
-      return;
-    }
+    if (!workerId) return;
     let active = true;
-    setLoading(true);
+    Promise.resolve().then(() => {
+      if (active) setLoading(true);
+    });
     getWorkerPackages(workerId, serviceTypeId ?? undefined)
       .then((result) => {
         if (active) setPackages(result);

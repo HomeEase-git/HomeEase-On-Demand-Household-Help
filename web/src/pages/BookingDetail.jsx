@@ -1,8 +1,10 @@
 import { useState } from 'react'
-import { Link, Navigate, useParams } from 'react-router-dom'
+import { Link, useParams } from 'react-router-dom'
 import PageHeader from '../components/common/PageHeader'
 import SubNav from '../components/common/SubNav'
+import SectionCard from '../components/common/SectionCard'
 import Badge from '../components/common/Badge'
+import { getBookingStatusVariant } from '../utils/statusBadge'
 import LoadingState from '../components/common/LoadingState'
 import ErrorState from '../components/common/ErrorState'
 import { useDetailQuery } from '../hooks/useListQuery'
@@ -26,7 +28,13 @@ export default function BookingDetail() {
 
   if (loading) return <LoadingState message="Loading booking..." />
   if (error) return <ErrorState message={error} onRetry={reload} />
-  if (!booking) return <Navigate to="/bookings" replace />
+  if (!booking) {
+    return (
+      <SectionCard>
+        <p style={{ color: 'var(--text-muted)' }}>Booking not found. <Link to="/bookings">Back to Bookings</Link></p>
+      </SectionCard>
+    )
+  }
 
   const canCancel = !TERMINAL_STATUSES.includes(booking.status)
 
@@ -53,7 +61,18 @@ export default function BookingDetail() {
     { label: 'Date & Time', value: booking.date },
     {
       label: 'Status',
-      value: <Badge variant={booking.status === 'Completed' ? 'approved' : 'pending'}>{booking.status}</Badge>,
+      value: <Badge variant={getBookingStatusVariant(booking.status)}>{booking.status}</Badge>,
+    },
+    {
+      label: 'Urgency',
+      value:
+        booking.urgencyLevel && booking.urgencyLevel !== 'STANDARD' ? (
+          <Badge variant={booking.urgencyLevel === 'EMERGENCY' ? 'flagged' : 'pending'}>
+            {booking.urgencyLevel === 'EMERGENCY' ? 'Emergency' : 'Urgent'}
+          </Badge>
+        ) : (
+          'Standard'
+        ),
     },
     { label: 'Amount', value: booking.amount },
   ]

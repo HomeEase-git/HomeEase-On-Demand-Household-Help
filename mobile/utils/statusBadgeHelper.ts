@@ -8,8 +8,14 @@ export function getStatusColor(status: StatusType): string {
       return colors.warning;
     case 'Accepted':
       return colors.active;
-    case 'Active':
+    case 'InProgress':
+    case 'QuoteApproved':
       return colors.brand.DEFAULT;
+    case 'QuoteSubmitted':
+    case 'PendingCompletion':
+      return colors.warning;
+    case 'Disputed':
+      return colors.error;
     case 'Completed':
     case 'Credited':
     case 'Verified':

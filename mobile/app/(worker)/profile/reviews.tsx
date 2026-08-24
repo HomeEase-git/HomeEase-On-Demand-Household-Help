@@ -8,10 +8,12 @@ import StarRating from "../../../components/ui/StarRating";
 import { SkeletonList, ReviewCardSkeleton } from "../../../components/ui/Skeleton";
 import { useAuthStore } from "../../../store/authStore";
 import * as api from "../../../services/api";
+import { cardShadow } from "../../../constants";
 
 type ReviewItem = {
   id: string;
   authorName: string;
+  authorAvatar?: string | null;
   rating: number;
   comment: string;
   date: string;
@@ -34,6 +36,7 @@ export default function WorkerReviewsScreen() {
           result.reviews.map((r: any) => ({
             id: r.id,
             authorName: r.clientName,
+            authorAvatar: r.clientAvatar,
             rating: r.rating,
             comment: r.comment,
             date: r.date,
@@ -91,7 +94,7 @@ export default function WorkerReviewsScreen() {
         keyExtractor={(item) => item.id}
         contentContainerStyle={{ padding: 16, paddingBottom: 24 }}
         ListHeaderComponent={
-          <View className="bg-card rounded-2xl p-4 mx-0 mb-4 items-center">
+          <View className="bg-card rounded-2xl p-4 mx-0 mb-4 items-center" style={cardShadow}>
             <Text className="text-text-primary font-bold text-3xl">
               {averageRating}
             </Text>

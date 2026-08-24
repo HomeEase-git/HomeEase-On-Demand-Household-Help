@@ -1,4 +1,4 @@
-import { useRef, useEffect, useCallback } from 'react';
+import { useRef, useEffect, useCallback, useState } from 'react';
 import { Animated, Easing } from 'react-native';
 
 /**
@@ -31,7 +31,7 @@ export function useInterruptibleAnimation(
   toValue: number,
   duration: number = 300
 ) {
-  const animValue = useRef(new Animated.Value(fromValue)).current;
+  const [animValue] = useState(() => new Animated.Value(fromValue));
   const animationRef = useRef<Animated.CompositeAnimation | null>(null);
   const currentValueRef = useRef(fromValue);
 
@@ -222,7 +222,7 @@ export function useFlatListOptimization(
  *   />
  */
 export function useImageOptimization() {
-  const opacity = useRef(new Animated.Value(0)).current;
+  const [opacity] = useState(() => new Animated.Value(0));
 
   const handleImageLoad = () => {
     Animated.timing(opacity, {

@@ -6,7 +6,8 @@ import { useRouter, useFocusEffect } from "expo-router";
 import ScreenHeader from "../../../../components/ui/ScreenHeader";
 import PaymentMethodCard from "../../../../components/cards/PaymentMethodCard";
 import EmptyState from "../../../../components/feedback/EmptyState";
-import { colors } from "../../../../constants";
+import { Skeleton } from "../../../../components/ui/Skeleton";
+import { colors, cardShadow } from "../../../../constants";
 import * as api from "../../../../services/api";
 import { useAlertModal } from "../../../../contexts/AlertModalContext";
 
@@ -88,16 +89,19 @@ export default function PaymentMethodsScreen() {
     <SafeAreaView className="flex-1 bg-white">
       <ScreenHeader title="Payment Methods" showBack />
       {loading ? (
-        <View className="flex-1 items-center justify-center">
-          <Text className="text-text-secondary">
-            Loading payment methods...
-          </Text>
+        <View className="p-4">
+          {Array.from({ length: 3 }).map((_, i) => (
+            <View key={i} className="bg-card rounded-2xl p-4 mb-3" style={cardShadow}>
+              <Skeleton width="40%" height={14} marginBottom={8} />
+              <Skeleton width="60%" height={12} marginBottom={0} />
+            </View>
+          ))}
         </View>
       ) : methods.length === 0 ? (
         <EmptyState
           icon="card-outline"
           title="No payment methods"
-          subtitle="Add a card, wallet, or bank account to pay for bookings."
+          subtitle="Add a wallet or bank account to pay for bookings."
           actionLabel="Add Payment Method"
           onAction={() => router.push("/(client)/profile/payment-methods/new")}
         />
@@ -129,6 +133,7 @@ export default function PaymentMethodsScreen() {
       )}
       <Pressable
         className="absolute bottom-6 right-6 w-14 h-14 bg-accent rounded-full items-center justify-center"
+        style={cardShadow}
         onPress={() => router.push("/(client)/profile/payment-methods/new")}
       >
         <Ionicons name="add" size={28} color={colors.white} />

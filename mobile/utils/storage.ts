@@ -41,19 +41,33 @@ const writeStoredValue = async (key: string, value: unknown) => {
   memoryStore[key] = value;
 };
 
+// In-memory cache for the auth token specifically — it's read by the API
+// client's request interceptor on every single network call (~60+ call
+// sites), so a per-call AsyncStorage round-trip there is a real, constant
+// tax on every screen. `undefined` = not loaded yet from disk this session;
+// `null` = loaded, no token. Kept in sync by saveToken/clearAuth below.
+let cachedToken: string | null | undefined;
+
 // Auth Storage
 export const authStorage = {
   async saveToken(token: string) {
+    cachedToken = token;
     try {
       await AsyncStorage.setItem(STORAGE_KEYS.AUTH_TOKEN, token);
+      cachedToken = token;
     } catch (error) {
       console.error('Error saving auth token:', error);
     }
   },
 
   async getToken() {
+    if (cachedToken !== undefined) {
+      return cachedToken;
+    }
     try {
-      return await AsyncStorage.getItem(STORAGE_KEYS.AUTH_TOKEN);
+      const token = await AsyncStorage.getItem(STORAGE_KEYS.AUTH_TOKEN);
+      cachedToken = token;
+      return token;
     } catch (error) {
       console.error('Error reading auth token:', error);
       return null;
@@ -79,9 +93,11 @@ export const authStorage = {
   },
 
   async clearAuth() {
+    cachedToken = null;
     try {
       await AsyncStorage.removeItem(STORAGE_KEYS.AUTH_TOKEN);
       await AsyncStorage.removeItem(STORAGE_KEYS.AUTH_USER);
+      cachedToken = null;
     } catch (error) {
       console.error('Error clearing auth:', error);
     }

@@ -7,6 +7,7 @@ import StatusBadge from "../../../../components/ui/StatusBadge";
 import type { StatusType } from "../../../../components/ui/StatusBadge";
 import PrimaryButton from "../../../../components/ui/PrimaryButton";
 import { Skeleton } from "../../../../components/ui/Skeleton";
+import { cardShadow } from "../../../../constants";
 import * as api from "../../../../services/api";
 
 type TransactionDetail = Awaited<ReturnType<typeof api.getTransactionDetail>>;
@@ -50,12 +51,12 @@ export default function TransactionDetailScreen() {
       <SafeAreaView className="flex-1 bg-white">
         <ScreenHeader title="Transaction Details" showBack />
         <View className="px-4 py-6">
-          <View className="bg-card rounded-2xl p-6 mb-4 items-center">
+          <View className="bg-card rounded-2xl p-6 mb-4 items-center" style={cardShadow}>
             <Skeleton width="50%" height={32} marginBottom={8} />
             <Skeleton width="30%" height={12} marginBottom={8} />
             <Skeleton width={90} height={22} borderRadius={11} marginBottom={0} />
           </View>
-          <View className="bg-card rounded-2xl p-4 mb-4">
+          <View className="bg-card rounded-2xl p-4 mb-4" style={cardShadow}>
             {Array.from({ length: 6 }).map((_, i) => (
               <View
                 key={i}
@@ -94,7 +95,7 @@ export default function TransactionDetailScreen() {
     <SafeAreaView className="flex-1 bg-white">
       <ScreenHeader title="Transaction Details" showBack />
       <View className="px-4 py-6">
-        <View className="bg-success/20 rounded-2xl p-6 mb-4 items-center">
+        <View className="bg-success/20 rounded-2xl p-6 mb-4 items-center" style={cardShadow}>
           <Text className="text-success font-bold text-4xl">
             ₱{transaction.amount?.toFixed(2)}
           </Text>
@@ -106,7 +107,7 @@ export default function TransactionDetailScreen() {
           </View>
         </View>
 
-        <View className="bg-card rounded-2xl p-4 mb-4">
+        <View className="bg-card rounded-2xl p-4 mb-4" style={cardShadow}>
           <Row label="Reference" value={transaction.transactionId ?? transaction.id} />
           <Row label="Booking" value={transaction.bookingId} />
           <Row label="Service" value={transaction.serviceName} />
@@ -135,7 +136,7 @@ function Row({ label, value }: { label: string; value: string }) {
   return (
     <View className="flex-row justify-between py-2 border-b border-divider last:border-0">
       <Text className="text-text-secondary text-sm">{label}</Text>
-      <Text className="text-primary font-semibold flex-1 text-right ml-4">
+      <Text className="text-text-primary font-semibold flex-1 text-right ml-4">
         {value}
       </Text>
     </View>

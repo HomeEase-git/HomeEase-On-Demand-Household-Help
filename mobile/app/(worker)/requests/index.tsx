@@ -10,9 +10,13 @@ import * as api from "../../../services/api";
 import { summarizeFlatRoomTypes } from "../../../utils/bookingPriceEstimate";
 import { ROOM_TYPE_LABELS } from "../../../types/booking4step.types";
 import { usePolling } from "../../../hooks/usePolling";
+import { useTabRefresh } from "../../../hooks/useTabRefresh";
 
 const TABS = ["Pending", "Accepted"] as const;
-const POLL_INTERVAL_MS = 8000;
+// A real-time socket layer already pushes updates here — this poll is a
+// belt-and-suspenders fallback, not the primary refresh path, so it doesn't
+// need to be this frequent.
+const POLL_INTERVAL_MS = 25000;
 
 export default function RequestsScreen() {
   const router = useRouter();
@@ -51,6 +55,8 @@ export default function RequestsScreen() {
   // background/foreground the screen to trigger the focus refresh above.
   usePolling(() => load(true), POLL_INTERVAL_MS, { paused: !focused });
 
+  useTabRefresh("worker:requests", load);
+
   const filtered = jobs.filter((j) => j.status === tab);
 
   const handleRequestPress = useCallback(
@@ -66,6 +72,7 @@ export default function RequestsScreen() {
         request={{
           id: item.id,
           client: item.clientName,
+          clientAvatar: item.clientAvatar,
           service: item.service,
           date: item.scheduledDate,
           amount: item.finalPrice ?? item.estimatedPrice,

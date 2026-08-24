@@ -186,7 +186,11 @@ export default function Reports() {
                       {rows.map((log) => (
                         <tr key={log.id}>
                           <td>{log.time}</td>
-                          <td><Badge variant={log.level === 'WARN' || log.level === 'ERROR' ? 'pending' : 'active'}>{log.level}</Badge></td>
+                          <td>
+                            <Badge variant={log.level === 'ERROR' ? 'flagged' : log.level === 'WARN' ? 'pending' : 'active'}>
+                              {log.level}
+                            </Badge>
+                          </td>
                           <td>{log.category}</td>
                           <td>{log.source}</td>
                           <td>{log.message}</td>

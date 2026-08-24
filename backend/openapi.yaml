@@ -6,7 +6,7 @@ info:
     Full REST API surface for the HomeEase household-services marketplace:
     auth, client/worker profiles, worker discovery, the booking lifecycle
     (creation/auto-match through accept/arrive/start/quote/complete/review),
-    payments & PayMongo escrow, messaging, notifications, KYC verification,
+    payments & Xendit escrow, messaging, notifications, KYC verification,
     and the admin back office (users, bookings, disputes, payments, pricing
     rules, reviews, reports, analytics, audit logs, settings).
 servers:
@@ -845,7 +845,7 @@ paths:
               type: object
               required: [type, accountIdentifier]
               properties:
-                type: { type: string, enum: [GCASH, MAYA, CARD, BANK_TRANSFER, CASH] }
+                type: { type: string, enum: [GCASH, MAYA, CASH] }
                 accountIdentifier: { type: string, description: Masked account number/phone }
       responses:
         '201': { description: Saved }
@@ -1242,7 +1242,7 @@ paths:
               type: object
               required: [payoutMethod]
               properties:
-                payoutMethod: { type: string, enum: [GCASH, MAYA, BANK_TRANSFER] }
+                payoutMethod: { type: string, enum: [GCASH, MAYA] }
                 payoutAccountName: { type: string }
                 payoutAccountNumber: { type: string }
       responses:
@@ -1263,28 +1263,6 @@ paths:
                 reason: { type: string }
       responses:
         '200': { description: Cancelled }
-        '403': { $ref: '#/components/responses/Forbidden' }
-        '404': { $ref: '#/components/responses/NotFound' }
-        '409': { $ref: '#/components/responses/Conflict' }
-
-  /bookings/{id}/reschedule:
-    patch:
-      tags: [Bookings]
-      summary: Reschedule a booking to a new date/time slot
-      parameters: [{ $ref: '#/components/parameters/BookingId' }]
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [newDate, newTime]
-              properties:
-                newDate: { type: string, format: date }
-                newTime: { $ref: '#/components/schemas/TimeSlot' }
-      responses:
-        '200': { description: Rescheduled }
-        '400': { $ref: '#/components/responses/BadRequest' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
@@ -1374,14 +1352,14 @@ paths:
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
 
-  /payments/{bookingId}/paymongo/checkout:
+  /payments/{bookingId}/xendit/checkout:
     post:
       tags: [Payments]
-      summary: Create a PayMongo Source checkout (GCash/Maya) for an existing pending payment
+      summary: Create a Xendit Invoice checkout (GCash/Maya) for an existing pending payment
       parameters: [{ $ref: '#/components/parameters/BookingId' }]
       responses:
         '200':
-          description: OK — returns the PayMongo checkout redirect URL
+          description: OK — returns the Xendit hosted checkout URL
           content:
             application/json:
               schema:
@@ -1393,6 +1371,7 @@ paths:
                         type: object
                         properties:
                           checkoutUrl: { type: string, format: uri }
+                          invoiceId: { type: string }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
@@ -1483,6 +1462,30 @@ paths:
       summary: Get the authenticated user's unread notification count
       responses:
         '200': { description: OK }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /notifications/push-token:
+    post:
+      tags: [Notifications]
+      summary: Register (or overwrite) the current device's Expo push token
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [token]
+              properties:
+                token: { type: string }
+      responses:
+        '200': { description: Registered }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+    delete:
+      tags: [Notifications]
+      summary: Clear the current user's push token (called on logout)
+      responses:
+        '200': { description: Removed }
         '401': { $ref: '#/components/responses/Unauthorized' }
 
   /notifications/read-all:
@@ -1870,10 +1873,10 @@ paths:
         '200': { description: Reinstated }
         '404': { $ref: '#/components/responses/NotFound' }
 
-  /payments/paymongo/webhook:
+  /payments/xendit/invoice-webhook:
     post:
       tags: [Webhooks]
-      summary: PayMongo webhook (signature-verified via the Paymongo-Signature header)
+      summary: Xendit invoice status webhook (token-verified via the x-callback-token header)
       security: []
       requestBody:
         required: true
@@ -1881,16 +1884,41 @@ paths:
           application/json:
             schema:
               type: object
-              description: Raw PayMongo event payload — signature verified against the raw body, not parsed JSON.
+              description: Xendit invoice payload — verified via a direct comparison of the x-callback-token header against XENDIT_WEBHOOK_TOKEN.
       responses:
         '200': { description: Acknowledged }
         '401':
-          description: Invalid signature
+          description: Invalid callback token
           content:
             application/json:
               schema: { type: object }
         '500':
-          description: Webhook not configured (missing PAYMONGO_WEBHOOK_SECRET)
+          description: Webhook not configured (missing XENDIT_WEBHOOK_TOKEN)
+          content:
+            application/json:
+              schema: { type: object }
+
+  /payments/xendit/payout-webhook:
+    post:
+      tags: [Webhooks]
+      summary: Xendit payout status webhook (token-verified via the x-callback-token header)
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              description: Xendit payout payload — verified via a direct comparison of the x-callback-token header against XENDIT_WEBHOOK_TOKEN.
+      responses:
+        '200': { description: Acknowledged }
+        '401':
+          description: Invalid callback token
+          content:
+            application/json:
+              schema: { type: object }
+        '500':
+          description: Webhook not configured (missing XENDIT_WEBHOOK_TOKEN)
           content:
             application/json:
               schema: { type: object }
@@ -2358,7 +2386,7 @@ components:
         tip: { type: number }
         paymentMethodType:
           type: string
-          enum: [GCASH, MAYA, CARD, BANK_TRANSFER, CASH]
+          enum: [GCASH, MAYA, CASH]
         paymentAccountIdentifier: { type: string }
 
     CreateBookingResponse:
@@ -2391,4 +2419,4 @@ components:
             clientSecret:
               type: string
               nullable: true
-              description: PayMongo Payment Intent client key (CARD only) for client-side confirmation
+              description: Deprecated — always null now that CARD payments are no longer supported

@@ -198,7 +198,6 @@ const ALL_KYC_DOC_TYPES: KycDocumentType[] = [
 const PAYOUT_CHANNELS: PaymentMethodType[] = [
   PaymentMethodType.GCASH,
   PaymentMethodType.MAYA,
-  PaymentMethodType.BANK_TRANSFER,
 ];
 
 function phoneNumber() {
@@ -214,10 +213,6 @@ function maskedAccountIdentifier(type: PaymentMethodType) {
     case PaymentMethodType.GCASH:
     case PaymentMethodType.MAYA:
       return "09XX XXX " + faker.string.numeric(4);
-    case PaymentMethodType.CARD:
-      return "**** **** **** " + faker.string.numeric(4);
-    case PaymentMethodType.BANK_TRANSFER:
-      return "Acct ***" + faker.string.numeric(4);
     default:
       return null;
   }
@@ -439,16 +434,6 @@ async function createClient(index: number) {
       isDefault: true,
     },
   });
-  await prisma.savedPaymentMethod.create({
-    data: {
-      clientProfileId: client.clientProfile!.id,
-      type: PaymentMethodType.CARD,
-      accountIdentifier: maskedAccountIdentifier(PaymentMethodType.CARD),
-      label: "Backup Card",
-      isDefault: false,
-    },
-  });
-
   return client;
 }
 
@@ -524,10 +509,7 @@ async function createWorker(
           resumeUrl: "https://example-storage.dev/resumes/placeholder.pdf",
           payoutMethod,
           payoutAccountName: fullName,
-          payoutAccountNumber:
-            payoutMethod === PaymentMethodType.BANK_TRANSFER
-              ? faker.finance.accountNumber(10)
-              : phoneNumber(),
+          payoutAccountNumber: phoneNumber(),
           serviceTypes: { connect: [{ id: category.id }] },
         },
       },
@@ -554,7 +536,12 @@ async function createWorker(
     data: {
       userId: user.id,
       type: "WORKER_ONBOARDING",
-      status: kycStatus,
+      // Distinct from WorkerProfile.kycStatus — the real app only ever
+      // writes PENDING/APPROVED/REJECTED here (never SUBMITTED), since a
+      // VerificationRequest starts PENDING and only leaves that state via
+      // admin decision. See verificationController.uploadVerificationDocuments
+      // and adminVerificationController.approve/rejectVerification.
+      status: isApproved ? KYCStatus.APPROVED : isRejected ? KYCStatus.REJECTED : KYCStatus.PENDING,
       rejectionReason: isRejected ? "Government ID photo was blurry and unreadable." : null,
       adminOverrideReason: fullDocSet ? "Manually approved after in-person verification." : null,
       reviewedById: kycStatus !== KYCStatus.PENDING ? "admin-seed-reviewer" : null,
@@ -780,7 +767,7 @@ async function createAuditLogs(admin: { id: string; fullName: string }) {
       action: "PAYOUT_TRANSFER_FAILED",
       category: "SYSTEM_ERROR",
       level: "ERROR",
-      message: "PayMongo transfer failed: insufficient platform balance.",
+      message: "Xendit payout failed: insufficient platform balance.",
       metadata: { errorCode: "INSUFFICIENT_BALANCE" },
     },
     {
@@ -830,7 +817,10 @@ async function createBookingsAndPayments(
     isAutoMatched?: boolean;
     disputeStatus?: "OPEN" | "UNDER_REVIEW" | "RESOLVED" | "REJECTED";
     payoutStatus?: PayoutStatus;
-    legacyXendit?: boolean;
+    // Simulates a payout that got as far as receiving a Xendit disbursement
+    // id before the payout webhook reported it FAILED (vs. a failure that
+    // never reached Xendit at all, e.g. an unsupported channel).
+    disbursementFailedWithId?: boolean;
     paymentStatusOverride?: PaymentStatus;
     cancelledBy?: Role;
     noTask?: boolean;
@@ -852,7 +842,7 @@ async function createBookingsAndPayments(
     { status: BookingStatus.COMPLETED, payoutStatus: PayoutStatus.PENDING, isAutoMatched: true },
     { status: BookingStatus.COMPLETED, payoutStatus: PayoutStatus.PROCESSING },
     { status: BookingStatus.COMPLETED, payoutStatus: PayoutStatus.PAID },
-    { status: BookingStatus.COMPLETED, payoutStatus: PayoutStatus.FAILED, legacyXendit: true },
+    { status: BookingStatus.COMPLETED, payoutStatus: PayoutStatus.FAILED, disbursementFailedWithId: true },
     { status: BookingStatus.COMPLETED, paymentStatusOverride: PaymentStatus.FAILED },
     { status: BookingStatus.COMPLETED, paymentStatusOverride: PaymentStatus.REFUNDED },
     { status: BookingStatus.COMPLETED, paymentStatusOverride: PaymentStatus.PENDING },
@@ -1112,7 +1102,7 @@ async function createBookingsAndPayments(
       const subtotal = estimatedPrice;
       const tip = booking.tip ?? 0;
       const commissionRate = 0.1;
-      const withholdingTaxRate = 0.05;
+      const withholdingTaxRate = 0.02;
       const commissionAmount = subtotal * commissionRate;
       const withholdingTaxAmount = subtotal * withholdingTaxRate;
       const workerPayout = subtotal - commissionAmount - withholdingTaxAmount + tip;
@@ -1150,8 +1140,8 @@ async function createBookingsAndPayments(
           releasedAt: escrowStatus === EscrowStatus.RELEASED ? faker.date.recent({ days: 2 }) : null,
           refundReason: refunded ? "Client reported no-show; refunded per policy." : null,
           refundedAt: refunded ? faker.date.recent({ days: 1 }) : null,
-          paymongoPaymentId: methodType !== PaymentMethodType.CASH ? `pay_${faker.string.alphanumeric(20)}` : null,
-          paymongoSourceId: methodType !== PaymentMethodType.CASH ? `src_${faker.string.alphanumeric(20)}` : null,
+          xenditPaymentId: methodType !== PaymentMethodType.CASH ? `ewc_${faker.string.alphanumeric(20)}` : null,
+          xenditInvoiceId: methodType !== PaymentMethodType.CASH ? `${faker.string.alphanumeric(24)}` : null,
           authorizedAmount: subtotal,
           authorizedAt,
           authorizationId,
@@ -1178,16 +1168,20 @@ async function createBookingsAndPayments(
             accountName: wp.payoutAccountName,
             accountNumber: wp.payoutAccountNumber ?? phoneNumber(),
             status: payoutStatus,
-            paymongoTransferId:
-              payoutStatus !== PayoutStatus.FAILED ? `trsf_${faker.string.alphanumeric(20)}` : null,
-            paymongoTransferStatus:
-              payoutStatus === PayoutStatus.PAID
-                ? "succeeded"
-                : payoutStatus === PayoutStatus.PROCESSING
-                ? "pending"
+            xenditDisbursementId:
+              payoutStatus === PayoutStatus.PAID ||
+              payoutStatus === PayoutStatus.PROCESSING ||
+              scenario.disbursementFailedWithId
+                ? `disb-${faker.string.alphanumeric(16)}`
                 : null,
-            xenditDisbursementId: scenario.legacyXendit ? `disb-${faker.string.alphanumeric(16)}` : null,
-            xenditStatus: scenario.legacyXendit ? "FAILED" : null,
+            xenditStatus:
+              payoutStatus === PayoutStatus.PAID
+                ? "COMPLETED"
+                : payoutStatus === PayoutStatus.PROCESSING
+                ? "ACCEPTED"
+                : payoutStatus === PayoutStatus.FAILED && scenario.disbursementFailedWithId
+                ? "FAILED"
+                : null,
             failureReason: payoutStatus === PayoutStatus.FAILED ? "Bank rejected transfer: invalid account." : null,
             attempts: payoutStatus === PayoutStatus.PENDING ? 0 : payoutStatus === PayoutStatus.FAILED ? 2 : 1,
             processingAt: payoutStatus !== PayoutStatus.PENDING ? faker.date.recent({ days: 2 }) : null,
@@ -1226,6 +1220,51 @@ async function createBookingsAndPayments(
   return bookingIds;
 }
 
+// Clients verify identity only (no trade credentials), so this is a lighter
+// version of the worker verification block — just the 3 identity docs.
+async function createClientVerification(
+  client: Awaited<ReturnType<typeof createClient>>,
+  status: typeof KYCStatus.PENDING | typeof KYCStatus.APPROVED | typeof KYCStatus.REJECTED
+) {
+  const isApproved = status === KYCStatus.APPROVED;
+  const isRejected = status === KYCStatus.REJECTED;
+  const docStatus = isApproved
+    ? KycDocumentStatus.APPROVED
+    : isRejected
+    ? KycDocumentStatus.REJECTED
+    : KycDocumentStatus.PENDING;
+  const docTypes: KycDocumentType[] = [
+    KycDocumentType.GOVERNMENT_ID_FRONT,
+    KycDocumentType.GOVERNMENT_ID_BACK,
+    KycDocumentType.SELFIE,
+  ];
+
+  await prisma.verificationRequest.create({
+    data: {
+      userId: client.id,
+      type: "CLIENT_VERIFICATION",
+      status,
+      rejectionReason: isRejected ? "Selfie did not match the government ID photo." : null,
+      reviewedAt: isApproved || isRejected ? faker.date.recent({ days: 10 }) : null,
+      aiStatus: isApproved || isRejected ? "MATCH" : null,
+      aiConfidence:
+        isApproved || isRejected
+          ? faker.number.float({ min: 0.85, max: 0.99, fractionDigits: 2 })
+          : null,
+      documents: {
+        create: docTypes.map((type) => ({
+          documentType: type,
+          fileUrl: `https://example-storage.dev/kyc/${client.id}/${type.toLowerCase()}.jpg`,
+          fileName: `${type.toLowerCase()}.jpg`,
+          mimeType: "image/jpeg",
+          status: docStatus,
+          reviewedAt: isApproved || isRejected ? faker.date.recent({ days: 10 }) : null,
+        })),
+      },
+    },
+  });
+}
+
 async function main() {
   console.log("Clearing existing data...");
   await clearData();
@@ -1244,6 +1283,15 @@ async function main() {
   for (let i = 0; i < NUM_CLIENTS; i++) {
     clients.push(await createClient(i));
   }
+
+  console.log("Creating client identity verification requests...");
+  // Indices 6-9 are plain active/verified clients (0-2 have status variety,
+  // 4 is the intentionally-unverified one) — safe picks for a status mix so
+  // the admin Verification Management "Clients" tab has real states to review.
+  await createClientVerification(clients[6], KYCStatus.PENDING);
+  await createClientVerification(clients[7], KYCStatus.PENDING);
+  await createClientVerification(clients[8], KYCStatus.APPROVED);
+  await createClientVerification(clients[9], KYCStatus.REJECTED);
 
   console.log(`Creating ${WORKERS_PER_CATEGORY} workers per category (all KYC states, skills, availability)...`);
   const workers = [];
@@ -1308,7 +1356,7 @@ async function main() {
       supportEmail: "support@homeease.ph",
       notificationsEnabled: true,
       commissionRate: 0.12,
-      withholdingTaxRate: 0.05,
+      withholdingTaxRate: 0.02,
       maxSlotsPerDay: 3,
       pendingExpiryMinutes: 45,
       geofenceRadiusMeters: 150,

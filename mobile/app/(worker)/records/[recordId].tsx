@@ -9,6 +9,7 @@ import PrimaryButton from "../../../components/ui/PrimaryButton";
 import { Skeleton } from "../../../components/ui/Skeleton";
 import { API_STATUS_MAP } from "../../../store/bookingStore";
 import * as api from "../../../services/api";
+import { getWorkerNetAmount } from "../../../utils/pricing";
 
 type BookingDetail = {
   id: string;
@@ -19,7 +20,7 @@ type BookingDetail = {
   scheduledDate: string;
   estimatedPrice: number;
   finalPrice: number | null;
-  payment: { methodType: string } | null;
+  payment: { methodType: string; workerPayout?: number | null } | null;
   notes: string | null;
   completionPhotoUrl?: string | null;
 };
@@ -86,7 +87,7 @@ export default function RecordDetailScreen() {
   const status = API_STATUS_MAP[record.status] ?? "Pending";
   const isCompleted = status === "Completed";
   const isCancelled = status === "Cancelled";
-  const amount = record.finalPrice ?? record.estimatedPrice;
+  const amount = isCompleted ? getWorkerNetAmount(record) : record.finalPrice ?? record.estimatedPrice;
 
   const openMap = async () => {
     if (!record.location) return;
@@ -129,9 +130,16 @@ export default function RecordDetailScreen() {
             </View>
           ) : null}
           <View className="flex-row justify-between">
-            <Text className="text-text-muted text-xs">Earnings</Text>
-            <Text className="text-primary text-sm">₱{amount}.00</Text>
+            <Text className="text-text-muted text-xs">
+              {isCompleted ? "Earnings" : "Amount"}
+            </Text>
+            <Text className="text-primary text-sm">₱{amount.toFixed(2)}</Text>
           </View>
+          {isCompleted && (
+            <Text className="text-text-muted text-xs mt-1 text-right">
+              After platform fee
+            </Text>
+          )}
         </View>
 
         {record.notes ? (

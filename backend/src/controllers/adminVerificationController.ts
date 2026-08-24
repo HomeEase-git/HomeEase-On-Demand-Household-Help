@@ -62,7 +62,7 @@ export const getVerificationById = async (req: Request, res: Response) => {
     const record = await prisma.verificationRequest.findUnique({
       where: { id },
       include: {
-        user: true,
+        user: { include: { workerProfile: { include: { serviceTypes: true } } } },
         documents: true,
       },
     });
@@ -73,7 +73,10 @@ export const getVerificationById = async (req: Request, res: Response) => {
 
     return res.json({
       success: true,
-      data: formatVerification(record),
+      data: {
+        ...formatVerification(record),
+        serviceCategories: record.user.workerProfile?.serviceTypes.map((s) => s.name) ?? null,
+      },
     });
   } catch (error) {
     console.error('Get verification error:', error);

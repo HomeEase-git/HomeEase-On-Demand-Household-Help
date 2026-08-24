@@ -50,30 +50,61 @@ export default function TrackBookingScreen() {
     );
   }
 
-  const steps = ["Booked", "Accepted", "On the Way", "In Progress", "Done"];
+  // Mirrors the real BookingStatus lifecycle (store/bookingStore.ts) rather
+  // than the old "Pending/Active/Completed, else = cancelled" shortcut —
+  // that fallback was silently mislabeling every other real status
+  // (InProgress, QuoteSubmitted, QuoteApproved, PendingCompletion, Disputed)
+  // as "Booking cancelled".
+  const steps = ["Booked", "Accepted", "In Progress", "Done"];
 
-  const currentStepIndex =
-    booking.status === "Pending"
-      ? 0
-      : booking.status === "Active"
-        ? 2
-        : booking.status === "Completed"
-          ? 4
-          : 0;
+  const currentStepIndex = (() => {
+    switch (booking.status) {
+      case "Pending":
+        return 0;
+      case "Accepted":
+      case "QuoteSubmitted":
+      case "QuoteApproved":
+        return 1;
+      case "InProgress":
+      case "PendingCompletion":
+      case "Disputed":
+        return 2;
+      case "Completed":
+        return 3;
+      default:
+        return 0;
+    }
+  })();
 
-  const statusLabel =
-    booking.status === "Pending"
-      ? "Waiting for worker to accept"
-      : booking.status === "Active"
-        ? "Worker is on the way"
-        : booking.status === "Completed"
-          ? "Service completed"
-          : "Booking cancelled";
+  const statusLabel = (() => {
+    switch (booking.status) {
+      case "Pending":
+        return "Waiting for worker to accept";
+      case "Accepted":
+        return "Worker accepted — getting ready";
+      case "QuoteSubmitted":
+        return "Worker sent a quote — awaiting your approval";
+      case "QuoteApproved":
+        return "Quote approved — worker will begin soon";
+      case "InProgress":
+        return "Worker is on the job";
+      case "PendingCompletion":
+        return "Job done — awaiting your confirmation";
+      case "Disputed":
+        return "This booking is under dispute";
+      case "Completed":
+        return "Service completed";
+      case "Cancelled":
+        return "Booking cancelled";
+      default:
+        return "Status: " + booking.status;
+    }
+  })();
 
   const statusColor =
     booking.status === "Completed"
       ? colors.success
-      : booking.status === "Cancelled"
+      : booking.status === "Cancelled" || booking.status === "Disputed"
         ? colors.error
         : colors.warning;
 

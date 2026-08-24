@@ -49,6 +49,7 @@ function formatPayment(record: PaymentRecord) {
     status: record.status.charAt(0) + record.status.slice(1).toLowerCase(),
     refundReason: record.refundReason,
     refundedAt: record.refundedAt,
+    xenditInvoiceId: record.xenditInvoiceId,
   };
 }
 
@@ -121,7 +122,7 @@ export const getPaymentById = async (req: Request, res: Response) => {
 };
 
 /**
- * Payout Distribution — tracks the real PayMongo transfer lifecycle via
+ * Payout Distribution — tracks the real Xendit payout lifecycle via
  * the Payout table (created once a Payment's escrow is RELEASED, see
  * paymentLifecycleService.captureAndReleasePayment). Payment.escrowStatus
  * RELEASED means "the worker's cut is owed"; Payout.status PAID means "the
@@ -184,8 +185,8 @@ function formatPayout(record: PayoutRecord) {
     status: record.status.charAt(0) + record.status.slice(1).toLowerCase(),
     failureReason: record.failureReason,
     attempts: record.attempts,
-    paymongoTransferId: record.paymongoTransferId,
-    xenditDisbursementId: record.xenditDisbursementId, // deprecated, Xendit-era rows only
+    xenditDisbursementId: record.xenditDisbursementId,
+    xenditStatus: record.xenditStatus,
     releasedAt: record.payment?.releasedAt ?? null,
     paidAt: record.paidAt,
     releasedDate: record.paidAt

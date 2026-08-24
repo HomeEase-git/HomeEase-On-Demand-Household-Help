@@ -73,8 +73,10 @@ export const getActivityReport = async (_req: Request, res: Response) => {
         where: { action: 'BOOKING_DECLINED' },
         _count: { _all: true },
       }),
+      // Scoped to the same 7-day window as the other metrics in this report —
+      // previously unbounded, so it scanned the entire bookings table.
       prisma.booking.findMany({
-        where: { scheduledTime: { not: null } },
+        where: { scheduledTime: { not: null }, createdAt: { gte: since } },
         select: { scheduledTime: true },
       }),
     ]);

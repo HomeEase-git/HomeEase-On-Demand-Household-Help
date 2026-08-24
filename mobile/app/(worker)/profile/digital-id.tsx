@@ -8,7 +8,7 @@ import StarRating from "../../../components/ui/StarRating";
 import { buildDigitalIdCard } from "../../../utils/digitalId";
 import * as api from "../../../services/api";
 import type { WorkerDigitalId } from "../../../types/api.types";
-import { colors } from "../../../constants";
+import { colors, cardShadow } from "../../../constants";
 
 export default function DigitalIdScreen() {
   const [data, setData] = useState<WorkerDigitalId | null>(null);
@@ -54,9 +54,9 @@ export default function DigitalIdScreen() {
       <SafeAreaView className="flex-1 bg-white">
         <ScreenHeader title="Digital ID" showBack />
         <ScrollView contentContainerStyle={{ padding: 24 }}>
-          <View className="bg-card-light rounded-2xl p-6 items-center">
-            <Text className="text-primary font-semibold text-lg mb-2">
-              Couldn't load your Digital ID
+          <View className="bg-card-light rounded-2xl p-6 items-center" style={cardShadow}>
+            <Text className="text-text-primary font-semibold text-lg mb-2">
+              Couldn&apos;t load your Digital ID
             </Text>
             <Text className="text-text-secondary text-sm text-center">
               Please try again in a moment.
@@ -83,7 +83,7 @@ export default function DigitalIdScreen() {
     <SafeAreaView className="flex-1 bg-white">
       <ScreenHeader title="Digital ID" showBack />
       <ScrollView contentContainerStyle={{ padding: 24 }}>
-        <View className="bg-brand rounded-3xl p-6 shadow-sm">
+        <View className="bg-brand rounded-3xl p-6" style={cardShadow}>
           <View className="flex-row items-center">
             <View className="w-16 h-16 rounded-full bg-white/20 items-center justify-center overflow-hidden mr-4">
               {card.avatar ? (
@@ -161,8 +161,8 @@ export default function DigitalIdScreen() {
           )}
         </View>
 
-        <View className="bg-card-light rounded-2xl p-4 mt-6">
-          <Text className="text-primary font-semibold mb-2">How to use it</Text>
+        <View className="bg-card-light rounded-2xl p-4 mt-6" style={cardShadow}>
+          <Text className="text-text-primary font-semibold mb-2">How to use it</Text>
           <Text className="text-text-secondary text-sm">
             Show this card to clients before starting work. Ask them to
             compare your photo and name here against the worker shown on

@@ -9,7 +9,7 @@ import { Skeleton } from "../../../components/ui/Skeleton";
 import { useAuthStore } from "../../../store/authStore";
 import * as api from "../../../services/api";
 import type { WorkerAvailabilitySlot } from "../../../services/api";
-import { colors } from "../../../constants/colors";
+import { colors, cardShadow } from "../../../constants";
 import { useAlertModal } from "../../../contexts/AlertModalContext";
 import { TIME_SLOTS, TIME_SLOT_LABELS, type TimeSlot } from "../../../types/booking4step.types";
 
@@ -157,7 +157,7 @@ export default function AvailabilityScreen() {
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.surface }}>
       <ScreenHeader title="Availability" showBack />
       <ScrollView contentContainerStyle={{ padding: 24, paddingBottom: 48 }}>
-        <View className="bg-card rounded-2xl p-4 flex-row items-center justify-between mb-6">
+        <View className="bg-card rounded-2xl p-4 flex-row items-center justify-between mb-6" style={cardShadow}>
           <View className="flex-1 pr-3">
             <Text className="text-text-primary font-bold text-sm">Available for new jobs</Text>
             <Text className="text-text-muted text-xs mt-0.5">
@@ -185,7 +185,7 @@ export default function AvailabilityScreen() {
             const isToday = iso === days[0].iso;
 
             return (
-              <View key={iso} className="bg-card rounded-2xl p-3.5">
+              <View key={iso} className="bg-card rounded-2xl p-3.5" style={cardShadow}>
                 <View className="flex-row items-center justify-between mb-2.5">
                   <Text className="text-text-primary font-semibold text-sm">{dayLabel}</Text>
                   {isToday && (

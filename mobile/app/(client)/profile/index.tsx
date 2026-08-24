@@ -13,30 +13,43 @@ import { uploadAvatar, updateUserProfile } from "../../../services/api";
 import { useAlertModal } from "../../../contexts/AlertModalContext";
 
 const MENU_GROUPS = [
-  [
-    { label: "My Reviews", path: "/(client)/profile/reviews" },
-    { label: "Payment Methods", path: "/(client)/profile/payment-methods" },
-    { label: "Manage Addresses", path: "/(client)/profile/addresses" },
-    { label: "Transaction History", path: "/(client)/profile/transactions" },
-  ],
-  [
-    { label: "Change Password", path: "/(client)/profile/change-password" },
-    {
-      label: "Notification Preferences",
-      path: "/(client)/profile/notification-preferences",
-    },
-    { label: "Privacy Settings", path: "/(client)/profile/privacy-settings" },
-  ],
-  [
-    { label: "Help & Support", path: "/(client)/profile/help-support" },
-    { label: "Contact Us", path: "/(client)/profile/contact-us" },
-    { label: "About the App", path: "/(client)/profile/about" },
-  ],
-  [
-    { label: "Terms and Conditions", path: "/(client)/profile/terms" },
-    { label: "Privacy Policy", path: "/(client)/profile/privacy-policy" },
-  ],
-];
+  {
+    title: "Account",
+    items: [
+      { label: "My Reviews", path: "/(client)/profile/reviews", icon: "star-outline" },
+      { label: "Payment Methods", path: "/(client)/profile/payment-methods", icon: "card-outline" },
+      { label: "Manage Addresses", path: "/(client)/profile/addresses", icon: "location-outline" },
+      { label: "Transaction History", path: "/(client)/profile/transactions", icon: "receipt-outline" },
+    ],
+  },
+  {
+    title: "Preferences",
+    items: [
+      { label: "Change Password", path: "/(client)/profile/change-password", icon: "lock-closed-outline" },
+      {
+        label: "Notification Preferences",
+        path: "/(client)/profile/notification-preferences",
+        icon: "notifications-outline",
+      },
+      { label: "Privacy Settings", path: "/(client)/profile/privacy-settings", icon: "shield-checkmark-outline" },
+    ],
+  },
+  {
+    title: "Support",
+    items: [
+      { label: "Help & Support", path: "/(client)/profile/help-support", icon: "help-circle-outline" },
+      { label: "Contact Us", path: "/(client)/profile/contact-us", icon: "chatbubble-ellipses-outline" },
+      { label: "About the App", path: "/(client)/profile/about", icon: "information-circle-outline" },
+    ],
+  },
+  {
+    title: "Legal",
+    items: [
+      { label: "Terms and Conditions", path: "/(client)/profile/terms", icon: "document-text-outline" },
+      { label: "Privacy Policy", path: "/(client)/profile/privacy-policy", icon: "shield-outline" },
+    ],
+  },
+] as const;
 
 export default function ClientProfileScreen() {
   const router = useRouter();
@@ -122,34 +135,47 @@ export default function ClientProfileScreen() {
           </View>
         </View>
 
-        {MENU_GROUPS.map((group, gi) => (
-          <View
-            key={gi}
-            className="bg-card rounded-2xl mx-4 mt-3 overflow-hidden"
-            style={cardShadow}
-          >
-            {group.map((item) => (
-              <Pressable
-                key={item.label}
-                className="flex-row items-center py-4 px-4 border-b border-divider last:border-0"
-                onPress={() => router.push(item.path as any)}
-              >
-                <Text className="text-text-primary flex-1">{item.label}</Text>
-                <Ionicons
-                  name="chevron-forward"
-                  size={20}
-                  color={colors.text.muted}
-                />
-              </Pressable>
-            ))}
+        {MENU_GROUPS.map((group) => (
+          <View key={group.title}>
+            <Text className="text-text-muted text-xs font-semibold uppercase tracking-wide mx-4 mt-4 mb-1">
+              {group.title}
+            </Text>
+            <View
+              className="bg-card rounded-2xl mx-4 overflow-hidden"
+              style={cardShadow}
+            >
+              {group.items.map((item) => (
+                <Pressable
+                  key={item.label}
+                  className="flex-row items-center py-3.5 px-4 border-b border-divider last:border-0"
+                  onPress={() => router.push(item.path as any)}
+                >
+                  <View className="w-9 h-9 rounded-full bg-accent/10 items-center justify-center mr-3">
+                    <Ionicons name={item.icon} size={18} color={colors.accent.DEFAULT} />
+                  </View>
+                  <Text className="text-text-primary flex-1">{item.label}</Text>
+                  <Ionicons
+                    name="chevron-forward"
+                    size={20}
+                    color={colors.text.muted}
+                  />
+                </Pressable>
+              ))}
+            </View>
           </View>
         ))}
 
-        <View className="bg-error/10 rounded-2xl mx-4 mt-3 overflow-hidden">
+        <Text className="text-text-muted text-xs font-semibold uppercase tracking-wide mx-4 mt-4 mb-1">
+          Danger Zone
+        </Text>
+        <View className="bg-error/10 rounded-2xl mx-4 overflow-hidden">
           <Pressable
             className="flex-row items-center py-4 px-4"
             onPress={() => setLogoutVisible(true)}
           >
+            <View className="w-9 h-9 rounded-full bg-error/10 items-center justify-center mr-3">
+              <Ionicons name="log-out-outline" size={18} color={colors.error} />
+            </View>
             <Text className="text-error flex-1 font-semibold">Log Out</Text>
             <Ionicons name="chevron-forward" size={20} color={colors.error} />
           </Pressable>
@@ -157,6 +183,9 @@ export default function ClientProfileScreen() {
             className="flex-row items-center py-4 px-4 border-t border-divider"
             onPress={() => router.push("/(client)/profile/delete-account")}
           >
+            <View className="w-9 h-9 rounded-full bg-error/10 items-center justify-center mr-3">
+              <Ionicons name="trash-outline" size={18} color={colors.error} />
+            </View>
             <Text className="text-error flex-1 font-semibold">
               Delete Account
             </Text>

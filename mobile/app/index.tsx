@@ -3,16 +3,32 @@ import { View, Text, Image } from "react-native";
 import { AppIcon as Ionicons } from "../components/icons/AppIcon";
 import { useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { useAuthStore } from "../store/authStore";
+
+const MIN_SPLASH_MS = 1200;
 
 export default function SplashScreen() {
   const router = useRouter();
+  const isInitializing = useAuthStore((s) => s.isInitializing);
+  const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
+  const user = useAuthStore((s) => s.user);
 
   useEffect(() => {
+    // Wait for the persisted session to be restored before deciding where to
+    // go — a returning, still-logged-in user should land straight on their
+    // home screen (the (client)/(worker) layouts re-gate on terms/KYC as
+    // needed) instead of being routed back through Landing/Role Selection.
+    if (isInitializing) return;
+
     const timer = setTimeout(() => {
-      router.replace("/landing");
-    }, 2000);
+      if (isAuthenticated && user) {
+        router.replace(user.role === "worker" ? "/(worker)/home" : "/(client)/home");
+      } else {
+        router.replace("/landing");
+      }
+    }, MIN_SPLASH_MS);
     return () => clearTimeout(timer);
-  }, [router]);
+  }, [router, isInitializing, isAuthenticated, user]);
 
   return (
     <SafeAreaView className="flex-1 bg-white items-center justify-center">

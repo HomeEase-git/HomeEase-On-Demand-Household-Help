@@ -8,7 +8,7 @@ import StatusBadge from "../../../../components/ui/StatusBadge";
 import type { StatusType } from "../../../../components/ui/StatusBadge";
 import DangerButton from "../../../../components/ui/DangerButton";
 import OutlinedButton from "../../../../components/ui/OutlinedButton";
-import { colors } from "../../../../constants";
+import { colors, cardShadow } from "../../../../constants";
 import * as api from "../../../../services/api";
 import type { Certification } from "../../../../services/api";
 import { useAlertModal } from "../../../../contexts/AlertModalContext";
@@ -88,7 +88,7 @@ export default function CertificationDetailScreen() {
     <SafeAreaView className="flex-1 bg-white">
       <ScreenHeader title="Certification Details" showBack />
       <View className="px-4 py-6">
-        <View className="w-full h-48 bg-card-dark rounded-2xl items-center justify-center mb-4 overflow-hidden">
+        <View className="w-full h-48 bg-card-dark rounded-2xl items-center justify-center mb-4 overflow-hidden" style={cardShadow}>
           {cert.documentUrl ? (
             <Image
               source={{ uri: cert.documentUrl }}
@@ -107,7 +107,7 @@ export default function CertificationDetailScreen() {
           )}
         </View>
 
-        <View className="bg-card rounded-2xl p-4 mb-4">
+        <View className="bg-card rounded-2xl p-4 mb-4" style={cardShadow}>
           <Text className="text-text-primary font-bold text-lg">{cert.name}</Text>
           <Text className="text-text-secondary text-sm mt-1">
             {cert.issuer}

@@ -28,14 +28,18 @@ export const GenericConfirmationModal: React.FC<Props> = ({
   return (
     <ModalWrapper visible={visible} onClose={onCancel}>
       <View className="items-center mb-4">
-        <Ionicons name="warning-outline" size={48} color={colors.warning} />
+        <View className="w-16 h-16 rounded-full bg-warning/10 items-center justify-center">
+          <Ionicons name="warning-outline" size={36} color={colors.warning} />
+        </View>
       </View>
       <Text className="text-text-primary font-bold text-lg text-center">
         {title}
       </Text>
-      <Text className="text-brand text-center mt-2">{message}</Text>
+      <Text className="text-text-secondary text-center mt-2">{message}</Text>
       <View className="flex-row gap-3 mt-6">
-        <OutlinedButton label={cancelLabel} onPress={onCancel} />
+        <View className="flex-1">
+          <OutlinedButton label={cancelLabel} onPress={onCancel} />
+        </View>
         <View className="flex-1">
           <PrimaryButton label={confirmLabel} onPress={onConfirm} />
         </View>

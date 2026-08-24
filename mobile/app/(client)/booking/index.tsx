@@ -15,13 +15,14 @@ import {
 import { getBookings } from "../../../services/api";
 import { colors } from "../../../constants";
 import { useAlertModal } from "../../../contexts/AlertModalContext";
+import { useTabRefresh } from "../../../hooks/useTabRefresh";
 
 const TABS = ["Pending", "Active", "Completed", "Cancelled"] as const;
 
 // Buckets the granular status into one of the four tabs shown on this screen
 const TAB_STATUS_MAP: Record<(typeof TABS)[number], BookingStatus[]> = {
   Pending: ["Pending", "QuoteSubmitted"],
-  Active: ["Accepted", "Active", "InProgress", "QuoteApproved", "PendingCompletion"],
+  Active: ["Accepted", "InProgress", "QuoteApproved", "PendingCompletion"],
   Completed: ["Completed"],
   Cancelled: ["Cancelled", "Disputed"],
 };
@@ -66,6 +67,8 @@ export default function MyBookingsScreen() {
       loadBookings();
     }, []),
   );
+
+  useTabRefresh("client:booking", loadBookings);
 
   const filtered = bookings.filter((b) => tabForStatus(b.status) === activeTab);
 

@@ -6,6 +6,7 @@ import { useRouter } from "expo-router";
 import ScreenHeader from "../../components/ui/ScreenHeader";
 import PrimaryButton from "../../components/ui/PrimaryButton";
 import { colors } from "../../constants";
+import { KycVerifyIllustration } from "../../components/illustrations/Illustrations";
 
 export default function KycLandingScreen() {
   const router = useRouter();
@@ -17,15 +18,8 @@ export default function KycLandingScreen() {
         className="flex-1"
         contentContainerStyle={{ paddingHorizontal: 24, paddingBottom: 40 }}
       >
-        {/* TODO: Replace with shield/verification illustration */}
         <View className="items-center my-6">
-          <View className="w-32 h-32 bg-accent/20 rounded-full items-center justify-center">
-            <Ionicons
-              name="shield-checkmark-outline"
-              size={80}
-              color={colors.accent.DEFAULT}
-            />
-          </View>
+          <KycVerifyIllustration size={160} />
         </View>
         <Text className="text-text-primary text-xl font-bold text-center">
           Verify Your Identity

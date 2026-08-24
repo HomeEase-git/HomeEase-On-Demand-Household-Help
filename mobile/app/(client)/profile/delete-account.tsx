@@ -8,7 +8,6 @@ import ScreenHeader from "../../../components/ui/ScreenHeader";
 import InputField from "../../../components/ui/InputField";
 import DangerButton from "../../../components/ui/DangerButton";
 import OutlinedButton from "../../../components/ui/OutlinedButton";
-import GenericConfirmationModal from "../../../components/modals/GenericConfirmationModal";
 import GenericSuccessModal from "../../../components/modals/GenericSuccessModal";
 import { useAuthStore } from "../../../store/authStore";
 import { colors } from "../../../constants";
@@ -21,18 +20,12 @@ export default function DeleteAccountScreen() {
   const toast = useToastContext();
   const [confirmText, setConfirmText] = useState("");
   const [password, setPassword] = useState("");
-  const [modalVisible, setModalVisible] = useState(false);
   const [successVisible, setSuccessVisible] = useState(false);
   const [deleting, setDeleting] = useState(false);
 
   const canDelete = confirmText === "DELETE" && password.length > 0;
 
-  const handleDelete = () => {
-    setModalVisible(true);
-  };
-
-  const onConfirmDelete = async () => {
-    setModalVisible(false);
+  const handleDelete = async () => {
     setDeleting(true);
     try {
       await api.deleteAccount(password);
@@ -66,7 +59,7 @@ export default function DeleteAccountScreen() {
         <Text className="text-error text-2xl font-bold text-center mb-4">
           Delete Your Account?
         </Text>
-        <View className="bg-error/10 border border-error rounded-xl p-4 mb-4">
+        <View className="bg-error/10 border border-error rounded-2xl p-4 mb-4">
           <Text className="text-error text-sm">
             This will permanently remove your account, bookings, and data. This
             action cannot be undone.
@@ -98,15 +91,6 @@ export default function DeleteAccountScreen() {
           <OutlinedButton label="Cancel" onPress={() => router.back()} />
         </View>
       </ScrollView>
-      <GenericConfirmationModal
-        visible={modalVisible}
-        title="Final confirmation"
-        message="Are you sure you want to delete your account? This cannot be undone."
-        confirmLabel="Delete"
-        cancelLabel="Cancel"
-        onConfirm={onConfirmDelete}
-        onCancel={() => setModalVisible(false)}
-      />
       <GenericSuccessModal
         visible={successVisible}
         title="Your account has been permanently deleted"

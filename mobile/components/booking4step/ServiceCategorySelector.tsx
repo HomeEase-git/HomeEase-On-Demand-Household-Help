@@ -2,6 +2,7 @@ import React from "react";
 import { View, Text, Pressable } from "react-native";
 import { AppIcon as Ionicons } from "../icons/AppIcon";
 import { colors } from "../../constants";
+import { getCategoryIcon } from "../../utils/categoryIcons";
 import type { ServiceScopeType, ScopeField } from "../../types/booking4step.types";
 
 export type ServiceCategoryOption = {
@@ -12,26 +13,8 @@ export type ServiceCategoryOption = {
   scopeType: ServiceScopeType;
   hasCondition: boolean;
   scopeFields: ScopeField[];
+  icon?: string | null;
 };
-
-// Best-effort icon per category name — falls back to a generic icon for
-// whatever else is seeded (categories are DB-driven via GET /services, not
-// hardcoded, so this can't be an exhaustive map).
-const CATEGORY_ICONS: Record<string, string> = {
-  "standard clean": "sparkles-outline",
-  "deep clean": "water-outline",
-  handyman: "hammer-outline",
-  "heavy lifting": "barbell-outline",
-  cleaning: "sparkles-outline",
-  plumbing: "water-outline",
-  electrical: "flash-outline",
-  aircon: "snow-outline",
-  carpentry: "hammer-outline",
-};
-
-function iconFor(name: string): string {
-  return CATEGORY_ICONS[name.toLowerCase()] ?? "construct-outline";
-}
 
 type Props = {
   categories: ServiceCategoryOption[];
@@ -69,7 +52,7 @@ export default function ServiceCategorySelector({ categories, selectedId, onSele
               }`}
             >
               <Ionicons
-                name={iconFor(cat.name) as any}
+                name={(cat.icon || getCategoryIcon(cat.name)) as any}
                 size={26}
                 color={isSelected ? colors.accent.DEFAULT : colors.text.secondary}
               />

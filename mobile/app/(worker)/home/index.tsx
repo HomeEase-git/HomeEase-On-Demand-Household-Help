@@ -11,6 +11,8 @@ import { useAuthStore } from "../../../store/authStore";
 import { useNotificationStore } from "../../../store/notificationStore";
 import * as api from "../../../services/api";
 import { colors } from "../../../constants";
+import { getWorkerNetAmount } from "../../../utils/pricing";
+import { useTabRefresh } from "../../../hooks/useTabRefresh";
 
 const todayStr = () => new Date().toISOString().slice(0, 10);
 
@@ -21,6 +23,8 @@ export default function WorkerHomeScreen() {
   const user = useAuthStore((s) => s.user);
   const unreadCount = useNotificationStore((s) => s.unreadCount);
   const [capacity, setCapacity] = React.useState<{ activeJobCount: number; maxConcurrentJobs: number } | null>(null);
+  const [declineCooldownUntil, setDeclineCooldownUntil] = React.useState<string | null>(null);
+  const [walletBalance, setWalletBalance] = React.useState<number | null>(null);
 
   const firstName = user?.name?.split(" ")[0] ?? "Worker";
   const pending = jobs.filter((j) => j.status === "Pending");
@@ -28,14 +32,21 @@ export default function WorkerHomeScreen() {
   const todayJobs = jobs.filter((j) => j.scheduledDate?.slice(0, 10) === today);
   const todayEarnings = jobs
     .filter((j) => j.status === "Completed" && j.scheduledDate?.slice(0, 10) === today)
-    .reduce((sum, j) => sum + (j.finalPrice ?? j.estimatedPrice), 0);
+    .reduce((sum, j) => sum + getWorkerNetAmount(j), 0);
 
   const load = useCallback(async () => {
     if (!user?.id) return;
     try {
-      const [bookings, capacityData] = await Promise.all([api.getBookings(), api.getWorkerCapacity()]);
+      const [bookings, capacityData, profile, wallet] = await Promise.all([
+        api.getBookings(),
+        api.getWorkerCapacity(),
+        api.getUserProfile(),
+        api.getMyWallet().catch(() => null),
+      ]);
       setJobs((bookings as ApiWorkerBooking[]).map(mapApiJob));
       setCapacity(capacityData);
+      setDeclineCooldownUntil(profile.declineCooldownUntil ?? null);
+      setWalletBalance(wallet?.balance ?? null);
     } catch (error) {
       console.error("Load worker home error:", error);
     }
@@ -46,6 +57,8 @@ export default function WorkerHomeScreen() {
       load();
     }, [load]),
   );
+
+  useTabRefresh("worker:home", load);
 
   return (
     <SafeAreaView className="flex-1 bg-white" edges={["top"]}>
@@ -122,6 +135,35 @@ export default function WorkerHomeScreen() {
           </Pressable>
         )}
 
+        {walletBalance != null && (
+          <Pressable
+            className="flex-row items-center justify-between bg-card rounded-xl p-3 mx-4 mt-3"
+            onPress={() => router.push("/(worker)/earnings/wallet")}
+          >
+            <View className="flex-row items-center">
+              <Ionicons name="wallet-outline" size={18} color={colors.text.secondary} />
+              <Text className="text-text-secondary text-sm ml-2">Wallet balance</Text>
+            </View>
+            <Text className="font-bold text-sm text-text-primary">₱{walletBalance.toFixed(2)}</Text>
+          </Pressable>
+        )}
+
+        {declineCooldownUntil && new Date(declineCooldownUntil) > new Date() && (
+          <View className="flex-row items-center bg-warning/10 rounded-xl p-3 mx-4 mt-3">
+            <Ionicons name="pause-circle-outline" size={18} color={colors.warning} />
+            <Text className="text-warning text-sm ml-2 flex-1">
+              New job matching paused until{" "}
+              {new Date(declineCooldownUntil).toLocaleString([], {
+                month: "short",
+                day: "numeric",
+                hour: "numeric",
+                minute: "2-digit",
+              })}{" "}
+              due to recent declines.
+            </Text>
+          </View>
+        )}
+
         <View className="mx-4 mt-4">
           <SectionHeader
             title="Upcoming Jobs"
@@ -143,6 +185,7 @@ export default function WorkerHomeScreen() {
                   request={{
                     id: job.id,
                     client: job.clientName,
+                    clientAvatar: job.clientAvatar,
                     service: job.service,
                     date: job.scheduledDate,
                     amount: job.finalPrice ?? job.estimatedPrice,
