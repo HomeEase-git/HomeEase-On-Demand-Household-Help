@@ -24,6 +24,9 @@ import {
   deleteCertification,
   getPayoutMethod,
   updatePayoutMethod,
+  getTaxInfo,
+  updateTaxInfo,
+  getMyTaxCertificates,
   getMyAvailabilitySlots,
   updateAvailabilitySlots,
   updateHourlyRate,
@@ -46,6 +49,7 @@ import {
   validateCreateCertification,
   validateUpdateCertification,
   validateUpdatePayoutMethod,
+  validateUpdateTaxInfo,
   validateUpdateAvailabilitySlots,
   validateUpdateHourlyRate,
   validateCreatePackage,
@@ -148,6 +152,10 @@ router.patch(
   validateUpdatePayoutMethod,
   updatePayoutMethod
 );
+
+router.get('/me/tax-info', authMiddleware, restrictTo('WORKER'), getTaxInfo);
+router.patch('/me/tax-info', authMiddleware, restrictTo('WORKER'), validateUpdateTaxInfo, updateTaxInfo);
+router.get('/me/tax-certificates', authMiddleware, restrictTo('WORKER'), getMyTaxCertificates);
 
 router.get('/me/availability-slots', authMiddleware, restrictTo('WORKER'), getMyAvailabilitySlots);
 router.patch(

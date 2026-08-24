@@ -176,10 +176,10 @@ export default function Sidebar({ isOpen, onClose }) {
             <span>Logout</span>
           </button>
         </nav>
-        {showLogoutModal && (
-          <LogoutConfirmModal onCancel={handleCancelLogout} onConfirm={handleConfirmLogout} />
-        )}
       </aside>
+      {showLogoutModal && (
+        <LogoutConfirmModal onCancel={handleCancelLogout} onConfirm={handleConfirmLogout} />
+      )}
     </>
   )
 }

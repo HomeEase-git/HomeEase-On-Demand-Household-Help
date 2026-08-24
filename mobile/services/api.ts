@@ -1737,6 +1737,52 @@ export async function updatePayoutMethod(data: {
   }
 }
 
+export type TaxInfo = {
+  tinOnFile: boolean;
+  maskedTin: string | null;
+  tinVerifiedAt: string | null;
+};
+
+export async function getTaxInfo(): Promise<TaxInfo> {
+  try {
+    const response = await api.get('/workers/me/tax-info');
+    return response;
+  } catch (error) {
+    console.error('Get tax info error:', error);
+    throw error;
+  }
+}
+
+export async function updateTaxInfo(tin: string): Promise<TaxInfo> {
+  try {
+    const response = await api.patch('/workers/me/tax-info', { tin });
+    return response;
+  } catch (error) {
+    console.error('Update tax info error:', error);
+    throw error;
+  }
+}
+
+export type TaxCertificate = {
+  id: string;
+  periodStart: string;
+  periodEnd: string;
+  totalIncomePayments: number;
+  totalTaxWithheld: number;
+  issuedAt: string;
+  downloadUrl: string | null;
+};
+
+export async function getMyTaxCertificates(): Promise<TaxCertificate[]> {
+  try {
+    const response = await api.get('/workers/me/tax-certificates');
+    return response ?? [];
+  } catch (error) {
+    console.error('Get tax certificates error:', error);
+    throw error;
+  }
+}
+
 // ============================================================================
 // PROFILE ENDPOINTS
 // ============================================================================

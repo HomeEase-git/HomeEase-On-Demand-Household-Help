@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import { errorResponse } from '../utils/errorResponse';
 import { KYC_DOCUMENT_TYPES } from '../utils/kycDocumentTypes';
+import { isValidTin } from '../utils/taxId';
 
 /**
  * Validates that required fields are present and returns 400 if missing.
@@ -387,6 +388,18 @@ export const validateUpdatePayoutMethod = (
 
   if (payoutAccountNumber !== undefined && typeof payoutAccountNumber !== 'string') {
     return res.status(400).json(errorResponse(400, 'payoutAccountNumber must be a string'));
+  }
+
+  return next();
+};
+
+export const validateUpdateTaxInfo = (req: Request, res: Response, next: NextFunction) => {
+  const { tin } = req.body;
+
+  if (typeof tin !== 'string' || !isValidTin(tin)) {
+    return res
+      .status(400)
+      .json(errorResponse(400, 'tin must be a valid Philippine TIN (e.g. 000-000-000 or 000-000-000-000)'));
   }
 
   return next();

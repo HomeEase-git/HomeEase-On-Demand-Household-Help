@@ -8,13 +8,15 @@ import ErrorState from '../components/common/ErrorState'
 import Pagination from '../components/common/Pagination'
 import { fetchDisputes } from '../services/disputes'
 
+const PAGE_SIZE = 10
+
 const SUB_NAV = [
   { to: '/payments', label: 'All Transactions' },
   { to: '/payments/refunds', label: 'Refund History' },
   { to: '/payments/payouts', label: 'Payout Distribution' },
+  { to: '/payments/tax-certificates', label: 'Tax Certificates' },
+  { to: '/payments/tax-remittance', label: 'Tax Remittance' },
 ]
-
-const PAGE_SIZE = 10
 
 function formatPeso(amount) {
   return `₱${amount?.toLocaleString() ?? '0'}`

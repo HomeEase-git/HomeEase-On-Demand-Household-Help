@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import PageHeader from '../components/common/PageHeader'
+import SubNav from '../components/common/SubNav'
 import SearchBar from '../components/common/SearchBar'
 import FilterTabs from '../components/common/FilterTabs'
 import SectionCard from '../components/common/SectionCard'
@@ -12,6 +13,11 @@ import { useToast } from '../context/ToastContext'
 import { usePolling } from '../hooks/usePolling'
 
 const POLL_INTERVAL_MS = 5000
+
+const SUB_NAV = [
+  { to: '/bookings', label: 'All Bookings' },
+  { to: '/bookings/dispute', label: 'Booking Dispute' },
+]
 
 const STATUS_TABS = ['Open', 'Resolved']
 
@@ -133,6 +139,7 @@ export default function BookingDispute() {
   return (
     <>
       <PageHeader title="Dispute Resolution Center" subtitle="Review and resolve disputed bookings" />
+      <SubNav items={SUB_NAV} />
       <div className="toolbar">
         <SearchBar placeholder="Search disputes..." value={search} onChange={setSearch} />
         <FilterTabs tabs={STATUS_TABS} activeTab={statusTab} onTabChange={setStatusTab} />

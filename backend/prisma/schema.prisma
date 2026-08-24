@@ -370,6 +370,12 @@ model WorkerProfile {
   payoutAccountName   String?
   payoutAccountNumber String?
 
+  // BIR Tax Identification Number — required before a Form 2307 withholding
+  // certificate can be generated for this worker (see taxCertificateService).
+  // Format: 000-000-000 or 000-000-000-000 with branch code (see utils/taxId.ts).
+  tin           String?   @unique
+  tinVerifiedAt DateTime?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -562,6 +568,13 @@ model ServiceType {
   // ServiceScopeType/ServiceScopeField for the CUSTOM case.
   scopeType    ServiceScopeType @default(ROOM_BASED)
   hasCondition Boolean          @default(true)
+
+  // Ionicons outline name (e.g. "water-outline") picked from the curated
+  // list in backend/src/constants/serviceIcons.ts — mobile renders this via
+  // <Ionicons name={icon} />. Null means the category predates this field or
+  // was never assigned one; mobile falls back to its static name-based guess
+  // (utils/categoryIcons.ts) in that case.
+  icon String?
 
   // Relations
   workers     WorkerProfile[]
@@ -905,8 +918,8 @@ model Payment {
   commissionRate   Float @default(0.10)
   commissionAmount Float
 
-  // Withholding tax (BIR compliance for professional fees)
-  withholdingTaxRate   Float @default(0.05)
+  // Withholding tax (BIR compliance — contractor-category workers, ATC WC158)
+  withholdingTaxRate   Float @default(0.02)
   withholdingTaxAmount Float
 
   // Worker receives
@@ -1192,7 +1205,7 @@ model AppSettings {
   // Platform configuration — live business rules read at runtime by the
   // booking/payment/worker-availability flows (see appSettingsService).
   commissionRate       Float @default(0.10)
-  withholdingTaxRate   Float @default(0.05)
+  withholdingTaxRate   Float @default(0.02)
   maxSlotsPerDay       Int   @default(2)
   pendingExpiryMinutes Int   @default(60)
   geofenceRadiusMeters Int   @default(100)
@@ -1220,4 +1233,74 @@ model AppSettings {
   adminFeePerJob Float @default(20)
 
   updatedAt DateTime @updatedAt
+}
+
+enum TaxCertificateStatus {
+  DRAFT // aggregated + PDF generated, not yet released to the worker
+  ISSUED // visible to the worker in-app (see workerController.getMyTaxCertificates)
+}
+
+// BIR Form 2307 (Certificate of Creditable Tax Withheld at Source) data —
+// one row per worker per reporting period. Generated from Payment rows by
+// taxCertificateService; see that file for the caveat that the rendered PDF
+// is not guaranteed to match BIR's exact official template.
+model TaxCertificate {
+  id       String @id @default(cuid())
+  workerId String // soft reference — User.id of the worker, same convention as Payout.workerId
+
+  periodStart DateTime
+  periodEnd   DateTime
+
+  // Snapshots at generation time — same "don't let a later profile edit
+  // silently rewrite an already-issued record" convention as
+  // Payout.accountName/accountNumber.
+  workerName String
+  workerTin  String
+
+  totalIncomePayments Float // sum of (Payment.subtotal - Payment.commissionAmount) captured in the period
+  totalTaxWithheld    Float // sum of Payment.withholdingTaxAmount captured in the period
+
+  pdfPath String // Supabase Storage object path in a PRIVATE bucket — a signed URL is minted on read, never stored here
+  status  TaxCertificateStatus @default(DRAFT)
+
+  issuedAt    DateTime?
+  generatedBy String // soft reference — User.id of the admin who triggered generation
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([workerId, periodStart, periodEnd])
+  @@index([workerId])
+  @@index([status])
+}
+
+enum TaxRemittanceStatus {
+  PENDING
+  REMITTED
+}
+
+// Bookkeeping/audit trail for the platform's own BIR remittance of withheld
+// tax — there is no public BIR e-filing API, so actual filing/payment
+// happens outside the app (eFPS or an authorized bank); this just tracks
+// that it happened. One row per reporting period, aggregated across all
+// workers. See taxRemittanceService.
+model TaxRemittance {
+  id String @id @default(cuid())
+
+  periodStart DateTime
+  periodEnd   DateTime
+
+  totalTaxWithheld Float // sum of Payment.withholdingTaxAmount captured in the period, across all workers
+
+  status          TaxRemittanceStatus @default(PENDING)
+  referenceNumber String? // BIR/bank OR number, set once actually filed/paid
+  remittedAt      DateTime?
+  remittedBy      String? // soft reference — User.id of the admin who marked this remitted
+  notes           String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([periodStart, periodEnd])
+  @@index([status])
 }

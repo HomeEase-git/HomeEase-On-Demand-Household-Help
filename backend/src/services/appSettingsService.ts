@@ -30,7 +30,7 @@ const FALLBACK_DEFAULTS: AppSettingsConfig = {
   supportEmail: 'support@homeease.dev',
   notificationsEnabled: true,
   commissionRate: 0.1,
-  withholdingTaxRate: 0.05,
+  withholdingTaxRate: 0.02,
   maxSlotsPerDay: 2,
   pendingExpiryMinutes: 60,
   geofenceRadiusMeters: 100,

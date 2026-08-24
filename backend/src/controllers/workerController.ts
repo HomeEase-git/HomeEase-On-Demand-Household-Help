@@ -6,6 +6,8 @@ import { toDayStart } from '@services/workerAvailabilityService';
 import { getAppSettings } from '@services/appSettingsService';
 import { parseWorkerResume } from '@services/resumeParseService';
 import { computeWorkerTier, tierMultiplier } from '@utils/workerTier';
+import { normalizeTin, maskTin } from '@utils/taxId';
+import { getCertificateDownloadUrl } from '@services/taxCertificateService';
 import type { JwtPayload } from '@/types/index';
 
 interface AuthRequest extends Request {
@@ -1664,6 +1666,118 @@ export const updatePayoutMethod = async (req: AuthRequest, res: Response) => {
   } catch (error) {
     console.error('Error updating payout method:', error);
     return res.status(500).json(errorResponse(500, 'Failed to update payout method'));
+  }
+};
+
+/**
+ * GET /api/workers/me/tax-info
+ * Get the authenticated worker's TIN-on-file, masked (worker only). Masked
+ * because this is echoed back to the same screen the worker just typed it
+ * into — full plaintext isn't needed for a "yes I have one saved" check.
+ */
+export const getTaxInfo = async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      return res.status(401).json(errorResponse(401, 'Not authenticated'));
+    }
+
+    const worker = await prisma.workerProfile.findUnique({
+      where: { userId: req.user.userId },
+      select: { tin: true, tinVerifiedAt: true },
+    });
+
+    if (!worker) {
+      return res.status(404).json(errorResponse(404, 'Worker profile not found'));
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: 'Tax info retrieved successfully',
+      data: {
+        tinOnFile: !!worker.tin,
+        maskedTin: worker.tin ? maskTin(worker.tin) : null,
+        tinVerifiedAt: worker.tinVerifiedAt,
+      },
+    });
+  } catch (error) {
+    console.error('Error fetching tax info:', error);
+    return res.status(500).json(errorResponse(500, 'Failed to fetch tax info'));
+  }
+};
+
+/**
+ * PATCH /api/workers/me/tax-info
+ * Set the authenticated worker's TIN (worker only). Format validated by
+ * validateUpdateTaxInfo before this runs. A worker's TIN is not required to
+ * use the app — it's only required before a 2307 certificate can be
+ * generated for them (see taxCertificateService.generateQuarterlyCertificates).
+ */
+export const updateTaxInfo = async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      return res.status(401).json(errorResponse(401, 'Not authenticated'));
+    }
+
+    const { tin } = req.body as { tin: string };
+    const normalized = normalizeTin(tin);
+
+    const updated = await prisma.workerProfile.update({
+      where: { userId: req.user.userId },
+      data: { tin: normalized, tinVerifiedAt: null },
+      select: { tin: true, tinVerifiedAt: true },
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: 'Tax info updated successfully',
+      data: { tinOnFile: true, maskedTin: maskTin(updated.tin!), tinVerifiedAt: updated.tinVerifiedAt },
+    });
+  } catch (error: any) {
+    if (error?.code === 'P2002') {
+      return res.status(409).json(errorResponse(409, 'This TIN is already on file for another worker'));
+    }
+    console.error('Error updating tax info:', error);
+    return res.status(500).json(errorResponse(500, 'Failed to update tax info'));
+  }
+};
+
+/**
+ * GET /api/workers/me/tax-certificates
+ * Lists the authenticated worker's ISSUED Form 2307 certificates with a
+ * fresh short-lived signed download URL per certificate (worker only). Draft
+ * certificates (generated but not yet issued) are never returned here.
+ */
+export const getMyTaxCertificates = async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      return res.status(401).json(errorResponse(401, 'Not authenticated'));
+    }
+
+    const certificates = await prisma.taxCertificate.findMany({
+      where: { workerId: req.user.userId, status: 'ISSUED' },
+      orderBy: { periodStart: 'desc' },
+    });
+
+    const data = await Promise.all(
+      certificates.map(async (cert) => ({
+        id: cert.id,
+        periodStart: cert.periodStart,
+        periodEnd: cert.periodEnd,
+        totalIncomePayments: cert.totalIncomePayments,
+        totalTaxWithheld: cert.totalTaxWithheld,
+        issuedAt: cert.issuedAt,
+        downloadUrl: await getCertificateDownloadUrl(cert.pdfPath),
+      }))
+    );
+
+    return res.status(200).json({
+      success: true,
+      message: 'Tax certificates retrieved successfully',
+      data,
+    });
+  } catch (error) {
+    console.error('Error fetching tax certificates:', error);
+    return res.status(500).json(errorResponse(500, 'Failed to fetch tax certificates'));
   }
 };
 

@@ -190,13 +190,22 @@ export async function refundOrVoidPayment(bookingId: string, reason: string) {
 
   if (payment.status === 'COMPLETED' && payment.xenditInvoiceId) {
     // Don't mark REFUNDED in our DB unless the gateway refund actually
-    // succeeded — leaving escrowStatus HELD on failure so it's visible for
-    // manual follow-up rather than silently lying about the client's money.
-    await createRefund({
+    // succeeded — leaving escrowStatus HELD on failure (or a still-PENDING
+    // refund — there's no webhook here to pick up an async confirmation, so
+    // treat PENDING the same as not-yet-done) so it's visible for manual
+    // follow-up rather than silently lying about the client's money. `reason`
+    // here is our own free-text record (Payment.refundReason below); Xendit's
+    // API only accepts its fixed enum, so REQUESTED_BY_CUSTOMER is sent
+    // regardless — this path is always a client-initiated refund.
+    const refund = await createRefund({
       xenditInvoiceId: payment.xenditInvoiceId,
       amountPesos: payment.capturedAmount ?? payment.totalAmount,
-      reason,
+      reason: 'REQUESTED_BY_CUSTOMER',
     });
+
+    if (refund.status !== 'SUCCEEDED') {
+      throw new Error(`Xendit refund for invoice ${payment.xenditInvoiceId} did not succeed (status: ${refund.status})`);
+    }
   }
 
   return prisma.payment.update({

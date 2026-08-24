@@ -1,5 +1,6 @@
 import React from "react";
-import { View, Image } from "react-native";
+import { View } from "react-native";
+import { Image } from "expo-image";
 import { AppIcon as Ionicons } from "../icons/AppIcon";
 import { colors } from "../../constants";
 
@@ -30,7 +31,10 @@ export const Avatar: React.FC<Props> = ({ uri, size = "md", showBadge }) => {
         <Image
           source={{ uri }}
           style={{ width: pixelSize, height: pixelSize }}
-          resizeMode="cover"
+          contentFit="cover"
+          // Disk-cached across app restarts — avatars don't need to be
+          // re-downloaded/re-decoded every time this list scrolls back into view.
+          cachePolicy="disk"
         />
       ) : (
         <Ionicons name="person" size={iconSize} color={colors.text.muted} />

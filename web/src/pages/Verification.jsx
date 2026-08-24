@@ -9,6 +9,7 @@ import ErrorState from '../components/common/ErrorState'
 import Pagination from '../components/common/Pagination'
 import { fetchVerifications } from '../services/verification'
 import { usePolling } from '../hooks/usePolling'
+import { humanizeEnum, humanizeList } from '../utils/verificationLabels'
 
 const TYPE_MAP = { All: 'all', Clients: 'client', Workers: 'worker' }
 const POLL_INTERVAL_MS = 8000
@@ -22,8 +23,11 @@ export default function Verification() {
   const [error, setError] = useState(null)
   const [page, setPage] = useState(1)
 
-  const load = useCallback(async () => {
-    setLoading(true)
+  // `silent` skips the loading flag so the 8s background poll refresh
+  // doesn't yank the table out and flash the spinner over an already
+  // -rendered list every cycle.
+  const load = useCallback(async (silent = false) => {
+    if (!silent) setLoading(true)
     setError(null)
     try {
       const data = await fetchVerifications({
@@ -33,10 +37,12 @@ export default function Verification() {
       })
       setRecords(data)
     } catch (err) {
-      setError(err.message || 'Failed to load verifications')
-      setRecords([])
+      if (!silent) {
+        setError(err.message || 'Failed to load verifications')
+        setRecords([])
+      }
     } finally {
-      setLoading(false)
+      if (!silent) setLoading(false)
     }
   }, [filterTab, search])
 
@@ -44,7 +50,7 @@ export default function Verification() {
     load()
   }, [load])
 
-  usePolling(load, POLL_INTERVAL_MS)
+  usePolling(() => load(true), POLL_INTERVAL_MS)
 
   useEffect(() => {
     setPage(1)
@@ -100,8 +106,8 @@ export default function Verification() {
                     <tr key={row.id}>
                       <td>{row.name}</td>
                       <td>{row.email}</td>
-                      <td style={{ textTransform: 'capitalize' }}>{row.type}</td>
-                      <td>{row.services}</td>
+                      <td>{humanizeEnum(row.type)}</td>
+                      <td>{humanizeList(row.services)}</td>
                       <td>{row.submitted}</td>
                       <td>
                         <div className="row-actions">

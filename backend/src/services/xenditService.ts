@@ -59,23 +59,39 @@ export async function retrieveInvoice(invoiceId: string) {
   return res.data;
 }
 
+// Xendit's fixed reason enum for the Refunds API — arbitrary client-supplied
+// text (e.g. a client's free-text cancellation reason) does not fit here and
+// must be mapped to 'OTHERS'; the free text itself still belongs in our own
+// Payment.refundReason column, not in this API call.
+export type XenditRefundReason = 'FRAUDULENT' | 'DUPLICATE' | 'REQUESTED_BY_CUSTOMER' | 'CANCELLATION' | 'OTHERS';
+
 interface CreateRefundParams {
   xenditInvoiceId: string;
   amountPesos: number;
-  reason?: string;
+  reason?: XenditRefundReason;
+}
+
+export interface XenditRefund {
+  id: string;
+  invoice_id: string;
+  amount: number;
+  currency: string;
+  status: 'PENDING' | 'SUCCEEDED' | 'FAILED' | 'CANCELLED';
+  failure_code: string | null;
 }
 
 /**
- * UNCONFIRMED — Xendit's Refunds API shape could not be validated against
- * live docs (network-blocked when this was built; only Invoices and Payouts
- * were hand-tested via curl). Targets Xendit's unified /refunds endpoint
- * keyed by invoice_id. Confirm the exact request/response shape against a
- * real sandbox refund before relying on this in production.
+ * Request/response shape confirmed 2026-08-22 against Xendit's public API
+ * reference and official Node SDK docs (POST /refunds, keyed by invoice_id,
+ * fixed `reason` enum, `currency` required alongside `amount`). Not yet
+ * exercised against a live sandbox call — do one real test-mode refund with
+ * real API keys before fully trusting this in production.
  */
-export async function createRefund(params: CreateRefundParams) {
+export async function createRefund(params: CreateRefundParams): Promise<XenditRefund> {
   const res = await secretClient().post('/refunds', {
     invoice_id: params.xenditInvoiceId,
     amount: params.amountPesos,
+    currency: 'PHP',
     reason: params.reason ?? 'REQUESTED_BY_CUSTOMER',
   });
 

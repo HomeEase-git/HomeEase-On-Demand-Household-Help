@@ -84,6 +84,18 @@ export default function PayoutMethodScreen() {
             {methodInfo ? "Edit" : "Set up"}
           </Text>
         </View>
+        <View className="bg-card rounded-2xl p-4 flex-row items-center justify-between mb-4" style={cardShadow}>
+          <View className="flex-1">
+            <Text className="text-text-primary font-bold">Tax Information</Text>
+            <Text className="text-text-secondary text-sm">TIN and downloadable tax documents</Text>
+          </View>
+          <Text
+            className="text-accent font-semibold"
+            onPress={() => router.push("/(worker)/earnings/tax-info")}
+          >
+            View
+          </Text>
+        </View>
         <Text className="text-text-primary font-bold mb-2">Payout History</Text>
         {loading ? (
           <View>

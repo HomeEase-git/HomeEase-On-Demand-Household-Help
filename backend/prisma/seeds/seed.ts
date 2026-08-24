@@ -269,7 +269,12 @@ async function createWorker(
     data: {
       userId: user.id,
       type: "WORKER_ONBOARDING",
-      status: kycStatus,
+      // Distinct from WorkerProfile.kycStatus — the real app only ever
+      // writes PENDING/APPROVED/REJECTED here (never SUBMITTED), since a
+      // VerificationRequest starts PENDING and only leaves that state via
+      // admin decision. See verificationController.uploadVerificationDocuments
+      // and adminVerificationController.approve/rejectVerification.
+      status: isApproved ? KYCStatus.APPROVED : KYCStatus.PENDING,
       reviewedAt: isApproved ? faker.date.recent({ days: 10 }) : null,
       aiStatus: isApproved ? "MATCH" : null,
       aiConfidence: isApproved
@@ -446,6 +451,51 @@ async function createBookingsAndPayments(
   }
 }
 
+// Clients verify identity only (no trade credentials), so this is a lighter
+// version of createWorker's verification block — just the 3 identity docs.
+async function createClientVerification(
+  client: Awaited<ReturnType<typeof createClient>>,
+  status: typeof KYCStatus.PENDING | typeof KYCStatus.APPROVED | typeof KYCStatus.REJECTED
+) {
+  const isApproved = status === KYCStatus.APPROVED;
+  const isRejected = status === KYCStatus.REJECTED;
+  const docStatus = isApproved
+    ? KycDocumentStatus.APPROVED
+    : isRejected
+    ? KycDocumentStatus.REJECTED
+    : KycDocumentStatus.PENDING;
+  const docTypes: KycDocumentType[] = [
+    KycDocumentType.GOVERNMENT_ID_FRONT,
+    KycDocumentType.GOVERNMENT_ID_BACK,
+    KycDocumentType.SELFIE,
+  ];
+
+  await prisma.verificationRequest.create({
+    data: {
+      userId: client.id,
+      type: "CLIENT_VERIFICATION",
+      status,
+      rejectionReason: isRejected ? "Selfie did not match the government ID photo." : null,
+      reviewedAt: isApproved || isRejected ? faker.date.recent({ days: 10 }) : null,
+      aiStatus: isApproved || isRejected ? "MATCH" : null,
+      aiConfidence:
+        isApproved || isRejected
+          ? faker.number.float({ min: 0.85, max: 0.99, fractionDigits: 2 })
+          : null,
+      documents: {
+        create: docTypes.map((type) => ({
+          documentType: type,
+          fileUrl: `https://example-storage.dev/kyc/${client.id}/${type.toLowerCase()}.jpg`,
+          fileName: `${type.toLowerCase()}.jpg`,
+          mimeType: "image/jpeg",
+          status: docStatus,
+          reviewedAt: isApproved || isRejected ? faker.date.recent({ days: 10 }) : null,
+        })),
+      },
+    },
+  });
+}
+
 async function main() {
   console.log("Clearing existing data...");
   await clearData();
@@ -458,6 +508,15 @@ async function main() {
   for (let i = 0; i < NUM_CLIENTS; i++) {
     clients.push(await createClient());
   }
+
+  console.log("Creating client identity verification requests...");
+  // A few clients have gone through identity verification, spanning every
+  // status so the admin Verification Management "Clients" tab has real
+  // states to review — most clients stay unverified, matching real usage.
+  await createClientVerification(clients[0], KYCStatus.PENDING);
+  await createClientVerification(clients[1], KYCStatus.PENDING);
+  await createClientVerification(clients[2], KYCStatus.APPROVED);
+  await createClientVerification(clients[3], KYCStatus.REJECTED);
 
   console.log(`Creating ${WORKERS_PER_CATEGORY} workers per category...`);
   const workers = [];
@@ -494,4 +553,4 @@ main()
   })
   .finally(async () => {
     await prisma.$disconnect();
-  });
+  });

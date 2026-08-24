@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Link, Navigate, useParams } from 'react-router-dom'
+import { Link, useParams } from 'react-router-dom'
 import PageHeader from '../components/common/PageHeader'
 import SectionCard from '../components/common/SectionCard'
 import Badge from '../components/common/Badge'
@@ -24,7 +24,13 @@ export default function ClientDetail() {
 
   if (loading) return <LoadingState message="Loading client..." />
   if (error) return <ErrorState message={error} onRetry={reload} />
-  if (!client) return <Navigate to="/users" replace />
+  if (!client) {
+    return (
+      <SectionCard>
+        <p style={{ color: 'var(--text-muted)' }}>Client not found. <Link to="/users">Back to Clients</Link></p>
+      </SectionCard>
+    )
+  }
 
   const isSuspended = client.status !== 'active'
 

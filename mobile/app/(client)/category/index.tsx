@@ -17,6 +17,7 @@ type ServiceCategory = {
   id: string;
   name: string;
   count: number;
+  icon: string | null;
 };
 
 export default function CategoryIndexScreen() {
@@ -36,6 +37,7 @@ export default function CategoryIndexScreen() {
         id: serviceType.name.toLowerCase().replace(/\s+/g, "-"),
         name: serviceType.name,
         count: serviceType.availableWorkerCount ?? 0,
+        icon: serviceType.icon ?? null,
       }));
       setServiceCategories(categories);
     } catch (err) {

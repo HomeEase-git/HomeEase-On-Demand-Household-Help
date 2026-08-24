@@ -52,6 +52,7 @@ type ServiceCategory = {
   id: string;
   name: string;
   count: number;
+  icon: string | null;
 };
 
 type HomeWorker = {
@@ -125,9 +126,12 @@ export default function ClientHomeScreen() {
     try {
       const [serviceTypes, workersResponse] = await Promise.all([
         getServiceTypes(),
+        // Only the top 3 are shown below — a small fetchLimit avoids
+        // downloading a full 50-worker page just for this preview.
         searchWorkers({
           sortBy: filters.sort,
           availableOnly: filters.availableOnly,
+          fetchLimit: 6,
         }),
       ]);
 
@@ -136,6 +140,7 @@ export default function ClientHomeScreen() {
           id: serviceType.name.toLowerCase().replace(/\s+/g, "-"),
           name: serviceType.name,
           count: serviceType.availableWorkerCount ?? 0,
+          icon: serviceType.icon ?? null,
         })),
       );
 

@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import Badge from './Badge'
+import { humanizeEnum } from '../../utils/verificationLabels'
 
 const STATUS_BADGE_VARIANT = {
   APPROVED: 'approved',
@@ -57,7 +58,14 @@ export default function DocumentViewer({ documents = [], onApproveDocument, onRe
         return (
           <div key={doc.id || doc.name} className="document-viewer__item">
             <div className="document-viewer__header">
-              <span className="document-viewer__name">{doc.name}</span>
+              <span className="document-viewer__name">
+                {humanizeEnum(doc.documentType)}
+                {doc.name && doc.name !== doc.documentType && (
+                  <span style={{ color: 'var(--text-muted)', fontWeight: 400, marginLeft: '0.5rem' }}>
+                    {doc.name}
+                  </span>
+                )}
+              </span>
               {doc.status && (
                 <Badge variant={STATUS_BADGE_VARIANT[doc.status] ?? 'pending'}>{doc.status}</Badge>
               )}

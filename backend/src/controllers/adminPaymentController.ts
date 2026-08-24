@@ -49,6 +49,7 @@ function formatPayment(record: PaymentRecord) {
     status: record.status.charAt(0) + record.status.slice(1).toLowerCase(),
     refundReason: record.refundReason,
     refundedAt: record.refundedAt,
+    xenditInvoiceId: record.xenditInvoiceId,
   };
 }
 

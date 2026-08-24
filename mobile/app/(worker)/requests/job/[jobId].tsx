@@ -20,7 +20,9 @@ import { getCurrentPosition, LocationPermissionDeniedError } from "../../../../s
 import { useAlertModal } from "../../../../contexts/AlertModalContext";
 import { usePolling } from "../../../../hooks/usePolling";
 
-const POLL_INTERVAL_MS = 8000;
+// A real-time socket layer already pushes updates here — this poll is a
+// belt-and-suspenders fallback, not the primary refresh path.
+const POLL_INTERVAL_MS = 25000;
 
 type BookingDetail = {
   id: string;

@@ -8,6 +8,7 @@ import type { JwtPayload } from '@/types/index';
 import { calculateCommission, calculateWithholdingTax } from '../utils/pricing';
 import { createInvoice } from '../services/xenditService';
 import { getAppSettings } from '@services/appSettingsService';
+import { refundOrVoidPayment } from '@services/paymentLifecycleService';
 import { translateXenditFailureReason } from '@utils/xenditFailureMessages';
 import { handleWalletTopupPaid, handleWalletTopupFailed } from './walletController';
 
@@ -447,6 +448,8 @@ export const refundPayment = async (req: AuthRequest, res: Response) => {
     const id = req.params.id as string;
     const currentUserId = req.user.userId;
     const { reason } = req.body;
+    const trimmedReason =
+      typeof reason === 'string' && reason.trim() ? reason.trim() : 'Refund requested by client';
 
     const payment = await prisma.payment.findUnique({
       where: { id },
@@ -466,15 +469,22 @@ export const refundPayment = async (req: AuthRequest, res: Response) => {
       return res.status(409).json(errorResponse(409, `Cannot refund escrow with status ${payment.escrowStatus}`));
     }
 
-    const updated = await prisma.payment.update({
-      where: { id },
-      data: {
-        escrowStatus: 'REFUNDED',
-        status: 'REFUNDED',
-        refundReason: typeof reason === 'string' && reason.trim() ? reason.trim() : null,
-        refundedAt: new Date(),
-      },
-    });
+    // Delegates to refundOrVoidPayment, which only marks the DB REFUNDED after
+    // a real Xendit refund succeeds for already-captured payments — a direct
+    // DB status flip here would silently lie about the client's money.
+    let updated;
+    try {
+      updated = await refundOrVoidPayment(payment.bookingId, trimmedReason);
+    } catch (refundError) {
+      console.error(`Xendit refund failed for payment ${id}, escrow left HELD for manual follow-up:`, refundError);
+      return res
+        .status(502)
+        .json(errorResponse(502, 'Refund could not be processed with the payment provider. Escrow is still held — please retry or contact support.'));
+    }
+
+    if (!updated) {
+      return res.status(404).json(errorResponse(404, 'Payment not found'));
+    }
 
     // Notify worker (booking.workerId is nullable — skip if unassigned)
     if (payment.booking.workerId) {
@@ -482,7 +492,7 @@ export const refundPayment = async (req: AuthRequest, res: Response) => {
         userId: payment.booking.workerId,
         type: 'PAYMENT_REFUNDED',
         title: 'Payment Refunded',
-        message: `Payment has been refunded: ${reason}`,
+        message: `Payment has been refunded: ${trimmedReason}`,
         relatedId: payment.bookingId,
       });
     }

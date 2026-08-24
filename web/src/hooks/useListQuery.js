@@ -15,7 +15,6 @@ const DEFAULT_META = { page: 1, total: 0, totalPages: 1, hasPrev: false, hasNext
 export function useListQuery(fetchFn, { initialParams = {}, deps = [], pollIntervalMs = null } = {}) {
   const { pathname } = useLocation();
   const [params, setParams] = useState(initialParams);
-
   const cacheKey = `${pathname}?${JSON.stringify(params)}`;
 
   const cachedEntry = listCache.get(cacheKey);

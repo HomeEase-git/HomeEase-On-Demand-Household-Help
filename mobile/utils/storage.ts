@@ -51,6 +51,7 @@ let cachedToken: string | null | undefined;
 // Auth Storage
 export const authStorage = {
   async saveToken(token: string) {
+    cachedToken = token;
     try {
       await AsyncStorage.setItem(STORAGE_KEYS.AUTH_TOKEN, token);
       cachedToken = token;
@@ -92,6 +93,7 @@ export const authStorage = {
   },
 
   async clearAuth() {
+    cachedToken = null;
     try {
       await AsyncStorage.removeItem(STORAGE_KEYS.AUTH_TOKEN);
       await AsyncStorage.removeItem(STORAGE_KEYS.AUTH_USER);

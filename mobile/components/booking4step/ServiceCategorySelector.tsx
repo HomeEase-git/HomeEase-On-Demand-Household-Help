@@ -13,6 +13,7 @@ export type ServiceCategoryOption = {
   scopeType: ServiceScopeType;
   hasCondition: boolean;
   scopeFields: ScopeField[];
+  icon?: string | null;
 };
 
 type Props = {
@@ -51,7 +52,7 @@ export default function ServiceCategorySelector({ categories, selectedId, onSele
               }`}
             >
               <Ionicons
-                name={getCategoryIcon(cat.name)}
+                name={(cat.icon || getCategoryIcon(cat.name)) as any}
                 size={26}
                 color={isSelected ? colors.accent.DEFAULT : colors.text.secondary}
               />

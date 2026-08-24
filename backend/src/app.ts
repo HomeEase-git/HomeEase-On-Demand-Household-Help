@@ -22,6 +22,7 @@ import adminServiceTypeRoutes from '@routes/adminServiceTypes';
 import adminAuditLogRoutes from '@routes/adminAuditLogs';
 import adminReportsRoutes from '@routes/adminReports';
 import adminSettingsRoutes from '@routes/adminSettings';
+import adminTaxRoutes from '@routes/adminTax';
 import { errorHandler } from '@middleware/errorHandler';
 
 const app = express();
@@ -64,6 +65,7 @@ app.use('/api/admin/service-types', adminServiceTypeRoutes);
 app.use('/api/admin/audit-logs', adminAuditLogRoutes);
 app.use('/api/admin/reports', adminReportsRoutes);
 app.use('/api/admin/settings', adminSettingsRoutes);
+app.use('/api/admin/tax', adminTaxRoutes);
 
 // Health check
 app.get('/health', (_req, res) => {
