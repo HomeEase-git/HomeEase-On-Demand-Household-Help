@@ -11,6 +11,33 @@ import { ensureStorageBuckets } from '@utils/ensureStorageBuckets';
 
 const PORT = process.env.PORT || 3000;
 
+// Defense-in-depth on top of the .on('error', ...) listeners already
+// attached to every Queue/Worker we construct ourselves (bookingQueue.ts,
+// payoutQueue.ts, verificationQueue.ts, and each start*Worker()) — BullMQ
+// still has at least one more internal connection (confirmed via a live
+// repro on 2026-09-03: killing local Redis crashed the process with an
+// unhandled 'error' event even with all six of those listeners in place,
+// recurring on a fixed interval independent of any request/shutdown
+// signal — never fully traced to its exact source in BullMQ's internals).
+// Only swallows errors that are specifically this app's configured Redis
+// connection failing — anything else still crashes the process as normal,
+// since resuming after a truly unknown uncaught exception risks running
+// with corrupted state. A Redis outage should degrade background job
+// scheduling, not take down the HTTP server serving unrelated
+// Postgres-backed requests.
+const REDIS_HOST = process.env.REDIS_HOST || '127.0.0.1';
+const REDIS_PORT = Number(process.env.REDIS_PORT || 6379);
+process.on('uncaughtException', (error: NodeJS.ErrnoException & { address?: string; port?: number }) => {
+  const isConfiguredRedisConnectionError =
+    error.syscall === 'connect' && error.address === REDIS_HOST && error.port === REDIS_PORT;
+  if (isConfiguredRedisConnectionError) {
+    console.error(`Unhandled Redis (${REDIS_HOST}:${REDIS_PORT}) connection error — server staying up:`, error.message);
+    return;
+  }
+  console.error('Uncaught exception, exiting:', error);
+  process.exit(1);
+});
+
 const startServer = async () => {
   try {
     // Test database connection

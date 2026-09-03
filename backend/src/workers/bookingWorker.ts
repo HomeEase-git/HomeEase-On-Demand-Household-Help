@@ -452,5 +452,12 @@ export async function startBookingWorker() {
     console.error(`Booking queue job ${job?.name}#${job?.id} failed`, err);
   });
 
+  // Mandatory per BullMQ's own docs — see the identical note in
+  // bookingQueue.ts. Distinct from 'failed' above: that's a job that ran
+  // and errored, this is the worker's own Redis connection dropping.
+  worker.on('error', (err) => {
+    console.error('bookingWorker Redis connection error:', err.message);
+  });
+
   return worker;
 }

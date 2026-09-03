@@ -154,5 +154,11 @@ export async function startPayoutWorker() {
     console.error(`Payout queue job ${job?.name}#${job?.id} failed`, err);
   });
 
+  // Mandatory per BullMQ's own docs — see the identical note in
+  // bookingQueue.ts.
+  worker.on('error', (err) => {
+    console.error('payoutWorker Redis connection error:', err.message);
+  });
+
   return worker;
 }

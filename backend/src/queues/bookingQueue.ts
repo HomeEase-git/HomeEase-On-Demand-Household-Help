@@ -25,6 +25,15 @@ export interface ExpirePendingBookingJobData {
 
 export const bookingQueue = new Queue(BOOKING_QUEUE_NAME, { connection });
 
+// Mandatory per BullMQ's own docs — Queue re-emits its Redis connection's
+// errors as an 'error' event, and an EventEmitter with no 'error' listener
+// crashes the whole process on the first one (e.g. Redis unreachable at
+// boot). Log-and-continue: the bounded retries in queueConnection already
+// decide when this queue gives up trying to reconnect.
+bookingQueue.on('error', (err) => {
+  console.error('bookingQueue Redis connection error:', err.message);
+});
+
 /**
  * Schedules the PENDING→CANCELLED expiry check for a newly-created booking,
  * after AppSettings.pendingExpiryMinutes (admin-configurable, defaults to

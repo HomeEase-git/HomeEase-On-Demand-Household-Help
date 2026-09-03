@@ -13,6 +13,12 @@ export interface SendPayoutJobData {
 
 export const payoutQueue = new Queue(PAYOUT_QUEUE_NAME, { connection });
 
+// Mandatory per BullMQ's own docs — see the identical note in
+// bookingQueue.ts.
+payoutQueue.on('error', (err) => {
+  console.error('payoutQueue Redis connection error:', err.message);
+});
+
 /**
  * Queues a worker payout for disbursement. Async by design — escrow release
  * happens in the booking-completion request path and in an hourly cron tick
