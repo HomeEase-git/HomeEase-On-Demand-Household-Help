@@ -1,4 +1,4 @@
-﻿import { useEffect, useMemo, useState } from 'react'
+﻿import { useCallback, useMemo, useState } from 'react'
 import PageHeader from '../components/common/PageHeader'
 import SubNav from '../components/common/SubNav'
 import SectionCard from '../components/common/SectionCard'
@@ -7,6 +7,7 @@ import ErrorState from '../components/common/ErrorState'
 import Pagination from '../components/common/Pagination'
 import { fetchReviews, updateReview } from '../services/reviews'
 import { useToast } from '../context/ToastContext'
+import { useListQuery } from '../hooks/useListQuery'
 
 const SUB_NAV = [
   { to: '/reviews', label: 'All Reviews' },
@@ -16,31 +17,12 @@ const SUB_NAV = [
 const PAGE_SIZE = 10
 
 export default function ReviewsFlagged() {
-  const [flagged, setFlagged] = useState([])
   const [selected, setSelected] = useState(null)
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState(null)
   const [page, setPage] = useState(1)
   const { showSuccess, showError } = useToast()
 
-  const loadFlaggedReviews = async () => {
-    setLoading(true)
-    setError(null)
-
-    try {
-      const result = await fetchReviews({ flagged: 'true', page: 1, limit: 50 })
-      setFlagged(result.data)
-    } catch (err) {
-      setError(err.message || 'Failed to load flagged reviews')
-      setFlagged([])
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  useEffect(() => {
-    loadFlaggedReviews()
-  }, [])
+  const fetchFn = useCallback(() => fetchReviews({ flagged: 'true', page: 1, limit: 50 }), [])
+  const { data: flagged, loading, error, reload: loadFlaggedReviews, setData: setFlagged } = useListQuery(fetchFn)
 
   const totalPages = Math.max(1, Math.ceil(flagged.length / PAGE_SIZE))
   const currentPage = Math.min(page, totalPages)

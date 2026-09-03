@@ -1,31 +1,57 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
+import PageHeader from '../components/common/PageHeader'
 import SectionCard from '../components/common/SectionCard'
 import LoadingState from '../components/common/LoadingState'
 import ErrorState from '../components/common/ErrorState'
 import { fetchSettings, updateSettings } from '../services/settings'
+import { useDetailQuery } from '../hooks/useListQuery'
+import { useToast } from '../context/ToastContext'
 
-function NumberField({ id, label, value, onChange, min, max, step, error }) {
+function AdornedNumberField({ id, label, hint, value, onChange, min, max, step, error, prefix, suffix }) {
+  const modifier = prefix ? 'input-adornment--prefix' : suffix ? 'input-adornment--suffix' : ''
   return (
     <div className="detail-block">
       <label htmlFor={id}>{label}</label>
-      <input
-        id={id}
-        type="number"
-        min={min}
-        max={max}
-        step={step}
-        value={value}
-        onChange={onChange}
-        className={`input ${error ? 'has-error' : ''}`}
-        aria-invalid={!!error}
-        aria-describedby={error ? `${id}-error` : undefined}
-      />
+      <div className={`input-adornment ${modifier}`}>
+        {prefix && <span className="input-adornment__affix input-adornment__affix--prefix">{prefix}</span>}
+        <input
+          id={id}
+          type="number"
+          min={min}
+          max={max}
+          step={step}
+          value={value}
+          onChange={onChange}
+          className={`input ${error ? 'has-error' : ''}`}
+          aria-invalid={!!error}
+          aria-describedby={error ? `${id}-error` : undefined}
+        />
+        {suffix && <span className="input-adornment__affix input-adornment__affix--suffix">{suffix}</span>}
+      </div>
+      {hint && !error && <span className="toggle-row__hint">{hint}</span>}
       {error && (
         <span id={`${id}-error`} className="field-error">
           {error}
         </span>
       )}
     </div>
+  )
+}
+
+function SettingsSection({ icon, title, description, children }) {
+  return (
+    <SectionCard className="settings-section">
+      <div className="settings-section__head">
+        <div className="settings-section__icon">
+          <i className={`fas ${icon}`} />
+        </div>
+        <div>
+          <h3>{title}</h3>
+          {description && <p>{description}</p>}
+        </div>
+      </div>
+      {children}
+    </SectionCard>
   )
 }
 
@@ -41,51 +67,49 @@ function fieldValidationError(raw, min, max) {
   return null
 }
 
+// Each numeric field's [min, max] bounds, keyed by settings field name —
+// shared between live per-field validation and the pre-submit sweep below.
+const NUMBER_FIELD_BOUNDS = {
+  adminFeePerJob: [0, 1000],
+  commissionRatePercent: [0, 100],
+  withholdingTaxRatePercent: [0, 100],
+  maxSlotsPerDay: [1, 24],
+  pendingExpiryMinutes: [5, 10080],
+  geofenceRadiusMeters: [10, 5000],
+  maxDeclinesBeforeCooldown: [1, 20],
+  declineWindowHours: [1, 720],
+  declineCooldownHours: [1, 720],
+  tierProMinRating: [0, 5],
+  tierProMinJobs: [0, null],
+  tierProMultiplier: [1, 5],
+  tierExpertMinRating: [0, 5],
+  tierExpertMinJobs: [0, null],
+  tierExpertMultiplier: [1, 5],
+}
+
 export default function Settings() {
+  const { data: loaded, loading, error: loadError, reload: loadSettings } = useDetailQuery(fetchSettings, 'singleton')
   const [settings, setSettings] = useState(null)
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState(null)
-  const [saving, setSaving] = useState(false)
-  const [saved, setSaved] = useState(false)
   const [fieldErrors, setFieldErrors] = useState({})
+  const [error, setError] = useState('')
+  const [saving, setSaving] = useState(false)
+  const { showSuccess, showError } = useToast()
 
-  const loadSettings = async () => {
-    setLoading(true)
-    setError(null)
-
-    try {
-      const data = await fetchSettings()
-      setSettings(data)
-    } catch (err) {
-      setError(err.message || 'Failed to load settings')
-    } finally {
-      setLoading(false)
-    }
-  }
-
+  // Draft state mirrors the loaded record so edits don't mutate the shared
+  // cache until Save actually succeeds; re-syncs whenever a fresh fetch
+  // lands (first load, or after loadSettings() following a save resets
+  // settings back to null below).
+  const current = settings ?? loaded
   useEffect(() => {
-    loadSettings()
-  }, [])
+    if (loaded && settings === null) {
+      setSettings(loaded)
+    }
+  }, [loaded, settings])
 
-  // Each numeric field's [min, max] bounds, keyed by settings field name —
-  // shared between live per-field validation and the pre-submit sweep below.
-  const NUMBER_FIELD_BOUNDS = {
-    adminFeePerJob: [0, 1000],
-    commissionRatePercent: [0, 100],
-    withholdingTaxRatePercent: [0, 100],
-    maxSlotsPerDay: [1, 24],
-    pendingExpiryMinutes: [5, 10080],
-    geofenceRadiusMeters: [10, 5000],
-    maxDeclinesBeforeCooldown: [1, 20],
-    declineWindowHours: [1, 720],
-    declineCooldownHours: [1, 720],
-    tierProMinRating: [0, 5],
-    tierProMinJobs: [0, null],
-    tierProMultiplier: [1, 5],
-    tierExpertMinRating: [0, 5],
-    tierExpertMinJobs: [0, null],
-    tierExpertMultiplier: [1, 5],
-  }
+  const isDirty = useMemo(
+    () => !!loaded && !!settings && JSON.stringify(loaded) !== JSON.stringify(settings),
+    [loaded, settings]
+  )
 
   const updateNumberField = (field) => (e) => {
     const raw = e.target.value
@@ -94,15 +118,22 @@ export default function Settings() {
     setFieldErrors((prev) => ({ ...prev, [field]: fieldValidationError(raw, min, max) }))
   }
 
+  const updatePercentField = (field, percentKey) => (e) => {
+    const raw = e.target.value
+    setSettings((prev) => ({ ...prev, [field]: raw === '' ? raw : Number(raw) / 100 }))
+    setFieldErrors((prev) => ({ ...prev, [percentKey]: fieldValidationError(raw, 0, 100) }))
+  }
+
   const handleSubmit = async (e) => {
     e.preventDefault()
+    if (!current) return
 
     const nextFieldErrors = {}
     Object.entries(NUMBER_FIELD_BOUNDS).forEach(([field, [min, max]]) => {
       const rawSettingsKey = field === 'commissionRatePercent' || field === 'withholdingTaxRatePercent'
         ? field.replace('Percent', '')
         : field
-      const rawValue = settings[rawSettingsKey]
+      const rawValue = current[rawSettingsKey]
       const displayValue = (rawSettingsKey === 'commissionRate' || rawSettingsKey === 'withholdingTaxRate') && rawValue !== ''
         ? Math.round(rawValue * 1000) / 10
         : rawValue
@@ -116,51 +147,55 @@ export default function Settings() {
     }
 
     setSaving(true)
-    setError(null)
+    setError('')
 
     try {
-      const updated = await updateSettings(settings)
-      setSettings(updated)
-      setSaved(true)
-      window.setTimeout(() => setSaved(false), 1800)
+      await updateSettings(current)
+      await loadSettings()
+      setSettings(null) // re-seed the draft from the freshly-reloaded record
+      showSuccess('Settings saved.')
     } catch (err) {
-      setError(err.message || 'Failed to save settings')
+      showError(err.message || 'Failed to save settings')
     } finally {
       setSaving(false)
     }
   }
 
-  if (loading) {
+  const discardChanges = () => {
+    setSettings(loaded)
+    setFieldErrors({})
+    setError('')
+  }
+
+  if (loading && !current) {
     return (
       <>
-        <h1 className="page-title">Settings</h1>
-        <p className="page-subtitle">General administration settings</p>
+        <PageHeader title="Settings" subtitle="General administration settings" />
         <LoadingState message="Loading settings..." />
       </>
     )
   }
 
-  if (error && !settings) {
+  if (loadError && !current) {
     return (
       <>
-        <h1 className="page-title">Settings</h1>
-        <p className="page-subtitle">General administration settings</p>
-        <ErrorState message={error} onRetry={loadSettings} />
+        <PageHeader title="Settings" subtitle="General administration settings" />
+        <ErrorState message={loadError} onRetry={loadSettings} />
       </>
     )
   }
 
   return (
     <form onSubmit={handleSubmit} noValidate>
-      <h1 className="page-title">Settings</h1>
-      <p className="page-subtitle">General administration settings</p>
-      <SectionCard title="General">
-        <div className="detail-grid">
+      <PageHeader title="Settings" subtitle="General administration settings" />
+
+      <SettingsSection icon="fa-building" title="General" description="Public-facing site identity.">
+        <div className="detail-grid" style={{ marginBottom: 0 }}>
           <div className="detail-block">
             <label htmlFor="settings-site-name">Site Name</label>
             <input
               id="settings-site-name"
-              value={settings.siteName}
+              value={current.siteName}
               onChange={(e) => setSettings((prev) => ({ ...prev, siteName: e.target.value }))}
               className="input"
               required
@@ -171,200 +206,240 @@ export default function Settings() {
             <input
               id="settings-support-email"
               type="email"
-              value={settings.supportEmail}
+              value={current.supportEmail}
               onChange={(e) => setSettings((prev) => ({ ...prev, supportEmail: e.target.value }))}
               className="input"
               required
             />
           </div>
         </div>
-      </SectionCard>
-      <SectionCard title="Notifications">
-        <p className="page-subtitle">Configure email and in-app notifications.</p>
-        <label htmlFor="settings-notifications-enabled" style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginTop: '0.75rem' }}>
-          <input
-            id="settings-notifications-enabled"
-            type="checkbox"
-            checked={settings.notificationsEnabled}
-            onChange={() => setSettings((prev) => ({ ...prev, notificationsEnabled: !prev.notificationsEnabled }))}
-          />
-          Enable admin notifications
-        </label>
-      </SectionCard>
-      <SectionCard title="Platform Configuration">
-        <p className="page-subtitle">
-          Live business rules enforced by the booking, payment, and worker-availability flows. Commission/tax rate
-          changes apply to new payments going forward; existing payments keep the rate they were charged at.
-        </p>
-        <div className="detail-grid" style={{ marginTop: '0.75rem' }}>
-          <NumberField
+      </SettingsSection>
+
+      <SettingsSection icon="fa-bell" title="Notifications" description="Email and in-app admin alerts.">
+        <div className="toggle-row">
+          <div>
+            <div className="toggle-row__label">Enable admin notifications</div>
+            <div className="toggle-row__hint">New bookings, disputes, and payout failures alert the admin team.</div>
+          </div>
+          <label className="toggle">
+            <input
+              id="settings-notifications-enabled"
+              type="checkbox"
+              checked={current.notificationsEnabled}
+              onChange={() => setSettings((prev) => ({ ...prev, notificationsEnabled: !prev.notificationsEnabled }))}
+            />
+            <span className="toggle__track">
+              <span className="toggle__thumb" />
+            </span>
+          </label>
+        </div>
+      </SettingsSection>
+
+      <SettingsSection
+        icon="fa-sliders"
+        title="Platform Configuration"
+        description="Live business rules enforced by the booking, payment, and worker-availability flows. Commission/tax rate changes apply to new payments going forward; existing payments keep the rate they were charged at."
+      >
+        <p className="settings-group__label" style={{ marginTop: 0 }}>Pricing &amp; Revenue</p>
+        <div className="detail-grid" style={{ marginBottom: 0 }}>
+          <AdornedNumberField
             id="settings-admin-fee"
-            label="Admin Fee Per Job (₱)"
+            label="Admin Fee Per Job"
+            prefix="₱"
             min={0}
             max={1000}
             step={1}
-            value={settings.adminFeePerJob}
+            value={current.adminFeePerJob}
             onChange={updateNumberField('adminFeePerJob')}
             error={fieldErrors.adminFeePerJob}
           />
-          <NumberField
+          <AdornedNumberField
             id="settings-commission-rate"
-            label="Commission Rate (%)"
+            label="Commission Rate"
+            suffix="%"
             min={0}
             max={100}
             step={0.5}
-            value={settings.commissionRate === '' ? '' : Math.round(settings.commissionRate * 1000) / 10}
-            onChange={(e) => {
-              const raw = e.target.value
-              setSettings((prev) => ({ ...prev, commissionRate: raw === '' ? raw : Number(raw) / 100 }))
-              setFieldErrors((prev) => ({ ...prev, commissionRatePercent: fieldValidationError(raw, 0, 100) }))
-            }}
+            value={current.commissionRate === '' ? '' : Math.round(current.commissionRate * 1000) / 10}
+            onChange={updatePercentField('commissionRate', 'commissionRatePercent')}
             error={fieldErrors.commissionRatePercent}
           />
-          <NumberField
+          <AdornedNumberField
             id="settings-withholding-tax"
-            label="Withholding Tax Rate (%)"
+            label="Withholding Tax Rate"
+            suffix="%"
             min={0}
             max={100}
             step={0.5}
-            value={settings.withholdingTaxRate === '' ? '' : Math.round(settings.withholdingTaxRate * 1000) / 10}
-            onChange={(e) => {
-              const raw = e.target.value
-              setSettings((prev) => ({ ...prev, withholdingTaxRate: raw === '' ? raw : Number(raw) / 100 }))
-              setFieldErrors((prev) => ({ ...prev, withholdingTaxRatePercent: fieldValidationError(raw, 0, 100) }))
-            }}
+            value={current.withholdingTaxRate === '' ? '' : Math.round(current.withholdingTaxRate * 1000) / 10}
+            onChange={updatePercentField('withholdingTaxRate', 'withholdingTaxRatePercent')}
             error={fieldErrors.withholdingTaxRatePercent}
           />
-          <NumberField
-            id="settings-max-slots"
-            label="Max Availability Slots / Day"
-            min={1}
-            max={24}
-            value={settings.maxSlotsPerDay}
-            onChange={updateNumberField('maxSlotsPerDay')}
-            error={fieldErrors.maxSlotsPerDay}
-          />
-          <NumberField
-            id="settings-pending-expiry"
-            label="Pending Booking Hold Timeout (minutes)"
-            min={5}
-            max={10080}
-            value={settings.pendingExpiryMinutes}
-            onChange={updateNumberField('pendingExpiryMinutes')}
-            error={fieldErrors.pendingExpiryMinutes}
-          />
-          <NumberField
-            id="settings-geofence-radius"
-            label="Arrival Geofence Radius (meters)"
-            min={10}
-            max={5000}
-            value={settings.geofenceRadiusMeters}
-            onChange={updateNumberField('geofenceRadiusMeters')}
-            error={fieldErrors.geofenceRadiusMeters}
-          />
-          <NumberField
-            id="settings-max-declines"
-            label="Max Declines Before Cooldown"
-            min={1}
-            max={20}
-            value={settings.maxDeclinesBeforeCooldown}
-            onChange={updateNumberField('maxDeclinesBeforeCooldown')}
-            error={fieldErrors.maxDeclinesBeforeCooldown}
-          />
-          <NumberField
-            id="settings-decline-window"
-            label="Decline Rolling Window (hours)"
-            min={1}
-            max={720}
-            value={settings.declineWindowHours}
-            onChange={updateNumberField('declineWindowHours')}
-            error={fieldErrors.declineWindowHours}
-          />
-          <NumberField
-            id="settings-decline-cooldown"
-            label="Decline Cooldown Duration (hours)"
-            min={1}
-            max={720}
-            value={settings.declineCooldownHours}
-            onChange={updateNumberField('declineCooldownHours')}
-            error={fieldErrors.declineCooldownHours}
-          />
         </div>
-      </SectionCard>
-      <SectionCard title="Expertise Tiers">
-        <p className="page-subtitle">
-          Rates scale up for higher tiers, computed live from a worker&apos;s rating and completed-job count — not
-          manually assigned.
-        </p>
-        <div className="detail-grid" style={{ marginTop: '0.75rem' }}>
-          <NumberField
+
+        <div className="settings-group">
+          <p className="settings-group__label">Booking &amp; Availability</p>
+          <div className="detail-grid" style={{ marginBottom: 0 }}>
+            <AdornedNumberField
+              id="settings-max-slots"
+              label="Max Availability Slots / Day"
+              min={1}
+              max={24}
+              value={current.maxSlotsPerDay}
+              onChange={updateNumberField('maxSlotsPerDay')}
+              error={fieldErrors.maxSlotsPerDay}
+            />
+            <AdornedNumberField
+              id="settings-pending-expiry"
+              label="Pending Booking Hold Timeout"
+              suffix="min"
+              min={5}
+              max={10080}
+              value={current.pendingExpiryMinutes}
+              onChange={updateNumberField('pendingExpiryMinutes')}
+              error={fieldErrors.pendingExpiryMinutes}
+            />
+            <AdornedNumberField
+              id="settings-geofence-radius"
+              label="Arrival Geofence Radius"
+              suffix="m"
+              min={10}
+              max={5000}
+              value={current.geofenceRadiusMeters}
+              onChange={updateNumberField('geofenceRadiusMeters')}
+              error={fieldErrors.geofenceRadiusMeters}
+            />
+          </div>
+        </div>
+
+        <div className="settings-group">
+          <p className="settings-group__label">Worker Decline Policy</p>
+          <div className="detail-grid" style={{ marginBottom: 0 }}>
+            <AdornedNumberField
+              id="settings-max-declines"
+              label="Max Declines Before Cooldown"
+              min={1}
+              max={20}
+              value={current.maxDeclinesBeforeCooldown}
+              onChange={updateNumberField('maxDeclinesBeforeCooldown')}
+              error={fieldErrors.maxDeclinesBeforeCooldown}
+            />
+            <AdornedNumberField
+              id="settings-decline-window"
+              label="Decline Rolling Window"
+              suffix="hrs"
+              min={1}
+              max={720}
+              value={current.declineWindowHours}
+              onChange={updateNumberField('declineWindowHours')}
+              error={fieldErrors.declineWindowHours}
+            />
+            <AdornedNumberField
+              id="settings-decline-cooldown"
+              label="Decline Cooldown Duration"
+              suffix="hrs"
+              min={1}
+              max={720}
+              value={current.declineCooldownHours}
+              onChange={updateNumberField('declineCooldownHours')}
+              error={fieldErrors.declineCooldownHours}
+            />
+          </div>
+        </div>
+      </SettingsSection>
+
+      <SettingsSection
+        icon="fa-ranking-star"
+        title="Expertise Tiers"
+        description="Rates scale up for higher tiers, computed live from a worker's rating and completed-job count — not manually assigned."
+      >
+        <p className="settings-group__label" style={{ marginTop: 0 }}>Pro Tier</p>
+        <div className="detail-grid" style={{ marginBottom: 0 }}>
+          <AdornedNumberField
             id="settings-pro-min-rating"
-            label="Pro: Min Rating"
+            label="Min Rating"
             min={0}
             max={5}
             step={0.1}
-            value={settings.tierProMinRating}
+            value={current.tierProMinRating}
             onChange={updateNumberField('tierProMinRating')}
             error={fieldErrors.tierProMinRating}
           />
-          <NumberField
+          <AdornedNumberField
             id="settings-pro-min-jobs"
-            label="Pro: Min Completed Jobs"
+            label="Min Completed Jobs"
             min={0}
-            value={settings.tierProMinJobs}
+            value={current.tierProMinJobs}
             onChange={updateNumberField('tierProMinJobs')}
             error={fieldErrors.tierProMinJobs}
           />
-          <NumberField
+          <AdornedNumberField
             id="settings-pro-multiplier"
-            label="Pro: Rate Multiplier"
+            label="Rate Multiplier"
+            suffix="×"
             min={1}
             max={5}
             step={0.05}
-            value={settings.tierProMultiplier}
+            value={current.tierProMultiplier}
             onChange={updateNumberField('tierProMultiplier')}
             error={fieldErrors.tierProMultiplier}
           />
-          <NumberField
-            id="settings-expert-min-rating"
-            label="Expert: Min Rating"
-            min={0}
-            max={5}
-            step={0.1}
-            value={settings.tierExpertMinRating}
-            onChange={updateNumberField('tierExpertMinRating')}
-            error={fieldErrors.tierExpertMinRating}
-          />
-          <NumberField
-            id="settings-expert-min-jobs"
-            label="Expert: Min Completed Jobs"
-            min={0}
-            value={settings.tierExpertMinJobs}
-            onChange={updateNumberField('tierExpertMinJobs')}
-            error={fieldErrors.tierExpertMinJobs}
-          />
-          <NumberField
-            id="settings-expert-multiplier"
-            label="Expert: Rate Multiplier"
-            min={1}
-            max={5}
-            step={0.05}
-            value={settings.tierExpertMultiplier}
-            onChange={updateNumberField('tierExpertMultiplier')}
-            error={fieldErrors.tierExpertMultiplier}
-          />
         </div>
-        {error && <div className="form-error" style={{ marginTop: '0.75rem' }}>{error}</div>}
-        <button
-          type="submit"
-          className="btn btn-primary"
-          style={{ marginTop: '1rem' }}
-          disabled={saving}
-        >
-          {saving ? 'Saving...' : 'Save Changes'}
-        </button>
-        {saved && <p className="page-subtitle" style={{ marginTop: '0.75rem', color: 'var(--success)' }}>Settings saved.</p>}
-      </SectionCard>
+
+        <div className="settings-group">
+          <p className="settings-group__label">Expert Tier</p>
+          <div className="detail-grid" style={{ marginBottom: 0 }}>
+            <AdornedNumberField
+              id="settings-expert-min-rating"
+              label="Min Rating"
+              min={0}
+              max={5}
+              step={0.1}
+              value={current.tierExpertMinRating}
+              onChange={updateNumberField('tierExpertMinRating')}
+              error={fieldErrors.tierExpertMinRating}
+            />
+            <AdornedNumberField
+              id="settings-expert-min-jobs"
+              label="Min Completed Jobs"
+              min={0}
+              value={current.tierExpertMinJobs}
+              onChange={updateNumberField('tierExpertMinJobs')}
+              error={fieldErrors.tierExpertMinJobs}
+            />
+            <AdornedNumberField
+              id="settings-expert-multiplier"
+              label="Rate Multiplier"
+              suffix="×"
+              min={1}
+              max={5}
+              step={0.05}
+              value={current.tierExpertMultiplier}
+              onChange={updateNumberField('tierExpertMultiplier')}
+              error={fieldErrors.tierExpertMultiplier}
+            />
+          </div>
+        </div>
+      </SettingsSection>
+
+      {error && <div className="form-error" style={{ marginTop: '1rem' }}>{error}</div>}
+
+      <div className="settings-savebar">
+        <div className={`settings-savebar__status ${isDirty ? '' : 'settings-savebar__status--clean'}`}>
+          <span className="settings-savebar__dot" />
+          {isDirty ? 'You have unsaved changes' : 'All changes saved'}
+        </div>
+        <div className="settings-savebar__actions">
+          {isDirty && (
+            <button type="button" className="btn btn-outline" onClick={discardChanges} disabled={saving}>
+              Discard
+            </button>
+          )}
+          <button type="submit" className="btn btn-primary" disabled={saving || !isDirty}>
+            {saving ? 'Saving...' : 'Save Changes'}
+          </button>
+        </div>
+      </div>
     </form>
   )
 }

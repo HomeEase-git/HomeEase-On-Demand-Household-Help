@@ -12,13 +12,16 @@ const detailCache = new Map();
 
 const DEFAULT_META = { page: 1, total: 0, totalPages: 1, hasPrev: false, hasNext: false };
 
-export function useListQuery(fetchFn, { initialParams = {}, deps = [], pollIntervalMs = null } = {}) {
+export function useListQuery(
+  fetchFn,
+  { initialParams = {}, deps = [], pollIntervalMs = null, pausePolling = false } = {}
+) {
   const { pathname } = useLocation();
   const [params, setParams] = useState(initialParams);
   const cacheKey = `${pathname}?${JSON.stringify(params)}`;
 
   const cachedEntry = listCache.get(cacheKey);
-  const [data, setData] = useState(cachedEntry?.data ?? []);
+  const [data, setDataState] = useState(cachedEntry?.data ?? []);
   const [meta, setMeta] = useState(cachedEntry?.meta ?? DEFAULT_META);
   const [loading, setLoading] = useState(!cachedEntry);
   const [error, setError] = useState(null);
@@ -29,7 +32,7 @@ export function useListQuery(fetchFn, { initialParams = {}, deps = [], pollInter
   const load = useCallback(async (silent = false) => {
     const cached = listCache.get(cacheKey);
     if (cached) {
-      setData(cached.data);
+      setDataState(cached.data);
       if (cached.meta) setMeta(cached.meta);
     }
 
@@ -39,13 +42,13 @@ export function useListQuery(fetchFn, { initialParams = {}, deps = [], pollInter
     try {
       const result = await fetchFn(params);
       const nextData = result.data ?? result;
-      setData(nextData);
+      setDataState(nextData);
       if (result.meta) setMeta(result.meta);
       listCache.set(cacheKey, { data: nextData, meta: result.meta });
     } catch (err) {
       if (!silent) {
         setError(err.message || 'Failed to load data');
-        if (!cached) setData([]);
+        if (!cached) setDataState([]);
       }
     } finally {
       if (showSpinner) setLoading(false);
@@ -57,11 +60,34 @@ export function useListQuery(fetchFn, { initialParams = {}, deps = [], pollInter
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [load, ...deps]);
 
-  usePolling(() => load(true), pollIntervalMs || 0, { paused: !pollIntervalMs });
+  // `pausePolling` lets a consumer suspend the background refresh for a
+  // reason of its own (e.g. an admin has a detail modal open and a refetch
+  // mid-review would yank the record out from under them) without having to
+  // roll its own polling loop.
+  usePolling(() => load(true), pollIntervalMs || 0, { paused: !pollIntervalMs || pausePolling });
 
   const setSearch = (search) => setParams((prev) => ({ ...prev, search, page: 1 }));
   const setFilter = (key, value) => setParams((prev) => ({ ...prev, [key]: value, page: 1 }));
   const goToPage = (page) => setParams((prev) => ({ ...prev, page }));
+
+  // Optimistic escape hatch — patches both the rendered `data` and the
+  // shared cache entry for the current cacheKey without a network round
+  // -trip, for a mutation whose API response already has everything needed
+  // to update the list locally (create/update/delete/toggle). Prefer this
+  // over `reload()` after a mutation: reload() re-fetches the full list,
+  // which is a second sequential round-trip the user waits through on
+  // every save.
+  const setData = useCallback(
+    (updater) => {
+      setDataState((prev) => {
+        const next = typeof updater === 'function' ? updater(prev) : updater;
+        const cached = listCache.get(cacheKey);
+        listCache.set(cacheKey, { data: next, meta: cached?.meta });
+        return next;
+      });
+    },
+    [cacheKey]
+  );
 
   return {
     data,
@@ -70,6 +96,7 @@ export function useListQuery(fetchFn, { initialParams = {}, deps = [], pollInter
     loading,
     error,
     reload: load,
+    setData,
     setSearch,
     setFilter,
     goToPage,

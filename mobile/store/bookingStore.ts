@@ -351,7 +351,6 @@ export const useBookingStore: UseBoundStore<StoreApi<BookingState>> = create<Boo
   setBookingCreated: (booking) =>
     set((state) => {
       const nextBookings = [...state.bookings, booking];
-      bookingStorage.cacheBookings(nextBookings);
       bookingStorage.clearDraft();
       return {
         bookings: nextBookings,

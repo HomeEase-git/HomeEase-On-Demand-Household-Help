@@ -2,7 +2,7 @@ import { Request, Response } from 'express';
 import prisma from '@config/database';
 import { errorResponse } from '@utils/errorResponse';
 import { formatVerification } from '@utils/formatters';
-import { verificationQueue } from '@queues/verificationQueue';
+import { verificationQueue, VERIFICATION_JOB_OPTIONS } from '@queues/verificationQueue';
 import { writeAuditLog } from '@utils/auditLog';
 import { notifyUser } from '@utils/notify';
 import type { JwtPayload } from '@/types/index';
@@ -346,16 +346,20 @@ export const rerunVerification = async (req: AuthRequest, res: Response) => {
       return res.status(400).json(errorResponse(400, 'Cannot rerun AI review for approved verification'));
     }
 
-    await verificationQueue.add('analyze-verification', {
-      verificationId: record.id,
-      requestType: record.type,
-      documents: record.documents.map((doc) => ({
-        documentType: doc.documentType,
-        fileUrl: doc.fileUrl,
-        mimeType: doc.mimeType,
-        originalName: doc.originalName,
-      })),
-    });
+    await verificationQueue.add(
+      'analyze-verification',
+      {
+        verificationId: record.id,
+        requestType: record.type,
+        documents: record.documents.map((doc) => ({
+          documentType: doc.documentType,
+          fileUrl: doc.fileUrl,
+          mimeType: doc.mimeType,
+          originalName: doc.originalName,
+        })),
+      },
+      VERIFICATION_JOB_OPTIONS
+    );
 
     const updated = await prisma.verificationRequest.update({
       where: { id },

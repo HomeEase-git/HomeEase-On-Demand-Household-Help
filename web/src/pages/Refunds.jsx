@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useMemo, useState } from 'react'
 import PageHeader from '../components/common/PageHeader'
 import SubNav from '../components/common/SubNav'
 import SectionCard from '../components/common/SectionCard'
@@ -7,6 +7,7 @@ import LoadingState from '../components/common/LoadingState'
 import ErrorState from '../components/common/ErrorState'
 import Pagination from '../components/common/Pagination'
 import { fetchDisputes } from '../services/disputes'
+import { useListQuery } from '../hooks/useListQuery'
 
 const PAGE_SIZE = 10
 
@@ -30,28 +31,14 @@ function formatPeso(amount) {
  * Resolution Center instead.
  */
 export default function Refunds() {
-  const [refunds, setRefunds] = useState([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState(null)
   const [page, setPage] = useState(1)
 
-  const loadRefunds = async () => {
-    setLoading(true)
-    setError(null)
-
-    try {
-      const response = await fetchDisputes({ status: 'all', page: 1, limit: 50 })
-      setRefunds(response.data.filter((d) => d.status === 'RESOLVED_CANCELLED'))
-    } catch (err) {
-      setError(err.message || 'Failed to load refund history')
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  useEffect(() => {
-    loadRefunds()
+  const fetchFn = useCallback(async () => {
+    const response = await fetchDisputes({ status: 'all', page: 1, limit: 50 })
+    return response.data.filter((d) => d.status === 'RESOLVED_CANCELLED')
   }, [])
+
+  const { data: refunds, loading, error, reload: loadRefunds } = useListQuery(fetchFn)
 
   const totalPages = Math.max(1, Math.ceil(refunds.length / PAGE_SIZE))
   const currentPage = Math.min(page, totalPages)

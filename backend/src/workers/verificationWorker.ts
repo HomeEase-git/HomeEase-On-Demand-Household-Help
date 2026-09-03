@@ -1,5 +1,5 @@
 import { Worker } from 'bullmq';
-import { analyzeVerificationDocuments } from '@services/verificationAiService';
+import { analyzeVerificationDocuments, recordExhaustedRetriesFallback } from '@services/verificationAiService';
 import prisma from '@config/database';
 import { redisConnection as connection } from '@config/redis';
 import { VERIFICATION_QUEUE_NAME, type VerificationJobData } from '@queues/verificationQueue';
@@ -12,7 +12,10 @@ export async function startVerificationWorker() {
 
       const verification = await prisma.verificationRequest.findUnique({ where: { id: verificationId } });
       if (!verification) {
-        throw new Error('Verification request not found');
+        // Don't throw — retrying can't fix a request that no longer exists
+        // (deleted user, etc.), so this shouldn't burn retry attempts.
+        console.warn(`Verification job ${job.id}: request ${verificationId} not found, skipping.`);
+        return { success: false, reason: 'not_found' };
       }
 
       await analyzeVerificationDocuments(verificationId, requestType, documents);
@@ -21,8 +24,22 @@ export async function startVerificationWorker() {
     { connection }
   );
 
-  worker.on('failed', (job, err) => {
+  worker.on('failed', async (job, err) => {
     console.error(`Verification job ${job?.id} failed`, err);
+    if (!job) return;
+
+    // BullMQ re-queues this job automatically up to `attempts` times (see
+    // VERIFICATION_JOB_OPTIONS) — only degrade to the heuristic fallback
+    // once this was truly the last attempt, so a request that will succeed
+    // on retry #2 doesn't get prematurely marked as failed.
+    const maxAttempts = job.opts.attempts ?? 1;
+    if (job.attemptsMade < maxAttempts) return;
+
+    try {
+      await recordExhaustedRetriesFallback(job.data.verificationId, job.data.requestType, job.data.documents, err);
+    } catch (writeError) {
+      console.error(`Failed to record fallback for verification ${job.data.verificationId}`, writeError);
+    }
   });
 
   return worker;

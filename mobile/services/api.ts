@@ -1948,23 +1948,31 @@ function delay(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-// Service catalog is effectively static (admin-managed, rarely changes), but
-// was being independently re-fetched with its own loading spinner in 5
-// different screens/components. Cache it in memory for the app session —
-// `servicesPromise` also dedupes concurrent calls if two screens mount at
-// once on first load, so they share one in-flight request instead of firing
-// two.
+// Service catalog is admin-managed (name/price/icon/etc. can change at any
+// time from the web admin), but was being independently re-fetched with its
+// own loading spinner in 5 different screens/components. Cache it in memory
+// for a short TTL rather than the whole app session — long enough to still
+// dedupe the repeat fetches those screens were doing, short enough that an
+// admin edit (e.g. changing a category's icon) shows up on next navigation
+// instead of only after a full app restart. `servicesPromise` also dedupes
+// concurrent calls if two screens mount at once on first load, so they share
+// one in-flight request instead of firing two.
+const SERVICE_TYPES_TTL_MS = 5 * 60 * 1000; // 5 minutes
 let cachedServiceTypes: any[] | null = null;
+let cachedServiceTypesAt = 0;
 let servicesPromise: Promise<any[]> | null = null;
 
 export async function getServiceTypes() {
-  if (cachedServiceTypes) return cachedServiceTypes;
+  if (cachedServiceTypes && Date.now() - cachedServiceTypesAt < SERVICE_TYPES_TTL_MS) {
+    return cachedServiceTypes;
+  }
   if (servicesPromise) return servicesPromise;
 
   servicesPromise = (async () => {
     try {
       const response = await api.get('/services');
       cachedServiceTypes = Array.isArray(response) ? response : [];
+      cachedServiceTypesAt = Date.now();
       return cachedServiceTypes;
     } catch (error) {
       console.error('Get service types error:', error);
