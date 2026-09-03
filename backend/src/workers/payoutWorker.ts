@@ -1,6 +1,6 @@
 import { Worker, type Job } from 'bullmq';
 import prisma from '@config/database';
-import { redisConnection as connection } from '@config/redis';
+import { workerConnection as connection } from '@config/redis';
 import { notifyUser } from '@utils/notify';
 import { sendSmsToUser } from '@utils/smsService';
 import { writeAuditLog } from '@utils/auditLog';

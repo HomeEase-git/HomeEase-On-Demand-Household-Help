@@ -1,5 +1,5 @@
 import { Queue } from 'bullmq';
-import { redisConnection as connection } from '@config/redis';
+import { queueConnection as connection } from '@config/redis';
 
 export const PAYOUT_QUEUE_NAME = 'worker-payout';
 

@@ -6,6 +6,8 @@
   "scripts": {
     "test": "jest --runInBand",
     "test:unit": "jest tests/unit --runInBand",
+    "test:queues": "jest --config jest.integration.config.js --runInBand",
+    "test:e2e:sandbox": "node _e2e_test_run.js",
     "typecheck:tooling": "tsc --noEmit -p tsconfig.tooling.json",
     "dev": "nodemon --exec \"ts-node -r tsconfig-paths/register\" src/index.ts",
     "build": "tsc",
@@ -15,6 +17,7 @@
     "prisma:studio": "prisma studio",
     "prisma:seed:full": "tsx prisma/seeds/seed-full.ts",
     "prisma:seed:complete": "tsx prisma/seeds/seed-complete.ts",
+    "prisma:seed:e2e-sandbox": "tsx prisma/seeds/seed-e2e-sandbox.ts",
     "test:concurrency": "ts-node scripts/concurrency_test.ts"
   },
   "keywords": [],
@@ -54,6 +57,7 @@
     "jest": "^30.4.2",
     "nodemon": "^3.1.14",
     "prisma": "^7.9.0",
+    "redis-memory-server": "^0.17.1",
     "supertest": "^7.2.2",
     "ts-jest": "^29.4.12",
     "ts-node": "^10.9.2",

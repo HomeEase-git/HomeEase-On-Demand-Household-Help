@@ -1,6 +1,6 @@
 import { Queue } from 'bullmq';
 import { getAppSettings } from '@services/appSettingsService';
-import { redisConnection as connection } from '@config/redis';
+import { queueConnection as connection } from '@config/redis';
 
 export const BOOKING_QUEUE_NAME = 'booking-lifecycle';
 

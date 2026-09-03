@@ -1,0 +1,104 @@
+name: E2E Sandbox
+
+# Manual-only (never on push/PR) — this creates real Xendit sandbox
+# invoices and payouts, unlike ci.yml's mocked/fake-secret test run. Needs
+# repo secrets prefixed E2E_ (Settings -> Secrets and variables -> Actions):
+#   E2E_JWT_SECRET, E2E_SMTP_USER, E2E_SMTP_PASS, E2E_XENDIT_SECRET_KEY,
+#   E2E_XENDIT_WEBHOOK_TOKEN, E2E_PHILSMS_API_TOKEN, E2E_SUPABASE_URL,
+#   E2E_SUPABASE_ANON_KEY, E2E_SUPABASE_SERVICE_KEY
+# — real sandbox/test-mode credentials, not the production ones.
+on:
+  workflow_dispatch: {}
+
+jobs:
+  e2e-sandbox:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: homeease_e2e
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/homeease_e2e
+      DIRECT_URL: postgresql://postgres:postgres@localhost:5432/homeease_e2e
+      NODE_ENV: development
+      PORT: 3000
+      APP_URL: http://localhost:3000
+      JWT_SECRET: ${{ secrets.E2E_JWT_SECRET }}
+      JWT_EXPIRY: 1h
+      SMTP_USER: ${{ secrets.E2E_SMTP_USER }}
+      SMTP_PASS: ${{ secrets.E2E_SMTP_PASS }}
+      XENDIT_SECRET_KEY: ${{ secrets.E2E_XENDIT_SECRET_KEY }}
+      XENDIT_WEBHOOK_TOKEN: ${{ secrets.E2E_XENDIT_WEBHOOK_TOKEN }}
+      XENDIT_REDIRECT_BASE_URL: https://example.invalid/xendit-redirect
+      PHILSMS_API_TOKEN: ${{ secrets.E2E_PHILSMS_API_TOKEN }}
+      PHILSMS_SENDER_ID: HomeEase
+      SUPABASE_URL: ${{ secrets.E2E_SUPABASE_URL }}
+      SUPABASE_ANON_KEY: ${{ secrets.E2E_SUPABASE_ANON_KEY }}
+      SUPABASE_SERVICE_KEY: ${{ secrets.E2E_SUPABASE_SERVICE_KEY }}
+      SUPABASE_KYC_BUCKET: kyc-documents
+      SUPABASE_RESUME_BUCKET: resumes
+      SUPABASE_CHAT_BUCKET: chat-images
+      SUPABASE_AVATAR_BUCKET: avatars
+      SUPABASE_BOOKING_PHOTO_BUCKET: booking-photos
+      SUPABASE_TAX_CERTIFICATE_BUCKET: tax-certificates
+      ANTHROPIC_API_KEY: ""
+      ANTHROPIC_MODEL: claude-sonnet-5
+      MAX_FILE_SIZE: "5242880"
+      UPLOAD_DIR: uploads
+      ALLOWED_ORIGINS: http://localhost:5173
+      COMMISSION_RATE: "0.10"
+      WITHHOLDING_TAX_RATE: "0.02"
+      REDIS_HOST: 127.0.0.1
+      REDIS_PORT: "6379"
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - run: npm ci
+      - run: npx prisma generate
+      - run: npx prisma migrate deploy
+      - run: npm run prisma:seed:e2e-sandbox
+      - name: Start dev server in background
+        run: nohup npm run dev > /tmp/dev-server.log 2>&1 &
+      - name: Wait for server to be healthy
+        run: |
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:3000/health > /dev/null; then
+              echo "Server is up"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "Server did not become healthy in time" >&2
+          cat /tmp/dev-server.log
+          exit 1
+      - name: Run E2E sandbox script
+        run: npm run test:e2e:sandbox
+      - name: Dump server log on failure
+        if: failure()
+        run: cat /tmp/dev-server.log || true

@@ -1,3 +1,15 @@
+// Manual end-to-end smoke test against a REAL Xendit sandbox — creates a
+// throwaway client + worker, runs a full booking through completion,
+// payment (real Xendit Invoice), and payout (real Xendit Payout), and
+// checks the commission/withholding-tax bookkeeping. `npm test` mocks
+// bookingQueue/verificationQueue/Xendit entirely, so this is the only thing
+// that actually exercises those integrations — run it (`npm run
+// test:e2e:sandbox`, or via the "E2E Sandbox" GitHub Actions workflow)
+// after touching paymentLifecycleService.ts, bookingWorker.ts, or either
+// Xendit webhook handler in paymentController.ts. Needs: a running dev
+// server (`npm run dev`), a real XENDIT_SECRET_KEY/XENDIT_WEBHOOK_TOKEN in
+// .env, and Redis actually reachable (REDIS_HOST/REDIS_PORT) — booking
+// creation hangs indefinitely without it (see config/redis.ts).
 require('dotenv').config();
 const axios = require('axios');
 const { Client } = require('pg');

@@ -67,6 +67,11 @@ jobs:
       - run: npx tsc --noEmit
       - run: npm run typecheck:tooling
       - run: npm test
+      # Exercises the real BullMQ queues against a real (ephemeral,
+      # redis-memory-server-provisioned) Redis — npm test above mocks these
+      # exact modules out, so this is what actually catches a real-queue
+      # regression (see jest.integration.config.js).
+      - run: npm run test:queues
 
   mobile:
     runs-on: ubuntu-latest

@@ -1,19 +1,19 @@
+// Separate from jest.config.js on purpose: the default suite's
+// moduleNameMapper mocks @queues/bookingQueue and @queues/verificationQueue
+// entirely (no local Redis in that context), which is exactly what this
+// suite needs to NOT do — it exists to exercise the real BullMQ queues
+// against a real (ephemeral, redis-memory-server-backed) Redis, the only
+// thing that would have caught the "BullMQ rejects ':' in custom jobIds"
+// bug found via the Xendit-sandbox E2E run.
 /** @type {import('jest').Config} */
 module.exports = {
   testEnvironment: 'node',
   rootDir: '.',
-  testMatch: ['<rootDir>/tests/**/*.test.ts'],
-  // tests/integration/** needs a real Redis and deliberately does NOT want
-  // the bookingQueue/verificationQueue mocks below — it's its own suite,
-  // run via `npm run test:queues` / jest.integration.config.js.
-  testPathIgnorePatterns: ['<rootDir>/node_modules/', '<rootDir>/tests/integration/'],
+  testMatch: ['<rootDir>/tests/integration/**/*.test.ts'],
   transform: {
     '^.+\\.tsx?$': ['ts-jest', { tsconfig: '<rootDir>/tsconfig.test.json' }],
   },
   moduleNameMapper: {
-    // Real verificationQueue/bookingQueue need a running Redis; tests don't have one.
-    '^@queues/verificationQueue$': '<rootDir>/tests/mocks/verificationQueue.ts',
-    '^@queues/bookingQueue$': '<rootDir>/tests/mocks/bookingQueue.ts',
     '^@/(.*)$': '<rootDir>/src/$1',
     '^@controllers/(.*)$': '<rootDir>/src/controllers/$1',
     '^@routes/(.*)$': '<rootDir>/src/routes/$1',
@@ -27,6 +27,6 @@ module.exports = {
   },
   setupFiles: ['<rootDir>/tests/setupEnv.ts'],
   setupFilesAfterEnv: ['<rootDir>/tests/jestSetupAfterEnv.ts'],
-  testTimeout: 20000,
+  testTimeout: 30000,
   verbose: true,
 };
