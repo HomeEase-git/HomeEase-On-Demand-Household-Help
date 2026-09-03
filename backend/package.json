@@ -18,7 +18,8 @@
     "prisma:seed:full": "tsx prisma/seeds/seed-full.ts",
     "prisma:seed:complete": "tsx prisma/seeds/seed-complete.ts",
     "prisma:seed:e2e-sandbox": "tsx prisma/seeds/seed-e2e-sandbox.ts",
-    "test:concurrency": "ts-node scripts/concurrency_test.ts"
+    "test:concurrency": "ts-node scripts/concurrency_test.ts",
+    "neon:branch": "tsx scripts/neon-branch.ts"
   },
   "keywords": [],
   "author": "",
