@@ -26,7 +26,9 @@ export async function schedulePayout(payoutId: string): Promise<void> {
     PAYOUT_JOB_NAMES.SEND_PAYOUT,
     { payoutId } satisfies SendPayoutJobData,
     {
-      jobId: `${PAYOUT_JOB_NAMES.SEND_PAYOUT}:${payoutId}`,
+      // BullMQ rejects ':' in custom jobIds (reserved for its own Redis key
+      // namespacing) — '-' instead.
+      jobId: `${PAYOUT_JOB_NAMES.SEND_PAYOUT}-${payoutId}`,
       attempts: 5,
       backoff: { type: 'exponential', delay: 60_000 },
       removeOnComplete: true,

@@ -191,6 +191,7 @@ export interface WorkerDigitalId {
   avatar: string | null;
   rating: number;
   totalReviews: number;
+  memberSince: string | null;
   kycStatus: string;
   kycApprovedAt: string | null;
   verified: boolean;
@@ -214,7 +215,7 @@ export interface WorkerReview {
 // PAYMENT METHOD TYPES
 // ============================================================================
 
-export type PaymentMethodType = 'card' | 'gcash' | 'maya' | 'bank';
+export type PaymentMethodType = 'gcash' | 'maya' | 'cash';
 
 export interface PaymentMethod {
   id: string;
@@ -222,16 +223,13 @@ export interface PaymentMethod {
   lastFour: string;
   label?: string;
   isDefault: boolean;
-  expiryDate?: string;
   createdAt?: string;
 }
 
 export interface AddPaymentMethodRequest {
   type: PaymentMethodType;
-  cardNumber?: string;
-  expiryDate?: string;
-  cvv?: string;
-  walletId?: string;
+  accountIdentifier: string;
+  label?: string;
 }
 
 // ============================================================================

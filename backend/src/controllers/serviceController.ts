@@ -17,7 +17,7 @@ export const getServiceTypes = async (_req: Request, res: Response) => {
         // filtered in memory below — same pattern as workerController's
         // searchWorkers.
         workers: {
-          where: { isAvailable: true, kycStatus: 'APPROVED' },
+          where: { isAvailable: true, kycStatus: 'APPROVED', debtHoldAt: null },
           select: { activeJobCount: true, maxConcurrentJobs: true },
         },
       },

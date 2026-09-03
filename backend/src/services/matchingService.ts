@@ -115,6 +115,7 @@ export async function findAutoMatchWorker(params: AutoMatchParams): Promise<Auto
     where: {
       kycStatus: 'APPROVED',
       isAvailable: true,
+      debtHoldAt: null,
       userId: excludeWorkerIds.length > 0 ? { notIn: excludeWorkerIds } : undefined,
       // Excludes workers currently serving a decline-limit cooldown (see
       // bookingController.declineBooking) from auto-match candidates.

@@ -83,6 +83,7 @@ export const searchWorkers = async (req: AuthRequest, res: Response) => {
     const whereClause: any = {
       isAvailable: true,
       kycStatus: 'APPROVED',
+      debtHoldAt: null,
     };
 
     // Scopes discovery to a single already-known worker — used by the client
@@ -353,6 +354,7 @@ export const getMyDigitalId = async (req: AuthRequest, res: Response) => {
       where: { userId: req.user.userId },
       select: {
         id: true,
+        createdAt: true,
         kycStatus: true,
         kycApprovedAt: true,
         rating: true,
@@ -383,6 +385,7 @@ export const getMyDigitalId = async (req: AuthRequest, res: Response) => {
         avatar: worker.user.avatar,
         rating: worker.rating,
         totalReviews: worker.totalReviews,
+        memberSince: worker.createdAt,
         kycStatus: worker.kycStatus,
         kycApprovedAt: worker.kycApprovedAt,
         verified: worker.kycStatus === 'APPROVED',
@@ -594,6 +597,25 @@ export const updateAvailability = async (req: AuthRequest, res: Response) => {
     }
 
     const { isAvailable, availableDays } = req.body;
+
+    if (isAvailable) {
+      const current = await prisma.workerProfile.findUnique({
+        where: { userId: req.user.userId },
+        select: { debtHoldAt: true },
+      });
+      if (current?.debtHoldAt) {
+        // 402, not 403 — see the matching comment in bookingController's
+        // acceptBooking (403 triggers the app's auth-clearing interceptor).
+        return res
+          .status(402)
+          .json(
+            errorResponse(
+              402,
+              'Your account is on hold due to outstanding platform dues. Contact support to go available again.'
+            )
+          );
+      }
+    }
 
     const updated = await prisma.workerProfile.update({
       where: { userId: req.user.userId },

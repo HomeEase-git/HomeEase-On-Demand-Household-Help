@@ -40,6 +40,11 @@ enum BookingStatus {
   QUOTE_APPROVED
   DISPUTED
   PENDING_COMPLETION
+  // Client confirmed the work is done but payment (GCash/Maya) has not yet
+  // cleared. The Xendit invoice for the full final total exists; the
+  // invoice-paid webhook moves this to COMPLETED. CASH bookings skip this
+  // state entirely (they go straight to COMPLETED on confirmation).
+  AWAITING_PAYMENT
   COMPLETED
   CANCELLED
 }
@@ -58,6 +63,12 @@ enum PaymentStatus {
   REFUNDED
 }
 
+// Vestigial since the move to pay-after-completion (no funds are ever held by
+// the platform). Kept for backward compatibility and admin reporting:
+//   HELD     = payment not yet settled
+//   RELEASED = payment collected and the worker's side settled (payout created
+//              or, for cash, commission/tax debt accrued)
+//   REFUNDED = payment refunded
 enum EscrowStatus {
   HELD
   RELEASED
@@ -132,6 +143,8 @@ enum NotificationType {
   VERIFICATION_REJECTED
   PAYOUT_SENT
   PAYOUT_FAILED
+  ACCOUNT_ON_HOLD
+  ACCOUNT_HOLD_RELEASED
 }
 
 enum TimeSlot {
@@ -376,6 +389,22 @@ model WorkerProfile {
   tin           String?   @unique
   tinVerifiedAt DateTime?
 
+  // Platform commission + withholding tax owed on CASH jobs (paid to the
+  // worker in person, so the platform's cut can't be skimmed from a gateway
+  // transaction). Accrued by debtLedgerService.accrueDebtTx, netted against
+  // the worker's next online-job payout by recoverDebtTx. Always >= 0 in
+  // practice — represents money owed TO the platform, not a spendable
+  // balance.
+  commissionOwed Float @default(0)
+
+  // Set when commissionOwed crosses AppSettings.workerDebtHoldLimit —
+  // excludes the worker from matching/search and blocks new booking
+  // acceptance (existing in-progress bookings are unaffected) until an
+  // admin explicitly clears it via debtLedgerService.releaseDebtHold.
+  // Deliberately does NOT auto-clear when the debt is later recovered.
+  debtHoldAt   DateTime?
+  debtHoldNote String?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -387,7 +416,7 @@ model WorkerProfile {
   resumeParseResult ResumeParseResult?
   availability      WorkerAvailability[]
   packages          WorkerPackage[]
-  wallet            WorkerWallet?
+  debtLedger        DebtLedgerEntry[]
 
   @@index([userId])
   @@index([kycStatus])
@@ -396,6 +425,7 @@ model WorkerProfile {
   // covers that combo directly instead of relying on a bitmap-AND of the
   // two single-column indexes above.
   @@index([isAvailable, kycStatus])
+  @@index([debtHoldAt])
 }
 
 // Per-date/slot availability record used by auto-matching to find candidate
@@ -966,6 +996,12 @@ model Payment {
   methodType        PaymentMethodType
   accountIdentifier String? // masked GCash/Maya number, etc.
 
+  // Set once the worker's earnings have been settled for this payment (payout
+  // scheduled and/or wallet debt netted). Idempotency guard for
+  // paymentLifecycleService.settleWorkerEarnings — a replayed webhook or the
+  // self-heal sweep must not net the debt or pay out twice.
+  workerSettledAt DateTime?
+
   payout Payout?
 
   createdAt DateTime @default(now())
@@ -1010,56 +1046,42 @@ model Payout {
   @@index([status])
 }
 
-// Prepaid balance a worker maintains to cover the per-job admin fee deducted
-// at booking acceptance (see bookingController.acceptBooking) — distinct
-// from Payout, which is the platform paying the worker their job earnings.
-model WorkerWallet {
+enum DebtLedgerEntryType {
+  // Platform commission + withholding tax owed on a CASH job, where the client
+  // paid the worker in person. Increases commissionOwed.
+  COMMISSION_DEBIT
+  // Withheld from an online job's payout to pay down outstanding
+  // commissionOwed before the remainder is disbursed. Decreases commissionOwed.
+  DEBT_RECOVERY
+  // Admin manual correction (either direction), always requires a note.
+  ADMIN_ADJUSTMENT
+  // A previously-accrued COMMISSION_DEBIT reversed because the underlying
+  // cash payment was refunded/voided. Decreases commissionOwed.
+  REVERSAL
+}
+
+// Audit trail for WorkerProfile.commissionOwed — a running tab of platform
+// dues, not a spendable balance. See debtLedgerService.ts.
+model DebtLedgerEntry {
   id              String        @id @default(cuid())
-  workerProfileId String        @unique
+  workerProfileId String
   workerProfile   WorkerProfile @relation(fields: [workerProfileId], references: [id], onDelete: Cascade)
 
-  balance Float @default(0)
+  type DebtLedgerEntryType
 
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  transactions WalletTransaction[]
-}
-
-enum WalletTransactionType {
-  TOPUP
-  ADMIN_FEE_DEDUCTION
-  REFUND
-  ADMIN_ADJUSTMENT
-}
-
-enum WalletTransactionStatus {
-  PENDING
-  COMPLETED
-  FAILED
-}
-
-model WalletTransaction {
-  id       String       @id @default(cuid())
-  walletId String
-  wallet   WorkerWallet @relation(fields: [walletId], references: [id], onDelete: Cascade)
-
-  type   WalletTransactionType
-  status WalletTransactionStatus @default(PENDING)
-
-  // Signed: credits (TOPUP, REFUND, positive ADMIN_ADJUSTMENT) are positive,
-  // debits (ADMIN_FEE_DEDUCTION, negative ADMIN_ADJUSTMENT) are negative.
+  // Signed: COMMISSION_DEBIT/negative ADMIN_ADJUSTMENT increase what's owed
+  // (positive amount here), DEBT_RECOVERY/REVERSAL/positive ADMIN_ADJUSTMENT
+  // decrease it (negative amount here). balanceAfter is always the resulting
+  // commissionOwed.
   amount       Float
-  balanceAfter Float?
+  balanceAfter Float
 
-  bookingId       String? // soft reference — links a deduction/refund to the job it was for
-  xenditInvoiceId String? @unique // set for TOPUP rows, keys the invoice-paid webhook back to this transaction
-  failureReason      String?
-  note               String? // admin's reason, for ADMIN_ADJUSTMENT rows
+  bookingId String? // soft reference — links an entry to the job it was for
+  note      String? // admin's reason, for ADMIN_ADJUSTMENT rows
 
   createdAt DateTime @default(now())
 
-  @@index([walletId])
+  @@index([workerProfileId])
   @@index([bookingId])
 }
 
@@ -1220,17 +1242,16 @@ model AppSettings {
   // Expertise-tier pricing (see utils/workerTier.ts) — tier is computed on
   // the fly from WorkerProfile.rating + completed-job count, not stored;
   // these thresholds/multipliers are the only admin-configurable part.
-  tierProMinRating    Float @default(4.5)
-  tierProMinJobs      Int   @default(20)
-  tierProMultiplier   Float @default(1.15)
-  tierExpertMinRating Float @default(4.8)
-  tierExpertMinJobs   Int   @default(50)
+  tierProMinRating     Float @default(4.5)
+  tierProMinJobs       Int   @default(20)
+  tierProMultiplier    Float @default(1.15)
+  tierExpertMinRating  Float @default(4.8)
+  tierExpertMinJobs    Int   @default(50)
   tierExpertMultiplier Float @default(1.3)
 
-  // Prepaid wallet admin-fee gate (see walletService.ts, bookingController.acceptBooking)
-  // — flat fee in pesos, independent of job price so it isn't affected by
-  // later quote/add-on changes.
-  adminFeePerJob Float @default(20)
+  // Threshold on WorkerProfile.commissionOwed (see debtLedgerService.ts) —
+  // crossing this puts the worker's account on hold until an admin clears it.
+  workerDebtHoldLimit Float @default(500)
 
   updatedAt DateTime @updatedAt
 }

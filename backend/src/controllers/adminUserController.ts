@@ -211,6 +211,7 @@ type WorkerRow = {
     kycStatus: string;
     serviceTypes: Array<{ name: string }>;
     declineCooldownUntil?: Date | null;
+    debtHoldAt?: Date | null;
   } | null;
 };
 
@@ -270,6 +271,7 @@ async function formatWorkersBatch(users: WorkerRow[]) {
       // verification label above, which `status`/`verification` both carry.
       accountStatus: user.status.toLowerCase(),
       declineCooldownUntil: user.workerProfile?.declineCooldownUntil ?? null,
+      debtHoldAt: user.workerProfile?.debtHoldAt ?? null,
       earnings: formatPeso(earnings),
       joined: user.createdAt.toLocaleDateString('en-US', {
         month: 'short',

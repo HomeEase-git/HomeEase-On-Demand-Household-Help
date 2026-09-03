@@ -1,14 +1,45 @@
-import { Resend } from 'resend';
+import nodemailer, { Transporter } from 'nodemailer';
 
-const resend = new Resend(process.env.RESEND_API_KEY);
-const FROM_EMAIL = process.env.RESEND_FROM_EMAIL || 'onboarding@resend.dev';
+// Gmail SMTP. Auth is the project Gmail address + a 16-char App Password
+// (Google Account -> Security -> 2-Step Verification -> App passwords).
+// No sending domain needed; replies land in the same Gmail inbox.
+const SMTP_USER = process.env.SMTP_USER;
+const SMTP_PASS = process.env.SMTP_PASS;
+const FROM_NAME = process.env.SMTP_FROM_NAME || 'HomeEase';
+const FROM_EMAIL = `${FROM_NAME} <${SMTP_USER}>`;
+
+let transporter: Transporter | null = null;
+
+const getTransporter = (): Transporter => {
+  if (!SMTP_USER || !SMTP_PASS) {
+    throw new Error('SMTP_USER and SMTP_PASS must be set to send email');
+  }
+  if (!transporter) {
+    transporter = nodemailer.createTransport({
+      host: 'smtp.gmail.com',
+      port: 465,
+      secure: true,
+      auth: { user: SMTP_USER, pass: SMTP_PASS },
+    });
+  }
+  return transporter;
+};
+
+const send = async (to: string, subject: string, html: string, label: string): Promise<void> => {
+  try {
+    const info = await getTransporter().sendMail({ from: FROM_EMAIL, to, subject, html });
+    console.log(`[Email] ${label} sent:`, info.messageId);
+  } catch (err) {
+    console.error(`[Email] Failed to send ${label}:`, err);
+    throw new Error(`Failed to send ${label}: ${(err as Error).message}`);
+  }
+};
 
 export const sendOtpEmail = async (email: string, otp: string): Promise<void> => {
-  const { data, error } = await resend.emails.send({
-    from: FROM_EMAIL,
-    to: email,
-    subject: 'Your HomeEase Verification Code',
-    html: `
+  await send(
+    email,
+    'Your HomeEase Verification Code',
+    `
       <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
         <h2 style="color: #4169E1;">HomeEase Email Verification</h2>
         <p>Your verification code is:</p>
@@ -17,22 +48,15 @@ export const sendOtpEmail = async (email: string, otp: string): Promise<void> =>
         <p>If you did not request this, please ignore this email.</p>
       </div>
     `,
-  });
-
-  if (error) {
-    console.error('[Resend] Failed to send OTP email:', error);
-    throw new Error(`Failed to send OTP email: ${error.message}`);
-  }
-
-  console.log('[Resend] OTP email sent:', data?.id);
+    'OTP email',
+  );
 };
 
 export const sendPasswordResetEmail = async (email: string, otp: string): Promise<void> => {
-  const { data, error } = await resend.emails.send({
-    from: FROM_EMAIL,
-    to: email,
-    subject: 'Reset Your HomeEase Password',
-    html: `
+  await send(
+    email,
+    'Reset Your HomeEase Password',
+    `
       <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
         <h2 style="color: #4169E1;">Password Reset Request</h2>
         <p>You requested to reset your HomeEase password. Enter this code in the app to continue:</p>
@@ -41,34 +65,21 @@ export const sendPasswordResetEmail = async (email: string, otp: string): Promis
         <p>If you did not request a password reset, please ignore this email.</p>
       </div>
     `,
-  });
-
-  if (error) {
-    console.error('[Resend] Failed to send password reset email:', error);
-    throw new Error(`Failed to send password reset email: ${error.message}`);
-  }
-
-  console.log('[Resend] Password reset email sent:', data?.id);
+    'password reset email',
+  );
 };
 
 export const sendWelcomeEmail = async (email: string, fullName: string): Promise<void> => {
-  const { data, error } = await resend.emails.send({
-    from: FROM_EMAIL,
-    to: email,
-    subject: 'Welcome to HomeEase',
-    html: `
+  await send(
+    email,
+    'Welcome to HomeEase',
+    `
       <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
         <h2 style="color: #4169E1;">Welcome to HomeEase, ${fullName}!</h2>
         <p>Your account has been successfully verified. You can now access all HomeEase features.</p>
         <p>Thank you for joining us.</p>
       </div>
     `,
-  });
-
-  if (error) {
-    console.error('[Resend] Failed to send welcome email:', error);
-    throw new Error(`Failed to send welcome email: ${error.message}`);
-  }
-
-  console.log('[Resend] Welcome email sent:', data?.id);
+    'welcome email',
+  );
 };

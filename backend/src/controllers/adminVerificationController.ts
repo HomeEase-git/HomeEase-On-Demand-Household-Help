@@ -2,9 +2,10 @@ import { Request, Response } from 'express';
 import prisma from '@config/database';
 import { errorResponse } from '@utils/errorResponse';
 import { formatVerification } from '@utils/formatters';
-import { verificationQueue } from '@queues/verificationQueue';
+import { verificationQueue, VERIFICATION_JOB_OPTIONS } from '@queues/verificationQueue';
 import { writeAuditLog } from '@utils/auditLog';
 import { notifyUser } from '@utils/notify';
+import { sendSmsToUser } from '@utils/smsService';
 import type { JwtPayload } from '@/types/index';
 
 interface AuthRequest extends Request {
@@ -138,15 +139,24 @@ export const approveVerification = async (req: AuthRequest, res: Response) => {
       return verification;
     });
 
+    const verificationApprovedMessage =
+      record.user.role === 'WORKER'
+        ? "You're verified! You can now start accepting jobs."
+        : 'Your account verification has been approved.';
+
     await notifyUser({
       userId: record.userId,
       type: 'VERIFICATION_APPROVED',
       title: 'Verification Approved',
-      message:
-        record.user.role === 'WORKER'
-          ? "You're verified! You can now start accepting jobs."
-          : 'Your account verification has been approved.',
+      message: verificationApprovedMessage,
       relatedId: record.id,
+    });
+    // A worker's KYC approval unlocks their ability to earn and they're
+    // actively waiting on it — worth the SMS even though this only fires
+    // once per account.
+    void sendSmsToUser({
+      userId: record.userId,
+      message: `HomeEase: ${verificationApprovedMessage}`,
     });
 
     await writeAuditLog({
@@ -346,16 +356,20 @@ export const rerunVerification = async (req: AuthRequest, res: Response) => {
       return res.status(400).json(errorResponse(400, 'Cannot rerun AI review for approved verification'));
     }
 
-    await verificationQueue.add('analyze-verification', {
-      verificationId: record.id,
-      requestType: record.type,
-      documents: record.documents.map((doc) => ({
-        documentType: doc.documentType,
-        fileUrl: doc.fileUrl,
-        mimeType: doc.mimeType,
-        originalName: doc.originalName,
-      })),
-    });
+    await verificationQueue.add(
+      'analyze-verification',
+      {
+        verificationId: record.id,
+        requestType: record.type,
+        documents: record.documents.map((doc) => ({
+          documentType: doc.documentType,
+          fileUrl: doc.fileUrl,
+          mimeType: doc.mimeType,
+          originalName: doc.originalName,
+        })),
+      },
+      VERIFICATION_JOB_OPTIONS
+    );
 
     const updated = await prisma.verificationRequest.update({
       where: { id },

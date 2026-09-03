@@ -3,171 +3,25 @@ import crypto from 'crypto';
 import prisma from '@config/database';
 import { errorResponse } from '@utils/errorResponse';
 import { notifyUser } from '@utils/notify';
+import { sendSmsToUser } from '@utils/smsService';
 import { writeAuditLog } from '@utils/auditLog';
 import type { JwtPayload } from '@/types/index';
-import { calculateCommission, calculateWithholdingTax } from '../utils/pricing';
-import { createInvoice } from '../services/xenditService';
-import { getAppSettings } from '@services/appSettingsService';
-import { refundOrVoidPayment } from '@services/paymentLifecycleService';
+import {
+  refundOrVoidPayment,
+  finalizePaidBooking,
+  createCompletionInvoice,
+} from '@services/paymentLifecycleService';
 import { translateXenditFailureReason } from '@utils/xenditFailureMessages';
-import { handleWalletTopupPaid, handleWalletTopupFailed } from './walletController';
 
 interface AuthRequest extends Request {
   user?: JwtPayload;
 }
 
-/**
- * POST /api/payments/:bookingId
- * Create Payment once booking is completed/approved
- *
- * Schema notes:
- *  - Payment has no clientId/workerId — ownership is accessed via booking relation
- *  - Payment.methodType is required (PaymentMethodType enum)
- *  - totalAmount is required on Payment
- *  - Booking quote data is inline (laborCost, materialsCost); addOns use `price` field
- */
-export const createPayment = async (req: AuthRequest, res: Response) => {
-  try {
-    if (!req.user) {
-      return res.status(401).json(errorResponse(401, 'Not authenticated'));
-    }
-
-    const bookingId = req.params.bookingId as string;
-    const currentUserId = req.user.userId;
-    const validPaymentMethodTypes = ['GCASH', 'MAYA', 'CASH'] as const;
-    const rawMethodType = typeof req.body?.methodType === 'string' ? req.body.methodType.trim() : '';
-    const paymentMethodId = typeof req.body?.paymentMethodId === 'string' ? req.body.paymentMethodId.trim() : '';
-    const requestAccountIdentifier = typeof req.body?.accountIdentifier === 'string' ? req.body.accountIdentifier.trim() : '';
-    const xenditPaymentId = typeof req.body?.xenditPaymentId === 'string' ? req.body.xenditPaymentId.trim() : null;
-    const xenditInvoiceId = typeof req.body?.xenditInvoiceId === 'string' ? req.body.xenditInvoiceId.trim() : null;
-
-    const booking = await prisma.booking.findUnique({
-      where: { id: bookingId },
-      include: {
-        addOns: true,   // schema: addOns (capital O), fields: name + price
-        client: true,
-        worker: true,
-      },
-    });
-
-    if (!booking) {
-      return res.status(404).json(errorResponse(404, 'Booking not found'));
-    }
-
-    // Only client can create payment for their booking
-    if (booking.clientId !== currentUserId) {
-      return res.status(403).json(errorResponse(403, 'You do not have permission to create payment for this booking'));
-    }
-
-    let methodType: (typeof validPaymentMethodTypes)[number] | null = null;
-    let accountIdentifier: string | null = null;
-
-    if (paymentMethodId) {
-      const savedMethod = await prisma.savedPaymentMethod.findUnique({
-        where: { id: paymentMethodId },
-        include: { clientProfile: true },
-      });
-
-      if (!savedMethod) {
-        return res.status(404).json(errorResponse(404, 'Payment method not found'));
-      }
-
-      if (savedMethod.clientProfile.userId !== currentUserId) {
-        return res.status(403).json(errorResponse(403, 'Payment method does not belong to this user'));
-      }
-
-      methodType = savedMethod.type;
-      accountIdentifier = savedMethod.accountIdentifier ?? (requestAccountIdentifier || null);
-
-      if (rawMethodType && rawMethodType !== methodType) {
-        return res.status(400).json(
-          errorResponse(400, `Payment method type mismatch: expected ${savedMethod.type}, got ${rawMethodType}`)
-        );
-      }
-    } else if (rawMethodType) {
-      if (!validPaymentMethodTypes.includes(rawMethodType as (typeof validPaymentMethodTypes)[number])) {
-        return res.status(400).json(
-          errorResponse(400, `Invalid methodType "${rawMethodType}". Allowed values: GCASH, MAYA, CASH`)
-        );
-      }
-
-      methodType = rawMethodType as (typeof validPaymentMethodTypes)[number];
-      accountIdentifier = requestAccountIdentifier || null;
-    } else if (booking.paymentMethodType) {
-      // Nothing provided in the request — fall back to the method the client
-      // already settled on when they made the booking.
-      methodType = booking.paymentMethodType as (typeof validPaymentMethodTypes)[number];
-      accountIdentifier = booking.paymentAccountIdentifier ?? (requestAccountIdentifier || null);
-    } else {
-      return res.status(400).json(
-        errorResponse(400, 'methodType is required and must be one of: GCASH, MAYA, CASH')
-      );
-    }
-
-    // Can only create payment for completed or approved bookings
-    if (!['COMPLETED', 'QUOTE_APPROVED'].includes(booking.status)) {
-      return res.status(409).json(errorResponse(409, `Cannot create payment for booking with status ${booking.status}`));
-    }
-
-    // Check if payment already exists (bookingId is @unique on Payment)
-    const existingPayment = await prisma.payment.findUnique({
-      where: { bookingId },
-    });
-
-    if (existingPayment) {
-      if (existingPayment.status !== 'FAILED') {
-        return res.status(409).json(errorResponse(409, 'Payment already exists for this booking'));
-      }
-
-      // A previous Xendit attempt failed (e.g. the client cancelled or the
-      // e-wallet declined it) — clear it so the client can retry the payment.
-      await prisma.payment.delete({ where: { id: existingPayment.id } });
-    }
-
-    // Calculate amounts using inline quote fields and addOns
-    const addonsCost = (booking.addOns || []).reduce((sum: number, addon: { price: number }) => sum + addon.price, 0);
-    const hasQuote = booking.laborCost != null && booking.materialsCost != null;
-    const subtotal = hasQuote
-      ? (booking.laborCost ?? 0) + (booking.materialsCost ?? 0) + addonsCost
-      : booking.estimatedPrice + addonsCost;
-    const tip = booking.tip ?? 0;
-
-    const { commissionRate, withholdingTaxRate } = await getAppSettings();
-    const commission = calculateCommission(subtotal, commissionRate);
-    const withholdingTax = calculateWithholdingTax(subtotal, commissionRate, withholdingTaxRate);
-    const workerPayout = subtotal - commission - withholdingTax + tip;
-    const totalAmount = subtotal + tip;
-
-    const payment = await prisma.payment.create({
-      data: {
-        bookingId,
-        subtotal,
-        tip,
-        commissionRate,
-        commissionAmount: commission,
-        withholdingTaxRate,
-        withholdingTaxAmount: withholdingTax,
-        workerPayout,
-        totalAmount,
-        status: 'PENDING',
-        escrowStatus: 'HELD',
-        methodType: methodType as any,
-        accountIdentifier,
-        xenditPaymentId,
-        xenditInvoiceId,
-      },
-    });
-
-    return res.status(201).json({
-      success: true,
-      message: 'Payment created successfully',
-      data: payment,
-    });
-  } catch (error) {
-    console.error('Error creating payment:', error);
-    return res.status(500).json(errorResponse(500, 'Failed to create payment'));
-  }
-};
+// NOTE: `createPayment` (POST /api/payments/:bookingId) and `releaseEscrow`
+// (POST /api/payments/:id/release) were removed with the move to
+// pay-after-completion. Payment rows are now created by
+// paymentLifecycleService.settleCashBooking / createCompletionInvoice, driven
+// from bookingController.confirmCompletion.
 
 /**
  * GET /api/payments/:bookingId
@@ -368,76 +222,13 @@ export const listMyPayments = async (req: AuthRequest, res: Response) => {
 };
 
 /**
- * POST /api/payments/:id/release
- * Release escrow: HELD → RELEASED
- */
-export const releaseEscrow = async (req: AuthRequest, res: Response) => {
-  try {
-    if (!req.user || req.user.role !== 'CLIENT') {
-      return res.status(403).json(errorResponse(403, 'Only clients can release escrow'));
-    }
-
-    const id = req.params.id as string;
-    const currentUserId = req.user.userId;
-
-    const payment = await prisma.payment.findUnique({
-      where: { id },
-      include: { booking: true },
-    });
-
-    if (!payment) {
-      return res.status(404).json(errorResponse(404, 'Payment not found'));
-    }
-
-    // Ownership via booking (Payment has no clientId)
-    if (payment.booking.clientId !== currentUserId) {
-      return res.status(403).json(errorResponse(403, 'You do not have permission to release this payment'));
-    }
-
-    if (payment.escrowStatus !== 'HELD') {
-      return res.status(409).json(errorResponse(409, `Cannot release escrow with status ${payment.escrowStatus}`));
-    }
-
-    const updated = await prisma.payment.update({
-      where: { id },
-      data: {
-        escrowStatus: 'RELEASED',
-        releasedAt: new Date(),
-        status: 'COMPLETED',
-      },
-    });
-
-    // Notify worker — schema has PAYMENT_RECEIVED (no PAYMENT_RELEASED)
-    // booking.workerId is nullable — skip if the booking has no assigned worker
-    if (payment.booking.workerId) {
-      await notifyUser({
-        userId: payment.booking.workerId,
-        type: 'PAYMENT_RECEIVED',
-        title: 'Payment Released',
-        message: `₱${payment.workerPayout} has been released to your account`,
-        relatedId: payment.bookingId,
-      });
-    }
-
-    return res.status(200).json({
-      success: true,
-      message: 'Escrow released successfully',
-      data: {
-        id: updated.id,
-        escrowStatus: updated.escrowStatus,
-        releasedAt: updated.releasedAt,
-        workerPayout: updated.workerPayout,
-      },
-    });
-  } catch (error) {
-    console.error('Error releasing escrow:', error);
-    return res.status(500).json(errorResponse(500, 'Failed to release escrow'));
-  }
-};
-
-/**
  * POST /api/payments/:id/refund
- * Refund payment: escrow → REFUNDED
+ * Client-initiated refund request.
+ *
+ *  - Payment still PENDING (unpaid GCash/Maya) -> void it directly.
+ *  - Payment COMPLETED -> money has already moved, so this opens a Dispute for
+ *    an admin to review; the actual refund happens in dispute resolution
+ *    (adminDisputeController -> refundOrVoidPayment).
  */
 export const refundPayment = async (req: AuthRequest, res: Response) => {
   try {
@@ -459,71 +250,72 @@ export const refundPayment = async (req: AuthRequest, res: Response) => {
     if (!payment) {
       return res.status(404).json(errorResponse(404, 'Payment not found'));
     }
-
-    // Ownership via booking
     if (payment.booking.clientId !== currentUserId) {
       return res.status(403).json(errorResponse(403, 'You do not have permission to refund this payment'));
     }
 
-    if (payment.escrowStatus !== 'HELD') {
-      return res.status(409).json(errorResponse(409, `Cannot refund escrow with status ${payment.escrowStatus}`));
+    if (payment.status === 'REFUNDED' || payment.status === 'FAILED') {
+      return res.status(409).json(errorResponse(409, `Nothing to refund — payment is ${payment.status}`));
     }
 
-    // Delegates to refundOrVoidPayment, which only marks the DB REFUNDED after
-    // a real Xendit refund succeeds for already-captured payments — a direct
-    // DB status flip here would silently lie about the client's money.
-    let updated;
-    try {
-      updated = await refundOrVoidPayment(payment.bookingId, trimmedReason);
-    } catch (refundError) {
-      console.error(`Xendit refund failed for payment ${id}, escrow left HELD for manual follow-up:`, refundError);
-      return res
-        .status(502)
-        .json(errorResponse(502, 'Refund could not be processed with the payment provider. Escrow is still held — please retry or contact support.'));
-    }
-
-    if (!updated) {
-      return res.status(404).json(errorResponse(404, 'Payment not found'));
-    }
-
-    // Notify worker (booking.workerId is nullable — skip if unassigned)
-    if (payment.booking.workerId) {
-      await notifyUser({
-        userId: payment.booking.workerId,
-        type: 'PAYMENT_REFUNDED',
-        title: 'Payment Refunded',
-        message: `Payment has been refunded: ${trimmedReason}`,
-        relatedId: payment.bookingId,
+    // Unpaid -> just void it, no dispute needed.
+    if (payment.status === 'PENDING') {
+      const updated = await refundOrVoidPayment(payment.bookingId, trimmedReason);
+      return res.status(200).json({
+        success: true,
+        message: 'Pending payment cancelled',
+        data: { id: updated?.id ?? payment.id, status: updated?.status ?? 'FAILED' },
       });
     }
 
-    return res.status(200).json({
+    // COMPLETED -> route through a Dispute for admin review.
+    const existingOpen = await prisma.dispute.findFirst({
+      where: { bookingId: payment.bookingId, status: { in: ['OPEN', 'UNDER_REVIEW'] } },
+    });
+    const dispute =
+      existingOpen ??
+      (await prisma.dispute.create({
+        data: {
+          bookingId: payment.bookingId,
+          raisedById: currentUserId,
+          reason: `Refund requested: ${trimmedReason}`,
+          status: 'OPEN',
+        },
+      }));
+
+    const admins = await prisma.user.findMany({
+      where: { role: 'ADMIN', isDeleted: false },
+      select: { id: true },
+    });
+    await Promise.all(
+      admins.map((admin) =>
+        notifyUser({
+          userId: admin.id,
+          type: 'PAYMENT_REFUNDED',
+          title: 'Refund Requested',
+          message: `A client requested a refund on booking ${payment.bookingId}: ${trimmedReason}`,
+          relatedId: dispute.id,
+        })
+      )
+    );
+
+    return res.status(202).json({
       success: true,
-      message: 'Payment refunded successfully',
-      data: {
-        id: updated.id,
-        escrowStatus: updated.escrowStatus,
-        status: updated.status,
-        refundedAt: updated.refundedAt,
-        refundAmount: updated.subtotal,
-      },
+      message: 'Refund request submitted for review',
+      data: { disputeId: dispute.id, status: 'UNDER_REVIEW' },
     });
   } catch (error) {
-    console.error('Error refunding payment:', error);
-    return res.status(500).json(errorResponse(500, 'Failed to refund payment'));
+    console.error('Error handling refund request:', error);
+    return res.status(500).json(errorResponse(500, 'Failed to submit refund request'));
   }
 };
 
 /**
  * POST /api/payments/:bookingId/xendit/checkout
- * Create a Xendit Invoice for an already-created, still-PENDING Payment, and
- * return the hosted checkout URL for the mobile app to open in a WebView.
- * Unlike PayMongo's Source, a Xendit Invoice's hosted page supports every PH
- * payment channel (GCash, Maya, cards, GrabPay, etc) at once — methodType
- * here only gates when this flow is offered client-side, it isn't sent to
- * Xendit as a channel restriction. Capture is atomic on Xendit's side, so
- * there is no separate "charge" step; the invoice-paid webhook below is what
- * actually marks the Payment COMPLETED.
+ * Resume payment for a GCash/Maya booking that is AWAITING_PAYMENT (the client
+ * abandoned or failed an earlier checkout). Returns the live hosted invoice
+ * URL, or mints a fresh invoice if the previous one expired/failed. Delegates
+ * to createCompletionInvoice, which owns the reuse-vs-recreate logic.
  */
 export const createXenditCheckout = async (req: AuthRequest, res: Response) => {
   try {
@@ -534,53 +326,35 @@ export const createXenditCheckout = async (req: AuthRequest, res: Response) => {
     const bookingId = req.params.bookingId as string;
     const currentUserId = req.user.userId;
 
-    const payment = await prisma.payment.findUnique({
-      where: { bookingId },
-      include: { booking: { include: { client: true } } },
+    const booking = await prisma.booking.findUnique({
+      where: { id: bookingId },
+      select: { clientId: true, status: true, paymentMethodType: true },
     });
 
-    if (!payment) {
-      return res.status(404).json(errorResponse(404, 'Payment not found for this booking'));
+    if (!booking) {
+      return res.status(404).json(errorResponse(404, 'Booking not found'));
     }
-
-    if (payment.booking.clientId !== currentUserId) {
+    if (booking.clientId !== currentUserId) {
       return res.status(403).json(errorResponse(403, 'You do not have permission to pay for this booking'));
     }
-
-    if (payment.status !== 'PENDING') {
-      return res.status(409).json(errorResponse(409, `Cannot start checkout for payment with status ${payment.status}`));
+    if (booking.status !== 'AWAITING_PAYMENT' && booking.status !== 'PENDING_COMPLETION') {
+      return res
+        .status(409)
+        .json(errorResponse(409, `Cannot start checkout for a booking with status ${booking.status}`));
     }
-
-    if (payment.methodType !== 'GCASH' && payment.methodType !== 'MAYA') {
+    if (booking.paymentMethodType !== 'GCASH' && booking.paymentMethodType !== 'MAYA') {
       return res.status(400).json(errorResponse(400, 'Xendit checkout is only available for GCash and Maya'));
     }
 
-    // Xendit's success_redirect_url/failure_redirect_url must be real http(s)
-    // URLs, so this points at a placeholder domain that the mobile WebView
-    // intercepts and cancels before it ever actually loads (see
-    // XenditCheckoutModal.tsx).
-    const redirectBase = process.env.XENDIT_REDIRECT_BASE_URL || 'https://homeease.app';
-
-    const invoice = await createInvoice({
-      externalId: payment.id,
-      amountPesos: payment.totalAmount,
-      description: `HomeEase booking ${bookingId}`,
-      payerEmail: payment.booking.client.email ?? undefined,
-      successRedirectUrl: `${redirectBase}/payment-redirect/success?bookingId=${bookingId}`,
-      failureRedirectUrl: `${redirectBase}/payment-redirect/failed?bookingId=${bookingId}`,
-    });
-
-    await prisma.payment.update({
-      where: { id: payment.id },
-      data: { xenditInvoiceId: invoice.id },
-    });
+    const invoice = await createCompletionInvoice(bookingId);
 
     return res.status(200).json({
       success: true,
-      message: 'Xendit checkout created',
+      message: 'Xendit checkout ready',
       data: {
-        checkoutUrl: invoice.invoiceUrl,
-        invoiceId: invoice.id,
+        checkoutUrl: invoice.checkoutUrl,
+        invoiceId: invoice.invoiceId,
+        amount: invoice.amount,
       },
     });
   } catch (error) {
@@ -619,10 +393,10 @@ function verifyXenditCallbackToken(headerToken: string | string[] | undefined, s
 }
 
 /**
- * Marks the Payment matching this Xendit invoice COMPLETED, but leaves
- * escrow HELD — same escrow semantics as before: charged != released. Money
- * still isn't released to the worker until the client confirms job
- * completion (see paymentLifecycleService.captureAndReleasePayment).
+ * Handles a paid Xendit invoice for a booking completion payment: hands off to
+ * paymentLifecycleService.finalizePaidBooking, which marks the Payment
+ * COMPLETED, finalizes the booking, nets any outstanding worker commission dues
+ * and schedules the payout.
  *
  * `invoice` is the raw Xendit invoice payload from the webhook body — shape
  * UNCONFIRMED against a real payload (docs domains were network-blocked
@@ -642,22 +416,18 @@ async function handleInvoicePaid(invoice: any) {
 
   if (!payment || payment.status !== 'PENDING') return;
 
-  await prisma.payment.update({
-    where: { id: payment.id },
-    data: {
-      xenditPaymentId: invoice.payment_id ?? null,
-      status: 'COMPLETED',
-      capturedAmount: invoice.paid_amount ?? payment.totalAmount,
-      capturedAt: invoice.paid_at ? new Date(invoice.paid_at) : new Date(),
-    },
-  });
+  // finalizePaidBooking marks the Payment COMPLETED, finalizes the booking,
+  // nets any outstanding worker commission dues and schedules the payout.
+  await finalizePaidBooking(
+    payment.id,
+    invoice.payment_id ?? null,
+    invoice.paid_amount ?? null,
+    invoice.paid_at ? new Date(invoice.paid_at) : null
+  );
 
-  await notifyUser({
+  void sendSmsToUser({
     userId: payment.booking.clientId,
-    type: 'PAYMENT_RECEIVED',
-    title: 'Payment Confirmed',
-    message: 'Your payment was received and is held until the job is completed.',
-    relatedId: payment.bookingId,
+    message: 'HomeEase: Your payment was received. Thank you!',
   });
 }
 
@@ -665,9 +435,25 @@ async function handleInvoiceFailed(invoice: any) {
   const invoiceId = invoice?.id as string | undefined;
   if (!invoiceId) return;
 
-  await prisma.payment.updateMany({
+  const payment = await prisma.payment.findFirst({
     where: { xenditInvoiceId: invoiceId, status: 'PENDING' },
+    include: { booking: { select: { clientId: true } } },
+  });
+  if (!payment) return;
+
+  // The booking stays in AWAITING_PAYMENT — the client can retry, which mints
+  // a fresh invoice (createCompletionInvoice / resumeCompletionPayment).
+  await prisma.payment.update({
+    where: { id: payment.id },
     data: { status: 'FAILED', failureReason: invoice?.status ?? 'EXPIRED' },
+  });
+
+  await notifyUser({
+    userId: payment.booking.clientId,
+    type: 'PAYMENT_RECEIVED',
+    title: 'Payment Not Completed',
+    message: 'Your payment did not go through. Open the booking to try again.',
+    relatedId: payment.bookingId,
   });
 }
 
@@ -705,12 +491,10 @@ export const handleXenditInvoiceWebhook = async (req: Request, res: Response) =>
     switch (status) {
       case 'PAID':
         await handleInvoicePaid(invoice);
-        await handleWalletTopupPaid(invoice);
         break;
       case 'EXPIRED':
       case 'FAILED':
         await handleInvoiceFailed(invoice);
-        await handleWalletTopupFailed(invoice?.id, status);
         break;
       default:
         break;
@@ -798,6 +582,10 @@ export const handleXenditPayoutWebhook = async (req: Request, res: Response) => 
         message: `₱${resolved.amount.toFixed(2)} has been sent to your ${resolved.channel} account`,
         relatedId: resolved.bookingId,
       });
+      void sendSmsToUser({
+        userId: resolved.workerId,
+        message: `HomeEase: ₱${resolved.amount.toFixed(2)} has been sent to your ${resolved.channel} account.`,
+      });
     } else if (status === 'FAILED') {
       await prisma.payout.update({
         where: { id: resolved.id },
@@ -815,6 +603,10 @@ export const handleXenditPayoutWebhook = async (req: Request, res: Response) => 
         title: 'Payout Failed',
         message: `We couldn't send your ₱${resolved.amount.toFixed(2)} payout. ${translateXenditFailureReason(failureReason)}`,
         relatedId: resolved.bookingId,
+      });
+      void sendSmsToUser({
+        userId: resolved.workerId,
+        message: `HomeEase: We couldn't send your ₱${resolved.amount.toFixed(2)} payout. ${translateXenditFailureReason(failureReason)}`,
       });
     }
 

@@ -38,7 +38,9 @@ export async function schedulePendingExpiry(bookingId: string): Promise<void> {
     JOB_NAMES.EXPIRE_PENDING,
     { bookingId } satisfies ExpirePendingBookingJobData,
     {
-      jobId: `${JOB_NAMES.EXPIRE_PENDING}:${bookingId}`,
+      // BullMQ rejects ':' in custom jobIds (reserved for its own Redis key
+      // namespacing) — '-' instead, kept in sync with cancelPendingExpiryJob.
+      jobId: `${JOB_NAMES.EXPIRE_PENDING}-${bookingId}`,
       delay: pendingExpiryMinutes * 60 * 1000,
       removeOnComplete: true,
       removeOnFail: true,
@@ -53,7 +55,7 @@ export async function schedulePendingExpiry(bookingId: string): Promise<void> {
  * that already moved on.
  */
 export async function cancelPendingExpiryJob(bookingId: string): Promise<void> {
-  const job = await bookingQueue.getJob(`${JOB_NAMES.EXPIRE_PENDING}:${bookingId}`);
+  const job = await bookingQueue.getJob(`${JOB_NAMES.EXPIRE_PENDING}-${bookingId}`);
   if (job) {
     await job.remove().catch(() => {
       // Already picked up by the worker or removed — safe to ignore.

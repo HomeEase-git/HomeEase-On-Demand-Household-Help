@@ -8,10 +8,15 @@ type Props = {
   onImagePress?: (imageUrl: string) => void;
 };
 
-export const ChatBubbleSent: React.FC<Props> = ({ message, imageUrl, timestamp, onImagePress }) => {
+export const ChatBubbleSent: React.FC<Props> = ({
+  message,
+  imageUrl,
+  timestamp,
+  onImagePress,
+}) => {
   return (
     <View className="items-end mb-2">
-      <View className="bg-accent rounded-2xl rounded-br-sm px-4 py-2 max-w-[75%]">
+      <View className="bg-brand rounded-2xl rounded-br-sm px-4 py-2 max-w-[75%]">
         {imageUrl && (
           <Pressable onPress={() => onImagePress?.(imageUrl)}>
             <Image
@@ -21,8 +26,8 @@ export const ChatBubbleSent: React.FC<Props> = ({ message, imageUrl, timestamp, 
             />
           </Pressable>
         )}
-        {message ? <Text className="text-brand">{message}</Text> : null}
-        <Text className="text-brand/60 text-xs text-right mt-1">
+        {message ? <Text className="text-white">{message}</Text> : null}
+        <Text className="text-white/60 text-xs text-right mt-1">
           {timestamp}
         </Text>
       </View>

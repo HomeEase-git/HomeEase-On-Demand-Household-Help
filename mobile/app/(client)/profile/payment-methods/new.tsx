@@ -18,9 +18,7 @@ import { useAlertModal } from "../../../../contexts/AlertModalContext";
 export default function AddPaymentMethodScreen() {
   const router = useRouter();
   const alertModal = useAlertModal();
-  const [type, setType] = useState<
-    "GCASH" | "MAYA" | "BANK_TRANSFER" | "CASH"
-  >("GCASH");
+  const [type, setType] = useState<"GCASH" | "MAYA" | "CASH">("GCASH");
   const [accountIdentifier, setAccountIdentifier] = useState("");
   const [label, setLabel] = useState("");
   const [loading, setLoading] = useState(false);
@@ -56,7 +54,6 @@ export default function AddPaymentMethodScreen() {
   const types = [
     { label: "GCash", value: "GCASH" as const },
     { label: "Maya", value: "MAYA" as const },
-    { label: "Bank", value: "BANK_TRANSFER" as const },
     { label: "Cash", value: "CASH" as const },
   ];
 

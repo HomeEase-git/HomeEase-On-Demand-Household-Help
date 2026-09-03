@@ -695,10 +695,8 @@ export async function getWorkerReviews(workerId: string, limit = 50) {
 // ============================================================================
 
 export const paymentMethodTypeMap: Record<string, string> = {
-  card: 'CARD',
   gcash: 'GCASH',
   maya: 'MAYA',
-  bank: 'BANK_TRANSFER',
   cash: 'CASH',
 };
 
@@ -904,33 +902,13 @@ export async function getTransactionDetail(bookingId: string) {
   }
 }
 
-export async function createBookingPayment(
-  bookingId: string,
-  data: { methodType: 'GCASH' | 'MAYA' | 'CARD' | 'BANK_TRANSFER' | 'CASH'; accountIdentifier?: string },
-) {
-  try {
-    const response = await api.post(`/payments/${bookingId}`, data);
-    return response;
-  } catch (error) {
-    console.error('Create payment error:', error);
-    throw error;
-  }
-}
-
-export async function releasePaymentEscrow(paymentId: string) {
-  try {
-    const response = await api.post(`/payments/${paymentId}/release`);
-    return response;
-  } catch (error) {
-    console.error('Release payment escrow error:', error);
-    throw error;
-  }
-}
-
+// Resume the Xendit checkout for a GCash/Maya booking that is AWAITING_PAYMENT
+// (client abandoned or failed an earlier attempt). Returns the live hosted
+// invoice URL, minting a fresh one server-side if the previous invoice expired.
 export async function createXenditCheckout(bookingId: string) {
   try {
     const response = await api.post(`/payments/${bookingId}/xendit/checkout`);
-    return response as { checkoutUrl: string; invoiceId: string };
+    return response as { checkoutUrl: string; invoiceId: string; amount: number };
   } catch (error) {
     console.error('Create Xendit checkout error:', error);
     throw error;
@@ -1145,39 +1123,6 @@ export async function acceptBooking(bookingId: string) {
   }
 }
 
-export async function getMyWallet() {
-  try {
-    const response = await api.get('/workers/me/wallet');
-    return response as {
-      balance: number;
-      transactions: Array<{
-        id: string;
-        type: string;
-        status: string;
-        amount: number;
-        balanceAfter: number | null;
-        bookingId: string | null;
-        note: string | null;
-        failureMessage: string | null;
-        createdAt: string;
-      }>;
-    };
-  } catch (error) {
-    console.error('Get wallet error:', error);
-    throw error;
-  }
-}
-
-export async function topupWallet(amount: number, methodType: 'GCASH' | 'MAYA') {
-  try {
-    const response = await api.post('/workers/me/wallet/topup', { amount, methodType });
-    return response as { checkoutUrl: string; invoiceId: string };
-  } catch (error) {
-    console.error('Top up wallet error:', error);
-    throw error;
-  }
-}
-
 export async function declineBooking(bookingId: string, reason?: string) {
   try {
     const response = await api.patch(`/bookings/${bookingId}/decline`, { reason });
@@ -1335,10 +1280,17 @@ export async function completeBooking(bookingId: string, completionPhotoUrl: str
   }
 }
 
+export type ConfirmCompletionResult =
+  | { status: 'COMPLETED'; finalPrice?: number; completedAt?: string; payment?: unknown }
+  | { status: 'AWAITING_PAYMENT'; checkoutUrl: string; invoiceId: string; amount: number };
+
+// CASH -> resolves { status: 'COMPLETED' }.
+// GCASH/MAYA -> resolves { status: 'AWAITING_PAYMENT', checkoutUrl, ... }; open
+// the checkout URL and poll the transaction detail for the final outcome.
 export async function confirmBookingCompletion(bookingId: string) {
   try {
     const response = await api.patch(`/bookings/${bookingId}/confirm-completion`);
-    return response;
+    return response as ConfirmCompletionResult;
   } catch (error) {
     console.error('Confirm booking completion error:', error);
     throw error;
@@ -1708,7 +1660,7 @@ export async function deleteCertification(certId: string) {
 }
 
 export type PayoutMethod = {
-  payoutMethod: 'GCASH' | 'MAYA' | 'BANK_TRANSFER' | null;
+  payoutMethod: 'GCASH' | 'MAYA' | null;
   payoutAccountName: string | null;
   payoutAccountNumber: string | null;
 };
@@ -1943,6 +1895,9 @@ export async function getUserProfile() {
       kycRejectionReason: response.kycRejectionReason,
       hasAcceptedTerms: response.hasAcceptedTerms,
       declineCooldownUntil: response.declineCooldownUntil,
+      // Set (non-null) only for a worker whose account is on hold for
+      // outstanding platform dues — see debtLedgerService.ts on the backend.
+      accountHold: response.accountHold as { since: string; amountOwed: number } | null | undefined,
       bio: response.bio,
       yearsOfExperience: response.yearsOfExperience,
       serviceArea: response.serviceArea,
@@ -1994,23 +1949,31 @@ function delay(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-// Service catalog is effectively static (admin-managed, rarely changes), but
-// was being independently re-fetched with its own loading spinner in 5
-// different screens/components. Cache it in memory for the app session —
-// `servicesPromise` also dedupes concurrent calls if two screens mount at
-// once on first load, so they share one in-flight request instead of firing
-// two.
+// Service catalog is admin-managed (name/price/icon/etc. can change at any
+// time from the web admin), but was being independently re-fetched with its
+// own loading spinner in 5 different screens/components. Cache it in memory
+// for a short TTL rather than the whole app session — long enough to still
+// dedupe the repeat fetches those screens were doing, short enough that an
+// admin edit (e.g. changing a category's icon) shows up on next navigation
+// instead of only after a full app restart. `servicesPromise` also dedupes
+// concurrent calls if two screens mount at once on first load, so they share
+// one in-flight request instead of firing two.
+const SERVICE_TYPES_TTL_MS = 5 * 60 * 1000; // 5 minutes
 let cachedServiceTypes: any[] | null = null;
+let cachedServiceTypesAt = 0;
 let servicesPromise: Promise<any[]> | null = null;
 
 export async function getServiceTypes() {
-  if (cachedServiceTypes) return cachedServiceTypes;
+  if (cachedServiceTypes && Date.now() - cachedServiceTypesAt < SERVICE_TYPES_TTL_MS) {
+    return cachedServiceTypes;
+  }
   if (servicesPromise) return servicesPromise;
 
   servicesPromise = (async () => {
     try {
       const response = await api.get('/services');
       cachedServiceTypes = Array.isArray(response) ? response : [];
+      cachedServiceTypesAt = Date.now();
       return cachedServiceTypes;
     } catch (error) {
       console.error('Get service types error:', error);

@@ -10,15 +10,7 @@ import { Skeleton } from "../../../../components/ui/Skeleton";
 import { colors, cardShadow } from "../../../../constants";
 import * as api from "../../../../services/api";
 import { useAlertModal } from "../../../../contexts/AlertModalContext";
-
-type PaymentMethod = {
-  id: string;
-  type: "card" | "gcash" | "maya" | "bank";
-  lastFour: string;
-  label?: string;
-  isDefault: boolean;
-  expiryDate?: string;
-};
+import type { PaymentMethod } from "../../../../types/api.types";
 
 export default function PaymentMethodsScreen() {
   const router = useRouter();
@@ -30,9 +22,9 @@ export default function PaymentMethodsScreen() {
     setLoading(true);
     try {
       const data = await api.getPaymentMethods();
-      const mapped = data.map((m: any) => ({
+      const mapped: PaymentMethod[] = data.map((m: any) => ({
         id: m.id,
-        type: m.type.toLowerCase() as "card" | "gcash" | "maya" | "bank",
+        type: m.type.toLowerCase() as PaymentMethod["type"],
         lastFour: m.accountIdentifier?.slice(-4) || "XXXX",
         label: m.label,
         isDefault: m.isDefault,

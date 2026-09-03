@@ -2,6 +2,7 @@ import { Worker, type Job } from 'bullmq';
 import prisma from '@config/database';
 import { redisConnection as connection } from '@config/redis';
 import { notifyUser } from '@utils/notify';
+import { sendSmsToUser } from '@utils/smsService';
 import { writeAuditLog } from '@utils/auditLog';
 import { PAYOUT_QUEUE_NAME, PAYOUT_JOB_NAMES, type SendPayoutJobData } from '@queues/payoutQueue';
 import { createPayout, xenditChannelCodeFor } from '@services/xenditDisbursementService';
@@ -74,6 +75,12 @@ export async function processSendPayout(job: Job, data: SendPayoutJobData): Prom
         message: `₱${payout.amount.toFixed(2)} has been sent to your ${payout.channel} account`,
         relatedId: payout.bookingId,
       });
+      // Money moving is the clearest case for SMS — same expectation as a
+      // bank alert. Fire-and-forget, never blocks the worker job.
+      void sendSmsToUser({
+        userId: payout.workerId,
+        message: `HomeEase: ₱${payout.amount.toFixed(2)} has been sent to your ${payout.channel} account.`,
+      });
     } else if (isImmediatelyFailed) {
       await notifyUser({
         userId: payout.workerId,
@@ -81,6 +88,10 @@ export async function processSendPayout(job: Job, data: SendPayoutJobData): Prom
         title: 'Payout Failed',
         message: `We couldn't send your ₱${payout.amount.toFixed(2)} payout. Our team has been notified.`,
         relatedId: payout.bookingId,
+      });
+      void sendSmsToUser({
+        userId: payout.workerId,
+        message: `HomeEase: We couldn't send your ₱${payout.amount.toFixed(2)} payout. Our team has been notified.`,
       });
     }
     // Otherwise (ACCEPTED/PENDING) the payout stays PROCESSING — the payout
@@ -105,6 +116,10 @@ export async function processSendPayout(job: Job, data: SendPayoutJobData): Prom
         title: 'Payout Failed',
         message: `We couldn't send your ₱${payout.amount.toFixed(2)} payout. Our team has been notified.`,
         relatedId: payout.bookingId,
+      });
+      void sendSmsToUser({
+        userId: payout.workerId,
+        message: `HomeEase: We couldn't send your ₱${payout.amount.toFixed(2)} payout. Our team has been notified.`,
       });
       await writeAuditLog({
         action: 'PAYOUT_FAILED',

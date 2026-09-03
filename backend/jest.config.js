@@ -22,6 +22,7 @@ module.exports = {
     '^@services/(.*)$': '<rootDir>/src/services/$1',
   },
   setupFiles: ['<rootDir>/tests/setupEnv.ts'],
+  setupFilesAfterEnv: ['<rootDir>/tests/jestSetupAfterEnv.ts'],
   testTimeout: 20000,
   verbose: true,
 };

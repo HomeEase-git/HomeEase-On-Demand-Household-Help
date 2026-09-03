@@ -6,15 +6,15 @@ import Badge from '../components/common/Badge'
 import LoadingState from '../components/common/LoadingState'
 import ErrorState from '../components/common/ErrorState'
 import { useDetailQuery } from '../hooks/useListQuery'
-import { fetchWorkerById, fetchWorkerWallet, adjustWorkerWallet } from '../services/workers'
+import { fetchWorkerById, fetchWorkerDebt, adjustWorkerDebt, releaseWorkerHold } from '../services/workers'
 import { suspendUser, reinstateUser } from '../services/users'
 import { useToast } from '../context/ToastContext'
 
-const WALLET_TYPE_LABELS = {
-  TOPUP: 'Top Up',
-  ADMIN_FEE_DEDUCTION: 'Admin Fee',
-  REFUND: 'Refund',
-  ADMIN_ADJUSTMENT: 'Adjustment',
+const DEBT_TYPE_LABELS = {
+  COMMISSION_DEBIT: 'Commission Accrued (cash job)',
+  DEBT_RECOVERY: 'Recovered from Payout',
+  ADMIN_ADJUSTMENT: 'Admin Adjustment',
+  REVERSAL: 'Reversed (refund)',
 }
 
 export default function WorkerDetail() {
@@ -25,31 +25,34 @@ export default function WorkerDetail() {
   const [reason, setReason] = useState('')
   const [submitting, setSubmitting] = useState(false)
 
-  const [wallet, setWallet] = useState(null)
-  const [walletLoading, setWalletLoading] = useState(true)
+  const [debt, setDebt] = useState(null)
+  const [debtLoading, setDebtLoading] = useState(true)
   const [adjustModalOpen, setAdjustModalOpen] = useState(false)
   const [adjustAmount, setAdjustAmount] = useState('')
   const [adjustReason, setAdjustReason] = useState('')
   const [adjustSubmitting, setAdjustSubmitting] = useState(false)
+  const [releaseModalOpen, setReleaseModalOpen] = useState(false)
+  const [releaseNote, setReleaseNote] = useState('')
+  const [releaseSubmitting, setReleaseSubmitting] = useState(false)
 
-  const loadWallet = async () => {
-    setWalletLoading(true)
+  const loadDebt = async () => {
+    setDebtLoading(true)
     try {
-      const data = await fetchWorkerWallet(id)
-      setWallet(data)
+      const data = await fetchWorkerDebt(id)
+      setDebt(data)
     } catch (err) {
-      console.error('Load worker wallet error:', err)
+      console.error('Load worker debt error:', err)
     } finally {
-      setWalletLoading(false)
+      setDebtLoading(false)
     }
   }
 
   useEffect(() => {
-    loadWallet()
+    loadDebt()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id])
 
-  const handleAdjustWallet = async () => {
+  const handleAdjustDebt = async () => {
     const amount = Number(adjustAmount)
     if (!amount) {
       showError('Enter a non-zero amount.')
@@ -61,16 +64,31 @@ export default function WorkerDetail() {
     }
     setAdjustSubmitting(true)
     try {
-      await adjustWorkerWallet(id, amount, adjustReason.trim())
-      showSuccess('Wallet balance adjusted.')
+      await adjustWorkerDebt(id, amount, adjustReason.trim())
+      showSuccess('Platform dues adjusted.')
       setAdjustModalOpen(false)
       setAdjustAmount('')
       setAdjustReason('')
-      loadWallet()
+      loadDebt()
     } catch (err) {
-      showError(err.message || 'Failed to adjust wallet')
+      showError(err.message || 'Failed to adjust dues')
     } finally {
       setAdjustSubmitting(false)
+    }
+  }
+
+  const handleReleaseHold = async () => {
+    setReleaseSubmitting(true)
+    try {
+      await releaseWorkerHold(id, releaseNote.trim() || undefined)
+      showSuccess('Account hold lifted.')
+      setReleaseModalOpen(false)
+      setReleaseNote('')
+      loadDebt()
+    } catch (err) {
+      showError(err.message || 'Failed to release hold')
+    } finally {
+      setReleaseSubmitting(false)
     }
   }
 
@@ -207,44 +225,66 @@ export default function WorkerDetail() {
         </div>
       </SectionCard>
 
-      <SectionCard title="Wallet">
-        {walletLoading ? (
-          <LoadingState message="Loading wallet..." />
+      <SectionCard title="Platform Dues">
+        {debtLoading ? (
+          <LoadingState message="Loading platform dues..." />
         ) : (
           <>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.75rem' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
               <p style={{ fontSize: '1.25rem', fontWeight: 700, margin: 0 }}>
-                ₱{(wallet?.balance ?? 0).toFixed(2)}
+                ₱{(debt?.commissionOwed ?? 0).toFixed(2)} owed
               </p>
-              <button type="button" className="btn btn-outline" onClick={() => setAdjustModalOpen(true)}>
-                Adjust Balance
-              </button>
+              <div style={{ display: 'flex', gap: '0.5rem' }}>
+                {debt?.debtHoldAt && (
+                  <button type="button" className="btn btn-success" onClick={() => setReleaseModalOpen(true)}>
+                    Release Hold
+                  </button>
+                )}
+                <button type="button" className="btn btn-outline" onClick={() => setAdjustModalOpen(true)}>
+                  Adjust Dues
+                </button>
+              </div>
             </div>
+            {debt?.debtHoldAt && (
+              <p style={{ marginBottom: '0.75rem' }}>
+                <Badge variant="suspended">
+                  On hold since {new Date(debt.debtHoldAt).toLocaleString('en-US', {
+                    month: 'short',
+                    day: 'numeric',
+                    hour: 'numeric',
+                    minute: '2-digit',
+                  })}
+                </Badge>
+                {debt.debtHoldNote && (
+                  <span style={{ marginLeft: '0.5rem', color: 'var(--text-muted)' }}>{debt.debtHoldNote}</span>
+                )}
+              </p>
+            )}
             <div className="table-wrap">
               <table className="table">
                 <thead>
                   <tr>
-                    <th>Type</th><th>Amount</th><th>Status</th><th>Note / Reason</th><th>Date</th>
+                    <th>Type</th><th>Amount</th><th>Balance After</th><th>Note</th><th>Date</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {(wallet?.transactions || []).length === 0 ? (
+                  {(debt?.entries || []).length === 0 ? (
                     <tr>
                       <td colSpan={5} style={{ textAlign: 'center', color: 'var(--text-muted)' }}>
-                        No wallet activity yet.
+                        No ledger activity yet.
                       </td>
                     </tr>
                   ) : (
-                    wallet.transactions.map((t) => (
-                      <tr key={t.id}>
-                        <td>{WALLET_TYPE_LABELS[t.type] ?? t.type}</td>
-                        <td style={{ color: t.amount >= 0 ? 'var(--success)' : 'var(--danger)' }}>
-                          {t.amount >= 0 ? '+' : ''}
-                          {t.amount.toFixed(2)}
+                    debt.entries.map((e) => (
+                      <tr key={e.id}>
+                        <td>{DEBT_TYPE_LABELS[e.type] ?? e.type}</td>
+                        <td style={{ color: e.amount <= 0 ? 'var(--success)' : 'var(--danger)' }}>
+                          {e.amount >= 0 ? '+' : ''}
+                          {e.amount.toFixed(2)}
                         </td>
-                        <td>{t.status}</td>
-                        <td title={t.failureReason || undefined}>{t.note || t.failureReason || '—'}</td>
-                        <td>{new Date(t.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</td>
+                        <td>₱{e.balanceAfter.toFixed(2)}</td>
+                        <td>{e.note || '—'}</td>
+                        <td>{new Date(e.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</td>
                       </tr>
                     ))
                   )}
@@ -258,10 +298,10 @@ export default function WorkerDetail() {
       {adjustModalOpen && (
         <div className="modal-backdrop" onClick={() => setAdjustModalOpen(false)} role="presentation">
           <div className="modal" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true">
-            <h2 className="modal-title">Adjust Wallet Balance</h2>
+            <h2 className="modal-title">Adjust Platform Dues</h2>
             <p className="modal-body">
-              Positive amounts credit the wallet, negative amounts debit it. Use this for support cases like a
-              goodwill credit or correcting a bad deduction.
+              Positive amounts reduce what the worker owes, negative amounts increase it. Use this for support
+              cases like waiving a debt or correcting a bad accrual.
             </p>
             <label htmlFor="adjust-amount" style={{ display: 'block', margin: '0.5rem 0 0.35rem', fontWeight: 600 }}>
               Amount (₱)
@@ -300,10 +340,52 @@ export default function WorkerDetail() {
               <button
                 type="button"
                 className="btn btn-primary"
-                onClick={handleAdjustWallet}
+                onClick={handleAdjustDebt}
                 disabled={adjustSubmitting}
               >
                 {adjustSubmitting ? 'Saving...' : 'Confirm Adjustment'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {releaseModalOpen && (
+        <div className="modal-backdrop" onClick={() => setReleaseModalOpen(false)} role="presentation">
+          <div className="modal" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true">
+            <h2 className="modal-title">Release Account Hold</h2>
+            <p className="modal-body">
+              This lets {worker.name} accept new jobs again. It does not forgive their outstanding dues — use
+              "Adjust Dues" separately if you're waiving any of it.
+            </p>
+            <label htmlFor="release-note" style={{ display: 'block', margin: '0.5rem 0 0.35rem', fontWeight: 600 }}>
+              Note (optional)
+            </label>
+            <textarea
+              id="release-note"
+              className="form-input"
+              rows={3}
+              value={releaseNote}
+              onChange={(e) => setReleaseNote(e.target.value)}
+              placeholder="What was agreed with the worker?"
+              style={{ width: '100%', resize: 'vertical' }}
+            />
+            <div className="modal-actions">
+              <button
+                type="button"
+                className="btn btn-outline"
+                onClick={() => setReleaseModalOpen(false)}
+                disabled={releaseSubmitting}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="btn btn-success"
+                onClick={handleReleaseHold}
+                disabled={releaseSubmitting}
+              >
+                {releaseSubmitting ? 'Saving...' : 'Confirm Release'}
               </button>
             </div>
           </div>

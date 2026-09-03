@@ -130,10 +130,10 @@ export default function RequestDetailScreen() {
       console.error("Accept booking error:", error);
       if (isAxiosError(error) && error.response?.status === 402) {
         alertModal.error(
-          "Insufficient Wallet Balance",
-          error.message || "Please top up your wallet to accept this job.",
+          "Account on Hold",
+          error.message || "Your account is on hold. Please contact support to continue accepting jobs.",
           [
-            { text: "Top Up", onPress: () => router.push("/(worker)/earnings/wallet") },
+            { text: "Contact Support", onPress: () => router.push("/(worker)/profile/help-support") },
             { text: "Cancel" },
           ],
         );
