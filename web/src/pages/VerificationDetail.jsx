@@ -103,7 +103,9 @@ export default function VerificationDetail() {
     )
   }
 
-  const isPending = verification.status === 'PENDING' || verification.status === 'AI_REVIEWED'
+  // VerificationRequest.status only ever holds PENDING/APPROVED/REJECTED —
+  // 'AI_REVIEWED' is a value of the separate aiStatus field, never of status.
+  const isPending = verification.status === 'PENDING'
 
   const details = [
     { label: 'Applicant', value: verification.name },

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useMemo, useState } from 'react'
 import PageHeader from '../components/common/PageHeader'
 import SubNav from '../components/common/SubNav'
 import SearchBar from '../components/common/SearchBar'
@@ -10,7 +10,7 @@ import LoadingState from '../components/common/LoadingState'
 import ErrorState from '../components/common/ErrorState'
 import { fetchDisputes, resolveDispute } from '../services/disputes'
 import { useToast } from '../context/ToastContext'
-import { usePolling } from '../hooks/usePolling'
+import { useListQuery } from '../hooks/useListQuery'
 
 const POLL_INTERVAL_MS = 5000
 
@@ -51,58 +51,45 @@ const ACTIONS = [
 ]
 
 export default function BookingDispute() {
-  const [disputes, setDisputes] = useState([])
-  const [meta, setMeta] = useState(null)
   const [selectedId, setSelectedId] = useState(null)
-  const [search, setSearch] = useState('')
-  const [statusTab, setStatusTab] = useState('Open')
-  const [page, setPage] = useState(1)
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState(null)
   const [pendingAction, setPendingAction] = useState(null) // { action, label, description } | null
   const [note, setNote] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const { showSuccess, showError } = useToast()
 
-  // `silent` skips the loading flag so the 5s background poll refresh
-  // doesn't yank the table out from under the admin every time it fires.
-  const loadDisputes = async (silent = false) => {
-    if (!silent) setLoading(true)
-    setError(null)
+  // The backend filters on an exact status match; "Resolved" spans 3
+  // possible values (RESOLVED_APPROVED/RESOLVED_NEW_QUOTE_REQUESTED/
+  // RESOLVED_CANCELLED), so that tab fetches 'all' and filters client-side.
+  const fetchFn = useCallback(async (params) => {
+    const response = await fetchDisputes({
+      search: params.search || '',
+      page: params.page,
+      limit: 20,
+      status: params.statusTab === 'Open' ? 'OPEN' : 'all',
+    })
+    const rows = params.statusTab === 'Open' ? response.data : response.data.filter((d) => d.status.startsWith('RESOLVED'))
+    return { data: rows, meta: response.meta }
+  }, [])
 
-    try {
-      // The backend filters on an exact status match; "Resolved" spans 3
-      // possible values (RESOLVED_APPROVED/RESOLVED_NEW_QUOTE_REQUESTED/
-      // RESOLVED_CANCELLED), so that tab fetches 'all' and filters client-side.
-      const response = await fetchDisputes({
-        search,
-        page,
-        limit: 20,
-        status: statusTab === 'Open' ? 'OPEN' : 'all',
-      })
-      const rows = statusTab === 'Open' ? response.data : response.data.filter((d) => d.status.startsWith('RESOLVED'))
-      setDisputes(rows)
-      setMeta(response.meta)
-    } catch (err) {
-      if (!silent) setError(err.message || 'Failed to load disputes')
-    } finally {
-      if (!silent) setLoading(false)
-    }
-  }
-
-  useEffect(() => {
-    loadDisputes()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [search, statusTab, page])
-
-  useEffect(() => {
-    setPage(1)
-  }, [search, statusTab])
-
-  // Keep the queue current for other admins working disputes concurrently —
-  // paused while a dispute is open so a background refresh can't disrupt an
-  // in-progress review/resolution.
-  usePolling(() => loadDisputes(true), POLL_INTERVAL_MS, { paused: !!selectedId })
+  const {
+    data: disputes,
+    meta,
+    params,
+    loading,
+    error,
+    reload: loadDisputes,
+    setData: setDisputes,
+    setSearch,
+    setFilter,
+    goToPage,
+  } = useListQuery(fetchFn, {
+    initialParams: { search: '', statusTab: 'Open', page: 1 },
+    pollIntervalMs: POLL_INTERVAL_MS,
+    // Keep the queue current for other admins working disputes concurrently —
+    // paused while a dispute is open so a background refresh can't disrupt an
+    // in-progress review/resolution.
+    pausePolling: !!selectedId,
+  })
 
   const selected = useMemo(() => disputes.find((d) => d.id === selectedId) || null, [disputes, selectedId])
 
@@ -126,7 +113,7 @@ export default function BookingDispute() {
     setSubmitting(true)
     try {
       await resolveDispute(selected.id, pendingAction.action, note.trim())
-      setDisputes((prev) => (statusTab === 'Open' ? prev.filter((d) => d.id !== selected.id) : prev))
+      setDisputes((prev) => (params.statusTab === 'Open' ? prev.filter((d) => d.id !== selected.id) : prev))
       showSuccess(`Dispute resolved: ${pendingAction.label}.`)
       closeModal()
     } catch (err) {
@@ -141,8 +128,8 @@ export default function BookingDispute() {
       <PageHeader title="Dispute Resolution Center" subtitle="Review and resolve disputed bookings" />
       <SubNav items={SUB_NAV} />
       <div className="toolbar">
-        <SearchBar placeholder="Search disputes..." value={search} onChange={setSearch} />
-        <FilterTabs tabs={STATUS_TABS} activeTab={statusTab} onTabChange={setStatusTab} />
+        <SearchBar placeholder="Search disputes..." value={params.search || ''} onChange={setSearch} />
+        <FilterTabs tabs={STATUS_TABS} activeTab={params.statusTab} onTabChange={(tab) => setFilter('statusTab', tab)} />
       </div>
       <SectionCard>
         {loading && <LoadingState message="Loading disputes..." />}
@@ -165,7 +152,7 @@ export default function BookingDispute() {
                 {disputes.length === 0 ? (
                   <tr>
                     <td colSpan={7} style={{ textAlign: 'center', color: 'var(--text-muted)' }}>
-                      No {statusTab.toLowerCase()} disputes found.
+                      No {params.statusTab.toLowerCase()} disputes found.
                     </td>
                   </tr>
                 ) : (
@@ -200,11 +187,11 @@ export default function BookingDispute() {
           </div>
         )}
         <Pagination
-          info={`Showing ${disputes.length} of ${meta?.total ?? disputes.length} ${statusTab.toLowerCase()} dispute(s)`}
-          hasPrev={(meta?.page ?? 1) > 1}
-          hasNext={!!meta && meta.page < meta.totalPages}
-          onPrev={() => setPage((p) => Math.max(1, p - 1))}
-          onNext={() => setPage((p) => p + 1)}
+          info={`Showing ${disputes.length} of ${meta.total ?? disputes.length} ${params.statusTab.toLowerCase()} dispute(s)`}
+          hasPrev={meta.page > 1}
+          hasNext={meta.page < meta.totalPages}
+          onPrev={() => goToPage(Math.max(1, params.page - 1))}
+          onNext={() => goToPage(params.page + 1)}
         />
       </SectionCard>
 

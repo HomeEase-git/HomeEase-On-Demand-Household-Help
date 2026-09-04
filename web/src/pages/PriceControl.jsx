@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import PageHeader from '../components/common/PageHeader'
 import SectionCard from '../components/common/SectionCard'
 import SearchBar from '../components/common/SearchBar'
@@ -8,6 +8,7 @@ import ErrorState from '../components/common/ErrorState'
 import Pagination from '../components/common/Pagination'
 import { fetchPricingRules, createPricingRule, updatePricingRule, deletePricingRule } from '../services/pricingRules'
 import { useToast } from '../context/ToastContext'
+import { useListQuery } from '../hooks/useListQuery'
 
 const PAGE_SIZE = 10
 
@@ -18,9 +19,6 @@ function formatPeso(amount) {
 }
 
 export default function PriceControl() {
-  const [rules, setRules] = useState([])
-  const [loading, setLoading] = useState(true)
-  const [loadError, setLoadError] = useState(null)
   const [query, setQuery] = useState('')
   const [serviceTab, setServiceTab] = useState('All')
   const [page, setPage] = useState(1)
@@ -35,23 +33,8 @@ export default function PriceControl() {
   const [deleting, setDeleting] = useState(false)
   const { showSuccess, showError } = useToast()
 
-  const loadRules = async () => {
-    setLoading(true)
-    setLoadError(null)
-
-    try {
-      const data = await fetchPricingRules()
-      setRules(data)
-    } catch (err) {
-      setLoadError(err.message || 'Failed to load pricing rules')
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  useEffect(() => {
-    loadRules()
-  }, [])
+  const fetchFn = useCallback(() => fetchPricingRules(), [])
+  const { data: rules, loading, error: loadError, reload: loadRules, setData: setRules } = useListQuery(fetchFn)
 
   const serviceTypes = useMemo(() => {
     const types = Array.from(new Set(rules.map((r) => r.serviceType))).sort()

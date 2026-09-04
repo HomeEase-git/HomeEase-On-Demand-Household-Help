@@ -6,7 +6,7 @@ import prisma from '@config/database';
 import { errorResponse } from '@utils/errorResponse';
 import { formatVerification } from '@utils/formatters';
 import { supabase, KYC_DOCUMENT_BUCKET } from '@config/supabase';
-import { verificationQueue } from '@queues/verificationQueue';
+import { verificationQueue, VERIFICATION_JOB_OPTIONS } from '@queues/verificationQueue';
 import type { JwtPayload } from '@/types/index';
 
 interface AuthRequest extends Request {
@@ -95,16 +95,20 @@ export const uploadVerificationDocuments = async (req: AuthRequest, res: Respons
       include: { user: true, documents: true },
     });
 
-    await verificationQueue.add('analyze-verification', {
-      verificationId: verification.id,
-      requestType,
-      documents: uploadedDocs.map((doc) => ({
-        documentType: doc.documentType,
-        fileUrl: doc.fileUrl,
-        mimeType: doc.mimeType,
-        originalName: doc.originalName,
-      })),
-    });
+    await verificationQueue.add(
+      'analyze-verification',
+      {
+        verificationId: verification.id,
+        requestType,
+        documents: uploadedDocs.map((doc) => ({
+          documentType: doc.documentType,
+          fileUrl: doc.fileUrl,
+          mimeType: doc.mimeType,
+          originalName: doc.originalName,
+        })),
+      },
+      VERIFICATION_JOB_OPTIONS
+    );
 
     if (user.role === 'WORKER') {
       await prisma.workerProfile.updateMany({

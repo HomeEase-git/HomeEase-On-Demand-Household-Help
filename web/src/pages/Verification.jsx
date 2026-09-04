@@ -8,7 +8,7 @@ import LoadingState from '../components/common/LoadingState'
 import ErrorState from '../components/common/ErrorState'
 import Pagination from '../components/common/Pagination'
 import { fetchVerifications } from '../services/verification'
-import { usePolling } from '../hooks/usePolling'
+import { useListQuery } from '../hooks/useListQuery'
 import { humanizeEnum, humanizeList } from '../utils/verificationLabels'
 
 const TYPE_MAP = { All: 'all', Clients: 'client', Workers: 'worker' }
@@ -16,45 +16,26 @@ const POLL_INTERVAL_MS = 8000
 const PAGE_SIZE = 10
 
 export default function Verification() {
-  const [filterTab, setFilterTab] = useState('All')
-  const [search, setSearch] = useState('')
-  const [records, setRecords] = useState([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState(null)
   const [page, setPage] = useState(1)
 
-  // `silent` skips the loading flag so the 8s background poll refresh
-  // doesn't yank the table out and flash the spinner over an already
-  // -rendered list every cycle.
-  const load = useCallback(async (silent = false) => {
-    if (!silent) setLoading(true)
-    setError(null)
-    try {
-      const data = await fetchVerifications({
+  const fetchFn = useCallback(
+    (params) =>
+      fetchVerifications({
         status: 'PENDING',
-        type: TYPE_MAP[filterTab] || 'all',
-        search,
-      })
-      setRecords(data)
-    } catch (err) {
-      if (!silent) {
-        setError(err.message || 'Failed to load verifications')
-        setRecords([])
-      }
-    } finally {
-      if (!silent) setLoading(false)
-    }
-  }, [filterTab, search])
+        type: TYPE_MAP[params.filterTab] || 'all',
+        search: params.search || '',
+      }),
+    []
+  )
 
-  useEffect(() => {
-    load()
-  }, [load])
-
-  usePolling(() => load(true), POLL_INTERVAL_MS)
+  const { data: records, loading, error, reload, params, setSearch, setFilter } = useListQuery(fetchFn, {
+    initialParams: { filterTab: 'All', search: '' },
+    pollIntervalMs: POLL_INTERVAL_MS,
+  })
 
   useEffect(() => {
     setPage(1)
-  }, [filterTab, search])
+  }, [params.filterTab, params.search])
 
   const totalPages = Math.max(1, Math.ceil(records.length / PAGE_SIZE))
   const currentPage = Math.min(page, totalPages)
@@ -69,18 +50,18 @@ export default function Verification() {
       <div className="toolbar" style={{ marginBottom: '1rem' }}>
         <SearchBar
           placeholder="Search by name or email..."
-          value={search}
+          value={params.search || ''}
           onChange={setSearch}
         />
         <FilterTabs
           tabs={['All', 'Clients', 'Workers']}
-          activeTab={filterTab}
-          onTabChange={setFilterTab}
+          activeTab={params.filterTab}
+          onTabChange={(tab) => setFilter('filterTab', tab)}
         />
       </div>
       <SectionCard>
         {loading && <LoadingState message="Loading verifications..." />}
-        {error && <ErrorState message={error} onRetry={load} />}
+        {error && <ErrorState message={error} onRetry={reload} />}
         {!loading && !error && (
           <div className="table-wrap">
             <table className="table">
