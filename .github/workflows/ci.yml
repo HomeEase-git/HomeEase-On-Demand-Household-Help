@@ -31,13 +31,13 @@ jobs:
       APP_URL: http://localhost:3000
       JWT_SECRET: ci-test-jwt-secret
       JWT_EXPIRY: 1h
-      RESEND_API_KEY: ci-test-key
-      RESEND_FROM_EMAIL: test@example.com
+      SMTP_USER: ci-test@example.com
+      SMTP_PASS: ci-test-app-password
       XENDIT_SECRET_KEY: ci-test-secret
       XENDIT_WEBHOOK_TOKEN: ci-test-webhook-token
       XENDIT_REDIRECT_BASE_URL: https://example.invalid/xendit-redirect
-      SEMAPHORE_API_KEY: ci-test-key
-      SEMAPHORE_SENDER_NAME: HomeEase
+      PHILSMS_API_TOKEN: ci-test-token
+      PHILSMS_SENDER_ID: HomeEase
       SUPABASE_URL: https://example.supabase.co
       SUPABASE_ANON_KEY: ci-test-anon-key
       SUPABASE_SERVICE_KEY: ci-test-service-key
@@ -50,7 +50,7 @@ jobs:
       UPLOAD_DIR: uploads
       ALLOWED_ORIGINS: http://localhost:5173
       COMMISSION_RATE: "0.10"
-      WITHHOLDING_TAX_RATE: "0.05"
+      WITHHOLDING_TAX_RATE: "0.02"
     defaults:
       run:
         working-directory: backend
@@ -65,7 +65,13 @@ jobs:
       - run: npx prisma generate
       - run: npx prisma migrate deploy
       - run: npx tsc --noEmit
+      - run: npm run typecheck:tooling
       - run: npm test
+      # Exercises the real BullMQ queues against a real (ephemeral,
+      # redis-memory-server-provisioned) Redis — npm test above mocks these
+      # exact modules out, so this is what actually catches a real-queue
+      # regression (see jest.integration.config.js).
+      - run: npm run test:queues
 
   mobile:
     runs-on: ubuntu-latest

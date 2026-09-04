@@ -123,10 +123,11 @@ export const getPaymentById = async (req: Request, res: Response) => {
 
 /**
  * Payout Distribution — tracks the real Xendit payout lifecycle via
- * the Payout table (created once a Payment's escrow is RELEASED, see
- * paymentLifecycleService.captureAndReleasePayment). Payment.escrowStatus
+ * the Payout table (created once the client's payment clears, see
+ * paymentLifecycleService.settleWorkerEarnings). Payment.escrowStatus
  * RELEASED means "the worker's cut is owed"; Payout.status PAID means "the
- * worker has actually been sent the money."
+ * worker has actually been sent the money." Cash jobs have no Payout — the
+ * platform's cut is booked as worker commission debt instead.
  */
 const payoutInclude = {
   payment: {

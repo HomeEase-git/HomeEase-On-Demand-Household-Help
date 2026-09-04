@@ -104,6 +104,43 @@ export const getPriceBreakdown = (
 };
 
 /**
+ * Single source of truth for a booking's final billable total, used at the
+ * pay-after-completion step (bookingController.completeBooking locks it in,
+ * confirmCompletion / the invoice webhook / auto-settle all read it).
+ *
+ * subtotal = (approved quote: labor + materials) OR (no quote: the estimate)
+ *            + priced add-ons
+ * totalAmount = subtotal + tip
+ *
+ * Add-ons are frozen once a booking reaches PENDING_COMPLETION (see
+ * bookingController.addAddon), so this is stable from that point on.
+ */
+export interface BookingFinalTotalInput {
+  estimatedPrice: number;
+  laborCost?: number | null;
+  materialsCost?: number | null;
+  tip?: number | null;
+  addOns?: Array<{ price: number }> | null;
+}
+
+export const computeBookingFinalTotal = (
+  booking: BookingFinalTotalInput
+): { subtotal: number; tip: number; totalAmount: number } => {
+  const addOnsTotal = (booking.addOns ?? []).reduce(
+    (sum, a) => sum + (typeof a.price === 'number' ? a.price : 0),
+    0
+  );
+  const hasQuote = booking.laborCost != null && booking.materialsCost != null;
+  const base = hasQuote
+    ? (booking.laborCost ?? 0) + (booking.materialsCost ?? 0)
+    : booking.estimatedPrice;
+  const subtotal = Math.round((base + addOnsTotal) * 100) / 100;
+  const tip = Math.round(((booking.tip ?? 0)) * 100) / 100;
+  const totalAmount = Math.round((subtotal + tip) * 100) / 100;
+  return { subtotal, tip, totalAmount };
+};
+
+/**
  * Validate price breakdown integrity
  * Ensures: subtotal + tip + platformFee = total AND workerPayout + commission + tax = subtotal
  */

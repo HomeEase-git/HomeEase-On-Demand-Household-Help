@@ -1,9 +1,8 @@
-import React, { useRef, useState } from "react";
+import React, { useState } from "react";
 import { View, Text, Image, ScrollView, Pressable, Linking } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useFocusEffect, useRouter, useLocalSearchParams } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
-import { isAxiosError } from "axios";
 import ScreenHeader from "../../../../components/ui/ScreenHeader";
 import StatusBadge from "../../../../components/ui/StatusBadge";
 import StepperVertical from "../../../../components/steppers/StepperVertical";
@@ -12,9 +11,7 @@ import OutlinedButton from "../../../../components/ui/OutlinedButton";
 import DangerButton from "../../../../components/ui/DangerButton";
 import PriceBreakdownCard from "../../../../components/ui/PriceBreakdown";
 import { LoadingSkeleton } from "../../../../components/feedback/LoadingSkeleton";
-import PaymentMethodBottomSheet from "../../../../components/bottom-sheets/PaymentMethodBottomSheet";
 import XenditCheckoutModal from "../../../../components/payment/XenditCheckoutModal";
-import type { BottomSheetHandle } from "../../../../components/bottom-sheets/BottomSheetWrapper";
 import {
   useBookingStore,
   API_STATUS_MAP,
@@ -24,17 +21,12 @@ import {
 import {
   getBookingDetail,
   confirmBookingCompletion,
-  createBookingPayment,
-  releasePaymentEscrow,
   createXenditCheckout,
   getTransactionDetail,
 } from "../../../../services/api";
 import type { StatusType } from "../../../../components/ui/StatusBadge";
 import { colors } from "../../../../constants";
 import { useAlertModal } from "../../../../contexts/AlertModalContext";
-import { PAYMENT_METHOD_TYPE_MAP } from "../../../../utils/paymentMethodMap";
-
-const XENDIT_GATEWAY_METHODS = new Set(["GCASH", "MAYA"]);
 
 type ApiBookingDetail = {
   id: string;
@@ -129,7 +121,6 @@ export default function BookingDetailScreen() {
   const [processingPayment, setProcessingPayment] = useState(false);
   const [checkoutUrl, setCheckoutUrl] = useState<string | null>(null);
   const [checkoutVisible, setCheckoutVisible] = useState(false);
-  const paymentSheetRef = useRef<BottomSheetHandle | null>(null);
 
   useFocusEffect(
     React.useCallback(() => {
@@ -197,6 +188,7 @@ export default function BookingDetailScreen() {
     QuoteSubmitted: "Action required",
     Disputed: "Under review",
     PendingCompletion: "Action required",
+    AwaitingPayment: "Payment required",
   };
 
   const canCancel = booking.status === "Pending";
@@ -204,16 +196,21 @@ export default function BookingDetailScreen() {
     booking.status === "Accepted" || booking.status === "InProgress";
   const isCompleted = booking.status === "Completed";
   const isPendingCompletion = booking.status === "PendingCompletion";
-  // A Payment row is created (status PENDING) as soon as the booking is
-  // made — see authorizePaymentForBooking — and confirmCompletion always
-  // captures/releases it server-side, so `payment.status` is COMPLETED by
-  // the time this screen would otherwise ask again. These only matter for
-  // the rare cases where no settlement happened automatically: a legacy
-  // booking with no Payment row at all, or one where server-side capture
-  // threw (e.g. a Xendit outage) and left status stuck at PENDING.
-  const settledMethodType = booking.payment?.methodType;
-  const needsPayment = isCompleted && booking.payment?.status !== "COMPLETED";
+  const isAwaitingPayment = booking.status === "AwaitingPayment";
   const hasQuote = booking.status === "QuoteSubmitted" && booking.quote;
+
+  // Payment is taken after completion and is locked to the method the client
+  // chose at booking time — no picker at the pay step.
+  const bookingMethod = (
+    rawDetail?.paymentMethodType ??
+    booking.payment?.methodType ??
+    "CASH"
+  ).toUpperCase();
+  const isCashBooking = bookingMethod === "CASH";
+  const finalTotal =
+    rawDetail?.payment?.totalAmount ??
+    booking.payment?.totalAmount ??
+    booking.amount;
 
   // Polls the payment detail until the Xendit webhook has resolved it to
   // COMPLETED/FAILED (it processes within a second or two of the redirect in
@@ -229,71 +226,26 @@ export default function BookingDetailScreen() {
     return null;
   };
 
-  const startXenditCheckout = async (methodType: string, accountIdentifier?: string) => {
-    try {
-      await createBookingPayment(booking.id, {
-        methodType: methodType as "GCASH" | "MAYA",
-        accountIdentifier,
-      });
-    } catch (error) {
-      // 409 = a Payment already exists for this booking. Expected when the
-      // client backed out of a previous Xendit checkout without finishing
-      // it — that Payment is still PENDING, so we just reuse it below.
-      if (!(isAxiosError(error) && error.response?.status === 409)) {
-        throw error;
-      }
-    }
-
-    const { checkoutUrl: url } = await createXenditCheckout(booking.id);
+  const openCheckout = (url: string) => {
     setCheckoutUrl(url);
     setCheckoutVisible(true);
   };
 
-  const processPayment = async (methodType: string, accountIdentifier?: string) => {
+  // "Resume Payment" on an AWAITING_PAYMENT booking — re-opens the hosted
+  // Xendit invoice (server reuses the live one or mints a fresh one).
+  const handleResumePayment = async () => {
     if (processingPayment) return;
     setProcessingPayment(true);
     try {
-      if (XENDIT_GATEWAY_METHODS.has(methodType)) {
-        await startXenditCheckout(methodType, accountIdentifier);
-        // processingPayment stays true while the checkout WebView is open —
-        // handleCheckoutSuccess/Failed/Cancel below clear it.
-        return;
-      }
-
-      const payment = await createBookingPayment(booking.id, {
-        methodType: methodType as "GCASH" | "MAYA" | "CASH",
-        accountIdentifier,
-      });
-      await releasePaymentEscrow(payment.id);
-      useBookingStore.setState((s) => ({
-        bookings: s.bookings.map((b) =>
-          b.id === booking.id
-            ? {
-                ...b,
-                payment: {
-                  methodType,
-                  accountIdentifier,
-                  status: "COMPLETED",
-                  totalAmount: payment.totalAmount,
-                },
-              }
-            : b,
-        ),
-      }));
-      alertModal.success(
-        "Payment Released",
-        "The worker has been paid. Thank you!",
-      );
+      const { checkoutUrl: url } = await createXenditCheckout(booking.id);
+      openCheckout(url);
     } catch (error) {
-      console.error("Process payment error:", error);
+      console.error("Resume payment error:", error);
+      setProcessingPayment(false);
       alertModal.error(
         "Payment failed",
-        "We couldn't process payment right now. You can try again from this screen.",
+        "We couldn't start the checkout. Please try again from this screen.",
       );
-    } finally {
-      if (!XENDIT_GATEWAY_METHODS.has(methodType)) {
-        setProcessingPayment(false);
-      }
     }
   };
 
@@ -308,6 +260,7 @@ export default function BookingDetailScreen() {
             b.id === booking.id
               ? {
                   ...b,
+                  status: "Completed" as const,
                   payment: {
                     methodType: detail.method ?? b.payment?.methodType ?? "GCASH",
                     status: "COMPLETED",
@@ -318,7 +271,7 @@ export default function BookingDetailScreen() {
           ),
         }));
         alertModal.success(
-          "Payment Released",
+          "Payment successful",
           "The worker has been paid. Thank you!",
         );
       } else if (detail?.status === "Failed") {
@@ -359,45 +312,35 @@ export default function BookingDetailScreen() {
     setProcessingPayment(false);
   };
 
+  // "Confirm & Pay" (online) / "Confirm Cash Payment" (cash). Cash finalizes
+  // immediately; GCash/Maya returns a Xendit checkout URL to open.
   const handleConfirmCompletion = async () => {
     if (confirmingCompletion) return;
     setConfirmingCompletion(true);
     try {
-      // The backend already captures the held authorization and releases
-      // escrow as part of confirming completion (see captureAndReleasePayment
-      // in confirmCompletion) — for every payment method. There's nothing
-      // left for the client to pay here; we just reflect the settled payment
-      // status it returns.
-      const response = await confirmBookingCompletion(booking.id);
-      const settledPayment = response.data?.data?.payment as
-        | { status?: string; escrowStatus?: string }
-        | undefined;
-      useBookingStore.setState((s) => ({
-        bookings: s.bookings.map((b) =>
-          b.id === booking.id
-            ? {
-                ...b,
-                status: "Completed" as const,
-                payment: b.payment
-                  ? { ...b.payment, status: settledPayment?.status ?? b.payment.status }
-                  : b.payment,
-              }
-            : b,
-        ),
-      }));
-      if (settledPayment?.status === "COMPLETED") {
+      const result = await confirmBookingCompletion(booking.id);
+
+      if (result.status === "COMPLETED") {
+        useBookingStore.setState((s) => ({
+          bookings: s.bookings.map((b) =>
+            b.id === booking.id ? { ...b, status: "Completed" as const } : b,
+          ),
+        }));
         alertModal.success(
-          "Payment Released",
-          "The worker has been paid. Thank you!",
+          "Payment recorded",
+          "Thanks! This job is now complete.",
         );
       } else {
-        // Rare: server-side capture didn't finish (e.g. a gateway hiccup).
-        // Let the client retry from the "Proceed to Payment" action rather
-        // than silently reporting success.
-        alertModal.info(
-          "Completion confirmed",
-          "We're still finalizing payment — you can retry from this screen if it doesn't clear shortly.",
-        );
+        // AWAITING_PAYMENT — open the hosted Xendit checkout.
+        useBookingStore.setState((s) => ({
+          bookings: s.bookings.map((b) =>
+            b.id === booking.id
+              ? { ...b, status: "AwaitingPayment" as const }
+              : b,
+          ),
+        }));
+        setProcessingPayment(true);
+        openCheckout(result.checkoutUrl);
       }
     } catch (error) {
       console.error("Confirm completion error:", error);
@@ -408,19 +351,6 @@ export default function BookingDetailScreen() {
     } finally {
       setConfirmingCompletion(false);
     }
-  };
-
-  const handleProceedToPayment = () => {
-    if (settledMethodType) {
-      processPayment(settledMethodType, booking.payment?.accountIdentifier);
-    } else {
-      paymentSheetRef.current?.expand();
-    }
-  };
-
-  const handleSelectPaymentMethod = (method: string) => {
-    const methodType = PAYMENT_METHOD_TYPE_MAP[method] ?? "CASH";
-    processPayment(methodType);
   };
 
   const quoteActedOn =
@@ -744,18 +674,22 @@ export default function BookingDetailScreen() {
         <View className="gap-3 mt-2">
           {isPendingCompletion && (
             <PrimaryButton
-              label="Confirm Completion"
+              label={
+                isCashBooking
+                  ? `Confirm Cash Payment · ₱${finalTotal}`
+                  : `Confirm & Pay · ₱${finalTotal}`
+              }
               fullWidth
               onPress={handleConfirmCompletion}
-              disabled={confirmingCompletion}
-              loading={confirmingCompletion}
+              disabled={confirmingCompletion || processingPayment}
+              loading={confirmingCompletion || processingPayment}
             />
           )}
-          {needsPayment && (
+          {isAwaitingPayment && (
             <PrimaryButton
-              label="Proceed to Payment"
+              label={`Resume Payment · ₱${finalTotal}`}
               fullWidth
-              onPress={handleProceedToPayment}
+              onPress={handleResumePayment}
               disabled={processingPayment}
               loading={processingPayment}
             />
@@ -818,10 +752,6 @@ export default function BookingDetailScreen() {
           )}
         </View>
       </ScrollView>
-      <PaymentMethodBottomSheet
-        innerRef={paymentSheetRef}
-        onSelect={handleSelectPaymentMethod}
-      />
       <XenditCheckoutModal
         visible={checkoutVisible}
         checkoutUrl={checkoutUrl}

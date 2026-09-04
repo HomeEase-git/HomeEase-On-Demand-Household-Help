@@ -1,4 +1,3 @@
-import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import StatCard from '../components/common/StatCard'
 import SectionCard from '../components/common/SectionCard'
@@ -6,32 +5,15 @@ import LoadingState from '../components/common/LoadingState'
 import ErrorState from '../components/common/ErrorState'
 import BookingsTrendChart from '../components/charts/BookingsTrendChart'
 import { fetchDashboardStats } from '../services/dashboard'
+import { useDetailQuery } from '../hooks/useListQuery'
 
 export default function Dashboard() {
-  const [dashboard, setDashboard] = useState(null)
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState(null)
-
-  const load = async () => {
-    setLoading(true)
-    setError(null)
-
-    try {
-      const data = await fetchDashboardStats()
-      setDashboard(data)
-    } catch (err) {
-      setError(err.message || 'Failed to load dashboard')
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  useEffect(() => {
-    load()
-  }, [])
+  // Constant key gives this single snapshot object a cache slot — same
+  // approach as Analytics.jsx, which has no natural "id" either.
+  const { data: dashboard, loading, error, reload } = useDetailQuery(fetchDashboardStats, 'snapshot')
 
   if (loading) return <LoadingState message="Loading dashboard..." />
-  if (error) return <ErrorState message={error} onRetry={load} />
+  if (error) return <ErrorState message={error} onRetry={reload} />
 
   const { stats, recentActivity, topWorkers, bookingsTrend } = dashboard
 

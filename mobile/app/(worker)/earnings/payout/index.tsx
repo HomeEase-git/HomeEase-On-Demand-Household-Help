@@ -18,7 +18,6 @@ type TransactionListItem = {
 const METHOD_LABELS: Record<string, { label: string; icon: string; color: string }> = {
   GCASH: { label: "GCash", icon: "G", color: "bg-green-500" },
   MAYA: { label: "Maya", icon: "M", color: "bg-teal-500" },
-  BANK_TRANSFER: { label: "Bank Transfer", icon: "B", color: "bg-blue-500" },
 };
 
 // Real Xendit payout status per job — there's no batched "balance", each

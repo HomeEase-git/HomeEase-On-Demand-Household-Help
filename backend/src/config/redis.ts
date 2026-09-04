@@ -1,8 +1,40 @@
-// Shared BullMQ connection options — used by both queues (bookingQueue,
-// verificationQueue) and both workers (bookingWorker, verificationWorker) so
-// Redis connection settings live in exactly one place.
-export const redisConnection = {
+// Shared BullMQ connection options — used by the three queues (bookingQueue,
+// payoutQueue, verificationQueue) and their matching workers, so Redis
+// connection settings live in exactly one place.
+const baseConnection = {
   host: process.env.REDIS_HOST || '127.0.0.1',
   port: Number(process.env.REDIS_PORT || 6379),
   password: process.env.REDIS_PASSWORD || undefined,
 };
+
+// For Queue producers (the `.add()` side — bookingQueue/payoutQueue so far).
+// Bounded retries so a Redis outage surfaces as a fast, visible error on
+// the request that tried to schedule a job (e.g. booking creation) instead
+// of hanging indefinitely — ioredis's own defaults retry forever with no
+// cap.
+export const queueConnection = {
+  ...baseConnection,
+  maxRetriesPerRequest: 3,
+  retryStrategy: (times: number) => (times > 3 ? null : Math.min(times * 200, 2000)),
+};
+
+// For Worker consumers (bookingWorker/payoutWorker so far). BullMQ requires
+// `maxRetriesPerRequest: null` here — its blocking commands (BRPOPLPUSH
+// etc.) need unbounded retries, and setting this otherwise makes BullMQ
+// throw on worker startup. Workers are long-running background processes
+// anyway, so retrying indefinitely to reconnect is the right behavior for
+// them (unlike a request-scoped queue.add() call).
+export const workerConnection = {
+  ...baseConnection,
+  maxRetriesPerRequest: null as null,
+};
+
+// Legacy: verificationQueue/verificationWorker still import this directly.
+// Deliberately left as-is (unbounded retries, ioredis's own defaults) rather
+// than switched to queueConnection/workerConnection here, since those two
+// files have separate in-progress changes of their own right now — bundling
+// an unrelated Redis-config swap into that diff isn't worth the risk.
+// Worth moving verificationQueue onto queueConnection (for the same
+// fail-fast behavior bookingQueue/payoutQueue now have) once that other
+// work lands.
+export const redisConnection = baseConnection;

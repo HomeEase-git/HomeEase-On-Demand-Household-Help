@@ -3,19 +3,23 @@ import type { ConditionType, PaymentMethodType, RoomType, TimeSlot, UrgencyLevel
 import prisma from '@config/database';
 import { errorResponse } from '@utils/errorResponse';
 import { notifyUser } from '@utils/notify';
+import { sendSmsToUser } from '@utils/smsService';
 import { writeAuditLog } from '@utils/auditLog';
 import { formatDisplayId } from '@utils/formatters';
 import { distanceKm, distanceMeters, isWithinRadiusMeters } from '@utils/geo';
 import { findAutoMatchWorker } from '@services/matchingService';
 import { validatePriceWithinPricingRule } from '@services/pricingRuleService';
-import { authorizePaymentForBooking, captureAndReleasePayment, refundOrVoidPayment } from '@services/paymentLifecycleService';
+import {
+  settleCashBooking,
+  createCompletionInvoice,
+  refundOrVoidPayment,
+} from '@services/paymentLifecycleService';
 import { toDayStart, findSlot, markSlotBooked, freeSlot } from '@services/workerAvailabilityService';
-import { calculateWorkerPayout } from '@utils/pricing';
+import { calculateWorkerPayout, computeBookingFinalTotal } from '@utils/pricing';
 import { schedulePendingExpiry, cancelPendingExpiryJob } from '@queues/bookingQueue';
 import { VALID_TRANSITIONS, isValidTransition } from '@services/bookingStateMachine';
 import { getAppSettings } from '@services/appSettingsService';
 import { computeWorkerTier, tierMultiplier } from '@utils/workerTier';
-import { debitWalletTx, creditWalletTx, InsufficientBalanceError } from '@services/walletService';
 import type { JwtPayload } from '@/types/index';
 
 export { VALID_TRANSITIONS, isValidTransition };
@@ -50,10 +54,10 @@ async function resolveServiceTypeConfig(name: string) {
  * requiring the client to choose one. Price is always computed server-side
  * (basePrice + condition surcharge + distance surcharge), logged via
  * PricingLog, and checked against any PricingRule for (city, serviceType).
- * A Payment row is created immediately in an authorized/held state (see
- * paymentLifecycleService.authorizePaymentForBooking) rather than after
- * completion, and a 1-hour expiry job is queued so an unanswered PENDING
- * booking auto-cancels (see queues/bookingQueue + workers/bookingWorker).
+ * No Payment row is created here — payment is taken after the job is finished
+ * and finally priced (see confirmCompletion). A 1-hour expiry job is queued so
+ * an unanswered PENDING booking auto-cancels (see queues/bookingQueue +
+ * workers/bookingWorker).
  */
 export const createBooking = async (req: AuthRequest, res: Response) => {
   try {
@@ -217,6 +221,10 @@ export const createBooking = async (req: AuthRequest, res: Response) => {
       return res.status(409).json(errorResponse(409, 'Worker is not currently available'));
     }
 
+    if (workerProfile.debtHoldAt) {
+      return res.status(409).json(errorResponse(409, 'Worker is not currently available'));
+    }
+
     if (workerProfile.activeJobCount >= workerProfile.maxConcurrentJobs) {
       return res.status(409).json(errorResponse(409, 'Worker is at maximum capacity'));
     }
@@ -284,7 +292,7 @@ export const createBooking = async (req: AuthRequest, res: Response) => {
     }
 
     try {
-      const { booking, payment } = await prisma.$transaction(async (tx) => {
+      const { booking } = await prisma.$transaction(async (tx) => {
         // Re-check KYC + capacity + slot inside the transaction to close the
         // race between the checks above and this insert (e.g. an admin
         // rejecting the worker in that window).
@@ -376,9 +384,9 @@ export const createBooking = async (req: AuthRequest, res: Response) => {
 
         await markSlotBooked(tx, workerTx.id, scheduledDate, timeSlot);
 
-        const createdPayment = await authorizePaymentForBooking(tx, created, addOnsTotal);
-
-        return { booking: created, payment: createdPayment };
+        // No Payment row is created here — the client pays after the job is
+        // finished and finally priced (see confirmCompletion). Nothing is held.
+        return { booking: created };
       });
 
       await schedulePendingExpiry(booking.id);
@@ -408,7 +416,8 @@ export const createBooking = async (req: AuthRequest, res: Response) => {
           estimatedDurationHours: booking.estimatedDurationHours,
           expiresAt: booking.expiresAt,
           pricing: { basePrice, conditionFee, distanceFee, urgencyFee, tierFee, addOnsTotal, finalEstimate },
-          payment: { id: payment.id, status: payment.status, escrowStatus: payment.escrowStatus, clientSecret: payment.clientSecret },
+          // Payment is collected after completion — none exists yet.
+          payment: null,
         },
       });
     } catch (txErr: any) {
@@ -675,7 +684,7 @@ export const getBookingDetail = async (req: AuthRequest, res: Response) => {
         // Chronological milestones for a status-progress UI.
         timeline: {
           createdAt: booking.createdAt,
-          acceptedAt: ['ACCEPTED', 'IN_PROGRESS', 'QUOTE_SUBMITTED', 'QUOTE_APPROVED', 'DISPUTED', 'PENDING_COMPLETION', 'COMPLETED'].includes(booking.status) ? booking.updatedAt : null,
+          acceptedAt: ['ACCEPTED', 'IN_PROGRESS', 'QUOTE_SUBMITTED', 'QUOTE_APPROVED', 'DISPUTED', 'PENDING_COMPLETION', 'AWAITING_PAYMENT', 'COMPLETED'].includes(booking.status) ? booking.updatedAt : null,
           workerArrivedAt: booking.workerArrivedAt,
           workerStartedAt: booking.workerStartedAt,
           quotedAt: booking.quotedAt,
@@ -725,7 +734,6 @@ export const acceptBooking = async (req: AuthRequest, res: Response) => {
     }
 
     const currentUserId = req.user.userId;
-    const { adminFeePerJob } = await getAppSettings();
 
     // Wrap in transaction to prevent double-counting
     try {
@@ -743,10 +751,11 @@ export const acceptBooking = async (req: AuthRequest, res: Response) => {
           throw new Error('Worker is at maximum capacity');
         }
 
-        // Admin-fee gate — blocks acceptance if the worker's prepaid wallet
-        // can't cover the flat per-job fee (see walletService.ts).
-        if (adminFeePerJob > 0) {
-          await debitWalletTx(tx, workerProfile.id, adminFeePerJob, 'ADMIN_FEE_DEDUCTION', { bookingId: id });
+        // Outstanding-dues gate — blocks acceptance while the worker's
+        // account is on hold (see debtLedgerService.ts). Already-accepted
+        // bookings are never affected by this.
+        if (workerProfile.debtHoldAt) {
+          throw new Error('ACCOUNT_ON_HOLD');
         }
 
         // Update booking status
@@ -781,6 +790,17 @@ export const acceptBooking = async (req: AuthRequest, res: Response) => {
         relatedId: result.id,
       });
 
+      // A worker accepting is the "is my booking actually happening" moment —
+      // SMS it in addition to the in-app/push notification above so it
+      // reaches the client even with the app closed and no push token
+      // registered. Fire-and-forget: never block the response on it, and a
+      // failed/skipped send (no phone on file, PhilSMS error) is swallowed
+      // inside sendSmsToUser.
+      void sendSmsToUser({
+        userId: result.clientId,
+        message: `HomeEase: Your booking (${formatDisplayId(result.id)}) has been accepted by the worker. Open the app for details.`,
+      });
+
       return res.status(200).json({
         success: true,
         message: 'Booking accepted successfully',
@@ -793,14 +813,15 @@ export const acceptBooking = async (req: AuthRequest, res: Response) => {
       if (txError.message === 'Worker is at maximum capacity') {
         return res.status(409).json(errorResponse(409, txError.message));
       }
-      if (txError instanceof InsufficientBalanceError) {
-        // 402 is a deliberately distinct status from the other errors here
-        // (403/404/409) so the mobile app can point the worker at the
-        // wallet top-up screen instead of showing a generic error toast.
+      if (txError.message === 'ACCOUNT_ON_HOLD') {
+        // 402 (not 403) — the mobile app's axios interceptor force-logs-out
+        // on any 401/403, which would be wrong here (this isn't an auth
+        // problem). 402 is a deliberately distinct status so the mobile app
+        // can surface the account-hold messaging instead of a generic toast.
         return res.status(402).json(
           errorResponse(
             402,
-            `Insufficient wallet balance to accept this job. A ₱${adminFeePerJob} admin fee is required — please top up your wallet.`
+            'Your account is on hold due to outstanding platform dues. Please contact support to continue accepting jobs.'
           )
         );
       }
@@ -1207,25 +1228,14 @@ export const approveQuote = async (req: AuthRequest, res: Response) => {
       return res.status(409).json(errorResponse(409, `Cannot approve quote for booking with status ${booking.status}`));
     }
 
-    const updated = await prisma.$transaction(async (tx) => {
-      const b = await tx.booking.update({
-        where: { id },
-        data: {
-          status: 'QUOTE_APPROVED',
-          quoteStatus: 'APPROVED',
-          approvedAt: new Date(),
-          finalPrice: booking.laborCost! + booking.materialsCost!,
-        },
-      });
-
-      // Re-affirm the hold — a prior DISPUTED→QUOTE_APPROVED admin
-      // resolution may have left this in a transient state.
-      await tx.payment.updateMany({
-        where: { bookingId: id, escrowStatus: { not: 'RELEASED' } },
-        data: { escrowStatus: 'HELD' },
-      });
-
-      return b;
+    const updated = await prisma.booking.update({
+      where: { id },
+      data: {
+        status: 'QUOTE_APPROVED',
+        quoteStatus: 'APPROVED',
+        approvedAt: new Date(),
+        finalPrice: booking.laborCost! + booking.materialsCost!,
+      },
     });
 
     // Notify worker (workerId is nullable on Booking — skip if unassigned)
@@ -1371,6 +1381,7 @@ export const completeBooking = async (req: AuthRequest, res: Response) => {
 
     const booking = await prisma.booking.findUnique({
       where: { id },
+      include: { addOns: true },
     });
 
     if (!booking) {
@@ -1385,6 +1396,16 @@ export const completeBooking = async (req: AuthRequest, res: Response) => {
       return res.status(409).json(errorResponse(409, `Cannot complete booking with status ${booking.status}`));
     }
 
+    // Lock in the final billable subtotal now — add-ons are frozen from this
+    // point on (see addAddon), so this is what the client pays at confirmation.
+    const { subtotal: lockedFinalPrice } = computeBookingFinalTotal({
+      estimatedPrice: booking.estimatedPrice,
+      laborCost: booking.laborCost,
+      materialsCost: booking.materialsCost,
+      tip: booking.tip,
+      addOns: booking.addOns,
+    });
+
     const updated = await prisma.$transaction(async (tx) => {
       const b = await tx.booking.update({
         where: { id },
@@ -1392,6 +1413,7 @@ export const completeBooking = async (req: AuthRequest, res: Response) => {
           status: 'PENDING_COMPLETION',
           completionPhotoUrl,
           workerCompletedAt: new Date(),
+          finalPrice: lockedFinalPrice,
         },
       });
 
@@ -1438,11 +1460,18 @@ export const completeBooking = async (req: AuthRequest, res: Response) => {
 
 /**
  * PATCH /api/bookings/:id/confirm-completion
- * Client confirms the worker's submitted proof of work. Finalizes the
- * booking (COMPLETED, finalPrice), captures the held payment authorization
- * for the final amount, releases escrow to the worker, and notifies them
- * that payout has been triggered. activeJobCount/slot were already freed in
- * completeBooking (the worker's side of the job finishing), not here.
+ * Client confirms the worker's submitted proof of work — this is the payment
+ * step. Payment method is locked to whatever the client chose at booking time.
+ *
+ *   CASH        -> settleCashBooking finalizes the booking immediately (the
+ *                  client already paid the worker in person); responds
+ *                  { status: 'COMPLETED' }.
+ *   GCASH/MAYA  -> createCompletionInvoice raises a Xendit invoice for the full
+ *                  final total, booking -> AWAITING_PAYMENT; responds
+ *                  { status: 'AWAITING_PAYMENT', checkoutUrl, invoiceId }. The
+ *                  invoice-paid webhook (finalizePaidBooking) finalizes it.
+ *
+ * activeJobCount/slot were already freed in completeBooking.
  */
 export const confirmCompletion = async (req: AuthRequest, res: Response) => {
   try {
@@ -1465,55 +1494,59 @@ export const confirmCompletion = async (req: AuthRequest, res: Response) => {
       return res.status(403).json(errorResponse(403, 'This booking does not belong to you'));
     }
 
-    if (!isValidTransition(booking.status, 'COMPLETED')) {
-      return res.status(409).json(errorResponse(409, `Cannot confirm completion for booking with status ${booking.status}`));
+    // Allowed from PENDING_COMPLETION (first confirm) or AWAITING_PAYMENT
+    // (client retrying an abandoned checkout).
+    if (booking.status !== 'PENDING_COMPLETION' && booking.status !== 'AWAITING_PAYMENT') {
+      return res
+        .status(409)
+        .json(errorResponse(409, `Cannot confirm completion for booking with status ${booking.status}`));
     }
 
-    // addOns use `price` field per schema
-    const addonsCost = (booking.addOns || []).reduce((sum: number, addon: any) => sum + addon.price, 0);
-    const hasQuote = booking.laborCost != null && booking.materialsCost != null;
-    const finalPrice = round2(
-      hasQuote ? (booking.laborCost ?? 0) + (booking.materialsCost ?? 0) + addonsCost : booking.estimatedPrice + addonsCost
-    );
+    const method = booking.paymentMethodType ?? 'CASH';
 
-    // Update booking — schema has completionDate (not completedAt)
-    const updated = await prisma.booking.update({
-      where: { id },
-      data: {
-        status: 'COMPLETED',
-        finalPrice,
-        completionDate: new Date(),
-      },
-    });
+    if (method === 'CASH') {
+      const payment = await settleCashBooking(id);
 
-    const payment = await captureAndReleasePayment(id, finalPrice, booking.workerId);
+      if (booking.workerId) {
+        await notifyUser({
+          userId: booking.workerId,
+          type: 'BOOKING_COMPLETED',
+          title: 'Client Confirmed Completion',
+          message: 'The client confirmed your work is done.',
+          relatedId: id,
+        });
+      }
 
-    // captureAndReleasePayment already sends a "payment released" notification —
-    // this one separately confirms the job itself was accepted as done.
-    if (booking.workerId) {
-      await notifyUser({
-        userId: booking.workerId,
-        type: 'BOOKING_COMPLETED',
-        title: 'Client Confirmed Completion',
-        message: 'The client confirmed your work is done.',
-        relatedId: id,
+      return res.status(200).json({
+        success: true,
+        message: 'Completion confirmed — cash payment recorded',
+        data: {
+          id,
+          status: 'COMPLETED',
+          finalPrice: payment.subtotal,
+          completedAt: payment.capturedAt,
+          payment: {
+            status: payment.status,
+            methodType: payment.methodType,
+            totalAmount: payment.totalAmount,
+            workerPayout: payment.workerPayout,
+          },
+        },
       });
     }
 
+    // GCASH / MAYA — raise the invoice, wait for the webhook.
+    const invoice = await createCompletionInvoice(id);
+
     return res.status(200).json({
       success: true,
-      message: 'Completion confirmed successfully',
+      message: 'Completion confirmed — payment required',
       data: {
-        id: updated.id,
-        status: updated.status,
-        finalPrice: updated.finalPrice,
-        completedAt: updated.completionDate,
-        payment: {
-          status: payment.status,
-          escrowStatus: payment.escrowStatus,
-          capturedAmount: payment.capturedAmount,
-          workerPayout: payment.workerPayout,
-        },
+        id,
+        status: 'AWAITING_PAYMENT',
+        checkoutUrl: invoice.checkoutUrl,
+        invoiceId: invoice.invoiceId,
+        amount: invoice.amount,
       },
     });
   } catch (error) {
@@ -1564,16 +1597,6 @@ export const cancelBooking = async (req: AuthRequest, res: Response) => {
         });
         if (booking.timeSlot) {
           await freeSlot(tx, workerProfile.id, booking.scheduledDate, booking.timeSlot);
-        }
-
-        // Refund the admin fee deducted at acceptance — but only when the
-        // cancellation isn't the worker's own choice; a worker who backs out
-        // of a job they already accepted forfeits the fee.
-        if (cancelledByRole !== 'WORKER') {
-          const { adminFeePerJob } = await getAppSettings();
-          if (adminFeePerJob > 0) {
-            await creditWalletTx(tx, workerProfile.id, adminFeePerJob, 'REFUND', { bookingId: id });
-          }
         }
       }
 

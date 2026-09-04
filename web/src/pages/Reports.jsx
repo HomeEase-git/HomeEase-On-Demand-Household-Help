@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useState } from 'react'
 import { useLocation } from 'react-router-dom'
 import PageHeader from '../components/common/PageHeader'
 import SubNav from '../components/common/SubNav'
@@ -15,6 +15,7 @@ import { fetchPayments } from '../services/payments'
 import { fetchClients } from '../services/users'
 import { fetchReviews } from '../services/reviews'
 import { downloadCsv } from '../utils/csvExport'
+import { useListQuery } from '../hooks/useListQuery'
 
 const SUB_NAV = [
   { to: '/reports/logs', label: 'System Logs' },
@@ -42,67 +43,46 @@ const EXPORT_FETCHERS = {
 export default function Reports() {
   const { pathname } = useLocation()
   const path = pathname.replace(/^\//, '') || 'reports'
+  // Each of the 4 report views is its own <Route> entry pointing at this same
+  // component (see App.jsx) — navigating between them remounts Reports, so
+  // `view` is stable for the lifetime of any one mount and it's safe to
+  // branch a single unconditional useListQuery call on it below.
   const view = path.includes('export') ? 'export' : path.includes('activity') ? 'activity' : path.includes('service') ? 'service' : 'logs'
   const [title, subtitle] = TITLES[view] || TITLES.logs
 
-  const [filterTab, setFilterTab] = useState('All')
-  const [rows, setRows] = useState([])
-  const [meta, setMeta] = useState({ page: 1, hasPrev: false, hasNext: false, total: 0 })
-  const [page, setPage] = useState(1)
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState(null)
-
   const [exportType, setExportType] = useState('Bookings')
   const [exporting, setExporting] = useState(false)
+  const [exportError, setExportError] = useState(null)
 
-  const load = async () => {
-    setLoading(true)
-    setError(null)
+  const fetchFn = useCallback(
+    (params) => {
+      if (view === 'logs') return fetchAuditLogs({ category: params.filterTab, page: params.page, limit: 10 })
+      if (view === 'service') return fetchServiceReport()
+      if (view === 'activity') return fetchActivityReport()
+      return Promise.resolve([]) // 'export' view has no list data to cache — it's an action, not a report
+    },
+    [view]
+  )
 
-    try {
-      if (view === 'logs') {
-        const response = await fetchAuditLogs({ category: filterTab, page, limit: 10 })
-        setRows(response.data)
-        setMeta(response.meta)
-      } else if (view === 'service') {
-        const data = await fetchServiceReport()
-        setRows(data)
-      } else if (view === 'activity') {
-        const data = await fetchActivityReport()
-        setRows(data)
-      }
-    } catch (err) {
-      setError(err.message || 'Failed to load report')
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  useEffect(() => {
-    if (view === 'export') return
-    load()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [view, filterTab, page])
-
-  useEffect(() => {
-    setPage(1)
-  }, [view, filterTab])
+  const { data: rows, meta, loading, error, reload, params, setFilter, goToPage } = useListQuery(fetchFn, {
+    initialParams: { filterTab: 'All', page: 1 },
+  })
 
   const handleExport = async () => {
     setExporting(true)
-    setError(null)
+    setExportError(null)
 
     try {
-      const fetchFn = EXPORT_FETCHERS[exportType]
+      const exportFetchFn = EXPORT_FETCHERS[exportType]
       const rowsAcc = []
       for (let p = 1; p <= 10; p++) {
-        const response = await fetchFn({ page: p, limit: 50 })
+        const response = await exportFetchFn({ page: p, limit: 50 })
         rowsAcc.push(...response.data)
         if (!response.meta?.hasNext) break
       }
       downloadCsv(`${exportType.toLowerCase()}-export.csv`, rowsAcc)
     } catch (err) {
-      setError(err.message || 'Failed to generate export')
+      setExportError(err.message || 'Failed to generate export')
     } finally {
       setExporting(false)
     }
@@ -149,7 +129,7 @@ export default function Reports() {
               Export returns all available rows for the selected type, capped at 500. For a date-filtered export, use
               the Payout Distribution page instead.
             </p>
-            {error && <div className="form-error" style={{ marginBottom: '1rem' }}>{error}</div>}
+            {exportError && <div className="form-error" style={{ marginBottom: '1rem' }}>{exportError}</div>}
             <button type="button" className="btn btn-primary" onClick={handleExport} disabled={exporting}>
               <i className="fas fa-download" /> {exporting ? 'Generating...' : 'Generate Export'}
             </button>
@@ -160,14 +140,14 @@ export default function Reports() {
               <div className="toolbar" style={{ marginBottom: '1rem' }}>
                 <FilterTabs
                   tabs={LOG_CATEGORY_TABS}
-                  activeTab={filterTab}
-                  onTabChange={setFilterTab}
+                  activeTab={params.filterTab}
+                  onTabChange={(tab) => setFilter('filterTab', tab)}
                 />
               </div>
             )}
 
             {loading && <LoadingState message="Loading report..." />}
-            {error && <ErrorState message={error} onRetry={load} />}
+            {error && <ErrorState message={error} onRetry={reload} />}
 
             {!loading && !error && view === 'logs' && (
               <>
@@ -210,8 +190,8 @@ export default function Reports() {
                   info={`Showing ${rows.length} of ${meta.total ?? rows.length} log entries`}
                   hasPrev={meta.hasPrev}
                   hasNext={meta.hasNext}
-                  onPrev={() => setPage((p) => Math.max(1, p - 1))}
-                  onNext={() => setPage((p) => p + 1)}
+                  onPrev={() => goToPage(Math.max(1, params.page - 1))}
+                  onNext={() => goToPage(params.page + 1)}
                 />
               </>
             )}

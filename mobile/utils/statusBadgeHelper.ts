@@ -13,6 +13,7 @@ export function getStatusColor(status: StatusType): string {
       return colors.brand.DEFAULT;
     case 'QuoteSubmitted':
     case 'PendingCompletion':
+    case 'AwaitingPayment':
       return colors.warning;
     case 'Disputed':
       return colors.error;

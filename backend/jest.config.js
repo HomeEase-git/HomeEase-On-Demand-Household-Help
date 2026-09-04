@@ -3,6 +3,10 @@ module.exports = {
   testEnvironment: 'node',
   rootDir: '.',
   testMatch: ['<rootDir>/tests/**/*.test.ts'],
+  // tests/integration/** needs a real Redis and deliberately does NOT want
+  // the bookingQueue/verificationQueue mocks below — it's its own suite,
+  // run via `npm run test:queues` / jest.integration.config.js.
+  testPathIgnorePatterns: ['<rootDir>/node_modules/', '<rootDir>/tests/integration/'],
   transform: {
     '^.+\\.tsx?$': ['ts-jest', { tsconfig: '<rootDir>/tsconfig.test.json' }],
   },
@@ -22,6 +26,7 @@ module.exports = {
     '^@services/(.*)$': '<rootDir>/src/services/$1',
   },
   setupFiles: ['<rootDir>/tests/setupEnv.ts'],
+  setupFilesAfterEnv: ['<rootDir>/tests/jestSetupAfterEnv.ts'],
   testTimeout: 20000,
   verbose: true,
 };

@@ -67,6 +67,7 @@ export default function TrackBookingScreen() {
         return 1;
       case "InProgress":
       case "PendingCompletion":
+      case "AwaitingPayment":
       case "Disputed":
         return 2;
       case "Completed":
@@ -89,7 +90,9 @@ export default function TrackBookingScreen() {
       case "InProgress":
         return "Worker is on the job";
       case "PendingCompletion":
-        return "Job done — awaiting your confirmation";
+        return "Job done — confirm and pay to finish";
+      case "AwaitingPayment":
+        return "Confirmed — complete your payment to finish";
       case "Disputed":
         return "This booking is under dispute";
       case "Completed":

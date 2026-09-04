@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import PageHeader from '../components/common/PageHeader'
 import SectionCard from '../components/common/SectionCard'
 import SearchBar from '../components/common/SearchBar'
@@ -14,6 +14,7 @@ import {
 import { useToast } from '../context/ToastContext'
 import IconPicker from '../components/common/IconPicker'
 import { msIconFor } from '../constants/serviceIcons'
+import { useListQuery } from '../hooks/useListQuery'
 
 const PAGE_SIZE = 10
 
@@ -63,9 +64,6 @@ function serviceToForm(service) {
 }
 
 export default function ServiceCatalog() {
-  const [services, setServices] = useState([])
-  const [loading, setLoading] = useState(true)
-  const [loadError, setLoadError] = useState(null)
   const [query, setQuery] = useState('')
   const [page, setPage] = useState(1)
 
@@ -78,22 +76,8 @@ export default function ServiceCatalog() {
   const [togglingId, setTogglingId] = useState(null)
   const { showSuccess, showError } = useToast()
 
-  const loadServices = async () => {
-    setLoading(true)
-    setLoadError(null)
-    try {
-      const data = await fetchServiceTypes()
-      setServices(data)
-    } catch (err) {
-      setLoadError(err.message || 'Failed to load service catalog')
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  useEffect(() => {
-    loadServices()
-  }, [])
+  const fetchFn = useCallback(() => fetchServiceTypes(), [])
+  const { data: services, loading, error: loadError, reload: loadServices, setData: setServices } = useListQuery(fetchFn)
 
   const filteredServices = useMemo(() => {
     const q = query.trim().toLowerCase()

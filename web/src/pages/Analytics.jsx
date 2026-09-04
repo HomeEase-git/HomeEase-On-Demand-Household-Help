@@ -1,4 +1,3 @@
-import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import StatCard from '../components/common/StatCard'
 import SectionCard from '../components/common/SectionCard'
@@ -7,32 +6,15 @@ import ErrorState from '../components/common/ErrorState'
 import BookingsTrendChart from '../components/charts/BookingsTrendChart'
 import CategoryBreakdownChart from '../components/charts/CategoryBreakdownChart'
 import { fetchAnalytics } from '../services/analytics'
+import { useDetailQuery } from '../hooks/useListQuery'
 
 export default function Analytics() {
-  const [analytics, setAnalytics] = useState(null)
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState(null)
-
-  const load = async () => {
-    setLoading(true)
-    setError(null)
-
-    try {
-      const data = await fetchAnalytics()
-      setAnalytics(data)
-    } catch (err) {
-      setError(err.message || 'Failed to load analytics')
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  useEffect(() => {
-    load()
-  }, [])
+  // useDetailQuery caches by `${pathname}:${id}` — there's no real "id" for
+  // a single analytics snapshot, so a constant key just gives it a cache slot.
+  const { data: analytics, loading, error, reload } = useDetailQuery(fetchAnalytics, 'snapshot')
 
   if (loading) return <LoadingState message="Loading analytics..." />
-  if (error) return <ErrorState message={error} onRetry={load} />
+  if (error) return <ErrorState message={error} onRetry={reload} />
 
   const stats = [
     { label: 'Total Bookings', value: String(analytics.totalBookings), icon: 'fa-calendar-check', color: 'blue' },

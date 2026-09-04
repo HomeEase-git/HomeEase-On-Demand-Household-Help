@@ -20,16 +20,25 @@ export async function fetchWorkerById(id) {
   return response.data;
 }
 
-export async function fetchWorkerWallet(id) {
-  const response = await apiRequest(`/admin/users/workers/${id}/wallet`);
+export async function fetchWorkerDebt(id) {
+  const response = await apiRequest(`/admin/users/workers/${id}/debt`);
   return response.data;
 }
 
-/** PATCH /admin/users/workers/:id/wallet/adjust — signed amount (positive credits, negative debits). */
-export async function adjustWorkerWallet(id, amount, reason) {
-  const response = await apiRequest(`/admin/users/workers/${id}/wallet/adjust`, {
+/** PATCH /admin/users/workers/:id/debt/adjust — signed amount (positive reduces what's owed, negative increases it). */
+export async function adjustWorkerDebt(id, amount, reason) {
+  const response = await apiRequest(`/admin/users/workers/${id}/debt/adjust`, {
     method: 'PATCH',
     body: JSON.stringify({ amount, reason }),
+  });
+  return response.data;
+}
+
+/** PATCH /admin/users/workers/:id/debt/release — lifts an account hold. */
+export async function releaseWorkerHold(id, note) {
+  const response = await apiRequest(`/admin/users/workers/${id}/debt/release`, {
+    method: 'PATCH',
+    body: JSON.stringify({ note }),
   });
   return response.data;
 }

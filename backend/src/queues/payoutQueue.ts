@@ -1,5 +1,5 @@
 import { Queue } from 'bullmq';
-import { redisConnection as connection } from '@config/redis';
+import { queueConnection as connection } from '@config/redis';
 
 export const PAYOUT_QUEUE_NAME = 'worker-payout';
 
@@ -12,6 +12,12 @@ export interface SendPayoutJobData {
 }
 
 export const payoutQueue = new Queue(PAYOUT_QUEUE_NAME, { connection });
+
+// Mandatory per BullMQ's own docs — see the identical note in
+// bookingQueue.ts.
+payoutQueue.on('error', (err) => {
+  console.error('payoutQueue Redis connection error:', err.message);
+});
 
 /**
  * Queues a worker payout for disbursement. Async by design — escrow release
@@ -26,7 +32,9 @@ export async function schedulePayout(payoutId: string): Promise<void> {
     PAYOUT_JOB_NAMES.SEND_PAYOUT,
     { payoutId } satisfies SendPayoutJobData,
     {
-      jobId: `${PAYOUT_JOB_NAMES.SEND_PAYOUT}:${payoutId}`,
+      // BullMQ rejects ':' in custom jobIds (reserved for its own Redis key
+      // namespacing) — '-' instead.
+      jobId: `${PAYOUT_JOB_NAMES.SEND_PAYOUT}-${payoutId}`,
       attempts: 5,
       backoff: { type: 'exponential', delay: 60_000 },
       removeOnComplete: true,

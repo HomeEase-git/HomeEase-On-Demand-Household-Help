@@ -10,6 +10,7 @@ export type StatusType =
   | "QuoteApproved"
   | "Disputed"
   | "PendingCompletion"
+  | "AwaitingPayment"
   | "Completed"
   | "Cancelled"
   | "Credited"
@@ -60,6 +61,10 @@ export const StatusBadge: React.FC<Props> = ({ status }) => {
       containerClass += " bg-teal-500/20";
       textClass += " text-teal-400";
       break;
+    case "AwaitingPayment":
+      containerClass += " bg-warning/20";
+      textClass += " text-warning";
+      break;
     case "Completed":
     case "Credited":
     case "Verified":
@@ -80,6 +85,7 @@ export const StatusBadge: React.FC<Props> = ({ status }) => {
     QuoteSubmitted: "Quote Submitted",
     QuoteApproved: "Quote Approved",
     PendingCompletion: "Awaiting Confirmation",
+    AwaitingPayment: "Awaiting Payment",
     Pending: "Pending",
     Declined: "Declined",
     "Pending KYC": "Pending KYC",

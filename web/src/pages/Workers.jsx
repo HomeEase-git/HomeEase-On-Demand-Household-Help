@@ -86,6 +86,11 @@ export default function Workers() {
                           <Badge variant={worker.status === 'Verified' ? 'approved' : 'pending'}>
                             {worker.status}
                           </Badge>
+                          {worker.debtHoldAt && (
+                            <span style={{ marginLeft: '0.35rem' }}>
+                              <Badge variant="suspended">On Hold</Badge>
+                            </span>
+                          )}
                         </td>
                         <td>{worker.earnings}</td>
                         <td>

@@ -1,6 +1,6 @@
 import { Queue } from 'bullmq';
 import { getAppSettings } from '@services/appSettingsService';
-import { redisConnection as connection } from '@config/redis';
+import { queueConnection as connection } from '@config/redis';
 
 export const BOOKING_QUEUE_NAME = 'booking-lifecycle';
 
@@ -25,6 +25,15 @@ export interface ExpirePendingBookingJobData {
 
 export const bookingQueue = new Queue(BOOKING_QUEUE_NAME, { connection });
 
+// Mandatory per BullMQ's own docs — Queue re-emits its Redis connection's
+// errors as an 'error' event, and an EventEmitter with no 'error' listener
+// crashes the whole process on the first one (e.g. Redis unreachable at
+// boot). Log-and-continue: the bounded retries in queueConnection already
+// decide when this queue gives up trying to reconnect.
+bookingQueue.on('error', (err) => {
+  console.error('bookingQueue Redis connection error:', err.message);
+});
+
 /**
  * Schedules the PENDING→CANCELLED expiry check for a newly-created booking,
  * after AppSettings.pendingExpiryMinutes (admin-configurable, defaults to
@@ -38,7 +47,9 @@ export async function schedulePendingExpiry(bookingId: string): Promise<void> {
     JOB_NAMES.EXPIRE_PENDING,
     { bookingId } satisfies ExpirePendingBookingJobData,
     {
-      jobId: `${JOB_NAMES.EXPIRE_PENDING}:${bookingId}`,
+      // BullMQ rejects ':' in custom jobIds (reserved for its own Redis key
+      // namespacing) — '-' instead, kept in sync with cancelPendingExpiryJob.
+      jobId: `${JOB_NAMES.EXPIRE_PENDING}-${bookingId}`,
       delay: pendingExpiryMinutes * 60 * 1000,
       removeOnComplete: true,
       removeOnFail: true,
@@ -53,7 +64,7 @@ export async function schedulePendingExpiry(bookingId: string): Promise<void> {
  * that already moved on.
  */
 export async function cancelPendingExpiryJob(bookingId: string): Promise<void> {
-  const job = await bookingQueue.getJob(`${JOB_NAMES.EXPIRE_PENDING}:${bookingId}`);
+  const job = await bookingQueue.getJob(`${JOB_NAMES.EXPIRE_PENDING}-${bookingId}`);
   if (job) {
     await job.remove().catch(() => {
       // Already picked up by the worker or removed — safe to ignore.

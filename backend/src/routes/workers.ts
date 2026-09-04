@@ -37,7 +37,6 @@ import {
   deletePackage,
   getWorkerPackages,
 } from '../controllers/workerController';
-import { getMyWallet, topupWallet } from '../controllers/walletController';
 import { authMiddleware } from '../middleware/auth';
 import { restrictTo } from '../middleware/role';
 import {
@@ -140,9 +139,6 @@ router.patch(
   updateCertification
 );
 router.delete('/me/certifications/:certId', authMiddleware, restrictTo('WORKER'), deleteCertification);
-
-router.get('/me/wallet', authMiddleware, restrictTo('WORKER'), getMyWallet);
-router.post('/me/wallet/topup', authMiddleware, restrictTo('WORKER'), topupWallet);
 
 router.get('/me/payout', authMiddleware, restrictTo('WORKER'), getPayoutMethod);
 router.patch(

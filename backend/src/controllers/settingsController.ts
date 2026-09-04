@@ -27,7 +27,7 @@ function formatSettings(record: {
   tierExpertMinRating: number;
   tierExpertMinJobs: number;
   tierExpertMultiplier: number;
-  adminFeePerJob: number;
+  workerDebtHoldLimit: number;
 }) {
   return {
     siteName: record.siteName,
@@ -47,7 +47,7 @@ function formatSettings(record: {
     tierExpertMinRating: record.tierExpertMinRating,
     tierExpertMinJobs: record.tierExpertMinJobs,
     tierExpertMultiplier: record.tierExpertMultiplier,
-    adminFeePerJob: record.adminFeePerJob,
+    workerDebtHoldLimit: record.workerDebtHoldLimit,
   };
 }
 
@@ -86,7 +86,7 @@ export const updateSettings = async (req: AuthRequest, res: Response) => {
       tierExpertMinRating,
       tierExpertMinJobs,
       tierExpertMultiplier,
-      adminFeePerJob,
+      workerDebtHoldLimit,
     } = req.body as {
       siteName?: string;
       supportEmail?: string;
@@ -105,7 +105,7 @@ export const updateSettings = async (req: AuthRequest, res: Response) => {
       tierExpertMinRating?: number;
       tierExpertMinJobs?: number;
       tierExpertMultiplier?: number;
-      adminFeePerJob?: number;
+      workerDebtHoldLimit?: number;
     };
 
     if (!siteName?.trim() || !supportEmail?.trim()) {
@@ -127,7 +127,7 @@ export const updateSettings = async (req: AuthRequest, res: Response) => {
       ['tierExpertMinRating', tierExpertMinRating, 0, 5],
       ['tierExpertMinJobs', tierExpertMinJobs, 0, 10000],
       ['tierExpertMultiplier', tierExpertMultiplier, 1, 5],
-      ['adminFeePerJob', adminFeePerJob, 0, 1000],
+      ['workerDebtHoldLimit', workerDebtHoldLimit, 0, 100000],
     ];
     for (const [field, value, min, max] of numericFields) {
       if (value != null && (typeof value !== 'number' || Number.isNaN(value) || value < min || value > max)) {
@@ -161,7 +161,7 @@ export const updateSettings = async (req: AuthRequest, res: Response) => {
         tierExpertMinRating: tierExpertMinRating ?? current.tierExpertMinRating,
         tierExpertMinJobs: tierExpertMinJobs ?? current.tierExpertMinJobs,
         tierExpertMultiplier: tierExpertMultiplier ?? current.tierExpertMultiplier,
-        adminFeePerJob: adminFeePerJob ?? current.adminFeePerJob,
+        workerDebtHoldLimit: workerDebtHoldLimit ?? current.workerDebtHoldLimit,
       },
     });
 

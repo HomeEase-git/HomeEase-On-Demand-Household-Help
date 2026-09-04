@@ -16,7 +16,7 @@ function secretClient() {
 }
 
 interface CreateInvoiceParams {
-  externalId: string; // Payment.id (or a wallet-topup id) — echoed back on the webhook as external_id
+  externalId: string; // Payment.id — echoed back on the webhook as external_id
   amountPesos: number; // decimal PHP pesos — Xendit invoices do NOT use centavos, unlike PayMongo
   description: string;
   payerEmail?: string;

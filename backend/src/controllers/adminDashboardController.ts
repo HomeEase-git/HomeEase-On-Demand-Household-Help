@@ -11,7 +11,11 @@ const ACTIVE_BOOKING_STATUSES = [
   'QUOTE_SUBMITTED',
   'QUOTE_APPROVED',
   'DISPUTED',
+  'PENDING_COMPLETION',
+  'AWAITING_PAYMENT',
 ] as const;
+
+const PAYMENT_OVERDUE_HOURS = 72;
 
 const CATEGORY_LABEL: Record<string, string> = {
   ADMIN_ACTION: 'Admin Actions',
@@ -34,6 +38,9 @@ export const getDashboardStats = async (_req: Request, res: Response) => {
       recentActivityRecords,
       topWorkerRecords,
       bookingsTrend,
+      workerDebtResult,
+      workersOnHoldCount,
+      overduePaymentCount,
     ] = await Promise.all([
       prisma.user.count({ where: { isDeleted: false } }),
       prisma.user.count({ where: { role: 'CLIENT', isDeleted: false } }),
@@ -53,6 +60,20 @@ export const getDashboardStats = async (_req: Request, res: Response) => {
         },
       }),
       getBookingsOverTime(7),
+      // Total commission/tax owed by workers from cash jobs.
+      prisma.workerProfile.aggregate({
+        where: { commissionOwed: { gt: 0 } },
+        _sum: { commissionOwed: true },
+      }),
+      prisma.workerProfile.count({ where: { debtHoldAt: { not: null } } }),
+      // GCash/Maya jobs finished but unpaid past the escalation threshold.
+      prisma.booking.count({
+        where: {
+          status: { in: ['PENDING_COMPLETION', 'AWAITING_PAYMENT'] },
+          paymentMethodType: { in: ['GCASH', 'MAYA'] },
+          workerCompletedAt: { lte: new Date(Date.now() - PAYMENT_OVERDUE_HOURS * 60 * 60 * 1000) },
+        },
+      }),
     ]);
 
     return res.json({
@@ -67,6 +88,9 @@ export const getDashboardStats = async (_req: Request, res: Response) => {
           openDisputes,
           totalRevenue: formatPeso(revenueResult._sum.totalAmount ?? 0),
           totalPayouts: formatPeso(payoutResult._sum.workerPayout ?? 0),
+          outstandingWorkerDebt: formatPeso(workerDebtResult._sum.commissionOwed ?? 0),
+          workersOnHoldCount,
+          overduePayments: overduePaymentCount,
         },
         recentActivity: recentActivityRecords.map((record) => ({
           id: record.id,

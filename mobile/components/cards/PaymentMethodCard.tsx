@@ -3,15 +3,7 @@ import { View, Text, Pressable } from "react-native";
 import { AppIcon as Ionicons } from "../icons/AppIcon";
 import { colors, cardShadow } from "../../constants";
 import { useAlertModal } from "../../contexts/AlertModalContext";
-
-type PaymentMethod = {
-  id: string;
-  type: "card" | "gcash" | "maya" | "bank";
-  lastFour: string;
-  label?: string;
-  isDefault?: boolean;
-  expiryDate?: string;
-};
+import type { PaymentMethod } from "../../types/api.types";
 
 type Props = {
   method: PaymentMethod;
@@ -33,21 +25,18 @@ export const PaymentMethodCard: React.FC<Props> = ({
   const handleDelete = () => {
     alertModal.confirm(
       "Delete Payment Method",
-      `Remove ${method.type === "card" ? `•••• ${method.lastFour}` : method.label} from your saved methods?`,
+      `Remove ${method.label || getDisplayLabel()} from your saved methods?`,
       { confirmText: "Delete", destructive: true, onConfirm: onDelete },
     );
   };
 
   const getIcon = () => {
     switch (method.type) {
-      case "card":
-        return "card-outline";
       case "gcash":
-        return "wallet-outline";
       case "maya":
         return "wallet-outline";
-      case "bank":
-        return "business-outline";
+      case "cash":
+        return "cash-outline";
       default:
         return "wallet-outline";
     }
@@ -55,14 +44,12 @@ export const PaymentMethodCard: React.FC<Props> = ({
 
   const getDisplayLabel = () => {
     switch (method.type) {
-      case "card":
-        return `Card •••• ${method.lastFour}`;
       case "gcash":
         return `GCash +${method.lastFour}`;
       case "maya":
         return `Maya +${method.lastFour}`;
-      case "bank":
-        return `Bank ${method.lastFour}`;
+      case "cash":
+        return "Cash";
       default:
         return method.label || "Payment Method";
     }
@@ -85,11 +72,6 @@ export const PaymentMethodCard: React.FC<Props> = ({
               </View>
             )}
           </View>
-          {method.expiryDate && (
-            <Text className="text-text-secondary text-sm mt-1">
-              Expires {method.expiryDate}
-            </Text>
-          )}
         </View>
       </View>
       <View className="flex-row gap-2 mt-3">

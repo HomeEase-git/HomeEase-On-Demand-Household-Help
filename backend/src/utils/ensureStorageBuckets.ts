@@ -3,14 +3,23 @@ import {
   AVATAR_BUCKET,
   RESUME_BUCKET,
   BOOKING_PHOTO_BUCKET,
+  CHAT_IMAGE_BUCKET,
+  KYC_DOCUMENT_BUCKET,
   TAX_CERTIFICATE_BUCKET,
 } from '@config/supabase';
 
 /**
- * Creates the avatars/resumes/booking-photos/tax-certificates Supabase
- * Storage buckets if they don't already exist, so this feature doesn't
- * require a manual dashboard setup step. chat-images and kyc-documents are
- * provisioned already and left alone.
+ * Creates every Supabase Storage bucket this app reads/writes if it doesn't
+ * already exist, so a fresh environment doesn't need a manual dashboard
+ * setup step.
+ *
+ * kyc-documents is created public (not signed-URL private, unlike
+ * tax-certificates) to match how the app actually reads it —
+ * uploadController.ts and verificationController.ts both call
+ * .getPublicUrl() on it, never .createSignedUrl(). That's a pre-existing
+ * design choice (worth reconsidering separately, since it means a leaked
+ * URL exposes a government ID with no expiry) — not something to silently
+ * change here, since doing so would break every existing KYC document URL.
  */
 export const ensureStorageBuckets = async () => {
   const { data: buckets, error: listError } = await supabase.storage.listBuckets();
@@ -21,7 +30,7 @@ export const ensureStorageBuckets = async () => {
   }
 
   const existingNames = new Set((buckets ?? []).map((bucket) => bucket.name));
-  const publicBuckets = [AVATAR_BUCKET, RESUME_BUCKET, BOOKING_PHOTO_BUCKET];
+  const publicBuckets = [AVATAR_BUCKET, RESUME_BUCKET, BOOKING_PHOTO_BUCKET, CHAT_IMAGE_BUCKET, KYC_DOCUMENT_BUCKET];
 
   for (const bucketName of publicBuckets) {
     if (existingNames.has(bucketName)) {

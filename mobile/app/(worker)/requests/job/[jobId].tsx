@@ -151,6 +151,7 @@ export default function JobDetailScreen() {
   const isQuoteApproved = status === "QuoteApproved";
   const isDisputed = status === "Disputed";
   const isPendingCompletion = status === "PendingCompletion";
+  const isAwaitingPayment = status === "AwaitingPayment";
   const isCompleted = status === "Completed";
   const amount = job.finalPrice ?? job.estimatedPrice;
   const hasArrived = !!(job.workerArrivedAt || job.timeline?.workerArrivedAt);
@@ -175,7 +176,12 @@ export default function JobDetailScreen() {
       label: "In Progress",
       timestamp: "",
       status:
-        isQuoteApproved || isPendingCompletion || isCompleted || isQuoteSubmitted || isDisputed
+        isQuoteApproved ||
+        isPendingCompletion ||
+        isAwaitingPayment ||
+        isCompleted ||
+        isQuoteSubmitted ||
+        isDisputed
           ? ("done" as const)
           : isInProgress
             ? ("active" as const)
@@ -186,7 +192,7 @@ export default function JobDetailScreen() {
       timestamp: "",
       status: isCompleted
         ? ("done" as const)
-        : isPendingCompletion
+        : isPendingCompletion || isAwaitingPayment
           ? ("active" as const)
           : ("pending" as const),
     },
@@ -454,7 +460,17 @@ export default function JobDetailScreen() {
           {isPendingCompletion && (
             <View className="bg-accent/10 border border-accent rounded-2xl p-4 items-center">
               <Text className="text-accent font-semibold">
-                Waiting for the client to review your photo and confirm completion.
+                Waiting for the client to review your photo, confirm completion, and pay.
+              </Text>
+            </View>
+          )}
+          {isAwaitingPayment && (
+            <View className="bg-warning/10 border border-warning rounded-2xl p-4 items-center">
+              <Text className="text-warning font-semibold">
+                The client confirmed the job — waiting for their payment to clear.
+              </Text>
+              <Text className="text-text-secondary text-xs mt-1">
+                Your payout is released once payment is received.
               </Text>
             </View>
           )}

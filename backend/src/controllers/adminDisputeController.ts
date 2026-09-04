@@ -165,11 +165,22 @@ export const resolveDispute = async (req: AuthRequest, res: Response) => {
     }
 
     const booking = dispute.booking;
-    if (booking.status !== 'DISPUTED') {
+    // Quote actions only make sense on a quote dispute; CANCEL_BOOKING can also
+    // resolve a payment-overdue or refund-request dispute (booking still in
+    // PENDING_COMPLETION / AWAITING_PAYMENT / COMPLETED).
+    if (action !== 'CANCEL_BOOKING' && booking.status !== 'DISPUTED') {
       return res.status(409).json(errorResponse(409, 'Booking is not currently disputed'));
+    }
+    if (
+      action === 'CANCEL_BOOKING' &&
+      !['DISPUTED', 'PENDING_COMPLETION', 'AWAITING_PAYMENT', 'COMPLETED'].includes(booking.status)
+    ) {
+      return res.status(409).json(errorResponse(409, `Cannot resolve — booking is ${booking.status}`));
     }
 
     const resolvedStatus = RESOLVED_STATUS_BY_ACTION[action as ResolveAction];
+    // A COMPLETED booking stays COMPLETED — we refund without un-completing it.
+    const cancelKeepsStatus = action === 'CANCEL_BOOKING' && booking.status === 'COMPLETED';
 
     await prisma.$transaction(async (tx) => {
       if (action === 'APPROVE_QUOTE') {
@@ -186,10 +197,6 @@ export const resolveDispute = async (req: AuthRequest, res: Response) => {
             disputeResolvedById: adminId,
             disputeResolvedAt: new Date(),
           },
-        });
-        await tx.payment.updateMany({
-          where: { bookingId: booking.id, escrowStatus: { not: 'RELEASED' } },
-          data: { escrowStatus: 'HELD' },
         });
       } else if (action === 'REQUEST_NEW_QUOTE') {
         await tx.booking.update({
@@ -209,19 +216,21 @@ export const resolveDispute = async (req: AuthRequest, res: Response) => {
         await tx.booking.update({
           where: { id: booking.id },
           data: {
-            status: 'CANCELLED',
+            ...(cancelKeepsStatus ? {} : { status: 'CANCELLED' }),
             disputeResolvedById: adminId,
             disputeResolvedAt: new Date(),
           },
         });
-        await tx.cancellation.create({
-          data: {
-            bookingId: booking.id,
-            cancelledBy: 'ADMIN',
-            cancelledById: adminId ?? 'system',
-            reason: resolution?.trim() || 'Cancelled via dispute resolution',
-          },
-        });
+        if (!cancelKeepsStatus) {
+          await tx.cancellation.create({
+            data: {
+              bookingId: booking.id,
+              cancelledBy: 'ADMIN',
+              cancelledById: adminId ?? 'system',
+              reason: resolution?.trim() || 'Cancelled via dispute resolution',
+            },
+          });
+        }
       }
 
       await tx.dispute.update({

@@ -6,11 +6,10 @@ import { formatDisplayId, formatPeso } from '@utils/formatters';
 import { buildPaginationMeta, getPaginationParams } from '@utils/pagination';
 import { writeAuditLog } from '@utils/auditLog';
 import { notifyUser } from '@utils/notify';
+import { sendSmsToUser } from '@utils/smsService';
 import { refundOrVoidPayment } from '@services/paymentLifecycleService';
 import { freeSlot } from '@services/workerAvailabilityService';
 import { cancelPendingExpiryJob } from '@queues/bookingQueue';
-import { getAppSettings } from '@services/appSettingsService';
-import { creditWalletTx } from '@services/walletService';
 import type { JwtPayload } from '@/types/index';
 
 interface AuthRequest extends Request {
@@ -203,13 +202,6 @@ export const cancelBookingAdmin = async (req: AuthRequest, res: Response) => {
         if (booking.timeSlot) {
           await freeSlot(tx, workerProfile.id, booking.scheduledDate, booking.timeSlot);
         }
-
-        // Admin-initiated cancellation isn't the worker's fault — refund the
-        // admin fee deducted at acceptance.
-        const { adminFeePerJob } = await getAppSettings();
-        if (adminFeePerJob > 0) {
-          await creditWalletTx(tx, workerProfile.id, adminFeePerJob, 'REFUND', { bookingId: id });
-        }
       }
 
       await tx.cancellation.create({
@@ -242,17 +234,21 @@ export const cancelBookingAdmin = async (req: AuthRequest, res: Response) => {
     });
 
     const partiesToNotify = [booking.clientId, booking.workerId].filter((v): v is string => Boolean(v));
+    const cancelledMessage = `This booking was cancelled by an administrator${reason ? `: ${reason}` : ''}`;
     await Promise.all(
       partiesToNotify.map((userId) =>
         notifyUser({
           userId,
           type: 'BOOKING_CANCELLED',
           title: 'Booking Cancelled',
-          message: `This booking was cancelled by an administrator${reason ? `: ${reason}` : ''}`,
+          message: cancelledMessage,
           relatedId: id,
         })
       )
     );
+    for (const userId of partiesToNotify) {
+      void sendSmsToUser({ userId, message: `HomeEase: ${cancelledMessage}` });
+    }
 
     return res.json({ success: true, data: { id, status: 'CANCELLED' } });
   } catch (error) {

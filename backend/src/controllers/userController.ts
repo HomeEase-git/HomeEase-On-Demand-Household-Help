@@ -30,7 +30,9 @@ export const getUserProfile = async (req: AuthRequest, res: Response) => {
         isVerified: true,
         createdAt: true,
         updatedAt: true,
-        workerProfile: { select: { kycStatus: true, declineCooldownUntil: true } },
+        workerProfile: {
+          select: { kycStatus: true, declineCooldownUntil: true, commissionOwed: true, debtHoldAt: true },
+        },
         verificationRequests: {
           orderBy: { submittedAt: 'desc' },
           take: 1,
@@ -68,6 +70,15 @@ export const getUserProfile = async (req: AuthRequest, res: Response) => {
         // excluded from auto-match (see matchingService.findAutoMatchWorker).
         declineCooldownUntil:
           user.role === 'WORKER' ? (workerProfile?.declineCooldownUntil ?? null) : undefined,
+        // Drives the mobile app's account-hold banner — undefined for
+        // clients, null for a worker in good standing (see
+        // debtLedgerService.ts for how/why this gets set).
+        accountHold:
+          user.role === 'WORKER' && workerProfile?.debtHoldAt
+            ? { since: workerProfile.debtHoldAt, amountOwed: workerProfile.commissionOwed }
+            : user.role === 'WORKER'
+              ? null
+              : undefined,
       },
     });
   } catch (error) {

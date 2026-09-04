@@ -24,7 +24,7 @@ export default function WorkerHomeScreen() {
   const unreadCount = useNotificationStore((s) => s.unreadCount);
   const [capacity, setCapacity] = React.useState<{ activeJobCount: number; maxConcurrentJobs: number } | null>(null);
   const [declineCooldownUntil, setDeclineCooldownUntil] = React.useState<string | null>(null);
-  const [walletBalance, setWalletBalance] = React.useState<number | null>(null);
+  const [accountHold, setAccountHold] = React.useState<{ since: string; amountOwed: number } | null>(null);
 
   const firstName = user?.name?.split(" ")[0] ?? "Worker";
   const pending = jobs.filter((j) => j.status === "Pending");
@@ -37,16 +37,15 @@ export default function WorkerHomeScreen() {
   const load = useCallback(async () => {
     if (!user?.id) return;
     try {
-      const [bookings, capacityData, profile, wallet] = await Promise.all([
+      const [bookings, capacityData, profile] = await Promise.all([
         api.getBookings(),
         api.getWorkerCapacity(),
         api.getUserProfile(),
-        api.getMyWallet().catch(() => null),
       ]);
       setJobs((bookings as ApiWorkerBooking[]).map(mapApiJob));
       setCapacity(capacityData);
       setDeclineCooldownUntil(profile.declineCooldownUntil ?? null);
-      setWalletBalance(wallet?.balance ?? null);
+      setAccountHold(profile.accountHold ?? null);
     } catch (error) {
       console.error("Load worker home error:", error);
     }
@@ -112,6 +111,27 @@ export default function WorkerHomeScreen() {
           </View>
         </View>
 
+        {accountHold && (
+          <View className="bg-error/10 rounded-xl p-4 mx-4 mt-3">
+            <View className="flex-row items-center">
+              <Ionicons name="alert-circle-outline" size={20} color={colors.error} />
+              <Text className="text-error font-bold text-sm ml-2 flex-1">
+                Account on hold
+              </Text>
+            </View>
+            <Text className="text-text-secondary text-xs mt-1">
+              You owe ₱{accountHold.amountOwed.toFixed(2)} in outstanding platform dues and can&apos;t
+              accept new jobs until this is resolved. Jobs already in progress are unaffected.
+            </Text>
+            <Pressable
+              className="bg-error rounded-lg py-2 mt-3 items-center"
+              onPress={() => router.push("/(worker)/profile/help-support")}
+            >
+              <Text className="text-white font-semibold text-sm">Contact Support</Text>
+            </Pressable>
+          </View>
+        )}
+
         {capacity && (
           <Pressable
             className="flex-row items-center justify-between bg-card rounded-xl p-3 mx-4 mt-3"
@@ -132,19 +152,6 @@ export default function WorkerHomeScreen() {
             >
               {capacity.activeJobCount}/{capacity.maxConcurrentJobs} slots filled
             </Text>
-          </Pressable>
-        )}
-
-        {walletBalance != null && (
-          <Pressable
-            className="flex-row items-center justify-between bg-card rounded-xl p-3 mx-4 mt-3"
-            onPress={() => router.push("/(worker)/earnings/wallet")}
-          >
-            <View className="flex-row items-center">
-              <Ionicons name="wallet-outline" size={18} color={colors.text.secondary} />
-              <Text className="text-text-secondary text-sm ml-2">Wallet balance</Text>
-            </View>
-            <Text className="font-bold text-sm text-text-primary">₱{walletBalance.toFixed(2)}</Text>
           </Pressable>
         )}
 
