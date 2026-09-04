@@ -452,7 +452,7 @@ export const createBooking = async (req: AuthRequest, res: Response) => {
       // never happened). Worst case if this silently fails: the booking
       // never gets its 1-hour PENDING auto-expiry, which is a smaller,
       // recoverable gap than a false "booking failed" error.
-      await schedulePendingExpiry(booking.id).catch((error) => {
+      await schedulePendingExpiry(booking.id, effectiveUrgencyLevel).catch((error) => {
         console.error(`Failed to schedule pending-expiry for booking ${booking.id}:`, error);
       });
 
@@ -1686,6 +1686,21 @@ export const cancelBooking = async (req: AuthRequest, res: Response) => {
     // Check ownership
     if (booking.clientId !== req.user.userId && booking.workerId !== req.user.userId) {
       return res.status(403).json(errorResponse(403, 'You do not have permission to cancel this booking'));
+    }
+
+    // A client's cancellation window closes the moment a worker accepts —
+    // by then the worker has committed real capacity and a calendar slot to
+    // this job, so backing out is no longer the client's call (a worker
+    // still can, from ACCEPTED onward, per the state machine below — e.g.
+    // an emergency on their end). This is a hard rule, not a fee: there is
+    // no "cancel for a charge" path past PENDING for the client, by design.
+    if (req.user.role === 'CLIENT' && booking.status !== 'PENDING') {
+      return res.status(409).json(
+        errorResponse(
+          409,
+          'This booking has already been accepted and can no longer be cancelled. Please contact the worker or support if you need help.'
+        )
+      );
     }
 
     if (!isValidTransition(booking.status, 'CANCELLED')) {

@@ -1057,7 +1057,6 @@ async function createBookingsAndPayments(
           : scenario.cancelledBy === Role.WORKER
           ? worker!.id
           : admin.id;
-      const feeCharged = scenario.cancelledBy === Role.CLIENT ? 100 : 0;
       await prisma.cancellation.create({
         data: {
           bookingId: booking.id,
@@ -1065,12 +1064,10 @@ async function createBookingsAndPayments(
           cancelledById,
           reason:
             scenario.cancelledBy === Role.CLIENT
-              ? "Client rescheduled to a later date."
+              ? "Client no longer needed the service."
               : scenario.cancelledBy === Role.WORKER
               ? "Worker had an emergency and could not make it."
               : "Cancelled by admin due to a policy violation.",
-          feeCharged,
-          refundAmount: estimatedPrice - feeCharged,
         },
       });
     }

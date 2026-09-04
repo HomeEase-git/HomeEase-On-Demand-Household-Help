@@ -910,9 +910,6 @@ model Cancellation {
   cancelledById String // soft reference to the user who cancelled
   reason        String?
 
-  feeCharged   Float? @default(0)
-  refundAmount Float?
-
   createdAt DateTime @default(now())
 }
 
