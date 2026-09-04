@@ -20,6 +20,7 @@ import { schedulePendingExpiry, cancelPendingExpiryJob } from '@queues/bookingQu
 import { VALID_TRANSITIONS, isValidTransition } from '@services/bookingStateMachine';
 import { getAppSettings } from '@services/appSettingsService';
 import { computeWorkerTier, tierMultiplier } from '@utils/workerTier';
+import { VALID_URGENCY_LEVELS } from '@/constants/bookingEnums';
 import type { JwtPayload } from '@/types/index';
 
 export { VALID_TRANSITIONS, isValidTransition };
@@ -89,6 +90,7 @@ export const createBooking = async (req: AuthRequest, res: Response) => {
       paymentAccountIdentifier,
       scopeAnswers,
       issuePhotoUrls,
+      idempotencyKey,
     } = req.body as {
       workerId?: string;
       serviceType: string;
@@ -112,11 +114,62 @@ export const createBooking = async (req: AuthRequest, res: Response) => {
       paymentAccountIdentifier?: string;
       scopeAnswers?: Record<string, string | string[]>;
       issuePhotoUrls?: string[];
+      idempotencyKey?: string;
     };
 
-    const VALID_URGENCY_LEVELS: UrgencyLevel[] = ['STANDARD', 'URGENT', 'EMERGENCY'];
     if (urgencyLevel !== undefined && !VALID_URGENCY_LEVELS.includes(urgencyLevel)) {
       return res.status(400).json(errorResponse(400, 'urgencyLevel must be one of STANDARD, URGENT, EMERGENCY'));
+    }
+
+    // Idempotent replay — a retried POST (app backgrounded mid-request,
+    // network timeout + user taps Submit again) with the same client-
+    // generated key returns the booking already created for it instead of
+    // creating a duplicate. Scoped to (clientId, idempotencyKey) — see the
+    // @@unique on Booking. Only short-circuits when a key is actually sent;
+    // omitting it behaves exactly as before.
+    const hasIdempotencyKey = typeof idempotencyKey === 'string' && idempotencyKey.trim().length > 0;
+    if (hasIdempotencyKey) {
+      const existing = await prisma.booking.findUnique({
+        where: { client_idempotency_key_unique: { clientId, idempotencyKey: idempotencyKey! } },
+        include: {
+          client: { select: { fullName: true } },
+          worker: { select: { fullName: true } },
+          pricingLogs: { orderBy: { createdAt: 'desc' }, take: 1 },
+        },
+      });
+      if (existing) {
+        const log = existing.pricingLogs[0];
+        return res.status(200).json({
+          success: true,
+          message: 'Booking already created for this request',
+          data: {
+            id: existing.id,
+            clientName: existing.client.fullName,
+            workerName: existing.worker?.fullName ?? null,
+            isAutoMatched: existing.isAutoMatched,
+            status: existing.status,
+            scheduledDate: existing.scheduledDate,
+            timeSlot: existing.timeSlot,
+            urgencyLevel: existing.urgencyLevel,
+            workerTier: (log?.breakdown as { workerTier?: string } | null)?.workerTier ?? null,
+            estimatedPrice: existing.estimatedPrice,
+            estimatedDurationHours: existing.estimatedDurationHours,
+            expiresAt: existing.expiresAt,
+            pricing: log
+              ? {
+                  basePrice: log.basePrice,
+                  conditionFee: log.conditionFee,
+                  distanceFee: log.distanceFee,
+                  urgencyFee: log.urgencyFee,
+                  tierFee: log.tierFee,
+                  addOnsTotal: log.addOnsTotal,
+                  finalEstimate: log.finalEstimate,
+                }
+              : null,
+            payment: null,
+          },
+        });
+      }
     }
     const effectiveUrgencyLevel: UrgencyLevel = urgencyLevel ?? 'STANDARD';
 
@@ -324,6 +377,7 @@ export const createBooking = async (req: AuthRequest, res: Response) => {
             isAutoMatched,
             declinedWorkerIds: [],
             expiresAt: new Date(Date.now() + 60 * 60 * 1000),
+            idempotencyKey: hasIdempotencyKey ? (idempotencyKey as string) : null,
             estimatedPrice,
             tip: typeof tip === 'number' ? tip : 0,
             notes: notes ?? null,
@@ -434,6 +488,16 @@ export const createBooking = async (req: AuthRequest, res: Response) => {
         return res.status(403).json(errorResponse(403, 'Worker is not verified yet'));
       }
       if (txErr.code === 'P2002') {
+        // Two near-simultaneous requests carrying the same idempotencyKey
+        // both passed the upfront lookup above before either committed —
+        // genuine race, not a slot conflict. Whichever loses this race
+        // should see the same "already created" reply as a normal replay,
+        // not a misleading slot error.
+        if (hasIdempotencyKey && Array.isArray(txErr.meta?.target) && txErr.meta.target.includes('idempotencyKey')) {
+          return res.status(409).json(
+            errorResponse(409, 'This booking request is already being processed — check your bookings list.')
+          );
+        }
         return res.status(409).json(errorResponse(409, 'Slot no longer available'));
       }
       throw txErr;
@@ -529,6 +593,10 @@ export const listBookings = async (req: AuthRequest, res: Response) => {
       distanceMeters: b.distanceMeters,
       estimatedPrice: b.estimatedPrice,
       finalPrice: b.finalPrice,
+      // Broken out separately (not just folded into workerPayoutEstimate) so
+      // the request list can call out "includes a ₱X tip" as a deliberate
+      // acceptance incentive rather than burying it in one blended number.
+      tip: b.tip ?? 0,
       // Estimate only — the authoritative payout is on the Payment row,
       // settled at capture time (see paymentLifecycleService).
       workerPayoutEstimate: calculateWorkerPayout(b.finalPrice ?? b.estimatedPrice, b.tip ?? 0, commissionRate, withholdingTaxRate),
@@ -641,6 +709,10 @@ export const getBookingDetail = async (req: AuthRequest, res: Response) => {
         isAutoMatched: booking.isAutoMatched,
         estimatedPrice: booking.estimatedPrice,
         finalPrice,
+        // Raw tip the client committed at booking time — exposed at top level
+        // (not just inside `payment`) so the worker can see it before a
+        // Payment row exists (pre-completion: Pending/Accepted/InProgress).
+        tip: booking.tip,
         completionPhotoUrl: booking.completionPhotoUrl,
         estimatedDurationHours: booking.estimatedDurationHours,
         inspectionFeeCharged: booking.inspectionFeeCharged,
@@ -684,7 +756,12 @@ export const getBookingDetail = async (req: AuthRequest, res: Response) => {
         // Chronological milestones for a status-progress UI.
         timeline: {
           createdAt: booking.createdAt,
-          acceptedAt: ['ACCEPTED', 'IN_PROGRESS', 'QUOTE_SUBMITTED', 'QUOTE_APPROVED', 'DISPUTED', 'PENDING_COMPLETION', 'AWAITING_PAYMENT', 'COMPLETED'].includes(booking.status) ? booking.updatedAt : null,
+          // Real column, stamped once in acceptBooking — not derived from
+          // updatedAt, which moves on every later write (quote, add-on,
+          // photo) and would misreport "accepted" as whenever the row was
+          // last touched. Null for bookings accepted before this column
+          // existed (display-only field, no backfill).
+          acceptedAt: booking.acceptedAt,
           workerArrivedAt: booking.workerArrivedAt,
           workerStartedAt: booking.workerStartedAt,
           quotedAt: booking.quotedAt,
@@ -761,7 +838,7 @@ export const acceptBooking = async (req: AuthRequest, res: Response) => {
         // Update booking status
         const updated = await tx.booking.update({
           where: { id },
-          data: { status: 'ACCEPTED' },
+          data: { status: 'ACCEPTED', acceptedAt: new Date() },
         });
 
         // Increment activeJobCount
