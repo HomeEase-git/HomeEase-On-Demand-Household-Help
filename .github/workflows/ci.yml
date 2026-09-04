@@ -66,6 +66,10 @@ jobs:
       - run: npx prisma migrate deploy
       - run: npx tsc --noEmit
       - run: npm run typecheck:tooling
+      # tsc --noEmit only type-checks; this compiles + rewrites path aliases
+      # (tsc-alias) so a `dist/` that can't actually `require()` its own
+      # modules fails CI instead of only blowing up at deploy time.
+      - run: npm run build
       - run: npm test
       # Exercises the real BullMQ queues against a real (ephemeral,
       # redis-memory-server-provisioned) Redis — npm test above mocks these
@@ -103,3 +107,26 @@ jobs:
           cache-dependency-path: web/package-lock.json
       - run: npm ci
       - run: npx vite build
+
+  # Keeps the deploy artifacts honest — a broken Dockerfile / entrypoint /
+  # multi-stage copy fails here instead of at deploy time.
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Build backend image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./backend
+          push: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Build web image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: web/Dockerfile
+          push: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
