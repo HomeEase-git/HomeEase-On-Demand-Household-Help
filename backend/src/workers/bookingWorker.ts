@@ -18,6 +18,11 @@ import { formatDisplayId } from '@utils/formatters';
 
 const HOUR_MS = 60 * 60 * 1000;
 const COMPLETION_REMINDER_HOURS = 12;
+// AWAITING_PAYMENT gets a much shorter, separate reminder than the general
+// 12h completion one — the client already confirmed and a checkout exists,
+// so this is a "you have one thing left, come finish it" nudge for an
+// abandoned/forgotten Xendit webview, not "go review a photo and decide."
+const PAYMENT_REMINDER_HOURS = 2;
 const COMPLETION_AUTO_CONFIRM_HOURS = 24;
 // A GCash/Maya booking the client confirmed but never paid (or never even
 // confirmed) is escalated to an admin dispute after this long. No platform
@@ -130,6 +135,8 @@ async function escalateOverduePayment(booking: { id: string; clientId: string; w
  * Post-completion payment safety net (pay-after-completion model).
  *
  *  - PENDING_COMPLETION 12h  -> nudge the client to confirm.
+ *  - AWAITING_PAYMENT 2h (own clock, separate from the 12h above) -> nudge
+ *    the client to finish an abandoned/forgotten Xendit checkout.
  *  - PENDING_COMPLETION 24h + CASH -> auto-confirm: the client is assumed to
  *    have paid the worker in person, so the booking is finalized and the
  *    platform's cut is accrued as worker commission debt (settleCashBooking).
@@ -142,6 +149,7 @@ async function escalateOverduePayment(booking: { id: string; clientId: string; w
 async function remindAndAutoSettleCompletions(): Promise<void> {
   const now = Date.now();
   const reminderCutoff = new Date(now - COMPLETION_REMINDER_HOURS * HOUR_MS);
+  const paymentReminderCutoff = new Date(now - PAYMENT_REMINDER_HOURS * HOUR_MS);
   const autoConfirmCutoff = new Date(now - COMPLETION_AUTO_CONFIRM_HOURS * HOUR_MS);
   const overdueCutoff = new Date(now - PAYMENT_OVERDUE_DISPUTE_HOURS * HOUR_MS);
   const reconcileCutoff = new Date(now - RECONCILE_AFTER_HOURS * HOUR_MS);
@@ -165,6 +173,32 @@ async function remindAndAutoSettleCompletions(): Promise<void> {
     await prisma.booking.update({
       where: { id: booking.id },
       data: { completionReminderSentAt: new Date() },
+    });
+  }
+
+  // 1b. AWAITING_PAYMENT-specific reminder — much shorter than the general
+  // 12h one above, and on its own clock (awaitingPaymentSince, not
+  // workerCompletedAt) so it fires promptly even for a booking that sat in
+  // PENDING_COMPLETION for a while (and already got its 12h reminder there)
+  // before the client finally confirmed and then abandoned the checkout.
+  const needsPaymentReminder = await prisma.booking.findMany({
+    where: {
+      status: 'AWAITING_PAYMENT',
+      awaitingPaymentSince: { lte: paymentReminderCutoff },
+      paymentReminderSentAt: null,
+    },
+  });
+  for (const booking of needsPaymentReminder) {
+    await notifyUser({
+      userId: booking.clientId,
+      type: 'PAYMENT_REMINDER',
+      title: "You're almost done — payment pending",
+      message: 'Finish paying for your completed job so the worker can be paid out.',
+      relatedId: booking.id,
+    });
+    await prisma.booking.update({
+      where: { id: booking.id },
+      data: { paymentReminderSentAt: new Date() },
     });
   }
 

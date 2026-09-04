@@ -27,6 +27,7 @@ import {
 import type { StatusType } from "../../../../components/ui/StatusBadge";
 import { colors } from "../../../../constants";
 import { useAlertModal } from "../../../../contexts/AlertModalContext";
+import type { ConditionType, RoomType, TimeSlot, UrgencyLevel } from "../../../../types/booking4step.types";
 
 type ApiBookingDetail = {
   id: string;
@@ -34,7 +35,16 @@ type ApiBookingDetail = {
   service: string;
   category?: string;
   status: string;
+  description?: string | null;
   location: string;
+  city?: string | null;
+  clientLat?: number | null;
+  clientLng?: number | null;
+  timeSlot?: TimeSlot | null;
+  urgencyLevel?: UrgencyLevel | null;
+  condition?: ConditionType | null;
+  rooms?: RoomType[];
+  scopeAnswers?: Record<string, string | string[]> | null;
   scheduledDate: string;
   scheduledTime: string | null;
   estimatedPrice: number;
@@ -109,7 +119,7 @@ export default function BookingDetailScreen() {
   const router = useRouter();
   const alertModal = useAlertModal();
   const { bookingId } = useLocalSearchParams<{ bookingId: string }>();
-  const { bookings, prefillFromBooking } = useBookingStore();
+  const { bookings, prefillFromBooking, prefillFromDeclinedBooking } = useBookingStore();
   const booking = bookings.find((b) => b.id === bookingId);
   // The shared store's Booking type only keeps payment.totalAmount (used by
   // many other screens) — the real subtotal/addOns/tip breakdown is kept
@@ -198,6 +208,17 @@ export default function BookingDetailScreen() {
   const isPendingCompletion = booking.status === "PendingCompletion";
   const isAwaitingPayment = booking.status === "AwaitingPayment";
   const hasQuote = booking.status === "QuoteSubmitted" && booking.quote;
+  // Distinct from a client-initiated cancel — both collapse to the same
+  // "Cancelled" bucket in booking.status (see API_STATUS_MAP), so this
+  // checks the raw backend status instead, to only offer "Find Another
+  // Pro" when a worker actually declined the request.
+  const isDeclined = rawDetail?.status === "REJECTED";
+
+  const handleFindAnotherPro = () => {
+    if (!rawDetail) return;
+    prefillFromDeclinedBooking(rawDetail);
+    router.push("/(client)/booking/new/step-1");
+  };
 
   // Payment is taken after completion and is locked to the method the client
   // chose at booking time — no picker at the pay step.
@@ -462,6 +483,26 @@ export default function BookingDetailScreen() {
               <Text className="text-text-secondary text-xs mt-0.5">
                 Support will contact you within 24 hours.
               </Text>
+            </View>
+          </View>
+        )}
+
+        {/* Declined banner */}
+        {isDeclined && (
+          <View className="bg-error/10 border border-error/30 rounded-2xl p-4 mb-4">
+            <View className="flex-row items-center">
+              <Ionicons name="close-circle" size={24} color={colors.error} />
+              <View className="ml-3 flex-1">
+                <Text className="text-error font-bold text-sm">
+                  This pro declined the request
+                </Text>
+                <Text className="text-text-secondary text-xs mt-0.5">
+                  Your scope, address, and schedule are unaffected — pick a different pro to continue.
+                </Text>
+              </View>
+            </View>
+            <View className="mt-3">
+              <PrimaryButton label="Find Another Pro" fullWidth onPress={handleFindAnotherPro} />
             </View>
           </View>
         )}

@@ -137,6 +137,7 @@ enum NotificationType {
   QUOTE_REMINDER
   QUOTE_AUTO_APPROVED
   COMPLETION_REMINDER
+  PAYMENT_REMINDER
   BOOKING_AUTO_COMPLETED
   VERIFICATION_SUBMITTED
   VERIFICATION_APPROVED
@@ -794,6 +795,14 @@ model Booking {
   // bookingWorker.autoSettleCompletedBookings) — prevents re-sending it on
   // every hourly sweep tick, distinct from the 24h auto-confirm itself.
   completionReminderSentAt DateTime?
+
+  // Stamped when the booking enters AWAITING_PAYMENT (see
+  // paymentLifecycleService.createCompletionInvoice) — the client already
+  // confirmed and a checkout exists, so this is a much shorter, separate
+  // reminder clock than completionReminderSentAt's 12h (a lower-friction
+  // "you have one thing left to do" nudge, not "go review a photo").
+  awaitingPaymentSince  DateTime?
+  paymentReminderSentAt DateTime?
 
   // Payment method chosen by the client at booking time — settled upfront so
   // the client isn't asked to pick a method again after confirming completion.

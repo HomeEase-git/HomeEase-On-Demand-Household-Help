@@ -250,6 +250,8 @@ export const createBooking = async (req: AuthRequest, res: Response) => {
         condition: effectiveCondition,
         rooms,
         hasPets,
+        clientLat: lat,
+        clientLng: lng,
       });
 
       if (!match) {
@@ -443,7 +445,16 @@ export const createBooking = async (req: AuthRequest, res: Response) => {
         return { booking: created };
       });
 
-      await schedulePendingExpiry(booking.id);
+      // Best-effort — the booking is already committed at this point, so a
+      // Redis hiccup here must not turn a real success into an apparent
+      // failure to the client (it would just retry into the idempotency
+      // path above and get told "already created" for a booking it thinks
+      // never happened). Worst case if this silently fails: the booking
+      // never gets its 1-hour PENDING auto-expiry, which is a smaller,
+      // recoverable gap than a false "booking failed" error.
+      await schedulePendingExpiry(booking.id).catch((error) => {
+        console.error(`Failed to schedule pending-expiry for booking ${booking.id}:`, error);
+      });
 
       await notifyUser({
         userId: booking.workerId as string,
@@ -696,8 +707,14 @@ export const getBookingDetail = async (req: AuthRequest, res: Response) => {
         service: booking.serviceTask?.name ?? booking.serviceType,
         category: booking.serviceTask?.serviceType?.name ?? booking.serviceType,
         status: booking.status,
+        description: booking.description,
         location: booking.location,
         city: booking.city,
+        // Booking address coordinates — client-side re-offer flow (a declined
+        // booking's "Find Another Pro") needs these to prefill a new draft
+        // without asking the client to re-pick their address.
+        clientLat: booking.clientLat,
+        clientLng: booking.clientLng,
         scheduledDate: booking.scheduledDate,
         scheduledTime: booking.scheduledTime,
         timeSlot: booking.timeSlot,
@@ -855,8 +872,14 @@ export const acceptBooking = async (req: AuthRequest, res: Response) => {
       });
 
       // The booking is no longer PENDING, so the 1-hour auto-expiry no
-      // longer applies.
-      await cancelPendingExpiryJob(id);
+      // longer applies. Best-effort: the accept already committed above, so
+      // a Redis hiccup here must not turn that real success into a false
+      // "failed to accept" for the worker — worst case a stale expiry job
+      // fires later and no-ops (expirePendingBooking re-checks status is
+      // still PENDING before doing anything).
+      await cancelPendingExpiryJob(id).catch((error) => {
+        console.error(`Failed to cancel pending-expiry job for accepted booking ${id}:`, error);
+      });
 
       // Create notification for client
       await notifyUser({
@@ -983,7 +1006,12 @@ export const declineBooking = async (req: AuthRequest, res: Response) => {
       });
     });
 
-    await cancelPendingExpiryJob(id);
+    // Best-effort — the decline already committed above (see the
+    // createBooking/acceptBooking equivalents for why this must not fail
+    // the request).
+    await cancelPendingExpiryJob(id).catch((error) => {
+      console.error(`Failed to cancel pending-expiry job for declined booking ${id}:`, error);
+    });
     await refundOrVoidPayment(id, 'WORKER_DECLINED').catch((error) => {
       console.error(`Failed to void payment for declined booking ${id}:`, error);
     });
@@ -1009,6 +1037,8 @@ export const declineBooking = async (req: AuthRequest, res: Response) => {
           condition: updated.condition,
           rooms: updated.rooms,
           excludeWorkerIds: updatedDeclinedWorkerIds,
+          clientLat: updated.clientLat,
+          clientLng: updated.clientLng,
         }).catch(() => null)
       : null;
 
@@ -1695,7 +1725,10 @@ export const cancelBooking = async (req: AuthRequest, res: Response) => {
       });
     });
 
-    await cancelPendingExpiryJob(id);
+    // Best-effort — same reasoning as accept/decline above.
+    await cancelPendingExpiryJob(id).catch((error) => {
+      console.error(`Failed to cancel pending-expiry job for cancelled booking ${id}:`, error);
+    });
     await refundOrVoidPayment(id, reason || 'Booking cancelled').catch((error) => {
       console.error(`Failed to void payment for cancelled booking ${id}:`, error);
     });

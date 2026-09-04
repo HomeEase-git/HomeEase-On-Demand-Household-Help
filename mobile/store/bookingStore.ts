@@ -1,9 +1,8 @@
 import { create, type StoreApi, type UseBoundStore } from 'zustand';
 import { bookingStorage } from '../utils/storage';
-import { isValidHHmm, TimeHHmm } from '../utils/time';
 import { validateDraftForSubmit as validateDraftUtil } from '../utils/bookingValidation';
 import { mapServiceToCategory } from '../utils/categoryMapping';
-import type { ConditionType, RoomSelection, ServiceScopeType, TimeSlot, UrgencyLevel, WorkerTier } from '../types/booking4step.types';
+import type { ConditionType, RoomSelection, RoomType, ServiceScopeType, TimeSlot, UrgencyLevel, WorkerTier } from '../types/booking4step.types';
 
 export type BookingStatus =
   | 'Pending'
@@ -75,7 +74,6 @@ export type DraftBooking = {
   address: string | null;
   city?: string;
   date: string | null;
-  time: TimeHHmm | null;
   instructions?: string;
   notes?: string;
   workerId: string | null;
@@ -88,7 +86,7 @@ export type DraftBooking = {
   // worker inspects the job and submits a quote (see utils/pricing.ts).
   quoteRequired?: boolean;
   // New metadata
-  entrySource?: 'worker_profile' | 'new_booking' | 'book_again' | null;
+  entrySource?: 'worker_profile' | 'new_booking' | 'book_again' | 're_offer' | null;
   workerLocked?: boolean;
   workerName?: string | null;
   // Every ServiceType the locked worker actually offers (id + name) — set
@@ -177,6 +175,33 @@ export function mapApiBooking(b: ApiBookingListItem): Booking {
   };
 }
 
+// Shape of GET /bookings/:id (services/api.ts getBookingDetail()) this store
+// needs to rebuild a full draft from — see prefillFromDeclinedBooking. A
+// deliberately partial view of the real response (only what's carried
+// forward), typed here rather than imported from the screen that owns the
+// full ApiBookingDetail shape, to avoid a screen -> store -> screen import
+// cycle.
+export type DeclinedBookingDetail = {
+  category?: string | null;
+  description?: string | null;
+  location?: string | null;
+  city?: string | null;
+  clientLat?: number | null;
+  clientLng?: number | null;
+  scheduledDate?: string | null;
+  timeSlot?: TimeSlot | null;
+  urgencyLevel?: UrgencyLevel | null;
+  rooms?: RoomType[] | null;
+  condition?: ConditionType | null;
+  scopeAnswers?: Record<string, string | string[]> | null;
+};
+
+function tallyRooms(rooms: RoomType[]): RoomSelection[] {
+  const counts = new Map<RoomType, number>();
+  for (const room of rooms) counts.set(room, (counts.get(room) ?? 0) + 1);
+  return Array.from(counts.entries()).map(([room, count]) => ({ room, count }));
+}
+
 export type BookingState = {
   bookings: Booking[];
   selectedBooking: Booking | null;
@@ -195,6 +220,7 @@ export type BookingState = {
   submitReview: (bookingId: string, rating: number, comment: string) => void;
   restoreDraft: () => Promise<void>;
   prefillFromBooking: (booking: Booking) => void;
+  prefillFromDeclinedBooking: (detail: DeclinedBookingDetail) => void;
   // Quote flow actions
   submitQuote: (bookingId: string, quote: Quote) => void;
   approveQuote: (bookingId: string) => void;
@@ -207,7 +233,6 @@ const initialDraft: DraftBooking = {
   address: null,
   city: '',
   date: null,
-  time: null,
   instructions: '',
   notes: '',
   workerId: null,
@@ -271,15 +296,13 @@ export const useBookingStore: UseBoundStore<StoreApi<BookingState>> = create<Boo
       const roomsChanged = draft.rooms !== undefined && draft.rooms !== prev.rooms;
       const clearingSchedule =
         (categoryChanged || addressChanged || cityChanged || conditionChanged || roomsChanged) &&
-        (prev.date || prev.time || prev.timeSlot || prev.workerId) &&
+        (prev.date || prev.timeSlot || prev.workerId) &&
         draft.date === undefined &&
-        draft.time === undefined &&
         draft.timeSlot === undefined &&
         draft.workerId === undefined;
 
       if (clearingSchedule) {
         updatedDraft.date = null;
-        updatedDraft.time = null;
         updatedDraft.timeSlot = null;
         if (!updatedDraft.workerLocked) {
           updatedDraft.workerId = null;
@@ -312,12 +335,6 @@ export const useBookingStore: UseBoundStore<StoreApi<BookingState>> = create<Boo
         updatedDraft.lastInvalidationReason = "Your worker isn't confirmed for the new date/time, so we cleared your selection.";
       }
 
-      // Ensure time is either null or valid HH:mm
-      if (updatedDraft.time && !isValidHHmm(updatedDraft.time)) {
-        updatedDraft.time = null;
-        updatedDraft.lastInvalidationReason = updatedDraft.lastInvalidationReason ?? 'Time format invalid; cleared.';
-      }
-
       const updated = { draft: updatedDraft };
       bookingStorage.saveDraft(updated.draft);
       return updated;
@@ -327,7 +344,6 @@ export const useBookingStore: UseBoundStore<StoreApi<BookingState>> = create<Boo
     set((state) => {
       const draft = { ...state.draft };
       draft.date = null;
-      draft.time = null;
       if (!draft.workerLocked) draft.workerId = null;
       draft.lastInvalidationReason = reason;
       bookingStorage.saveDraft(draft);
@@ -436,11 +452,7 @@ export const useBookingStore: UseBoundStore<StoreApi<BookingState>> = create<Boo
   restoreDraft: async () => {
     const savedDraft = await bookingStorage.getDraft();
     if (savedDraft) {
-      const restoredDraft: DraftBooking = {
-        ...initialDraft,
-        ...savedDraft,
-        time: savedDraft.time && isValidHHmm(savedDraft.time) ? savedDraft.time : null,
-      };
+      const restoredDraft: DraftBooking = { ...initialDraft, ...savedDraft };
       set({ draft: restoredDraft });
     }
   },
@@ -457,7 +469,44 @@ export const useBookingStore: UseBoundStore<StoreApi<BookingState>> = create<Boo
         entrySource: 'book_again',
         workerLocked: false,
         date: null,
-        time: null,
+        paymentMethod: null,
+      };
+      bookingStorage.saveDraft(updatedDraft);
+      return { draft: updatedDraft };
+    }),
+
+  // A worker declining leaves the booking terminally REJECTED — there's no
+  // reviving it, so this builds a fresh draft from its scope+schedule and
+  // routes back through Step 1 (see the booking-detail screen's "Find
+  // Another Pro"), rather than making the client re-enter everything.
+  // Deliberately does NOT resolve serviceTypeId/categoryBasePrice/scopeType
+  // here — Step 1's own category loader already does that name-match
+  // lookup against the live catalog for a restored draft, so duplicating it
+  // here would just be a second, driftable copy of the same logic.
+  prefillFromDeclinedBooking: (detail) =>
+    set(() => {
+      const updatedDraft: DraftBooking = {
+        ...initialDraft,
+        category: detail.category ?? null,
+        serviceType: detail.category ?? null,
+        description: detail.description ?? '',
+        address: detail.location ?? null,
+        city: detail.city ?? '',
+        lat: detail.clientLat ?? undefined,
+        lng: detail.clientLng ?? undefined,
+        // scheduledDate is a full ISO datetime truncated to UTC midnight
+        // server-side (see backend toDayStart) — the leading 10 chars are
+        // its YYYY-MM-DD, matching what DateGridPicker/step-2 expect.
+        date: detail.scheduledDate ? detail.scheduledDate.slice(0, 10) : null,
+        timeSlot: detail.timeSlot ?? null,
+        urgencyLevel: detail.urgencyLevel ?? 'STANDARD',
+        rooms: detail.rooms ? tallyRooms(detail.rooms) : [],
+        condition: detail.condition ?? null,
+        scopeAnswers: detail.scopeAnswers ?? {},
+        entrySource: 're_offer',
+        workerLocked: false,
+        workerId: null,
+        isAutoMatched: false,
         paymentMethod: null,
       };
       bookingStorage.saveDraft(updatedDraft);
