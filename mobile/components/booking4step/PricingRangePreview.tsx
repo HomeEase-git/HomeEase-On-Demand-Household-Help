@@ -7,10 +7,12 @@ type Props = {
 };
 
 /**
- * Dynamic pricing preview shown in Step 1/2 (range, no worker chosen yet)
- * and Step 3/4 (single point estimate once a worker is picked). This is a
- * client-side estimate for responsive UX — see utils/bookingPriceEstimate.ts
- * for why the authoritative price always comes from the backend instead.
+ * Dynamic pricing preview shown in Step 1/2 (category-rate estimate, no
+ * worker chosen yet — "range" mode is a legacy name, it renders one
+ * approximate price, not a low-high spread) and Step 3/4 (point estimate off
+ * the actual worker's rate once one is picked). Client-side estimate for
+ * responsive UX — see utils/bookingPriceEstimate.ts for why the authoritative
+ * price always comes from the backend instead.
  *
  * Price and duration are rendered as equally-weighted stat blocks (same
  * size/boldness) rather than one being the headline and the other a footnote
@@ -18,7 +20,7 @@ type Props = {
  */
 export default function PricingRangePreview({ estimate }: Props) {
   if (estimate.mode === "range") {
-    const { low, high, durationHours } = estimate.range;
+    const { price, durationHours } = estimate.range;
     const hasSelection = durationHours > 0;
 
     return (
@@ -29,7 +31,7 @@ export default function PricingRangePreview({ estimate }: Props) {
               Estimated price
             </Text>
             <Text className="text-white font-bold text-2xl mt-0.5">
-              {hasSelection ? `₱${Math.round(low)} - ₱${Math.round(high)}` : "—"}
+              {hasSelection ? `~₱${Math.round(price)}` : "—"}
             </Text>
           </View>
           <View className="items-end">

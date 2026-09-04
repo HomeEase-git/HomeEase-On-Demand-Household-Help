@@ -22,6 +22,7 @@ export type WorkerJob = {
   city: string | null;
   distanceMeters: number | null;
   workerPayoutEstimate: number | null;
+  tip: number;
 };
 
 // Shape returned by GET /bookings (services/api.ts getBookings()) for a worker
@@ -44,6 +45,7 @@ export type ApiWorkerBooking = {
   city?: string | null;
   distanceMeters?: number | null;
   workerPayoutEstimate?: number | null;
+  tip?: number | null;
 };
 
 export function mapApiJob(b: ApiWorkerBooking): WorkerJob {
@@ -66,6 +68,7 @@ export function mapApiJob(b: ApiWorkerBooking): WorkerJob {
     city: b.city ?? null,
     distanceMeters: b.distanceMeters ?? null,
     workerPayoutEstimate: b.workerPayoutEstimate ?? null,
+    tip: b.tip ?? 0,
   };
 }
 

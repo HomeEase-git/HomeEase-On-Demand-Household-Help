@@ -345,6 +345,7 @@ export async function createBooking(details: CreateBookingPayload): Promise<Crea
       paymentAccountIdentifier: details.paymentAccountIdentifier,
       scopeAnswers: details.scopeAnswers ?? undefined,
       issuePhotoUrls: details.issuePhotoUrls ?? [],
+      idempotencyKey: details.idempotencyKey ?? undefined,
     });
     return response;
   } catch (error) {

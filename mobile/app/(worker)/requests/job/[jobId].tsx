@@ -32,6 +32,7 @@ type BookingDetail = {
   scheduledDate: string;
   estimatedPrice: number;
   finalPrice: number | null;
+  tip?: number | null;
   completionPhotoUrl?: string | null;
   workerArrivedAt?: string | null;
   timeline?: { workerArrivedAt?: string | null; workerStartedAt?: string | null } | null;
@@ -40,6 +41,7 @@ type BookingDetail = {
     status: string;
     escrowStatus: string;
     subtotal?: number;
+    tip?: number;
     commissionAmount?: number;
     withholdingTaxAmount?: number;
     workerPayout?: number;
@@ -154,6 +156,10 @@ export default function JobDetailScreen() {
   const isAwaitingPayment = status === "AwaitingPayment";
   const isCompleted = status === "Completed";
   const amount = job.finalPrice ?? job.estimatedPrice;
+  // `payment.tip` once a Payment row exists (post-completion), else the raw
+  // tip the client committed at booking time — available from Pending on,
+  // so it's visible before the worker even accepts the job.
+  const tip = job.payment?.tip ?? job.tip ?? 0;
   const hasArrived = !!(job.workerArrivedAt || job.timeline?.workerArrivedAt);
   // Matches the backend's ADDON_ALLOWED_STATUSES (bookingController.addAddon).
   const canAddAddon = isInProgress || isQuoteSubmitted || isQuoteApproved;
@@ -161,7 +167,9 @@ export default function JobDetailScreen() {
 
   // Prefer the real settled amounts off the Payment row once one exists;
   // fall back to a rough 10%-commission estimate for jobs still pre-payout.
-  const payoutEstimate = job.payment?.workerPayout ?? amount * 0.9;
+  // Tip is never commissioned or taxed (see utils/pricing.ts
+  // calculateWorkerPayout) so it's added on top, not folded into the 90%.
+  const payoutEstimate = job.payment?.workerPayout ?? amount * 0.9 + tip;
   const commissionEstimate = job.payment?.commissionAmount ?? amount * 0.1;
   const taxEstimate = job.payment?.withholdingTaxAmount ?? 0;
 
@@ -290,6 +298,7 @@ export default function JobDetailScreen() {
       `Subtotal: ₱${(job.payment?.subtotal ?? amount).toFixed(2)}`,
       `Commission: -₱${commissionEstimate.toFixed(2)}`,
       taxEstimate > 0 ? `Withholding tax: -₱${taxEstimate.toFixed(2)}` : null,
+      tip > 0 ? `Tip (yours, untaxed): +₱${tip.toFixed(2)}` : null,
       `Your payout: ₱${payoutEstimate.toFixed(2)}`,
     ].filter(Boolean);
     Share.share({ message: lines.join("\n") }).catch(() => {});
@@ -333,6 +342,14 @@ export default function JobDetailScreen() {
             Labor ₱{(job.payment?.subtotal ?? amount).toFixed(2)} − commission ₱{commissionEstimate.toFixed(2)}
             {taxEstimate > 0 ? ` − tax ₱${taxEstimate.toFixed(2)}` : ""}
           </Text>
+          {tip > 0 && (
+            <View className="bg-gold/20 rounded-full self-start px-2.5 py-1 mt-2 flex-row items-center">
+              <Text className="text-xs">🎉</Text>
+              <Text className="text-accent text-xs font-bold ml-1">
+                Includes a ₱{tip.toFixed(2)} tip — yours in full, no commission or tax
+              </Text>
+            </View>
+          )}
         </View>
 
         {/* Completion photo — shown once submitted */}

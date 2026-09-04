@@ -66,7 +66,6 @@ export type Booking = {
   workerVerified?: boolean;
   completionPhotoUrl?: string | null;
   category?: string;
-  selectedTaskId?: string;
   selectedAddOnIds?: string[];
 };
 
@@ -83,7 +82,6 @@ export type DraftBooking = {
   paymentMethod: string | null;
   tip?: number;
   taxRate?: number;
-  selectedTaskId: string | null;
   selectedAddOnIds: string[];
   estimatedPrice: number;
   // True when the selected task's price is only an estimate until the
@@ -118,7 +116,8 @@ export type DraftBooking = {
   issuePhotoUrls?: string[]; // photos of the issue the client attached in Step 1, uploaded via POST /bookings/issue-photo/upload
   timeSlot: TimeSlot | null;
   urgencyLevel: UrgencyLevel;
-  priorities: string[]; // max MAX_PRIORITIES, see types/booking4step.types.ts
+  priorities: string[]; // Step 4 submits ['Pet-friendly'] when the "I have pets" toggle is on; empty otherwise
+
   addOnToggles: string[]; // AddOnToggleKey[] — free preference toggles, sent as zero-priced addOns
   // Worker selected via Step 3 (WHO) — separate from workerId/workerName above,
   // which pre-date this flow and are still used by the "book from profile" /
@@ -134,6 +133,13 @@ export type DraftBooking = {
   // backend has no pre-booking hold concept, only the 1-hour PENDING expiry
   // that starts once the booking is actually created).
   holdStartedAt?: number | null;
+  // Generated once (see utils/idempotencyKey.ts) the first time this draft
+  // is submitted, and persisted with the rest of the draft — so a retried
+  // submission (including after the app was backgrounded/killed and
+  // relaunched, since the draft is restored from storage) reuses the same
+  // key instead of letting the backend create a duplicate booking. Cleared
+  // whenever the draft resets (successful create, or a fresh "New Booking").
+  idempotencyKey?: string | null;
 };
 
 export type ApiBookingListItem = {
@@ -208,7 +214,6 @@ const initialDraft: DraftBooking = {
   paymentMethod: null,
   tip: 0,
   taxRate: 0.12,
-  selectedTaskId: null,
   selectedAddOnIds: [],
   estimatedPrice: 0,
   quoteRequired: false,
@@ -240,6 +245,7 @@ const initialDraft: DraftBooking = {
   workerRating: null,
   isAutoMatched: false,
   holdStartedAt: null,
+  idempotencyKey: null,
 };
 
 export const useBookingStore: UseBoundStore<StoreApi<BookingState>> = create<BookingState>((set, get) => ({
@@ -446,7 +452,6 @@ export const useBookingStore: UseBoundStore<StoreApi<BookingState>> = create<Boo
         ...initialDraft,
         category: resolvedCategory,
         address: booking.address ?? null,
-        selectedTaskId: booking.selectedTaskId ?? null,
         selectedAddOnIds: booking.selectedAddOnIds ?? [],
         workerId: booking.workerId ?? null,
         entrySource: 'book_again',

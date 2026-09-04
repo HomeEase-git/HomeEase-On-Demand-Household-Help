@@ -48,9 +48,10 @@ type Props = {
  * Month-grid date picker, capped to the next DAYS_AHEAD days to match the
  * booking flow's near-term-only scheduling window (dates outside that
  * window render dimmed/disabled rather than being hidden, so the calendar
- * shape stays intact). Today is bookable — same-day is a deliberate option
- * priced in via PEAK_MODIFIER_TODAY in utils/bookingPriceEstimate.ts — so
- * it's marked with a ring, not disabled.
+ * shape stays intact). Today is bookable and priced the same as any other
+ * date — the backend has no same-day surcharge (only urgencyLevel affects
+ * price, see bookingController.createBooking) — so it's marked with a ring
+ * to call it out as "today", not disabled or upcharged.
  */
 export default function DateGridPicker({ selectedDate, onSelect, unavailableDates = [] }: Props) {
   const today = useMemo(() => {
@@ -173,13 +174,6 @@ export default function DateGridPicker({ selectedDate, onSelect, unavailableDate
           })}
         </View>
       ))}
-
-      <View className="flex-row items-center justify-center mt-3 pt-3 border-t border-divider">
-        <Ionicons name="flash" size={12} color={colors.warning} />
-        <Text className="text-text-muted text-[11px] ml-1.5">
-          Booking today adds a rush surcharge
-        </Text>
-      </View>
     </View>
   );
 }

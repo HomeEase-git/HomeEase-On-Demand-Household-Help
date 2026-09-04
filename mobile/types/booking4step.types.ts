@@ -172,6 +172,7 @@ export type CreateBookingPayload = {
   paymentAccountIdentifier?: string;
   scopeAnswers?: Record<string, string | string[]>;
   issuePhotoUrls?: string[];
+  idempotencyKey?: string;
 };
 
 export type CreateBookingResponse = {
@@ -202,16 +203,11 @@ export type CreateBookingResponse = {
   };
 };
 
-export const PRIORITY_OPTIONS = [
-  'Eco-friendly',
-  'Detail-oriented',
-  'Fast service',
-  'Pet-friendly',
-  'Budget-conscious',
-  'Experienced pro',
-] as const;
-
-export const MAX_PRIORITIES = 3;
+// The only booking "priority" the backend acts on: any priority string
+// containing "pet" flips the auto-match filter to pet-friendly workers
+// (see bookingController `hasPets`). Step 4 collects this as a single
+// toggle and submits this constant when it's on.
+export const PET_FRIENDLY_PRIORITY = 'Pet-friendly';
 
 export type AddOnToggleKey = 'eco_friendly' | 'client_supplies' | 'call_before_arrival';
 

@@ -2,15 +2,18 @@
  * Client-side live pricing preview for the 4-step booking flow.
  *
  * This is a UX-only estimate — it gives the user fast, real-time feedback as
- * they adjust rooms/condition/date/worker, but the AUTHORITATIVE price is
+ * they adjust rooms/condition/urgency/worker, but the AUTHORITATIVE price is
  * always whatever `POST /bookings` returns in its `pricing` block (computed
- * server-side from ServiceTask/ServiceType base price + condition surcharge
- * + distance fee, see backend `bookingController.createBooking`). The two
- * formulas are intentionally different: the backend doesn't know a specific
- * worker's rate until one is matched/selected, so it prices off the service
- * catalog; this preview prices off room count/condition/worker rate per the
- * product's "live pricing calculator" spec so the client sees something
- * responsive to their choices before a worker or final price exists.
+ * server-side from ServiceType base price + condition/distance/urgency/tier
+ * fees, see backend `bookingController.createBooking`). The two formulas are
+ * intentionally different: the backend doesn't know a specific worker's rate
+ * until one is matched/selected, so it prices off the service catalog; this
+ * preview prices off room count/condition/worker rate per the product's
+ * "live pricing calculator" spec so the client sees something responsive to
+ * their choices before a worker or final price exists. Deliberately NOT
+ * modeled here: any same-day/date-based premium — the backend has none (see
+ * urgencyFee, the only speed-related fee, which doesn't vary by date), so a
+ * same-day booking previews at the same price as booking in advance.
  */
 import type { ConditionType, RoomSelection, RoomType, ServiceScopeType, UrgencyLevel, WorkerTier } from '../types/booking4step.types';
 import { CONDITION_MULTIPLIER, URGENCY_MODIFIER, TIER_MULTIPLIER } from '../types/booking4step.types';
@@ -20,8 +23,6 @@ import { CONDITION_MULTIPLIER, URGENCY_MODIFIER, TIER_MULTIPLIER } from '../type
 const CUSTOM_SCOPE_FLAT_HOURS = 1;
 
 export const MINUTES_PER_ROOM = 45;
-export const PEAK_MODIFIER_TODAY = 1.3;
-export const PEAK_MODIFIER_ADVANCE = 0.9;
 
 /** Platform-enforced worker hourly rate bounds (see backend PATCH /workers/me/rate). */
 export const PLATFORM_MIN_RATE = 20;
@@ -49,47 +50,36 @@ export function estimateDurationHours(
   return (roomCount * MINUTES_PER_ROOM * multiplier) / 60;
 }
 
-/** Peak modifier: booking for today costs more than booking in advance. */
-export function peakModifierForDate(dateIso: string | null): number {
-  if (!dateIso) return PEAK_MODIFIER_ADVANCE;
-  const today = new Date();
-  const target = new Date(dateIso);
-  const isToday =
-    today.getFullYear() === target.getFullYear() &&
-    today.getMonth() === target.getMonth() &&
-    today.getDate() === target.getDate();
-  return isToday ? PEAK_MODIFIER_TODAY : PEAK_MODIFIER_ADVANCE;
-}
-
-export interface PriceRangeEstimate {
-  low: number;
-  high: number;
+export interface PriceEstimate {
+  price: number;
   durationHours: number;
 }
 
 /**
  * Pre-worker-selection estimate (Steps 1-2): since the actual worker's rate
- * isn't known yet, shows a range spanning the peak-vs-advance modifier
- * against a category rate proxy (ServiceType.basePrice — the closest
- * available stand-in for "typical hourly rate" before a worker is picked).
+ * isn't known yet, this prices off a category rate proxy (ServiceType.
+ * basePrice — the closest available stand-in for "typical hourly rate"
+ * before a worker is picked). No date/peak factor — the backend has no
+ * same-day surcharge (see bookingController.createBooking's urgencyFee,
+ * which is the only speed-related premium and doesn't vary by date), so
+ * this preview doesn't invent one either; a same-day booking previews at
+ * the same price as an advance one, matching what actually gets charged.
  */
-export function estimatePriceRange(
+export function estimatePrice(
   rooms: RoomSelection[],
   condition: ConditionType | null,
   categoryRate: number,
   scopeType?: ServiceScopeType | null,
   urgencyLevel?: UrgencyLevel | null
-): PriceRangeEstimate {
+): PriceEstimate {
   const durationHours = estimateDurationHours(rooms, condition, scopeType === 'CUSTOM' ? CUSTOM_SCOPE_FLAT_HOURS : undefined);
   const urgencyModifier = URGENCY_MODIFIER[urgencyLevel ?? 'STANDARD'];
-  const low = round2(durationHours * categoryRate * PEAK_MODIFIER_ADVANCE * urgencyModifier);
-  const high = round2(durationHours * categoryRate * PEAK_MODIFIER_TODAY * urgencyModifier);
-  return { low, high, durationHours };
+  const price = round2(durationHours * categoryRate * urgencyModifier);
+  return { price, durationHours };
 }
 
 export interface PricePointEstimate {
   durationHours: number;
-  peakModifier: number;
   urgencyModifier: number;
   tierModifier: number;
   laborCost: number;
@@ -101,15 +91,14 @@ export interface PricePointEstimate {
 
 /**
  * Post-worker-selection estimate (Steps 3-4): a specific worker's hourly
- * rate and the chosen date are both known, so this collapses to a point
- * estimate: duration * rate * peakModifier * urgencyModifier * tierModifier
- * + add-ons + tip.
+ * rate is known, so this collapses to a point estimate: duration * rate *
+ * urgencyModifier * tierModifier + add-ons + tip. No date/peak factor — see
+ * estimatePrice above; the backend never charges more for booking today.
  */
 export function estimatePricePoint(params: {
   rooms: RoomSelection[];
   condition: ConditionType | null;
   workerHourlyRate: number;
-  dateIso: string | null;
   addOnsTotal?: number;
   tip?: number;
   scopeType?: ServiceScopeType | null;
@@ -121,16 +110,15 @@ export function estimatePricePoint(params: {
     params.condition,
     params.scopeType === 'CUSTOM' ? CUSTOM_SCOPE_FLAT_HOURS : undefined
   );
-  const peakModifier = peakModifierForDate(params.dateIso);
   const urgencyModifier = URGENCY_MODIFIER[params.urgencyLevel ?? 'STANDARD'];
   const tierModifier = TIER_MULTIPLIER[params.workerTier ?? 'STANDARD'];
-  const laborCost = round2(durationHours * params.workerHourlyRate * peakModifier * urgencyModifier * tierModifier);
+  const laborCost = round2(durationHours * params.workerHourlyRate * urgencyModifier * tierModifier);
   const addOnsTotal = round2(params.addOnsTotal ?? 0);
   const tip = round2(params.tip ?? 0);
   const subtotal = round2(laborCost + addOnsTotal);
   const total = round2(subtotal + tip);
 
-  return { durationHours, peakModifier, urgencyModifier, tierModifier, laborCost, addOnsTotal, tip, subtotal, total };
+  return { durationHours, urgencyModifier, tierModifier, laborCost, addOnsTotal, tip, subtotal, total };
 }
 
 export function formatRoomSummary(rooms: RoomSelection[], labels: Record<RoomType, string>): string {
