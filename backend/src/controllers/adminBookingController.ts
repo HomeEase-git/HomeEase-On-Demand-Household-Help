@@ -219,7 +219,11 @@ export const cancelBookingAdmin = async (req: AuthRequest, res: Response) => {
       });
     });
 
-    await cancelPendingExpiryJob(id);
+    // Best-effort — the cancel already committed above, same reasoning as
+    // the client-facing cancelBooking/acceptBooking/declineBooking handlers.
+    await cancelPendingExpiryJob(id).catch((error) => {
+      console.error(`Failed to cancel pending-expiry job for admin-cancelled booking ${id}:`, error);
+    });
     await refundOrVoidPayment(id, reason?.trim() || 'Cancelled by admin').catch((error) => {
       console.error(`Failed to refund payment for admin-cancelled booking ${id}:`, error);
     });
