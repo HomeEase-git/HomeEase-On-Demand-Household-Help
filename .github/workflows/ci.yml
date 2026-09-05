@@ -30,7 +30,13 @@ jobs:
       PORT: 3000
       APP_URL: http://localhost:3000
       JWT_SECRET: ci-test-jwt-secret
-      JWT_EXPIRY: 1h
+      # Seconds, not a duration string — src/utils/jwt.ts's getJwtExpiry()
+      # does Number.parseInt() on this (it pre-computes expiresIn itself
+      # rather than letting jsonwebtoken parse "1h"/"7d" directly), so "1h"
+      # silently parsed to 1 (second): every token minted in a beforeAll
+      # expired well before the test file finished, 401-ing every request
+      # that came more than ~1s after login. 3600 = 1 hour.
+      JWT_EXPIRY: "3600"
       SMTP_USER: ci-test@example.com
       SMTP_PASS: ci-test-app-password
       XENDIT_SECRET_KEY: ci-test-secret

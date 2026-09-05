@@ -43,7 +43,8 @@ jobs:
       PORT: 3000
       APP_URL: http://localhost:3000
       JWT_SECRET: ${{ secrets.E2E_JWT_SECRET }}
-      JWT_EXPIRY: 1h
+      # See ci.yml — must be plain seconds, not a duration string.
+      JWT_EXPIRY: "3600"
       SMTP_USER: ${{ secrets.E2E_SMTP_USER }}
       SMTP_PASS: ${{ secrets.E2E_SMTP_PASS }}
       XENDIT_SECRET_KEY: ${{ secrets.E2E_XENDIT_SECRET_KEY }}
