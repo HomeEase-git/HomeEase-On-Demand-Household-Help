@@ -5,4 +5,12 @@
 -- adminFeePerJob = 20, the column default, on the singleton row; zero references
 -- to it anywhere in current backend/mobile/web code — fully superseded by the
 -- commission/DebtLedgerEntry model this same migration introduced).
-ALTER TABLE "AppSettings" DROP COLUMN "adminFeePerJob";
+--
+-- IF EXISTS: this only reconciles drift on the one database where the
+-- earlier migration's DROP half silently didn't land. On any database that
+-- applies both migrations in order for the first time (CI, a fresh
+-- docker-compose Postgres, a new production DB), 20260902070000 already
+-- dropped this column correctly, so by the time this one runs it's already
+-- gone — confirmed via a real CI failure (42703: column does not exist)
+-- on a from-scratch database before this fix.
+ALTER TABLE "AppSettings" DROP COLUMN IF EXISTS "adminFeePerJob";
