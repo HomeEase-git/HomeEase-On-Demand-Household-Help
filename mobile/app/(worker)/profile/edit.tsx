@@ -35,6 +35,12 @@ export default function WorkerEditProfileScreen() {
   const [addressState, setAddressState] = useState("");
   const [zipCode, setZipCode] = useState("");
   const [addressCoords, setAddressCoords] = useState<{ lat: number; lng: number } | null>(null);
+  // True once the address/city/state/zip text has been edited since the
+  // last resolved coordinate pair — distinguishes "never touched this
+  // session" (fine to leave addressLat/Lng untouched on save) from
+  // "changed but re-geocode never resolved" (must clear the now-stale
+  // addressLat/Lng rather than silently keep pricing pinned to the old spot).
+  const [addressDirty, setAddressDirty] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
@@ -84,6 +90,7 @@ export default function WorkerEditProfileScreen() {
   const addressChanged = (updater: () => void) => {
     updater();
     setAddressCoords(null);
+    setAddressDirty(true);
   };
 
   const handleSubmit = async () => {
@@ -116,6 +123,7 @@ export default function WorkerEditProfileScreen() {
           if (geocoded) {
             coords = geocoded.geometry.location;
             setAddressCoords(coords);
+            setAddressDirty(false);
           }
         } catch (error) {
           console.error("Geocode worker address error:", error);
@@ -128,6 +136,17 @@ export default function WorkerEditProfileScreen() {
         }
       }
 
+      // addressDirty means the text changed since the last resolved coords
+      // (or was cleared) and re-geocoding above didn't produce a fresh pair.
+      // Sending `undefined` here would leave the *previous* address's
+      // addressLat/addressLng in place, so future bookings would silently
+      // keep computing the distance fee against the old location instead of
+      // the one just saved. Send an explicit null instead so the backend
+      // clears it (treated the same as "no address on file yet" — no
+      // distance fee — rather than a wrong one).
+      const addressLat = coords ? coords.lat : addressDirty ? null : undefined;
+      const addressLng = coords ? coords.lng : addressDirty ? null : undefined;
+
       await api.updateWorkerProfileDetails({
         bio: bio.trim(),
         serviceAreaRadius: parseInt(areaRadius, 10) || undefined,
@@ -135,8 +154,8 @@ export default function WorkerEditProfileScreen() {
         city: trimmedCity,
         state: addressState.trim(),
         zipCode: zipCode.trim(),
-        addressLat: coords?.lat,
-        addressLng: coords?.lng,
+        addressLat,
+        addressLng,
         digitalIdTrade: trade.trim(),
         digitalIdServiceArea: serviceArea.trim(),
         licenseNumber: licenseNumber.trim(),

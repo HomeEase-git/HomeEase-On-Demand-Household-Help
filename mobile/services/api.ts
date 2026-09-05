@@ -1404,8 +1404,12 @@ export async function updateWorkerProfileDetails(data: {
   city?: string;
   state?: string;
   zipCode?: string;
-  addressLat?: number;
-  addressLng?: number;
+  // null (not just omitted) is a valid, meaningful value here — it tells the
+  // backend to clear a now-stale addressLat/Lng (e.g. the address text
+  // changed but re-geocoding it failed), as opposed to omitting the field
+  // entirely to leave whatever's already stored untouched.
+  addressLat?: number | null;
+  addressLng?: number | null;
   resumeUrl?: string;
   digitalIdTrade?: string;
   digitalIdServiceArea?: string;

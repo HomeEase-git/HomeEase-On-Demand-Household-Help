@@ -481,7 +481,12 @@ export const validateCreateBooking = (
     return res.status(400).json(errorResponse(400, 'city is required and must be a non-empty string'));
   }
 
-  if (typeof lat !== 'number' || typeof lng !== 'number') {
+  // Number.isFinite (not typeof + a plain comparison) rejects NaN/Infinity
+  // too — `typeof NaN === 'number'` is true, and every comparison against
+  // NaN is false, so the PH_BOUNDS range check below would silently let a
+  // NaN lat/lng through rather than reject it, corrupting the distanceFee
+  // (and therefore estimatedPrice) computed from it downstream.
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
     return res.status(400).json(errorResponse(400, 'lat and lng are required and must be numbers'));
   }
 
@@ -577,7 +582,11 @@ export const validateArriveBooking = (
 ) => {
   const { lat, lng } = req.body;
 
-  if (typeof lat !== 'number' || typeof lng !== 'number') {
+  // Number.isFinite rejects NaN/Infinity too (see the same fix in
+  // validateCreateBooking) — a NaN here would otherwise make every
+  // isWithinRadiusMeters comparison silently false, always failing the
+  // check-in with a "you are NaNm away" message instead of a clear 400.
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
     return res.status(400).json(errorResponse(400, 'lat and lng are required and must be numbers'));
   }
 

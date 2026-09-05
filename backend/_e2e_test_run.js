@@ -262,7 +262,7 @@ async function main() {
       condition: 'NORMAL',
       description: 'E2E test booking — living room cleaning',
       address: '456 Mabini St, Manila',
-      city: '',
+      city: 'Manila',
       lat: 14.5995,
       lng: 120.9842,
       date: bookingDate,

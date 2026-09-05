@@ -63,16 +63,6 @@ paths:
           in: query
           schema: { type: string }
           description: Comma-separated RoomType values
-        - name: lat
-          in: query
-          schema: { type: number }
-        - name: lng
-          in: query
-          schema: { type: number }
-        - name: radius
-          in: query
-          schema: { type: number, default: 30 }
-          description: Search radius in kilometers
         - name: page
           in: query
           schema: { type: integer, default: 1 }
@@ -81,7 +71,11 @@ paths:
           schema: { type: integer, default: 10 }
       responses:
         '200':
-          description: Worker cards sorted by rating desc, then distance asc
+          description: >-
+            Worker cards sorted by rating desc, then totalReviews desc.
+            There is no proximity-based sort/filter — the platform has no
+            reliable worker location data for it (a prior lat/lng/radius
+            search was removed; see matchingService.ts).
           content:
             application/json:
               schema:
