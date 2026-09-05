@@ -11,8 +11,20 @@ RUN apt-get update \
 WORKDIR /app
 ENV NODE_ENV=production
 
+# `prisma generate` only reads the schema (no DB connection), but
+# prisma.config.ts resolves DIRECT_URL via Prisma's env() helper, which
+# throws — PrismaConfigEnvError — if the var is simply unset. There's no
+# real DATABASE_URL/DIRECT_URL at build time (.env is dockerignored on
+# purpose, so no secret ever lands in an image layer), so both `generate`
+# steps below inject a syntactically-valid placeholder as a one-off RUN env
+# rather than an ENV/ARG default: it never persists into an image layer or
+# leaks into the running container, where the platform's real value takes
+# over for `migrate deploy` at start.
+ARG PRISMA_GENERATE_DB_URL=postgresql://build:build@localhost:5432/build
+
 # ---------- build ----------
 FROM base AS build
+ARG PRISMA_GENERATE_DB_URL
 ENV NODE_ENV=development
 COPY package.json package-lock.json ./
 RUN npm ci
@@ -20,10 +32,12 @@ COPY . .
 # generate the Prisma client (so tsc sees its types), then compile TS ->
 # dist/ and rewrite the @/* path aliases (tsc-alias) so dist/ can run under
 # plain node.
-RUN npx prisma generate && npm run build
+RUN DATABASE_URL=$PRISMA_GENERATE_DB_URL DIRECT_URL=$PRISMA_GENERATE_DB_URL \
+  npx prisma generate && npm run build
 
 # ---------- runtime ----------
 FROM base AS runtime
+ARG PRISMA_GENERATE_DB_URL
 # Production dependencies only. `prisma` is a runtime dep here because the
 # entrypoint runs `prisma migrate deploy`.
 COPY package.json package-lock.json ./
@@ -33,7 +47,8 @@ RUN npm ci --omit=dev && npm cache clean --force
 # this image's exact engine and to run migrations at start.
 COPY prisma ./prisma
 COPY prisma.config.ts ./
-RUN npx prisma generate
+RUN DATABASE_URL=$PRISMA_GENERATE_DB_URL DIRECT_URL=$PRISMA_GENERATE_DB_URL \
+  npx prisma generate
 
 # Compiled application.
 COPY --from=build /app/dist ./dist
