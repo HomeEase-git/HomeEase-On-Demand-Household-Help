@@ -58,7 +58,14 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          # @supabase/supabase-js's realtime-js constructs a WebSocket at
+          # `createClient()` time (src/config/supabase.ts, imported at
+          # module scope by several route files) and needs Node's native
+          # WebSocket global, stable only from Node 22 — Node 20 fails
+          # every test file importing that chain with "Node.js detected
+          # but native WebSocket not found." Must match (or exceed) the
+          # backend Dockerfile's node:22-bookworm-slim.
+          node-version: 22
           cache: npm
           cache-dependency-path: backend/package-lock.json
       - run: npm ci
