@@ -16,7 +16,6 @@ import {
   useBookingStore,
   API_STATUS_MAP,
   type Booking,
-  type BookingState,
 } from "../../../../store/bookingStore";
 import {
   getBookingDetail,
@@ -24,7 +23,6 @@ import {
   createXenditCheckout,
   getTransactionDetail,
 } from "../../../../services/api";
-import type { StatusType } from "../../../../components/ui/StatusBadge";
 import { colors } from "../../../../constants";
 import { useAlertModal } from "../../../../contexts/AlertModalContext";
 import type { ConditionType, RoomType, TimeSlot, UrgencyLevel } from "../../../../types/booking4step.types";
@@ -373,9 +371,6 @@ export default function BookingDetailScreen() {
       setConfirmingCompletion(false);
     }
   };
-
-  const quoteActedOn =
-    booking.status === "QuoteApproved" || booking.status === "Disputed";
 
   const steps = [
     { label: "Requested", timestamp: booking.date, status: "done" as const },

@@ -31,7 +31,7 @@ function formatCategoryTitle(slug: string) {
     .replace(/\b\w/g, (character) => character.toUpperCase());
 }
 
-function normalizeWorkers(workers: Array<any>): WorkerListItem[] {
+function normalizeWorkers(workers: any[]): WorkerListItem[] {
   return workers.map((worker) => {
     const rate =
       typeof worker.basePrice === "number"
@@ -90,7 +90,7 @@ export default function CategoryDetailScreen() {
         });
         if (!active) return;
         setWorkers(normalizeWorkers(result.data ?? []));
-      } catch (err) {
+      } catch {
         if (!active) return;
         setError("Unable to load workers for this category.");
       } finally {

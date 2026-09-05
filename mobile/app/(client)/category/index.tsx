@@ -40,7 +40,7 @@ export default function CategoryIndexScreen() {
         icon: serviceType.icon ?? null,
       }));
       setServiceCategories(categories);
-    } catch (err) {
+    } catch {
       setError("Unable to load services. Please try again.");
     } finally {
       setLoading(false);

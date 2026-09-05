@@ -5,12 +5,10 @@ import {
   ScrollView,
   Pressable,
   FlatList,
-  ActivityIndicator,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { AppIcon as Ionicons } from "../../../components/icons/AppIcon";
 import { useRouter } from "expo-router";
-import { SearchBar } from "../../../components/ui/SearchBar";
 import { SectionHeader } from "../../../components/ui/SectionHeader";
 import { PromoBanner } from "../../../components/ui/PromoBanner";
 import { CategoryCard } from "../../../components/cards/CategoryCard";
@@ -147,7 +145,7 @@ export default function ClientHomeScreen() {
       setWorkers(
         (workersResponse.data ?? []).slice(0, 3).map(normalizeHomeWorker),
       );
-    } catch (err) {
+    } catch {
       setError("Unable to load home content. Please try again.");
     } finally {
       setLoading(false);
@@ -201,6 +199,10 @@ export default function ClientHomeScreen() {
                 <Skeleton width="100%" height={80} borderRadius={12} />
               </View>
             ))}
+          </View>
+        ) : error ? (
+          <View className="px-4 py-6">
+            <Text className="text-error">{error}</Text>
           </View>
         ) : (
           <>

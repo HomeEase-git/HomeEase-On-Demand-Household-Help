@@ -39,7 +39,7 @@ export const ImageSourcePickerBottomSheet: React.FC<Props> = ({
         onSelect(result.assets[0].uri);
         innerRef.current?.close();
       }
-    } catch (error) {
+    } catch {
       alertModal.error(
         "Error",
         "Something went wrong while opening the camera. Please try again.",
@@ -61,7 +61,7 @@ export const ImageSourcePickerBottomSheet: React.FC<Props> = ({
         onSelect(result.assets[0].uri);
         innerRef.current?.close();
       }
-    } catch (error) {
+    } catch {
       alertModal.error(
         "Error",
         "Something went wrong while opening your gallery. Please try again.",

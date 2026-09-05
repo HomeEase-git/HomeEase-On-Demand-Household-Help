@@ -1,5 +1,5 @@
 import React, { useRef } from "react";
-import { View, TextInput, Pressable } from "react-native";
+import { View, TextInput } from "react-native";
 import { colors } from "../../constants";
 
 type Props = {

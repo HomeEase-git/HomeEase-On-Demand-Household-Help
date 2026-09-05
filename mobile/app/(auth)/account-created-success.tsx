@@ -63,7 +63,7 @@ export default function AccountCreatedSuccessScreen() {
       >
         <Animated.View
           style={{
-            transform: [{ scale: scaleAnim }],
+            transform: [{ scale: scaleAnim }, { rotate: rotateDegrees }],
             marginBottom: 32,
           }}
         >

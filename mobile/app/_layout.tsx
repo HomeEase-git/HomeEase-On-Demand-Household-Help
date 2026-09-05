@@ -1,6 +1,6 @@
 import "react-native-reanimated";
 import "../global.css";
-import React, { useEffect, useRef } from "react";
+import React, { useEffect } from "react";
 import { useFonts } from "expo-font";
 import { Stack } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
@@ -15,10 +15,7 @@ import { useNotificationStore } from "../store/notificationStore";
 import { useWorkerStore } from "../store/workerStore";
 import * as api from "../services/api";
 import { connectSocket, disconnectSocket } from "../services/socket";
-import {
-  initializeNotificationService,
-  notificationService,
-} from "../services/notificationService";
+import { initializeNotificationService } from "../services/notificationService";
 import {
   setupNotificationReceivedHandler,
   setupNotificationInteractionHandler,

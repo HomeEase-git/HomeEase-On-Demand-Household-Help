@@ -112,7 +112,7 @@ export default function AvailabilityScreen() {
   const handleSave = async () => {
     setSaving(true);
     try {
-      const slots: Array<{ date: string; timeSlot: TimeSlot }> = [];
+      const slots: { date: string; timeSlot: TimeSlot }[] = [];
       for (const { iso } of days) {
         const day = schedule[iso];
         if (!day) continue;

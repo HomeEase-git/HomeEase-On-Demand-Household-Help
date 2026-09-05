@@ -1,6 +1,5 @@
 import React, { useEffect } from "react";
-import { View, Text, Image } from "react-native";
-import { AppIcon as Ionicons } from "../components/icons/AppIcon";
+import { View, Image } from "react-native";
 import { useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useAuthStore } from "../store/authStore";

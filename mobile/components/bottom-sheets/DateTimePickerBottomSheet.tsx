@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { View, Text, Pressable } from "react-native";
+import { Text, Pressable } from "react-native";
 import { AppIcon as Ionicons } from "../icons/AppIcon";
 import BottomSheetWrapper, { BottomSheetHandle } from "./BottomSheetWrapper";
 import PrimaryButton from "../ui/PrimaryButton";
