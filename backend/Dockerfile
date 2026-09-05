@@ -27,7 +27,12 @@ FROM base AS build
 ARG PRISMA_GENERATE_DB_URL
 ENV NODE_ENV=development
 COPY package.json package-lock.json ./
-RUN npm ci
+# redis-memory-server (devDep, only used by tests/integration — never runs
+# in this image) postinstalls by compiling Redis from source via `make`,
+# which this slim base image doesn't have. Its own opt-out var skips that;
+# the image never needs the binary since it talks to a real Redis at
+# runtime.
+RUN REDISMS_DISABLE_POSTINSTALL=1 npm ci
 COPY . .
 # generate the Prisma client (so tsc sees its types), then compile TS ->
 # dist/ and rewrite the @/* path aliases (tsc-alias) so dist/ can run under
