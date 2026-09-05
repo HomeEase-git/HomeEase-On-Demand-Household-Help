@@ -1,5 +1,4 @@
 import { DraftBooking } from '../store/bookingStore';
-import { isValidHHmm } from './time';
 
 export function validateDraftForSubmit(draft: DraftBooking): { ok: boolean; errors: string[] } {
   const errors: string[] = [];
@@ -9,7 +8,6 @@ export function validateDraftForSubmit(draft: DraftBooking): { ok: boolean; erro
   if (draft.lat == null || draft.lng == null) errors.push('Please select an address with a valid location.');
   if (!draft.date) errors.push('Please select a date.');
   if (!draft.timeSlot) errors.push('Please select a time slot.');
-  if (draft.time && !isValidHHmm(draft.time)) errors.push('Selected time format is invalid.');
   if (!draft.workerId && !draft.isAutoMatched) errors.push('Please select a worker.');
   if (!draft.paymentMethod) errors.push('Please select a payment method.');
 

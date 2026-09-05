@@ -1,15 +1,23 @@
 import 'dotenv/config';
 import http from 'http';
+import type { Server as SocketIOServer } from 'socket.io';
+import type { Worker } from 'bullmq';
 import app from './app';
 import prisma from '@config/database';
 import { initSocket } from './socket';
 import { startVerificationWorker } from '@workers/verificationWorker';
 import { startBookingWorker } from '@workers/bookingWorker';
 import { startPayoutWorker } from '@workers/payoutWorker';
-import { registerRepeatableBookingJobs } from '@queues/bookingQueue';
+import { registerRepeatableBookingJobs, bookingQueue } from '@queues/bookingQueue';
+import { payoutQueue } from '@queues/payoutQueue';
+import { verificationQueue } from '@queues/verificationQueue';
 import { ensureStorageBuckets } from '@utils/ensureStorageBuckets';
 
 const PORT = process.env.PORT || 3000;
+// How long to let in-flight requests / jobs finish on shutdown before the
+// process is killed regardless. Keep it under the platform's own kill grace
+// period (Kubernetes terminationGracePeriodSeconds, etc.).
+const SHUTDOWN_TIMEOUT_MS = Number(process.env.SHUTDOWN_TIMEOUT_MS || 15_000);
 
 // Defense-in-depth on top of the .on('error', ...) listeners already
 // attached to every Queue/Worker we construct ourselves (bookingQueue.ts,
@@ -38,30 +46,35 @@ process.on('uncaughtException', (error: NodeJS.ErrnoException & { address?: stri
   process.exit(1);
 });
 
+let server: http.Server | undefined;
+let io: SocketIOServer | undefined;
+const workers: Worker[] = [];
+let shuttingDown = false;
+
 const startServer = async () => {
   try {
     // Test database connection
     await prisma.$connect();
     console.log('Database connected');
 
-    const server = http.createServer(app);
-    initSocket(server);
+    server = http.createServer(app);
+    io = initSocket(server);
 
     server.listen(PORT, () => {
       console.log(`Server running on http://localhost:${PORT}`);
     });
 
-    startVerificationWorker().catch((error) => {
-      console.error('Failed to start verification worker:', error);
-    });
+    startVerificationWorker()
+      .then((worker) => workers.push(worker))
+      .catch((error) => console.error('Failed to start verification worker:', error));
 
-    startBookingWorker().catch((error) => {
-      console.error('Failed to start booking worker:', error);
-    });
+    startBookingWorker()
+      .then((worker) => workers.push(worker))
+      .catch((error) => console.error('Failed to start booking worker:', error));
 
-    startPayoutWorker().catch((error) => {
-      console.error('Failed to start payout worker:', error);
-    });
+    startPayoutWorker()
+      .then((worker) => workers.push(worker))
+      .catch((error) => console.error('Failed to start payout worker:', error));
 
     registerRepeatableBookingJobs().catch((error) => {
       console.error('Failed to register repeatable booking jobs:', error);
@@ -76,10 +89,45 @@ const startServer = async () => {
   }
 };
 
-startServer();
+// Orchestrators (Docker, Kubernetes, Render, Railway, Fly…) send SIGTERM on
+// deploy/scale-down and SIGINT on Ctrl+C. Both should drain rather than
+// drop connections mid-request.
+const shutdown = async (signal: string) => {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  console.log(`${signal} received — draining (max ${SHUTDOWN_TIMEOUT_MS}ms)...`);
 
-// Graceful shutdown
-process.on('SIGINT', async () => {
-  await prisma.$disconnect();
-  process.exit(0);
-});
+  const forceExit = setTimeout(() => {
+    console.error('Drain timed out — forcing exit.');
+    process.exit(1);
+  }, SHUTDOWN_TIMEOUT_MS);
+  forceExit.unref();
+
+  try {
+    // 1. Stop taking new HTTP connections; close idle keep-alive sockets
+    //    right away, let in-flight requests finish.
+    if (server) {
+      server.closeIdleConnections();
+      await new Promise<void>((resolve) => server!.close(() => resolve()));
+    }
+    // 2. Drop websockets.
+    if (io) await io.close();
+    // 3. Stop pulling new jobs and finish the ones running now.
+    await Promise.allSettled(workers.map((w) => w.close()));
+    // 4. Close the queue producer connections.
+    await Promise.allSettled([bookingQueue.close(), payoutQueue.close(), verificationQueue.close()]);
+    // 5. Release the DB pool.
+    await prisma.$disconnect();
+    clearTimeout(forceExit);
+    console.log('Drain complete — exiting.');
+    process.exit(0);
+  } catch (error) {
+    console.error('Error during shutdown:', error);
+    process.exit(1);
+  }
+};
+
+process.on('SIGTERM', () => void shutdown('SIGTERM'));
+process.on('SIGINT', () => void shutdown('SIGINT'));
+
+startServer();

@@ -1,12 +1,13 @@
-import React, { useState } from "react";
-import { View, Text, ScrollView, TextInput } from "react-native";
+import React, { useCallback, useState } from "react";
+import { View, Text, ScrollView, TextInput, Switch } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { useRouter } from "expo-router";
+import { useRouter, useFocusEffect } from "expo-router";
+import { AppIcon as Ionicons } from "../../../../components/icons/AppIcon";
 import { colors } from "../../../../constants";
 import ScreenHeader from "../../../../components/ui/ScreenHeader";
 import StepperHorizontal from "../../../../components/steppers/StepperHorizontal";
 import PrimaryButton from "../../../../components/ui/PrimaryButton";
-import PrioritySelector from "../../../../components/booking4step/PrioritySelector";
+import OutlinedButton from "../../../../components/ui/OutlinedButton";
 import AddOnsToggleGroup from "../../../../components/booking4step/AddOnsToggleGroup";
 import PackageSelector from "../../../../components/booking4step/PackageSelector";
 import TipSlider from "../../../../components/booking4step/TipSlider";
@@ -15,6 +16,7 @@ import PricingRangePreview from "../../../../components/booking4step/PricingRang
 import GenericConfirmationModal from "../../../../components/modals/GenericConfirmationModal";
 import { useBookingStore, type Booking } from "../../../../store/bookingStore";
 import { useBookingPriceEstimate } from "../../../../hooks/useBookingPriceEstimate";
+import { useWorkerDiscovery } from "../../../../hooks/useWorkerDiscovery";
 import { validateDraftForSubmit } from "../../../../utils/bookingValidation";
 import { PAYMENT_METHOD_TYPE_MAP } from "../../../../utils/paymentMethodMap";
 import {
@@ -22,9 +24,11 @@ import {
   ADD_ON_TOGGLE_LABELS,
   TIME_SLOT_LABELS,
   CONDITION_LABELS,
+  PET_FRIENDLY_PRIORITY,
   type AddOnToggleKey,
 } from "../../../../types/booking4step.types";
 import { formatRoomSummary } from "../../../../utils/bookingPriceEstimate";
+import { generateIdempotencyKey } from "../../../../utils/idempotencyKey";
 import * as api from "../../../../services/api";
 import { useAlertModal } from "../../../../contexts/AlertModalContext";
 
@@ -55,7 +59,9 @@ export default function BookingStep4Screen() {
   const setDraft = useBookingStore((s) => s.setDraft);
   const setBookingCreated = useBookingStore((s) => s.setBookingCreated);
 
-  const [priorities, setPriorities] = useState<string[]>(draft.priorities ?? []);
+  const [hasPets, setHasPets] = useState<boolean>(
+    (draft.priorities ?? []).includes(PET_FRIENDLY_PRIORITY)
+  );
   const [addOnToggles, setAddOnToggles] = useState<string[]>(draft.addOnToggles ?? []);
   const [selectedPackageIds, setSelectedPackageIds] = useState<string[]>(draft.selectedPackageIds ?? []);
   const [packagesTotal, setPackagesTotal] = useState(0);
@@ -65,6 +71,7 @@ export default function BookingStep4Screen() {
   const [confirmVisible, setConfirmVisible] = useState(false);
   const [loading, setLoading] = useState(false);
 
+  const priorities = hasPets ? [PET_FRIENDLY_PRIORITY] : [];
   const effectiveDraft = { ...draft, paymentMethod, priorities, addOnToggles, tip };
   const validation = validateDraftForSubmit(effectiveDraft);
   const priceEstimate = useBookingPriceEstimate(draft.categoryBasePrice ?? 0, packagesTotal, tip);
@@ -73,12 +80,58 @@ export default function BookingStep4Screen() {
     .map(([label, value]) => `${label}: ${Array.isArray(value) ? value.join(", ") : value}`)
     .join(" · ");
 
+  // Re-verify the held worker/slot is still actually open right before the
+  // user commits — the HoldTimerBadge in Step 3 is a UX countdown only, not
+  // a real server-side reservation, so the first sign it died could
+  // otherwise be a 409 at submit, after filling in packages/payment/tip.
+  // Scoped to this specific worker (workerId filter) when one was picked or
+  // locked in; unscoped (any pro) for an auto-matched booking.
+  const readyToCheckAvailability = !!draft.serviceType && !!draft.date && !!draft.timeSlot;
+  const {
+    workers: availabilityCheck,
+    loading: checkingAvailability,
+    error: availabilityError,
+    refetch: recheckAvailability,
+  } = useWorkerDiscovery(
+    {
+      serviceType: draft.serviceType ?? undefined,
+      date: draft.date ?? undefined,
+      timeSlot: draft.timeSlot ?? undefined,
+      condition: draft.condition ?? undefined,
+      rooms: draft.rooms?.map((r) => r.room),
+      workerId: draft.isAutoMatched ? undefined : (draft.workerId ?? undefined),
+      limit: 1,
+    },
+    readyToCheckAvailability
+  );
+  const slotNoLongerAvailable =
+    readyToCheckAvailability && !checkingAvailability && !availabilityError && availabilityCheck.length === 0;
+
+  // Runs on every focus (not just mount) — catches a slot dying while the
+  // user was away from this screen (backgrounded, or navigated back and
+  // forth), not just at first load.
+  useFocusEffect(
+    useCallback(() => {
+      recheckAvailability();
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [draft.serviceType, draft.date, draft.timeSlot, draft.workerId, draft.isAutoMatched])
+  );
+
   const requiresAccountValue = paymentMethod === "gcash" || paymentMethod === "maya";
   // PH mobile number, local (09XXXXXXXXX) or international (+639XXXXXXXXX)
   // format — matches the "09XXXXXXXXX" placeholder shown for both methods.
   const PH_MOBILE_NUMBER_PATTERN = /^(09\d{9}|\+639\d{9})$/;
 
   const handleSubmit = () => {
+    if (slotNoLongerAvailable) {
+      alertModal.warning(
+        "Slot no longer available",
+        draft.isAutoMatched
+          ? "No pro is available for this date/time anymore. Please pick a different time."
+          : `${draft.workerName ?? "This pro"} is no longer available for this date/time. Please pick a different time or pro.`
+      );
+      return;
+    }
     if (!paymentMethod) {
       alertModal.warning("Payment method required", "Please select a payment method.");
       return;
@@ -106,7 +159,13 @@ export default function BookingStep4Screen() {
     setLoading(true);
 
     try {
-      setDraft({ paymentMethod, priorities, addOnToggles, selectedPackageIds, tip });
+      // Reuse the key already on the draft (a retry after a failed/hung
+      // attempt) rather than generating a fresh one each time — that's what
+      // lets the backend recognize a retried submit as the same request.
+      // Persisted immediately (setDraft writes through to storage) so it
+      // survives the app being backgrounded/killed mid-request too.
+      const idempotencyKey = draft.idempotencyKey ?? generateIdempotencyKey();
+      setDraft({ paymentMethod, priorities, addOnToggles, selectedPackageIds, tip, idempotencyKey });
 
       const addOns = addOnToggles.map((key) => ({
         id: key,
@@ -131,11 +190,11 @@ export default function BookingStep4Screen() {
         packageIds: selectedPackageIds,
         priorities,
         tip,
-        notes: draft.notes || draft.instructions,
         paymentMethodType: PAYMENT_METHOD_TYPE_MAP[paymentMethod!],
         paymentAccountIdentifier: accountValue.trim() || undefined,
         scopeAnswers: draft.scopeAnswers,
         issuePhotoUrls: draft.issuePhotoUrls,
+        idempotencyKey,
       });
 
       const createdBooking: Booking = {
@@ -181,6 +240,26 @@ export default function BookingStep4Screen() {
           </View>
         )}
 
+        {slotNoLongerAvailable && (
+          <View className="bg-error/10 border border-error rounded-2xl p-3.5 mb-4 flex-row items-start">
+            <Ionicons name="alert-circle" size={18} color={colors.error} style={{ marginTop: 1 }} />
+            <View className="flex-1 ml-2.5">
+              <Text className="text-error font-bold text-sm">This slot is no longer available</Text>
+              <Text className="text-error text-xs mt-0.5">
+                {draft.isAutoMatched
+                  ? "No pro is available for this date/time anymore."
+                  : `${draft.workerName ?? "This pro"} is no longer available for this date/time.`}
+              </Text>
+              <View className="mt-2.5">
+                <OutlinedButton
+                  label="Change date/time"
+                  onPress={() => router.push("/(client)/booking/new/step-2")}
+                />
+              </View>
+            </View>
+          </View>
+        )}
+
         {/* Booking summary */}
         <View className="bg-card rounded-2xl p-4">
           <Text className="text-text-primary font-bold mb-3">Summary</Text>
@@ -205,8 +284,20 @@ export default function BookingStep4Screen() {
           <PricingRangePreview estimate={priceEstimate} />
         </View>
 
-        <View className="mt-6">
-          <PrioritySelector selected={priorities} onChange={setPriorities} />
+        <Text className="text-text-primary font-bold text-sm mb-2 mt-6">Pets</Text>
+        <View className="bg-card rounded-xl p-3.5 flex-row items-center">
+          <View className="flex-1 pr-3">
+            <Text className="text-text-primary font-semibold text-sm">I have pets at home</Text>
+            <Text className="text-text-muted text-xs mt-0.5">
+              We&apos;ll match you with a pet-friendly pro
+            </Text>
+          </View>
+          <Switch
+            value={hasPets}
+            onValueChange={setHasPets}
+            trackColor={{ false: colors.toggleOff, true: colors.accent.DEFAULT }}
+            thumbColor={colors.white}
+          />
         </View>
 
         <Text className="text-text-primary font-bold text-sm mb-2 mt-6">Packages</Text>
@@ -254,6 +345,7 @@ export default function BookingStep4Screen() {
               !paymentMethod ||
               loading ||
               !validation.ok ||
+              slotNoLongerAvailable ||
               (requiresAccountValue && !accountValue.trim())
             }
             loading={loading}
@@ -265,7 +357,7 @@ export default function BookingStep4Screen() {
       <GenericConfirmationModal
         visible={confirmVisible}
         title="Submit booking request"
-        message="You are about to submit a booking request. Your payment method will be authorized and held until the job is completed."
+        message="You are about to submit a booking request. No charge now — you'll pay after the job is done and you've confirmed it."
         confirmLabel="Submit Request"
         cancelLabel="Cancel"
         onConfirm={onConfirm}

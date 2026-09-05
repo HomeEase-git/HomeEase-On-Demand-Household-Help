@@ -19,6 +19,7 @@ type Request = {
   roomsSummary?: string;
   distanceKm?: number | null;
   payoutEstimate?: number | null;
+  tip?: number | null;
 };
 
 type Props = {
@@ -50,7 +51,15 @@ export const RequestCard: React.FC<Props> = ({ request, onPress }) => {
         </View>
         <View className="items-end">
           <Text className="text-accent font-bold">₱{request.amount}</Text>
-          <StatusBadge status={request.status as StatusType} />
+          {!!request.tip && request.tip > 0 && (
+            <View className="bg-gold/20 rounded-full px-2 py-0.5 mt-1 flex-row items-center">
+              <Text className="text-[10px]">🎉</Text>
+              <Text className="text-accent text-[10px] font-bold ml-1">+₱{request.tip} tip</Text>
+            </View>
+          )}
+          <View className="mt-1">
+            <StatusBadge status={request.status as StatusType} />
+          </View>
         </View>
       </View>
 

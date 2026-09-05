@@ -1,0 +1,90 @@
+# Prod-like bring-up of the whole stack: Postgres + Redis + API + admin web.
+# Enough to run HomeEase on a single VPS, and a faithful local rehearsal of
+# a real deploy.
+#
+#   cp backend/.env.example backend/.env   # then fill in real secrets
+#   docker compose up --build
+#
+#   admin web : http://localhost:8080
+#   API       : http://localhost:3000/health
+#
+# Secrets (JWT, Xendit, Supabase, SMTP, PhilSMS, Anthropic) come from
+# backend/.env. Everything below is infrastructure wiring and is safe to
+# commit.
+name: homeease
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-homeease}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-homeease}
+      POSTGRES_DB: ${POSTGRES_DB:-homeease}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-homeease} -d ${POSTGRES_DB:-homeease}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build:
+      context: ./backend
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    env_file:
+      - ./backend/.env
+    environment:
+      NODE_ENV: production
+      PORT: "3000"
+      # Override whatever backend/.env points at — inside Compose the DB and
+      # Redis are these service names, not Neon / localhost.
+      DATABASE_URL: postgresql://${POSTGRES_USER:-homeease}:${POSTGRES_PASSWORD:-homeease}@postgres:5432/${POSTGRES_DB:-homeease}
+      DIRECT_URL: postgresql://${POSTGRES_USER:-homeease}:${POSTGRES_PASSWORD:-homeease}@postgres:5432/${POSTGRES_DB:-homeease}
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      # nginx (web) proxies /api here, and the API sits behind that one hop.
+      TRUST_PROXY: "1"
+      APP_URL: ${APP_URL:-http://localhost:8080}
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:8080}
+      RUN_MIGRATIONS: "true"
+    ports:
+      - "${BACKEND_PORT:-3000}:3000"
+
+  web:
+    build:
+      context: .
+      dockerfile: web/Dockerfile
+      args:
+        VITE_API_URL: /api
+    restart: unless-stopped
+    depends_on:
+      - backend
+    environment:
+      BACKEND_URL: http://backend:3000
+    ports:
+      - "${WEB_PORT:-8080}:8080"
+
+volumes:
+  pgdata:
+  redisdata:

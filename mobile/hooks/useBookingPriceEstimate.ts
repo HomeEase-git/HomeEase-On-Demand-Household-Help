@@ -1,15 +1,15 @@
 import { useMemo } from 'react';
 import { useBookingStore } from '../store/bookingStore';
 import {
-  estimatePriceRange,
+  estimatePrice,
   estimatePricePoint,
-  type PriceRangeEstimate,
+  type PriceEstimate,
   type PricePointEstimate,
 } from '../utils/bookingPriceEstimate';
 import type { ConditionType, RoomSelection, ServiceScopeType } from '../types/booking4step.types';
 
 export type BookingPriceEstimate =
-  | { mode: 'range'; range: PriceRangeEstimate }
+  | { mode: 'range'; range: PriceEstimate }
   | { mode: 'point'; point: PricePointEstimate };
 
 /**
@@ -57,7 +57,6 @@ export function useBookingPriceEstimate(
           rooms,
           condition,
           workerHourlyRate: draft.workerHourlyRate,
-          dateIso: draft.date,
           addOnsTotal,
           tip,
           scopeType,
@@ -69,7 +68,7 @@ export function useBookingPriceEstimate(
 
     return {
       mode: 'range',
-      range: estimatePriceRange(rooms, condition, categoryRate, scopeType, draft.urgencyLevel),
+      range: estimatePrice(rooms, condition, categoryRate, scopeType, draft.urgencyLevel),
     };
-  }, [rooms, condition, draft.workerHourlyRate, draft.workerTier, draft.date, draft.urgencyLevel, scopeType, tip, categoryRate, addOnsTotal]);
+  }, [rooms, condition, draft.workerHourlyRate, draft.workerTier, draft.urgencyLevel, scopeType, tip, categoryRate, addOnsTotal]);
 }

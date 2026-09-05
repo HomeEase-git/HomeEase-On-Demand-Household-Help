@@ -80,6 +80,7 @@ export default function RequestsScreen() {
           roomsSummary: item.rooms.length > 0 ? summarizeFlatRoomTypes(item.rooms, ROOM_TYPE_LABELS) : undefined,
           distanceKm: item.distanceMeters != null ? item.distanceMeters / 1000 : null,
           payoutEstimate: item.workerPayoutEstimate,
+          tip: item.tip,
         }}
         onPress={() => handleRequestPress(item.id)}
       />

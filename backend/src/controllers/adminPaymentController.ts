@@ -265,7 +265,23 @@ export const retryPayout = async (req: AuthRequest, res: Response) => {
       where: { id },
       data: { status: 'PENDING', failureReason: null, failedAt: null },
     });
-    await schedulePayout(id);
+
+    // Unlike the booking-flow expiry-job calls elsewhere, this one can't be
+    // a silent best-effort catch: the update above already flipped this
+    // payout to PENDING, so a Redis hiccup here would otherwise leave it
+    // stuck looking "in flight" with no job actually queued to process it —
+    // an admin has no way to notice that from the outside. Revert it back
+    // to FAILED (still visibly retriable) instead of leaving that gap.
+    try {
+      await schedulePayout(id);
+    } catch (error) {
+      console.error(`Failed to schedule retried payout ${id}:`, error);
+      await prisma.payout.update({
+        where: { id },
+        data: { status: 'FAILED', failureReason: 'Retry could not be queued — please try again.' },
+      });
+      return res.status(500).json(errorResponse(500, 'Failed to re-queue payout. Please try again.'));
+    }
 
     await writeAuditLog({
       actorId: adminId,

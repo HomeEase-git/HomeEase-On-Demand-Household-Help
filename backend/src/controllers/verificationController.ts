@@ -95,20 +95,32 @@ export const uploadVerificationDocuments = async (req: AuthRequest, res: Respons
       include: { user: true, documents: true },
     });
 
-    await verificationQueue.add(
-      'analyze-verification',
-      {
-        verificationId: verification.id,
-        requestType,
-        documents: uploadedDocs.map((doc) => ({
-          documentType: doc.documentType,
-          fileUrl: doc.fileUrl,
-          mimeType: doc.mimeType,
-          originalName: doc.originalName,
-        })),
-      },
-      VERIFICATION_JOB_OPTIONS
-    );
+    // Best-effort — the VerificationRequest row and its documents (plus the
+    // actual Supabase file uploads above) already exist at this point, so a
+    // Redis hiccup here must not report this submission as failed: the user
+    // would otherwise likely resubmit, creating a duplicate request and
+    // re-uploading the same files. Worst case if this silently fails: the
+    // request sits at aiStatus PENDING until an admin notices and reruns it
+    // (see adminVerificationController.rerunVerification, which queues the
+    // exact same job).
+    await verificationQueue
+      .add(
+        'analyze-verification',
+        {
+          verificationId: verification.id,
+          requestType,
+          documents: uploadedDocs.map((doc) => ({
+            documentType: doc.documentType,
+            fileUrl: doc.fileUrl,
+            mimeType: doc.mimeType,
+            originalName: doc.originalName,
+          })),
+        },
+        VERIFICATION_JOB_OPTIONS
+      )
+      .catch((error) => {
+        console.error(`Failed to queue AI review for verification ${verification.id}:`, error);
+      });
 
     if (user.role === 'WORKER') {
       await prisma.workerProfile.updateMany({

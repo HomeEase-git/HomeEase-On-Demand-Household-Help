@@ -137,6 +137,7 @@ enum NotificationType {
   QUOTE_REMINDER
   QUOTE_AUTO_APPROVED
   COMPLETION_REMINDER
+  PAYMENT_REMINDER
   BOOKING_AUTO_COMPLETED
   VERIFICATION_SUBMITTED
   VERIFICATION_APPROVED
@@ -713,6 +714,14 @@ model Booking {
   declinedWorkerIds String[]
   expiresAt         DateTime?
 
+  // Client-generated key (one per booking-draft submission attempt) so a
+  // retried POST /bookings — app backgrounded mid-request, network timeout
+  // + user taps Submit again — returns the already-created booking instead
+  // of creating a duplicate. Scoped per-client, not global, since it's the
+  // client that generates it. Null for older bookings created before this
+  // existed and for any caller that doesn't send one.
+  idempotencyKey String?
+
   // Service
   serviceType            String
   serviceTaskId          String?
@@ -749,6 +758,12 @@ model Booking {
   approvedAt    DateTime?
   disputeReason String?
 
+  // Stamped once, in acceptBooking, when a worker accepts a PENDING request.
+  // Distinct from updatedAt, which moves on every later write to this row
+  // (a quote, an add-on, a photo) and so can't be trusted as "when accepted"
+  // — see getBookingDetail's timeline, which used to fall back to updatedAt.
+  acceptedAt DateTime?
+
   // Set once the 12h "please approve/dispute this quote" reminder fires
   // (see bookingWorker.remindAndAutoApproveQuotes) — prevents re-sending it
   // on every hourly sweep tick, distinct from the 24h auto-approve itself.
@@ -780,6 +795,14 @@ model Booking {
   // bookingWorker.autoSettleCompletedBookings) — prevents re-sending it on
   // every hourly sweep tick, distinct from the 24h auto-confirm itself.
   completionReminderSentAt DateTime?
+
+  // Stamped when the booking enters AWAITING_PAYMENT (see
+  // paymentLifecycleService.createCompletionInvoice) — the client already
+  // confirmed and a checkout exists, so this is a much shorter, separate
+  // reminder clock than completionReminderSentAt's 12h (a lower-friction
+  // "you have one thing left to do" nudge, not "go review a photo").
+  awaitingPaymentSince  DateTime?
+  paymentReminderSentAt DateTime?
 
   // Payment method chosen by the client at booking time — settled upfront so
   // the client isn't asked to pick a method again after confirming completion.
@@ -818,6 +841,11 @@ model Booking {
 
   // NOTE: only enforceable while workerId is set — see merge notes.
   @@unique([workerId, scheduledDate, timeSlot], name: "worker_slot_unique")
+  // Partial-unique-by-non-null: Postgres/Prisma treats NULL as distinct from
+  // NULL in a unique index, so this only ever collides when a client
+  // actually sends a (repeated) key — never blocks two real bookings that
+  // both omit idempotencyKey.
+  @@unique([clientId, idempotencyKey], name: "client_idempotency_key_unique")
   @@index([clientId, status])
   @@index([workerId, status])
   @@index([scheduledDate])
@@ -881,9 +909,6 @@ model Cancellation {
   cancelledBy   Role // CLIENT, WORKER, or ADMIN
   cancelledById String // soft reference to the user who cancelled
   reason        String?
-
-  feeCharged   Float? @default(0)
-  refundAmount Float?
 
   createdAt DateTime @default(now())
 }

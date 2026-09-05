@@ -44,6 +44,7 @@ interface BookingWithAddOns {
   tip: number | null;
   paymentMethodType: 'GCASH' | 'MAYA' | 'CASH' | null;
   paymentAccountIdentifier: string | null;
+  awaitingPaymentSince: Date | null;
   addOns?: Array<{ price: number }>;
 }
 
@@ -253,7 +254,15 @@ export async function createCompletionInvoice(bookingId: string): Promise<{
 
   await prisma.booking.update({
     where: { id: bookingId },
-    data: { status: 'AWAITING_PAYMENT', finalPrice: priced.subtotal },
+    // awaitingPaymentSince only set on the first entry into this status —
+    // a retried/resumed checkout (existing PENDING invoice reused above, or
+    // a fresh one minted after a failure) shouldn't push the reminder clock
+    // back out, since the client has been waiting since the original one.
+    data: {
+      status: 'AWAITING_PAYMENT',
+      finalPrice: priced.subtotal,
+      awaitingPaymentSince: booking.awaitingPaymentSince ?? new Date(),
+    },
   });
 
   return { checkoutUrl: invoice.invoiceUrl, invoiceId: invoice.id, paymentId: payment.id, amount: priced.totalAmount };

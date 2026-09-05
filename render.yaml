@@ -1,0 +1,142 @@
+# Render Blueprint — https://render.com/docs/blueprint-spec
+# In the Render dashboard: New -> Blueprint -> select this repo.
+# Defines the backend web service + its Redis. The database is deliberately
+# NOT here — production stays on Neon (see DEPLOY.md), not Render Postgres.
+#
+# After the first apply, Render prompts you for every `sync: false` var
+# below. APP_URL and ALLOWED_ORIGINS need a second pass once you know the
+# service's real Render URL and the Vercel domain for the admin web app.
+services:
+  - name: homeease-backend
+    type: web
+    runtime: docker
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: ./backend
+    # NOT "free" — the app runs its BullMQ workers and scheduled jobs
+    # (booking-expiry, 72h auto-dispute sweep, payment reminders) in this
+    # same process. Render's free tier spins down on idle, which would
+    # silently kill those background flows and any open websockets.
+    plan: 0.5c-512mb
+    region: singapore # closest listed region to the Philippines
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      # Render injects PORT itself — do not set it here.
+      - key: APP_URL
+        sync: false # your Render service URL, e.g. https://homeease-backend.onrender.com
+      - key: ALLOWED_ORIGINS
+        sync: false # the Vercel admin-web domain(s), comma-separated
+      - key: TRUST_PROXY
+        value: "1" # one hop: Render's own edge proxy
+      - key: JSON_BODY_LIMIT
+        value: 1mb
+      - key: SHUTDOWN_TIMEOUT_MS
+        value: "15000"
+      - key: RUN_MIGRATIONS
+        value: "true"
+      - key: RATE_LIMIT_DISABLED
+        value: "false"
+      - key: RATE_LIMIT_API_WINDOW_MS
+        value: "60000"
+      - key: RATE_LIMIT_API_MAX
+        value: "300"
+      - key: RATE_LIMIT_AUTH_WINDOW_MS
+        value: "900000"
+      - key: RATE_LIMIT_AUTH_MAX
+        value: "10"
+
+      # --- Database: Neon (production branch), not Render Postgres ---
+      - key: DATABASE_URL
+        sync: false # Neon pooled connection string
+      - key: DIRECT_URL
+        sync: false # Neon direct (unpooled) connection string
+
+      # --- Redis: this Blueprint's own Key Value instance, below ---
+      - key: REDIS_URL
+        fromService:
+          type: keyvalue
+          name: homeease-redis
+          property: connectionString
+
+      # --- Auth ---
+      - key: JWT_SECRET
+        generateValue: true # Render generates and stores a strong random value
+      - key: JWT_EXPIRY
+        value: "604800" # seconds — 7 days. Must be a number, not "7d"/"1h".
+
+      # --- Email (Gmail SMTP) ---
+      - key: SMTP_USER
+        sync: false
+      - key: SMTP_PASS
+        sync: false
+      - key: SMTP_FROM_NAME
+        value: HomeEase
+
+      # --- Payments: Xendit LIVE keys ---
+      - key: XENDIT_SECRET_KEY
+        sync: false
+      - key: XENDIT_WEBHOOK_TOKEN
+        sync: false
+      - key: XENDIT_REDIRECT_BASE_URL
+        sync: false # must match XenditCheckoutModal.tsx's redirect prefixes
+
+      # --- SMS: PhilSMS ---
+      - key: PHILSMS_API_TOKEN
+        sync: false
+      - key: PHILSMS_SENDER_ID
+        value: HomeEase
+
+      # --- File storage: Supabase ---
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_ANON_KEY
+        sync: false
+      - key: SUPABASE_SERVICE_KEY
+        sync: false
+      - key: SUPABASE_KYC_BUCKET
+        value: kyc-documents
+      - key: SUPABASE_RESUME_BUCKET
+        value: resumes
+      - key: SUPABASE_CHAT_BUCKET
+        value: chat-images
+      - key: SUPABASE_TAX_CERTIFICATE_BUCKET
+        value: tax-certificates
+
+      # --- AI resume parsing (optional — leave blank to disable) ---
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: ANTHROPIC_MODEL
+        value: claude-sonnet-5
+
+      # --- Uploads ---
+      - key: MAX_FILE_SIZE
+        value: "5242880"
+      - key: UPLOAD_DIR
+        value: uploads
+
+      # --- Pricing DEFAULTS ONLY — live values are the AppSettings DB row ---
+      - key: COMMISSION_RATE
+        value: "0.10"
+      - key: WITHHOLDING_TAX_RATE
+        value: "0.02"
+
+      # --- BIR 2307 certificate identity (static business facts) ---
+      - key: PLATFORM_LEGAL_NAME
+        sync: false
+      - key: PLATFORM_TIN
+        sync: false
+
+  - name: homeease-redis
+    type: keyvalue
+    plan: 256mb
+    region: singapore
+    # BullMQ stores job data in Redis and must never lose it to eviction —
+    # noeviction makes Redis return an error on OOM instead of silently
+    # dropping queued jobs (the docs' own example, allkeys-lru, is right for
+    # a cache but wrong for a job queue).
+    maxmemoryPolicy: noeviction
+    persistenceMode: journal-snapshot
+    ipAllowList:
+      - source: 0.0.0.0/0
+        description: "Open for now — tighten once homeease-backend's egress IP is known"

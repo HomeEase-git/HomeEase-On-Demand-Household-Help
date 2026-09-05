@@ -1,5 +1,8 @@
 import express from 'express';
 import cors from 'cors';
+import helmet from 'helmet';
+import prisma from '@config/database';
+import { apiLimiter } from '@middleware/rateLimit';
 import authRoutes from '@routes/auth';
 import workerRoutes from '@routes/workers';
 import bookingRoutes from '@routes/bookings';
@@ -32,6 +35,24 @@ const allowedOrigins = (process.env.ALLOWED_ORIGINS || 'http://localhost:3000')
   .map((origin) => origin.trim())
   .filter(Boolean);
 
+// Behind a load balancer / reverse proxy (Render, Railway, Fly, nginx, an
+// ALB…) Express needs to trust X-Forwarded-* to see the real client IP and
+// protocol — the rate limiter keys on IP, so getting this wrong either
+// lets everyone share one bucket or lets clients spoof it. TRUST_PROXY is
+// the number of proxy hops in front of the app (default 0 = direct).
+app.set('trust proxy', Number(process.env.TRUST_PROXY || 0));
+
+// Security headers. This is a JSON API (no first-party HTML), so CSP and
+// the COEP/CORP embedding controls don't apply; the rest of helmet's
+// defaults (HSTS, nosniff, frameguard, referrer-policy, …) do.
+app.use(
+  helmet({
+    contentSecurityPolicy: false,
+    crossOriginEmbedderPolicy: false,
+    crossOriginResourcePolicy: { policy: 'cross-origin' },
+  })
+);
+
 // Middleware
 app.use(express.json({ limit: jsonBodyLimit }));
 app.use(express.urlencoded({ extended: true, limit: jsonBodyLimit }));
@@ -41,6 +62,28 @@ app.use(
     credentials: true,
   })
 );
+
+// Liveness: is the process up? Cheap, no dependencies — this is what a
+// container orchestrator / load balancer should poll.
+app.get('/health', (_req, res) => {
+  res.json({ status: 'OK' });
+});
+
+// Readiness: can the process actually serve traffic (DB reachable)?
+// Returns 503 when not, so a rollout can wait for it and a broken pod is
+// pulled from rotation.
+app.get('/health/ready', async (_req, res) => {
+  try {
+    await prisma.$queryRaw`SELECT 1`;
+    res.json({ status: 'ready' });
+  } catch {
+    res.status(503).json({ status: 'not ready', reason: 'database unreachable' });
+  }
+});
+
+// Broad rate limit across the whole API surface (credential endpoints get a
+// second, stricter limiter inside routes/auth.ts).
+app.use('/api', apiLimiter);
 
 // Routes
 app.use('/api/auth', authRoutes);
@@ -66,11 +109,6 @@ app.use('/api/admin/audit-logs', adminAuditLogRoutes);
 app.use('/api/admin/reports', adminReportsRoutes);
 app.use('/api/admin/settings', adminSettingsRoutes);
 app.use('/api/admin/tax', adminTaxRoutes);
-
-// Health check
-app.get('/health', (_req, res) => {
-  res.json({ status: 'OK' });
-});
 
 // Error handling
 app.use(errorHandler);

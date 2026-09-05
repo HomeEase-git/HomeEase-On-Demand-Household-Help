@@ -1,5 +1,4 @@
 import { Request, Response } from 'express';
-import type { ConditionType, RoomType, TimeSlot } from '@prisma/client';
 import prisma from '@config/database';
 import { errorResponse } from '@utils/errorResponse';
 import { toDayStart } from '@services/workerAvailabilityService';
@@ -8,25 +7,14 @@ import { parseWorkerResume } from '@services/resumeParseService';
 import { computeWorkerTier, tierMultiplier } from '@utils/workerTier';
 import { normalizeTin, maskTin } from '@utils/taxId';
 import { getCertificateDownloadUrl } from '@services/taxCertificateService';
+import { VALID_TIME_SLOTS, VALID_CONDITIONS, VALID_ROOM_TYPES } from '@/constants/bookingEnums';
+import type { TimeSlot, RoomType, ConditionType } from '@prisma/client';
 import type { JwtPayload } from '@/types/index';
 
 interface AuthRequest extends Request {
   user?: JwtPayload;
 }
 
-const VALID_TIME_SLOTS: TimeSlot[] = ['MORNING', 'AFTERNOON', 'EVENING'];
-const VALID_CONDITIONS: ConditionType[] = ['TIDY', 'NORMAL', 'HEAVY'];
-const VALID_ROOM_TYPES: RoomType[] = [
-  'BEDROOM',
-  'BATHROOM',
-  'KITCHEN',
-  'LIVING_ROOM',
-  'DINING_ROOM',
-  'OFFICE',
-  'GARAGE',
-  'BALCONY',
-  'OTHER',
-];
 // Search has no specific ServiceTask (that's picked in a later booking step),
 // so estimatedTotal for an hourly-rate worker uses a flat assumed duration —
 // documented here since it's the one non-obvious number in the card payload.

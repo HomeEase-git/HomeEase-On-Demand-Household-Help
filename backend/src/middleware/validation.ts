@@ -2,6 +2,13 @@ import { Request, Response, NextFunction } from 'express';
 import { errorResponse } from '../utils/errorResponse';
 import { KYC_DOCUMENT_TYPES } from '../utils/kycDocumentTypes';
 import { isValidTin } from '../utils/taxId';
+import {
+  VALID_TIME_SLOTS,
+  VALID_CONDITIONS,
+  VALID_URGENCY_LEVELS,
+  VALID_ROOM_TYPES,
+  VALID_PAYMENT_METHOD_TYPES,
+} from '../constants/bookingEnums';
 
 /**
  * Validates that required fields are present and returns 400 if missing.
@@ -293,8 +300,6 @@ export const validateUpdateCertification = (
   return next();
 };
 
-const VALID_TIME_SLOTS = ['MORNING', 'AFTERNOON', 'EVENING'];
-
 export const validateUpdateAvailabilitySlots = (
   req: Request,
   res: Response,
@@ -406,12 +411,12 @@ export const validateUpdateTaxInfo = (req: Request, res: Response, next: NextFun
 };
 
 // Booking validators
-const VALID_TIME_SLOTS_BOOKING = ['MORNING', 'AFTERNOON', 'EVENING'];
-const VALID_CONDITIONS_BOOKING = ['TIDY', 'NORMAL', 'HEAVY'];
-const VALID_URGENCY_LEVELS_BOOKING = ['STANDARD', 'URGENT', 'EMERGENCY'];
-const VALID_ROOM_TYPES_BOOKING = [
-  'BEDROOM', 'BATHROOM', 'KITCHEN', 'LIVING_ROOM', 'DINING_ROOM', 'OFFICE', 'GARAGE', 'BALCONY', 'OTHER',
-];
+// Rough Philippines bounding box (the only market this platform serves) —
+// rejects wildly wrong/spoofed coordinates before they ever reach a
+// distanceFee calculation or a "which city" pricing-rule lookup. Generous on
+// purpose (includes surrounding EEZ waters) rather than tightly hugging the
+// coastline, since a false rejection is worse than a slightly loose bound.
+const PH_BOUNDS = { minLat: 4, maxLat: 21.5, minLng: 116, maxLng: 127 };
 
 /**
  * Booking creation no longer takes a client-supplied estimatedPrice or free-text
@@ -431,6 +436,7 @@ export const validateCreateBooking = (
     rooms,
     condition,
     address,
+    city,
     lat,
     lng,
     date,
@@ -442,6 +448,7 @@ export const validateCreateBooking = (
     paymentMethodType,
     paymentAccountIdentifier,
     scopeAnswers,
+    idempotencyKey,
   } = req.body;
 
   if (!serviceType || typeof serviceType !== 'string') {
@@ -452,6 +459,10 @@ export const validateCreateBooking = (
     return res.status(400).json(errorResponse(400, 'serviceTaskId must be a string'));
   }
 
+  if (idempotencyKey !== undefined && (typeof idempotencyKey !== 'string' || idempotencyKey.length > 200)) {
+    return res.status(400).json(errorResponse(400, 'idempotencyKey must be a string of at most 200 characters'));
+  }
+
   if (workerId !== undefined && workerId !== null && typeof workerId !== 'string') {
     return res.status(400).json(errorResponse(400, 'workerId must be a string'));
   }
@@ -460,30 +471,47 @@ export const validateCreateBooking = (
     return res.status(400).json(errorResponse(400, 'address is required and must be a string'));
   }
 
+  // Required, not just recommended: an empty city silently no-ops any
+  // city-keyed PricingRule lookup (see bookingController.createBooking's
+  // validatePriceWithinPricingRule call) — better to reject up front than
+  // let pricing enforcement quietly not apply. The client always has this
+  // (see mobile step-2's address picker, which sets it from the geocoded
+  // result), so this doesn't tighten anything a real booking needs.
+  if (!city || typeof city !== 'string' || !city.trim()) {
+    return res.status(400).json(errorResponse(400, 'city is required and must be a non-empty string'));
+  }
+
   if (typeof lat !== 'number' || typeof lng !== 'number') {
     return res.status(400).json(errorResponse(400, 'lat and lng are required and must be numbers'));
+  }
+
+  if (
+    lat < PH_BOUNDS.minLat || lat > PH_BOUNDS.maxLat ||
+    lng < PH_BOUNDS.minLng || lng > PH_BOUNDS.maxLng
+  ) {
+    return res.status(400).json(errorResponse(400, 'lat/lng must fall within the Philippines'));
   }
 
   if (!date || isNaN(new Date(date).getTime())) {
     return res.status(400).json(errorResponse(400, 'date is required and must be a valid date'));
   }
 
-  if (!timeSlot || !VALID_TIME_SLOTS_BOOKING.includes(timeSlot)) {
-    return res.status(400).json(errorResponse(400, `timeSlot is required and must be one of ${VALID_TIME_SLOTS_BOOKING.join(', ')}`));
+  if (!timeSlot || !VALID_TIME_SLOTS.includes(timeSlot)) {
+    return res.status(400).json(errorResponse(400, `timeSlot is required and must be one of ${VALID_TIME_SLOTS.join(', ')}`));
   }
 
   if (rooms !== undefined) {
-    if (!Array.isArray(rooms) || !rooms.every((r: unknown) => typeof r === 'string' && VALID_ROOM_TYPES_BOOKING.includes(r))) {
-      return res.status(400).json(errorResponse(400, `rooms must be an array of: ${VALID_ROOM_TYPES_BOOKING.join(', ')}`));
+    if (!Array.isArray(rooms) || !rooms.every((r: unknown) => typeof r === 'string' && VALID_ROOM_TYPES.includes(r as (typeof VALID_ROOM_TYPES)[number]))) {
+      return res.status(400).json(errorResponse(400, `rooms must be an array of: ${VALID_ROOM_TYPES.join(', ')}`));
     }
   }
 
-  if (condition !== undefined && condition !== null && !VALID_CONDITIONS_BOOKING.includes(condition)) {
-    return res.status(400).json(errorResponse(400, `condition must be one of ${VALID_CONDITIONS_BOOKING.join(', ')}`));
+  if (condition !== undefined && condition !== null && !VALID_CONDITIONS.includes(condition)) {
+    return res.status(400).json(errorResponse(400, `condition must be one of ${VALID_CONDITIONS.join(', ')}`));
   }
 
-  if (urgencyLevel !== undefined && !VALID_URGENCY_LEVELS_BOOKING.includes(urgencyLevel)) {
-    return res.status(400).json(errorResponse(400, `urgencyLevel must be one of ${VALID_URGENCY_LEVELS_BOOKING.join(', ')}`));
+  if (urgencyLevel !== undefined && !VALID_URGENCY_LEVELS.includes(urgencyLevel)) {
+    return res.status(400).json(errorResponse(400, `urgencyLevel must be one of ${VALID_URGENCY_LEVELS.join(', ')}`));
   }
 
   if (priorities !== undefined) {
@@ -502,9 +530,8 @@ export const validateCreateBooking = (
     return res.status(400).json(errorResponse(400, 'tip must be a non-negative number'));
   }
 
-  const VALID_PAYMENT_METHOD_TYPES = ['GCASH', 'MAYA', 'CASH'];
   if (paymentMethodType !== undefined) {
-    if (typeof paymentMethodType !== 'string' || !VALID_PAYMENT_METHOD_TYPES.includes(paymentMethodType)) {
+    if (typeof paymentMethodType !== 'string' || !VALID_PAYMENT_METHOD_TYPES.includes(paymentMethodType as (typeof VALID_PAYMENT_METHOD_TYPES)[number])) {
       return res.status(400).json(
         errorResponse(400, `paymentMethodType must be one of: ${VALID_PAYMENT_METHOD_TYPES.join(', ')}`)
       );
