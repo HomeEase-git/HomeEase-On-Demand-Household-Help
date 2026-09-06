@@ -8,7 +8,7 @@ import { queueConnection as connection } from '@config/redis';
 // — at the 60min default this works out to 60/30/15, matching the product
 // decision. Relative rather than absolute values so an admin changing the
 // base setting scales every urgency tier with it instead of only STANDARD.
-const EXPIRY_MULTIPLIER: Record<UrgencyLevel, number> = {
+export const EXPIRY_MULTIPLIER: Record<UrgencyLevel, number> = {
   STANDARD: 1,
   URGENT: 0.5,
   EMERGENCY: 0.25,

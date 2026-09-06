@@ -1,0 +1,38 @@
+name: Booking lifecycle cron sweeps
+
+# Runs the backend's booking-lifecycle safety-net sweeps (payment reminders,
+# 72h overdue -> auto-dispute, quote auto-approve, pending-booking expiry,
+# Xendit reconciliation) over HTTP instead of relying on BullMQ's in-process
+# repeatable jobs. Needed because the free-tier Render deploy sleeps the
+# whole process — including those jobs — after ~15 min with no HTTP traffic.
+# See DEPLOY.md's free-tier section and backend/src/routes/internalCron.ts.
+#
+# Hourly is deliberate: every task here tolerates "ran within the last hour"
+# (that's the schedule these sweeps already ran on via BullMQ), so GitHub's
+# scheduled-workflow drift under load doesn't matter. This is a backstop —
+# if the service is kept warm by an external uptime pinger, BullMQ's own
+# schedule handles this and these runs are just redundant confirmation.
+#
+# Requires two repo settings (Settings -> Secrets and variables -> Actions):
+#   Variable RENDER_URL  = the backend's public URL, e.g.
+#                           https://homeease-on-demand-household-help.onrender.com
+#   Secret   CRON_SECRET = the same value set as CRON_SECRET on the Render service
+
+on:
+  schedule:
+    # :17 past the hour, not :00 — GitHub's scheduler is most congested (and
+    # most likely to delay a run) right at the top of the hour.
+    - cron: '17 * * * *'
+  workflow_dispatch: {} # lets you trigger a run manually from the Actions tab
+
+jobs:
+  sweep:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Hit /internal/cron/all
+        run: |
+          curl --fail --show-error --silent \
+            --max-time 120 \
+            -X POST \
+            -H "x-cron-secret: ${{ secrets.CRON_SECRET }}" \
+            "${{ vars.RENDER_URL }}/internal/cron/all"
