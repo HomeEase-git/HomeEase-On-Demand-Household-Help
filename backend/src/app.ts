@@ -27,6 +27,7 @@ import adminAuditLogRoutes from '@routes/adminAuditLogs';
 import adminReportsRoutes from '@routes/adminReports';
 import adminSettingsRoutes from '@routes/adminSettings';
 import adminTaxRoutes from '@routes/adminTax';
+import internalCronRoutes from '@routes/internalCron';
 import { errorHandler } from '@middleware/errorHandler';
 
 const app = express();
@@ -107,6 +108,12 @@ app.get('/health/ready', async (_req, res) => {
     res.status(503).json({ status: 'not ready', reason: 'database unreachable', redis: redisConnected ? 'connected' : 'unreachable' });
   }
 });
+
+// Server-to-server sweep trigger for hosts that sleep on idle (see
+// internalCron.ts) — deliberately outside /api so it's exempt from the
+// broad API limiter and CORS allow-list; it has its own auth (CRON_SECRET)
+// and its own limiter.
+app.use('/internal/cron', internalCronRoutes);
 
 // Broad rate limit across the whole API surface (credential endpoints get a
 // second, stricter limiter inside routes/auth.ts).

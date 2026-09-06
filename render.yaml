@@ -27,6 +27,8 @@ services:
         sync: false # your Render service URL, e.g. https://homeease-backend.onrender.com
       - key: ALLOWED_ORIGINS
         sync: false # the Vercel admin-web domain(s), comma-separated
+      - key: CRON_SECRET
+        sync: false # shared secret for POST /internal/cron/:task — also set as a GitHub Actions secret
       - key: TRUST_PROXY
         value: "1" # one hop: Render's own edge proxy
       - key: JSON_BODY_LIMIT

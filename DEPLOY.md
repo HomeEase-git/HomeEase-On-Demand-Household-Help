@@ -68,13 +68,55 @@ reminders. Treat Redis as a hard dependency and watch `GET /health/ready`.
      with anything else that needs CORS access
 
    Both changes trigger a redeploy.
-6. Confirm the plan is **not** `free` on the web service (see the comment in
-   `render.yaml` — the in-process background workers need always-on).
+6. **Paid plan** (recommended): keep the web service on a non-`free` instance
+   type (see the comment in `render.yaml`) — the in-process background
+   workers need always-on, and this is the simplest correct setup.
+   **Free plan** instead: see "Free-tier hosting" below — it's supported, but
+   needs two extra pieces wired up or the background jobs silently stop.
 
 ### Probes
 - **Liveness:** `GET /health` → `200 {"status":"OK"}` (no dependencies touched).
-- **Readiness:** `GET /health/ready` → `200` when Postgres is reachable, `503`
-  otherwise.
+- **Readiness:** `GET /health/ready` → `200 {"status":"ready","redis":"connected"|"unreachable"}`
+  when Postgres is reachable, `503` otherwise. The `redis` field is
+  informational only — a Redis outage never flips the status code or the
+  `ready`/`not ready` verdict (only Postgres does), matching the design in
+  `index.ts`'s `uncaughtException` guard: Redis being down should degrade
+  background jobs, not HTTP availability.
+
+### Free-tier hosting (background jobs)
+
+Render's free web instance type sleeps after ~15 min with no inbound HTTP
+traffic — and takes the in-process BullMQ workers and repeatable schedules
+(payout disbursement, 72h overdue → auto-dispute, quote/completion timeouts,
+payment reminders) down with it. Two pieces close that gap:
+
+1. **`POST /internal/cron/:task`** (`backend/src/routes/internalCron.ts`) —
+   runs the same sweep logic the BullMQ repeatable jobs call, plus a
+   pending-booking-expiry sweep (`expireOverduePendingBookings`,
+   `backend/src/services/pendingExpirySweep.ts`) standing in for the
+   per-booking delayed job BullMQ would otherwise handle. Tasks:
+   `settle-completions`, `approve-quotes`, `reset-availability`,
+   `expire-pending`, or `all`. Authenticated by an `x-cron-secret` header
+   checked against `CRON_SECRET` (`crypto.timingSafeEqual`, fails closed if
+   unset) — set `CRON_SECRET` on the Render service (a long random value,
+   e.g. `openssl rand -hex 32`).
+2. **`.github/workflows/cron-sweeps.yml`** — hits `/internal/cron/all` hourly
+   (`workflow_dispatch` also available for a manual run). Needs, in the
+   repo's Settings → Secrets and variables → Actions: variable `RENDER_URL`
+   (the backend's public URL) and secret `CRON_SECRET` (same value as on
+   Render). Hourly is fine because every sweep already tolerates "ran within
+   the last hour" — that was its BullMQ schedule too.
+
+Optionally, add an **external keep-alive pinger** (UptimeRobot, cron-job.org
+— free, 5-min interval) hitting `GET /health`. Any request resets Render's
+idle timer, so this keeps the service (and BullMQ's own in-process schedule)
+running continuously instead of relying on the hourly sweep as the only
+mechanism. Not GitHub Actions for this part — scheduled workflows drift
+5-15 min under load and auto-disable after 60 days of repo inactivity, too
+loose for a 15-min idle window.
+
+On the free plan, budget ~744 of the 750 free instance-hours/month if kept
+warm continuously — under the cap, but close to it in a 31-day month.
 
 ### Shutdown
 The server drains on `SIGTERM`/`SIGINT`: stops accepting connections, finishes

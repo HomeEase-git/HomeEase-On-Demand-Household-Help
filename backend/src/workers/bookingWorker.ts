@@ -39,7 +39,7 @@ const QUOTE_AUTO_APPROVE_HOURS = 24;
  * auto-cancelled: escrow is voided/refunded, the assigned worker's slot (if
  * any) is freed, and a Cancellation record captures why.
  */
-async function expirePendingBooking(data: ExpirePendingBookingJobData): Promise<void> {
+export async function expirePendingBooking(data: ExpirePendingBookingJobData): Promise<void> {
   const booking = await prisma.booking.findUnique({ where: { id: data.bookingId } });
   if (!booking || booking.status !== 'PENDING') return; // already resolved by accept/decline/cancel
 
@@ -146,7 +146,7 @@ async function escalateOverduePayment(booking: { id: string; clientId: string; w
  *    re-checked against Xendit in case a webhook was missed.
  *  - Self-heal: COMPLETED bookings whose worker payout never got created.
  */
-async function remindAndAutoSettleCompletions(): Promise<void> {
+export async function remindAndAutoSettleCompletions(): Promise<void> {
   const now = Date.now();
   const reminderCutoff = new Date(now - COMPLETION_REMINDER_HOURS * HOUR_MS);
   const paymentReminderCutoff = new Date(now - PAYMENT_REMINDER_HOURS * HOUR_MS);
@@ -343,7 +343,7 @@ async function remindAndAutoSettleCompletions(): Promise<void> {
  * worker who already did the job isn't stuck unable to complete it (and get
  * paid) because the client never opened the app.
  */
-async function remindAndAutoApproveQuotes(): Promise<void> {
+export async function remindAndAutoApproveQuotes(): Promise<void> {
   const now = Date.now();
   const reminderCutoff = new Date(now - QUOTE_REMINDER_HOURS * HOUR_MS);
   const autoApproveCutoff = new Date(now - QUOTE_AUTO_APPROVE_HOURS * HOUR_MS);
@@ -426,7 +426,7 @@ async function remindAndAutoApproveQuotes(): Promise<void> {
  * didn't explicitly free it (defense-in-depth self-heal, not the primary
  * mechanism — accept/complete/cancel free their own slot inline).
  */
-async function resetExpiredAvailabilitySlots(): Promise<void> {
+export async function resetExpiredAvailabilitySlots(): Promise<void> {
   const today = new Date();
   today.setUTCHours(0, 0, 0, 0);
 
