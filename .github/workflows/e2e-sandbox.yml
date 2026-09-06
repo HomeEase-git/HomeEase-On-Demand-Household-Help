@@ -75,7 +75,7 @@ jobs:
         working-directory: backend
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           # See ci.yml's backend job: @supabase/supabase-js needs Node's
           # native WebSocket (stable from Node 22), and this workflow boots
