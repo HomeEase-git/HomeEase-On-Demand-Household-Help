@@ -1,4 +1,5 @@
 import 'dotenv/config';
+import dns from 'node:dns';
 import http from 'http';
 import type { Server as SocketIOServer } from 'socket.io';
 import type { Worker } from 'bullmq';
@@ -13,6 +14,16 @@ import { payoutQueue } from '@queues/payoutQueue';
 import { verificationQueue } from '@queues/verificationQueue';
 import { ensureStorageBuckets } from '@utils/ensureStorageBuckets';
 import { redisHost, redisPort } from '@config/redis';
+
+// Some hosts (Render confirmed) don't reliably route outbound IPv6, but
+// Neon's connection hostnames publish AAAA records alongside A records.
+// Node's default dual-stack lookup can hand out an IPv6 address first, and
+// since node-postgres/ioredis just open a plain socket to whatever
+// dns.lookup() returns, that connection then hangs on a dead route until
+// TCP gives up (~4s) instead of ever trying the reachable IPv4 address —
+// this is also settable via NODE_OPTIONS=--dns-result-order=ipv4first, but
+// baking it in here means it doesn't depend on that env var being set.
+dns.setDefaultResultOrder('ipv4first');
 
 const PORT = process.env.PORT || 3000;
 // How long to let in-flight requests / jobs finish on shutdown before the
