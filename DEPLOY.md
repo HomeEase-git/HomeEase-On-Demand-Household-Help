@@ -23,9 +23,16 @@ reminders. Treat Redis as a hard dependency and watch `GET /health/ready`.
 
 ## 1. Provision first
 
-- **Neon** — create a **production** project/branch, separate from whatever
-  dev branch `backend/.env` currently points at. Grab both connection strings:
-  `DATABASE_URL` (pooled) and `DIRECT_URL` (unpooled, used by `prisma migrate deploy`).
+- **Neon** — done: project **`homeease-prod`** (`quiet-pond-70953688`), AWS
+  `ap-southeast-1` (matches Render's Singapore region), Postgres 18, branch
+  `main`. Kept separate from the dev project (`floral-lake-80894687`, us-east-1).
+  All 44 migrations already applied to it via `prisma migrate deploy`; Render
+  re-runs `migrate deploy` on every deploy anyway (idempotent). Pull the two
+  connection strings from the Neon console (or `neonctl connection-string`):
+  `DATABASE_URL` = the **-pooler** host, `DIRECT_URL` = the plain host.
+  Free-tier caveats to revisit before real traffic: compute is fixed at
+  0.25 CU (raise the max in the console), suspends after ~5 min idle (Render's
+  `/health` check doesn't keep it warm), and history retention / PITR is 6h only.
 - **Render account**, repo connected — the Blueprint (§2) provisions the web
   service + Redis together.
 - **Vercel account**, repo connected, Root Directory set to `web`.

@@ -76,7 +76,11 @@ app.get('/health/ready', async (_req, res) => {
   try {
     await prisma.$queryRaw`SELECT 1`;
     res.json({ status: 'ready' });
-  } catch {
+  } catch (error) {
+    // Logged (not just swallowed) so the actual driver/DB error — auth,
+    // TLS, DNS, timeout — shows up in the platform's log stream instead of
+    // this endpoint's deliberately generic client-facing message.
+    console.error('[health/ready] database check failed:', error);
     res.status(503).json({ status: 'not ready', reason: 'database unreachable' });
   }
 });
