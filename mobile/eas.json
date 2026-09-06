@@ -16,7 +16,7 @@
         "buildType": "apk"
       },
       "env": {
-        "EXPO_PUBLIC_API_URL": "https://staging-api.REPLACE_ME.com"
+        "EXPO_PUBLIC_API_URL": "https://homeease-on-demand-household-help.onrender.com"
       }
     },
     "production": {
@@ -24,7 +24,7 @@
         "buildType": "apk"
       },
       "env": {
-        "EXPO_PUBLIC_API_URL": "https://api.REPLACE_ME.com"
+        "EXPO_PUBLIC_API_URL": "https://homeease-on-demand-household-help.onrender.com"
       }
     }
   },
