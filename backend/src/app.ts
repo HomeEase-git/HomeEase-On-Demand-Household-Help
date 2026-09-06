@@ -2,6 +2,7 @@ import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
 import prisma from '@config/database';
+import { bookingQueue } from '@queues/bookingQueue';
 import { apiLimiter } from '@middleware/rateLimit';
 import authRoutes from '@routes/auth';
 import workerRoutes from '@routes/workers';
@@ -69,19 +70,41 @@ app.get('/health', (_req, res) => {
   res.json({ status: 'OK' });
 });
 
+// Best-effort Redis reachability check via one of the existing BullMQ
+// queues' own connection (no extra client/connection to manage). Bounded by
+// a manual timeout on top of queueConnection's own bounded retries
+// (@config/redis.ts) so this can never hang the health check indefinitely.
+async function checkRedis(): Promise<boolean> {
+  try {
+    const client = await Promise.race([
+      bookingQueue.client,
+      new Promise<never>((_, reject) => setTimeout(() => reject(new Error('redis check timed out')), 3000)),
+    ]);
+    // BullMQ's IRedisClient is adapter-agnostic (ioredis/node-redis/Bun) and
+    // doesn't expose ping() — info() forces the same kind of live round-trip.
+    await client.info();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 // Readiness: can the process actually serve traffic (DB reachable)?
 // Returns 503 when not, so a rollout can wait for it and a broken pod is
-// pulled from rotation.
+// pulled from rotation. Redis is reported alongside but deliberately doesn't
+// affect the status/HTTP code — per index.ts's uncaughtException guard, a
+// Redis outage should degrade background job scheduling, not availability.
 app.get('/health/ready', async (_req, res) => {
+  const redisConnected = await checkRedis();
   try {
     await prisma.$queryRaw`SELECT 1`;
-    res.json({ status: 'ready' });
+    res.json({ status: 'ready', redis: redisConnected ? 'connected' : 'unreachable' });
   } catch (error) {
     // Logged (not just swallowed) so the actual driver/DB error — auth,
     // TLS, DNS, timeout — shows up in the platform's log stream instead of
     // this endpoint's deliberately generic client-facing message.
     console.error('[health/ready] database check failed:', error);
-    res.status(503).json({ status: 'not ready', reason: 'database unreachable' });
+    res.status(503).json({ status: 'not ready', reason: 'database unreachable', redis: redisConnected ? 'connected' : 'unreachable' });
   }
 });
 
