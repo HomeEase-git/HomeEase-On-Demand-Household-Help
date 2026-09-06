@@ -2,7 +2,6 @@ import React, { useEffect, useState } from "react";
 import { View, Text, FlatList, Pressable, Modal, ScrollView } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { AppIcon as Ionicons } from "../../../../components/icons/AppIcon";
-import { useRouter } from "expo-router";
 import ScreenHeader from "../../../../components/ui/ScreenHeader";
 import SkillCard from "../../../../components/cards/SkillCard";
 import InputField from "../../../../components/ui/InputField";
@@ -14,7 +13,6 @@ import type { Skill, WorkerServiceType } from "../../../../services/api";
 import { useAlertModal } from "../../../../contexts/AlertModalContext";
 
 export default function SkillsScreen() {
-  const router = useRouter();
   const alertModal = useAlertModal();
   const [skills, setSkills] = useState<Skill[]>([]);
   const [loading, setLoading] = useState(true);

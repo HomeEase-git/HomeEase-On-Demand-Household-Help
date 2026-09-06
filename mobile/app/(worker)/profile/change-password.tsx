@@ -1,9 +1,8 @@
 import React, { useState } from "react";
-import { ScrollView } from "react-native";
+import { ScrollView, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { isAxiosError } from "axios";
-import { View } from "react-native";
 import { AppIcon as Ionicons } from "../../../components/icons/AppIcon";
 import ScreenHeader from "../../../components/ui/ScreenHeader";
 import InputField from "../../../components/ui/InputField";

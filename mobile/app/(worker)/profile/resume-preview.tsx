@@ -38,7 +38,11 @@ export default function ResumePreviewScreen() {
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async (force: boolean) => {
-    force ? setReanalyzing(true) : setLoading(true);
+    if (force) {
+      setReanalyzing(true);
+    } else {
+      setLoading(true);
+    }
     setError(null);
     try {
       const data = await parseMyResume(force);

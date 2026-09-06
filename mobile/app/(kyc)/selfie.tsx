@@ -1,5 +1,5 @@
 import React, { useRef, useState, useEffect } from "react";
-import { View, Text, ScrollView, Pressable, Image } from "react-native";
+import { View, Text, ScrollView, Pressable, Image, ActivityIndicator } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { CameraView, useCameraPermissions } from "expo-camera";
 import { AppIcon as Ionicons } from "../../components/icons/AppIcon";
@@ -185,6 +185,7 @@ export default function SelfieScreen() {
               alignItems: "center",
               justifyContent: "center",
             }}
+            disabled={compressing}
             onPress={handleCapture}
           >
             <View
@@ -199,6 +200,26 @@ export default function SelfieScreen() {
 
           <View style={{ width: 48 }} />
         </View>
+
+        {compressing && (
+          <View
+            style={{
+              position: "absolute",
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: 0,
+              backgroundColor: "rgba(0,0,0,0.5)",
+              alignItems: "center",
+              justifyContent: "center",
+            }}
+          >
+            <ActivityIndicator size="large" color="white" />
+            <Text style={{ color: "white", fontSize: 13, marginTop: 12 }}>
+              {submitting ? "Uploading selfie…" : "Processing photo…"}
+            </Text>
+          </View>
+        )}
       </SafeAreaView>
     );
   }

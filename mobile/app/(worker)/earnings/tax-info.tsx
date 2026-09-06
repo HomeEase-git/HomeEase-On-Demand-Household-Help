@@ -4,7 +4,6 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import ScreenHeader from "../../../components/ui/ScreenHeader";
 import InputField from "../../../components/ui/InputField";
 import PrimaryButton from "../../../components/ui/PrimaryButton";
-import { Skeleton } from "../../../components/ui/Skeleton";
 import { cardShadow } from "../../../constants";
 import * as api from "../../../services/api";
 import { useAlertModal } from "../../../contexts/AlertModalContext";

@@ -3,7 +3,6 @@ import { View, Text, Pressable } from "react-native";
 import BottomSheetWrapper, { BottomSheetHandle } from "./BottomSheetWrapper";
 import PrimaryButton from "../ui/PrimaryButton";
 import OutlinedButton from "../ui/OutlinedButton";
-import { categories } from "../../constants/dummyData";
 import { cardShadow } from "../../constants";
 
 export type SortOption = "rating" | "priceLow" | "priceHigh";

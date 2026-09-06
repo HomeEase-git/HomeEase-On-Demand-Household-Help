@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { View, Text, FlatList, Pressable } from "react-native";
+import { View, FlatList, Pressable } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter, useFocusEffect } from "expo-router";
@@ -117,6 +117,7 @@ export default function AddressesScreen() {
                 router.push(`/(client)/profile/addresses/${item.id}`)
               }
               onDelete={() => handleDelete(item.id)}
+              onSetDefault={() => handleSetDefault(item.id)}
             />
           )}
         />

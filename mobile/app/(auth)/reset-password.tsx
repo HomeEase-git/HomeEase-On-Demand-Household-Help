@@ -39,8 +39,6 @@ export default function ResetPasswordScreen() {
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [loading, setLoading] = useState(false);
-  const [showPassword, setShowPassword] = useState(false);
-  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [newPasswordError, setNewPasswordError] = useState("");
   const [confirmPasswordError, setConfirmPasswordError] = useState("");
   const [countdown, setCountdown] = useState(RESEND_COUNTDOWN_SECONDS);
@@ -176,7 +174,7 @@ export default function ResetPasswordScreen() {
           value={newPassword}
           onChangeText={handleNewPasswordChange}
           placeholder="Enter new password"
-          secureTextEntry={!showPassword}
+          secureTextEntry
           editable={!loading}
           error={newPasswordError}
         />
@@ -228,27 +226,15 @@ export default function ResetPasswordScreen() {
           </View>
         </View>
 
-        <View className="relative">
-          <InputField
-            label="Confirm Password"
-            value={confirmPassword}
-            onChangeText={handleConfirmPasswordChange}
-            placeholder="Confirm new password"
-            secureTextEntry={!showConfirmPassword}
-            editable={!loading}
-            error={confirmPasswordError}
-          />
-          <Pressable
-            className="absolute right-3 top-10"
-            onPress={() => setShowConfirmPassword(!showConfirmPassword)}
-          >
-            <Ionicons
-              name={showConfirmPassword ? "eye-off" : "eye"}
-              size={20}
-              color={colors.text.secondary}
-            />
-          </Pressable>
-        </View>
+        <InputField
+          label="Confirm Password"
+          value={confirmPassword}
+          onChangeText={handleConfirmPasswordChange}
+          placeholder="Confirm new password"
+          secureTextEntry
+          editable={!loading}
+          error={confirmPasswordError}
+        />
 
         <PrimaryButton
           label="Reset Password"

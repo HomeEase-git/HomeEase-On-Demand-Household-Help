@@ -12,6 +12,7 @@ import { registerRepeatableBookingJobs, bookingQueue } from '@queues/bookingQueu
 import { payoutQueue } from '@queues/payoutQueue';
 import { verificationQueue } from '@queues/verificationQueue';
 import { ensureStorageBuckets } from '@utils/ensureStorageBuckets';
+import { redisHost, redisPort } from '@config/redis';
 
 const PORT = process.env.PORT || 3000;
 // How long to let in-flight requests / jobs finish on shutdown before the
@@ -33,8 +34,8 @@ const SHUTDOWN_TIMEOUT_MS = Number(process.env.SHUTDOWN_TIMEOUT_MS || 15_000);
 // with corrupted state. A Redis outage should degrade background job
 // scheduling, not take down the HTTP server serving unrelated
 // Postgres-backed requests.
-const REDIS_HOST = process.env.REDIS_HOST || '127.0.0.1';
-const REDIS_PORT = Number(process.env.REDIS_PORT || 6379);
+const REDIS_HOST = redisHost;
+const REDIS_PORT = redisPort;
 process.on('uncaughtException', (error: NodeJS.ErrnoException & { address?: string; port?: number }) => {
   const isConfiguredRedisConnectionError =
     error.syscall === 'connect' && error.address === REDIS_HOST && error.port === REDIS_PORT;

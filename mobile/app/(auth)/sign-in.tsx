@@ -23,7 +23,6 @@ export default function SignInScreen() {
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [showPassword, setShowPassword] = useState(false);
   const [emailError, setEmailError] = useState("");
   const [passwordError, setPasswordError] = useState("");
 
@@ -141,7 +140,7 @@ export default function SignInScreen() {
           value={password}
           onChangeText={handlePasswordChange}
           placeholder="Enter your password"
-          secureTextEntry={!showPassword}
+          secureTextEntry
           returnKeyType="done"
           onSubmitEditing={handleSignIn}
           editable={!loading}

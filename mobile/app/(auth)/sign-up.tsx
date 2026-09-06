@@ -27,8 +27,6 @@ export default function SignUpScreen() {
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [acceptedTerms, setAcceptedTerms] = useState(false);
-  const [showPassword, setShowPassword] = useState(false);
-  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
 
   const [nameError, setNameError] = useState("");
   const [emailError, setEmailError] = useState("");
@@ -213,7 +211,7 @@ export default function SignUpScreen() {
           value={password}
           onChangeText={handlePasswordChange}
           placeholder="Create a password"
-          secureTextEntry={!showPassword}
+          secureTextEntry
           returnKeyType="next"
           onSubmitEditing={() => confirmPasswordRef.current?.focus()}
           editable={!loading}
@@ -227,7 +225,7 @@ export default function SignUpScreen() {
           value={confirmPassword}
           onChangeText={handleConfirmPasswordChange}
           placeholder="Confirm your password"
-          secureTextEntry={!showConfirmPassword}
+          secureTextEntry
           returnKeyType="done"
           onSubmitEditing={handleSignUp}
           editable={!loading}

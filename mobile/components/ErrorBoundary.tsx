@@ -1,7 +1,6 @@
 import React from "react";
 import { View, Text, ScrollView, Pressable } from "react-native";
 import { AppIcon as Ionicons } from "./icons/AppIcon";
-import EmptyState from "./feedback/EmptyState";
 import PrimaryButton from "./ui/PrimaryButton";
 import {
   captureErrorBoundary,

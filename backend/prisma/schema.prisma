@@ -363,10 +363,12 @@ model WorkerProfile {
   addressLat Float?
   addressLng Float?
 
-  // Live GPS location — updated at arrival check-in (see
-  // bookingController.arriveBooking) and used for the arrival geofence
-  // check. Deliberately not used for matching/search or pricing (this app
-  // has no reliable live-location source for workers before they arrive).
+  // Dead columns from the since-removed live-proximity-matching feature
+  // (see matchingService.ts's docblock) — nothing in backend/src reads or
+  // writes these anymore. The real arrival GPS check-in writes to
+  // Booking.workerLat/workerLng + ArrivalVerification instead (see
+  // bookingController.arriveBooking). Left in place only because dropping
+  // columns needs a migration; do not resurrect reads/writes against these.
   currentLat         Float?
   currentLng         Float?
   lastLocationUpdate DateTime?

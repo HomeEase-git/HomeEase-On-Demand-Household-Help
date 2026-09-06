@@ -75,6 +75,15 @@ jobs:
           cache: npm
           cache-dependency-path: backend/package-lock.json
       - run: npm ci
+      # Fails the build on a new high/critical vuln in a production
+      # dependency (dev-only tooling is excluded). `prisma` (the CLI) stays
+      # a prod dependency because docker-entrypoint.sh runs `prisma migrate
+      # deploy` at container start after an `npm ci --omit=dev` install —
+      # it pulls in @prisma/dev's local-dev-server code, which this repo
+      # never invokes but which drags along outdated nested packages; see
+      # the `overrides` block in package.json, which pins those to patched
+      # versions (exact, not caret, so they can't drift outside this file).
+      - run: npm audit --omit=dev --audit-level=high
       - run: npx prisma generate
       - run: npx prisma migrate deploy
       - run: npx tsc --noEmit
@@ -119,6 +128,7 @@ jobs:
           cache: npm
           cache-dependency-path: web/package-lock.json
       - run: npm ci
+      - run: npm audit --omit=dev --audit-level=high
       - run: npx vite build
 
   # Keeps the deploy artifacts honest — a broken Dockerfile / entrypoint /

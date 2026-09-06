@@ -22,7 +22,6 @@ type Props = {
 
 export const RecordCard: React.FC<Props> = ({ record, onPress }) => {
   const isCompleted = record.status === "Completed";
-  const isCancelled = record.status === "Cancelled";
   const isOngoing = record.status === "Ongoing";
 
   return (

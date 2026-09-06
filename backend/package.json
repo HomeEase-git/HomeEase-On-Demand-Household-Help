@@ -10,6 +10,7 @@
     "test:e2e:sandbox": "node _e2e_test_run.js",
     "typecheck:tooling": "tsc --noEmit -p tsconfig.tooling.json",
     "dev": "nodemon --exec \"ts-node -r tsconfig-paths/register\" src/index.ts",
+    "redis:dev": "tsx scripts/dev-redis.ts",
     "build": "tsc && tsc-alias",
     "start": "node dist/index.js",
     "prisma:generate": "prisma generate",
@@ -17,6 +18,7 @@
     "prisma:studio": "prisma studio",
     "prisma:seed:full": "tsx prisma/seeds/seed-full.ts",
     "prisma:seed:complete": "tsx prisma/seeds/seed-complete.ts",
+    "prisma:seed:comprehensive": "tsx prisma/seeds/seed-comprehensive.ts",
     "prisma:seed:e2e-sandbox": "tsx prisma/seeds/seed-e2e-sandbox.ts",
     "test:concurrency": "ts-node scripts/concurrency_test.ts",
     "neon:branch": "tsx scripts/neon-branch.ts"
@@ -40,7 +42,7 @@
     "ioredis": "^5.11.1",
     "jsonwebtoken": "^9.0.3",
     "multer": "^2.0.1",
-    "nodemailer": "^7.0.13",
+    "nodemailer": "^10.0.0",
     "pdfkit": "^0.19.1",
     "pg": "^8.22.0",
     "prisma": "^7.9.0",
@@ -54,7 +56,6 @@
     "@types/jsonwebtoken": "^9.0.10",
     "@types/multer": "^1.4.12",
     "@types/node": "^25.9.5",
-    "@types/nodemailer": "^8.0.1",
     "@types/pdfkit": "^0.17.6",
     "@types/pg": "^8.20.0",
     "@types/supertest": "^7.2.1",
@@ -68,5 +69,13 @@
     "tsconfig-paths": "^4.2.0",
     "tsx": "^4.23.1",
     "typescript": "^6.0.3"
+  },
+  "overrides": {
+    "find-my-way": "9.9.0",
+    "mysql2": "3.24.3",
+    "valibot": "1.4.2",
+    "deepmerge-ts": "8.0.2",
+    "fast-uri": "4.1.4",
+    "qs": "6.16.0"
   }
 }

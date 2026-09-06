@@ -25,6 +25,14 @@ const baseConnection = process.env.REDIS_URL
       password: process.env.REDIS_PASSWORD || undefined,
     };
 
+// The actual host/port ioredis will report on a connection error — resolved
+// the same way as baseConnection (REDIS_URL takes priority), so callers that
+// need to identify "was this failure our configured Redis?" (e.g. index.ts's
+// uncaughtException guard) match reality instead of assuming REDIS_HOST/PORT
+// env vars are set, which they aren't when only REDIS_URL is (Render, etc.).
+export const redisHost = baseConnection.host;
+export const redisPort = baseConnection.port;
+
 // For Queue producers (the `.add()` side — bookingQueue/payoutQueue so far).
 // Bounded retries so a Redis outage surfaces as a fast, visible error on
 // the request that tried to schedule a job (e.g. booking creation) instead
