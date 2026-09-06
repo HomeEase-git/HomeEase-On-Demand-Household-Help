@@ -145,6 +145,12 @@ the DB or with a seed script.
 5. Deploy. Grab the resulting `*.vercel.app` URL and feed it back into the
    backend's `ALLOWED_ORIGINS` if you haven't already.
 
+Live: `home-ease-on-demand-household-help.vercel.app` (use the stable
+**Domains** URL, not the per-deploy one with a random hash under
+**Deployment**) → `ALLOWED_ORIGINS` on Render, both confirmed working (CORS
+preflight against `/api/auth/login` returns the right
+`Access-Control-Allow-Origin`).
+
 ## 4. Mobile
 
 `mobile/eas.json` carries `EXPO_PUBLIC_API_URL` per profile — **replace the
