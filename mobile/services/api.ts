@@ -1,4 +1,5 @@
 import axios, { AxiosRequestConfig, isAxiosError } from 'axios';
+import { router } from 'expo-router';
 import { config } from '../constants/config';
 import { authStorage } from '../utils/storage';
 import { AbortableRequest } from '../utils/apiErrorHandling';
@@ -89,11 +90,34 @@ const createApiClient = (): ApiClient => {
         if (isAxiosError(error)) {
           const status = error.response?.status;
           if (status === 401 || status === 403) {
+            // Dynamic import to avoid a circular dependency at module-load
+            // time (authStore -> notificationService -> this file). Safe
+            // here since it's only ever touched inside this async handler,
+            // long after the whole module graph has finished loading.
+            const { useAuthStore } = await import('../store/authStore');
+            const wasAuthenticated = useAuthStore.getState().isAuthenticated;
+
             // Clear stored auth (token + user) so app reacts to unauthorized state
             try {
               await authStorage.clearAuth();
             } catch (e) {
               console.error('Error clearing auth on 401/403:', e);
+            }
+
+            // authStorage.clearAuth() only wipes AsyncStorage — without also
+            // clearing the live zustand state, every screen keeps reading
+            // the old (now-stale) user/token from memory and behaves as if
+            // still logged in, while the *next* request has nothing to
+            // send and fails with a confusing "No token provided" instead
+            // of the real reason (a previous request's token got rejected
+            // and the session was silently torn down underneath the UI).
+            // Only do this — and only redirect — for a session that was
+            // actually logged in; a 401 from a plain failed login attempt
+            // has no session to tear down and its own screen already shows
+            // the right error.
+            if (wasAuthenticated) {
+              useAuthStore.setState({ user: null, token: null, isAuthenticated: false });
+              router.replace('/landing');
             }
           }
 
