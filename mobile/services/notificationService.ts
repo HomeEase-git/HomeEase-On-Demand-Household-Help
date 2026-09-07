@@ -1,5 +1,6 @@
 import type * as Notifications from 'expo-notifications';
 import Constants from 'expo-constants';
+import { Platform } from 'react-native';
 import { isRunningInExpoGo } from 'expo';
 import { authStorage } from '../utils/storage';
 import { updatePushToken, removePushToken } from './api';
@@ -140,6 +141,20 @@ class NotificationService {
     try {
       const Notifications = await getNotificationsModule();
       if (!Notifications) return;
+
+      // Push tokens need Firebase Cloud Messaging on Android, wired up via
+      // app.json's android.googleServicesFile — never configured for this
+      // app. Calling getExpoPushTokenAsync() without it doesn't just reject
+      // cleanly like the try/catch here would normally handle: it was
+      // observed causing a native crash (not a catchable JS rejection) the
+      // first time a fresh install's notification permission is granted.
+      // Skip the call entirely until Firebase is set up — this re-enables
+      // itself automatically the moment googleServicesFile is configured,
+      // no need to remember to revert this guard.
+      if (Platform.OS === 'android' && !Constants.expoConfig?.android?.googleServicesFile) {
+        console.log('[Notifications] Skipping push token fetch — Firebase not configured (no googleServicesFile in app.json)');
+        return;
+      }
 
       // Get project ID for Firebase
       const projectId =
