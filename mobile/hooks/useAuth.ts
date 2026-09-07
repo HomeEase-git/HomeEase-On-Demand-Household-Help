@@ -1,4 +1,5 @@
 import { useCallback } from 'react';
+import { InteractionManager } from 'react-native';
 import { useAuthStore } from '../store/authStore';
 import {
   postLogin,
@@ -15,10 +16,21 @@ import { notificationService } from '../services/notificationService';
  * granted, obtains + registers the push token against the now-authenticated
  * session. Fire-and-forget from the caller's perspective — a denied/failed
  * permission request should never block login/signup.
+ *
+ * Deferred with InteractionManager.runAfterInteractions(): calling this
+ * immediately after login/signup means the native OS permission dialog can
+ * pop up (and later dismiss) while the app is still mid-navigation-transition
+ * to the next screen — observed live (adb logcat) causing a Fabric crash
+ * (`addViewAt: failed to insert view ... into parent ... at index`) from two
+ * concurrent view-tree mutations racing each other. Waiting for the current
+ * transition/interactions to finish before even requesting the permission
+ * removes that race instead of trying to catch its symptom.
  */
 function registerForPushNotifications() {
-  notificationService.requestPermissions().catch((error) => {
-    console.error('[useAuth] Failed to set up push notifications:', error);
+  InteractionManager.runAfterInteractions(() => {
+    notificationService.requestPermissions().catch((error) => {
+      console.error('[useAuth] Failed to set up push notifications:', error);
+    });
   });
 }
 
