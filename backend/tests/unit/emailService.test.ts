@@ -7,11 +7,10 @@ jest.mock('nodemailer', () => ({
   createTransport: mockCreateTransport,
 }));
 
-// emailService.ts reads SMTP_USER/SMTP_PASS/SMTP_FROM_NAME into module-level
-// consts at import time and caches its transporter in a module-level
-// variable, so each test needs a fresh module instance (via
-// jest.isolateModules) to see a given env combination and to reliably
-// assert on transporter-creation call counts.
+// emailService.ts reads env into module-level consts at import time and
+// caches its SMTP transporter in a module-level variable, so each test needs
+// a fresh module instance (via jest.isolateModules) to see a given env
+// combination and to reliably assert on transporter-creation call counts.
 function loadEmailService(env: Record<string, string | undefined>): typeof EmailService {
   const originalEnv = { ...process.env };
   // Node stringifies assigned process.env values, so `= undefined` would
@@ -35,15 +34,26 @@ function loadEmailService(env: Record<string, string | undefined>): typeof Email
 }
 
 const TEST_ENV = {
+  EMAIL_PROVIDER: undefined,
   SMTP_USER: 'noreply@homeease.test',
   SMTP_PASS: 'app-password',
   SMTP_FROM_NAME: 'HomeEase',
+  SMTP_HOST: undefined,
+  SMTP_PORT: undefined,
+  SMTP_SECURE: undefined,
 };
 
 describe('emailService', () => {
+  let originalFetch: typeof fetch;
+
   beforeEach(() => {
     mockSendMail.mockReset();
     mockCreateTransport.mockClear();
+    originalFetch = global.fetch;
+  });
+
+  afterEach(() => {
+    global.fetch = originalFetch;
   });
 
   it('sends an OTP email over Gmail SMTP with the code embedded', async () => {
@@ -52,17 +62,30 @@ describe('emailService', () => {
 
     await sendOtpEmail('client@example.com', '123456');
 
-    expect(mockCreateTransport).toHaveBeenCalledWith({
-      host: 'smtp.gmail.com',
-      port: 465,
-      secure: true,
-      auth: { user: 'noreply@homeease.test', pass: 'app-password' },
-    });
+    expect(mockCreateTransport).toHaveBeenCalledWith(
+      expect.objectContaining({
+        host: 'smtp.gmail.com',
+        port: 465,
+        secure: true,
+        auth: { user: 'noreply@homeease.test', pass: 'app-password' },
+      })
+    );
     const [sentMessage] = mockSendMail.mock.calls[0];
     expect(sentMessage.from).toBe('HomeEase <noreply@homeease.test>');
     expect(sentMessage.to).toBe('client@example.com');
     expect(sentMessage.subject).toBe('Your HomeEase Verification Code');
     expect(sentMessage.html).toContain('123456');
+  });
+
+  it('honours SMTP_PORT / SMTP_SECURE overrides (e.g. 587 STARTTLS)', async () => {
+    mockSendMail.mockResolvedValueOnce({ messageId: 'abc' });
+    const { sendOtpEmail } = loadEmailService({ ...TEST_ENV, SMTP_PORT: '587', SMTP_SECURE: 'false' });
+
+    await sendOtpEmail('client@example.com', '123456');
+
+    expect(mockCreateTransport).toHaveBeenCalledWith(
+      expect.objectContaining({ port: 587, secure: false, requireTLS: true })
+    );
   });
 
   it('embeds the reset code in the password reset email', async () => {
@@ -107,11 +130,63 @@ describe('emailService', () => {
   });
 
   it('throws before ever creating a transport when SMTP credentials are missing', async () => {
-    const { sendOtpEmail } = loadEmailService({ SMTP_USER: undefined, SMTP_PASS: undefined });
+    const { sendOtpEmail } = loadEmailService({ ...TEST_ENV, SMTP_USER: undefined, SMTP_PASS: undefined });
 
     await expect(sendOtpEmail('client@example.com', '123456')).rejects.toThrow(
-      'Failed to send OTP email: SMTP_USER and SMTP_PASS must be set to send email'
+      'Failed to send OTP email: SMTP_USER and SMTP_PASS must be set for EMAIL_PROVIDER=smtp'
     );
     expect(mockCreateTransport).not.toHaveBeenCalled();
+  });
+
+  it('dispatches to the Brevo HTTP API when EMAIL_PROVIDER=brevo', async () => {
+    const fetchMock = jest.fn().mockResolvedValue({ ok: true, json: async () => ({ messageId: '<brevo-1>' }) });
+    global.fetch = fetchMock as unknown as typeof fetch;
+    const { sendOtpEmail } = loadEmailService({
+      ...TEST_ENV,
+      EMAIL_PROVIDER: 'brevo',
+      BREVO_API_KEY: 'xkeysib-test',
+      BREVO_SENDER_EMAIL: 'noreply@homeease.test',
+    });
+
+    await sendOtpEmail('client@example.com', '123456');
+
+    expect(mockCreateTransport).not.toHaveBeenCalled();
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://api.brevo.com/v3/smtp/email',
+      expect.objectContaining({ method: 'POST' })
+    );
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(body.to).toEqual([{ email: 'client@example.com' }]);
+    expect(body.sender.email).toBe('noreply@homeease.test');
+    expect(body.htmlContent).toContain('123456');
+  });
+
+  it('dispatches to the Gmail REST API (token refresh + send) when EMAIL_PROVIDER=gmail-api', async () => {
+    const fetchMock = jest
+      .fn()
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ access_token: 'ya29.test', expires_in: 3600 }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ id: 'gmail-msg-1' }) });
+    global.fetch = fetchMock as unknown as typeof fetch;
+    const { sendOtpEmail } = loadEmailService({
+      ...TEST_ENV,
+      EMAIL_PROVIDER: 'gmail-api',
+      GMAIL_CLIENT_ID: 'cid',
+      GMAIL_CLIENT_SECRET: 'csec',
+      GMAIL_REFRESH_TOKEN: 'rtok',
+    });
+
+    await sendOtpEmail('client@example.com', '123456');
+
+    expect(mockCreateTransport).not.toHaveBeenCalled();
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      'https://oauth2.googleapis.com/token',
+      expect.objectContaining({ method: 'POST' })
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      'https://gmail.googleapis.com/gmail/v1/users/me/messages/send',
+      expect.objectContaining({ method: 'POST' })
+    );
   });
 });

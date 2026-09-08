@@ -28,6 +28,7 @@ import adminReportsRoutes from '@routes/adminReports';
 import adminSettingsRoutes from '@routes/adminSettings';
 import adminTaxRoutes from '@routes/adminTax';
 import internalCronRoutes from '@routes/internalCron';
+import internalDiagRoutes from '@routes/internalDiag';
 import { errorHandler } from '@middleware/errorHandler';
 
 const app = express();
@@ -114,6 +115,7 @@ app.get('/health/ready', async (_req, res) => {
 // broad API limiter and CORS allow-list; it has its own auth (CRON_SECRET)
 // and its own limiter.
 app.use('/internal/cron', internalCronRoutes);
+app.use('/internal/diag', internalDiagRoutes);
 
 // Broad rate limit across the whole API surface (credential endpoints get a
 // second, stricter limiter inside routes/auth.ts).
