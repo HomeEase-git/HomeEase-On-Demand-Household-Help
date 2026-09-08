@@ -1,3 +1,5 @@
+import dns from 'node:dns';
+import net from 'node:net';
 import nodemailer, { Transporter } from 'nodemailer';
 
 // Pluggable email transport. EMAIL_PROVIDER selects one of:
@@ -30,10 +32,14 @@ const SMTP_PASS = process.env.SMTP_PASS;
 const SMTP_HOST = process.env.SMTP_HOST || 'smtp.gmail.com';
 const SMTP_PORT = Number(process.env.SMTP_PORT) || 465;
 const SMTP_SECURE = process.env.SMTP_SECURE ? process.env.SMTP_SECURE === 'true' : SMTP_PORT === 465;
-// Force IPv4 by default: the Render host resolves smtp.gmail.com to an AAAA
-// record but has no IPv6 route, and nodemailer doesn't Happy-Eyeballs down to
-// IPv4 on its own (it just fails ENETUNREACH). SMTP_FAMILY=0 restores
-// "try both", SMTP_FAMILY=6 forces IPv6.
+// Force IPv4 by default. nodemailer 10 resolves BOTH A and AAAA records and
+// then picks one at random (shared/index.js formatDNSValue) — it does not
+// honour a `family` option — so on the Render host (which has an IPv6
+// interface but no IPv6 route) roughly half its connections die with
+// ENETUNREACH. When SMTP_FAMILY=4 we resolve the host to an A record
+// ourselves and hand nodemailer the IPv4 literal (+ TLS servername), which
+// short-circuits its resolver entirely. SMTP_FAMILY=0 restores "let
+// nodemailer resolve", 6 forces its IPv6 path.
 const SMTP_FAMILY = process.env.SMTP_FAMILY !== undefined ? Number(process.env.SMTP_FAMILY) : 4;
 // Fail fast on a blocked port / unreachable host instead of hanging ~2 min on
 // nodemailer's default connectionTimeout (which was blocking the whole signup
@@ -54,33 +60,79 @@ const HTTP_TIMEOUT_MS = 15_000;
 
 export const getEmailProviderName = (): string => PROVIDER;
 
+// Snapshot of the effective transport config, for POST /internal/diag/email-test.
+export const getEmailDiagInfo = async (): Promise<Record<string, unknown>> => {
+  const info: Record<string, unknown> = { provider: PROVIDER, from: FROM };
+  if (PROVIDER === 'smtp') {
+    let connectHost: string = SMTP_HOST;
+    let servername: string | undefined;
+    let resolveError: string | undefined;
+    try {
+      ({ host: connectHost, servername } = await resolveSmtpTarget());
+    } catch (err) {
+      resolveError = (err as Error).message;
+    }
+    info.smtp = {
+      configuredHost: SMTP_HOST,
+      connectHost,
+      servername: servername ?? null,
+      port: SMTP_PORT,
+      secure: SMTP_SECURE,
+      family: SMTP_FAMILY,
+      ...(resolveError ? { resolveError } : {}),
+    };
+  }
+  return info;
+};
+
 // ---------------------------------------------------------------------------
 // Transports — each returns a provider messageId string (or undefined) and
 // throws with a clear message on misconfiguration or send failure.
 // ---------------------------------------------------------------------------
 
-let transporter: Transporter | null = null;
+// Resolve SMTP_HOST to an IPv4 literal when SMTP_FAMILY=4, so nodemailer's
+// own (randomising) resolver never gets a chance to pick an AAAA record.
+export const resolveSmtpTarget = async (): Promise<{ host: string; servername?: string }> => {
+  if (SMTP_FAMILY === 4 && SMTP_HOST && net.isIP(SMTP_HOST) === 0) {
+    const addrs = await dns.promises.resolve4(SMTP_HOST);
+    if (addrs.length) {
+      return { host: addrs[0], servername: SMTP_HOST };
+    }
+  }
+  return { host: SMTP_HOST };
+};
 
-const getTransporter = (): Transporter => {
+let transporterPromise: Promise<Transporter> | null = null;
+
+const buildTransporter = async (): Promise<Transporter> => {
   if (!SMTP_USER || !SMTP_PASS) {
     throw new Error('SMTP_USER and SMTP_PASS must be set for EMAIL_PROVIDER=smtp');
   }
-  if (!transporter) {
-    transporter = nodemailer.createTransport({
-      host: SMTP_HOST,
-      port: SMTP_PORT,
-      secure: SMTP_SECURE,
-      requireTLS: !SMTP_SECURE,
-      auth: { user: SMTP_USER, pass: SMTP_PASS },
-      ...(SMTP_FAMILY ? { family: SMTP_FAMILY } : {}),
-      ...SMTP_TIMEOUTS,
+  const { host, servername } = await resolveSmtpTarget();
+  return nodemailer.createTransport({
+    host,
+    port: SMTP_PORT,
+    secure: SMTP_SECURE,
+    requireTLS: !SMTP_SECURE,
+    ...(servername ? { servername, tls: { servername } } : {}),
+    ...(SMTP_FAMILY ? { family: SMTP_FAMILY } : {}),
+    auth: { user: SMTP_USER, pass: SMTP_PASS },
+    ...SMTP_TIMEOUTS,
+  });
+};
+
+const getTransporter = (): Promise<Transporter> => {
+  if (!transporterPromise) {
+    transporterPromise = buildTransporter().catch((err) => {
+      transporterPromise = null; // let the next send retry the DNS resolve
+      throw err;
     });
   }
-  return transporter;
+  return transporterPromise;
 };
 
 const sendViaSmtp = async (to: string, subject: string, html: string): Promise<string | undefined> => {
-  const info = await getTransporter().sendMail({ from: FROM, to, subject, html });
+  const info = await (await getTransporter()).sendMail({ from: FROM, to, subject, html });
   return info.messageId;
 };
 

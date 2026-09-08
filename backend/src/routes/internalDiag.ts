@@ -1,7 +1,7 @@
 import { Router, type Request, type Response } from 'express';
 import crypto from 'node:crypto';
 import { authLimiter } from '@middleware/rateLimit';
-import { sendTestEmail, getEmailProviderName } from '@utils/emailService';
+import { sendTestEmail, getEmailProviderName, getEmailDiagInfo } from '@utils/emailService';
 
 // Server-to-server diagnostics, deliberately outside /api (see app.ts) — same
 // CRON_SECRET shared-secret auth as internalCron.ts. OFF unless
@@ -46,13 +46,14 @@ router.post('/email-test', authLimiter, async (req: Request, res: Response) => {
     return;
   }
 
+  const config = await getEmailDiagInfo().catch(() => ({ provider: getEmailProviderName() }));
   const start = Date.now();
   try {
     const result = await sendTestEmail(to);
-    res.json({ ok: true, ms: Date.now() - start, ...result });
+    res.json({ ok: true, ms: Date.now() - start, config, ...result });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unknown error';
-    res.status(502).json({ ok: false, ms: Date.now() - start, provider: getEmailProviderName(), message });
+    res.status(502).json({ ok: false, ms: Date.now() - start, provider: getEmailProviderName(), config, message });
   }
 });
 

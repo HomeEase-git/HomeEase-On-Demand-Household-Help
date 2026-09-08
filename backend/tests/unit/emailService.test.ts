@@ -7,6 +7,16 @@ jest.mock('nodemailer', () => ({
   createTransport: mockCreateTransport,
 }));
 
+// emailService resolves SMTP_HOST to an A record itself (SMTP_FAMILY=4) — keep
+// that off the real network.
+jest.mock('node:dns', () => {
+  const actual = jest.requireActual('node:dns');
+  return {
+    ...actual,
+    promises: { ...actual.promises, resolve4: jest.fn().mockResolvedValue(['93.184.216.34']) },
+  };
+});
+
 // emailService.ts reads env into module-level consts at import time and
 // caches its SMTP transporter in a module-level variable, so each test needs
 // a fresh module instance (via jest.isolateModules) to see a given env
@@ -65,7 +75,9 @@ describe('emailService', () => {
 
     expect(mockCreateTransport).toHaveBeenCalledWith(
       expect.objectContaining({
-        host: 'smtp.gmail.com',
+        host: '93.184.216.34', // resolved from smtp.gmail.com, family 4
+        servername: 'smtp.gmail.com',
+        tls: { servername: 'smtp.gmail.com' },
         port: 465,
         secure: true,
         family: 4,
@@ -90,12 +102,15 @@ describe('emailService', () => {
     );
   });
 
-  it('omits family when SMTP_FAMILY=0 (let the OS pick)', async () => {
+  it('with SMTP_FAMILY=0 leaves resolution to nodemailer (hostname, no family)', async () => {
     mockSendMail.mockResolvedValueOnce({ messageId: 'abc' });
     const { sendOtpEmail } = loadEmailService({ ...TEST_ENV, SMTP_FAMILY: '0' });
 
     await sendOtpEmail('client@example.com', '123456');
 
+    expect(mockCreateTransport).toHaveBeenCalledWith(
+      expect.objectContaining({ host: 'smtp.gmail.com' })
+    );
     expect(mockCreateTransport).toHaveBeenCalledWith(
       expect.not.objectContaining({ family: expect.anything() })
     );
