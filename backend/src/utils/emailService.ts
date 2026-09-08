@@ -30,6 +30,11 @@ const SMTP_PASS = process.env.SMTP_PASS;
 const SMTP_HOST = process.env.SMTP_HOST || 'smtp.gmail.com';
 const SMTP_PORT = Number(process.env.SMTP_PORT) || 465;
 const SMTP_SECURE = process.env.SMTP_SECURE ? process.env.SMTP_SECURE === 'true' : SMTP_PORT === 465;
+// Force IPv4 by default: the Render host resolves smtp.gmail.com to an AAAA
+// record but has no IPv6 route, and nodemailer doesn't Happy-Eyeballs down to
+// IPv4 on its own (it just fails ENETUNREACH). SMTP_FAMILY=0 restores
+// "try both", SMTP_FAMILY=6 forces IPv6.
+const SMTP_FAMILY = process.env.SMTP_FAMILY !== undefined ? Number(process.env.SMTP_FAMILY) : 4;
 // Fail fast on a blocked port / unreachable host instead of hanging ~2 min on
 // nodemailer's default connectionTimeout (which was blocking the whole signup
 // response on Render).
@@ -67,6 +72,7 @@ const getTransporter = (): Transporter => {
       secure: SMTP_SECURE,
       requireTLS: !SMTP_SECURE,
       auth: { user: SMTP_USER, pass: SMTP_PASS },
+      ...(SMTP_FAMILY ? { family: SMTP_FAMILY } : {}),
       ...SMTP_TIMEOUTS,
     });
   }

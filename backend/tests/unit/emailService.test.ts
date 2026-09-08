@@ -41,6 +41,7 @@ const TEST_ENV = {
   SMTP_HOST: undefined,
   SMTP_PORT: undefined,
   SMTP_SECURE: undefined,
+  SMTP_FAMILY: undefined,
 };
 
 describe('emailService', () => {
@@ -67,6 +68,7 @@ describe('emailService', () => {
         host: 'smtp.gmail.com',
         port: 465,
         secure: true,
+        family: 4,
         auth: { user: 'noreply@homeease.test', pass: 'app-password' },
       })
     );
@@ -85,6 +87,17 @@ describe('emailService', () => {
 
     expect(mockCreateTransport).toHaveBeenCalledWith(
       expect.objectContaining({ port: 587, secure: false, requireTLS: true })
+    );
+  });
+
+  it('omits family when SMTP_FAMILY=0 (let the OS pick)', async () => {
+    mockSendMail.mockResolvedValueOnce({ messageId: 'abc' });
+    const { sendOtpEmail } = loadEmailService({ ...TEST_ENV, SMTP_FAMILY: '0' });
+
+    await sendOtpEmail('client@example.com', '123456');
+
+    expect(mockCreateTransport).toHaveBeenCalledWith(
+      expect.not.objectContaining({ family: expect.anything() })
     );
   });
 
