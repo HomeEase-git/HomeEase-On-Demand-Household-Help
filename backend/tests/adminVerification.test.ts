@@ -29,7 +29,7 @@ describe('Admin verification approve/reject', () => {
     await prisma.$disconnect();
   });
 
-  async function seedPendingVerification(label: string) {
+  async function seedPendingVerification(label: string, status: 'PENDING' | 'SUBMITTED' = 'PENDING') {
     const { user: worker } = await createTestUser(label, { role: 'WORKER' });
     createdUserIds.push(worker.id);
 
@@ -37,7 +37,7 @@ describe('Admin verification approve/reject', () => {
       data: {
         userId: worker.id,
         type: 'WORKER_ONBOARDING',
-        status: 'PENDING',
+        status,
         documents: {
           // All 4 Tier 1 required types (see documents.MD / adminVerificationController's
           // approval completeness gate) so approval tests reflect a realistic, complete
@@ -65,6 +65,37 @@ describe('Admin verification approve/reject', () => {
     expect(res.status).toBe(200);
     expect(res.body.data.some((v: { id: string }) => v.id === verification.id)).toBe(true);
     expect(res.body.data.find((v: { id: string }) => v.id === verification.id).name).toBe(worker.fullName);
+  });
+
+  it('includes SUBMITTED (a completed worker application) when the queue is filtered to PENDING', async () => {
+    // A worker's request only ever reaches SUBMITTED once they finish
+    // onboarding (userController.acceptContract) and never moves back to
+    // PENDING — the admin web's Verification Management page always queries
+    // status=PENDING with no way to change it, so SUBMITTED must show up
+    // there too or a completed application is invisible to admins forever.
+    const { worker, verification } = await seedPendingVerification('submitted', 'SUBMITTED');
+
+    const res = await request(app)
+      .get('/api/admin/verifications?status=PENDING')
+      .set('Authorization', `Bearer ${adminToken}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.some((v: { id: string }) => v.id === verification.id)).toBe(true);
+    expect(res.body.data.find((v: { id: string }) => v.id === verification.id).name).toBe(worker.fullName);
+  });
+
+  it('does not leak SUBMITTED into an explicit APPROVED or REJECTED filter', async () => {
+    const { verification: submitted } = await seedPendingVerification('submitted-2', 'SUBMITTED');
+
+    const approvedRes = await request(app)
+      .get('/api/admin/verifications?status=APPROVED')
+      .set('Authorization', `Bearer ${adminToken}`);
+    const rejectedRes = await request(app)
+      .get('/api/admin/verifications?status=REJECTED')
+      .set('Authorization', `Bearer ${adminToken}`);
+
+    expect(approvedRes.body.data.some((v: { id: string }) => v.id === submitted.id)).toBe(false);
+    expect(rejectedRes.body.data.some((v: { id: string }) => v.id === submitted.id)).toBe(false);
   });
 
   it('approves a verification, updates worker KYC status, and notifies the worker', async () => {

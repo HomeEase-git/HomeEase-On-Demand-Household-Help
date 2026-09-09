@@ -1,4 +1,5 @@
 import { Request, Response } from 'express';
+import { KYCStatus } from '@prisma/client';
 import prisma from '@config/database';
 import { errorResponse } from '@utils/errorResponse';
 import { formatVerification } from '@utils/formatters';
@@ -28,9 +29,22 @@ export const listVerifications = async (req: Request, res: Response) => {
     const type = typeof req.query.type === 'string' ? req.query.type.toLowerCase() : 'all';
     const search = typeof req.query.search === 'string' ? req.query.search.trim() : '';
 
+    // A worker's request only ever reaches SUBMITTED once they finish
+    // onboarding (see userController.acceptContract) — it never moves back to
+    // PENDING. Treat "PENDING" here as "awaiting admin action" and include
+    // SUBMITTED too, or a completed worker application would never surface in
+    // the default admin queue (see the app's Verification Management page,
+    // which always requests status=PENDING with no way to change it).
+    const statusFilter =
+      status === 'ALL'
+        ? undefined
+        : status === 'PENDING'
+          ? { in: [KYCStatus.PENDING, KYCStatus.SUBMITTED] }
+          : (status as KYCStatus);
+
     const records = await prisma.verificationRequest.findMany({
       where: {
-        ...(status !== 'ALL' ? { status: status as 'PENDING' | 'SUBMITTED' | 'APPROVED' | 'REJECTED' } : {}),
+        ...(statusFilter ? { status: statusFilter } : {}),
         ...(type === 'worker' ? { user: { role: 'WORKER' } } : {}),
         ...(type === 'client' ? { user: { role: 'CLIENT' } } : {}),
         ...(search
