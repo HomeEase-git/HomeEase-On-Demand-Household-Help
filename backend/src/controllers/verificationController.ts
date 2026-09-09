@@ -84,16 +84,41 @@ export const uploadVerificationDocuments = async (req: AuthRequest, res: Respons
 
     const requestType = user.role === 'WORKER' ? 'WORKER_ONBOARDING' : 'CLIENT_VERIFICATION';
 
-    const verification = await prisma.verificationRequest.create({
-      data: {
-        userId: user.id,
-        type: requestType,
-        status: 'PENDING',
-        aiStatus: 'PENDING',
-        documents: { create: uploadedDocs },
-      },
-      include: { user: true, documents: true },
+    // Reuse an existing open request for this user instead of always
+    // creating a new one — a single call can only tag its files with one
+    // documentType, so a full submission (ID front, ID back, selfie, ...)
+    // takes several calls; without this they'd fragment into a separate
+    // admin-reviewable card per call instead of one per applicant. Mirrors
+    // userController.submitKYCDocument's behavior on the worker-onboarding
+    // upload path.
+    const openRequest = await prisma.verificationRequest.findFirst({
+      where: { userId: user.id, type: requestType, status: { in: ['PENDING', 'SUBMITTED'] } },
+      orderBy: { submittedAt: 'desc' },
     });
+
+    const verification = openRequest
+      ? await prisma.$transaction(async (tx) => {
+          await tx.kycDocument.createMany({
+            data: uploadedDocs.map((doc) => ({ ...doc, verificationRequestId: openRequest.id })),
+          });
+          // New evidence just arrived — re-flag for AI review rather than
+          // leaving a stale result from an earlier, incomplete submission.
+          return tx.verificationRequest.update({
+            where: { id: openRequest.id },
+            data: { aiStatus: 'PENDING' },
+            include: { user: true, documents: true },
+          });
+        })
+      : await prisma.verificationRequest.create({
+          data: {
+            userId: user.id,
+            type: requestType,
+            status: 'PENDING',
+            aiStatus: 'PENDING',
+            documents: { create: uploadedDocs },
+          },
+          include: { user: true, documents: true },
+        });
 
     // Best-effort — the VerificationRequest row and its documents (plus the
     // actual Supabase file uploads above) already exist at this point, so a
@@ -103,13 +128,17 @@ export const uploadVerificationDocuments = async (req: AuthRequest, res: Respons
     // request sits at aiStatus PENDING until an admin notices and reruns it
     // (see adminVerificationController.rerunVerification, which queues the
     // exact same job).
+    //
+    // Reviews the FULL current document set on the request (not just this
+    // call's files) so a review triggered by, say, the third upload call
+    // still sees the first two documents too.
     await verificationQueue
       .add(
         'analyze-verification',
         {
           verificationId: verification.id,
           requestType,
-          documents: uploadedDocs.map((doc) => ({
+          documents: verification.documents.map((doc) => ({
             documentType: doc.documentType,
             fileUrl: doc.fileUrl,
             mimeType: doc.mimeType,

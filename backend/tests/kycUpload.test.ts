@@ -103,6 +103,33 @@ describe('KYC document upload', () => {
     expect(mine.status).toBe(200);
     expect(mine.body.data.length).toBeGreaterThanOrEqual(1);
   });
+
+  it('consolidates multiple upload calls into one request instead of one per call', async () => {
+    const { user: applicant, plainPassword } = await createTestUser('kyc-upload-consolidate', { role: 'CLIENT' });
+    createdUserIds.push(applicant.id);
+    const login = await request(app).post('/api/auth/login').send({ email: applicant.email, password: plainPassword });
+    const token = login.body.data.token;
+
+    const first = await attachFile(
+      request(app).post(UPLOAD_PATH).set('Authorization', `Bearer ${token}`).field('documentType', 'GOVERNMENT_ID_FRONT')
+    );
+    const second = await attachFile(
+      request(app).post(UPLOAD_PATH).set('Authorization', `Bearer ${token}`).field('documentType', 'GOVERNMENT_ID_BACK')
+    );
+    const third = await attachFile(
+      request(app).post(UPLOAD_PATH).set('Authorization', `Bearer ${token}`).field('documentType', 'SELFIE')
+    );
+
+    expect(first.body.data.id).toBe(second.body.data.id);
+    expect(second.body.data.id).toBe(third.body.data.id);
+    expect(third.body.data.documents).toHaveLength(3);
+    expect(third.body.data.documents.map((d: { documentType: string }) => d.documentType).sort()).toEqual(
+      ['GOVERNMENT_ID_BACK', 'GOVERNMENT_ID_FRONT', 'SELFIE'].sort()
+    );
+
+    const mine = await request(app).get('/api/verification/mine').set('Authorization', `Bearer ${token}`);
+    expect(mine.body.data).toHaveLength(1);
+  });
 });
 
 describe('Admin verification approval — Tier 1 document completeness gate', () => {
