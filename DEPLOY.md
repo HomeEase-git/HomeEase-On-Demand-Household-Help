@@ -74,6 +74,14 @@ reminders. Treat Redis as a hard dependency and watch `GET /health/ready`.
    **Free plan** instead: see "Free-tier hosting" below — it's supported, but
    needs two extra pieces wired up or the background jobs silently stop.
 
+### Native dependencies
+`sharp` (image resize/re-encode on KYC/verification uploads) is the only native
+module. It ships prebuilt binaries for glibc x64/arm64 — works as-is on Render's
+native Node build and on the `node:22-bookworm-slim` Docker image, no system
+libvips or build tools needed. If you ever move the image to Alpine/musl, `npm`
+pulls the musl variant automatically as long as the platform's `@img/*` optional
+dependency isn't pruned (don't set `--no-optional`).
+
 ### Probes
 - **Liveness:** `GET /health` → `200 {"status":"OK"}` (no dependencies touched).
 - **Readiness:** `GET /health/ready` → `200 {"status":"ready","redis":"connected"|"unreachable"}`

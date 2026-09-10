@@ -1,7 +1,10 @@
 import { Request, Response } from 'express';
+import { KycDocumentType } from '@prisma/client';
 import * as bcrypt from 'bcryptjs';
 import prisma from '@config/database';
 import { errorResponse } from '@utils/errorResponse';
+import { mimeTypeFromUrl, storagePathFromUrl } from '@utils/kycFileMeta';
+import { verificationQueue, VERIFICATION_JOB_OPTIONS } from '@queues/verificationQueue';
 import type { JwtPayload } from '@/types/index';
 
 interface AuthRequest extends Request {
@@ -611,7 +614,14 @@ export const submitKYCDocument = async (req: AuthRequest, res: Response) => {
       return res.status(401).json(errorResponse(401, 'Not authenticated'));
     }
     
-    const { documentType, documentUrl } = req.body;
+    // validateSubmitKYCDocument has already checked documentType is one of
+    // KYC_DOCUMENT_TYPES and documentUrl is a non-empty string.
+    const { documentType, documentUrl, originalName, fileSize } = req.body as {
+      documentType: KycDocumentType;
+      documentUrl: string;
+      originalName?: string;
+      fileSize?: number;
+    };
 
     // KycDocument has no userId field — it must belong to a VerificationRequest.
     // Reuse the user's open request if one exists, otherwise start a new one.
@@ -633,15 +643,52 @@ export const submitKYCDocument = async (req: AuthRequest, res: Response) => {
       });
     }
 
+    // The upload step (POST .../kyc-documents/upload) discards the mime type;
+    // re-derive it from the Supabase URL's extension so the AI review
+    // (verificationAiService) can actually see this document and the admin UI
+    // can render a preview. Client-supplied values are not trusted here.
     const document = await prisma.kycDocument.create({
       data: {
         verificationRequestId: verificationRequest.id,
         documentType,
         fileUrl: documentUrl,
+        fileName: storagePathFromUrl(documentUrl),
+        mimeType: mimeTypeFromUrl(documentUrl),
+        originalName: typeof originalName === 'string' ? originalName : null,
+        fileSize: Number.isFinite(fileSize) ? Number(fileSize) : null,
         status: 'PENDING',
       },
     });
-    
+
+    // Kick off (or re-run) the automated review over the request's FULL current
+    // document set — mirrors verificationController.uploadVerificationDocuments.
+    // Best-effort: the row already exists, so a Redis hiccup must not fail the
+    // submission; an admin can re-run from adminVerificationController.
+    const withDocuments = await prisma.verificationRequest.update({
+      where: { id: verificationRequest.id },
+      data: { aiStatus: 'PENDING' },
+      include: { documents: true },
+    });
+
+    await verificationQueue
+      .add(
+        'analyze-verification',
+        {
+          verificationId: withDocuments.id,
+          requestType: withDocuments.type,
+          documents: withDocuments.documents.map((doc) => ({
+            documentType: doc.documentType,
+            fileUrl: doc.fileUrl,
+            mimeType: doc.mimeType,
+            originalName: doc.originalName,
+          })),
+        },
+        VERIFICATION_JOB_OPTIONS
+      )
+      .catch((error) => {
+        console.error(`Failed to queue AI review for verification ${withDocuments.id}:`, error);
+      });
+
     return res.status(201).json({
       success: true,
       message: 'KYC document submitted successfully',

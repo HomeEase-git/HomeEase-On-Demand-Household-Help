@@ -10,6 +10,7 @@ import UploadCard from "../../components/ui/UploadCard";
 import PrimaryButton from "../../components/ui/PrimaryButton";
 import { useAuthStore } from "../../store/authStore";
 import { submitKycDocument, uploadKycFile } from "../../services/api";
+import { compressImage } from "../../utils/imageCompressor";
 import {
   documentRequirements,
   isDocumentTypeAllowed,
@@ -108,7 +109,22 @@ export default function DocumentsScreen() {
       }
 
       setSubmitting(true);
-      const { url } = await uploadKycFile(key, document.uri, mimeType);
+
+      // Compress image picks (smaller upload, HEIC -> JPEG); PDFs pass through
+      // untouched. Fall back to the original if compression fails.
+      let uploadUri = document.uri;
+      let uploadMime = mimeType;
+      if (mimeType.startsWith("image/")) {
+        try {
+          const compressed = await compressImage(document.uri);
+          uploadUri = compressed.uri;
+          uploadMime = "image/jpeg";
+        } catch (err) {
+          console.error("KYC document compression failed, using original", err);
+        }
+      }
+
+      const { url } = await uploadKycFile(key, uploadUri, uploadMime);
       await submitKycDocument(key, url);
       setDocuments((prev) => ({
         ...prev,

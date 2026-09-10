@@ -66,7 +66,7 @@ export default function SelfieScreen() {
         // Automatically compress the captured selfie
         let selfieUri = photo.uri;
         try {
-          const compressed = await compressImage(photo.uri, 1200, 0.7);
+          const compressed = await compressImage(photo.uri, 1600, 0.7);
           selfieUri = compressed.uri;
           setCapturedUri(compressed.uri);
           alertModal.success(

@@ -46,6 +46,7 @@
     "pdfkit": "^0.19.1",
     "pg": "^8.22.0",
     "prisma": "^7.9.0",
+    "sharp": "0.35.4",
     "socket.io": "^4.8.1"
   },
   "devDependencies": {

@@ -10,6 +10,7 @@ import UploadCard from "../../components/ui/UploadCard";
 import PrimaryButton from "../../components/ui/PrimaryButton";
 import { useAuthStore } from "../../store/authStore";
 import { submitKycDocument, uploadKycFile } from "../../services/api";
+import { compressImage } from "../../utils/imageCompressor";
 import {
   documentRequirements,
   isDocumentTypeAllowed,
@@ -71,7 +72,20 @@ export default function UploadIdScreen() {
     }
 
     try {
-      const { url } = await uploadKycFile(key, uri, mimeType);
+      // Shrink + re-encode as JPEG before upload: smaller payloads, and it
+      // converts iOS HEIC (which the backend rejects). Fall back to the
+      // original if compression fails.
+      let uploadUri = uri;
+      let uploadMime = mimeType;
+      try {
+        const compressed = await compressImage(uri);
+        uploadUri = compressed.uri;
+        uploadMime = "image/jpeg";
+      } catch (err) {
+        console.error("KYC ID compression failed, using original", err);
+      }
+
+      const { url } = await uploadKycFile(key, uploadUri, uploadMime);
       await submitKycDocument(key, url);
       setDocuments((prev) => ({
         ...prev,

@@ -22,10 +22,18 @@ jest.mock('@config/supabase', () => ({
 
 const UPLOAD_PATH = '/api/verification/upload';
 
+// A real (1x1) PNG — the upload path now runs the bytes through sharp
+// (normalizeImage), which rejects undecodable input with a 415, so a
+// placeholder string buffer is no longer enough.
+const ONE_BY_ONE_PNG = Buffer.from(
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+  'base64'
+);
+
 function attachFile(req: request.Test, field = 'documents') {
-  return req.attach(field, Buffer.from('fake-image-bytes'), {
-    filename: 'id-front.jpg',
-    contentType: 'image/jpeg',
+  return req.attach(field, ONE_BY_ONE_PNG, {
+    filename: 'id-front.png',
+    contentType: 'image/png',
   });
 }
 

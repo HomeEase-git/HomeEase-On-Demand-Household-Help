@@ -6,6 +6,7 @@ import prisma from '@config/database';
 import { errorResponse } from '@utils/errorResponse';
 import { formatVerification } from '@utils/formatters';
 import { supabase, KYC_DOCUMENT_BUCKET } from '@config/supabase';
+import { normalizeImage, UnsupportedImageError } from '@utils/normalizeImage';
 import { verificationQueue, VERIFICATION_JOB_OPTIONS } from '@queues/verificationQueue';
 import type { JwtPayload } from '@/types/index';
 
@@ -22,7 +23,11 @@ export const verificationUpload = multer({
   limits: { fileSize: MAX_FILE_SIZE, files: MAX_FILES },
   fileFilter: (_req, file, cb) => {
     if (!ALLOWED_MIME_TYPES.has(file.mimetype)) {
-      cb(new Error('Only JPG, PNG, WEBP, and PDF files are allowed'));
+      cb(
+        new Error(
+          "Only JPG, PNG, WEBP, and PDF files are allowed. iPhone HEIC photos aren't supported — turn on Camera > Formats > \"Most Compatible\", or screenshot the document."
+        )
+      );
       return;
     }
     cb(null, true);
@@ -58,12 +63,25 @@ export const uploadVerificationDocuments = async (req: AuthRequest, res: Respons
 
     const uploadedDocs = await Promise.all(
       files.map(async (file) => {
-        const extension = file.originalname.split('.').pop() || 'bin';
+        // Normalise images (auto-orient + downscale + JPEG); leave PDFs alone.
+        // An UnsupportedImageError bubbles to the handler's catch → 415.
+        let body: Buffer = file.buffer;
+        let contentType = file.mimetype;
+        let extension = (file.originalname.split('.').pop() || 'bin').toLowerCase();
+        let size = file.size;
+        if (file.mimetype.startsWith('image/')) {
+          const normalized = await normalizeImage(file.buffer);
+          body = normalized.buffer;
+          contentType = normalized.mimeType;
+          extension = normalized.extension;
+          size = normalized.byteLength;
+        }
+
         const storagePath = `${user.id}/${randomUUID()}.${extension}`;
 
         const { error: uploadError } = await supabase.storage
           .from(KYC_DOCUMENT_BUCKET)
-          .upload(storagePath, file.buffer, { contentType: file.mimetype });
+          .upload(storagePath, body, { contentType });
 
         if (uploadError) {
           throw new Error(`Failed to upload ${file.originalname}: ${uploadError.message}`);
@@ -76,8 +94,8 @@ export const uploadVerificationDocuments = async (req: AuthRequest, res: Respons
           fileName: storagePath,
           originalName: file.originalname,
           fileUrl: data.publicUrl,
-          fileSize: file.size,
-          mimeType: file.mimetype,
+          fileSize: size,
+          mimeType: contentType,
         };
       })
     );
@@ -164,6 +182,11 @@ export const uploadVerificationDocuments = async (req: AuthRequest, res: Respons
       data: formatVerification(verification),
     });
   } catch (error) {
+    if (error instanceof UnsupportedImageError) {
+      return res
+        .status(415)
+        .json(errorResponse(415, 'That image could not be processed. Upload a JPG, PNG, or WEBP photo, or a PDF.'));
+    }
     console.error('Upload verification error:', error);
     return res.status(500).json(errorResponse(500, 'Internal server error'));
   }

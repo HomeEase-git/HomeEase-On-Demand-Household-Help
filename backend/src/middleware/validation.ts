@@ -903,7 +903,7 @@ export const validateSubmitKYCDocument = (
   res: Response,
   next: NextFunction
 ) => {
-  const { documentType, documentUrl } = req.body;
+  const { documentType, documentUrl, originalName, fileSize } = req.body;
 
   if (!documentType || typeof documentType !== 'string') {
     return res.status(400).json(errorResponse(400, 'documentType is required and must be a string'));
@@ -912,11 +912,20 @@ export const validateSubmitKYCDocument = (
   if (!(KYC_DOCUMENT_TYPES as readonly string[]).includes(documentType)) {
     return res.status(400).json(errorResponse(400, 'documentType is not supported'));
   }
-  
+
   if (!documentUrl || typeof documentUrl !== 'string') {
     return res.status(400).json(errorResponse(400, 'documentUrl is required and must be a string'));
   }
-  
+
+  // Optional cosmetic hints from the upload step (admin UI display only).
+  if (originalName !== undefined && typeof originalName !== 'string') {
+    return res.status(400).json(errorResponse(400, 'originalName must be a string'));
+  }
+
+  if (fileSize !== undefined && (typeof fileSize !== 'number' || !Number.isFinite(fileSize) || fileSize < 0)) {
+    return res.status(400).json(errorResponse(400, 'fileSize must be a non-negative number'));
+  }
+
   return next();
 };
 

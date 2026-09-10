@@ -10,20 +10,22 @@ export type CompressionResult = {
 
 /**
  * Compresses an image by resizing and reducing quality.
- * 
+ *
  * Targets:
- * - Max width/height: 1200px (maintains quality for most use cases)
+ * - Max width/height: 1600px (matches the backend's normalizeImage target, so
+ *   documents aren't downscaled twice; keeps small print on IDs legible)
  * - Quality: 0.7 (70% quality for good balance of size/quality)
- * - Format: JPEG for lossy compression
- * 
+ * - Format: JPEG for lossy compression (also converts iOS HEIC to JPEG, which
+ *   the backend upload filter rejects)
+ *
  * @param uri - Image URI (file:// or content://)
- * @param maxDimension - Maximum width or height (default 1200)
+ * @param maxDimension - Maximum width or height (default 1600)
  * @param quality - Compression quality 0-1 (default 0.7)
  * @returns Compressed image URI and size info
  */
 export async function compressImage(
   uri: string,
-  maxDimension: number = 1200,
+  maxDimension: number = 1600,
   quality: number = 0.7
 ): Promise<CompressionResult> {
   try {

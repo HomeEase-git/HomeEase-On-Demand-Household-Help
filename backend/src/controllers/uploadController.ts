@@ -3,6 +3,7 @@ import { randomUUID } from 'crypto';
 import multer from 'multer';
 import { errorResponse } from '@utils/errorResponse';
 import { KYC_DOCUMENT_TYPES } from '@utils/kycDocumentTypes';
+import { normalizeImage, UnsupportedImageError } from '@utils/normalizeImage';
 import {
   supabase,
   CHAT_IMAGE_BUCKET,
@@ -278,7 +279,11 @@ export const kycFileUpload = multer({
   limits: { fileSize: MAX_FILE_SIZE },
   fileFilter: (_req, file, cb) => {
     if (!ALLOWED_KYC_MIME_TYPES.includes(file.mimetype)) {
-      cb(new Error('Only JPG, PNG, WEBP, and PDF files are allowed'));
+      cb(
+        new Error(
+          "Only JPG, PNG, WEBP, and PDF files are allowed. iPhone HEIC photos aren't supported — turn on Camera > Formats > \"Most Compatible\", or screenshot the document."
+        )
+      );
       return;
     }
     cb(null, true);
@@ -307,13 +312,35 @@ export const uploadKycFile = async (req: AuthRequest, res: Response) => {
     }
 
     const bucket = documentType === 'RESUME' ? RESUME_BUCKET : KYC_DOCUMENT_BUCKET;
-    const extension = req.file.mimetype.split('/')[1] || 'bin';
+
+    // Normalise images (auto-orient + downscale + JPEG) before storing; leave
+    // PDFs untouched. Keeps the KYC bucket and the downstream AI-review payload
+    // small and consistently encoded.
+    let body: Buffer = req.file.buffer;
+    let contentType = req.file.mimetype;
+    let extension = req.file.mimetype.split('/')[1] || 'bin';
+    if (req.file.mimetype.startsWith('image/')) {
+      try {
+        const normalized = await normalizeImage(req.file.buffer);
+        body = normalized.buffer;
+        contentType = normalized.mimeType;
+        extension = normalized.extension;
+      } catch (err) {
+        if (err instanceof UnsupportedImageError) {
+          return res
+            .status(415)
+            .json(errorResponse(415, 'That image could not be processed. Upload a JPG, PNG, or WEBP photo, or a PDF.'));
+        }
+        throw err;
+      }
+    }
+
     const fileName = `${req.user.userId}/${randomUUID()}.${extension}`;
 
     const { error: uploadError } = await supabase.storage
       .from(bucket)
-      .upload(fileName, req.file.buffer, {
-        contentType: req.file.mimetype,
+      .upload(fileName, body, {
+        contentType,
       });
 
     if (uploadError) {

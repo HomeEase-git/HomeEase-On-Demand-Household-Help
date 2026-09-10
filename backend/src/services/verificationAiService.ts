@@ -8,15 +8,31 @@ export interface VerificationReviewResult {
   aiError: string | null;
 }
 
-const MAX_IMAGES_REVIEWED = 3;
+// Claude can review images (JPG/PNG/WEBP) and PDFs. Anything else (or a row
+// with no mimeType) is not sent.
+const MAX_DOCS_REVIEWED = 12;
+// ~14 MB of base64 across all attached documents. The concurrency below can
+// overshoot this by up to (REVIEW_FETCH_CONCURRENCY - 1) files before it trips,
+// so the ceiling leaves headroom to stay under Anthropic's 32 MB request cap
+// even with a few large PDFs (PDFs, unlike images, aren't downscaled on upload).
+const REVIEW_BASE64_BUDGET = 14 * 1024 * 1024;
+// Fetch document bytes a few at a time rather than all at once, so a submission
+// with many large files can't spike the worker's memory.
+const REVIEW_FETCH_CONCURRENCY = 4;
+
+function isReviewable(doc: VerificationJobDocument): boolean {
+  const mime = doc.mimeType ?? '';
+  return mime.startsWith('image/') || mime === 'application/pdf';
+}
 
 // Called by the BullMQ processor. Deliberately does NOT catch Claude/fetch
 // failures here — letting them throw all the way out to BullMQ is what
 // makes `VERIFICATION_JOB_OPTIONS`'s attempts/backoff actually retry the
 // whole job. Only once retries are exhausted does the worker's `failed`
 // handler (see verificationWorker.ts) call recordExhaustedRetriesFallback
-// to degrade to the heuristic. A non-retryable case (no API key, no images)
-// resolves immediately below with no throw, since retrying can't fix those.
+// to degrade to the heuristic. A non-retryable case (no API key, no
+// reviewable documents) resolves immediately below with no throw, since
+// retrying can't fix those.
 export async function analyzeVerificationDocuments(
   verificationId: string,
   requestType: string,
@@ -67,12 +83,12 @@ export async function recordExhaustedRetriesFallback(
 }
 
 // `AI_REVIEWED` is reserved for a genuine Claude-backed review — anything
-// that falls back to the heuristic (no API key, no images, or retries
-// exhausted after Claude/fetch kept failing) is tagged `HEURISTIC_REVIEWED`
-// instead, and always carries a non-null `aiError` explaining why, so the
-// admin UI's existing error banner (VerificationDetail.jsx) surfaces the
-// caveat instead of a heuristic file-listing looking identical to a real
-// automated review.
+// that falls back to the heuristic (no API key, no reviewable documents, or
+// retries exhausted after Claude/fetch kept failing) is tagged
+// `HEURISTIC_REVIEWED` instead, and always carries a non-null `aiError`
+// explaining why, so the admin UI's existing error banner
+// (VerificationDetail.jsx) surfaces the caveat instead of a heuristic
+// file-listing looking identical to a real automated review.
 async function generateAiReview(
   requestType: string,
   documents: VerificationJobDocument[]
@@ -81,60 +97,111 @@ async function generateAiReview(
     return runHeuristicReview(requestType, documents, 'Automated AI review is not configured for this environment.');
   }
 
-  const imageDocs = documents.filter((doc) => (doc.mimeType ?? '').startsWith('image/'));
-  if (!imageDocs.length) {
+  const reviewableDocs = documents.filter(isReviewable);
+  if (!reviewableDocs.length) {
     return runHeuristicReview(
       requestType,
       documents,
-      'No image documents were included (PDF/text only) — Claude can only review images here, so this submission was not automatically reviewed. Check the documents manually.'
+      'No reviewable documents were included — automated review needs image (JPG/PNG/WEBP) or PDF files. This submission was not automatically reviewed; check the documents manually.'
     );
   }
 
   // Let transient failures (rate limits, 5xx, a document URL that didn't
   // fetch this time) throw straight through — see the comment on
   // analyzeVerificationDocuments above for why.
-  return runClaudeReview(requestType, documents, imageDocs);
+  return runClaudeReview(requestType, reviewableDocs);
+}
+
+type FetchedDoc =
+  | { status: 'ok'; doc: VerificationJobDocument; base64: string }
+  | { status: 'failed'; doc: VerificationJobDocument }
+  | { status: 'skipped'; doc: VerificationJobDocument };
+
+// Fetches up to `candidates.length` document bodies, at most
+// REVIEW_FETCH_CONCURRENCY in flight, and stops committing once
+// REVIEW_BASE64_BUDGET is reached (the first document is always attempted, even
+// if oversized, so a single big file still gets a review). Results are written
+// back in the original candidate order.
+async function fetchReviewableDocs(candidates: VerificationJobDocument[]): Promise<FetchedDoc[]> {
+  const out: FetchedDoc[] = new Array(candidates.length);
+  let committedBase64Length = 0;
+  let budgetReached = false;
+  let nextIndex = 0;
+
+  async function worker(): Promise<void> {
+    // `nextIndex++` is atomic between awaits on JS's single thread.
+    for (let i = nextIndex++; i < candidates.length; i = nextIndex++) {
+      const doc = candidates[i]!;
+
+      if (budgetReached) {
+        out[i] = { status: 'skipped', doc };
+        continue;
+      }
+
+      try {
+        const response = await fetch(doc.fileUrl);
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}`);
+        }
+        const buffer = Buffer.from(await response.arrayBuffer());
+        const base64 = buffer.toString('base64');
+
+        const alreadyCommitted = out.some((r) => r?.status === 'ok');
+        if (alreadyCommitted && committedBase64Length + base64.length > REVIEW_BASE64_BUDGET) {
+          budgetReached = true;
+          out[i] = { status: 'skipped', doc };
+          continue;
+        }
+
+        committedBase64Length += base64.length;
+        out[i] = { status: 'ok', doc, base64 };
+      } catch {
+        // One bad document URL shouldn't sink the ones that fetched fine.
+        out[i] = { status: 'failed', doc };
+      }
+    }
+  }
+
+  const poolSize = Math.min(REVIEW_FETCH_CONCURRENCY, candidates.length);
+  await Promise.all(Array.from({ length: poolSize }, () => worker()));
+  return out;
+}
+
+function toContentBlock(doc: VerificationJobDocument, base64: string) {
+  if ((doc.mimeType ?? '') === 'application/pdf') {
+    return {
+      type: 'document' as const,
+      source: { type: 'base64' as const, media_type: 'application/pdf' as const, data: base64 },
+    };
+  }
+  return {
+    type: 'image' as const,
+    source: { type: 'base64' as const, media_type: doc.mimeType || 'image/jpeg', data: base64 },
+  };
 }
 
 async function runClaudeReview(
   requestType: string,
-  allDocuments: VerificationJobDocument[],
-  imageDocs: VerificationJobDocument[]
+  reviewableDocs: VerificationJobDocument[]
 ): Promise<VerificationReviewResult> {
-  const reviewedDocs = imageDocs.slice(0, MAX_IMAGES_REVIEWED);
-  const skippedCount = imageDocs.length - reviewedDocs.length;
+  const candidates = reviewableDocs.slice(0, MAX_DOCS_REVIEWED);
+  const overflowCount = reviewableDocs.length - candidates.length;
 
-  // allSettled, not all — one bad document URL shouldn't sink the images
-  // that fetched fine.
-  const fetchResults = await Promise.allSettled(
-    reviewedDocs.map(async (doc) => {
-      const response = await fetch(doc.fileUrl);
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`);
-      }
-      const buffer = Buffer.from(await response.arrayBuffer());
-      return {
-        type: 'image' as const,
-        source: {
-          type: 'base64' as const,
-          media_type: doc.mimeType || 'image/jpeg',
-          data: buffer.toString('base64'),
-        },
-      };
-    })
-  );
+  const fetched = await fetchReviewableDocs(candidates);
+  const okDocs = fetched.filter((r): r is Extract<FetchedDoc, { status: 'ok' }> => r.status === 'ok');
+  const failedFetches = fetched.filter((r) => r.status === 'failed').length;
+  const budgetSkipped = fetched.filter((r) => r.status === 'skipped').length;
 
-  const imageBlocks = fetchResults
-    .filter((r): r is PromiseFulfilledResult<{ type: 'image'; source: { type: 'base64'; media_type: string; data: string } }> => r.status === 'fulfilled')
-    .map((r) => r.value);
-  const failedFetches = fetchResults.filter((r) => r.status === 'rejected').length;
-
-  if (!imageBlocks.length) {
-    throw new Error('None of the document images could be fetched for review');
+  if (!okDocs.length) {
+    throw new Error('None of the documents could be fetched for review');
   }
 
-  const documentTypeList = allDocuments.map((doc) => doc.documentType).join(', ');
-  const prompt = `Review these verification documents for a ${requestType} submission. Document types included: ${documentTypeList}. Assess whether the documents look legitimate, extract the key facts, and provide a short admin summary (2-3 sentences), noting any concerns. End your reply on its own final line with exactly "CONFIDENCE: 0.NN" — your own certainty (0.00-1.00) in your legitimacy assessment.`;
+  const contentBlocks = okDocs.map((r) => toContentBlock(r.doc, r.base64));
+
+  const reviewedTypeList = okDocs
+    .map((r) => `${r.doc.documentType}${(r.doc.mimeType ?? '') === 'application/pdf' ? ' (PDF)' : ''}`)
+    .join(', ');
+  const prompt = `Review these verification documents for a ${requestType} submission. Documents included: ${reviewedTypeList}. Assess whether the documents look legitimate, extract the key facts, and provide a short admin summary (2-3 sentences), noting any concerns. End your reply on its own final line with exactly "CONFIDENCE: 0.NN" — your own certainty (0.00-1.00) in your legitimacy assessment.`;
 
   const response = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
@@ -145,11 +212,11 @@ async function runClaudeReview(
     },
     body: JSON.stringify({
       model: process.env.ANTHROPIC_MODEL || 'claude-sonnet-5',
-      max_tokens: 500,
+      max_tokens: 1024,
       messages: [
         {
           role: 'user',
-          content: [{ type: 'text', text: prompt }, ...imageBlocks],
+          content: [{ type: 'text', text: prompt }, ...contentBlocks],
         },
       ],
     }),
@@ -176,18 +243,24 @@ async function runClaudeReview(
   // fabricating a fixed number — if it didn't follow the format, we don't
   // pretend to know how confident it was.
   const confidenceMatch = contentText.match(/CONFIDENCE:\s*([01](?:\.\d+)?)\s*$/i);
-  const aiConfidence = confidenceMatch ? Math.min(1, Math.max(0, parseFloat(confidenceMatch[1]))) : null;
+  const aiConfidence = confidenceMatch ? Math.min(1, Math.max(0, parseFloat(confidenceMatch[1]!))) : null;
   const summaryText = confidenceMatch ? contentText.slice(0, confidenceMatch.index).trim() : contentText;
 
+  const notReviewed = overflowCount + budgetSkipped;
+  const budgetMb = Math.round(REVIEW_BASE64_BUDGET / (1024 * 1024));
   const caveats = [
-    skippedCount > 0 ? `${skippedCount} additional image document${skippedCount > 1 ? 's' : ''} were not reviewed (only the first ${MAX_IMAGES_REVIEWED} are sent to AI review).` : '',
-    failedFetches > 0 ? `${failedFetches} document${failedFetches > 1 ? 's' : ''} could not be fetched for review.` : '',
+    notReviewed > 0
+      ? `${notReviewed} document${notReviewed > 1 ? 's were' : ' was'} not sent for AI review (limit: first ${MAX_DOCS_REVIEWED} documents / ~${budgetMb} MB). Review those manually.`
+      : '',
+    failedFetches > 0
+      ? `${failedFetches} document${failedFetches > 1 ? 's' : ''} could not be fetched for review.`
+      : '',
     aiConfidence === null ? 'The model did not report a confidence score for this review.' : '',
   ].filter(Boolean);
 
   return {
     aiStatus: 'AI_REVIEWED',
-    aiSummary: summaryText.slice(0, 500),
+    aiSummary: summaryText.slice(0, 1500),
     aiConfidence,
     aiError: caveats.length ? caveats.join(' ') : null,
   };
