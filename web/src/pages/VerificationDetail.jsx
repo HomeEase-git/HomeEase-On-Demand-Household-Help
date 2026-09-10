@@ -103,9 +103,12 @@ export default function VerificationDetail() {
     )
   }
 
-  // VerificationRequest.status only ever holds PENDING/APPROVED/REJECTED —
+  // VerificationRequest.status holds PENDING/SUBMITTED/APPROVED/REJECTED —
+  // a worker's request flips PENDING -> SUBMITTED once onboarding is
+  // complete and never moves back, so both count as "awaiting admin action"
+  // (mirrors listVerifications' PENDING filter in adminVerificationController).
   // 'AI_REVIEWED' is a value of the separate aiStatus field, never of status.
-  const isPending = verification.status === 'PENDING'
+  const isPending = verification.status === 'PENDING' || verification.status === 'SUBMITTED'
 
   const details = [
     { label: 'Applicant', value: verification.name },
