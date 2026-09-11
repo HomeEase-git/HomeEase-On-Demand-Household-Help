@@ -20,7 +20,7 @@ import { useBookingStore } from "../../../../store/bookingStore";
 import { useSlotAvailabilityCounts } from "../../../../hooks/useWorkerDiscovery";
 import * as api from "../../../../services/api";
 import { addressStorage } from "../../../../utils/storage";
-import { geocodeAddress } from "../../../../utils/geo";
+import { formatStructuredAddress, geocodeAddressWithFallback } from "../../../../utils/geo";
 import { TIME_SLOTS, type TimeSlot, type UrgencyLevel } from "../../../../types/booking4step.types";
 
 const BOOKING_STEPS = ["Scope", "Schedule", "Who", "Confirm"];
@@ -64,7 +64,14 @@ export default function BookingStep2Screen() {
   );
 
   const handleSelectAddress = async (item: SavedAddress) => {
-    const fullAddress = `${item.street}, ${item.city}, ${item.state} ${item.zipCode}`;
+    const fullAddress = formatStructuredAddress({
+      houseNumber: item.houseNumber ?? undefined,
+      street: item.street,
+      barangay: item.barangay ?? undefined,
+      city: item.city,
+      state: item.state,
+      zipCode: item.zipCode,
+    });
 
     const applySelection = (selLat: number, selLng: number) => {
       setAddress(fullAddress);
@@ -75,6 +82,15 @@ export default function BookingStep2Screen() {
       addressSheetRef.current?.close();
     };
 
+    // Backend-persisted coordinates (set when the address was last
+    // saved/geocoded — see UserAddress.lat/lng) are the most trustworthy
+    // source and need no network round-trip; the on-device cache is a
+    // fallback for addresses saved before that column existed.
+    if (item.lat != null && item.lng != null) {
+      applySelection(item.lat, item.lng);
+      return;
+    }
+
     const cached = await addressStorage.get(item.id);
     if (cached?.lat != null && cached?.lng != null) {
       applySelection(cached.lat, cached.lng);
@@ -83,12 +99,25 @@ export default function BookingStep2Screen() {
 
     setResolvingId(item.id);
     try {
-      const geocoded = await geocodeAddress(fullAddress);
+      const geocoded = await geocodeAddressWithFallback({
+        houseNumber: item.houseNumber ?? undefined,
+        street: item.street,
+        barangay: item.barangay ?? undefined,
+        city: item.city,
+        state: item.state,
+        zipCode: item.zipCode,
+      });
       if (!geocoded) {
         alertModal.error("Error", "Couldn't locate this address on the map. Try editing it from My Addresses.");
         return;
       }
       applySelection(geocoded.geometry.location.lat, geocoded.geometry.location.lng);
+      if (geocoded.approximate) {
+        alertModal.info(
+          "Approximate location",
+          "We could only find the general area for this address. For a precise pin, edit it in My Addresses and use \"Use my current location\".",
+        );
+      }
     } catch (error) {
       console.error("Geocode saved address error:", error);
       alertModal.error("Error", "Couldn't locate this address on the map. Try editing it from My Addresses.");

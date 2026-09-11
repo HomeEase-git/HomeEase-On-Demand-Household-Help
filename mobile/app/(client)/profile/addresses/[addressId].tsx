@@ -9,7 +9,7 @@ import PrimaryButton from "../../../../components/ui/PrimaryButton";
 import OutlinedButton from "../../../../components/ui/OutlinedButton";
 import { colors, cardShadow } from "../../../../constants";
 import { addressStorage } from "../../../../utils/storage";
-import { geocodeAddress, searchAddresses, reverseGeocodeDetailed, formatStructuredAddress, type PlaceResult } from "../../../../utils/geo";
+import { geocodeAddressWithFallback, searchAddresses, reverseGeocodeDetailed, formatStructuredAddress, type PlaceResult } from "../../../../utils/geo";
 import { getPrecisePosition, LocationPermissionDeniedError, LocationTimeoutError } from "../../../../services/location";
 import { useDebouncedCallback } from "../../../../utils/performanceOptimization";
 import * as api from "../../../../services/api";
@@ -194,8 +194,8 @@ export default function AddressEditScreen() {
       const fullAddress = formatStructuredAddress({ houseNumber, street, barangay, city, state, zipCode });
       const isFreshResolution = resolvedLatLng && resolvedFor === fullAddress;
       const geocoded = isFreshResolution
-        ? { geometry: { location: resolvedLatLng! } }
-        : await geocodeAddress(fullAddress).catch(() => null);
+        ? { geometry: { location: resolvedLatLng! }, approximate: false }
+        : await geocodeAddressWithFallback({ houseNumber, street, barangay, city, state, zipCode }).catch(() => null);
       // Only a device GPS fix carries a real accuracy figure — a fresh
       // free-text geocode (fields were edited since the last resolve) has none.
       const geocodeAccuracy = isFreshResolution ? (resolvedAccuracy ?? undefined) : undefined;
@@ -232,11 +232,26 @@ export default function AddressEditScreen() {
         });
       }
 
-      alertModal.success(
-        "Success",
-        isNew ? "Address added successfully." : "Address updated successfully.",
-        [{ text: "OK", onPress: () => router.back() }],
-      );
+      const baseMessage = isNew ? "Address added successfully." : "Address updated successfully.";
+      if (!geocoded) {
+        // No coordinates at all (even the broadened city-level fallback
+        // failed) — this address won't be selectable for a booking until
+        // it's pinned via GPS, so make that visible now rather than a
+        // confusing "couldn't locate this address" surprise at booking time.
+        alertModal.error(
+          "Saved, but not located",
+          `${baseMessage} We couldn't find this address on the map from the details entered — open it again and use "Use my current location" to pin it precisely.`,
+          [{ text: "OK", onPress: () => router.back() }],
+        );
+      } else if (geocoded.approximate) {
+        alertModal.info(
+          "Saved — approximate location",
+          `${baseMessage} We could only find the general area (not the exact address). For a precise pin, edit it and use "Use my current location".`,
+          [{ text: "OK", onPress: () => router.back() }],
+        );
+      } else {
+        alertModal.success("Success", baseMessage, [{ text: "OK", onPress: () => router.back() }]);
+      }
     } catch (error) {
       console.error("Address save error:", error);
       alertModal.error("Error", "Unable to save address right now.");

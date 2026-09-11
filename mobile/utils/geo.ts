@@ -24,6 +24,12 @@ export type PlaceResult = {
     location: LatLng;
   };
   components?: AddressComponents;
+  // Set when the result came from a broadened fallback query (see
+  // geocodeAddressWithFallback) rather than the exact address — e.g. a rural
+  // barangay OpenStreetMap simply has no record of resolves to its
+  // city/province centroid instead. Callers should surface this so the user
+  // knows the pin isn't exact, rather than treating it as a normal match.
+  approximate?: boolean;
 };
 
 export type RouteResult = {
@@ -112,6 +118,35 @@ export function formatStructuredAddress(parts: StructuredAddress): string {
   ]
     .filter((p) => p && p.trim())
     .join(', ');
+}
+
+// Nominatim (free, community-mapped OSM data) frequently has no record at
+// all of a specific rural barangay/subdivision, even though the surrounding
+// city/province resolves fine — confirmed live for at least one real PH
+// address ("Bangungon, Paombong, Bulacan" geocodes to [] on its own, but
+// "Paombong, Bulacan" resolves to the town centroid). Rather than a hard
+// failure that blocks booking entirely, this tries the full address first
+// and, if that comes back empty, progressively drops the most specific
+// component (house/street, then barangay) until something resolves —
+// landing on a city-level pin is still far more useful than nothing, as
+// long as the caller knows to treat it as approximate (see PlaceResult.approximate).
+export async function geocodeAddressWithFallback(parts: StructuredAddress): Promise<PlaceResult | null> {
+  const exact = await geocodeAddress(formatStructuredAddress(parts));
+  if (exact) return exact;
+
+  if (parts.barangay) {
+    const withBarangayOnly = await geocodeAddress(
+      formatStructuredAddress({ street: '', barangay: parts.barangay, city: parts.city, state: parts.state, zipCode: parts.zipCode }),
+    );
+    if (withBarangayOnly) return { ...withBarangayOnly, approximate: true };
+  }
+
+  const cityOnly = await geocodeAddress(
+    formatStructuredAddress({ street: '', city: parts.city, state: parts.state, zipCode: parts.zipCode }),
+  );
+  if (cityOnly) return { ...cityOnly, approximate: true };
+
+  return null;
 }
 
 /**
