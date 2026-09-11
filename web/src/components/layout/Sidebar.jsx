@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { NavLink, useLocation, useNavigate } from 'react-router-dom'
-import homeEaseLogo from '../Assets/HomeEase Logo.jpg'
+import homeEaseLogo from '../Assets/home-ease-icon.png'
 import { useAuth } from '../../context/AuthContext'
 import LogoutConfirmModal from '../common/LogoutConfirmModal'
 

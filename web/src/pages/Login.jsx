@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { Navigate, useLocation, useNavigate } from 'react-router-dom'
 import SectionCard from '../components/common/SectionCard'
-import homeEaseLogo from '../components/Assets/HomeEase Logo.jpg'
+import homeEaseLogo from '../components/Assets/home-ease-logo.png'
 import { useAuth } from '../context/AuthContext'
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/

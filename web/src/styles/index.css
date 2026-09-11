@@ -118,9 +118,7 @@ body {
 .sidebar-logo {
   width: 36px;
   height: 36px;
-  border-radius: 10px;
-  object-fit: cover;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  object-fit: contain;
 }
 
 .sidebar-brand span {
@@ -523,11 +521,9 @@ body {
 }
 
 .auth-logo {
-  width: 88px;
-  height: 88px;
-  border-radius: var(--radius-lg);
-  object-fit: cover;
-  box-shadow: var(--shadow-md);
+  width: 120px;
+  height: 120px;
+  object-fit: contain;
 }
 
 .auth-form {
