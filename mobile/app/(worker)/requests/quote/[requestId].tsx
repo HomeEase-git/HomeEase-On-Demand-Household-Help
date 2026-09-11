@@ -17,6 +17,7 @@ type BookingSummary = {
   service: string;
   scheduledDate: string;
   estimatedPrice: number;
+  addOns?: { id: string; name: string; price: number }[];
 };
 
 export default function SubmitQuoteScreen() {
@@ -51,8 +52,10 @@ export default function SubmitQuoteScreen() {
   const [loading, setLoading] = useState(false);
 
   const labor = booking?.estimatedPrice ?? 0;
+  const addOns = booking?.addOns ?? [];
+  const addOnsTotal = addOns.reduce((sum, a) => sum + a.price, 0);
   const materials = parseFloat(materialsCost) || 0;
-  const total = labor + materials;
+  const total = labor + addOnsTotal + materials;
 
   if (fetching) {
     return (
@@ -144,6 +147,22 @@ export default function SubmitQuoteScreen() {
           </Text>
         </View>
 
+        {addOns.length > 0 && (
+          <View className="bg-card rounded-xl px-3 py-3 mb-4">
+            <Text className="text-text-secondary text-sm mb-2">
+              Items already added on-site
+            </Text>
+            {addOns.map((item) => (
+              <View key={item.id} className="flex-row justify-between items-center mb-1">
+                <Text className="text-text-primary text-sm">{item.name}</Text>
+                <Text className="text-text-primary font-semibold text-sm">
+                  ₱{item.price.toFixed(2)}
+                </Text>
+              </View>
+            ))}
+          </View>
+        )}
+
         <InputField
           label="Additional Costs (₱) — optional"
           value={materialsCost}
@@ -173,6 +192,14 @@ export default function SubmitQuoteScreen() {
                 ₱{labor.toFixed(2)}
               </Text>
             </View>
+            {addOnsTotal > 0 && (
+              <View className="flex-row justify-between mt-1">
+                <Text className="text-text-muted text-xs">Items added on-site</Text>
+                <Text className="text-text-secondary text-xs">
+                  ₱{addOnsTotal.toFixed(2)}
+                </Text>
+              </View>
+            )}
             {materials > 0 && (
               <View className="flex-row justify-between mt-1">
                 <Text className="text-text-muted text-xs">Additional Costs</Text>

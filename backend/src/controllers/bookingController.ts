@@ -1381,6 +1381,7 @@ export const approveQuote = async (req: AuthRequest, res: Response) => {
 
     const booking = await prisma.booking.findUnique({
       where: { id },
+      include: { addOns: true },
     });
 
     if (!booking) {
@@ -1399,13 +1400,18 @@ export const approveQuote = async (req: AuthRequest, res: Response) => {
       return res.status(409).json(errorResponse(409, `Cannot approve quote for booking with status ${booking.status}`));
     }
 
+    // Mirrors getBookingDetail's finalPrice formula (laborCost + materialsCost
+    // + addOns) so this stored snapshot doesn't undercount items the worker
+    // added on-site.
+    const addonsCost = booking.addOns.reduce((sum, addon) => sum + addon.price, 0);
+
     const updated = await prisma.booking.update({
       where: { id },
       data: {
         status: 'QUOTE_APPROVED',
         quoteStatus: 'APPROVED',
         approvedAt: new Date(),
-        finalPrice: booking.laborCost! + booking.materialsCost!,
+        finalPrice: booking.laborCost! + booking.materialsCost! + addonsCost,
       },
     });
 
