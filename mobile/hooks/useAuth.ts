@@ -1,5 +1,4 @@
 import { useCallback } from 'react';
-import { InteractionManager } from 'react-native';
 import { useAuthStore } from '../store/authStore';
 import {
   postLogin,
@@ -9,40 +8,6 @@ import {
   sendOtpEmail
 } from '../services/api';
 import { normalizeError } from '../utils/apiErrors';
-import { notificationService } from '../services/notificationService';
-
-/**
- * Prompts for notification permission (no-ops if already decided) and, if
- * granted, obtains + registers the push token against the now-authenticated
- * session. Fire-and-forget from the caller's perspective — a denied/failed
- * permission request should never block login/signup.
- *
- * Deferred with InteractionManager.runAfterInteractions() *plus* a fixed
- * settle delay: calling this immediately after login/signup means the
- * native OS permission dialog can pop up (and later dismiss) while the app
- * is still mid-navigation-transition to the next screen — observed live
- * (adb logcat) causing a Fabric crash (`addViewAt: failed to insert view
- * ... into parent ... at index`, caused by "child already has a parent")
- * from two concurrent view-tree mutations racing each other.
- *
- * InteractionManager alone was not enough — it only tracks JS-scheduled
- * work, not react-native-screens' native-side stack transition, and login
- * swaps the entire (auth) navigator for the (client)/(worker) one rather
- * than just pushing a screen, which takes noticeably longer to settle. A
- * second live-device test confirmed the crash still happened ~100ms after
- * the InteractionManager-only callback fired. Adding a fixed buffer on top
- * gives the native transition real time to finish before the permission
- * dialog (and whatever re-layout it triggers) can collide with it.
- */
-function registerForPushNotifications() {
-  InteractionManager.runAfterInteractions(() => {
-    setTimeout(() => {
-      notificationService.requestPermissions().catch((error) => {
-        console.error('[useAuth] Failed to set up push notifications:', error);
-      });
-    }, 1500);
-  });
-}
 
 export function useAuth() {
   const store = useAuthStore();
@@ -63,7 +28,6 @@ export function useAuth() {
         hasAcceptedTerms: response.hasAcceptedTerms,
       });
       store.setToken(response.token);
-      registerForPushNotifications();
 
       return { success: true, data: response };
     } catch (err) {
@@ -139,7 +103,6 @@ export function useAuth() {
       
       if (response.success && response.token) {
         store.setToken(response.token);
-        registerForPushNotifications();
       }
       
       return { success: true, data: response };

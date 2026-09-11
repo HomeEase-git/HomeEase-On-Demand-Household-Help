@@ -6,6 +6,7 @@ import {
   Pressable,
   TextInput,
   Image,
+  Keyboard,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
@@ -86,7 +87,18 @@ export default function SignInScreen() {
           destination = "/(kyc)/landing";
         }
       }
-      router.replace(destination);
+      // The password field is still focused (native keyboard + IME
+      // connection attached) at this point — replacing the entire (auth)
+      // navigator for (client)/(worker) while it holds focus caused a
+      // reproducible Fabric crash (`addViewAt: ... View already has a
+      // parent`, confirmed via adb logcat) where the still-mounting
+      // ReactEditText raced the stack swap. Keyboard.dismiss() itself is
+      // fire-and-forget on the native side, so a short delay before
+      // navigating gives its view teardown a real frame to finish rather
+      // than racing it — dismissing and replacing in the same tick wasn't
+      // reliably enough on live-device retest.
+      Keyboard.dismiss();
+      setTimeout(() => router.replace(destination), 100);
     } catch (err: any) {
       // The backend intentionally returns the same 401 for "no account with
       // this email" and "wrong password" (prevents attackers from using this

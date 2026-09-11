@@ -13,11 +13,13 @@ import * as api from "../../../services/api";
 import { colors } from "../../../constants";
 import { getWorkerNetAmount } from "../../../utils/pricing";
 import { useTabRefresh } from "../../../hooks/useTabRefresh";
+import { usePushNotificationPrompt } from "../../../hooks/usePushNotificationPrompt";
 
 const todayStr = () => new Date().toISOString().slice(0, 10);
 
 export default function WorkerHomeScreen() {
   const router = useRouter();
+  usePushNotificationPrompt();
   const jobs = useWorkerStore((s) => s.jobs);
   const setJobs = useWorkerStore((s) => s.setJobs);
   const user = useAuthStore((s) => s.user);

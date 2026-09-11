@@ -25,6 +25,7 @@ import { Skeleton } from "../../../components/ui/Skeleton";
 import type { BottomSheetHandle } from "../../../components/bottom-sheets/BottomSheetWrapper";
 import { colors } from "../../../constants";
 import { useTabRefresh } from "../../../hooks/useTabRefresh";
+import { usePushNotificationPrompt } from "../../../hooks/usePushNotificationPrompt";
 
 const DEFAULT_FILTERS: SearchFilters = { sort: "rating", availableOnly: false };
 
@@ -105,6 +106,7 @@ function normalizeHomeWorker(worker: any): HomeWorker {
 
 export default function ClientHomeScreen() {
   const router = useRouter();
+  usePushNotificationPrompt();
   const unreadCount = useNotificationStore((s) => s.unreadCount);
   const filterRef = useRef<BottomSheetHandle | null>(null);
   const [loading, setLoading] = useState(true);
