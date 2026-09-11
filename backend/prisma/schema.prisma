@@ -256,12 +256,32 @@ model UserAddress {
   userId String
   user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  label     String?
-  street    String
-  city      String
-  state     String?
-  zipCode   String?
+  label   String?
+  // House/unit/building number and barangay are split out from `street` so
+  // the geocoder can be given a structured query (street+barangay+city vs. one
+  // free-text blob) — Nominatim resolves PH addresses far more precisely with
+  // the barangay present, and house number lets a future routing/geocoding
+  // provider pin the exact lot rather than just the street.
+  houseNumber String?
+  street      String
+  barangay    String?
+  city        String
+  state       String?
+  zipCode     String?
+  // Free-text landmark ("beside Mercury Drug") — not geocoded itself, but
+  // shown to the worker so they can confirm they're at the right gate/unit.
+  landmark  String?
   isDefault Boolean @default(false)
+
+  // Resolved coordinates, persisted server-side (previously cached only in
+  // on-device AsyncStorage, which meant a reinstall or new device silently
+  // lost them and forced a re-geocode). `geocodeAccuracy` is the device GPS
+  // accuracy radius in meters when resolved via "Use my location" (null when
+  // resolved by geocoding typed text, which carries no accuracy figure).
+  lat             Float?
+  lng             Float?
+  geocodeAccuracy Float?
+  geocodedAt      DateTime?
 
   // Soft delete
   isDeleted Boolean   @default(false)
@@ -363,12 +383,17 @@ model WorkerProfile {
   addressLat Float?
   addressLng Float?
 
-  // Dead columns from the since-removed live-proximity-matching feature
-  // (see matchingService.ts's docblock) — nothing in backend/src reads or
-  // writes these anymore. The real arrival GPS check-in writes to
-  // Booking.workerLat/workerLng + ArrivalVerification instead (see
-  // bookingController.arriveBooking). Left in place only because dropping
-  // columns needs a migration; do not resurrect reads/writes against these.
+  // Live position while the worker is en route to an ACCEPTED booking, pushed
+  // from the worker app's foreground GPS watch and read by the client's
+  // "Track Service" map in real time over the existing Socket.IO channel (see
+  // bookingController.updateWorkerLiveLocation). This is NOT the old
+  // proximity/auto-matching feature that once lived on these same columns
+  // (see matchingService.ts's docblock) and was removed for being unreliable
+  // — that feature used a stale position to *choose* a worker; this one only
+  // streams a live position for an *already-booked* job the client is
+  // actively watching, and stops as soon as the worker checks in as arrived.
+  // Distinct from Booking.workerLat/workerLng, which is a one-time arrival
+  // snapshot written by arriveBooking, not a continuously updated live feed.
   currentLat         Float?
   currentLng         Float?
   lastLocationUpdate DateTime?

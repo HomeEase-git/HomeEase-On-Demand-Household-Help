@@ -1,12 +1,21 @@
-import React, { useMemo } from "react";
+import React, { forwardRef, useImperativeHandle, useMemo, useRef } from "react";
 import { StyleProp, ViewStyle } from "react-native";
 import { WebView } from "react-native-webview";
 import type { LatLng } from "../../utils/geo";
+
+export type LeafletMapHandle = {
+  // Moves (or creates, on first call) the worker marker without reloading the
+  // WebView/tiles — used for live tracking, where a fresh call arrives every
+  // few seconds and a full HTML reload would flicker and re-fetch tiles.
+  updateWorkerLocation: (position: LatLng) => void;
+};
 
 type Props = {
   destination: LatLng;
   destinationLabel?: string;
   currentLocation?: LatLng | null;
+  workerLocation?: LatLng | null;
+  workerLabel?: string;
   routeCoordinates?: LatLng[];
   zoom?: number;
   onMapReady?: () => void;
@@ -17,6 +26,8 @@ const buildHtml = ({
   destination,
   destinationLabel,
   currentLocation,
+  workerLocation,
+  workerLabel,
   routeCoordinates,
   zoom,
 }: Omit<Props, "onMapReady" | "style">) => {
@@ -24,6 +35,8 @@ const buildHtml = ({
     destination,
     destinationLabel: destinationLabel ?? "Selected location",
     currentLocation: currentLocation ?? null,
+    workerLocation: workerLocation ?? null,
+    workerLabel: workerLabel ?? "Worker's location",
     route: routeCoordinates ?? [],
     zoom: zoom ?? 15,
   };
@@ -38,6 +51,7 @@ const buildHtml = ({
     .pin { width: 20px; height: 20px; border-radius: 50% 50% 50% 0; transform: rotate(-45deg); border: 2px solid #fff; box-shadow: 0 1px 4px rgba(0,0,0,0.4); }
     .pin-destination { background: #E63946; }
     .dot-current { width: 14px; height: 14px; border-radius: 50%; background: #2A6DF4; border: 2px solid #fff; box-shadow: 0 1px 4px rgba(0,0,0,0.4); }
+    .dot-worker { width: 16px; height: 16px; border-radius: 50%; background: #22C55E; border: 2px solid #fff; box-shadow: 0 0 0 4px rgba(34,197,94,0.25); }
   </style>
 </head>
 <body>
@@ -86,6 +100,30 @@ const buildHtml = ({
       bounds = bounds.concat(routeLatLngs);
     }
 
+    var workerIcon = L.divIcon({
+      className: '',
+      html: '<div class="dot-worker"></div>',
+      iconSize: [16, 16],
+      iconAnchor: [8, 8],
+    });
+    var workerMarker = null;
+
+    // Called via WebView.injectJavaScript for every live location push, so a
+    // moving marker never forces the map/tiles to reload.
+    window.setWorkerLocation = function (lat, lng) {
+      if (workerMarker) {
+        workerMarker.setLatLng([lat, lng]);
+      } else {
+        workerMarker = L.marker([lat, lng], { icon: workerIcon }).addTo(map).bindPopup(data.workerLabel);
+        map.fitBounds([[data.destination.lat, data.destination.lng], [lat, lng]], { padding: [40, 40] });
+      }
+    };
+
+    if (data.workerLocation) {
+      window.setWorkerLocation(data.workerLocation.lat, data.workerLocation.lng);
+      bounds.push([data.workerLocation.lat, data.workerLocation.lng]);
+    }
+
     if (bounds.length > 1) {
       map.fitBounds(bounds, { padding: [40, 40] });
     }
@@ -94,37 +132,46 @@ const buildHtml = ({
 </html>`;
 };
 
-export const LeafletMap: React.FC<Props> = ({
-  destination,
-  destinationLabel,
-  currentLocation,
-  routeCoordinates,
-  zoom,
-  onMapReady,
-  style,
-}) => {
+export const LeafletMap = forwardRef<LeafletMapHandle, Props>(function LeafletMap(
+  { destination, destinationLabel, currentLocation, workerLocation, workerLabel, routeCoordinates, zoom, onMapReady, style },
+  ref,
+) {
+  const webviewRef = useRef<WebView>(null);
+
+  // Intentionally excludes workerLocation/workerLabel — live updates go
+  // through the imperative handle below (injectJavaScript), not a re-render,
+  // so the WebView/tiles never reload mid-tracking. Only the *initial* value
+  // (captured at mount, via buildHtml's closure) seeds the first marker.
   const html = useMemo(
     () =>
       buildHtml({
         destination,
         destinationLabel,
         currentLocation,
+        workerLocation,
+        workerLabel,
         routeCoordinates,
         zoom,
       }),
-    [
-      destination.lat,
-      destination.lng,
-      destinationLabel,
-      currentLocation?.lat,
-      currentLocation?.lng,
-      routeCoordinates,
-      zoom,
-    ],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [destination.lat, destination.lng, destinationLabel, currentLocation?.lat, currentLocation?.lng, routeCoordinates, zoom],
+  );
+
+  useImperativeHandle(
+    ref,
+    () => ({
+      updateWorkerLocation: (position: LatLng) => {
+        webviewRef.current?.injectJavaScript(
+          `window.setWorkerLocation && window.setWorkerLocation(${position.lat}, ${position.lng}); true;`,
+        );
+      },
+    }),
+    [],
   );
 
   return (
     <WebView
+      ref={webviewRef}
       source={{ html }}
       style={style ?? { flex: 1 }}
       originWhitelist={["*"]}
@@ -134,6 +181,6 @@ export const LeafletMap: React.FC<Props> = ({
       onLoadEnd={onMapReady}
     />
   );
-};
+});
 
 export default LeafletMap;

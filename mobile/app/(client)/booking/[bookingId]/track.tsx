@@ -1,14 +1,24 @@
-import React, { useCallback, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { View, Text, Image, Pressable, Linking } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { AppIcon as Ionicons } from "../../../../components/icons/AppIcon";
 import { useFocusEffect, useRouter, useLocalSearchParams } from "expo-router";
 import ScreenHeader from "../../../../components/ui/ScreenHeader";
 import AddressMap from "../../../../components/ui/AddressMap";
+import LeafletMap, { type LeafletMapHandle } from "../../../../components/ui/LeafletMap";
 import { useBookingStore } from "../../../../store/bookingStore";
 import * as api from "../../../../services/api";
+import { getSocket } from "../../../../services/socket";
 import { colors } from "../../../../constants";
 import { useAlertModal } from "../../../../contexts/AlertModalContext";
+
+type WorkerLocationEvent = {
+  bookingId: string;
+  lat: number;
+  lng: number;
+  accuracy: number | null;
+  at: string;
+};
 
 export default function TrackBookingScreen() {
   const router = useRouter();
@@ -20,6 +30,11 @@ export default function TrackBookingScreen() {
   const [location, setLocation] = useState<string | null>(
     booking?.address ?? null,
   );
+  const [destination, setDestination] = useState<{ lat: number; lng: number } | null>(null);
+  const [initialWorkerLocation, setInitialWorkerLocation] = useState<{ lat: number; lng: number } | null>(null);
+  const [hasWorkerLocation, setHasWorkerLocation] = useState(false);
+  const [lastUpdatedAt, setLastUpdatedAt] = useState<string | null>(null);
+  const mapRef = useRef<LeafletMapHandle>(null);
 
   useFocusEffect(
     useCallback(() => {
@@ -27,8 +42,17 @@ export default function TrackBookingScreen() {
       let cancelled = false;
       api
         .getBookingDetail(bookingId)
-        .then((detail) => {
-          if (!cancelled) setLocation(detail?.location ?? null);
+        .then((detail: any) => {
+          if (cancelled) return;
+          setLocation(detail?.location ?? null);
+          if (detail?.clientLat != null && detail?.clientLng != null) {
+            setDestination({ lat: detail.clientLat, lng: detail.clientLng });
+          }
+          if (detail?.worker?.currentLat != null && detail?.worker?.currentLng != null) {
+            setInitialWorkerLocation({ lat: detail.worker.currentLat, lng: detail.worker.currentLng });
+            setHasWorkerLocation(true);
+            setLastUpdatedAt(detail.worker.lastLocationUpdate ?? null);
+          }
         })
         .catch((error) => {
           console.error("Load booking location error:", error);
@@ -38,6 +62,28 @@ export default function TrackBookingScreen() {
       };
     }, [bookingId]),
   );
+
+  // Live worker position while en route (booking still "Accepted") — pushed
+  // over the same app-wide socket connection used for chat/notifications
+  // (see app/_layout.tsx), so no extra connection to manage here.
+  const isLiveTrackable = booking?.status === "Accepted" && !!destination;
+  useEffect(() => {
+    if (!isLiveTrackable || !bookingId) return;
+    const socket = getSocket();
+    if (!socket) return;
+
+    const handler = (event: WorkerLocationEvent) => {
+      if (event.bookingId !== bookingId) return;
+      mapRef.current?.updateWorkerLocation({ lat: event.lat, lng: event.lng });
+      setHasWorkerLocation(true);
+      setLastUpdatedAt(event.at);
+    };
+
+    socket.on("worker:location", handler);
+    return () => {
+      socket.off("worker:location", handler);
+    };
+  }, [isLiveTrackable, bookingId]);
 
   if (!booking) {
     return (
@@ -154,7 +200,29 @@ export default function TrackBookingScreen() {
         <Text className="text-text-secondary text-sm font-semibold mb-2">
           Service Location
         </Text>
-        <AddressMap address={location} height="min-h-[200]" />
+        {isLiveTrackable && destination ? (
+          <View>
+            <View className="w-full min-h-[200] rounded-2xl overflow-hidden">
+              <LeafletMap
+                ref={mapRef}
+                destination={destination}
+                destinationLabel={location ?? undefined}
+                workerLocation={initialWorkerLocation}
+                workerLabel={booking.worker}
+              />
+            </View>
+            <View className="flex-row items-center mt-2">
+              <Ionicons name="navigate-circle" size={14} color={colors.success} />
+              <Text className="text-text-muted text-xs ml-1.5">
+                {hasWorkerLocation
+                  ? `Live — worker's location${lastUpdatedAt ? `, updated ${new Date(lastUpdatedAt).toLocaleTimeString()}` : ""}`
+                  : "Waiting for the worker to start sharing their location..."}
+              </Text>
+            </View>
+          </View>
+        ) : (
+          <AddressMap address={location} height="min-h-[200]" />
+        )}
 
         <View
           className="rounded-full py-2 px-4 self-center mt-4"

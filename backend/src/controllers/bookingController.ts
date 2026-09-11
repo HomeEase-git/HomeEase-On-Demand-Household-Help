@@ -20,6 +20,7 @@ import { schedulePendingExpiry, cancelPendingExpiryJob } from '@queues/bookingQu
 import { VALID_TRANSITIONS, isValidTransition } from '@services/bookingStateMachine';
 import { getAppSettings } from '@services/appSettingsService';
 import { computeWorkerTier, tierMultiplier } from '@utils/workerTier';
+import { getIO } from '../socket';
 import { VALID_URGENCY_LEVELS } from '@/constants/bookingEnums';
 import type { JwtPayload } from '@/types/index';
 
@@ -656,7 +657,7 @@ export const getBookingDetail = async (req: AuthRequest, res: Response) => {
             email: true,
             phone: true,
             avatar: true,
-            workerProfile: { select: { kycStatus: true } },
+            workerProfile: { select: { kycStatus: true, currentLat: true, currentLng: true, lastLocationUpdate: true } },
           },
         },
         serviceTask: { include: { serviceType: { select: { name: true } } } },
@@ -702,6 +703,13 @@ export const getBookingDetail = async (req: AuthRequest, res: Response) => {
               phone: booking.worker.phone,
               avatar: booking.worker.avatar,
               verified: booking.worker.workerProfile?.kycStatus === 'APPROVED',
+              // Last known live position while en route (see
+              // updateWorkerLiveLocation) — only meaningful for an ACCEPTED
+              // booking; gives the client's tracking map a starting marker
+              // before the first live socket push arrives.
+              currentLat: booking.worker.workerProfile?.currentLat ?? null,
+              currentLng: booking.worker.workerProfile?.currentLng ?? null,
+              lastLocationUpdate: booking.worker.workerProfile?.lastLocationUpdate ?? null,
             }
           : null,
         service: booking.serviceTask?.name ?? booking.serviceType,
@@ -1148,6 +1156,62 @@ export const arriveBooking = async (req: AuthRequest, res: Response) => {
   } catch (error) {
     console.error('Error verifying arrival:', error);
     return res.status(500).json(errorResponse(500, 'Failed to verify arrival'));
+  }
+};
+
+/**
+ * PATCH /api/bookings/:id/live-location
+ * Worker's foreground GPS watch pings this while en route to an ACCEPTED
+ * booking. Stores the latest position on WorkerProfile.currentLat/currentLng
+ * (nothing per-booking to keep this a cheap, high-frequency write) and pushes
+ * it straight to the client's already-open socket connection so the "Track
+ * Service" map can move the worker's marker live. Stops mattering once the
+ * worker checks in (see arriveBooking) — the mobile app stops sending at
+ * that point, and the client screen falls back to the static arrival pin.
+ */
+export const updateWorkerLiveLocation = async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user || req.user.role !== 'WORKER') {
+      return res.status(403).json(errorResponse(403, 'Only workers can share live location'));
+    }
+
+    const id = req.params.id as string;
+    const { lat, lng, accuracy } = req.body as { lat: number; lng: number; accuracy?: number };
+
+    const booking = await prisma.booking.findUnique({ where: { id }, select: { workerId: true, clientId: true, status: true } });
+
+    if (!booking) {
+      return res.status(404).json(errorResponse(404, 'Booking not found'));
+    }
+
+    if (booking.workerId !== req.user.userId) {
+      return res.status(403).json(errorResponse(403, 'This booking is not assigned to you'));
+    }
+
+    // Only meaningful while the worker is travelling to the job — once
+    // arrived/started there's nothing left to "track" on a map.
+    if (booking.status !== 'ACCEPTED') {
+      return res.status(409).json(errorResponse(409, `Cannot share live location for booking with status ${booking.status}`));
+    }
+
+    const now = new Date();
+    await prisma.workerProfile.update({
+      where: { userId: req.user.userId },
+      data: { currentLat: lat, currentLng: lng, lastLocationUpdate: now },
+    });
+
+    getIO().to(booking.clientId).emit('worker:location', {
+      bookingId: id,
+      lat,
+      lng,
+      accuracy: accuracy ?? null,
+      at: now.toISOString(),
+    });
+
+    return res.status(200).json({ success: true, message: 'Location shared' });
+  } catch (error) {
+    console.error('Error updating worker live location:', error);
+    return res.status(500).json(errorResponse(500, 'Failed to update live location'));
   }
 };
 

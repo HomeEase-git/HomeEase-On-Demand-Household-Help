@@ -1,8 +1,19 @@
 export type LatLng = { lat: number; lng: number };
 
 export type AddressComponents = {
+  houseNumber?: string;
   street?: string;
+  barangay?: string;
   city?: string;
+  state?: string;
+  zipCode?: string;
+};
+
+export type StructuredAddress = {
+  houseNumber?: string;
+  street: string;
+  barangay?: string;
+  city: string;
   state?: string;
   zipCode?: string;
 };
@@ -49,11 +60,14 @@ function parseAddressComponents(address: Record<string, string> | undefined): Ad
   const houseNumber = address.house_number;
   const road = address.road;
   const street = [houseNumber, road].filter(Boolean).join(' ') || undefined;
+  // PH barangays come back from Nominatim under whichever of these tags OSM
+  // happened to map the area to — there's no single reliable key.
+  const barangay = address.suburb || address.village || address.neighbourhood || address.quarter;
   const city =
-    address.city || address.town || address.municipality || address.suburb || address.county;
+    address.city || address.town || address.municipality || address.county;
   const state = address.state || address.region;
   const zipCode = address.postcode;
-  return { street, city, state, zipCode };
+  return { houseNumber, street, barangay, city, state, zipCode };
 }
 
 export async function geocodeAddress(address: string): Promise<PlaceResult | null> {
@@ -81,6 +95,23 @@ export async function geocodeAddress(address: string): Promise<PlaceResult | nul
     },
     components: parseAddressComponents(firstResult.address),
   };
+}
+
+// Builds one well-ordered query string (most-specific first) from the
+// individual address fields instead of one free-text blob — house number and
+// barangay are exactly the detail Nominatim needs to resolve a PH address
+// down to the actual lot rather than just the street or city centroid.
+export function formatStructuredAddress(parts: StructuredAddress): string {
+  const streetLine = [parts.houseNumber, parts.street].filter((p) => p?.trim()).join(' ');
+  return [
+    streetLine,
+    parts.barangay ? `Barangay ${parts.barangay}` : null,
+    parts.city,
+    [parts.state, parts.zipCode].filter((p) => p?.trim()).join(' '),
+    'Philippines',
+  ]
+    .filter((p) => p && p.trim())
+    .join(', ');
 }
 
 /**

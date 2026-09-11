@@ -207,8 +207,8 @@ export const createAddress = async (req: AuthRequest, res: Response) => {
       return res.status(401).json(errorResponse(401, 'Not authenticated'));
     }
     
-    const { label, street, city, state, zipCode } = req.body;
-    
+    const { label, street, city, state, zipCode, houseNumber, barangay, landmark, lat, lng, geocodeAccuracy } = req.body;
+
     const address = await prisma.userAddress.create({
       data: {
         userId: req.user.userId,
@@ -217,6 +217,13 @@ export const createAddress = async (req: AuthRequest, res: Response) => {
         city,
         state,
         zipCode,
+        houseNumber,
+        barangay,
+        landmark,
+        lat,
+        lng,
+        geocodeAccuracy,
+        geocodedAt: lat != null && lng != null ? new Date() : null,
       },
     });
     
@@ -241,23 +248,32 @@ export const updateAddress = async (req: AuthRequest, res: Response) => {
     }
     
     const addressId = req.params.addressId as string;
-    const { label, street, city, state, zipCode } = req.body;
-    
+    const { label, street, city, state, zipCode, houseNumber, barangay, landmark, lat, lng, geocodeAccuracy } = req.body;
+
     const address = await prisma.userAddress.findFirst({
       where: { id: addressId, isDeleted: false },
     });
-    
+
     if (!address || address.userId !== req.user.userId) {
       return res.status(403).json(errorResponse(403, 'Cannot update this address'));
     }
-    
+
     const updateData: any = {};
     if (label !== undefined) updateData.label = label;
     if (street !== undefined) updateData.street = street;
     if (city !== undefined) updateData.city = city;
     if (state !== undefined) updateData.state = state;
     if (zipCode !== undefined) updateData.zipCode = zipCode;
-    
+    if (houseNumber !== undefined) updateData.houseNumber = houseNumber;
+    if (barangay !== undefined) updateData.barangay = barangay;
+    if (landmark !== undefined) updateData.landmark = landmark;
+    if (lat !== undefined) {
+      updateData.lat = lat;
+      updateData.geocodedAt = lat != null ? new Date() : null;
+    }
+    if (lng !== undefined) updateData.lng = lng;
+    if (geocodeAccuracy !== undefined) updateData.geocodeAccuracy = geocodeAccuracy;
+
     const updated = await prisma.userAddress.update({
       where: { id: addressId },
       data: updateData,

@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import { View, Text, Image, ScrollView, Share } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useFocusEffect, useRouter, useLocalSearchParams } from "expo-router";
+import { AppIcon as Ionicons } from "../../../../components/icons/AppIcon";
 import ScreenHeader from "../../../../components/ui/ScreenHeader";
 import StatusBadge from "../../../../components/ui/StatusBadge";
 import StepperVertical from "../../../../components/steppers/StepperVertical";
@@ -15,9 +16,11 @@ import type { BottomSheetHandle } from "../../../../components/bottom-sheets/Bot
 import { Skeleton } from "../../../../components/ui/Skeleton";
 import { API_STATUS_MAP } from "../../../../store/bookingStore";
 import * as api from "../../../../services/api";
-import { getCurrentPosition, LocationPermissionDeniedError } from "../../../../services/location";
+import { getCurrentPosition, watchLiveLocation, LocationPermissionDeniedError } from "../../../../services/location";
+import type { LocationSubscription } from "expo-location";
 import { useAlertModal } from "../../../../contexts/AlertModalContext";
 import { usePolling } from "../../../../hooks/usePolling";
+import { colors } from "../../../../constants";
 
 // A real-time socket layer already pushes updates here — this poll is a
 // belt-and-suspenders fallback, not the primary refresh path.
@@ -111,6 +114,43 @@ export default function JobDetailScreen() {
     return () => clearInterval(interval);
   }, [workerStartedAt]);
   const displayedElapsedMs = workerStartedAt ? elapsedMs : 0;
+
+  // Streams live GPS to the client while en route (ACCEPTED, not yet checked
+  // in) so their "Track Service" map can show a moving marker. Stops as soon
+  // as the worker checks in as arrived, the job leaves ACCEPTED, or the
+  // screen loses focus — there's nothing left worth tracking once on-site,
+  // and no reason to burn battery watching GPS from a backgrounded screen.
+  const jobStatus = job ? API_STATUS_MAP[job.status] ?? "Pending" : null;
+  const hasArrivedForTracking = !!(job?.workerArrivedAt || job?.timeline?.workerArrivedAt);
+  const shouldShareLocation = focused && jobStatus === "Accepted" && !hasArrivedForTracking;
+
+  useEffect(() => {
+    if (!shouldShareLocation || !job?.id) return;
+
+    let cancelled = false;
+    let subscription: LocationSubscription | null = null;
+
+    watchLiveLocation((position) => {
+      api.updateWorkerLiveLocation(job.id, position.lat, position.lng, position.accuracy).catch((error) => {
+        console.error("Live location push error:", error);
+      });
+    })
+      .then((sub) => {
+        if (cancelled) {
+          sub.remove();
+          return;
+        }
+        subscription = sub;
+      })
+      .catch((error) => {
+        console.error("Start live location tracking error:", error);
+      });
+
+    return () => {
+      cancelled = true;
+      subscription?.remove();
+    };
+  }, [shouldShareLocation, job?.id]);
 
   if (loading) {
     return (
@@ -412,6 +452,14 @@ export default function JobDetailScreen() {
             <Text className="text-text-muted text-xs text-center -mt-1">
               You must check in within 100m of the job site before starting.
             </Text>
+          )}
+          {shouldShareLocation && (
+            <View className="flex-row items-center justify-center bg-success/10 rounded-xl py-2 -mt-1">
+              <Ionicons name="navigate-circle" size={16} color={colors.success} />
+              <Text className="text-success text-xs font-semibold ml-2">
+                Sharing your live location with the client
+              </Text>
+            </View>
           )}
           {isInProgress && (
             <PrimaryButton

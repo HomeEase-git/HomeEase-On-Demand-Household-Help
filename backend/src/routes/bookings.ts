@@ -6,6 +6,7 @@ import {
   acceptBooking,
   declineBooking,
   arriveBooking,
+  updateWorkerLiveLocation,
   startBooking,
   submitQuote,
   approveQuote,
@@ -28,6 +29,7 @@ import {
   validateAddAddon,
   validateAddReview,
   validateArriveBooking,
+  validateLiveLocation,
 } from '../middleware/validation';
 
 const router = Router();
@@ -57,6 +59,10 @@ router.patch('/:id/decline', restrictTo('WORKER'), validateBookingStatusUpdate, 
 
 // Worker checks in as arrived at the job site (worker only)
 router.patch('/:id/arrive', restrictTo('WORKER'), validateArriveBooking, arriveBooking);
+
+// Worker's live GPS while en route (worker only) — pushed to the client over
+// the socket so "Track Service" can show a moving marker
+router.patch('/:id/live-location', restrictTo('WORKER'), validateLiveLocation, updateWorkerLiveLocation);
 
 // Start booking (worker only) — requires a prior verified arrival
 router.patch('/:id/start', restrictTo('WORKER'), startBooking);

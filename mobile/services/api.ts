@@ -812,6 +812,12 @@ export async function addAddress(data: {
   city: string;
   state: string;
   zipCode: string;
+  houseNumber?: string;
+  barangay?: string;
+  landmark?: string;
+  lat?: number;
+  lng?: number;
+  geocodeAccuracy?: number;
 }) {
   try {
     const response = await api.post('/users/me/addresses', data);
@@ -828,6 +834,12 @@ export async function updateAddress(addressId: string, data: {
   city?: string;
   state?: string;
   zipCode?: string;
+  houseNumber?: string;
+  barangay?: string;
+  landmark?: string;
+  lat?: number;
+  lng?: number;
+  geocodeAccuracy?: number;
 }) {
   try {
     const response = await api.patch(`/users/me/addresses/${addressId}`, data);
@@ -1193,6 +1205,14 @@ export async function arriveBooking(bookingId: string, lat: number, lng: number)
     console.error('Arrive booking error:', error);
     throw error;
   }
+}
+
+// Fire-and-forget-ish: called every few seconds by the worker's foreground
+// GPS watch while en route. Callers should swallow failures (a dropped ping
+// isn't worth surfacing an error to the worker) rather than retry-storm.
+export async function updateWorkerLiveLocation(bookingId: string, lat: number, lng: number, accuracy?: number | null) {
+  const response = await api.patch(`/bookings/${bookingId}/live-location`, { lat, lng, accuracy });
+  return response;
 }
 
 export async function submitQuote(

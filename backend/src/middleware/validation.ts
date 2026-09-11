@@ -593,6 +593,31 @@ export const validateArriveBooking = (
   return next();
 };
 
+export const validateLiveLocation = (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  const { lat, lng, accuracy } = req.body;
+
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+    return res.status(400).json(errorResponse(400, 'lat and lng are required and must be numbers'));
+  }
+
+  if (
+    lat < PH_BOUNDS.minLat || lat > PH_BOUNDS.maxLat ||
+    lng < PH_BOUNDS.minLng || lng > PH_BOUNDS.maxLng
+  ) {
+    return res.status(400).json(errorResponse(400, 'lat/lng must fall within the Philippines'));
+  }
+
+  if (accuracy !== undefined && accuracy !== null && (!Number.isFinite(accuracy) || accuracy < 0)) {
+    return res.status(400).json(errorResponse(400, 'accuracy must be a non-negative number'));
+  }
+
+  return next();
+};
+
 export const validateSubmitQuote = (
   req: Request,
   res: Response,
@@ -809,33 +834,74 @@ export const validateChangePassword = (
   return next();
 };
 
+// Shared by both address validators — lat/lng are optional (an address saved
+// before geocoding resolves, or one Nominatim couldn't resolve at all, still
+// has to save), but when present must be real Philippine coordinates so a bad
+// geocode/GPS glitch can't corrupt the distance-fee or arrival-geofence math
+// that reads UserAddress.lat/lng downstream.
+const validateOptionalAddressCoords = (
+  req: Request,
+  res: Response,
+): Response | null => {
+  const { lat, lng, geocodeAccuracy } = req.body;
+
+  if (lat !== undefined && lat !== null) {
+    if (!Number.isFinite(lat) || lat < PH_BOUNDS.minLat || lat > PH_BOUNDS.maxLat) {
+      return res.status(400).json(errorResponse(400, 'lat must be a number within the Philippines'));
+    }
+  }
+
+  if (lng !== undefined && lng !== null) {
+    if (!Number.isFinite(lng) || lng < PH_BOUNDS.minLng || lng > PH_BOUNDS.maxLng) {
+      return res.status(400).json(errorResponse(400, 'lng must be a number within the Philippines'));
+    }
+  }
+
+  if (geocodeAccuracy !== undefined && geocodeAccuracy !== null) {
+    if (!Number.isFinite(geocodeAccuracy) || geocodeAccuracy < 0) {
+      return res.status(400).json(errorResponse(400, 'geocodeAccuracy must be a non-negative number'));
+    }
+  }
+
+  return null;
+};
+
 export const validateAddAddress = (
   req: Request,
   res: Response,
   next: NextFunction
 ) => {
-  const { label, street, city, state, zipCode } = req.body;
-  
+  const { label, street, city, state, zipCode, houseNumber, barangay, landmark } = req.body;
+
   if (!label || typeof label !== 'string') {
     return res.status(400).json(errorResponse(400, 'label is required and must be a string'));
   }
-  
+
   if (!street || typeof street !== 'string') {
     return res.status(400).json(errorResponse(400, 'street is required and must be a string'));
   }
-  
+
   if (!city || typeof city !== 'string') {
     return res.status(400).json(errorResponse(400, 'city is required and must be a string'));
   }
-  
+
   if (!state || typeof state !== 'string') {
     return res.status(400).json(errorResponse(400, 'state is required and must be a string'));
   }
-  
+
   if (!zipCode || typeof zipCode !== 'string') {
     return res.status(400).json(errorResponse(400, 'zipCode is required and must be a string'));
   }
-  
+
+  for (const [field, value] of [['houseNumber', houseNumber], ['barangay', barangay], ['landmark', landmark]] as const) {
+    if (value !== undefined && value !== null && typeof value !== 'string') {
+      return res.status(400).json(errorResponse(400, `${field} must be a string`));
+    }
+  }
+
+  const coordsError = validateOptionalAddressCoords(req, res);
+  if (coordsError) return coordsError;
+
   return next();
 };
 
@@ -844,28 +910,37 @@ export const validateUpdateAddress = (
   res: Response,
   next: NextFunction
 ) => {
-  const { label, street, city, state, zipCode } = req.body;
-  
+  const { label, street, city, state, zipCode, houseNumber, barangay, landmark } = req.body;
+
   if (label !== undefined && typeof label !== 'string') {
     return res.status(400).json(errorResponse(400, 'label must be a string'));
   }
-  
+
   if (street !== undefined && typeof street !== 'string') {
     return res.status(400).json(errorResponse(400, 'street must be a string'));
   }
-  
+
   if (city !== undefined && typeof city !== 'string') {
     return res.status(400).json(errorResponse(400, 'city must be a string'));
   }
-  
+
   if (state !== undefined && typeof state !== 'string') {
     return res.status(400).json(errorResponse(400, 'state must be a string'));
   }
-  
+
   if (zipCode !== undefined && typeof zipCode !== 'string') {
     return res.status(400).json(errorResponse(400, 'zipCode must be a string'));
   }
-  
+
+  for (const [field, value] of [['houseNumber', houseNumber], ['barangay', barangay], ['landmark', landmark]] as const) {
+    if (value !== undefined && value !== null && typeof value !== 'string') {
+      return res.status(400).json(errorResponse(400, `${field} must be a string`));
+    }
+  }
+
+  const coordsError = validateOptionalAddressCoords(req, res);
+  if (coordsError) return coordsError;
+
   return next();
 };
 

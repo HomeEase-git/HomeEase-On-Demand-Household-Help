@@ -9,8 +9,8 @@ import PrimaryButton from "../../../../components/ui/PrimaryButton";
 import OutlinedButton from "../../../../components/ui/OutlinedButton";
 import { colors, cardShadow } from "../../../../constants";
 import { addressStorage } from "../../../../utils/storage";
-import { geocodeAddress, searchAddresses, reverseGeocodeDetailed, type PlaceResult } from "../../../../utils/geo";
-import { getCurrentPosition, LocationPermissionDeniedError } from "../../../../services/location";
+import { geocodeAddress, searchAddresses, reverseGeocodeDetailed, formatStructuredAddress, type PlaceResult } from "../../../../utils/geo";
+import { getPrecisePosition, LocationPermissionDeniedError, LocationTimeoutError } from "../../../../services/location";
 import { useDebouncedCallback } from "../../../../utils/performanceOptimization";
 import * as api from "../../../../services/api";
 import { useAlertModal } from "../../../../contexts/AlertModalContext";
@@ -24,10 +24,13 @@ export default function AddressEditScreen() {
   const isNew = addressId === "new";
 
   const [label, setLabel] = useState("Home");
+  const [houseNumber, setHouseNumber] = useState("");
   const [street, setStreet] = useState("");
+  const [barangay, setBarangay] = useState("");
   const [city, setCity] = useState("");
   const [state, setState] = useState("");
   const [zipCode, setZipCode] = useState("");
+  const [landmark, setLandmark] = useState("");
   const [saving, setSaving] = useState(false);
   const [showManualFields, setShowManualFields] = useState(!isNew);
 
@@ -41,6 +44,10 @@ export default function AddressEditScreen() {
   // geocode call — but only while the fields still match what was resolved.
   const [resolvedLatLng, setResolvedLatLng] = useState<{ lat: number; lng: number } | null>(null);
   const [resolvedFor, setResolvedFor] = useState<string | null>(null);
+  // Only set when resolvedLatLng came from the device's own GPS (not a typed
+  // address or a search suggestion) — this is the one case we actually know
+  // how accurate the pin is, and it's worth surfacing to the client.
+  const [resolvedAccuracy, setResolvedAccuracy] = useState<number | null>(null);
 
   useEffect(() => {
     const loadExisting = async () => {
@@ -50,10 +57,27 @@ export default function AddressEditScreen() {
         const existing = addresses.find((a: any) => a.id === addressId);
         if (existing) {
           setLabel(existing.label ?? "Home");
+          setHouseNumber(existing.houseNumber ?? "");
           setStreet(existing.street ?? "");
+          setBarangay(existing.barangay ?? "");
           setCity(existing.city ?? "");
           setState(existing.state ?? "");
           setZipCode(existing.zipCode ?? "");
+          setLandmark(existing.landmark ?? "");
+          if (existing.lat != null && existing.lng != null) {
+            setResolvedLatLng({ lat: existing.lat, lng: existing.lng });
+            setResolvedFor(
+              formatStructuredAddress({
+                houseNumber: existing.houseNumber ?? undefined,
+                street: existing.street ?? "",
+                barangay: existing.barangay ?? undefined,
+                city: existing.city ?? "",
+                state: existing.state ?? undefined,
+                zipCode: existing.zipCode ?? undefined,
+              }),
+            );
+            setResolvedAccuracy(existing.geocodeAccuracy ?? null);
+          }
         }
       } catch (error) {
         console.error("Load address error:", error);
@@ -90,19 +114,33 @@ export default function AddressEditScreen() {
     runSearch(text);
   };
 
-  const applyResolvedPlace = (place: PlaceResult) => {
-    const { street: s, city: c, state: st, zipCode: z } = place.components ?? {};
+  const applyResolvedPlace = (place: PlaceResult, accuracy: number | null = null) => {
+    const { houseNumber: h, street: s, barangay: b, city: c, state: st, zipCode: z } = place.components ?? {};
+    const nextHouseNumber = h ?? "";
     const nextStreet = s ?? "";
+    const nextBarangay = b ?? "";
     const nextCity = c ?? "";
     const nextState = st ?? "";
     const nextZip = z ?? "";
 
+    setHouseNumber(nextHouseNumber);
     setStreet(nextStreet);
+    setBarangay(nextBarangay);
     setCity(nextCity);
     setState(nextState);
     setZipCode(nextZip);
     setResolvedLatLng(place.geometry.location);
-    setResolvedFor(`${nextStreet}, ${nextCity}, ${nextState} ${nextZip}`);
+    setResolvedFor(
+      formatStructuredAddress({
+        houseNumber: nextHouseNumber,
+        street: nextStreet,
+        barangay: nextBarangay,
+        city: nextCity,
+        state: nextState,
+        zipCode: nextZip,
+      }),
+    );
+    setResolvedAccuracy(accuracy);
     setShowManualFields(true);
     setSearchResults([]);
     setSearchQuery("");
@@ -115,13 +153,14 @@ export default function AddressEditScreen() {
   const handleUseCurrentLocation = async () => {
     setLocating(true);
     try {
-      const position = await getCurrentPosition();
+      const position = await getPrecisePosition();
       const place = await reverseGeocodeDetailed(position.lat, position.lng);
       if (place) {
-        applyResolvedPlace(place);
+        applyResolvedPlace(place, position.accuracy);
       } else {
         setResolvedLatLng(position);
         setResolvedFor(null);
+        setResolvedAccuracy(position.accuracy);
         setShowManualFields(true);
         alertModal.error(
           "Couldn't fill in details",
@@ -131,6 +170,11 @@ export default function AddressEditScreen() {
     } catch (error) {
       if (error instanceof LocationPermissionDeniedError) {
         alertModal.error("Location needed", "Please enable location access to use your current location.");
+      } else if (error instanceof LocationTimeoutError) {
+        alertModal.error(
+          "Couldn't get a precise fix",
+          "GPS is taking too long — try moving near a window or open sky, or enter your address manually.",
+        );
       } else {
         alertModal.error("Error", "Unable to get your current location right now.");
       }
@@ -147,20 +191,31 @@ export default function AddressEditScreen() {
 
     setSaving(true);
     try {
-      const fullAddress = `${street}, ${city}, ${state} ${zipCode}`;
-      const geocoded =
-        resolvedLatLng && resolvedFor === fullAddress
-          ? { geometry: { location: resolvedLatLng } }
-          : await geocodeAddress(fullAddress).catch(() => null);
+      const fullAddress = formatStructuredAddress({ houseNumber, street, barangay, city, state, zipCode });
+      const isFreshResolution = resolvedLatLng && resolvedFor === fullAddress;
+      const geocoded = isFreshResolution
+        ? { geometry: { location: resolvedLatLng! } }
+        : await geocodeAddress(fullAddress).catch(() => null);
+      // Only a device GPS fix carries a real accuracy figure — a fresh
+      // free-text geocode (fields were edited since the last resolve) has none.
+      const geocodeAccuracy = isFreshResolution ? (resolvedAccuracy ?? undefined) : undefined;
+
+      const payload = {
+        label,
+        houseNumber: houseNumber || undefined,
+        street,
+        barangay: barangay || undefined,
+        city,
+        state,
+        zipCode,
+        landmark: landmark || undefined,
+        lat: geocoded?.geometry.location.lat,
+        lng: geocoded?.geometry.location.lng,
+        geocodeAccuracy,
+      };
 
       if (isNew) {
-        const result = await api.addAddress({
-          label,
-          street,
-          city,
-          state,
-          zipCode,
-        });
+        const result = await api.addAddress(payload);
         await addressStorage.upsert(result.id, {
           label,
           address: fullAddress,
@@ -168,13 +223,7 @@ export default function AddressEditScreen() {
           lng: geocoded?.geometry.location.lng,
         });
       } else if (addressId) {
-        await api.updateAddress(addressId, {
-          label,
-          street,
-          city,
-          state,
-          zipCode,
-        });
+        await api.updateAddress(addressId, payload);
         await addressStorage.upsert(addressId, {
           label,
           address: fullAddress,
@@ -194,6 +243,11 @@ export default function AddressEditScreen() {
     } finally {
       setSaving(false);
     }
+  };
+
+  const clearResolution = () => {
+    setResolvedFor(null);
+    setResolvedAccuracy(null);
   };
 
   return (
@@ -219,7 +273,7 @@ export default function AddressEditScreen() {
                 <Ionicons name="locate-outline" size={18} color={colors.accent.DEFAULT} />
               )}
               <Text className="text-accent font-semibold ml-2">
-                {locating ? "Locating..." : "Use my current location"}
+                {locating ? "Getting a precise fix..." : "Use my current location"}
               </Text>
             </Pressable>
 
@@ -266,6 +320,15 @@ export default function AddressEditScreen() {
           </>
         )}
 
+        {resolvedAccuracy != null && resolvedFor && (
+          <View className="flex-row items-center bg-success/10 rounded-xl px-3 py-2 mb-4">
+            <Ionicons name="checkmark-circle" size={16} color={colors.success} />
+            <Text className="text-success text-xs font-semibold ml-2">
+              Pinned to within ~{Math.round(resolvedAccuracy)}m of your device
+            </Text>
+          </View>
+        )}
+
         {showManualFields && (
           <>
             <View className="bg-card rounded-2xl p-4 mb-4" style={cardShadow}>
@@ -292,13 +355,33 @@ export default function AddressEditScreen() {
             </View>
 
             <InputField
-              label="Street Address"
+              label="House / Unit / Bldg. No. (optional)"
+              value={houseNumber}
+              onChangeText={(text) => {
+                setHouseNumber(text);
+                clearResolution();
+              }}
+              placeholder="e.g., Blk 4 Lot 12, Unit 3B"
+            />
+
+            <InputField
+              label="Street Name"
               value={street}
               onChangeText={(text) => {
                 setStreet(text);
-                setResolvedFor(null);
+                clearResolution();
               }}
-              placeholder="e.g., 123 Rizal Street"
+              placeholder="e.g., Rizal Street"
+            />
+
+            <InputField
+              label="Barangay"
+              value={barangay}
+              onChangeText={(text) => {
+                setBarangay(text);
+                clearResolution();
+              }}
+              placeholder="e.g., San Isidro"
             />
 
             <InputField
@@ -306,7 +389,7 @@ export default function AddressEditScreen() {
               value={city}
               onChangeText={(text) => {
                 setCity(text);
-                setResolvedFor(null);
+                clearResolution();
               }}
               placeholder="e.g., Manila"
             />
@@ -316,7 +399,7 @@ export default function AddressEditScreen() {
               value={state}
               onChangeText={(text) => {
                 setState(text);
-                setResolvedFor(null);
+                clearResolution();
               }}
               placeholder="e.g., Bulacan"
             />
@@ -326,10 +409,17 @@ export default function AddressEditScreen() {
               value={zipCode}
               onChangeText={(text) => {
                 setZipCode(text);
-                setResolvedFor(null);
+                clearResolution();
               }}
               placeholder="e.g., 1234"
               keyboardType="number-pad"
+            />
+
+            <InputField
+              label="Landmark (optional)"
+              value={landmark}
+              onChangeText={setLandmark}
+              placeholder="e.g., Beside Mercury Drug"
             />
           </>
         )}
