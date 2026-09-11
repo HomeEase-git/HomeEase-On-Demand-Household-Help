@@ -119,6 +119,9 @@ body {
   width: 36px;
   height: 36px;
   object-fit: contain;
+  background: #ffffff;
+  border-radius: 8px;
+  padding: 3px;
 }
 
 .sidebar-brand span {
