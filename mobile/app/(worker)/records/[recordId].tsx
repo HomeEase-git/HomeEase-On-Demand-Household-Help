@@ -17,6 +17,8 @@ type BookingDetail = {
   service: string;
   status: string;
   location: string | null;
+  clientLat?: number | null;
+  clientLng?: number | null;
   scheduledDate: string;
   estimatedPrice: number;
   finalPrice: number | null;
@@ -152,7 +154,11 @@ export default function RecordDetailScreen() {
         {record.location ? (
           <>
             <View className="mb-3">
-              <AddressMap height="h-56" address={record.location} />
+              <AddressMap
+                height="h-56"
+                address={record.location}
+                coords={record.clientLat != null && record.clientLng != null ? { lat: record.clientLat, lng: record.clientLng } : undefined}
+              />
             </View>
             <PrimaryButton label="Open in Maps" onPress={openMap} />
           </>

@@ -7,35 +7,48 @@ import { colors } from "../../constants";
 
 type Props = {
   address?: string | null;
+  // Pass this whenever the caller already has resolved coordinates (e.g. a
+  // booking's persisted clientLat/clientLng) — skips geocoding entirely
+  // instead of re-resolving the same address from text on every render/view.
+  coords?: LatLng | null;
   height?: string;
   zoom?: number;
 };
 
 type Status = "loading" | "found" | "missing" | "error";
 
+const initialStatus = (address?: string | null, coords?: LatLng | null): Status =>
+  coords ? "found" : address ? "loading" : "missing";
+
 export const AddressMap: React.FC<Props> = ({
   address,
+  coords,
   height = "h-48",
   zoom,
 }) => {
-  const [coords, setCoords] = useState<LatLng | null>(null);
-  const [status, setStatus] = useState<Status>(address ? "loading" : "missing");
-  const [prevAddress, setPrevAddress] = useState(address);
+  const [geocodedCoords, setGeocodedCoords] = useState<LatLng | null>(null);
+  const [status, setStatus] = useState<Status>(() => initialStatus(address, coords));
+  // Re-derive state when either input changes, same pattern as the address
+  // string alone used to use — comparing a combined key during render avoids
+  // a flash of stale content before an effect would otherwise catch up.
+  const [prevKey, setPrevKey] = useState(`${coords?.lat ?? ""},${coords?.lng ?? ""}|${address ?? ""}`);
+  const key = `${coords?.lat ?? ""},${coords?.lng ?? ""}|${address ?? ""}`;
 
-  if (address !== prevAddress) {
-    setPrevAddress(address);
-    setStatus(address ? "loading" : "missing");
-    setCoords(null);
+  if (key !== prevKey) {
+    setPrevKey(key);
+    setStatus(initialStatus(address, coords));
+    setGeocodedCoords(null);
   }
 
   useEffect(() => {
+    if (coords) return; // already precise — nothing to geocode
     if (!address) return;
     let active = true;
     geocodeAddress(address)
       .then((result) => {
         if (!active) return;
         if (result) {
-          setCoords(result.geometry.location);
+          setGeocodedCoords(result.geometry.location);
           setStatus("found");
         } else {
           setStatus("error");
@@ -47,12 +60,14 @@ export const AddressMap: React.FC<Props> = ({
     return () => {
       active = false;
     };
-  }, [address]);
+  }, [address, coords]);
 
-  if (status === "found" && coords) {
+  const resolvedCoords = coords ?? geocodedCoords;
+
+  if (status === "found" && resolvedCoords) {
     return (
       <View className={`w-full rounded-2xl overflow-hidden ${height}`}>
-        <LeafletMap destination={coords} destinationLabel={address ?? undefined} zoom={zoom} />
+        <LeafletMap destination={resolvedCoords} destinationLabel={address ?? undefined} zoom={zoom} />
       </View>
     );
   }

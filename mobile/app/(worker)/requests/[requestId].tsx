@@ -26,6 +26,8 @@ type BookingDetail = {
   service: string;
   status: string;
   location: string | null;
+  clientLat?: number | null;
+  clientLng?: number | null;
   scheduledDate: string;
   estimatedPrice: number;
   rooms?: RoomType[];
@@ -260,7 +262,11 @@ export default function RequestDetailScreen() {
             {booking.location || "No address provided"}
           </Text>
           <View className="mt-3">
-            <AddressMap height="h-32" address={booking.location} />
+            <AddressMap
+              height="h-32"
+              address={booking.location}
+              coords={booking.clientLat != null && booking.clientLng != null ? { lat: booking.clientLat, lng: booking.clientLng } : undefined}
+            />
           </View>
         </View>
 

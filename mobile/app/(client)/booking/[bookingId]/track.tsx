@@ -221,7 +221,7 @@ export default function TrackBookingScreen() {
             </View>
           </View>
         ) : (
-          <AddressMap address={location} height="min-h-[200]" />
+          <AddressMap address={location} coords={destination} height="min-h-[200]" />
         )}
 
         <View
