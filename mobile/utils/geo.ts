@@ -1,3 +1,5 @@
+import { geocodeAddressGoogle, reverseGeocodeGoogle } from "../services/api";
+
 export type LatLng = { lat: number; lng: number };
 
 export type AddressComponents = {
@@ -76,13 +78,16 @@ function parseAddressComponents(address: Record<string, string> | undefined): Ad
   return { houseNumber, street, barangay, city, state, zipCode };
 }
 
-export async function geocodeAddress(address: string): Promise<PlaceResult | null> {
-  const normalized = address.trim();
-  if (!normalized) return null;
+// Google's geometry.location_type: ROOFTOP (exact building) and
+// RANGE_INTERPOLATED (interpolated between two known points on a road) are
+// both precise enough to treat as an exact match; GEOMETRIC_CENTER (center of
+// a broader area — a road, a neighborhood) and APPROXIMATE are not.
+const PRECISE_GOOGLE_LOCATION_TYPES = new Set(["ROOFTOP", "RANGE_INTERPOLATED"]);
 
+async function geocodeAddressNominatim(address: string): Promise<PlaceResult | null> {
   const response = await fetch(
     `https://nominatim.openstreetmap.org/search?format=json&limit=1&addressdetails=1&countrycodes=ph&q=${encodeURIComponent(
-      normalized,
+      address,
     )}`,
     { headers: NOMINATIM_HEADERS },
   );
@@ -92,7 +97,7 @@ export async function geocodeAddress(address: string): Promise<PlaceResult | nul
   if (!firstResult) return null;
 
   return {
-    formatted_address: firstResult.display_name || normalized,
+    formatted_address: firstResult.display_name || address,
     geometry: {
       location: {
         lat: parseFloat(firstResult.lat),
@@ -101,6 +106,28 @@ export async function geocodeAddress(address: string): Promise<PlaceResult | nul
     },
     components: parseAddressComponents(firstResult.address),
   };
+}
+
+// Tries the backend-proxied Google Geocoding API first (far better PH
+// barangay coverage — see googleGeocodingService.ts), falling back to free
+// Nominatim when Google isn't configured server-side, doesn't resolve the
+// address either, or the request fails. geocodeAddressGoogle never throws
+// (see services/api.ts), so this never needs its own try/catch around it.
+export async function geocodeAddress(address: string): Promise<PlaceResult | null> {
+  const normalized = address.trim();
+  if (!normalized) return null;
+
+  const viaGoogle = await geocodeAddressGoogle(normalized);
+  if (viaGoogle) {
+    return {
+      formatted_address: viaGoogle.formattedAddress,
+      geometry: { location: { lat: viaGoogle.lat, lng: viaGoogle.lng } },
+      components: viaGoogle.components,
+      approximate: !PRECISE_GOOGLE_LOCATION_TYPES.has(viaGoogle.locationType),
+    };
+  }
+
+  return geocodeAddressNominatim(normalized);
 }
 
 // Builds one well-ordered query string (most-specific first) from the
@@ -151,13 +178,13 @@ export async function geocodeAddressWithFallback(parts: StructuredAddress): Prom
 
 /**
  * Multi-result address search for autocomplete-style UI (as opposed to
- * `geocodeAddress`, which only returns the single best match). Backed by
- * Nominatim (OpenStreetMap) rather than Google Places — this app has no
- * Google Maps/Places API key or SDK configured, and Nominatim is free/keyless
- * and already the established geocoding provider (see `geocodeAddress`/
- * `reverseGeocodeDetailed` above, used by the existing address-picker
- * screen). Swap the fetch implementation here if a Google Places key is
- * added later; callers only depend on the `PlaceResult[]` shape.
+ * `geocodeAddress`, which only returns the single best match). Stays on
+ * Nominatim even though `geocodeAddress`/`reverseGeocodeDetailed` above now
+ * try Google first — Google's equivalent is Places Autocomplete, a separate,
+ * session-billed SKU with its own pricing that fires on every keystroke
+ * rather than once per save, so it wasn't brought in along with the plain
+ * Geocoding API. Swap the fetch implementation here if that's wanted later;
+ * callers only depend on the `PlaceResult[]` shape.
  */
 export async function searchAddresses(query: string, limit = 5): Promise<PlaceResult[]> {
   const normalized = query.trim();
@@ -196,6 +223,18 @@ export async function reverseGeocode(lat: number, lng: number): Promise<string |
 }
 
 export async function reverseGeocodeDetailed(lat: number, lng: number): Promise<PlaceResult | null> {
+  const viaGoogle = await reverseGeocodeGoogle(lat, lng);
+  if (viaGoogle) {
+    return {
+      formatted_address: viaGoogle.formattedAddress,
+      // Keep the caller's own GPS fix rather than Google's (possibly
+      // snapped-to-road) geometry — this is "what address is at this point?",
+      // not "give me a new point," matching the existing Nominatim behavior below.
+      geometry: { location: { lat, lng } },
+      components: viaGoogle.components,
+    };
+  }
+
   const response = await fetch(
     `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&addressdetails=1`,
     { headers: NOMINATIM_HEADERS },

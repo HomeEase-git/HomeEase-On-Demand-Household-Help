@@ -796,6 +796,43 @@ export async function setDefaultPaymentMethod(methodId: string) {
 // ADDRESSES - CLIENT
 // ============================================================================
 
+export type GoogleGeocodeResult = {
+  formattedAddress: string;
+  lat: number;
+  lng: number;
+  locationType: string;
+  components: {
+    houseNumber?: string;
+    street?: string;
+    barangay?: string;
+    city?: string;
+    state?: string;
+    zipCode?: string;
+  };
+};
+
+// Backend-proxied Google Geocoding — the API key never ships to the mobile
+// bundle. Resolves to `null` (never throws) whenever Google isn't configured
+// server-side, the address genuinely doesn't resolve, or the request fails —
+// callers (utils/geo.ts) treat all three the same way: fall back to Nominatim.
+export async function geocodeAddressGoogle(address: string): Promise<GoogleGeocodeResult | null> {
+  try {
+    return await api.post('/geo/geocode', { address });
+  } catch (error) {
+    console.error('Google geocode proxy error:', error);
+    return null;
+  }
+}
+
+export async function reverseGeocodeGoogle(lat: number, lng: number): Promise<GoogleGeocodeResult | null> {
+  try {
+    return await api.post('/geo/reverse-geocode', { lat, lng });
+  } catch (error) {
+    console.error('Google reverse geocode proxy error:', error);
+    return null;
+  }
+}
+
 export async function getAddresses() {
   try {
     const response = await api.get('/users/me/addresses');

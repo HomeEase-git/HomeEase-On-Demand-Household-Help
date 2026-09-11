@@ -111,6 +111,10 @@ services:
       - key: ANTHROPIC_MODEL
         value: claude-sonnet-5
 
+      # --- Geocoding (optional — falls back to free Nominatim if unset) ---
+      - key: GOOGLE_MAPS_API_KEY
+        sync: false
+
       # --- Uploads ---
       - key: MAX_FILE_SIZE
         value: "5242880"
