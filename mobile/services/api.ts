@@ -986,7 +986,11 @@ export async function getTransactionDetail(bookingId: string) {
 export async function createXenditCheckout(bookingId: string) {
   try {
     const response = await api.post(`/payments/${bookingId}/xendit/checkout`);
-    return response as { checkoutUrl: string; invoiceId: string; amount: number };
+    // alreadyPaid: true means the server found this already PAID on Xendit's
+    // side (webhook was missed/delayed) and self-healed it — no checkout to open.
+    return response as
+      | { checkoutUrl: string; invoiceId: string; amount: number; alreadyPaid?: undefined }
+      | { alreadyPaid: true; checkoutUrl?: undefined };
   } catch (error) {
     console.error('Create Xendit checkout error:', error);
     throw error;

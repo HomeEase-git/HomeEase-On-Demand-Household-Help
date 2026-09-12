@@ -348,6 +348,14 @@ export const createXenditCheckout = async (req: AuthRequest, res: Response) => {
 
     const invoice = await createCompletionInvoice(bookingId);
 
+    if ('alreadyPaid' in invoice) {
+      return res.status(200).json({
+        success: true,
+        message: 'Payment already completed',
+        data: { alreadyPaid: true },
+      });
+    }
+
     return res.status(200).json({
       success: true,
       message: 'Xendit checkout ready',

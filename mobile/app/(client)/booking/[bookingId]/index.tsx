@@ -130,21 +130,25 @@ export default function BookingDetailScreen() {
   const [checkoutUrl, setCheckoutUrl] = useState<string | null>(null);
   const [checkoutVisible, setCheckoutVisible] = useState(false);
 
+  const refreshBookingDetail = React.useCallback(async () => {
+    const data: ApiBookingDetail = await getBookingDetail(bookingId);
+    const mapped = mapApiBookingDetail(data);
+    setRawDetail(data);
+    useBookingStore.setState((s) => ({
+      bookings: [...s.bookings.filter((b) => b.id !== mapped.id), mapped],
+    }));
+    return data;
+  }, [bookingId]);
+
   useFocusEffect(
     React.useCallback(() => {
       let cancelled = false;
       (async () => {
         setLoading(true);
         try {
-          const data: ApiBookingDetail = await getBookingDetail(bookingId);
-          if (cancelled) return;
-          const mapped = mapApiBookingDetail(data);
-          setRawDetail(data);
-          useBookingStore.setState((s) => ({
-            bookings: [...s.bookings.filter((b) => b.id !== mapped.id), mapped],
-          }));
+          await refreshBookingDetail();
         } catch (error) {
-          console.error("Load booking detail error:", error);
+          if (!cancelled) console.error("Load booking detail error:", error);
         } finally {
           if (!cancelled) setLoading(false);
         }
@@ -152,7 +156,7 @@ export default function BookingDetailScreen() {
       return () => {
         cancelled = true;
       };
-    }, [bookingId]),
+    }, [refreshBookingDetail]),
   );
 
   if (loading && !booking) {
@@ -256,8 +260,19 @@ export default function BookingDetailScreen() {
     if (processingPayment) return;
     setProcessingPayment(true);
     try {
-      const { checkoutUrl: url } = await createXenditCheckout(booking.id);
-      openCheckout(url);
+      const result = await createXenditCheckout(booking.id);
+      if (result.alreadyPaid) {
+        // Server found this already PAID on Xendit's side (webhook was
+        // missed/delayed) and self-healed it — no checkout to open.
+        await refreshBookingDetail();
+        setProcessingPayment(false);
+        alertModal.success(
+          "Payment successful",
+          "The worker has been paid. Thank you!",
+        );
+        return;
+      }
+      openCheckout(result.checkoutUrl);
     } catch (error) {
       console.error("Resume payment error:", error);
       setProcessingPayment(false);

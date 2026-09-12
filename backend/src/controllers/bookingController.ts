@@ -1715,6 +1715,31 @@ export const confirmCompletion = async (req: AuthRequest, res: Response) => {
     // GCASH / MAYA — raise the invoice, wait for the webhook.
     const invoice = await createCompletionInvoice(id);
 
+    if ('alreadyPaid' in invoice) {
+      // Xendit already shows this PAID (webhook missed/delayed) — createCompletionInvoice
+      // self-healed it via finalizePaidBooking, so report COMPLETED instead of
+      // handing back a checkout that would charge the client again.
+      const payment = await prisma.payment.findUnique({ where: { bookingId: id } });
+      return res.status(200).json({
+        success: true,
+        message: 'Completion confirmed — payment already received',
+        data: {
+          id,
+          status: 'COMPLETED',
+          finalPrice: payment?.subtotal ?? null,
+          completedAt: payment?.capturedAt ?? null,
+          payment: payment
+            ? {
+                status: payment.status,
+                methodType: payment.methodType,
+                totalAmount: payment.totalAmount,
+                workerPayout: payment.workerPayout,
+              }
+            : null,
+        },
+      });
+    }
+
     return res.status(200).json({
       success: true,
       message: 'Completion confirmed — payment required',

@@ -156,12 +156,10 @@ export async function settleCashBooking(bookingId: string) {
  * Payment with a live invoice already exists (client abandoned an earlier
  * checkout), its URL is returned instead of creating a duplicate.
  */
-export async function createCompletionInvoice(bookingId: string): Promise<{
-  checkoutUrl: string;
-  invoiceId: string;
-  paymentId: string;
-  amount: number;
-}> {
+export async function createCompletionInvoice(bookingId: string): Promise<
+  | { checkoutUrl: string; invoiceId: string; paymentId: string; amount: number }
+  | { alreadyPaid: true }
+> {
   const booking = await loadBooking(bookingId);
   const method = booking.paymentMethodType;
   if (method !== 'GCASH' && method !== 'MAYA') {
@@ -180,11 +178,24 @@ export async function createCompletionInvoice(bookingId: string): Promise<{
     throw new Error(`Booking ${bookingId} is already paid`);
   }
 
-  // Reuse a still-open invoice from an abandoned checkout.
+  // Reuse a still-open invoice from an abandoned checkout — or, if Xendit
+  // already shows it PAID (the invoice-paid webhook was missed/delayed),
+  // self-heal right here instead of minting a duplicate invoice and charging
+  // the client a second time.
   if (existing && existing.status === 'PENDING' && existing.xenditInvoiceId) {
     try {
       const inv = await retrieveInvoice(existing.xenditInvoiceId);
-      if ((inv?.status as string)?.toUpperCase() === 'PENDING' && inv?.invoice_url) {
+      const invStatus = (inv?.status as string)?.toUpperCase();
+      if (invStatus === 'PAID' || invStatus === 'SETTLED') {
+        await finalizePaidBooking(
+          existing.id,
+          inv.payment_id ?? null,
+          inv.paid_amount ?? null,
+          inv.paid_at ? new Date(inv.paid_at) : null
+        );
+        return { alreadyPaid: true };
+      }
+      if (invStatus === 'PENDING' && inv?.invoice_url) {
         return {
           checkoutUrl: inv.invoice_url,
           invoiceId: existing.xenditInvoiceId,

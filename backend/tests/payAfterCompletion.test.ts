@@ -24,6 +24,13 @@ import { createTestUser, deleteTestUser, deleteTestBooking } from './helpers';
 const { createInvoice } = require('@services/xenditService');
 const { schedulePayout } = require('@queues/payoutQueue');
 
+// All call sites below invoice a freshly-seeded booking with no prior Payment
+// row, so the alreadyPaid self-heal branch never applies here — narrow it away.
+function expectInvoice(result: Awaited<ReturnType<typeof createCompletionInvoice>>) {
+  if ('alreadyPaid' in result) throw new Error('Expected a fresh invoice, got alreadyPaid');
+  return result;
+}
+
 describe('Pay-after-completion payment lifecycle', () => {
   const createdUserIds: string[] = [];
   const createdBookingIds: string[] = [];
@@ -117,7 +124,7 @@ describe('Pay-after-completion payment lifecycle', () => {
       invoiceUrl: 'https://checkout.xendit.co/inv_pac_1',
     });
 
-    const result = await createCompletionInvoice(booking.id);
+    const result = expectInvoice(await createCompletionInvoice(booking.id));
     expect(result.checkoutUrl).toContain('inv_pac_1');
     expect(createInvoice).toHaveBeenCalledWith(expect.objectContaining({ amountPesos: 1000 }));
 
@@ -129,6 +136,38 @@ describe('Pay-after-completion payment lifecycle', () => {
     expect(payment?.xenditInvoiceId).toBe('inv_pac_1');
   });
 
+  it('GCASH: resuming checkout after a missed webhook self-heals instead of raising a duplicate invoice', async () => {
+    const booking = await seedPendingCompletion('GCASH', 1000);
+    (createInvoice as jest.Mock).mockResolvedValueOnce({
+      id: 'inv_pac_resume',
+      status: 'PENDING',
+      invoiceUrl: 'https://checkout.xendit.co/inv_pac_resume',
+    });
+    await createCompletionInvoice(booking.id);
+
+    // Xendit shows PAID (the client actually completed checkout), but the
+    // invoice-paid webhook never landed, so the local Payment is still PENDING.
+    const { retrieveInvoice } = require('@services/xenditService');
+    (retrieveInvoice as jest.Mock).mockResolvedValueOnce({
+      status: 'PAID',
+      payment_id: 'xnd_pay_resume',
+      paid_amount: 1000,
+      paid_at: new Date().toISOString(),
+    });
+
+    const result = await createCompletionInvoice(booking.id);
+    expect(result).toEqual({ alreadyPaid: true });
+    // Must not have minted a second invoice.
+    expect(createInvoice).toHaveBeenCalledTimes(1);
+
+    const updatedBooking = await prisma.booking.findUnique({ where: { id: booking.id } });
+    expect(updatedBooking?.status).toBe('COMPLETED');
+
+    const payment = await prisma.payment.findUniqueOrThrow({ where: { bookingId: booking.id } });
+    expect(payment.status).toBe('COMPLETED');
+    expect(payment.xenditPaymentId).toBe('xnd_pay_resume');
+  });
+
   it('GCASH: invoice-paid finalize completes the booking and schedules the full payout', async () => {
     const booking = await seedPendingCompletion('GCASH', 1000);
     (createInvoice as jest.Mock).mockResolvedValueOnce({
@@ -136,7 +175,7 @@ describe('Pay-after-completion payment lifecycle', () => {
       status: 'PENDING',
       invoiceUrl: 'https://checkout.xendit.co/inv_pac_2',
     });
-    const { paymentId } = await createCompletionInvoice(booking.id);
+    const { paymentId } = expectInvoice(await createCompletionInvoice(booking.id));
 
     await finalizePaidBooking(paymentId, 'ewc_pac_2', 1000, new Date());
 
@@ -160,7 +199,7 @@ describe('Pay-after-completion payment lifecycle', () => {
       status: 'PENDING',
       invoiceUrl: 'https://checkout.xendit.co/inv_pac_3',
     });
-    const { paymentId } = await createCompletionInvoice(booking.id);
+    const { paymentId } = expectInvoice(await createCompletionInvoice(booking.id));
 
     await finalizePaidBooking(paymentId, 'ewc_pac_3', 1000, new Date());
 
@@ -187,7 +226,7 @@ describe('Pay-after-completion payment lifecycle', () => {
       status: 'PENDING',
       invoiceUrl: 'https://checkout.xendit.co/inv_pac_4',
     });
-    const { paymentId } = await createCompletionInvoice(booking.id);
+    const { paymentId } = expectInvoice(await createCompletionInvoice(booking.id));
 
     await finalizePaidBooking(paymentId, 'ewc_pac_4', 1000, new Date());
 
@@ -206,7 +245,7 @@ describe('Pay-after-completion payment lifecycle', () => {
       status: 'PENDING',
       invoiceUrl: 'https://checkout.xendit.co/inv_pac_5',
     });
-    const { paymentId } = await createCompletionInvoice(booking.id);
+    const { paymentId } = expectInvoice(await createCompletionInvoice(booking.id));
 
     await finalizePaidBooking(paymentId, 'ewc_pac_5', 1000, new Date());
     (schedulePayout as jest.Mock).mockClear();
