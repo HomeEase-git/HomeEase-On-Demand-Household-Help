@@ -9,6 +9,7 @@ import Pagination from '../components/common/Pagination'
 import { fetchPricingRules, createPricingRule, updatePricingRule, deletePricingRule } from '../services/pricingRules'
 import { useToast } from '../context/ToastContext'
 import { useListQuery } from '../hooks/useListQuery'
+import { getDoleWageReference } from '../constants/doleWageReference'
 
 const PAGE_SIZE = 10
 
@@ -16,6 +17,15 @@ function formatPeso(amount) {
   const num = typeof amount === 'number' ? amount : Number(amount)
   if (Number.isNaN(num)) return '—'
   return `₱${num.toLocaleString()}`
+}
+
+// Reference-only — not read by the pricing engine. Lets an admin eyeball
+// whether a city's min price clears the DOLE daily wage floor for a full
+// day's work before they save it.
+function formatDoleReference(city) {
+  const ref = getDoleWageReference(city)
+  if (!ref) return null
+  return `${formatPeso(ref.dailyWage)}/day · ${formatPeso(ref.hourlyWage)}/hr (${ref.wageOrder})`
 }
 
 export default function PriceControl() {
@@ -26,7 +36,7 @@ export default function PriceControl() {
   const [open, setOpen] = useState(false)
   const [mode, setMode] = useState('add') // 'add' | 'edit'
   const [editingId, setEditingId] = useState(null)
-  const [form, setForm] = useState({ city: '', serviceType: '', minPrice: '', maxPrice: '' })
+  const [form, setForm] = useState({ city: '', serviceType: '', minPrice: '', maxPrice: '', overrideReason: '' })
   const [error, setError] = useState('')
   const [saving, setSaving] = useState(false)
   const [deleteTarget, setDeleteTarget] = useState(null)
@@ -64,14 +74,14 @@ export default function PriceControl() {
     setOpen(false)
     setMode('add')
     setEditingId(null)
-    setForm({ city: '', serviceType: '', minPrice: '', maxPrice: '' })
+    setForm({ city: '', serviceType: '', minPrice: '', maxPrice: '', overrideReason: '' })
     setError('')
   }
 
   const openAdd = () => {
     setMode('add')
     setEditingId(null)
-    setForm({ city: '', serviceType: '', minPrice: '', maxPrice: '' })
+    setForm({ city: '', serviceType: '', minPrice: '', maxPrice: '', overrideReason: '' })
     setError('')
     setOpen(true)
   }
@@ -84,10 +94,19 @@ export default function PriceControl() {
       serviceType: rule.serviceType,
       minPrice: String(rule.minPrice),
       maxPrice: String(rule.maxPrice),
+      overrideReason: '',
     })
     setError('')
     setOpen(true)
   }
+
+  // Soft guardrail, not enforcement — a minPrice below one hour at the
+  // city's DOLE-equivalent wage is almost always a typo, so the backend
+  // rejects it unless overrideReason is filled in. This mirrors that check
+  // client-side purely to reveal the reason field before submitting.
+  const doleRef = getDoleWageReference(form.city)
+  const minPriceNum = Number(form.minPrice)
+  const belowDoleFloor = Boolean(doleRef) && Number.isFinite(minPriceNum) && minPriceNum > 0 && minPriceNum < doleRef.hourlyWage
 
   const onSave = async (e) => {
     e.preventDefault()
@@ -97,20 +116,24 @@ export default function PriceControl() {
     const serviceType = form.serviceType.trim()
     const minPrice = Number(form.minPrice)
     const maxPrice = Number(form.maxPrice)
+    const overrideReason = form.overrideReason.trim()
 
     if (!city || !serviceType) return setError('City and Service Type are required.')
     if (!Number.isFinite(minPrice) || !Number.isFinite(maxPrice)) return setError('Min and Max price must be valid numbers.')
     if (minPrice < 0 || maxPrice < 0) return setError('Prices cannot be negative.')
     if (minPrice > maxPrice) return setError('Min price cannot be greater than Max price.')
+    if (belowDoleFloor && !overrideReason) {
+      return setError('This price is below the DOLE wage floor for this city. Enter an override reason to save it anyway.')
+    }
 
     setSaving(true)
     try {
       if (mode === 'add') {
-        const created = await createPricingRule({ city, serviceType, minPrice, maxPrice })
+        const created = await createPricingRule({ city, serviceType, minPrice, maxPrice, overrideReason: overrideReason || undefined })
         setRules((prev) => [created, ...prev])
         showSuccess('Pricing rule added.')
       } else {
-        const updated = await updatePricingRule(editingId, { city, serviceType, minPrice, maxPrice })
+        const updated = await updatePricingRule(editingId, { city, serviceType, minPrice, maxPrice, overrideReason: overrideReason || undefined })
         setRules((prev) => prev.map((r) => (r.id === editingId ? updated : r)))
         showSuccess('Pricing rule updated.')
       }
@@ -167,6 +190,7 @@ export default function PriceControl() {
                   <th>Service Type</th>
                   <th>Min Price (₱)</th>
                   <th>Max Price (₱)</th>
+                  <th>DOLE Wage Floor (reference)</th>
                   <th>Actions</th>
                 </tr>
               </thead>
@@ -177,6 +201,9 @@ export default function PriceControl() {
                     <td>{r.serviceType}</td>
                     <td>{formatPeso(r.minPrice)}</td>
                     <td>{formatPeso(r.maxPrice)}</td>
+                    <td style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>
+                      {formatDoleReference(r.city) || '—'}
+                    </td>
                     <td>
                       <div className="row-actions">
                         <button
@@ -203,7 +230,7 @@ export default function PriceControl() {
                 ))}
                 {filteredRules.length === 0 && (
                   <tr>
-                    <td colSpan={5} style={{ color: 'var(--text-muted)', padding: '1rem' }}>
+                    <td colSpan={6} style={{ color: 'var(--text-muted)', padding: '1rem' }}>
                       No pricing rules found.
                     </td>
                   </tr>
@@ -241,6 +268,11 @@ export default function PriceControl() {
                   onChange={(e) => setForm((p) => ({ ...p, city: e.target.value }))}
                   placeholder="e.g. Malolos"
                 />
+                {formatDoleReference(form.city) && (
+                  <small style={{ color: 'var(--text-muted)' }}>
+                    DOLE wage floor for reference: {formatDoleReference(form.city)}
+                  </small>
+                )}
               </div>
 
               <div className="form-field">
@@ -278,6 +310,23 @@ export default function PriceControl() {
                   />
                 </div>
               </div>
+
+              {belowDoleFloor && (
+                <div className="form-field">
+                  <small style={{ color: 'var(--warning, #b45309)' }}>
+                    Min price is below the DOLE {doleRef.label} hourly wage floor (₱{doleRef.hourlyWage.toFixed(2)}/hr,{' '}
+                    {doleRef.wageOrder}). Enter a reason to save it anyway — this gets recorded in the audit log.
+                  </small>
+                  <textarea
+                    id="pc-override-reason"
+                    rows={2}
+                    value={form.overrideReason}
+                    onChange={(e) => setForm((p) => ({ ...p, overrideReason: e.target.value }))}
+                    placeholder="Why this price is intentionally below the DOLE reference"
+                    style={{ width: '100%', padding: '0.5rem 0.75rem', border: '1px solid var(--border)', borderRadius: 8 }}
+                  />
+                </div>
+              )}
 
               {error && <div className="form-error">{error}</div>}
 

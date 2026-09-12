@@ -3,6 +3,7 @@ import { Prisma } from '@prisma/client';
 import prisma from '@config/database';
 import { errorResponse } from '@utils/errorResponse';
 import { writeAuditLog } from '@utils/auditLog';
+import { checkDoleFloor } from '@services/pricingRuleService';
 import type { JwtPayload } from '@/types/index';
 
 interface AuthRequest extends Request {
@@ -71,16 +72,22 @@ export const listPricingRules = async (req: Request, res: Response) => {
 
 export const createPricingRule = async (req: AuthRequest, res: Response) => {
   try {
-    const { city, serviceType, minPrice, maxPrice } = req.body as {
+    const { city, serviceType, minPrice, maxPrice, overrideReason } = req.body as {
       city?: string;
       serviceType?: string;
       minPrice?: number;
       maxPrice?: number;
+      overrideReason?: string;
     };
 
     const validationError = validatePricingRuleInput({ city, serviceType, minPrice, maxPrice });
     if (validationError) {
       return res.status(400).json(errorResponse(400, validationError));
+    }
+
+    const doleCheck = checkDoleFloor(city!.trim(), minPrice!, overrideReason);
+    if (doleCheck.blocked) {
+      return res.status(400).json(errorResponse(400, doleCheck.message));
     }
 
     const record = await prisma.pricingRule.create({
@@ -98,7 +105,9 @@ export const createPricingRule = async (req: AuthRequest, res: Response) => {
       actorRole: req.user?.role,
       action: 'PRICING_RULE_CREATED',
       category: 'ADMIN_ACTION',
-      message: `Pricing rule created for ${record.city} / ${record.serviceType}`,
+      level: doleCheck.note ? 'WARN' : 'INFO',
+      message: doleCheck.note ?? `Pricing rule created for ${record.city} / ${record.serviceType}`,
+      metadata: { city: record.city, serviceType: record.serviceType, minPrice: record.minPrice, maxPrice: record.maxPrice },
     });
 
     return res.status(201).json({ success: true, data: formatPricingRule(record) });
@@ -116,16 +125,22 @@ export const createPricingRule = async (req: AuthRequest, res: Response) => {
 export const updatePricingRule = async (req: AuthRequest, res: Response) => {
   try {
     const id = req.params.id as string;
-    const { city, serviceType, minPrice, maxPrice } = req.body as {
+    const { city, serviceType, minPrice, maxPrice, overrideReason } = req.body as {
       city?: string;
       serviceType?: string;
       minPrice?: number;
       maxPrice?: number;
+      overrideReason?: string;
     };
 
     const validationError = validatePricingRuleInput({ city, serviceType, minPrice, maxPrice });
     if (validationError) {
       return res.status(400).json(errorResponse(400, validationError));
+    }
+
+    const doleCheck = checkDoleFloor(city!.trim(), minPrice!, overrideReason);
+    if (doleCheck.blocked) {
+      return res.status(400).json(errorResponse(400, doleCheck.message));
     }
 
     const existing = await prisma.pricingRule.findUnique({ where: { id } });
@@ -149,7 +164,9 @@ export const updatePricingRule = async (req: AuthRequest, res: Response) => {
       actorRole: req.user?.role,
       action: 'PRICING_RULE_UPDATED',
       category: 'ADMIN_ACTION',
-      message: `Pricing rule updated for ${record.city} / ${record.serviceType}`,
+      level: doleCheck.note ? 'WARN' : 'INFO',
+      message: doleCheck.note ?? `Pricing rule updated for ${record.city} / ${record.serviceType}`,
+      metadata: { city: record.city, serviceType: record.serviceType, minPrice: record.minPrice, maxPrice: record.maxPrice },
     });
 
     return res.json({ success: true, data: formatPricingRule(record) });
