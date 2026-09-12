@@ -537,7 +537,11 @@ function normalizeWorkerListItem(worker: any): NormalizedWorkerListItem {
         ? worker.basePrice
         : typeof worker.rate === "number"
           ? worker.rate
-          : null,
+          : typeof worker.hourlyRate === "number"
+            ? worker.hourlyRate
+            : typeof worker.estimatedTotal === "number"
+              ? worker.estimatedTotal
+              : null,
     status: normalizedStatus,
     avatar: worker.avatar ?? worker.user?.avatar ?? null,
     activeJobCount: typeof worker.activeJobCount === "number" ? worker.activeJobCount : null,
