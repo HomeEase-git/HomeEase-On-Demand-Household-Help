@@ -332,7 +332,7 @@ export default function ServiceCatalog() {
 
       {open && (
         <div className="modal-backdrop" onClick={closeModal} role="presentation">
-          <div className="modal" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true">
+          <div className="modal modal--landscape" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true">
             <h2 className="modal-title">{mode === 'add' ? 'Add Service' : 'Edit Service'}</h2>
             <p className="modal-body">
               Register a service and decide what the booking flow asks clients for it.
