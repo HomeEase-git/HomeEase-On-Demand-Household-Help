@@ -148,9 +148,9 @@ async function main() {
   log('3', 'Worker profile setup: service type, availability slot, address, payout method');
 
   r = await api('get', '/services', null, workerToken);
-  const cleaning = (r.data?.data || []).find((s) => s.name === 'Cleaning') || null;
-  if (!cleaning) throw new Error(`Could not find "Cleaning" service type via /api/services: ${JSON.stringify(r.data)}`);
-  info(`using service type: Cleaning (${cleaning.id})`);
+  const cleaning = (r.data?.data || []).find((s) => s.name === 'Home Cleaning') || null;
+  if (!cleaning) throw new Error(`Could not find "Home Cleaning" service type via /api/services: ${JSON.stringify(r.data)}`);
+  info(`using service type: Home Cleaning (${cleaning.id})`);
 
   r = await api('post', '/workers/me/service-types', { serviceTypeIds: [cleaning.id] }, workerToken);
   info(`add service type -> ${r.status} ${JSON.stringify(r.data?.data || r.data)}`);
@@ -248,15 +248,21 @@ async function main() {
   }
 
   // ---------------------------------------------------------------
-  log('6', 'Client creates a booking for the worker\'s Cleaning service');
+  log('6', 'Client creates a booking for the worker\'s Home Cleaning service');
   r = await api(
     'post',
     '/bookings',
     {
       workerId,
-      serviceType: 'Cleaning',
-      rooms: ['LIVING_ROOM'],
-      condition: 'NORMAL',
+      serviceType: 'Home Cleaning',
+      // Home Cleaning's required scope fields (see seed-catalog.ts) — no
+      // more rooms/condition, every category is just field answers now.
+      scopeAnswers: {
+        'Clean Type': 'Standard Maintenance',
+        Bedrooms: '2',
+        Bathrooms: '1',
+        'Last Professionally Cleaned': 'A Few Weeks Ago',
+      },
       description: 'E2E test booking — living room cleaning',
       address: '456 Mabini St, Manila',
       city: 'Manila',

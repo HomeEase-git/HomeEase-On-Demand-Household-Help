@@ -56,13 +56,30 @@ paths:
         - name: timeSlot
           in: query
           schema: { $ref: '#/components/schemas/TimeSlot' }
-        - name: condition
-          in: query
-          schema: { $ref: '#/components/schemas/ConditionType' }
-        - name: rooms
+        - name: scopeAnswers
           in: query
           schema: { type: string }
-          description: Comma-separated RoomType values
+          description: >-
+            JSON object string, keyed by ServiceScopeField.label (e.g.
+            {"Appliance Type":"Air Conditioner"}). Only fields the admin
+            flagged usedForMatching actually filter candidates — see
+            matchingService.buildCapabilityFilters.
+        - name: hasPets
+          in: query
+          schema: { type: boolean }
+        - name: serviceTaskId
+          in: query
+          schema: { type: string }
+          description: When given, prices the estimatedTotal off this task's basePrice instead of the category's.
+        - name: urgencyLevel
+          in: query
+          schema: { type: string, enum: [STANDARD, URGENT, EMERGENCY] }
+        - name: lat
+          in: query
+          schema: { type: number }
+        - name: lng
+          in: query
+          schema: { type: number }
         - name: page
           in: query
           schema: { type: integer, default: 1 }
@@ -72,10 +89,11 @@ paths:
       responses:
         '200':
           description: >-
-            Worker cards sorted by rating desc, then totalReviews desc.
-            There is no proximity-based sort/filter — the platform has no
-            reliable worker location data for it (a prior lat/lng/radius
-            search was removed; see matchingService.ts).
+            Worker cards sorted by rating desc, then totalReviews desc —
+            there is no proximity-based sort. estimatedTotal is a real
+            per-job price (same formula as POST /bookings, see
+            utils/pricing.computeJobPricing) — it factors in distance only
+            when lat/lng are supplied and the worker has an address on file.
           content:
             application/json:
               schema:
@@ -1099,43 +1117,65 @@ paths:
         '200': { description: OK }
         '401': { $ref: '#/components/responses/Unauthorized' }
 
-  /workers/me/skills:
+  /workers/me/capabilities:
     get:
       tags: [Worker Profile]
-      summary: List the authenticated worker's free-text skills
+      summary: List the ServiceScopeFieldOption ids this worker has declared they handle
+      description: >-
+        Replaces the old free-text skill list. Every id here is a real
+        admin-defined option (see ServiceScopeField.usedForMatching) — nothing
+        is typed by the worker. Used by worker discovery
+        (GET /workers, and "surprise me" auto-match) to only show/match
+        workers who've declared the option a client asked for; a worker with
+        no declarations for a given field is left unrestricted for it.
       responses:
-        '200': { description: OK }
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          optionIds: { type: array, items: { type: string } }
         '401': { $ref: '#/components/responses/Unauthorized' }
-    post:
+    put:
       tags: [Worker Profile]
-      summary: Add a skill
+      summary: Replace this worker's declared capability option ids
+      description: >-
+        Replace-all — pass every option id currently declared. Every id must
+        belong to a ServiceScopeField.usedForMatching field on a ServiceType
+        this worker already offers (see /workers/me/service-types), or the
+        request is rejected.
       requestBody:
         required: true
         content:
           application/json:
             schema:
               type: object
-              required: [name, category, rate]
+              required: [optionIds]
               properties:
-                name: { type: string }
-                category: { type: string }
-                rate: { type: number, minimum: 0, exclusiveMinimum: true }
+                optionIds: { type: array, items: { type: string } }
       responses:
-        '201': { description: Created }
+        '200':
+          description: Updated
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          optionIds: { type: array, items: { type: string } }
         '400': { $ref: '#/components/responses/BadRequest' }
-
-  /workers/me/skills/{skillId}:
-    delete:
-      tags: [Worker Profile]
-      summary: Remove a skill
-      parameters:
-        - name: skillId
-          in: path
-          required: true
-          schema: { type: string }
-      responses:
-        '200': { description: Removed }
-        '404': { $ref: '#/components/responses/NotFound' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
 
   /workers/me/certifications:
     get:
