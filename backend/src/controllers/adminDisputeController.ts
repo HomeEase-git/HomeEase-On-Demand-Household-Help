@@ -7,6 +7,7 @@ import { writeAuditLog } from '@utils/auditLog';
 import { formatDisplayId, formatPeso } from '@utils/formatters';
 import { buildPaginationMeta, getPaginationParams } from '@utils/pagination';
 import { refundOrVoidPayment } from '@services/paymentLifecycleService';
+import { freeSlot } from '@services/workerAvailabilityService';
 import type { JwtPayload } from '@/types/index';
 
 interface AuthRequest extends Request {
@@ -213,6 +214,22 @@ export const resolveDispute = async (req: AuthRequest, res: Response) => {
           },
         });
       } else {
+        // A dispute raised pre-completion (QUOTE_SUBMITTED -> DISPUTED) still
+        // holds the worker's capacity slot and calendar slot — completeBooking
+        // never ran for this booking, so nothing has freed them yet. A dispute
+        // raised post-completion (AWAITING_PAYMENT -> DISPUTED, e.g. payment
+        // overdue) already had both freed there (workerCompletedAt is set), so
+        // skip here to avoid double-freeing capacity that isn't actually held.
+        if (!cancelKeepsStatus && booking.workerId && !booking.workerCompletedAt) {
+          const workerProfile = await tx.workerProfile.update({
+            where: { userId: booking.workerId },
+            data: { activeJobCount: { decrement: 1 } },
+          });
+          if (booking.timeSlot) {
+            await freeSlot(tx, workerProfile.id, booking.scheduledDate, booking.timeSlot);
+          }
+        }
+
         await tx.booking.update({
           where: { id: booking.id },
           data: {

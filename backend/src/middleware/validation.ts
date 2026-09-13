@@ -192,54 +192,6 @@ export const validateUpdatePackage = (
   return next();
 };
 
-export const validateCreateSkill = (
-  req: Request,
-  res: Response,
-  next: NextFunction
-) => {
-  const { name, category, rate } = req.body;
-
-  if (!name || typeof name !== 'string' || !name.trim()) {
-    return res.status(400).json(errorResponse(400, 'name is required and must be a non-empty string'));
-  }
-
-  if (!category || typeof category !== 'string' || !category.trim()) {
-    return res.status(400).json(errorResponse(400, 'category is required and must be a non-empty string'));
-  }
-
-  if (typeof rate !== 'number' || rate <= 0) {
-    return res.status(400).json(errorResponse(400, 'rate must be a positive number'));
-  }
-
-  return next();
-};
-
-export const validateUpdateSkill = (
-  req: Request,
-  res: Response,
-  next: NextFunction
-) => {
-  const { name, category, rate } = req.body;
-
-  if (name !== undefined && (typeof name !== 'string' || !name.trim())) {
-    return res.status(400).json(errorResponse(400, 'name must be a non-empty string'));
-  }
-
-  if (category !== undefined && (typeof category !== 'string' || !category.trim())) {
-    return res.status(400).json(errorResponse(400, 'category must be a non-empty string'));
-  }
-
-  if (rate !== undefined && (typeof rate !== 'number' || rate <= 0)) {
-    return res.status(400).json(errorResponse(400, 'rate must be a positive number'));
-  }
-
-  if (name === undefined && category === undefined && rate === undefined) {
-    return res.status(400).json(errorResponse(400, 'At least one field must be provided'));
-  }
-
-  return next();
-};
-
 export const validateCreateCertification = (
   req: Request,
   res: Response,
@@ -333,29 +285,6 @@ export const validateUpdateAvailabilitySlots = (
     if (!Array.isArray(dates) || dates.some((d: unknown) => typeof d !== 'string' || isNaN(new Date(d).getTime()))) {
       return res.status(400).json(errorResponse(400, 'dates must be an array of valid date strings'));
     }
-  }
-
-  return next();
-};
-
-const MIN_HOURLY_RATE = 20;
-const MAX_HOURLY_RATE = 100;
-
-export const validateUpdateHourlyRate = (
-  req: Request,
-  res: Response,
-  next: NextFunction
-) => {
-  const { hourlyRate } = req.body;
-
-  if (typeof hourlyRate !== 'number' || Number.isNaN(hourlyRate)) {
-    return res.status(400).json(errorResponse(400, 'hourlyRate must be a number'));
-  }
-
-  if (hourlyRate < MIN_HOURLY_RATE || hourlyRate > MAX_HOURLY_RATE) {
-    return res.status(400).json(
-      errorResponse(400, `hourlyRate must be between $${MIN_HOURLY_RATE} and $${MAX_HOURLY_RATE}`)
-    );
   }
 
   return next();

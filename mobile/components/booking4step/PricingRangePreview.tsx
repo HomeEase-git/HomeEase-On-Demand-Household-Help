@@ -9,71 +9,45 @@ type Props = {
 /**
  * Dynamic pricing preview shown in Step 1/2 (category-rate estimate, no
  * worker chosen yet — "range" mode is a legacy name, it renders one
- * approximate price, not a low-high spread) and Step 3/4 (point estimate off
- * the actual worker's rate once one is picked). Client-side estimate for
+ * approximate price, not a low-high spread) and Step 3/4 (point estimate
+ * with the worker's tier surcharge and add-ons factored in, once a worker
+ * is picked or auto-match is confirmed). Client-side estimate for
  * responsive UX — see utils/bookingPriceEstimate.ts for why the authoritative
  * price always comes from the backend instead.
  *
- * Price and duration are rendered as equally-weighted stat blocks (same
- * size/boldness) rather than one being the headline and the other a footnote
- * caption — both matter equally when deciding whether to book.
  */
 export default function PricingRangePreview({ estimate }: Props) {
   if (estimate.mode === "range") {
-    const { price, durationHours } = estimate.range;
-    const hasSelection = durationHours > 0;
+    const { price } = estimate.range;
+    const hasSelection = price > 0;
 
     return (
       <View className="bg-brand rounded-2xl p-4">
-        <View className="flex-row items-center justify-between">
-          <View className="flex-1 pr-3">
-            <Text className="text-white/70 text-xs font-medium">
-              Estimated price
-            </Text>
-            <Text className="text-white font-bold text-2xl mt-0.5">
-              {hasSelection ? `~₱${Math.round(price)}` : "—"}
-            </Text>
-          </View>
-          <View className="items-end">
-            <Text className="text-white/70 text-xs font-medium">
-              Estimated hours
-            </Text>
-            <Text className="text-white font-bold text-2xl mt-0.5">
-              {hasSelection ? `${durationHours.toFixed(1)}h` : "—"}
-            </Text>
-          </View>
-        </View>
+        <Text className="text-white/70 text-xs font-medium">
+          Estimated price
+        </Text>
+        <Text className="text-white font-bold text-2xl mt-0.5">
+          {hasSelection ? `~₱${Math.round(price)}` : "—"}
+        </Text>
         <Text className="text-white/60 text-xs mt-2">
           {hasSelection
-            ? "Exact price and pro rate shown after you pick a time and worker"
+            ? "Exact price shown after you pick a time and worker"
             : "Select a service to see pricing"}
         </Text>
       </View>
     );
   }
 
-  const { total, laborCost, addOnsTotal, tip, durationHours } = estimate.point;
+  const { total, laborCost, addOnsTotal, tip } = estimate.point;
 
   return (
     <View className="bg-brand rounded-2xl p-4">
-      <View className="flex-row items-center justify-between">
-        <View className="flex-1 pr-3">
-          <Text className="text-white/70 text-xs font-medium">
-            Estimated total
-          </Text>
-          <Text className="text-white font-bold text-2xl mt-0.5">
-            ₱{Math.round(total)}
-          </Text>
-        </View>
-        <View className="items-end">
-          <Text className="text-white/70 text-xs font-medium">
-            Estimated hours
-          </Text>
-          <Text className="text-white font-bold text-2xl mt-0.5">
-            {durationHours.toFixed(1)}h
-          </Text>
-        </View>
-      </View>
+      <Text className="text-white/70 text-xs font-medium">
+        Estimated total
+      </Text>
+      <Text className="text-white font-bold text-2xl mt-0.5">
+        ₱{Math.round(total)}
+      </Text>
       <View className="flex-row flex-wrap gap-x-4 gap-y-0.5 mt-2">
         <Text className="text-white/60 text-xs">
           Labor ₱{Math.round(laborCost)}

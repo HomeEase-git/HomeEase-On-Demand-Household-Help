@@ -495,7 +495,6 @@ async function createWorker(
           acceptsHeavyCondition: workerIndex % 2 === 0,
           acceptsPets: workerIndex % 3 !== 0,
           preferredRoomTypes: faker.helpers.arrayElements(ROOM_TYPES, { min: 1, max: 3 }),
-          hourlyRate: faker.number.float({ min: 150, max: 600, fractionDigits: 2 }),
           city,
           state: "Philippines",
           address: faker.location.streetAddress(),

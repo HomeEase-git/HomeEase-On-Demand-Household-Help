@@ -13,10 +13,8 @@ import {
   listMyServiceTypes,
   removeServiceType,
   getWorkerCapacity,
-  listMySkills,
-  createSkill,
-  updateSkill,
-  deleteSkill,
+  listMyCapabilities,
+  replaceMyCapabilities,
   listMyCertifications,
   getCertification,
   createCertification,
@@ -29,7 +27,6 @@ import {
   getMyTaxCertificates,
   getMyAvailabilitySlots,
   updateAvailabilitySlots,
-  updateHourlyRate,
   parseMyResume,
   listMyPackages,
   createPackage,
@@ -43,14 +40,11 @@ import {
   validateUpdateAvailability,
   validateUpdateWorkerProfile,
   validateAddServiceTypes,
-  validateCreateSkill,
-  validateUpdateSkill,
   validateCreateCertification,
   validateUpdateCertification,
   validateUpdatePayoutMethod,
   validateUpdateTaxInfo,
   validateUpdateAvailabilitySlots,
-  validateUpdateHourlyRate,
   validateCreatePackage,
   validateUpdatePackage,
 } from '../middleware/validation';
@@ -117,10 +111,8 @@ router.get(
   getWorkerCapacity
 );
 
-router.get('/me/skills', authMiddleware, restrictTo('WORKER'), listMySkills);
-router.post('/me/skills', authMiddleware, restrictTo('WORKER'), validateCreateSkill, createSkill);
-router.patch('/me/skills/:skillId', authMiddleware, restrictTo('WORKER'), validateUpdateSkill, updateSkill);
-router.delete('/me/skills/:skillId', authMiddleware, restrictTo('WORKER'), deleteSkill);
+router.get('/me/capabilities', authMiddleware, restrictTo('WORKER'), listMyCapabilities);
+router.put('/me/capabilities', authMiddleware, restrictTo('WORKER'), replaceMyCapabilities);
 
 router.get('/me/certifications', authMiddleware, restrictTo('WORKER'), listMyCertifications);
 router.get('/me/certifications/:certId', authMiddleware, restrictTo('WORKER'), getCertification);
@@ -161,7 +153,5 @@ router.patch(
   validateUpdateAvailabilitySlots,
   updateAvailabilitySlots
 );
-
-router.patch('/me/rate', authMiddleware, restrictTo('WORKER'), validateUpdateHourlyRate, updateHourlyRate);
 
 export default router;

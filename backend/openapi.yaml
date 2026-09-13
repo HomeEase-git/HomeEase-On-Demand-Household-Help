@@ -181,36 +181,6 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorEnvelope' }
 
-  /workers/me/rate:
-    patch:
-      tags: [Worker Availability]
-      summary: Set the authenticated worker's hourly rate ($20–$100)
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [hourlyRate]
-              properties:
-                hourlyRate: { type: number, minimum: 20, maximum: 100 }
-      responses:
-        '200':
-          description: Rate updated
-          content:
-            application/json:
-              schema:
-                allOf:
-                  - $ref: '#/components/schemas/SuccessEnvelope'
-                  - type: object
-                    properties:
-                      data:
-                        type: object
-                        properties:
-                          hourlyRate: { type: number }
-        '400': { $ref: '#/components/responses/BadRequest' }
-        '401': { $ref: '#/components/responses/Unauthorized' }
-
   /bookings:
     get:
       tags: [Bookings]
@@ -2335,7 +2305,6 @@ components:
         rating: { type: number }
         totalReviews: { type: integer }
         distance: { type: number, nullable: true, description: kilometers }
-        hourlyRate: { type: number, nullable: true }
         estimatedTotal: { type: number, nullable: true }
         badges:
           type: array

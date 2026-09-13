@@ -44,14 +44,12 @@ export const ROOM_TYPE_LABELS: Record<RoomType, string> = {
   OTHER: 'Hallway',
 };
 
-// Admin-configured booking "scope" step (see ServiceType.scopeType on the
-// backend) — ROOM_BASED shows the room picker below; CUSTOM shows
-// admin-defined ScopeField[] instead (e.g. "Appliance Type" for Appliance
-// Repair, since rooms/quantity don't make sense for every category).
-export const SERVICE_SCOPE_TYPES = ['ROOM_BASED', 'CUSTOM'] as const;
-export type ServiceScopeType = (typeof SERVICE_SCOPE_TYPES)[number];
-
-export const SCOPE_FIELD_TYPES = ['TEXT', 'SELECT', 'MULTI_SELECT'] as const;
+// Admin-configured booking "scope" step — every category is just an ordered
+// list of these (Text / Select / Multi-select / Number), configured in the
+// admin Service Catalog page. No special-cased room picker or condition
+// toggle anymore; a category that wants either just defines them as
+// ordinary fields.
+export const SCOPE_FIELD_TYPES = ['TEXT', 'SELECT', 'MULTI_SELECT', 'NUMBER'] as const;
 export type ScopeFieldType = (typeof SCOPE_FIELD_TYPES)[number];
 
 export type ScopeFieldOption = {
@@ -65,8 +63,14 @@ export type ScopeField = {
   fieldType: ScopeFieldType;
   required: boolean;
   options: ScopeFieldOption[];
+  minValue?: number | null;
+  maxValue?: number | null;
 };
 
+// Condition is no longer a platform-wide booking input (a category that
+// wants a condition-style question defines it as an ordinary field now) —
+// these are kept only to render Booking.condition on historical bookings
+// created before this change.
 export const CONDITION_TYPES = ['TIDY', 'NORMAL', 'HEAVY'] as const;
 export type ConditionType = (typeof CONDITION_TYPES)[number];
 
@@ -74,18 +78,6 @@ export const CONDITION_LABELS: Record<ConditionType, string> = {
   TIDY: 'Tidy',
   NORMAL: 'Normal',
   HEAVY: 'Heavy',
-};
-
-export const CONDITION_MULTIPLIER: Record<ConditionType, number> = {
-  TIDY: 0.8,
-  NORMAL: 1.0,
-  HEAVY: 1.6,
-};
-
-export const CONDITION_DESCRIPTIONS: Record<ConditionType, string> = {
-  TIDY: 'Lightly used, minimal mess',
-  NORMAL: 'Everyday household mess',
-  HEAVY: 'Heavily soiled or neglected',
 };
 
 export const WORKER_TIERS = ['STANDARD', 'PRO', 'EXPERT'] as const;
@@ -123,19 +115,12 @@ export const URGENCY_MODIFIER: Record<UrgencyLevel, number> = {
   EMERGENCY: 1.3,
 };
 
-/** Selected room + how many of that room type (e.g. 2 bedrooms). */
-export type RoomSelection = {
-  room: RoomType;
-  count: number;
-};
-
 export type WorkerCard = {
   id: string;
   fullName: string;
   avatar: string | null;
   rating: number;
   totalReviews: number;
-  hourlyRate: number | null;
   estimatedTotal: number | null;
   matchedServiceTypeId: string | null;
   badges: string[];
@@ -153,8 +138,6 @@ export type CreateBookingPayload = {
   workerId?: string | null;
   serviceType: string;
   serviceTaskId?: string | null;
-  rooms?: RoomType[];
-  condition?: ConditionType | null;
   description?: string;
   address: string;
   city?: string;

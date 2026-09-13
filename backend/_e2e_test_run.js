@@ -145,10 +145,7 @@ async function main() {
   info('worker email verified');
 
   // ---------------------------------------------------------------
-  log('3', 'Worker profile setup: hourly rate, service type, availability slot, address, payout method');
-
-  r = await api('patch', '/workers/me/rate', { hourlyRate: 80 }, workerToken);
-  info(`set hourly rate -> ${r.status} ${r.status !== 200 ? JSON.stringify(r.data) : ''}`);
+  log('3', 'Worker profile setup: service type, availability slot, address, payout method');
 
   r = await api('get', '/services', null, workerToken);
   const cleaning = (r.data?.data || []).find((s) => s.name === 'Cleaning') || null;

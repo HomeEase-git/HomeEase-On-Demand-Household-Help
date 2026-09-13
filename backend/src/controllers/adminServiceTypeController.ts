@@ -1,5 +1,5 @@
 import { Request, Response } from 'express';
-import { Prisma, ScopeFieldType, ServiceScopeType } from '@prisma/client';
+import { Prisma, ScopeFieldType } from '@prisma/client';
 import prisma from '@config/database';
 import { errorResponse } from '@utils/errorResponse';
 import { writeAuditLog } from '@utils/auditLog';
@@ -10,8 +10,8 @@ interface AuthRequest extends Request {
   user?: JwtPayload;
 }
 
-const VALID_SCOPE_TYPES: ServiceScopeType[] = ['ROOM_BASED', 'CUSTOM'];
-const VALID_FIELD_TYPES: ScopeFieldType[] = ['TEXT', 'SELECT', 'MULTI_SELECT'];
+const VALID_FIELD_TYPES: ScopeFieldType[] = ['TEXT', 'SELECT', 'MULTI_SELECT', 'NUMBER'];
+const OPTION_FIELD_TYPES: ScopeFieldType[] = ['SELECT', 'MULTI_SELECT'];
 
 const serviceTypeInclude = {
   tasks: true,
@@ -26,13 +26,14 @@ type ScopeFieldInput = {
   fieldType?: string;
   required?: boolean;
   options?: string[];
+  minValue?: number | null;
+  maxValue?: number | null;
+  usedForMatching?: boolean;
 };
 
 function validateServiceTypeInput(body: {
   name?: string;
   basePrice?: number;
-  scopeType?: string;
-  hasCondition?: boolean;
   scopeFields?: ScopeFieldInput[];
   icon?: string | null;
 }): string | null {
@@ -42,33 +43,37 @@ function validateServiceTypeInput(body: {
   if (typeof body.basePrice !== 'number' || Number.isNaN(body.basePrice) || body.basePrice < 0) {
     return 'Base price must be a non-negative number.';
   }
-  if (body.scopeType !== undefined && !VALID_SCOPE_TYPES.includes(body.scopeType as ServiceScopeType)) {
-    return `scopeType must be one of ${VALID_SCOPE_TYPES.join(', ')}.`;
-  }
-  if (body.hasCondition !== undefined && typeof body.hasCondition !== 'boolean') {
-    return 'hasCondition must be a boolean.';
-  }
   if (body.icon != null && !VALID_SERVICE_ICONS.includes(body.icon as (typeof VALID_SERVICE_ICONS)[number])) {
     return `icon must be one of the curated set: ${VALID_SERVICE_ICONS.join(', ')}.`;
   }
 
-  const scopeType = (body.scopeType as ServiceScopeType) ?? 'ROOM_BASED';
-  if (scopeType === 'CUSTOM') {
-    if (!Array.isArray(body.scopeFields) || body.scopeFields.length === 0) {
-      return 'At least one custom field is required when scopeType is CUSTOM.';
-    }
+  if (Array.isArray(body.scopeFields)) {
     for (const field of body.scopeFields) {
       if (!field.label?.trim()) {
-        return 'Each custom field needs a non-empty label.';
+        return 'Each field needs a non-empty label.';
       }
       if (!field.fieldType || !VALID_FIELD_TYPES.includes(field.fieldType as ScopeFieldType)) {
-        return `Each custom field's fieldType must be one of ${VALID_FIELD_TYPES.join(', ')}.`;
+        return `Each field's fieldType must be one of ${VALID_FIELD_TYPES.join(', ')}.`;
       }
       if (
-        (field.fieldType === 'SELECT' || field.fieldType === 'MULTI_SELECT') &&
+        OPTION_FIELD_TYPES.includes(field.fieldType as ScopeFieldType) &&
         (!Array.isArray(field.options) || field.options.filter((o) => o?.trim()).length === 0)
       ) {
         return `Field "${field.label}" needs at least one option.`;
+      }
+      if (
+        field.usedForMatching &&
+        !OPTION_FIELD_TYPES.includes(field.fieldType as ScopeFieldType)
+      ) {
+        return `Field "${field.label}" can only be used to match workers if it's a single- or multi-choice field.`;
+      }
+      if (
+        field.fieldType === 'NUMBER' &&
+        field.minValue != null &&
+        field.maxValue != null &&
+        field.minValue > field.maxValue
+      ) {
+        return `Field "${field.label}"'s minimum value can't be greater than its maximum.`;
       }
     }
   }
@@ -83,14 +88,18 @@ function buildScopeFieldsCreate(scopeFields: ScopeFieldInput[] | undefined) {
     fieldType: field.fieldType as ScopeFieldType,
     required: field.required !== false,
     sortOrder: index,
-    options:
-      field.fieldType === 'SELECT' || field.fieldType === 'MULTI_SELECT'
-        ? {
-            create: (field.options ?? [])
-              .filter((o) => o?.trim())
-              .map((label, optIndex) => ({ label: label.trim(), sortOrder: optIndex })),
-          }
-        : undefined,
+    minValue: field.fieldType === 'NUMBER' ? field.minValue ?? null : null,
+    maxValue: field.fieldType === 'NUMBER' ? field.maxValue ?? null : null,
+    usedForMatching: OPTION_FIELD_TYPES.includes(field.fieldType as ScopeFieldType)
+      ? field.usedForMatching ?? false
+      : false,
+    options: OPTION_FIELD_TYPES.includes(field.fieldType as ScopeFieldType)
+      ? {
+          create: (field.options ?? [])
+            .filter((o) => o?.trim())
+            .map((label, optIndex) => ({ label: label.trim(), sortOrder: optIndex })),
+        }
+      : undefined,
   }));
 }
 
@@ -110,35 +119,26 @@ export const listServiceTypesAdmin = async (_req: Request, res: Response) => {
 
 export const createServiceType = async (req: AuthRequest, res: Response) => {
   try {
-    const { name, description, basePrice, scopeType, hasCondition, scopeFields, icon } = req.body as {
+    const { name, description, basePrice, scopeFields, icon } = req.body as {
       name?: string;
       description?: string;
       basePrice?: number;
-      scopeType?: string;
-      hasCondition?: boolean;
       scopeFields?: ScopeFieldInput[];
       icon?: string | null;
     };
 
-    const validationError = validateServiceTypeInput({ name, basePrice, scopeType, hasCondition, scopeFields, icon });
+    const validationError = validateServiceTypeInput({ name, basePrice, scopeFields, icon });
     if (validationError) {
       return res.status(400).json(errorResponse(400, validationError));
     }
-
-    const resolvedScopeType = (scopeType as ServiceScopeType) ?? 'ROOM_BASED';
 
     const record = await prisma.serviceType.create({
       data: {
         name: name!.trim(),
         description: description?.trim() || null,
         basePrice: basePrice!,
-        scopeType: resolvedScopeType,
-        hasCondition: hasCondition ?? true,
         icon: icon || null,
-        scopeFields:
-          resolvedScopeType === 'CUSTOM'
-            ? { create: buildScopeFieldsCreate(scopeFields) }
-            : undefined,
+        scopeFields: { create: buildScopeFieldsCreate(scopeFields) },
       },
       include: serviceTypeInclude,
     });
@@ -165,18 +165,16 @@ export const createServiceType = async (req: AuthRequest, res: Response) => {
 export const updateServiceType = async (req: AuthRequest, res: Response) => {
   try {
     const id = req.params.id as string;
-    const { name, description, basePrice, scopeType, hasCondition, scopeFields, isActive, icon } = req.body as {
+    const { name, description, basePrice, scopeFields, isActive, icon } = req.body as {
       name?: string;
       description?: string;
       basePrice?: number;
-      scopeType?: string;
-      hasCondition?: boolean;
       scopeFields?: ScopeFieldInput[];
       isActive?: boolean;
       icon?: string | null;
     };
 
-    const validationError = validateServiceTypeInput({ name, basePrice, scopeType, hasCondition, scopeFields, icon });
+    const validationError = validateServiceTypeInput({ name, basePrice, scopeFields, icon });
     if (validationError) {
       return res.status(400).json(errorResponse(400, validationError));
     }
@@ -189,11 +187,11 @@ export const updateServiceType = async (req: AuthRequest, res: Response) => {
       return res.status(404).json(errorResponse(404, 'Service type not found'));
     }
 
-    const resolvedScopeType = (scopeType as ServiceScopeType) ?? 'ROOM_BASED';
-
     const record = await prisma.$transaction(async (tx) => {
       // Replace-all for scope fields — Booking.scopeAnswers snapshots by
       // field label, not id, so past bookings aren't affected by this.
+      // ServiceScopeFieldOption cascade-deletes, which also clears any
+      // WorkerScopeFieldCapability rows pointed at those options.
       await tx.serviceScopeField.deleteMany({ where: { serviceTypeId: id } });
 
       return tx.serviceType.update({
@@ -202,14 +200,9 @@ export const updateServiceType = async (req: AuthRequest, res: Response) => {
           name: name!.trim(),
           description: description?.trim() || null,
           basePrice: basePrice!,
-          scopeType: resolvedScopeType,
-          hasCondition: hasCondition ?? true,
           isActive: isActive ?? existing.isActive,
           icon: icon !== undefined ? icon || null : existing.icon,
-          scopeFields:
-            resolvedScopeType === 'CUSTOM'
-              ? { create: buildScopeFieldsCreate(scopeFields) }
-              : undefined,
+          scopeFields: { create: buildScopeFieldsCreate(scopeFields) },
         },
         include: serviceTypeInclude,
       });

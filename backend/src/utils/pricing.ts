@@ -162,3 +162,45 @@ export const validatePriceBreakdown = (breakdown: PriceBreakdown): boolean => {
 export const formatPrice = (amount: number): string => {
   return `₱${(Math.round(amount * 100) / 100).toFixed(2)}`;
 };
+
+/**
+ * Single source of truth for turning a category/task base price into an
+ * estimate — used by both bookingController.createBooking (the
+ * authoritative price at booking time) and workerController.searchWorkers
+ * (the per-worker preview shown in Step 3, before a booking exists). These
+ * two used to be different formulas (this one vs. an hourly-rate × duration
+ * guess); keeping the math in one place means a worker's Step 3 price can
+ * never drift from what they're actually charged for the same job.
+ *
+ * Condition is deliberately not a factor here — it's an ordinary
+ * admin-defined scope field now, not a platform-wide surcharge.
+ */
+const URGENCY_FEE_MULTIPLIER: Record<string, number> = { STANDARD: 0, URGENT: 0.15, EMERGENCY: 0.3 };
+const FREE_DISTANCE_KM = 5;
+const PER_KM_FEE = 10;
+
+export interface JobPricingInput {
+  basePrice: number;
+  urgencyLevel: string;
+  tierMultiplier: number;
+  distanceKm?: number | null;
+}
+
+export interface JobPricingResult {
+  basePrice: number;
+  distanceFee: number;
+  urgencyFee: number;
+  tierFee: number;
+  estimatedPrice: number;
+}
+
+export const computeJobPricing = (input: JobPricingInput): JobPricingResult => {
+  const distanceFee =
+    Math.round(
+      (input.distanceKm != null ? Math.max(0, input.distanceKm - FREE_DISTANCE_KM) * PER_KM_FEE : 0) * 100
+    ) / 100;
+  const urgencyFee = Math.round(input.basePrice * (URGENCY_FEE_MULTIPLIER[input.urgencyLevel] ?? 0) * 100) / 100;
+  const tierFee = Math.round(input.basePrice * (input.tierMultiplier - 1) * 100) / 100;
+  const estimatedPrice = Math.round((input.basePrice + distanceFee + urgencyFee + tierFee) * 100) / 100;
+  return { basePrice: input.basePrice, distanceFee, urgencyFee, tierFee, estimatedPrice };
+};

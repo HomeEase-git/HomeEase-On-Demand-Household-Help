@@ -5,33 +5,35 @@ import { toDayStart } from '@services/workerAvailabilityService';
 import { getAppSettings } from '@services/appSettingsService';
 import { parseWorkerResume } from '@services/resumeParseService';
 import { computeWorkerTier, tierMultiplier } from '@utils/workerTier';
+import { computeJobPricing } from '@utils/pricing';
+import { distanceKm } from '@utils/geo';
+import { buildCapabilityFilters } from '@services/matchingService';
 import { normalizeTin, maskTin } from '@utils/taxId';
 import { getCertificateDownloadUrl } from '@services/taxCertificateService';
-import { VALID_TIME_SLOTS, VALID_CONDITIONS, VALID_ROOM_TYPES } from '@/constants/bookingEnums';
-import type { TimeSlot, RoomType, ConditionType } from '@prisma/client';
+import { VALID_TIME_SLOTS, VALID_URGENCY_LEVELS } from '@/constants/bookingEnums';
+import type { TimeSlot, UrgencyLevel, Prisma } from '@prisma/client';
 import type { JwtPayload } from '@/types/index';
 
 interface AuthRequest extends Request {
   user?: JwtPayload;
 }
 
-// Search has no specific ServiceTask (that's picked in a later booking step),
-// so estimatedTotal for an hourly-rate worker uses a flat assumed duration —
-// documented here since it's the one non-obvious number in the card payload.
-const DEFAULT_ESTIMATE_HOURS = 2;
-
 /**
  * GET /api/workers
  * Worker discovery search (public). Query params:
- *   serviceType, date (YYYY-MM-DD), timeSlot, condition, rooms (comma-separated
- *   RoomType), page, limit
+ *   serviceType, date (YYYY-MM-DD), timeSlot, hasPets, scopeAnswers (JSON
+ *   object string, keyed by ServiceScopeField.label), serviceTaskId,
+ *   urgencyLevel, lat, lng, page, limit
  *   — plus legacy category/minRating/maxPrice, kept for existing callers.
  *
  * Filters to isAvailable + kycStatus APPROVED workers under capacity, with an
- * open (date, timeSlot) slot when both are given, offering serviceType, and —
- * when condition/rooms are given — matching the worker's job preferences.
- * Sorted by rating (there's no reliable worker location data to sort/filter
- * by proximity — see matchingService.ts for the same reasoning on auto-match).
+ * open (date, timeSlot) slot when both are given, offering serviceType, and
+ * — via buildCapabilityFilters — matching whatever the client answered for
+ * any usedForMatching scope field (see matchingService.ts's docblock on that
+ * function; it's the same filter findAutoMatchWorker uses, so Step 3's list
+ * and "surprise me" never disagree on eligibility). Sorted by rating —
+ * there's no reliable worker location data to sort/filter by proximity (see
+ * matchingService.ts for the same reasoning on auto-match).
  */
 export const searchWorkers = async (req: AuthRequest, res: Response) => {
   try {
@@ -40,8 +42,12 @@ export const searchWorkers = async (req: AuthRequest, res: Response) => {
       category,
       date,
       timeSlot,
-      condition,
-      rooms,
+      hasPets,
+      scopeAnswers,
+      serviceTaskId,
+      urgencyLevel,
+      lat,
+      lng,
       minRating,
       maxPrice,
       workerId,
@@ -55,23 +61,35 @@ export const searchWorkers = async (req: AuthRequest, res: Response) => {
     if (timeSlot !== undefined && !VALID_TIME_SLOTS.includes(timeSlot as TimeSlot)) {
       return res.status(400).json(errorResponse(400, `timeSlot must be one of ${VALID_TIME_SLOTS.join(', ')}`));
     }
-    if (condition !== undefined && !VALID_CONDITIONS.includes(condition as ConditionType)) {
-      return res.status(400).json(errorResponse(400, `condition must be one of ${VALID_CONDITIONS.join(', ')}`));
+    if (urgencyLevel !== undefined && !VALID_URGENCY_LEVELS.includes(urgencyLevel as UrgencyLevel)) {
+      return res.status(400).json(errorResponse(400, `urgencyLevel must be one of ${VALID_URGENCY_LEVELS.join(', ')}`));
     }
     if (date !== undefined && (typeof date !== 'string' || isNaN(new Date(date).getTime()))) {
       return res.status(400).json(errorResponse(400, 'date must be a valid YYYY-MM-DD date'));
     }
 
-    const requestedRooms = typeof rooms === 'string'
-      ? rooms.split(',').map((r) => r.trim().toUpperCase()).filter((r): r is RoomType => VALID_ROOM_TYPES.includes(r as RoomType))
-      : [];
+    let parsedScopeAnswers: Record<string, string | string[]> | undefined;
+    if (typeof scopeAnswers === 'string' && scopeAnswers.trim()) {
+      try {
+        const parsed = JSON.parse(scopeAnswers);
+        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) parsedScopeAnswers = parsed;
+      } catch {
+        return res.status(400).json(errorResponse(400, 'scopeAnswers must be a JSON object'));
+      }
+    }
 
     const serviceTypeName = typeof serviceType === 'string' ? serviceType : typeof category === 'string' ? category : undefined;
+    const hasPetsBool = hasPets === 'true' || hasPets === '1';
 
-    const whereClause: any = {
+    const capabilityFilters = serviceTypeName
+      ? await buildCapabilityFilters(serviceTypeName, parsedScopeAnswers)
+      : [];
+
+    const whereClause: Prisma.WorkerProfileWhereInput = {
       isAvailable: true,
       kycStatus: 'APPROVED',
       debtHoldAt: null,
+      AND: capabilityFilters,
     };
 
     // Scopes discovery to a single already-known worker — used by the client
@@ -83,7 +101,12 @@ export const searchWorkers = async (req: AuthRequest, res: Response) => {
     }
 
     if (serviceTypeName) {
-      whereClause.serviceTypes = { some: { name: { contains: serviceTypeName, mode: 'insensitive' } } };
+      // Exact match, not substring — a "contains" match here could pull in
+      // an unrelated category whose name happens to include this one as a
+      // substring (e.g. "Repair"), and it must agree with
+      // matchingService.findAutoMatchWorker's equals check so Step 3's list
+      // and auto-match never disagree on who's eligible.
+      whereClause.serviceTypes = { some: { name: { equals: serviceTypeName, mode: 'insensitive' } } };
     }
 
     if (minRating) {
@@ -95,13 +118,13 @@ export const searchWorkers = async (req: AuthRequest, res: Response) => {
       const price = parseFloat(maxPrice as string);
       if (!isNaN(price)) {
         whereClause.serviceTypes = {
-          some: { ...(whereClause.serviceTypes?.some || {}), basePrice: { lte: price } },
+          some: { ...(whereClause.serviceTypes as any)?.some, basePrice: { lte: price } },
         };
       }
     }
 
-    if (condition === 'HEAVY') {
-      whereClause.acceptsHeavyCondition = true;
+    if (hasPetsBool) {
+      whereClause.acceptsPets = true;
     }
 
     let dayStart: Date | null = null;
@@ -126,26 +149,33 @@ export const searchWorkers = async (req: AuthRequest, res: Response) => {
         serviceTypes: true,
         availability: dayStart ? { where: { date: dayStart, isBlocked: false, isBooked: false } } : false,
       },
-      // Bounded candidate pool — the radius/rating/distance ranking below
-      // runs in memory (see file header comment), so this caps how much a
-      // single request can pull before that pass.
+      // Bounded candidate pool — the rating sort below runs in memory (see
+      // file header comment), so this caps how much a single request can
+      // pull before that pass.
       take: 500,
     });
 
     const filtered = candidates.filter((w) => w.activeJobCount < w.maxConcurrentJobs);
 
-    const roomFiltered = requestedRooms.length > 0
-      ? filtered.filter((w) => w.preferredRoomTypes.length === 0 || w.preferredRoomTypes.some((r) => requestedRooms.includes(r)))
-      : filtered;
-
-    roomFiltered.sort((a, b) => {
+    filtered.sort((a, b) => {
       if (b.rating !== a.rating) return b.rating - a.rating;
       return b.totalReviews - a.totalReviews;
     });
 
-    const total = roomFiltered.length;
+    const total = filtered.length;
     const start = (pageNum - 1) * limitNum;
-    const page_ = roomFiltered.slice(start, start + limitNum);
+    const page_ = filtered.slice(start, start + limitNum);
+
+    // Task-priced discovery: a specific ServiceTask's basePrice overrides
+    // the category's flat basePrice, mirroring bookingController.createBooking.
+    const serviceTask =
+      typeof serviceTaskId === 'string' && serviceTaskId
+        ? await prisma.serviceTask.findUnique({ where: { id: serviceTaskId } })
+        : null;
+    const effectiveUrgencyLevel = (urgencyLevel as UrgencyLevel) ?? 'STANDARD';
+    const clientLat = typeof lat === 'string' ? parseFloat(lat) : NaN;
+    const clientLng = typeof lng === 'string' ? parseFloat(lng) : NaN;
+    const hasClientLocation = !isNaN(clientLat) && !isNaN(clientLng);
 
     // Expertise tier — computed live from rating + completed-job count (see
     // utils/workerTier.ts). Batched over just this page, not all candidates.
@@ -165,20 +195,33 @@ export const searchWorkers = async (req: AuthRequest, res: Response) => {
         worker.serviceTypes.find((st) => serviceTypeName && st.name.toLowerCase() === serviceTypeName.toLowerCase()) ??
         worker.serviceTypes[0];
 
-      const estimatedTotal =
-        worker.hourlyRate != null
-          ? Math.round(worker.hourlyRate * DEFAULT_ESTIMATE_HOURS * 100) / 100
-          : matchedServiceType?.basePrice ?? null;
+      const basePrice = serviceTask?.basePrice ?? matchedServiceType?.basePrice ?? null;
 
       const badges: string[] = ['VERIFIED'];
       if (worker.rating >= 4.8 && worker.totalReviews >= 20) badges.push('TOP_RATED');
       if (worker.totalReviews === 0) badges.push('NEW');
-      if (condition === 'HEAVY' && worker.acceptsHeavyCondition) badges.push('HEAVY_DUTY_READY');
 
       const completedJobs = completedByWorkerId.get(worker.userId) ?? 0;
       const tier = computeWorkerTier(worker.rating, completedJobs, tierSettings);
       if (tier === 'PRO') badges.push('PRO_TIER');
       if (tier === 'EXPERT') badges.push('EXPERT_TIER');
+
+      // Same formula bookingController.createBooking uses for the real
+      // charge (see utils/pricing.computeJobPricing) — this is a genuine
+      // per-job preview, not a separate hourly-rate guess.
+      const workerDistanceKm =
+        hasClientLocation && worker.addressLat != null && worker.addressLng != null
+          ? distanceKm({ lat: clientLat, lng: clientLng }, { lat: worker.addressLat, lng: worker.addressLng })
+          : null;
+      const estimatedTotal =
+        basePrice != null
+          ? computeJobPricing({
+              basePrice,
+              urgencyLevel: effectiveUrgencyLevel,
+              tierMultiplier: tierMultiplier(tier, tierSettings),
+              distanceKm: workerDistanceKm,
+            }).estimatedPrice
+          : null;
 
       return {
         id: worker.userId,
@@ -186,9 +229,7 @@ export const searchWorkers = async (req: AuthRequest, res: Response) => {
         avatar: worker.user.avatar,
         rating: worker.rating,
         totalReviews: worker.totalReviews,
-        hourlyRate: worker.hourlyRate,
-        estimatedTotal:
-          estimatedTotal != null ? Math.round(estimatedTotal * tierMultiplier(tier, tierSettings) * 100) / 100 : null,
+        estimatedTotal,
         tier,
         // Lets the client fetch this worker's packages for the selected
         // category later in the booking flow without an extra round-trip.
@@ -253,7 +294,6 @@ export const getWorkerDetail = async (req: AuthRequest, res: Response) => {
         kycApprovedAt: true,
         resumeUrl: true,
         maxConcurrentJobs: true,
-        hourlyRate: true,
         user: {
           select: {
             id: true,
@@ -305,7 +345,6 @@ export const getWorkerDetail = async (req: AuthRequest, res: Response) => {
         zipCode: worker.zipCode,
         isAvailable: worker.isAvailable,
         availableDays: worker.availableDays,
-        hourlyRate: worker.hourlyRate,
         kycStatus: worker.kycStatus,
         kycSubmittedAt: worker.kycSubmittedAt,
         kycApprovedAt: worker.kycApprovedAt,
@@ -1206,10 +1245,12 @@ export const getWorkerCapacity = async (req: AuthRequest, res: Response) => {
 };
 
 /**
- * GET /api/workers/me/skills
- * List the authenticated worker's skills (worker only)
+ * GET /api/workers/me/capabilities
+ * List the authenticated worker's declared ServiceScopeFieldOption ids
+ * (worker only) — replaces the old free-text Skill list. Nothing here is
+ * typed by the worker; every id traces back to a real admin-defined option.
  */
-export const listMySkills = async (req: AuthRequest, res: Response) => {
+export const listMyCapabilities = async (req: AuthRequest, res: Response) => {
   try {
     if (!req.user) {
       return res.status(401).json(errorResponse(401, 'Not authenticated'));
@@ -1224,146 +1265,89 @@ export const listMySkills = async (req: AuthRequest, res: Response) => {
       return res.status(404).json(errorResponse(404, 'Worker profile not found'));
     }
 
-    const skills = await prisma.skill.findMany({
+    const capabilities = await prisma.workerScopeFieldCapability.findMany({
       where: { workerProfileId: workerProfile.id },
-      orderBy: { createdAt: 'asc' },
+      select: { optionId: true },
     });
 
     return res.status(200).json({
       success: true,
-      message: 'Skills retrieved successfully',
-      data: { skills },
+      message: 'Capabilities retrieved successfully',
+      data: { optionIds: capabilities.map((c) => c.optionId) },
     });
   } catch (error) {
-    console.error('Error fetching skills:', error);
-    return res.status(500).json(errorResponse(500, 'Failed to fetch skills'));
+    console.error('Error fetching capabilities:', error);
+    return res.status(500).json(errorResponse(500, 'Failed to fetch capabilities'));
   }
 };
 
 /**
- * POST /api/workers/me/skills
- * Add a skill to the authenticated worker's profile (worker only)
+ * PUT /api/workers/me/capabilities
+ * Body: { optionIds: string[] } — replace-all, same pattern
+ * adminServiceTypeController.updateServiceType uses for scope fields
+ * (delete-then-recreate in a transaction). Every id must be a real
+ * ServiceScopeFieldOption belonging to a ServiceType this worker actually
+ * offers — a worker can't declare a capability for a category they haven't
+ * added.
  */
-export const createSkill = async (req: AuthRequest, res: Response) => {
+export const replaceMyCapabilities = async (req: AuthRequest, res: Response) => {
   try {
     if (!req.user) {
       return res.status(401).json(errorResponse(401, 'Not authenticated'));
     }
 
-    const { name, category, rate } = req.body;
+    const { optionIds } = req.body as { optionIds?: unknown };
+    if (!Array.isArray(optionIds) || !optionIds.every((id) => typeof id === 'string')) {
+      return res.status(400).json(errorResponse(400, 'optionIds must be an array of strings'));
+    }
 
     const workerProfile = await prisma.workerProfile.findUnique({
       where: { userId: req.user.userId },
-      select: { id: true },
+      select: { id: true, serviceTypes: { select: { id: true } } },
     });
 
     if (!workerProfile) {
       return res.status(404).json(errorResponse(404, 'Worker profile not found'));
     }
 
-    const skill = await prisma.skill.create({
-      data: {
-        workerProfileId: workerProfile.id,
-        name: name.trim(),
-        category: category.trim(),
-        rate,
-      },
-    });
+    const offeredServiceTypeIds = new Set(workerProfile.serviceTypes.map((s) => s.id));
 
-    return res.status(201).json({
-      success: true,
-      message: 'Skill added successfully',
-      data: { skill },
-    });
-  } catch (error) {
-    console.error('Error creating skill:', error);
-    return res.status(500).json(errorResponse(500, 'Failed to add skill'));
-  }
-};
-
-/**
- * PATCH /api/workers/me/skills/:skillId
- * Update a skill on the authenticated worker's profile (worker only)
- */
-export const updateSkill = async (req: AuthRequest, res: Response) => {
-  try {
-    if (!req.user) {
-      return res.status(401).json(errorResponse(401, 'Not authenticated'));
+    const uniqueOptionIds = Array.from(new Set(optionIds));
+    if (uniqueOptionIds.length > 0) {
+      const options = await prisma.serviceScopeFieldOption.findMany({
+        where: { id: { in: uniqueOptionIds } },
+        select: { id: true, field: { select: { serviceTypeId: true, usedForMatching: true } } },
+      });
+      if (options.length !== uniqueOptionIds.length) {
+        return res.status(400).json(errorResponse(400, 'One or more options do not exist'));
+      }
+      const invalid = options.find(
+        (o) => !o.field.usedForMatching || !offeredServiceTypeIds.has(o.field.serviceTypeId)
+      );
+      if (invalid) {
+        return res
+          .status(400)
+          .json(errorResponse(400, 'One or more options are not available to declare a capability for'));
+      }
     }
 
-    const skillId = req.params.skillId as string;
-    const { name, category, rate } = req.body;
-
-    const workerProfile = await prisma.workerProfile.findUnique({
-      where: { userId: req.user.userId },
-      select: { id: true },
-    });
-
-    if (!workerProfile) {
-      return res.status(404).json(errorResponse(404, 'Worker profile not found'));
-    }
-
-    const existingSkill = await prisma.skill.findUnique({ where: { id: skillId } });
-    if (!existingSkill || existingSkill.workerProfileId !== workerProfile.id) {
-      return res.status(404).json(errorResponse(404, 'Skill not found'));
-    }
-
-    const skill = await prisma.skill.update({
-      where: { id: skillId },
-      data: {
-        ...(name !== undefined && { name: name.trim() }),
-        ...(category !== undefined && { category: category.trim() }),
-        ...(rate !== undefined && { rate }),
-      },
+    await prisma.$transaction(async (tx) => {
+      await tx.workerScopeFieldCapability.deleteMany({ where: { workerProfileId: workerProfile.id } });
+      if (uniqueOptionIds.length > 0) {
+        await tx.workerScopeFieldCapability.createMany({
+          data: uniqueOptionIds.map((optionId) => ({ workerProfileId: workerProfile.id, optionId })),
+        });
+      }
     });
 
     return res.status(200).json({
       success: true,
-      message: 'Skill updated successfully',
-      data: { skill },
+      message: 'Capabilities updated successfully',
+      data: { optionIds: uniqueOptionIds },
     });
   } catch (error) {
-    console.error('Error updating skill:', error);
-    return res.status(500).json(errorResponse(500, 'Failed to update skill'));
-  }
-};
-
-/**
- * DELETE /api/workers/me/skills/:skillId
- * Remove a skill from the authenticated worker's profile (worker only)
- */
-export const deleteSkill = async (req: AuthRequest, res: Response) => {
-  try {
-    if (!req.user) {
-      return res.status(401).json(errorResponse(401, 'Not authenticated'));
-    }
-
-    const skillId = req.params.skillId as string;
-
-    const workerProfile = await prisma.workerProfile.findUnique({
-      where: { userId: req.user.userId },
-      select: { id: true },
-    });
-
-    if (!workerProfile) {
-      return res.status(404).json(errorResponse(404, 'Worker profile not found'));
-    }
-
-    const skill = await prisma.skill.findUnique({ where: { id: skillId } });
-    if (!skill || skill.workerProfileId !== workerProfile.id) {
-      return res.status(404).json(errorResponse(404, 'Skill not found'));
-    }
-
-    await prisma.skill.delete({ where: { id: skillId } });
-
-    return res.status(200).json({
-      success: true,
-      message: 'Skill removed successfully',
-      data: null,
-    });
-  } catch (error) {
-    console.error('Error deleting skill:', error);
-    return res.status(500).json(errorResponse(500, 'Failed to remove skill'));
+    console.error('Error updating capabilities:', error);
+    return res.status(500).json(errorResponse(500, 'Failed to update capabilities'));
   }
 };
 
@@ -1962,32 +1946,3 @@ class ActiveBookingConflictError extends Error {
     super(`Slot ${timeSlot} on ${date} has an active booking`);
   }
 }
-
-/**
- * PATCH /api/workers/me/rate
- * Body: { hourlyRate: number } — enforced range $20-$100/hr (worker only)
- */
-export const updateHourlyRate = async (req: AuthRequest, res: Response) => {
-  try {
-    if (!req.user) {
-      return res.status(401).json(errorResponse(401, 'Not authenticated'));
-    }
-
-    const { hourlyRate } = req.body as { hourlyRate: number };
-
-    const updated = await prisma.workerProfile.update({
-      where: { userId: req.user.userId },
-      data: { hourlyRate },
-      select: { hourlyRate: true },
-    });
-
-    return res.status(200).json({
-      success: true,
-      message: 'Hourly rate updated successfully',
-      data: updated,
-    });
-  } catch (error) {
-    console.error('Error updating hourly rate:', error);
-    return res.status(500).json(errorResponse(500, 'Failed to update hourly rate'));
-  }
-};

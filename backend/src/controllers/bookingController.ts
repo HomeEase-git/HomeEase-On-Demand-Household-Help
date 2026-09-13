@@ -15,7 +15,8 @@ import {
   refundOrVoidPayment,
 } from '@services/paymentLifecycleService';
 import { toDayStart, findSlot, markSlotBooked, freeSlot } from '@services/workerAvailabilityService';
-import { calculateWorkerPayout, computeBookingFinalTotal } from '@utils/pricing';
+import { calculateWorkerPayout, computeBookingFinalTotal, computeJobPricing } from '@utils/pricing';
+import { buildCapabilityFilters } from '@services/matchingService';
 import { schedulePendingExpiry, cancelPendingExpiryJob } from '@queues/bookingQueue';
 import { VALID_TRANSITIONS, isValidTransition } from '@services/bookingStateMachine';
 import { getAppSettings } from '@services/appSettingsService';
@@ -29,14 +30,6 @@ export { VALID_TRANSITIONS, isValidTransition };
 interface AuthRequest extends Request {
   user?: JwtPayload;
 }
-
-// Condition-based surcharge on the base price — HEAVY jobs take more effort;
-// TIDY/NORMAL carry no adjustment.
-const CONDITION_FEE_MULTIPLIER: Record<string, number> = { TIDY: 0, NORMAL: 0, HEAVY: 0.25 };
-const URGENCY_FEE_MULTIPLIER: Record<string, number> = { STANDARD: 0, URGENT: 0.15, EMERGENCY: 0.3 };
-// Distance-based surcharge beyond a free radius around the worker.
-const FREE_DISTANCE_KM = 5;
-const PER_KM_FEE = 10;
 
 const round2 = (n: number): number => Math.round(n * 100) / 100;
 
@@ -54,8 +47,9 @@ async function resolveServiceTypeConfig(name: string) {
  * If workerId is omitted, runs the "surprise me" auto-match algorithm
  * (see matchingService.findAutoMatchWorker) to pick a worker instead of
  * requiring the client to choose one. Price is always computed server-side
- * (basePrice + condition surcharge + distance surcharge), logged via
- * PricingLog, and checked against any PricingRule for (city, serviceType).
+ * (basePrice + distance/urgency/tier surcharges — see utils/pricing.
+ * computeJobPricing), logged via PricingLog, and checked against any
+ * PricingRule for (city, serviceType).
  * No Payment row is created here — payment is taken after the job is finished
  * and finally priced (see confirmCompletion). A 1-hour expiry job is queued so
  * an unanswered PENDING booking auto-cancels (see queues/bookingQueue +
@@ -73,7 +67,6 @@ export const createBooking = async (req: AuthRequest, res: Response) => {
       serviceType,
       serviceTaskId,
       rooms,
-      condition,
       description,
       address,
       city,
@@ -97,7 +90,6 @@ export const createBooking = async (req: AuthRequest, res: Response) => {
       serviceType: string;
       serviceTaskId?: string;
       rooms?: RoomType[];
-      condition?: ConditionType;
       description?: string;
       address: string;
       city?: string;
@@ -188,8 +180,8 @@ export const createBooking = async (req: AuthRequest, res: Response) => {
 
     const resolvedServiceTypeName = serviceTask?.serviceType.name ?? serviceType;
     // Task-priced bookings aren't category-scoped — only fetch/enforce the
-    // parent category's scope config (rooms vs custom fields, condition
-    // on/off) when the client booked straight off a ServiceType.
+    // parent category's scope fields when the client booked straight off a
+    // ServiceType rather than a specific ServiceTask.
     const serviceTypeConfig = serviceTask ? null : await resolveServiceTypeConfig(resolvedServiceTypeName);
     const basePrice = serviceTask?.basePrice ?? serviceTypeConfig?.basePrice ?? null;
 
@@ -197,42 +189,41 @@ export const createBooking = async (req: AuthRequest, res: Response) => {
       return res.status(404).json(errorResponse(404, 'Service type not found'));
     }
 
-    if (serviceTypeConfig) {
-      if (serviceTypeConfig.scopeType === 'ROOM_BASED') {
-        if (!Array.isArray(rooms) || rooms.length === 0) {
-          return res.status(400).json(errorResponse(400, 'At least one room is required for this service'));
-        }
-      } else if (serviceTypeConfig.scopeType === 'CUSTOM') {
-        const answers: Record<string, string | string[]> =
-          scopeAnswers && typeof scopeAnswers === 'object' && !Array.isArray(scopeAnswers)
-            ? (scopeAnswers as Record<string, string | string[]>)
-            : {};
-        for (const field of serviceTypeConfig.scopeFields) {
-          const answer = answers[field.label];
-          const hasAnswer = Array.isArray(answer) ? answer.length > 0 : typeof answer === 'string' && answer.trim().length > 0;
-          if (field.required && !hasAnswer) {
-            return res.status(400).json(errorResponse(400, `"${field.label}" is required for this service`));
-          }
-          if (hasAnswer && (field.fieldType === 'SELECT' || field.fieldType === 'MULTI_SELECT')) {
-            const validLabels = new Set(field.options.map((o) => o.label));
-            const values = Array.isArray(answer) ? answer : [answer as string];
-            if (!values.every((v) => validLabels.has(v))) {
-              return res.status(400).json(errorResponse(400, `"${field.label}" has an invalid selection`));
-            }
-          }
-        }
-      }
+    const effectiveScopeAnswers =
+      scopeAnswers && typeof scopeAnswers === 'object' && !Array.isArray(scopeAnswers) ? scopeAnswers : undefined;
 
-      if (serviceTypeConfig.hasCondition && !condition) {
-        return res.status(400).json(errorResponse(400, 'condition is required for this service'));
+    if (serviceTypeConfig) {
+      const answers = effectiveScopeAnswers ?? {};
+      for (const field of serviceTypeConfig.scopeFields) {
+        const answer = answers[field.label];
+        const hasAnswer = Array.isArray(answer) ? answer.length > 0 : typeof answer === 'string' && answer.trim().length > 0;
+        if (field.required && !hasAnswer) {
+          return res.status(400).json(errorResponse(400, `"${field.label}" is required for this service`));
+        }
+        if (hasAnswer && (field.fieldType === 'SELECT' || field.fieldType === 'MULTI_SELECT')) {
+          const validLabels = new Set(field.options.map((o) => o.label));
+          const values = Array.isArray(answer) ? answer : [answer as string];
+          if (!values.every((v) => validLabels.has(v))) {
+            return res.status(400).json(errorResponse(400, `"${field.label}" has an invalid selection`));
+          }
+        }
+        if (hasAnswer && field.fieldType === 'NUMBER') {
+          const n = Number(answer);
+          if (Number.isNaN(n)) {
+            return res.status(400).json(errorResponse(400, `"${field.label}" must be a number`));
+          }
+          if ((field.minValue != null && n < field.minValue) || (field.maxValue != null && n > field.maxValue)) {
+            return res.status(400).json(errorResponse(400, `"${field.label}" is outside the allowed range`));
+          }
+        }
       }
     }
 
-    // hasCondition=false means this category doesn't ask the question at
-    // all — ignore whatever the client sent rather than erroring on it.
-    const effectiveCondition = serviceTypeConfig && !serviceTypeConfig.hasCondition ? null : (condition ?? null);
-    const effectiveScopeAnswers =
-      scopeAnswers && typeof scopeAnswers === 'object' && !Array.isArray(scopeAnswers) ? scopeAnswers : undefined;
+    // Condition is no longer a platform-wide concept — new bookings don't
+    // collect it (an admin who still wants a "condition"-style question can
+    // add it as an ordinary scope field). The Booking.condition column is
+    // kept only for historical rows.
+    const effectiveCondition: ConditionType | null = null;
     const effectiveIssuePhotoUrls = Array.isArray(issuePhotoUrls)
       ? issuePhotoUrls.filter((url): url is string => typeof url === 'string' && url.length > 0)
       : [];
@@ -248,8 +239,7 @@ export const createBooking = async (req: AuthRequest, res: Response) => {
         serviceTaskId,
         date: scheduledDate,
         timeSlot,
-        condition: effectiveCondition,
-        rooms,
+        scopeAnswers: effectiveScopeAnswers,
         hasPets,
         clientLat: lat,
         clientLng: lng,
@@ -267,6 +257,23 @@ export const createBooking = async (req: AuthRequest, res: Response) => {
 
     if (!workerProfile) {
       return res.status(404).json(errorResponse(404, 'Worker not found'));
+    }
+
+    // A client picking a specific worker (not auto-match) could otherwise
+    // bypass the capability filter Step 3 already applied — re-check
+    // server-side so a stale/tampered request can't book a worker who
+    // doesn't actually handle what was asked for.
+    if (!isAutoMatched) {
+      const capabilityFilters = await buildCapabilityFilters(resolvedServiceTypeName, effectiveScopeAnswers);
+      if (capabilityFilters.length > 0) {
+        const eligible = await prisma.workerProfile.findFirst({
+          where: { userId: resolvedWorkerId, AND: capabilityFilters },
+          select: { id: true },
+        });
+        if (!eligible) {
+          return res.status(409).json(errorResponse(409, 'This pro does not handle the selected option for this service'));
+        }
+      }
     }
 
     if (workerProfile.kycStatus !== 'APPROVED') {
@@ -330,11 +337,15 @@ export const createBooking = async (req: AuthRequest, res: Response) => {
 
     const addOnsList = [...preferenceAddOns, ...resolvedPackages];
     const addOnsTotal = addOnsList.reduce((sum, a) => sum + (typeof a.price === 'number' ? a.price : 0), 0);
-    const conditionFee = round2(basePrice * (CONDITION_FEE_MULTIPLIER[effectiveCondition ?? 'NORMAL'] ?? 0));
-    const distanceFee = round2(workerDistanceKm != null ? Math.max(0, workerDistanceKm - FREE_DISTANCE_KM) * PER_KM_FEE : 0);
-    const urgencyFee = round2(basePrice * (URGENCY_FEE_MULTIPLIER[effectiveUrgencyLevel] ?? 0));
-    const tierFee = round2(basePrice * (tierMultiplier(workerTier, appSettings) - 1));
-    const estimatedPrice = round2(basePrice + conditionFee + distanceFee + urgencyFee + tierFee);
+    const { distanceFee, urgencyFee, tierFee, estimatedPrice } = computeJobPricing({
+      basePrice,
+      urgencyLevel: effectiveUrgencyLevel,
+      tierMultiplier: tierMultiplier(workerTier, appSettings),
+      distanceKm: workerDistanceKm,
+    });
+    // Kept in the response/log shape below for compatibility with existing
+    // clients/receipts — always 0 now that condition carries no platform fee.
+    const conditionFee = 0;
     const finalEstimate = round2(estimatedPrice + addOnsTotal);
 
     const priceCheck = await validatePriceWithinPricingRule(cityName, resolvedServiceTypeName, finalEstimate);
@@ -1042,8 +1053,7 @@ export const declineBooking = async (req: AuthRequest, res: Response) => {
           serviceTaskId: updated.serviceTaskId,
           date: updated.scheduledDate,
           timeSlot: updated.timeSlot,
-          condition: updated.condition,
-          rooms: updated.rooms,
+          scopeAnswers: updated.scopeAnswers as Record<string, string | string[]> | null,
           excludeWorkerIds: updatedDeclinedWorkerIds,
           clientLat: updated.clientLat,
           clientLng: updated.clientLng,
@@ -1805,9 +1815,20 @@ export const cancelBooking = async (req: AuthRequest, res: Response) => {
     const cancelledByRole = req.user.role === 'WORKER' ? 'WORKER' : 'CLIENT';
 
     const updated = await prisma.$transaction(async (tx) => {
-      // If worker is cancelling after accepting (job was occupying capacity
-      // and a calendar slot), free both up.
-      if (booking.status === 'ACCEPTED' && booking.workerId) {
+      // If the job was occupying capacity and a calendar slot, free both up.
+      // Covers every pre-completion status the state machine allows a
+      // cancel from (mobile's "Cancel Job" is enabled for all of these —
+      // see canCancelJob in the worker job-detail screen), not just the
+      // initial ACCEPTED state. A DISPUTED booking can also be reached
+      // post-completion (AWAITING_PAYMENT -> DISPUTED, e.g. payment
+      // overdue) where completeBooking already freed both — workerCompletedAt
+      // being set is what distinguishes that case, so skip to avoid
+      // double-freeing.
+      if (
+        booking.workerId &&
+        !booking.workerCompletedAt &&
+        ['ACCEPTED', 'IN_PROGRESS', 'QUOTE_SUBMITTED', 'QUOTE_APPROVED', 'DISPUTED'].includes(booking.status)
+      ) {
         const workerProfile = await tx.workerProfile.update({
           where: { userId: booking.workerId },
           data: { activeJobCount: { decrement: 1 } },

@@ -372,10 +372,9 @@ export default function WorkerProfileScreen() {
       >
         {typeof worker.rate === "number" && (
           <View>
-            <Text className="text-text-muted text-xs">Rate</Text>
+            <Text className="text-text-muted text-xs">Starting at</Text>
             <Text className="text-text-primary font-bold text-base">
               ₱{worker.rate}
-              <Text className="text-text-muted text-xs font-normal">/hr</Text>
             </Text>
           </View>
         )}
@@ -399,7 +398,6 @@ export default function WorkerProfileScreen() {
                 workerName: worker.name,
                 workerLocked: true,
                 workerServiceTypes: worker.services,
-                workerHourlyRate: worker.hourlyRate ?? null,
                 workerTier: worker.tier ?? "STANDARD",
                 workerAvatar: worker.avatar ?? null,
                 workerRating: worker.rating ?? null,

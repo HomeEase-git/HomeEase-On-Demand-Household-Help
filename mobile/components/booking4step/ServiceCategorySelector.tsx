@@ -3,15 +3,13 @@ import { View, Text, Pressable } from "react-native";
 import { AppIcon as Ionicons } from "../icons/AppIcon";
 import { colors } from "../../constants";
 import { getCategoryIcon } from "../../utils/categoryIcons";
-import type { ServiceScopeType, ScopeField } from "../../types/booking4step.types";
+import type { ScopeField } from "../../types/booking4step.types";
 
 export type ServiceCategoryOption = {
   id: string;
   name: string;
   basePrice: number;
   description?: string | null;
-  scopeType: ServiceScopeType;
-  hasCondition: boolean;
   scopeFields: ScopeField[];
   icon?: string | null;
 };

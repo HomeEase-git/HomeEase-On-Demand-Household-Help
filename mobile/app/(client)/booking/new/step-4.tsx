@@ -20,14 +20,11 @@ import { useWorkerDiscovery } from "../../../../hooks/useWorkerDiscovery";
 import { validateDraftForSubmit } from "../../../../utils/bookingValidation";
 import { PAYMENT_METHOD_TYPE_MAP } from "../../../../utils/paymentMethodMap";
 import {
-  ROOM_TYPE_LABELS,
   ADD_ON_TOGGLE_LABELS,
   TIME_SLOT_LABELS,
-  CONDITION_LABELS,
   PET_FRIENDLY_PRIORITY,
   type AddOnToggleKey,
 } from "../../../../types/booking4step.types";
-import { formatRoomSummary } from "../../../../utils/bookingPriceEstimate";
 import { generateIdempotencyKey } from "../../../../utils/idempotencyKey";
 import * as api from "../../../../services/api";
 import { useAlertModal } from "../../../../contexts/AlertModalContext";
@@ -107,7 +104,6 @@ export default function BookingStep4Screen() {
   const effectiveDraft = { ...draft, paymentMethod, priorities, addOnToggles, tip };
   const validation = validateDraftForSubmit(effectiveDraft);
   const priceEstimate = useBookingPriceEstimate(draft.categoryBasePrice ?? 0, packagesTotal, tip);
-  const roomSummary = formatRoomSummary(draft.rooms ?? [], ROOM_TYPE_LABELS);
   const scopeAnswersSummary = Object.entries(draft.scopeAnswers ?? {})
     .map(([label, value]) => `${label}: ${Array.isArray(value) ? value.join(", ") : value}`)
     .join(" · ");
@@ -129,8 +125,7 @@ export default function BookingStep4Screen() {
       serviceType: draft.serviceType ?? undefined,
       date: draft.date ?? undefined,
       timeSlot: draft.timeSlot ?? undefined,
-      condition: draft.condition ?? undefined,
-      rooms: draft.rooms?.map((r) => r.room),
+      scopeAnswers: draft.scopeAnswers,
       workerId: draft.isAutoMatched ? undefined : (draft.workerId ?? undefined),
       limit: 1,
     },
@@ -216,8 +211,6 @@ export default function BookingStep4Screen() {
       const response = await api.createBooking({
         workerId: draft.isAutoMatched ? null : draft.workerId,
         serviceType: draft.serviceType || draft.category || "",
-        rooms: (draft.rooms ?? []).flatMap((r) => Array(r.count).fill(r.room)),
-        condition: draft.condition ?? undefined,
         description: draft.description || undefined,
         address: draft.address || "",
         city: draft.city,
@@ -305,14 +298,7 @@ export default function BookingStep4Screen() {
           <Text className="text-text-primary font-bold mb-3">Summary</Text>
           <SummaryRow label="Pro" value={draft.isAutoMatched ? "Auto-matched" : draft.workerName || "—"} />
           <SummaryRow label="Service" value={draft.category || "—"} />
-          {draft.scopeType === "CUSTOM" ? (
-            <SummaryRow label="Details" value={scopeAnswersSummary || "—"} />
-          ) : (
-            <SummaryRow label="Rooms" value={roomSummary || "—"} />
-          )}
-          {draft.hasCondition !== false && (
-            <SummaryRow label="Condition" value={draft.condition ? CONDITION_LABELS[draft.condition] : "—"} />
-          )}
+          <SummaryRow label="Details" value={scopeAnswersSummary || "—"} />
           <SummaryRow
             label="Date & Time"
             value={`${draft.date ?? "—"} · ${draft.timeSlot ? TIME_SLOT_LABELS[draft.timeSlot] : "—"}`}

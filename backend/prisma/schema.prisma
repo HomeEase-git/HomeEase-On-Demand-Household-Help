@@ -178,18 +178,11 @@ enum ConditionType {
   HEAVY
 }
 
-// Whether a service's booking "scope" step is the generic room picker
-// (Cleaning, Painting, ...) or an admin-defined set of custom fields
-// (Appliance Repair: "which appliance", Pest Control: "describe the issue").
-enum ServiceScopeType {
-  ROOM_BASED
-  CUSTOM
-}
-
 enum ScopeFieldType {
   TEXT
   SELECT
   MULTI_SELECT
+  NUMBER
 }
 
 // ============================================================================
@@ -358,15 +351,11 @@ model WorkerProfile {
   // candidates (see matchingService.findAutoMatchWorker) until this passes.
   declineCooldownUntil DateTime?
 
-  // Job preferences — used by auto-matching to filter candidate workers
-  acceptsHeavyCondition Boolean    @default(false)
-  acceptsPets           Boolean    @default(false)
-  preferredRoomTypes    RoomType[]
-
-  // Hourly rate the worker charges — surfaced in search results and used to
-  // compute estimatedTotal; distinct from per-skill Skill.rate, which is more
-  // granular but optional (not every worker sets skill-level rates).
-  hourlyRate Float?
+  // Job preferences — used by auto-matching to filter candidate workers.
+  // Specific-skill filtering (e.g. "does this worker service air
+  // conditioners specifically") lives on WorkerScopeFieldCapability instead —
+  // see that model's docblock.
+  acceptsPets Boolean @default(false)
 
   // Location
   address String?
@@ -437,14 +426,14 @@ model WorkerProfile {
   updatedAt DateTime @updatedAt
 
   // Relations
-  serviceTypes      ServiceType[]
-  certifications    Certification[]
-  skills            Skill[]
-  reviews           Review[]
-  resumeParseResult ResumeParseResult?
-  availability      WorkerAvailability[]
-  packages          WorkerPackage[]
-  debtLedger        DebtLedgerEntry[]
+  serviceTypes       ServiceType[]
+  certifications     Certification[]
+  scopeCapabilities  WorkerScopeFieldCapability[]
+  reviews            Review[]
+  resumeParseResult  ResumeParseResult?
+  availability       WorkerAvailability[]
+  packages           WorkerPackage[]
+  debtLedger         DebtLedgerEntry[]
 
   @@index([userId])
   @@index([kycStatus])
@@ -578,21 +567,6 @@ model Certification {
   @@index([verificationStatus])
 }
 
-model Skill {
-  id              String        @id @default(cuid())
-  workerProfileId String
-  workerProfile   WorkerProfile @relation(fields: [workerProfileId], references: [id], onDelete: Cascade)
-
-  name     String
-  category String
-  rate     Float
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  @@index([workerProfileId])
-}
-
 // ============================================================================
 // LEGAL
 // ============================================================================
@@ -622,11 +596,6 @@ model ServiceType {
   basePrice   Float
   isActive    Boolean @default(true)
 
-  // Admin-configured booking "scope" step for this category — see
-  // ServiceScopeType/ServiceScopeField for the CUSTOM case.
-  scopeType    ServiceScopeType @default(ROOM_BASED)
-  hasCondition Boolean          @default(true)
-
   // Ionicons outline name (e.g. "water-outline") picked from the curated
   // list in backend/src/constants/serviceIcons.ts — mobile renders this via
   // <Ionicons name={icon} />. Null means the category predates this field or
@@ -643,11 +612,11 @@ model ServiceType {
   @@unique([name])
 }
 
-// Admin-defined question shown in the booking "scope" step when the parent
-// ServiceType.scopeType is CUSTOM (e.g. "Appliance Type" for Appliance
-// Repair). Answers are snapshotted onto Booking.scopeAnswers keyed by
-// `label`, not by this row's id, so editing/reordering fields later doesn't
-// orphan past bookings.
+// Admin-defined question shown in every category's booking "scope" step
+// (e.g. "Appliance Type" for Appliance Repair, "Bedrooms" for Cleaning).
+// Answers are snapshotted onto Booking.scopeAnswers keyed by `label`, not by
+// this row's id, so editing/reordering fields later doesn't orphan past
+// bookings.
 model ServiceScopeField {
   id            String      @id @default(cuid())
   serviceTypeId String
@@ -657,6 +626,17 @@ model ServiceScopeField {
   fieldType ScopeFieldType
   required  Boolean        @default(true)
   sortOrder Int            @default(0)
+
+  // Only meaningful for fieldType = NUMBER.
+  minValue Float?
+  maxValue Float?
+
+  // Admin opt-in: only turn this on for a SELECT/MULTI_SELECT field where
+  // worker specialization is real (e.g. "Appliance Type," "Pest Type") — see
+  // WorkerScopeFieldCapability. A field like "Color change" is still a
+  // SELECT but every worker in the category can do any color, so it stays
+  // off (the default) and is purely informational.
+  usedForMatching Boolean @default(false)
 
   options ServiceScopeFieldOption[]
 
@@ -674,7 +654,33 @@ model ServiceScopeFieldOption {
   label     String
   sortOrder Int    @default(0)
 
+  workerCapabilities WorkerScopeFieldCapability[]
+
   @@index([fieldId])
+}
+
+// A worker declaring "I handle this specific option" for a scope field the
+// admin flagged usedForMatching (e.g. checking "Air Conditioner" under
+// Appliance Type). Discovery (workerController.searchWorkers,
+// matchingService.findAutoMatchWorker) only enforces this against a worker
+// who has *any* capability rows for that field's options at all — a worker
+// with zero declarations is left unrestricted, the same "empty = no
+// preference" rule WorkerProfile.preferredRoomTypes used before it was
+// replaced by this general mechanism. Replaces the old free-text Skill
+// model: nothing here is typed by the worker, every row points at a real
+// admin-defined ServiceScopeFieldOption.
+model WorkerScopeFieldCapability {
+  id              String        @id @default(cuid())
+  workerProfileId String
+  workerProfile   WorkerProfile @relation(fields: [workerProfileId], references: [id], onDelete: Cascade)
+
+  optionId String
+  option   ServiceScopeFieldOption @relation(fields: [optionId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@unique([workerProfileId, optionId])
+  @@index([optionId])
 }
 
 // A worker-defined, priced service bundle (e.g. "Deep Clean Package — ₱1500,
@@ -759,7 +765,7 @@ model Booking {
   condition              ConditionType?
   priorities             String[]
   addOnsSnapshot         Json? // itemized add-ons as submitted at booking time; BookingAddOn[] below is the normalized/authoritative record
-  scopeAnswers           Json? // { [ServiceScopeField.label]: string | string[] } snapshot for CUSTOM-scope services (see ServiceType.scopeType)
+  scopeAnswers           Json? // { [ServiceScopeField.label]: string | string[] } snapshot of this booking's scope-step answers
   issuePhotoUrls         String[]       @default([]) // client-attached photos of the issue, uploaded at Step 1 before the booking exists (see POST /bookings/issue-photo/upload)
 
   // Scheduling

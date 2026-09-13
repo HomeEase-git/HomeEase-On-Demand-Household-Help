@@ -22,7 +22,10 @@ const FIELD_TYPE_LABELS = {
   TEXT: 'Text',
   SELECT: 'Single choice',
   MULTI_SELECT: 'Multiple choice',
+  NUMBER: 'Number',
 }
+
+const OPTION_FIELD_TYPES = ['SELECT', 'MULTI_SELECT']
 
 function formatPeso(amount) {
   const num = typeof amount === 'number' ? amount : Number(amount)
@@ -31,7 +34,7 @@ function formatPeso(amount) {
 }
 
 function emptyField() {
-  return { label: '', fieldType: 'TEXT', required: true, options: [] }
+  return { label: '', fieldType: 'TEXT', required: true, options: [], minValue: '', maxValue: '', usedForMatching: false }
 }
 
 function emptyForm() {
@@ -39,8 +42,6 @@ function emptyForm() {
     name: '',
     description: '',
     basePrice: '',
-    scopeType: 'ROOM_BASED',
-    hasCondition: true,
     icon: null,
     fields: [],
   }
@@ -51,14 +52,15 @@ function serviceToForm(service) {
     name: service.name,
     description: service.description || '',
     basePrice: String(service.basePrice),
-    scopeType: service.scopeType,
-    hasCondition: service.hasCondition,
     icon: service.icon || null,
     fields: (service.scopeFields || []).map((f) => ({
       label: f.label,
       fieldType: f.fieldType,
       required: f.required,
       options: (f.options || []).map((o) => o.label),
+      minValue: f.minValue != null ? String(f.minValue) : '',
+      maxValue: f.maxValue != null ? String(f.maxValue) : '',
+      usedForMatching: !!f.usedForMatching,
     })),
   }
 }
@@ -128,7 +130,19 @@ export default function ServiceCatalog() {
   const updateField = (index, patch) => {
     setForm((p) => ({
       ...p,
-      fields: p.fields.map((f, i) => (i === index ? { ...f, ...patch } : f)),
+      fields: p.fields.map((f, i) => {
+        if (i !== index) return f
+        const next = { ...f, ...patch }
+        // Matching only makes sense against a fixed option set, and min/max
+        // only against a number — clear whichever no longer applies when the
+        // field type changes.
+        if (!OPTION_FIELD_TYPES.includes(next.fieldType)) next.usedForMatching = false
+        if (next.fieldType !== 'NUMBER') {
+          next.minValue = ''
+          next.maxValue = ''
+        }
+        return next
+      }),
     }))
   }
 
@@ -167,13 +181,13 @@ export default function ServiceCatalog() {
     if (!name) return setError('Name is required.')
     if (!Number.isFinite(basePrice) || basePrice < 0) return setError('Base price must be a non-negative number.')
 
-    if (form.scopeType === 'CUSTOM') {
-      if (form.fields.length === 0) return setError('Add at least one custom field, or switch to Room-based.')
-      for (const f of form.fields) {
-        if (!f.label.trim()) return setError('Every custom field needs a label.')
-        if ((f.fieldType === 'SELECT' || f.fieldType === 'MULTI_SELECT') && f.options.filter((o) => o.trim()).length === 0) {
-          return setError(`Field "${f.label}" needs at least one option.`)
-        }
+    for (const f of form.fields) {
+      if (!f.label.trim()) return setError('Every field needs a label.')
+      if (OPTION_FIELD_TYPES.includes(f.fieldType) && f.options.filter((o) => o.trim()).length === 0) {
+        return setError(`Field "${f.label}" needs at least one option.`)
+      }
+      if (f.fieldType === 'NUMBER' && f.minValue !== '' && f.maxValue !== '' && Number(f.minValue) > Number(f.maxValue)) {
+        return setError(`Field "${f.label}"'s minimum can't be greater than its maximum.`)
       }
     }
 
@@ -181,18 +195,16 @@ export default function ServiceCatalog() {
       name,
       description: form.description.trim() || undefined,
       basePrice,
-      scopeType: form.scopeType,
-      hasCondition: form.hasCondition,
       icon: form.icon,
-      scopeFields:
-        form.scopeType === 'CUSTOM'
-          ? form.fields.map((f) => ({
-              label: f.label.trim(),
-              fieldType: f.fieldType,
-              required: f.required,
-              options: f.options.map((o) => o.trim()).filter(Boolean),
-            }))
-          : undefined,
+      scopeFields: form.fields.map((f) => ({
+        label: f.label.trim(),
+        fieldType: f.fieldType,
+        required: f.required,
+        options: OPTION_FIELD_TYPES.includes(f.fieldType) ? f.options.map((o) => o.trim()).filter(Boolean) : [],
+        minValue: f.fieldType === 'NUMBER' && f.minValue !== '' ? Number(f.minValue) : null,
+        maxValue: f.fieldType === 'NUMBER' && f.maxValue !== '' ? Number(f.maxValue) : null,
+        usedForMatching: OPTION_FIELD_TYPES.includes(f.fieldType) ? f.usedForMatching : false,
+      })),
     }
 
     setSaving(true)
@@ -254,61 +266,66 @@ export default function ServiceCatalog() {
                   <th></th>
                   <th>Name</th>
                   <th>Base Price (₱)</th>
-                  <th>Scope</th>
-                  <th>Condition Question</th>
+                  <th>Fields</th>
                   <th>Status</th>
                   <th>Actions</th>
                 </tr>
               </thead>
               <tbody>
-                {pagedServices.map((s) => (
-                  <tr key={s.id}>
-                    <td>
-                      <span className="icon-picker-trigger__swatch" style={{ width: 32, height: 32 }}>
-                        <span className="msym" style={{ fontSize: 18 }}>{s.icon ? msIconFor(s.icon) : 'help_outline'}</span>
-                      </span>
-                    </td>
-                    <td><strong>{s.name}</strong></td>
-                    <td>{formatPeso(s.basePrice)}</td>
-                    <td>
-                      <span className={`badge ${s.scopeType === 'CUSTOM' ? 'badge-pending' : 'badge-approved'}`}>
-                        {s.scopeType === 'CUSTOM' ? 'Custom fields' : 'Room-based'}
-                      </span>
-                    </td>
-                    <td>{s.hasCondition ? 'Yes' : 'No'}</td>
-                    <td>
-                      <span className={`badge ${s.isActive ? 'badge-active' : 'badge-suspended'}`}>
-                        {s.isActive ? 'Active' : 'Inactive'}
-                      </span>
-                    </td>
-                    <td>
-                      <div className="row-actions">
-                        <button
-                          type="button"
-                          className="action-btn view"
-                          title="Edit"
-                          aria-label={`Edit ${s.name}`}
-                          onClick={() => openEdit(s)}
-                        >
-                          <i className="fas fa-pen" />
-                        </button>
-                        <button
-                          type="button"
-                          className={`action-btn ${s.isActive ? 'delete' : 'approve'}`}
-                          title={s.isActive ? 'Deactivate' : 'Activate'}
-                          aria-label={`${s.isActive ? 'Deactivate' : 'Activate'} ${s.name}`}
-                          disabled={togglingId === s.id}
-                          onClick={() => onToggleActive(s)}
-                        >
-                          <i className={`fas ${s.isActive ? 'fa-ban' : 'fa-check'}`} />
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
+                {pagedServices.map((s) => {
+                  const fieldCount = (s.scopeFields || []).length
+                  const matchingCount = (s.scopeFields || []).filter((f) => f.usedForMatching).length
+                  return (
+                    <tr key={s.id}>
+                      <td>
+                        <span className="icon-picker-trigger__swatch" style={{ width: 32, height: 32 }}>
+                          <span className="msym" style={{ fontSize: 18 }}>{s.icon ? msIconFor(s.icon) : 'help_outline'}</span>
+                        </span>
+                      </td>
+                      <td><strong>{s.name}</strong></td>
+                      <td>{formatPeso(s.basePrice)}</td>
+                      <td>
+                        {fieldCount} field{fieldCount === 1 ? '' : 's'}
+                        {matchingCount > 0 && (
+                          <span className="badge badge-pending" style={{ marginLeft: '0.4rem' }}>
+                            {matchingCount} match{matchingCount === 1 ? '' : 'es'} workers
+                          </span>
+                        )}
+                      </td>
+                      <td>
+                        <span className={`badge ${s.isActive ? 'badge-active' : 'badge-suspended'}`}>
+                          {s.isActive ? 'Active' : 'Inactive'}
+                        </span>
+                      </td>
+                      <td>
+                        <div className="row-actions">
+                          <button
+                            type="button"
+                            className="action-btn view"
+                            title="Edit"
+                            aria-label={`Edit ${s.name}`}
+                            onClick={() => openEdit(s)}
+                          >
+                            <i className="fas fa-pen" />
+                          </button>
+                          <button
+                            type="button"
+                            className={`action-btn ${s.isActive ? 'delete' : 'approve'}`}
+                            title={s.isActive ? 'Deactivate' : 'Activate'}
+                            aria-label={`${s.isActive ? 'Deactivate' : 'Activate'} ${s.name}`}
+                            disabled={togglingId === s.id}
+                            onClick={() => onToggleActive(s)}
+                          >
+                            <i className={`fas ${s.isActive ? 'fa-ban' : 'fa-check'}`} />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  )
+                })}
                 {filteredServices.length === 0 && (
                   <tr>
-                    <td colSpan={7} style={{ color: 'var(--text-muted)', padding: '1rem' }}>
+                    <td colSpan={6} style={{ color: 'var(--text-muted)', padding: '1rem' }}>
                       No services found.
                     </td>
                   </tr>
@@ -346,7 +363,7 @@ export default function ServiceCatalog() {
                   type="text"
                   value={form.name}
                   onChange={(e) => setForm((p) => ({ ...p, name: e.target.value }))}
-                  placeholder="e.g. Appliance Repair"
+                  placeholder="e.g. House Painting"
                 />
               </div>
 
@@ -379,75 +396,79 @@ export default function ServiceCatalog() {
               </div>
 
               <div className="form-field">
-                <label htmlFor="sc-scope-type">Booking scope</label>
-                <select
-                  id="sc-scope-type"
-                  value={form.scopeType}
-                  onChange={(e) => setForm((p) => ({ ...p, scopeType: e.target.value }))}
-                  style={{ width: '100%', padding: '0.5rem 0.75rem', border: '1px solid var(--border)', borderRadius: 8 }}
-                >
-                  <option value="ROOM_BASED">Room-based (client picks rooms, e.g. Cleaning)</option>
-                  <option value="CUSTOM">Custom fields (e.g. Appliance Repair, Pest Control)</option>
-                </select>
-              </div>
+                <label>Booking fields</label>
+                <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem', margin: '0 0 0.5rem' }}>
+                  What the client fills in when booking this service. For a single- or multi-choice field, turn on
+                  "Use to match workers" only when different pros genuinely handle different options (e.g. which
+                  appliance) — not for a field like paint color that every pro can do.
+                </p>
+                {form.fields.map((field, fieldIndex) => (
+                  <div
+                    key={fieldIndex}
+                    style={{ border: '1px solid var(--border)', borderRadius: 8, padding: '0.75rem', marginBottom: '0.5rem' }}
+                  >
+                    <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '0.5rem' }}>
+                      <input
+                        type="text"
+                        value={field.label}
+                        onChange={(e) => updateField(fieldIndex, { label: e.target.value })}
+                        placeholder="Field label, e.g. Appliance Type"
+                        aria-label={`Field ${fieldIndex + 1} label`}
+                        style={{ flex: 1, padding: '0.5rem 0.75rem', border: '1px solid var(--border)', borderRadius: 8 }}
+                      />
+                      <select
+                        value={field.fieldType}
+                        onChange={(e) => updateField(fieldIndex, { fieldType: e.target.value })}
+                        aria-label={`Field ${fieldIndex + 1} type`}
+                        style={{ padding: '0.5rem 0.75rem', border: '1px solid var(--border)', borderRadius: 8 }}
+                      >
+                        {Object.entries(FIELD_TYPE_LABELS).map(([value, label]) => (
+                          <option key={value} value={value}>{label}</option>
+                        ))}
+                      </select>
+                      <button
+                        type="button"
+                        className="action-btn delete"
+                        title="Remove field"
+                        aria-label={`Remove field ${fieldIndex + 1}`}
+                        onClick={() => removeField(fieldIndex)}
+                      >
+                        <i className="fas fa-trash" />
+                      </button>
+                    </div>
 
-              <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                <input
-                  type="checkbox"
-                  checked={form.hasCondition}
-                  onChange={(e) => setForm((p) => ({ ...p, hasCondition: e.target.checked }))}
-                />
-                Ask client for job condition (Tidy/Normal/Heavy)
-              </label>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.5rem' }}>
+                      <input
+                        type="checkbox"
+                        checked={field.required}
+                        onChange={(e) => updateField(fieldIndex, { required: e.target.checked })}
+                      />
+                      Required
+                    </label>
 
-              {form.scopeType === 'CUSTOM' && (
-                <div className="form-field">
-                  <label>Custom fields</label>
-                  {form.fields.map((field, fieldIndex) => (
-                    <div
-                      key={fieldIndex}
-                      style={{ border: '1px solid var(--border)', borderRadius: 8, padding: '0.75rem', marginBottom: '0.5rem' }}
-                    >
+                    {field.fieldType === 'NUMBER' && (
                       <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '0.5rem' }}>
                         <input
-                          type="text"
-                          value={field.label}
-                          onChange={(e) => updateField(fieldIndex, { label: e.target.value })}
-                          placeholder="Field label, e.g. Appliance Type"
-                          aria-label={`Custom field ${fieldIndex + 1} label`}
-                          style={{ flex: 1, padding: '0.5rem 0.75rem', border: '1px solid var(--border)', borderRadius: 8 }}
+                          type="number"
+                          value={field.minValue}
+                          onChange={(e) => updateField(fieldIndex, { minValue: e.target.value })}
+                          placeholder="Min (optional)"
+                          aria-label={`Field ${fieldIndex + 1} minimum value`}
+                          style={{ flex: 1, padding: '0.4rem 0.6rem', border: '1px solid var(--border)', borderRadius: 8 }}
                         />
-                        <select
-                          value={field.fieldType}
-                          onChange={(e) => updateField(fieldIndex, { fieldType: e.target.value })}
-                          aria-label={`Custom field ${fieldIndex + 1} type`}
-                          style={{ padding: '0.5rem 0.75rem', border: '1px solid var(--border)', borderRadius: 8 }}
-                        >
-                          {Object.entries(FIELD_TYPE_LABELS).map(([value, label]) => (
-                            <option key={value} value={value}>{label}</option>
-                          ))}
-                        </select>
-                        <button
-                          type="button"
-                          className="action-btn delete"
-                          title="Remove field"
-                          aria-label={`Remove custom field ${fieldIndex + 1}`}
-                          onClick={() => removeField(fieldIndex)}
-                        >
-                          <i className="fas fa-trash" />
-                        </button>
-                      </div>
-
-                      <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.5rem' }}>
                         <input
-                          type="checkbox"
-                          checked={field.required}
-                          onChange={(e) => updateField(fieldIndex, { required: e.target.checked })}
+                          type="number"
+                          value={field.maxValue}
+                          onChange={(e) => updateField(fieldIndex, { maxValue: e.target.value })}
+                          placeholder="Max (optional)"
+                          aria-label={`Field ${fieldIndex + 1} maximum value`}
+                          style={{ flex: 1, padding: '0.4rem 0.6rem', border: '1px solid var(--border)', borderRadius: 8 }}
                         />
-                        Required
-                      </label>
+                      </div>
+                    )}
 
-                      {(field.fieldType === 'SELECT' || field.fieldType === 'MULTI_SELECT') && (
+                    {OPTION_FIELD_TYPES.includes(field.fieldType) && (
+                      <>
                         <div>
                           {field.options.map((option, optionIndex) => (
                             <div key={optionIndex} style={{ display: 'flex', gap: '0.5rem', marginBottom: '0.4rem' }}>
@@ -456,14 +477,14 @@ export default function ServiceCatalog() {
                                 value={option}
                                 onChange={(e) => updateOption(fieldIndex, optionIndex, e.target.value)}
                                 placeholder="Option label"
-                                aria-label={`Custom field ${fieldIndex + 1} option ${optionIndex + 1}`}
+                                aria-label={`Field ${fieldIndex + 1} option ${optionIndex + 1}`}
                                 style={{ flex: 1, padding: '0.4rem 0.6rem', border: '1px solid var(--border)', borderRadius: 8 }}
                               />
                               <button
                                 type="button"
                                 className="action-btn delete"
                                 title="Remove option"
-                                aria-label={`Remove custom field ${fieldIndex + 1} option ${optionIndex + 1}`}
+                                aria-label={`Remove field ${fieldIndex + 1} option ${optionIndex + 1}`}
                                 onClick={() => removeOption(fieldIndex, optionIndex)}
                               >
                                 <i className="fas fa-xmark" />
@@ -474,14 +495,23 @@ export default function ServiceCatalog() {
                             <i className="fas fa-plus" /> Add option
                           </button>
                         </div>
-                      )}
-                    </div>
-                  ))}
-                  <button type="button" className="btn btn-outline btn-sm" onClick={addField}>
-                    <i className="fas fa-plus" /> Add field
-                  </button>
-                </div>
-              )}
+
+                        <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginTop: '0.6rem' }}>
+                          <input
+                            type="checkbox"
+                            checked={field.usedForMatching}
+                            onChange={(e) => updateField(fieldIndex, { usedForMatching: e.target.checked })}
+                          />
+                          Use to match workers — only show pros who've declared they handle the client's chosen option
+                        </label>
+                      </>
+                    )}
+                  </div>
+                ))}
+                <button type="button" className="btn btn-outline btn-sm" onClick={addField}>
+                  <i className="fas fa-plus" /> Add field
+                </button>
+              </div>
 
               {error && <div className="form-error">{error}</div>}
 

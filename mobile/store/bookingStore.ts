@@ -2,7 +2,7 @@ import { create, type StoreApi, type UseBoundStore } from 'zustand';
 import { bookingStorage } from '../utils/storage';
 import { validateDraftForSubmit as validateDraftUtil } from '../utils/bookingValidation';
 import { mapServiceToCategory } from '../utils/categoryMapping';
-import type { ConditionType, RoomSelection, RoomType, ServiceScopeType, TimeSlot, UrgencyLevel, WorkerTier } from '../types/booking4step.types';
+import type { TimeSlot, UrgencyLevel, WorkerTier } from '../types/booking4step.types';
 
 export type BookingStatus =
   | 'Pending'
@@ -106,14 +106,7 @@ export type DraftBooking = {
   serviceTypeId?: string | null; // ServiceType.id — captured from the selected worker's card in Step 3, used to fetch that worker's packages for the selected category
   categoryBasePrice?: number | null; // ServiceType.basePrice — rate proxy for the pre-worker price range preview
   selectedPackageIds: string[]; // WorkerPackage ids selected in Step 4 — resolved to priced add-ons server-side
-  rooms: RoomSelection[];
-  condition: ConditionType | null;
-  // Admin-configured scope for the selected category (ServiceType.scopeType/
-  // hasCondition) — mirrored into the draft so later steps (price estimate,
-  // Step 4 summary) don't need the full category list to know how to render.
-  scopeType?: ServiceScopeType | null;
-  hasCondition?: boolean;
-  scopeAnswers?: Record<string, string | string[]>; // CUSTOM-scope answers, keyed by ScopeField.label
+  scopeAnswers?: Record<string, string | string[]>; // scope-step answers, keyed by ScopeField.label
   issuePhotoUrls?: string[]; // photos of the issue the client attached in Step 1, uploaded via POST /bookings/issue-photo/upload
   timeSlot: TimeSlot | null;
   urgencyLevel: UrgencyLevel;
@@ -123,7 +116,6 @@ export type DraftBooking = {
   // Worker selected via Step 3 (WHO) — separate from workerId/workerName above,
   // which pre-date this flow and are still used by the "book from profile" /
   // "book again" entry points that lock a worker before Step 1.
-  workerHourlyRate?: number | null;
   workerTier?: WorkerTier | null;
   workerEstimatedTotal?: number | null;
   workerAvatar?: string | null;
@@ -194,16 +186,8 @@ export type DeclinedBookingDetail = {
   scheduledDate?: string | null;
   timeSlot?: TimeSlot | null;
   urgencyLevel?: UrgencyLevel | null;
-  rooms?: RoomType[] | null;
-  condition?: ConditionType | null;
   scopeAnswers?: Record<string, string | string[]> | null;
 };
-
-function tallyRooms(rooms: RoomType[]): RoomSelection[] {
-  const counts = new Map<RoomType, number>();
-  for (const room of rooms) counts.set(room, (counts.get(room) ?? 0) + 1);
-  return Array.from(counts.entries()).map(([room, count]) => ({ room, count }));
-}
 
 export type BookingState = {
   bookings: Booking[];
@@ -257,17 +241,12 @@ const initialDraft: DraftBooking = {
   serviceTypeId: null,
   categoryBasePrice: null,
   selectedPackageIds: [],
-  rooms: [],
-  condition: null,
   urgencyLevel: 'STANDARD',
-  scopeType: null,
-  hasCondition: true,
   scopeAnswers: {},
   issuePhotoUrls: [],
   timeSlot: null,
   priorities: [],
   addOnToggles: [],
-  workerHourlyRate: null,
   workerEstimatedTotal: null,
   workerAvatar: null,
   workerRating: null,
@@ -295,10 +274,8 @@ export const useBookingStore: UseBoundStore<StoreApi<BookingState>> = create<Boo
       const categoryChanged = draft.category && draft.category !== prev.category;
       const addressChanged = draft.address && draft.address !== prev.address;
       const cityChanged = draft.city && draft.city !== prev.city;
-      const conditionChanged = draft.condition !== undefined && draft.condition !== prev.condition;
-      const roomsChanged = draft.rooms !== undefined && draft.rooms !== prev.rooms;
       const clearingSchedule =
-        (categoryChanged || addressChanged || cityChanged || conditionChanged || roomsChanged) &&
+        (categoryChanged || addressChanged || cityChanged) &&
         (prev.date || prev.timeSlot || prev.workerId) &&
         draft.date === undefined &&
         draft.timeSlot === undefined &&
@@ -309,7 +286,6 @@ export const useBookingStore: UseBoundStore<StoreApi<BookingState>> = create<Boo
         updatedDraft.timeSlot = null;
         if (!updatedDraft.workerLocked) {
           updatedDraft.workerId = null;
-          updatedDraft.workerHourlyRate = null;
           updatedDraft.workerEstimatedTotal = null;
           updatedDraft.isAutoMatched = false;
           updatedDraft.holdStartedAt = null;
@@ -318,20 +294,19 @@ export const useBookingStore: UseBoundStore<StoreApi<BookingState>> = create<Boo
       }
 
       // Changing the date/time slot after a specific worker was picked (Step 3)
-      // invalidates that pick — the worker's availability/rate was matched
+      // invalidates that pick — the worker's availability was matched
       // against the previous slot, not the new one.
       const dateChanged = draft.date !== undefined && draft.date !== prev.date;
       const slotChanged = draft.timeSlot !== undefined && draft.timeSlot !== prev.timeSlot;
       const clearingWorkerForNewSlot =
         (dateChanged || slotChanged) &&
         !updatedDraft.workerLocked &&
-        prev.workerHourlyRate != null &&
+        prev.workerId != null &&
         draft.workerId === undefined;
 
       if (clearingWorkerForNewSlot) {
         updatedDraft.workerId = null;
         updatedDraft.workerName = null;
-        updatedDraft.workerHourlyRate = null;
         updatedDraft.workerEstimatedTotal = null;
         updatedDraft.isAutoMatched = false;
         updatedDraft.holdStartedAt = null;
@@ -481,7 +456,7 @@ export const useBookingStore: UseBoundStore<StoreApi<BookingState>> = create<Boo
   // reviving it, so this builds a fresh draft from its scope+schedule and
   // routes back through Step 1 (see the booking-detail screen's "Find
   // Another Pro"), rather than making the client re-enter everything.
-  // Deliberately does NOT resolve serviceTypeId/categoryBasePrice/scopeType
+  // Deliberately does NOT resolve serviceTypeId/categoryBasePrice/scopeFields
   // here — Step 1's own category loader already does that name-match
   // lookup against the live catalog for a restored draft, so duplicating it
   // here would just be a second, driftable copy of the same logic.
@@ -502,8 +477,6 @@ export const useBookingStore: UseBoundStore<StoreApi<BookingState>> = create<Boo
         date: detail.scheduledDate ? detail.scheduledDate.slice(0, 10) : null,
         timeSlot: detail.timeSlot ?? null,
         urgencyLevel: detail.urgencyLevel ?? 'STANDARD',
-        rooms: detail.rooms ? tallyRooms(detail.rooms) : [],
-        condition: detail.condition ?? null,
         scopeAnswers: detail.scopeAnswers ?? {},
         entrySource: 're_offer',
         workerLocked: false,

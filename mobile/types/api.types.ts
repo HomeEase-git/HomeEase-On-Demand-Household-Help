@@ -161,7 +161,6 @@ export interface WorkerDetail extends Worker {
   isAvailable: boolean;
   availableDays: string[];
   maxConcurrentJobs: number;
-  hourlyRate?: number | null;
   // Every ServiceType this worker offers (not just the primary `service`
   // shown on the card) — lets a "book this worker" entry point (the profile
   // screen) restrict the booking flow's category picker to services this

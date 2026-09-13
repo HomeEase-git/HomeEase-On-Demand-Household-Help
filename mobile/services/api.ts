@@ -11,8 +11,7 @@ import type {
   CreateBookingResponse,
   WorkerCard,
   TimeSlot,
-  RoomType,
-  ConditionType,
+  UrgencyLevel,
 } from "../types/booking4step.types";
 
 type NormalizedWorkerListItem = {
@@ -350,8 +349,6 @@ export async function createBooking(details: CreateBookingPayload): Promise<Crea
       workerId: details.workerId ?? undefined,
       serviceType: details.serviceType,
       serviceTaskId: details.serviceTaskId ?? undefined,
-      rooms: details.rooms ?? [],
-      condition: details.condition ?? undefined,
       description: details.description || '',
       address: details.address,
       city: details.city || '',
@@ -467,8 +464,15 @@ export interface DiscoverWorkersFilters {
   serviceType?: string;
   date?: string; // YYYY-MM-DD
   timeSlot?: TimeSlot;
-  condition?: ConditionType;
-  rooms?: RoomType[];
+  // Answers to the selected category's scope fields, keyed by field label —
+  // only fields the admin flagged "use to match workers" actually filter
+  // candidates server-side (see matchingService.buildCapabilityFilters).
+  scopeAnswers?: Record<string, string | string[]>;
+  hasPets?: boolean;
+  serviceTaskId?: string;
+  urgencyLevel?: UrgencyLevel;
+  lat?: number;
+  lng?: number;
   // Scopes results to a single worker — used to check a specific (e.g.
   // profile-locked) worker's real open slots rather than discovering a list.
   workerId?: string;
@@ -494,8 +498,14 @@ export async function discoverWorkers(filters: DiscoverWorkersFilters): Promise<
     if (filters.serviceType) params.serviceType = filters.serviceType;
     if (filters.date) params.date = filters.date;
     if (filters.timeSlot) params.timeSlot = filters.timeSlot;
-    if (filters.condition) params.condition = filters.condition;
-    if (filters.rooms?.length) params.rooms = filters.rooms.join(',');
+    if (filters.scopeAnswers && Object.keys(filters.scopeAnswers).length > 0) {
+      params.scopeAnswers = JSON.stringify(filters.scopeAnswers);
+    }
+    if (filters.hasPets) params.hasPets = 'true';
+    if (filters.serviceTaskId) params.serviceTaskId = filters.serviceTaskId;
+    if (filters.urgencyLevel) params.urgencyLevel = filters.urgencyLevel;
+    if (filters.lat != null) params.lat = filters.lat;
+    if (filters.lng != null) params.lng = filters.lng;
     if (filters.workerId) params.workerId = filters.workerId;
     if (filters.page) params.page = filters.page;
     if (filters.limit) params.limit = filters.limit;
@@ -537,11 +547,9 @@ function normalizeWorkerListItem(worker: any): NormalizedWorkerListItem {
         ? worker.basePrice
         : typeof worker.rate === "number"
           ? worker.rate
-          : typeof worker.hourlyRate === "number"
-            ? worker.hourlyRate
-            : typeof worker.estimatedTotal === "number"
-              ? worker.estimatedTotal
-              : null,
+          : typeof worker.estimatedTotal === "number"
+            ? worker.estimatedTotal
+            : null,
     status: normalizedStatus,
     avatar: worker.avatar ?? worker.user?.avatar ?? null,
     activeJobCount: typeof worker.activeJobCount === "number" ? worker.activeJobCount : null,
@@ -581,7 +589,6 @@ export async function getWorkerDetail(workerId: string): Promise<WorkerDetail | 
       isAvailable: Boolean(response.isAvailable),
       availableDays: Array.isArray(response.availableDays) ? response.availableDays : [],
       maxConcurrentJobs: Number(response.maxConcurrentJobs ?? 0),
-      hourlyRate: typeof response.hourlyRate === "number" ? response.hourlyRate : null,
     };
   } catch (error) {
     if (isAxiosError(error) && error.response?.status === 404) return null;
@@ -1444,17 +1451,6 @@ export async function updateAvailabilitySlots(
   }
 }
 
-/** PATCH /workers/me/rate — enforced ₱20-₱100/hr range server-side. */
-export async function updateHourlyRate(hourlyRate: number): Promise<{ hourlyRate: number }> {
-  try {
-    const response = await api.patch('/workers/me/rate', { hourlyRate });
-    return response;
-  } catch (error) {
-    console.error('Update hourly rate error:', error);
-    throw error;
-  }
-}
-
 export interface MyWorkerProfileDetails {
   bio: string | null;
   serviceAreaRadius: number | null;
@@ -1523,47 +1519,32 @@ export async function getWorkerCapacity() {
   }
 }
 
-export type Skill = { id: string; name: string; category: string; rate: number };
-
-export async function getMySkills(): Promise<Skill[]> {
+/**
+ * Which specific ServiceScopeFieldOption ids this worker has declared they
+ * handle (e.g. "Air Conditioner" under a category's "Appliance Type"
+ * field) — replaces the old free-text Skill list. Nothing here is typed by
+ * the worker; every id traces back to a real admin-defined option, fetched
+ * from getServiceTypes()'s scopeFields for the categories this worker
+ * offers. Used by discovery (see matchingService.buildCapabilityFilters) to
+ * only show/match workers who've declared the option the client asked for.
+ */
+export async function getMyCapabilities(): Promise<string[]> {
   try {
-    const response = await api.get('/workers/me/skills');
-    return response.skills ?? [];
+    const response = await api.get('/workers/me/capabilities');
+    return response.optionIds ?? [];
   } catch (error) {
-    console.error('Get skills error:', error);
+    console.error('Get capabilities error:', error);
     throw error;
   }
 }
 
-export async function addSkill(data: { name: string; category: string; rate: number }): Promise<Skill> {
+/** Replace-all — pass every option id this worker currently declares. */
+export async function replaceMyCapabilities(optionIds: string[]): Promise<string[]> {
   try {
-    const response = await api.post('/workers/me/skills', data);
-    return response.skill;
+    const response = await api.put('/workers/me/capabilities', { optionIds });
+    return response.optionIds ?? [];
   } catch (error) {
-    console.error('Add skill error:', error);
-    throw error;
-  }
-}
-
-export async function updateSkill(
-  skillId: string,
-  data: { name?: string; category?: string; rate?: number },
-): Promise<Skill> {
-  try {
-    const response = await api.patch(`/workers/me/skills/${skillId}`, data);
-    return response.skill;
-  } catch (error) {
-    console.error('Update skill error:', error);
-    throw error;
-  }
-}
-
-export async function deleteSkill(skillId: string) {
-  try {
-    await api.delete(`/workers/me/skills/${skillId}`);
-    return true;
-  } catch (error) {
-    console.error('Delete skill error:', error);
+    console.error('Update capabilities error:', error);
     throw error;
   }
 }

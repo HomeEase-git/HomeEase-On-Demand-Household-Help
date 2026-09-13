@@ -236,19 +236,6 @@ export default function WorkerHomeScreen() {
               </Text>
             </Pressable>
             <Pressable
-              className="w-[48%] bg-blue-100 border-2 border-brand rounded-xl p-4"
-              onPress={() => router.push("/(worker)/profile/rate")}
-            >
-              <Ionicons
-                name="pricetag-outline"
-                size={24}
-                color={colors.brand.DEFAULT}
-              />
-              <Text className="text-brand font-semibold mt-2">
-                Set Hourly Rate
-              </Text>
-            </Pressable>
-            <Pressable
               className="w-[48%] bg-orange-100 border-2 border-brand rounded-xl p-4"
               onPress={() => router.push("/(worker)/profile/certifications")}
             >

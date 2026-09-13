@@ -1,5 +1,5 @@
 import prisma from '@config/database';
-import type { ConditionType, RoomType, TimeSlot } from '@prisma/client';
+import type { Prisma, TimeSlot } from '@prisma/client';
 import { isWithinRadiusKm } from '@utils/geo';
 
 // Fallback when a worker hasn't set WorkerProfile.serviceAreaRadius (it has
@@ -77,13 +77,59 @@ export function selectBestCandidate(
   return scored.reduce((best, current) => (current.score > best.score ? current : best));
 }
 
+/**
+ * Fields the admin flagged usedForMatching on the given category, filtered
+ * down to the ones the client actually answered, resolved to real
+ * ServiceScopeFieldOption ids. Shared by findAutoMatchWorker and
+ * workerController.searchWorkers so "does this worker handle what the
+ * client asked for" is enforced identically on both discovery paths.
+ *
+ * A worker with zero WorkerScopeFieldCapability rows for a given field is
+ * left unrestricted for it — same "empty declaration = no preference" rule
+ * WorkerProfile.preferredRoomTypes used before this replaced it. A field the
+ * client didn't answer imposes no constraint at all.
+ */
+export async function buildCapabilityFilters(
+  serviceType: string,
+  scopeAnswers: Record<string, string | string[]> | null | undefined
+): Promise<Prisma.WorkerProfileWhereInput[]> {
+  if (!scopeAnswers || typeof scopeAnswers !== 'object') return [];
+
+  const matchingFields = await prisma.serviceScopeField.findMany({
+    where: {
+      usedForMatching: true,
+      serviceType: { name: { equals: serviceType, mode: 'insensitive' } },
+    },
+    include: { options: true },
+  });
+  if (matchingFields.length === 0) return [];
+
+  const filters: Prisma.WorkerProfileWhereInput[] = [];
+  for (const field of matchingFields) {
+    const answer = scopeAnswers[field.label];
+    if (answer == null) continue;
+    const answeredLabels = Array.isArray(answer) ? answer : [answer];
+    const requiredOptionIds = field.options
+      .filter((o) => answeredLabels.includes(o.label))
+      .map((o) => o.id);
+    if (requiredOptionIds.length === 0) continue;
+
+    filters.push({
+      OR: [
+        { scopeCapabilities: { none: { option: { fieldId: field.id } } } },
+        { scopeCapabilities: { some: { optionId: { in: requiredOptionIds } } } },
+      ],
+    });
+  }
+  return filters;
+}
+
 export interface AutoMatchParams {
   serviceType: string;
   serviceTaskId?: string | null;
   date: Date;
   timeSlot: TimeSlot;
-  condition?: ConditionType | null;
-  rooms?: RoomType[];
+  scopeAnswers?: Record<string, string | string[]> | null;
   hasPets?: boolean;
   excludeWorkerIds?: string[];
   // Booking address — when given (and a candidate has WorkerProfile.
@@ -109,8 +155,9 @@ export interface AutoMatchResult {
  *  - offers the requested serviceType
  *  - has an explicit open WorkerAvailability row for (date, timeSlot) —
  *    not blocked, not already booked
- *  - accepts HEAVY-condition jobs if this one is HEAVY
  *  - accepts pets if the booking involves pets
+ *  - matches every usedForMatching scope field the client answered (see
+ *    buildCapabilityFilters)
  *  - not in excludeWorkerIds (declined workers on a re-match attempt)
  */
 export async function findAutoMatchWorker(params: AutoMatchParams): Promise<AutoMatchResult | null> {
@@ -118,7 +165,7 @@ export async function findAutoMatchWorker(params: AutoMatchParams): Promise<Auto
     serviceType,
     date,
     timeSlot,
-    condition,
+    scopeAnswers,
     hasPets,
     excludeWorkerIds = [],
     clientLat,
@@ -130,6 +177,8 @@ export async function findAutoMatchWorker(params: AutoMatchParams): Promise<Auto
   const dayEnd = new Date(date);
   dayEnd.setUTCHours(23, 59, 59, 999);
 
+  const capabilityFilters = await buildCapabilityFilters(serviceType, scopeAnswers);
+
   const workers = await prisma.workerProfile.findMany({
     where: {
       kycStatus: 'APPROVED',
@@ -140,8 +189,8 @@ export async function findAutoMatchWorker(params: AutoMatchParams): Promise<Auto
       // bookingController.declineBooking) from auto-match candidates.
       OR: [{ declineCooldownUntil: null }, { declineCooldownUntil: { lte: new Date() } }],
       serviceTypes: { some: { name: { equals: serviceType, mode: 'insensitive' } } },
-      ...(condition === 'HEAVY' ? { acceptsHeavyCondition: true } : {}),
       ...(hasPets ? { acceptsPets: true } : {}),
+      AND: capabilityFilters,
       availability: {
         some: {
           date: { gte: dayStart, lte: dayEnd },

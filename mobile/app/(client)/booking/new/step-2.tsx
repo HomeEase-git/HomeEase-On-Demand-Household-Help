@@ -143,8 +143,7 @@ export default function BookingStep2Screen() {
     {
       serviceType: draft.serviceType ?? undefined,
       date: date ?? undefined,
-      condition: draft.condition ?? undefined,
-      rooms: draft.rooms?.map((r) => r.room),
+      scopeAnswers: draft.scopeAnswers,
       workerId: draft.workerLocked ? (draft.workerId ?? undefined) : undefined,
     },
     hasScope && !!date

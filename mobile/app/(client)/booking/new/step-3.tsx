@@ -32,8 +32,10 @@ export default function BookingStep3Screen() {
       serviceType: draft.serviceType ?? undefined,
       date: draft.date ?? undefined,
       timeSlot: draft.timeSlot ?? undefined,
-      condition: draft.condition ?? undefined,
-      rooms: draft.rooms?.map((r) => r.room),
+      scopeAnswers: draft.scopeAnswers,
+      urgencyLevel: draft.urgencyLevel,
+      lat: draft.lat,
+      lng: draft.lng,
       limit: 20,
     },
     readyToSearch && !draft.workerLocked
@@ -43,7 +45,6 @@ export default function BookingStep3Screen() {
     setDraft({
       workerId: worker.id,
       workerName: worker.fullName,
-      workerHourlyRate: worker.hourlyRate,
       workerTier: worker.tier ?? "STANDARD",
       workerEstimatedTotal: worker.estimatedTotal,
       workerAvatar: worker.avatar,
@@ -59,7 +60,6 @@ export default function BookingStep3Screen() {
     setDraft({
       workerId: null,
       workerName: null,
-      workerHourlyRate: null,
       workerTier: null,
       workerEstimatedTotal: null,
       workerAvatar: null,

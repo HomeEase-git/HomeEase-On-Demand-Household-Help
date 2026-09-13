@@ -10,12 +10,12 @@ type Props = {
 };
 
 /**
- * Renders an admin-defined set of scope questions for services whose
- * ServiceType.scopeType is CUSTOM (e.g. "Appliance Type" for Appliance
- * Repair) — the alternative to the generic RoomSelector used by ROOM_BASED
- * services. Answers are keyed by field id locally, then remapped to field
- * *label* when written to the booking draft (see step-1.tsx), matching how
- * the backend snapshots them onto Booking.scopeAnswers.
+ * Renders an admin-defined set of scope questions for a service (e.g.
+ * "Appliance Type" for Appliance Repair, "Bedrooms" for Home Cleaning) —
+ * every category's booking scope step is just an ordered list of these now.
+ * Answers are keyed by field id locally, then remapped to field *label*
+ * when written to the booking draft (see step-1.tsx), matching how the
+ * backend snapshots them onto Booking.scopeAnswers.
  */
 export default function DynamicScopeFields({ fields, answers, onChange }: Props) {
   const setAnswer = (fieldId: string, value: string | string[]) => {
@@ -46,6 +46,20 @@ export default function DynamicScopeFields({ fields, answers, onChange }: Props)
                 onChangeText={(t) => setAnswer(field.id, t)}
                 placeholder={`Enter ${field.label.toLowerCase()}`}
                 multiline
+              />
+            )}
+
+            {field.fieldType === "NUMBER" && (
+              <InputField
+                label=""
+                value={typeof value === "string" ? value : ""}
+                onChangeText={(t) => setAnswer(field.id, t.replace(/[^0-9.]/g, ""))}
+                placeholder={
+                  field.minValue != null && field.maxValue != null
+                    ? `Enter a number (${field.minValue}–${field.maxValue})`
+                    : `Enter ${field.label.toLowerCase()}`
+                }
+                keyboardType="number-pad"
               />
             )}
 

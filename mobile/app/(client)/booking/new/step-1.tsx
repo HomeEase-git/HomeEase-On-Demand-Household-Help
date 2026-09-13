@@ -11,8 +11,6 @@ import InvalidationBanner from "../../../../components/ui/InvalidationBanner";
 import ServiceCategorySelector, {
   type ServiceCategoryOption,
 } from "../../../../components/booking4step/ServiceCategorySelector";
-import RoomSelector from "../../../../components/booking4step/RoomSelector";
-import ConditionSelector from "../../../../components/booking4step/ConditionSelector";
 import DynamicScopeFields from "../../../../components/booking4step/DynamicScopeFields";
 import PricingRangePreview from "../../../../components/booking4step/PricingRangePreview";
 import ImageSourcePickerBottomSheet from "../../../../components/bottom-sheets/ImageSourcePickerBottomSheet";
@@ -22,8 +20,6 @@ import { colors } from "../../../../constants";
 import { useBookingStore } from "../../../../store/bookingStore";
 import { getServiceTypes, uploadIssuePhoto } from "../../../../services/api";
 import { useBookingPriceEstimate } from "../../../../hooks/useBookingPriceEstimate";
-import { totalRoomCount } from "../../../../utils/bookingPriceEstimate";
-import type { RoomSelection, ConditionType } from "../../../../types/booking4step.types";
 import { useAlertModal } from "../../../../contexts/AlertModalContext";
 
 const MAX_ISSUE_PHOTOS = 5;
@@ -44,8 +40,6 @@ export default function BookingStep1Screen() {
   const [loadingCategories, setLoadingCategories] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [selectedCategory, setSelectedCategory] = useState<ServiceCategoryOption | null>(null);
-  const [rooms, setRooms] = useState<RoomSelection[]>(draft.rooms ?? []);
-  const [condition, setCondition] = useState<ConditionType | null>(draft.condition ?? null);
   const [scopeAnswers, setScopeAnswers] = useState<Record<string, string | string[]>>({});
   const [description, setDescription] = useState(draft.description);
   const [issuePhotos, setIssuePhotos] = useState<string[]>(draft.issuePhotoUrls ?? []);
@@ -65,8 +59,6 @@ export default function BookingStep1Screen() {
           name: t.name,
           basePrice: t.basePrice,
           description: t.description,
-          scopeType: t.scopeType ?? "ROOM_BASED",
-          hasCondition: t.hasCondition ?? true,
           icon: t.icon ?? null,
           scopeFields: Array.isArray(t.scopeFields)
             ? t.scopeFields.map((f: any) => ({
@@ -75,6 +67,8 @@ export default function BookingStep1Screen() {
                 fieldType: f.fieldType,
                 required: f.required,
                 options: Array.isArray(f.options) ? f.options.map((o: any) => ({ id: o.id, label: o.label })) : [],
+                minValue: f.minValue ?? null,
+                maxValue: f.maxValue ?? null,
               }))
             : [],
         }));
@@ -86,9 +80,9 @@ export default function BookingStep1Screen() {
           null;
         if (matched) {
           setSelectedCategory(matched);
-          // Restore previously-answered custom fields (draft stores them
-          // keyed by label; the picker/UI below keys by field id).
-          if (matched.scopeType === "CUSTOM" && draft.scopeAnswers) {
+          // Restore previously-answered fields (draft stores them keyed by
+          // label; the picker/UI below keys by field id).
+          if (draft.scopeAnswers) {
             const byLabel = draft.scopeAnswers;
             const restored: Record<string, string | string[]> = {};
             matched.scopeFields.forEach((f) => {
@@ -125,30 +119,19 @@ export default function BookingStep1Screen() {
         )
       : categories;
 
-  const isRoomBased = (selectedCategory?.scopeType ?? "ROOM_BASED") === "ROOM_BASED";
-  const showCondition = selectedCategory?.hasCondition ?? true;
-
-  const priceEstimate = useBookingPriceEstimate(selectedCategory?.basePrice ?? 0, 0, undefined, {
-    rooms: isRoomBased ? rooms : [],
-    condition: showCondition ? condition : null,
-    scopeType: selectedCategory?.scopeType ?? null,
-  });
+  const priceEstimate = useBookingPriceEstimate(selectedCategory?.basePrice ?? 0);
 
   const scopeComplete = !selectedCategory
     ? false
-    : isRoomBased
-      ? totalRoomCount(rooms) > 0
-      : selectedCategory.scopeFields.every((f) => !f.required || hasAnswer(scopeAnswers[f.id]));
+    : selectedCategory.scopeFields.every((f) => !f.required || hasAnswer(scopeAnswers[f.id]));
 
-  const canNext = !!selectedCategory && scopeComplete && (!showCondition || !!condition);
+  const canNext = !!selectedCategory && scopeComplete;
 
   const handleCategorySelect = (cat: ServiceCategoryOption) => {
     setSelectedCategory(cat);
-    // Switching category can change scope shape entirely — start clean
-    // rather than carrying over rooms/answers that no longer apply.
-    setRooms([]);
+    // Switching category can change its fields entirely — start clean
+    // rather than carrying over answers that no longer apply.
     setScopeAnswers({});
-    setCondition(null);
   };
 
   const handlePickIssuePhoto = async (uri: string) => {
@@ -170,22 +153,15 @@ export default function BookingStep1Screen() {
 
   const handleNext = () => {
     if (!canNext) {
-      alertModal.warning(
-        "Scope incomplete",
-        isRoomBased
-          ? "Please choose a service, at least one room, and a condition before continuing."
-          : "Please choose a service and fill in the required details before continuing."
-      );
+      alertModal.warning("Scope incomplete", "Please choose a service and fill in the required details before continuing.");
       return;
     }
 
     const labelAnswers: Record<string, string | string[]> = {};
-    if (!isRoomBased) {
-      selectedCategory!.scopeFields.forEach((f) => {
-        const value = scopeAnswers[f.id];
-        if (hasAnswer(value)) labelAnswers[f.label] = value;
-      });
-    }
+    selectedCategory!.scopeFields.forEach((f) => {
+      const value = scopeAnswers[f.id];
+      if (hasAnswer(value)) labelAnswers[f.label] = value;
+    });
 
     setDraft({
       category: selectedCategory!.name,
@@ -196,11 +172,7 @@ export default function BookingStep1Screen() {
         : (draft.serviceTypeId ?? null),
       categoryBasePrice: selectedCategory!.basePrice,
       description,
-      rooms: isRoomBased ? rooms : [],
-      condition: showCondition ? condition : null,
-      scopeType: selectedCategory!.scopeType,
-      hasCondition: showCondition,
-      scopeAnswers: isRoomBased ? {} : labelAnswers,
+      scopeAnswers: labelAnswers,
       issuePhotoUrls: issuePhotos,
     });
     router.push("/(client)/booking/new/step-2");
@@ -242,14 +214,7 @@ export default function BookingStep1Screen() {
           </Text>
         )}
 
-        {selectedCategory && isRoomBased && (
-          <>
-            <Text className="text-text-primary font-bold text-lg mt-6 mb-3">Which rooms?</Text>
-            <RoomSelector selection={rooms} onChange={setRooms} />
-          </>
-        )}
-
-        {selectedCategory && !isRoomBased && (
+        {selectedCategory && (
           <View className="mt-6">
             <DynamicScopeFields
               fields={selectedCategory.scopeFields}
@@ -257,13 +222,6 @@ export default function BookingStep1Screen() {
               onChange={setScopeAnswers}
             />
           </View>
-        )}
-
-        {selectedCategory && showCondition && (
-          <>
-            <Text className="text-text-primary font-bold text-lg mt-6 mb-3">Condition</Text>
-            <ConditionSelector value={condition} onChange={setCondition} />
-          </>
         )}
 
         <View className="mt-6">

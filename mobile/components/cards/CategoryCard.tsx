@@ -12,11 +12,14 @@ type Props = {
 };
 
 export const CategoryCard: React.FC<Props> = ({ category, onPress }) => {
+  const isEmpty = category.count <= 0;
+
   return (
     <Pressable
       className="bg-card rounded-2xl p-4 items-center mb-3 mx-1 flex-1 min-w-[140]"
-      style={cardShadow}
-      onPress={onPress}
+      style={[cardShadow, isEmpty && { opacity: 0.5 }]}
+      onPress={isEmpty ? undefined : onPress}
+      disabled={isEmpty}
     >
       <View className="w-14 h-14 bg-accent/20 rounded-full items-center justify-center mb-2">
         <Ionicons
@@ -32,7 +35,9 @@ export const CategoryCard: React.FC<Props> = ({ category, onPress }) => {
         {category.name}
       </Text>
       <Text className="text-text-secondary text-xs text-center">
-        {category.count} worker{category.count === 1 ? "" : "s"} available
+        {isEmpty
+          ? "No workers available"
+          : `${category.count} worker${category.count === 1 ? "" : "s"} available`}
       </Text>
     </Pressable>
   );

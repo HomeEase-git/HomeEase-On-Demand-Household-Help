@@ -66,12 +66,6 @@ export default function DiscoveredWorkerCard({ worker, selected, onSelect }: Pro
 
       <View className="flex-row items-center justify-between mt-3 pt-3 border-t border-divider">
         <View>
-          <Text className="text-text-muted text-xs">Rate</Text>
-          <Text className="text-text-primary font-semibold text-sm">
-            {worker.hourlyRate != null ? `₱${worker.hourlyRate}/hr` : "—"}
-          </Text>
-        </View>
-        <View>
           <Text className="text-text-muted text-xs">Est. total</Text>
           <Text className="text-accent font-bold text-sm">
             {worker.estimatedTotal != null ? `₱${Math.round(worker.estimatedTotal)}` : "—"}
