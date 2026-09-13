@@ -65,7 +65,6 @@ export type Booking = {
   workerVerified?: boolean;
   completionPhotoUrl?: string | null;
   category?: string;
-  selectedAddOnIds?: string[];
 };
 
 export type DraftBooking = {
@@ -78,9 +77,13 @@ export type DraftBooking = {
   notes?: string;
   workerId: string | null;
   paymentMethod: string | null;
+  // GCash/Maya mobile number entered in Step 4 — kept in the draft (like the
+  // rest of Step 4's fields) so it survives navigating back to an earlier
+  // step and forward again, which remounts Step 4 and would otherwise reset
+  // its local state.
+  paymentAccountIdentifier?: string | null;
   tip?: number;
   taxRate?: number;
-  selectedAddOnIds: string[];
   estimatedPrice: number;
   // True when the selected task's price is only an estimate until the
   // worker inspects the job and submits a quote (see utils/pricing.ts).
@@ -237,9 +240,9 @@ const initialDraft: DraftBooking = {
   notes: '',
   workerId: null,
   paymentMethod: null,
+  paymentAccountIdentifier: null,
   tip: 0,
   taxRate: 0.12,
-  selectedAddOnIds: [],
   estimatedPrice: 0,
   quoteRequired: false,
   entrySource: null,
@@ -464,7 +467,6 @@ export const useBookingStore: UseBoundStore<StoreApi<BookingState>> = create<Boo
         ...initialDraft,
         category: resolvedCategory,
         address: booking.address ?? null,
-        selectedAddOnIds: booking.selectedAddOnIds ?? [],
         workerId: booking.workerId ?? null,
         entrySource: 'book_again',
         workerLocked: false,

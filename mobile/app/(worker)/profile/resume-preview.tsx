@@ -6,12 +6,7 @@ import { useRouter } from "expo-router";
 import ScreenHeader from "../../../components/ui/ScreenHeader";
 import PrimaryButton from "../../../components/ui/PrimaryButton";
 import OutlinedButton from "../../../components/ui/OutlinedButton";
-import {
-  useWorkerProfileStore,
-  type WorkerProfileState,
-} from "../../../store/workerProfileStore";
-import { useAuthStore } from "../../../store/authStore";
-import { parseMyResume } from "../../../services/api";
+import { parseMyResume, updateWorkerProfileDetails } from "../../../services/api";
 import type { ParsedResume } from "../../../types/api.types";
 import { colors, cardShadow } from "../../../constants";
 import { useAlertModal } from "../../../contexts/AlertModalContext";
@@ -26,16 +21,13 @@ const LEVEL_COLOR: Record<string, { bg: string; text: string }> = {
 export default function ResumePreviewScreen() {
   const router = useRouter();
   const alertModal = useAlertModal();
-  const setProfile = useWorkerProfileStore(
-    (s: WorkerProfileState) => s.setProfile,
-  );
-  const isSaved = useWorkerProfileStore((s: WorkerProfileState) => s.isSaved);
-  const currentName = useAuthStore((s) => s.user?.name);
 
   const [result, setResult] = useState<ParsedResume | null>(null);
   const [loading, setLoading] = useState(true);
   const [reanalyzing, setReanalyzing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [applying, setApplying] = useState(false);
+  const [isSaved, setIsSaved] = useState(false);
 
   const load = useCallback(async (force: boolean) => {
     if (force) {
@@ -59,22 +51,45 @@ export default function ResumePreviewScreen() {
     Promise.resolve().then(() => load(false));
   }, [load]);
 
-  const handleUseProfileData = () => {
+  const handleUseProfileData = async () => {
     if (!result) return;
-    setProfile({
-      name: currentName ?? "",
-      trade: result.tradeCategory ?? "",
-      yearsOfExperience: result.yearsOfExperience ?? 0,
-      masteryLevel: result.masteryLevel ?? "Unknown",
-      summary: result.summary ?? "",
-      skills: result.parsedSkills,
-      certifications: [],
-    });
-    alertModal.success(
-      "Profile Updated",
-      "Your profile has been updated with the parsed resume data. You can edit individual fields from your profile screen.",
-      [{ text: "OK", onPress: () => router.back() }],
-    );
+    setApplying(true);
+    try {
+      const bioParts: string[] = [];
+      if (result.summary) bioParts.push(result.summary);
+      if (result.yearsOfExperience != null) {
+        bioParts.push(`${result.yearsOfExperience} years of experience`);
+      }
+      if (result.masteryLevel) bioParts.push(`Mastery level: ${result.masteryLevel}`);
+
+      await updateWorkerProfileDetails({
+        bio: bioParts.join(" · ") || undefined,
+        digitalIdTrade: result.tradeCategory || undefined,
+      });
+      setIsSaved(true);
+
+      const hasSkills = result.parsedSkills.length > 0;
+      alertModal.success(
+        "Profile Updated",
+        hasSkills
+          ? "Your trade and bio were updated from your resume. Add the skills listed below from your Skills screen to finish your profile."
+          : "Your trade and bio were updated from your resume.",
+        hasSkills
+          ? [
+              { text: "Later", onPress: () => router.back() },
+              {
+                text: "Add Skills",
+                onPress: () => router.push("/(worker)/profile/skills"),
+              },
+            ]
+          : [{ text: "OK", onPress: () => router.back() }],
+      );
+    } catch (err) {
+      console.error("Apply resume profile data error:", err);
+      alertModal.error("Error", "Failed to update your profile. Please try again.");
+    } finally {
+      setApplying(false);
+    }
   };
 
   if (loading) {
@@ -220,7 +235,8 @@ export default function ResumePreviewScreen() {
             <PrimaryButton
               label="Use This Profile Data"
               fullWidth
-              disabled={!hasSkills}
+              loading={applying}
+              disabled={applying}
               onPress={handleUseProfileData}
             />
           )}

@@ -107,7 +107,7 @@ export default function WorkerHomeScreen() {
           </View>
           <View className="flex-1 bg-card rounded-xl p-3 items-center">
             <Text className="text-success font-bold text-xl">
-              ₱{todayEarnings}
+              ₱{todayEarnings.toFixed(2)}
             </Text>
             <Text className="text-text-secondary text-xs">Earned Today</Text>
           </View>
@@ -210,7 +210,7 @@ export default function WorkerHomeScreen() {
           <SectionHeader title="Quick Actions" />
           <View className="flex-row flex-wrap gap-3 mt-2">
             <Pressable
-              className="flex-1 min-w-[140] bg-brand/25 border-2 border-brand rounded-xl p-4"
+              className="w-[48%] bg-brand/25 border-2 border-brand rounded-xl p-4"
               onPress={() => router.push("/(worker)/profile/availability")}
             >
               <Ionicons
@@ -223,7 +223,7 @@ export default function WorkerHomeScreen() {
               </Text>
             </Pressable>
             <Pressable
-              className="flex-1 min-w-[140] bg-green-100 border-2 border-brand rounded-xl p-4"
+              className="w-[48%] bg-green-100 border-2 border-brand rounded-xl p-4"
               onPress={() => router.push("/(worker)/earnings")}
             >
               <Ionicons
@@ -236,7 +236,7 @@ export default function WorkerHomeScreen() {
               </Text>
             </Pressable>
             <Pressable
-              className="flex-1 min-w-[140] bg-blue-100 border-2 border-brand rounded-xl p-4"
+              className="w-[48%] bg-blue-100 border-2 border-brand rounded-xl p-4"
               onPress={() => router.push("/(worker)/profile/rate")}
             >
               <Ionicons
@@ -249,7 +249,7 @@ export default function WorkerHomeScreen() {
               </Text>
             </Pressable>
             <Pressable
-              className="flex-1 min-w-[140] bg-orange-100 border-2 border-brand rounded-xl p-4"
+              className="w-[48%] bg-orange-100 border-2 border-brand rounded-xl p-4"
               onPress={() => router.push("/(worker)/profile/certifications")}
             >
               <Ionicons
@@ -262,7 +262,7 @@ export default function WorkerHomeScreen() {
               </Text>
             </Pressable>
             <Pressable
-              className="flex-1 min-w-[140] bg-purple-100 border-2 border-brand rounded-xl p-4"
+              className="w-[48%] bg-purple-100 border-2 border-brand rounded-xl p-4"
               onPress={() => router.push("/(worker)/profile")}
             >
               <Ionicons

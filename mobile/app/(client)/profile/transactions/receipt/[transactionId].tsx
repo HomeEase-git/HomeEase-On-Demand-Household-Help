@@ -171,7 +171,9 @@ function Row({ label, value }: { label: string; value: string }) {
   return (
     <View className="flex-row justify-between py-2 border-b border-divider last:border-0">
       <Text className="text-text-secondary text-sm">{label}</Text>
-      <Text className="text-text-primary font-semibold">{value}</Text>
+      <Text className="text-text-primary font-semibold flex-1 text-right ml-4">
+        {value}
+      </Text>
     </View>
   );
 }

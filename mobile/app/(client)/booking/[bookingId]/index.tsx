@@ -434,7 +434,11 @@ export default function BookingDetailScreen() {
               {statusCaption[booking.status]}
             </Text>
           ) : null}
-          <Text className="text-text-secondary text-xs ml-auto">
+          <Text
+            className="text-text-secondary text-xs ml-auto flex-shrink"
+            numberOfLines={1}
+            ellipsizeMode="middle"
+          >
             ID: {booking.id}
           </Text>
         </View>
@@ -544,7 +548,7 @@ export default function BookingDetailScreen() {
             </View>
             <View className="ml-3 flex-1">
               <View className="flex-row items-center">
-                <Text className="text-primary font-semibold">{workerName}</Text>
+                <Text className="text-text-primary font-semibold">{workerName}</Text>
                 {booking.workerVerified && (
                   <Ionicons
                     name="checkmark-circle"
@@ -599,7 +603,7 @@ export default function BookingDetailScreen() {
         <View className="bg-card rounded-2xl p-4 mb-3">
           <View className="flex-row items-center mb-2">
             <Ionicons name="calendar" size={16} color={colors.accent.DEFAULT} />
-            <Text className="text-primary font-semibold ml-2">
+            <Text className="text-text-primary font-semibold ml-2">
               {new Date(booking.date).toLocaleDateString("en-PH", {
                 weekday: "long",
                 year: "numeric",
@@ -611,7 +615,7 @@ export default function BookingDetailScreen() {
           {booking.time && (
             <View className="flex-row items-center mb-2">
               <Ionicons name="time" size={16} color={colors.accent.DEFAULT} />
-              <Text className="text-primary font-semibold ml-2">
+              <Text className="text-text-primary font-semibold ml-2">
                 {booking.time}
               </Text>
             </View>
@@ -623,7 +627,7 @@ export default function BookingDetailScreen() {
                 size={16}
                 color={colors.accent.DEFAULT}
               />
-              <Text className="text-primary font-semibold ml-2 flex-1">
+              <Text className="text-text-primary font-semibold ml-2 flex-1">
                 {booking.address}
               </Text>
             </View>
@@ -658,7 +662,7 @@ export default function BookingDetailScreen() {
               size={20}
               color={colors.accent.DEFAULT}
             />
-            <Text className="text-primary font-semibold ml-3">
+            <Text className="text-text-primary font-semibold ml-3">
               {booking.payment?.methodType ?? "Payment pending"}
             </Text>
           </View>
@@ -708,7 +712,7 @@ export default function BookingDetailScreen() {
                   ))}
                 </View>
                 {booking.reviewText && (
-                  <Text className="text-primary text-sm mt-1">
+                  <Text className="text-text-primary text-sm mt-1">
                     {`"${booking.reviewText}"`}
                   </Text>
                 )}

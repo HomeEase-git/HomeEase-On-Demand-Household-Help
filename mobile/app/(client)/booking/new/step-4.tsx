@@ -66,10 +66,42 @@ export default function BookingStep4Screen() {
   const [selectedPackageIds, setSelectedPackageIds] = useState<string[]>(draft.selectedPackageIds ?? []);
   const [packagesTotal, setPackagesTotal] = useState(0);
   const [paymentMethod, setPaymentMethod] = useState<string | null>(draft.paymentMethod);
-  const [accountValue, setAccountValue] = useState("");
+  const [accountValue, setAccountValue] = useState(draft.paymentAccountIdentifier ?? "");
   const [tip, setTip] = useState<number>(draft.tip ?? 0);
   const [confirmVisible, setConfirmVisible] = useState(false);
   const [loading, setLoading] = useState(false);
+
+  // Unlike Steps 1-3 (which each commit their fields to the draft store the
+  // moment the user taps "Next"), Step 4 is the last screen before submit —
+  // there's no forward transition to hang a commit off of. Without writing
+  // these through immediately, navigating back to Step 3/2 (e.g. to change
+  // pro or slot) and returning here remounts this screen and silently resets
+  // payment method/account number/tip/pets/packages back to the draft's last
+  // saved values.
+  const updateHasPets = (value: boolean) => {
+    setHasPets(value);
+    setDraft({ priorities: value ? [PET_FRIENDLY_PRIORITY] : [] });
+  };
+  const updateAddOnToggles = (value: string[]) => {
+    setAddOnToggles(value);
+    setDraft({ addOnToggles: value });
+  };
+  const updateSelectedPackageIds = (value: string[]) => {
+    setSelectedPackageIds(value);
+    setDraft({ selectedPackageIds: value });
+  };
+  const updatePaymentMethod = (value: string) => {
+    setPaymentMethod(value);
+    setDraft({ paymentMethod: value });
+  };
+  const updateAccountValue = (value: string) => {
+    setAccountValue(value);
+    setDraft({ paymentAccountIdentifier: value || null });
+  };
+  const updateTip = (value: number) => {
+    setTip(value);
+    setDraft({ tip: value });
+  };
 
   const priorities = hasPets ? [PET_FRIENDLY_PRIORITY] : [];
   const effectiveDraft = { ...draft, paymentMethod, priorities, addOnToggles, tip };
@@ -165,7 +197,15 @@ export default function BookingStep4Screen() {
       // Persisted immediately (setDraft writes through to storage) so it
       // survives the app being backgrounded/killed mid-request too.
       const idempotencyKey = draft.idempotencyKey ?? generateIdempotencyKey();
-      setDraft({ paymentMethod, priorities, addOnToggles, selectedPackageIds, tip, idempotencyKey });
+      setDraft({
+        paymentMethod,
+        paymentAccountIdentifier: accountValue.trim() || null,
+        priorities,
+        addOnToggles,
+        selectedPackageIds,
+        tip,
+        idempotencyKey,
+      });
 
       const addOns = addOnToggles.map((key) => ({
         id: key,
@@ -263,7 +303,7 @@ export default function BookingStep4Screen() {
         {/* Booking summary */}
         <View className="bg-card rounded-2xl p-4">
           <Text className="text-text-primary font-bold mb-3">Summary</Text>
-          <SummaryRow label="Pro" value={draft.isAutoMatched ? "Surprise Me (auto-assigned)" : draft.workerName || "—"} />
+          <SummaryRow label="Pro" value={draft.isAutoMatched ? "Auto-matched" : draft.workerName || "—"} />
           <SummaryRow label="Service" value={draft.category || "—"} />
           {draft.scopeType === "CUSTOM" ? (
             <SummaryRow label="Details" value={scopeAnswersSummary || "—"} />
@@ -294,7 +334,7 @@ export default function BookingStep4Screen() {
           </View>
           <Switch
             value={hasPets}
-            onValueChange={setHasPets}
+            onValueChange={updateHasPets}
             trackColor={{ false: colors.toggleOff, true: colors.accent.DEFAULT }}
             thumbColor={colors.white}
           />
@@ -305,15 +345,15 @@ export default function BookingStep4Screen() {
           workerId={draft.isAutoMatched ? null : draft.workerId}
           serviceTypeId={draft.serviceTypeId}
           selected={selectedPackageIds}
-          onChange={setSelectedPackageIds}
+          onChange={updateSelectedPackageIds}
           onSelectedTotalChange={setPackagesTotal}
         />
 
         <Text className="text-text-primary font-bold text-sm mb-2 mt-6">Job Preferences</Text>
-        <AddOnsToggleGroup selected={addOnToggles} onChange={setAddOnToggles} />
+        <AddOnsToggleGroup selected={addOnToggles} onChange={updateAddOnToggles} />
 
         <Text className="text-text-primary font-bold text-sm mb-2 mt-6">Payment Method</Text>
-        <PaymentMethodSelector value={paymentMethod} onChange={setPaymentMethod} />
+        <PaymentMethodSelector value={paymentMethod} onChange={updatePaymentMethod} />
 
         {paymentMethod && ACCOUNT_FIELD_CONFIG[paymentMethod] && (
           <View className="bg-card rounded-2xl p-4 mt-3">
@@ -329,13 +369,13 @@ export default function BookingStep4Screen() {
               placeholderTextColor={colors.text.secondary}
               keyboardType={ACCOUNT_FIELD_CONFIG[paymentMethod].keyboardType}
               value={accountValue}
-              onChangeText={setAccountValue}
+              onChangeText={updateAccountValue}
             />
           </View>
         )}
 
         <Text className="text-text-primary font-bold text-sm mb-2 mt-6">Add a Tip</Text>
-        <TipSlider value={tip} onChange={setTip} />
+        <TipSlider value={tip} onChange={updateTip} />
 
         <View className="mt-8">
           <PrimaryButton

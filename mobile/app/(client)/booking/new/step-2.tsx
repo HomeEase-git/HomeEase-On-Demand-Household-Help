@@ -156,9 +156,17 @@ export default function BookingStep2Screen() {
     !loadingCounts &&
     TIME_SLOTS.every((slot) => counts[slot] === 0);
 
-  const canNext = !!address && lat != null && lng != null && !!date && !!timeSlot;
+  const canNext =
+    !!address && lat != null && lng != null && !!date && !!timeSlot && !noSlotsForLockedWorker;
 
   const handleNext = () => {
+    if (noSlotsForLockedWorker) {
+      alertModal.warning(
+        "No slots available",
+        `${draft.workerName ?? "This pro"} isn't available on this date. Try a different date, or go back and choose another pro.`,
+      );
+      return;
+    }
     if (!canNext) {
       alertModal.warning("Schedule incomplete", "Please set your address, a date, and a time slot to continue.");
       return;

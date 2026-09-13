@@ -83,8 +83,9 @@ export default function DeleteAccountScreen() {
         />
         <View className="gap-3 mt-6">
           <DangerButton
-            label={deleting ? "Deleting..." : "Delete My Account"}
+            label="Delete My Account"
             fullWidth
+            loading={deleting}
             disabled={!canDelete || deleting}
             onPress={handleDelete}
           />

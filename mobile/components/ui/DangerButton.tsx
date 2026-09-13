@@ -1,11 +1,12 @@
 import React from "react";
-import { Pressable, Text } from "react-native";
+import { ActivityIndicator, Pressable, Text } from "react-native";
 import { colors } from "../../constants";
 
 type Props = {
   label: string;
   onPress: () => void;
   disabled?: boolean;
+  loading?: boolean;
   fullWidth?: boolean;
 };
 
@@ -13,6 +14,7 @@ export const DangerButton: React.FC<Props> = ({
   label,
   onPress,
   disabled,
+  loading,
   fullWidth,
 }) => {
   return (
@@ -32,9 +34,13 @@ export const DangerButton: React.FC<Props> = ({
             }
       }
       onPress={onPress}
-      disabled={disabled}
+      disabled={disabled || loading}
     >
-      <Text className="text-white font-semibold text-center">{label}</Text>
+      {loading ? (
+        <ActivityIndicator color={colors.white} />
+      ) : (
+        <Text className="text-white font-semibold text-center">{label}</Text>
+      )}
     </Pressable>
   );
 };

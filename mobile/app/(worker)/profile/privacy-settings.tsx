@@ -16,6 +16,7 @@ export default function WorkerPrivacySettingsScreen() {
   const [showProfile, setShowProfile] = useState(true);
   const [locationEnabled, setLocationEnabled] = useState(false);
   const [usage, setUsage] = useState(false);
+  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     privacySettingsStorage.get().then((saved) => {
@@ -141,11 +142,18 @@ export default function WorkerPrivacySettingsScreen() {
           <PrimaryButton
             label="Save Settings"
             fullWidth
+            loading={saving}
+            disabled={saving}
             onPress={async () => {
-              await privacySettingsStorage.save({ showProfile, usage });
-              alertModal.success("Saved", "Settings saved on this device", [
-                { text: "OK", onPress: () => router.back() },
-              ]);
+              setSaving(true);
+              try {
+                await privacySettingsStorage.save({ showProfile, usage });
+                alertModal.success("Saved", "Settings saved on this device", [
+                  { text: "OK", onPress: () => router.back() },
+                ]);
+              } finally {
+                setSaving(false);
+              }
             }}
           />
         </View>

@@ -116,9 +116,9 @@ export default function WorkerChatScreen() {
         <Pressable onPress={() => router.back()} className="mr-2">
           <Ionicons name="chevron-back" size={24} color={colors.text.primary} />
         </Pressable>
-        <Pressable className="mr-3" onPress={() => {}}>
+        <View className="mr-3">
           <Avatar uri={conversation?.avatar} size="sm" />
-        </Pressable>
+        </View>
         <View className="flex-1">
           <Text className="text-text-primary font-bold">
             {conversation?.name ?? "Chat"}

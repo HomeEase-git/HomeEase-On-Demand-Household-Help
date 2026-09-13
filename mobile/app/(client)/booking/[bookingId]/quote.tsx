@@ -233,7 +233,7 @@ export default function QuoteReviewScreen() {
             <Text className="text-text-secondary text-sm">
               Labor (agreed at booking)
             </Text>
-            <Text className="text-primary font-semibold">
+            <Text className="text-text-primary font-semibold">
               ₱{quote.laborCost.toFixed(2)}
             </Text>
           </View>
@@ -243,7 +243,7 @@ export default function QuoteReviewScreen() {
               <Text className="text-text-secondary text-sm">
                 Additional Costs
               </Text>
-              <Text className="text-primary font-semibold">
+              <Text className="text-text-primary font-semibold">
                 ₱{quote.materialsCost.toFixed(2)}
               </Text>
             </View>
@@ -261,7 +261,7 @@ export default function QuoteReviewScreen() {
               <Text className="text-text-secondary text-xs font-semibold mb-1">
                 Worker&apos;s notes
               </Text>
-              <Text className="text-primary text-sm">{quote.notes}</Text>
+              <Text className="text-text-primary text-sm">{quote.notes}</Text>
             </View>
           ) : null}
         </View>
@@ -319,6 +319,7 @@ export default function QuoteReviewScreen() {
                 <DangerButton
                   label="Submit Dispute"
                   fullWidth
+                  loading={loading}
                   disabled={!disputeReason.trim() || loading}
                   onPress={handleDispute}
                 />

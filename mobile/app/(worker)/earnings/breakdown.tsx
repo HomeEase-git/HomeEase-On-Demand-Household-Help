@@ -84,11 +84,11 @@ export default function EarningsBreakdownScreen() {
           <>
             <View className="bg-card rounded-2xl p-4 mb-4">
               <Text className="text-text-secondary text-sm">Total</Text>
-              <Text className="text-text-primary font-bold text-2xl">₱{total}.00</Text>
+              <Text className="text-text-primary font-bold text-2xl">₱{total.toFixed(2)}</Text>
               <Text className="text-text-muted text-xs mt-1">
                 {transactions.length} jobs
                 {transactions.length > 0
-                  ? ` · Avg ₱${Math.round(total / transactions.length)}`
+                  ? ` · Avg ₱${(total / transactions.length).toFixed(2)}`
                   : ""}
               </Text>
             </View>

@@ -253,6 +253,23 @@ export default function ClientHomeScreen() {
                 title="Available Workers"
                 actionLabel="See All"
                 onActionPress={() => router.push("/(client)/category")}
+                rightElement={
+                  <Pressable
+                    onPress={() => filterRef.current?.expand()}
+                    hitSlop={8}
+                  >
+                    <Ionicons
+                      name="options-outline"
+                      size={20}
+                      color={
+                        filters.sort !== DEFAULT_FILTERS.sort ||
+                        filters.availableOnly !== DEFAULT_FILTERS.availableOnly
+                          ? colors.accent.DEFAULT
+                          : colors.text.muted
+                      }
+                    />
+                  </Pressable>
+                }
               />
               {workers.slice(0, 3).map((worker) => (
                 <WorkerCard

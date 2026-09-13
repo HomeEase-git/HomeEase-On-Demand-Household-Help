@@ -25,21 +25,32 @@ const FAQ = [
 export default function HelpSupportScreen() {
   const router = useRouter();
   const [expanded, setExpanded] = useState<number | null>(null);
+  const [query, setQuery] = useState("");
+  const filteredFAQ = FAQ.filter(
+    (item) =>
+      item.q.toLowerCase().includes(query.trim().toLowerCase()) ||
+      item.a.toLowerCase().includes(query.trim().toLowerCase()),
+  );
 
   return (
     <SafeAreaView className="flex-1 bg-white">
       <ScreenHeader title="Help & Support" showBack />
       <ScrollView contentContainerStyle={{ padding: 24 }}>
-        <SearchBar placeholder="Search FAQ..." />
+        <SearchBar placeholder="Search FAQ..." value={query} onChangeText={setQuery} />
 
         <Text className="text-text-muted text-xs font-semibold uppercase tracking-wide mt-5 mb-1">
           Frequently Asked Questions
         </Text>
+        {filteredFAQ.length === 0 ? (
+          <Text className="text-text-secondary text-sm px-1 py-3">
+            No results for &quot;{query}&quot;.
+          </Text>
+        ) : (
         <View className="bg-card rounded-2xl overflow-hidden" style={cardShadow}>
-          {FAQ.map((item, i) => (
+          {filteredFAQ.map((item, i) => (
             <Pressable
-              key={i}
-              className="p-4 border-b border-divider last:border-0"
+              key={item.q}
+              className={`p-4 ${i < filteredFAQ.length - 1 ? "border-b border-divider" : ""}`}
               onPress={() => setExpanded(expanded === i ? null : i)}
             >
               <View className="flex-row items-center">
@@ -63,6 +74,7 @@ export default function HelpSupportScreen() {
             </Pressable>
           ))}
         </View>
+        )}
 
         <Text className="text-text-muted text-xs font-semibold uppercase tracking-wide mt-5 mb-1">
           Still Need Help?

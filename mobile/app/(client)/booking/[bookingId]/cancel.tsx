@@ -105,7 +105,7 @@ export default function CancelBookingScreen() {
                 <View className="w-2 h-2 rounded-full bg-white" />
               )}
             </View>
-            <Text className="text-primary">{r}</Text>
+            <Text className="text-text-primary">{r}</Text>
           </Pressable>
         ))}
 
@@ -125,8 +125,9 @@ export default function CancelBookingScreen() {
           <OutlinedButton label="Keep Booking" onPress={() => router.back()} />
           <View className="flex-1">
             <DangerButton
-              label={loading ? "Cancelling..." : "Cancel Booking"}
+              label="Cancel Booking"
               fullWidth
+              loading={loading}
               disabled={!canConfirm || loading}
               onPress={() => setConfirmVisible(true)}
             />

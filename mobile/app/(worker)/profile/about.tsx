@@ -1,19 +1,42 @@
 import React from "react";
-import { View, Text, ScrollView, Pressable } from "react-native";
+import { View, Text, ScrollView, Pressable, Share, Linking } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { useRouter } from "expo-router";
 import { AppIcon as Ionicons } from "../../../components/icons/AppIcon";
 import ScreenHeader from "../../../components/ui/ScreenHeader";
 import { colors, cardShadow } from "../../../constants";
 import { useAlertModal } from "../../../contexts/AlertModalContext";
 
-const LINKS = [
-  { label: "Rate the App", icon: "star-outline", action: "Opening Play Store..." },
-  { label: "Visit Website", icon: "globe-outline", action: "Opening Website..." },
-  { label: "Follow us on Facebook", icon: "logo-facebook", action: "Opening Facebook..." },
-] as const;
+const PLAY_STORE_URL = "https://play.google.com/store/apps/details?id=com.homeease.app";
 
 export default function WorkerAboutScreen() {
   const alertModal = useAlertModal();
+  const router = useRouter();
+
+  const LINKS = [
+    {
+      label: "Rate the App",
+      icon: "star-outline" as const,
+      onPress: () =>
+        Linking.openURL(PLAY_STORE_URL).catch(() =>
+          alertModal.error("Error", "Could not open the Play Store."),
+        ),
+    },
+    {
+      label: "Share HomeEase",
+      icon: "share-social-outline" as const,
+      onPress: () =>
+        Share.share({
+          message: "I'm using HomeEase to find home service jobs — check it out!",
+        }).catch(() => {}),
+    },
+    {
+      label: "Contact Us",
+      icon: "mail-outline" as const,
+      onPress: () => router.push("/(worker)/profile/contact-us"),
+    },
+  ];
+
   return (
     <SafeAreaView className="flex-1 bg-white">
       <ScreenHeader title="About HomeEase" showBack />
@@ -43,7 +66,7 @@ export default function WorkerAboutScreen() {
               className={`flex-row items-center py-3.5 px-4 ${
                 index < LINKS.length - 1 ? "border-b border-divider" : ""
               }`}
-              onPress={() => alertModal.info(link.action)}
+              onPress={link.onPress}
             >
               <View className="w-9 h-9 rounded-full bg-accent/10 items-center justify-center mr-3">
                 <Ionicons name={link.icon} size={18} color={colors.accent.DEFAULT} />
