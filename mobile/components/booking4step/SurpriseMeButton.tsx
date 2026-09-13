@@ -1,5 +1,6 @@
 import React from "react";
 import { Pressable, Text, View, ActivityIndicator } from "react-native";
+import { Ionicons } from "@expo/vector-icons";
 
 type Props = {
   onPress: () => void;
@@ -22,11 +23,11 @@ export default function SurpriseMeButton({ onPress, loading, disabled }: Props) 
         <ActivityIndicator color="#fff" />
       ) : (
         <>
-          <Text className="text-xl mr-2">🎲</Text>
+          <Ionicons name="flash" size={20} color="#fff" style={{ marginRight: 8 }} />
           <View>
-            <Text className="text-white font-bold text-base text-center">Surprise Me</Text>
+            <Text className="text-white font-bold text-base text-center">Auto-Match Me</Text>
             <Text className="text-white/80 text-xs text-center mt-0.5">
-              We&apos;ll auto-assign the best available pro
+              We&apos;ll assign the best available pro
             </Text>
           </View>
         </>

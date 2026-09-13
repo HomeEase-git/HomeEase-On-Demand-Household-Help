@@ -74,7 +74,7 @@ export default function BookingStep3Screen() {
 
   const handleNext = () => {
     if (!canNext) {
-      alertModal.warning("Pick a pro", "Select a worker or tap Surprise Me to continue.");
+      alertModal.warning("Pick a pro", "Select a worker or tap Auto-Match Me to continue.");
       return;
     }
     router.push("/(client)/booking/new/step-4");
@@ -114,9 +114,9 @@ export default function BookingStep3Screen() {
 
         {draft.isAutoMatched ? (
           <View className="bg-accent/10 rounded-2xl p-4 mb-4 flex-row items-center">
-            <Text className="text-2xl mr-3">🎲</Text>
+            <Ionicons name="flash" size={22} color={colors.accent.DEFAULT} style={{ marginRight: 12 }} />
             <View className="flex-1">
-              <Text className="text-accent font-bold text-sm">We&apos;ll surprise you!</Text>
+              <Text className="text-accent font-bold text-sm">Pro auto-assigned</Text>
               <Text className="text-text-secondary text-xs mt-0.5">
                 Your best-matched available pro will be assigned when you submit.
               </Text>
@@ -145,7 +145,7 @@ export default function BookingStep3Screen() {
           <View className="py-10 items-center">
             <Ionicons name="sad-outline" size={32} color={colors.text.muted} />
             <Text className="text-text-secondary text-sm mt-2 text-center">
-              No pros available for this scope/time. Try a different time slot or tap Surprise Me.
+              No pros available for this scope/time. Try a different time slot or tap Auto-Match Me.
             </Text>
           </View>
         )}
