@@ -5,9 +5,10 @@ import { AppIcon as Ionicons } from "../../../../components/icons/AppIcon";
 import ScreenHeader from "../../../../components/ui/ScreenHeader";
 import PrimaryButton from "../../../../components/ui/PrimaryButton";
 import OutlinedButton from "../../../../components/ui/OutlinedButton";
+import InputField from "../../../../components/ui/InputField";
 import { colors } from "../../../../constants";
 import * as api from "../../../../services/api";
-import type { WorkerServiceType } from "../../../../services/api";
+import type { WorkerServiceType, MyTaskPriceEntry } from "../../../../services/api";
 import { useAlertModal } from "../../../../contexts/AlertModalContext";
 
 type CatalogField = {
@@ -26,23 +27,30 @@ export default function SkillsScreen() {
   const [myServiceTypes, setMyServiceTypes] = useState<WorkerServiceType[]>([]);
   const [catalogServiceTypes, setCatalogServiceTypes] = useState<CatalogServiceType[]>([]);
   const [selectedOptionIds, setSelectedOptionIds] = useState<Set<string>>(new Set());
+  const [taskPrices, setTaskPrices] = useState<MyTaskPriceEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [showCategoryModal, setShowCategoryModal] = useState(false);
   const [pendingCategoryIds, setPendingCategoryIds] = useState<string[]>([]);
   const [savingCategories, setSavingCategories] = useState(false);
 
+  const [priceModalEntry, setPriceModalEntry] = useState<MyTaskPriceEntry | null>(null);
+  const [priceInput, setPriceInput] = useState("");
+  const [savingPrice, setSavingPrice] = useState(false);
+
   const load = async () => {
     setLoading(true);
     try {
-      const [mine, catalog, capabilities] = await Promise.all([
+      const [mine, catalog, capabilities, prices] = await Promise.all([
         api.getMyServiceTypes(),
         api.getServiceTypes(),
         api.getMyCapabilities(),
+        api.getMyTaskPrices(),
       ]);
       setMyServiceTypes(mine);
       setCatalogServiceTypes(catalog as CatalogServiceType[]);
       setSelectedOptionIds(new Set(capabilities));
+      setTaskPrices(prices);
     } catch (error) {
       console.error("Load skills error:", error);
     } finally {
@@ -141,6 +149,45 @@ export default function SkillsScreen() {
 
   const connectedIds = new Set(myServiceTypes.map((s) => s.id));
   const availableToAdd = catalogServiceTypes.filter((s) => !connectedIds.has(s.id));
+
+  const openPriceModal = (entry: MyTaskPriceEntry) => {
+    setPriceModalEntry(entry);
+    const current = entry.task.pricingModel === "PER_UNIT" ? entry.myPrice?.unitPrice : entry.myPrice?.price;
+    setPriceInput(current != null ? String(current) : "");
+  };
+
+  const closePriceModal = () => {
+    setPriceModalEntry(null);
+    setPriceInput("");
+  };
+
+  const handleSavePrice = async () => {
+    if (!priceModalEntry) return;
+    const { task } = priceModalEntry;
+    const value = parseFloat(priceInput);
+
+    if (Number.isNaN(value)) {
+      alertModal.error("Error", "Please enter a valid amount.");
+      return;
+    }
+    if (task.minPrice != null && task.maxPrice != null && (value < task.minPrice || value > task.maxPrice)) {
+      alertModal.error("Error", `Must be between ₱${task.minPrice} and ₱${task.maxPrice}.`);
+      return;
+    }
+
+    setSavingPrice(true);
+    try {
+      const data = task.pricingModel === "PER_UNIT" ? { unitPrice: value } : { price: value };
+      const updated = await api.setMyTaskPrice(task.id, data);
+      setTaskPrices((prev) => prev.map((e) => (e.task.id === task.id ? { ...e, myPrice: updated } : e)));
+      closePriceModal();
+    } catch (error) {
+      console.error("Set task price error:", error);
+      alertModal.error("Error", "Failed to save price. Please try again.");
+    } finally {
+      setSavingPrice(false);
+    }
+  };
 
   return (
     <SafeAreaView className="flex-1 bg-white">
@@ -242,6 +289,54 @@ export default function SkillsScreen() {
             loading={saving}
           />
         )}
+
+        <Text className="text-text-primary font-bold mb-1 mt-6">Your Prices</Text>
+        <Text className="text-text-muted text-sm mb-3">
+          Set your own price for each task, within the range the admin allows.
+        </Text>
+
+        {!loading && taskPrices.length === 0 && (
+          <View className="bg-card rounded-2xl p-4">
+            <Text className="text-text-secondary text-sm">
+              Add a service category above to see its tasks here.
+            </Text>
+          </View>
+        )}
+
+        {!loading &&
+          taskPrices.map((entry) => {
+            const { task, myPrice } = entry;
+            const isPerUnit = task.pricingModel === "PER_UNIT";
+            const isCustomQuote = task.pricingModel === "CUSTOM_QUOTE";
+            const currentValue = isPerUnit ? myPrice?.unitPrice : myPrice?.price;
+            const isPriced = !isCustomQuote && myPrice?.isActive && currentValue != null;
+
+            return (
+              <Pressable
+                key={task.id}
+                disabled={isCustomQuote}
+                onPress={() => openPriceModal(entry)}
+                className="bg-card rounded-2xl p-4 mb-3 flex-row items-center justify-between"
+              >
+                <View className="flex-1 pr-3">
+                  <Text className="text-text-primary font-semibold text-sm">{task.name}</Text>
+                  <Text className="text-text-muted text-xs mt-1">
+                    {isCustomQuote
+                      ? "You'll quote this on-site after inspecting."
+                      : `Admin allows ₱${task.minPrice}–₱${task.maxPrice}${isPerUnit ? `/${task.unitLabel}` : ""}`}
+                  </Text>
+                </View>
+                {!isCustomQuote && (
+                  <View className="flex-row items-center">
+                    {!isPriced && <View className="w-2 h-2 rounded-full bg-warning mr-2" />}
+                    <Text className={`text-sm font-bold ${isPriced ? "text-accent" : "text-warning"}`}>
+                      {isPriced ? `₱${currentValue}${isPerUnit ? `/${task.unitLabel}` : ""}` : "Set your price"}
+                    </Text>
+                  </View>
+                )}
+              </Pressable>
+            );
+          })}
       </ScrollView>
 
       <Modal visible={showCategoryModal} transparent animationType="slide">
@@ -294,6 +389,46 @@ export default function SkillsScreen() {
                 label="Cancel"
                 onPress={() => setShowCategoryModal(false)}
               />
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal visible={!!priceModalEntry} transparent animationType="slide">
+        <View className="flex-1 bg-black/40 justify-end">
+          <View className="bg-white rounded-t-3xl p-6 pb-8">
+            <View className="flex-row justify-between items-center mb-6">
+              <Text className="text-text-primary text-xl font-bold">{priceModalEntry?.task.name}</Text>
+              <Pressable onPress={closePriceModal}>
+                <Ionicons name="close" size={24} color={colors.text.primary} />
+              </Pressable>
+            </View>
+
+            {priceModalEntry && (
+              <>
+                <Text className="text-text-muted text-sm mb-4">
+                  Admin allows ₱{priceModalEntry.task.minPrice}–₱{priceModalEntry.task.maxPrice}
+                  {priceModalEntry.task.pricingModel === "PER_UNIT" ? `/${priceModalEntry.task.unitLabel}` : ""}
+                </Text>
+                <InputField
+                  label={priceModalEntry.task.pricingModel === "PER_UNIT" ? `Your rate (₱/${priceModalEntry.task.unitLabel})` : "Your price (₱)"}
+                  value={priceInput}
+                  onChangeText={setPriceInput}
+                  placeholder="e.g. 800"
+                  keyboardType="number-pad"
+                />
+              </>
+            )}
+
+            <View className="gap-3 mt-2">
+              <PrimaryButton
+                label="Save Price"
+                fullWidth
+                onPress={handleSavePrice}
+                disabled={savingPrice}
+                loading={savingPrice}
+              />
+              <OutlinedButton label="Cancel" onPress={closePriceModal} />
             </View>
           </View>
         </View>
