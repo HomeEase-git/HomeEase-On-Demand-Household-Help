@@ -22,6 +22,7 @@ import {
   confirmBookingCompletion,
   createXenditCheckout,
   getTransactionDetail,
+  acknowledgeReschedule as acknowledgeRescheduleApi,
 } from "../../../../services/api";
 import { colors } from "../../../../constants";
 import { useAlertModal } from "../../../../contexts/AlertModalContext";
@@ -40,6 +41,13 @@ type ApiBookingDetail = {
   clientLng?: number | null;
   timeSlot?: TimeSlot | null;
   condition?: ConditionType | null;
+  // Reschedule-on-conflict (see backend bookingController.extendBooking) —
+  // rescheduleAcknowledgedAt null means this is still an open episode
+  // awaiting the client's explicit response.
+  rescheduledAt?: string | null;
+  previousScheduledDate?: string | null;
+  previousTimeSlot?: TimeSlot | null;
+  rescheduleAcknowledgedAt?: string | null;
   rooms?: RoomType[];
   scopeAnswers?: Record<string, string | string[]> | null;
   scheduledDate: string;
@@ -109,6 +117,10 @@ function mapApiBookingDetail(d: ApiBookingDetail): Booking {
       : undefined,
     rating: d.review?.rating,
     reviewText: d.review?.comment ?? undefined,
+    rescheduledAt: d.rescheduledAt,
+    previousScheduledDate: d.previousScheduledDate,
+    previousTimeSlot: d.previousTimeSlot,
+    rescheduleAcknowledgedAt: d.rescheduleAcknowledgedAt,
   };
 }
 
@@ -116,7 +128,8 @@ export default function BookingDetailScreen() {
   const router = useRouter();
   const alertModal = useAlertModal();
   const { bookingId } = useLocalSearchParams<{ bookingId: string }>();
-  const { bookings, prefillFromBooking, prefillFromDeclinedBooking } = useBookingStore();
+  const { bookings, prefillFromBooking, prefillFromDeclinedBooking, acknowledgeReschedule } = useBookingStore();
+  const [confirmingNewDate, setConfirmingNewDate] = useState(false);
   const booking = bookings.find((b) => b.id === bookingId);
   // The shared store's Booking type only keeps payment.totalAmount (used by
   // many other screens) — the real subtotal/addOns/tip breakdown is kept
@@ -214,6 +227,35 @@ export default function BookingDetailScreen() {
   // checks the raw backend status instead, to only offer "Find Another
   // Pro" when a worker actually declined the request.
   const isDeclined = rawDetail?.status === "REJECTED";
+
+  // A different job's spillover (see backend extendBooking) moved this
+  // booking to a new date — resolved once the client explicitly keeps it,
+  // or the 24h auto-confirm sweep does it for them.
+  const hasPendingReschedule = !!booking.rescheduledAt && !booking.rescheduleAcknowledgedAt;
+
+  const handleKeepNewDate = () => {
+    alertModal.confirm(
+      "Keep New Date",
+      `Keep ${booking.date ? new Date(booking.date).toLocaleDateString("en-PH", { month: "long", day: "numeric" }) : "the new date"} for this booking?`,
+      {
+        confirmText: "Keep Date",
+        onConfirm: async () => {
+          setConfirmingNewDate(true);
+          try {
+            await acknowledgeRescheduleApi(bookingId);
+            acknowledgeReschedule(bookingId);
+            await refreshBookingDetail();
+            alertModal.success("Confirmed", "The new date is now confirmed.");
+          } catch (error) {
+            console.error("Acknowledge reschedule error:", error);
+            alertModal.error("Error", "Failed to confirm the new date. Please try again.");
+          } finally {
+            setConfirmingNewDate(false);
+          }
+        },
+      },
+    );
+  };
 
   const handleFindAnotherPro = () => {
     if (!rawDetail) return;
@@ -441,6 +483,47 @@ export default function BookingDetailScreen() {
             ID: {booking.id}
           </Text>
         </View>
+
+        {/* Reschedule banner — placed first, most time-sensitive */}
+        {hasPendingReschedule && (
+          <View className="bg-warning/10 border border-warning/30 rounded-2xl p-4 mb-4">
+            <View className="flex-row items-center">
+              <Ionicons name="calendar" size={22} color={colors.warning} />
+              <Text className="font-bold text-sm text-text-primary ml-2 flex-1">
+                Your pro needs another day
+              </Text>
+            </View>
+            <Text className="text-text-secondary text-xs mt-1.5">
+              Moved from{" "}
+              {booking.previousScheduledDate
+                ? new Date(booking.previousScheduledDate).toLocaleDateString("en-PH", { month: "short", day: "numeric" })
+                : "the original date"}{" "}
+              to{" "}
+              {booking.date
+                ? new Date(booking.date).toLocaleDateString("en-PH", { month: "short", day: "numeric" })
+                : "a new date"}
+              . Keep it, or cancel free of charge.
+            </Text>
+            <View className="flex-row gap-2 mt-3">
+              <View className="flex-1">
+                <PrimaryButton
+                  label="Keep New Date"
+                  fullWidth
+                  onPress={handleKeepNewDate}
+                  disabled={confirmingNewDate}
+                  loading={confirmingNewDate}
+                />
+              </View>
+              <View className="flex-1">
+                <OutlinedButton
+                  label="Cancel Instead"
+                  fullWidth
+                  onPress={() => router.push(`/(client)/booking/${bookingId}/cancel`)}
+                />
+              </View>
+            </View>
+          </View>
+        )}
 
         {/* Quote notification banner */}
         {hasQuote && (

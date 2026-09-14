@@ -1241,6 +1241,39 @@ export async function startBooking(bookingId: string) {
   }
 }
 
+export interface ExtendBookingResult {
+  targetDate: string;
+  resolved: number;
+  escalated: number;
+}
+
+/**
+ * PATCH /bookings/:id/extend — worker signals this job is running into a
+ * second day. See backend extendBooking's docblock for the full
+ * reschedule-on-conflict behavior this triggers on any other booking of
+ * theirs that collides with tomorrow.
+ */
+export async function extendBooking(bookingId: string): Promise<ExtendBookingResult> {
+  try {
+    const response = await api.patch(`/bookings/${bookingId}/extend`);
+    return response;
+  } catch (error) {
+    console.error('Extend booking error:', error);
+    throw error;
+  }
+}
+
+/** PATCH /bookings/:id/acknowledge-reschedule — client keeps the new date. */
+export async function acknowledgeReschedule(bookingId: string) {
+  try {
+    const response = await api.patch(`/bookings/${bookingId}/acknowledge-reschedule`);
+    return response;
+  } catch (error) {
+    console.error('Acknowledge reschedule error:', error);
+    throw error;
+  }
+}
+
 export interface ArrivalVerificationResult {
   id: string;
   workerArrivedAt: string;

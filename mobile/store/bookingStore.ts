@@ -65,6 +65,14 @@ export type Booking = {
   workerVerified?: boolean;
   completionPhotoUrl?: string | null;
   category?: string;
+  // Reschedule-on-conflict (see backend bookingController.extendBooking) —
+  // set when a DIFFERENT worker job's spillover moved this booking to a new
+  // date. rescheduleAcknowledgedAt null = still awaiting the client's
+  // response (keep the date, or cancel via the existing free-cancel path).
+  rescheduledAt?: string | null;
+  previousScheduledDate?: string | null;
+  previousTimeSlot?: string | null;
+  rescheduleAcknowledgedAt?: string | null;
 };
 
 export type DraftBooking = {
@@ -237,6 +245,9 @@ export type BookingState = {
   submitQuote: (bookingId: string, quote: Quote) => void;
   approveQuote: (bookingId: string) => void;
   disputeQuote: (bookingId: string, reason: string) => void;
+  // Client keeps the new date for a booking a worker's spillover moved (see
+  // backend extendBooking) — status-preserving, mirrors approveQuote's shape.
+  acknowledgeReschedule: (bookingId: string) => void;
 };
 
 const initialDraft: DraftBooking = {
@@ -447,6 +458,19 @@ export const useBookingStore: UseBoundStore<StoreApi<BookingState>> = create<Boo
       const updatedSelected =
         state.selectedBooking?.id === bookingId
           ? { ...state.selectedBooking, status: 'Disputed' as BookingStatus }
+          : state.selectedBooking;
+      return { bookings: updatedBookings, selectedBooking: updatedSelected };
+    }),
+
+  acknowledgeReschedule: (bookingId) =>
+    set((state) => {
+      const acknowledgedAt = new Date().toISOString();
+      const updatedBookings = state.bookings.map((b) =>
+        b.id === bookingId ? { ...b, rescheduleAcknowledgedAt: acknowledgedAt } : b,
+      );
+      const updatedSelected =
+        state.selectedBooking?.id === bookingId
+          ? { ...state.selectedBooking, rescheduleAcknowledgedAt: acknowledgedAt }
           : state.selectedBooking;
       return { bookings: updatedBookings, selectedBooking: updatedSelected };
     }),

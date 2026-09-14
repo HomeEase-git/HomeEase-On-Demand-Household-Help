@@ -462,11 +462,18 @@ export default function JobDetailScreen() {
             </View>
           )}
           {isInProgress && (
-            <PrimaryButton
-              label="Submit Quote"
-              fullWidth
-              onPress={() => router.push(`/(worker)/requests/quote/${job.id}`)}
-            />
+            <View className="gap-3">
+              <PrimaryButton
+                label="Submit Quote"
+                fullWidth
+                onPress={() => router.push(`/(worker)/requests/quote/${job.id}`)}
+              />
+              <OutlinedButton
+                label="Continue Tomorrow"
+                fullWidth
+                onPress={() => router.push(`/(worker)/requests/extend/${job.id}`)}
+              />
+            </View>
           )}
           {isQuoteSubmitted && (
             <View className="bg-accent/10 border border-accent rounded-2xl p-4 items-center">
