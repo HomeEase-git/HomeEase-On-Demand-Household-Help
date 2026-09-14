@@ -47,9 +47,13 @@ export const generateCertificates = async (req: AuthRequest, res: Response) => {
       metadata: { ...period, generated: result.generated, skippedNoTin: result.skippedNoTin },
     });
 
+    const message = result.blockedNoAtcCode
+      ? 'No certificates generated — set the ATC code in Settings first.'
+      : `Generated ${result.generated} certificate(s). ${result.skippedNoTin.length} worker(s) skipped — no TIN on file.`;
+
     return res.status(201).json({
       success: true,
-      message: `Generated ${result.generated} certificate(s). ${result.skippedNoTin.length} worker(s) skipped — no TIN on file.`,
+      message,
       data: result,
     });
   } catch (error) {

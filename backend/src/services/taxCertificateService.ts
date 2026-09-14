@@ -2,6 +2,7 @@ import { randomUUID } from 'crypto';
 import PDFDocument from 'pdfkit';
 import prisma from '@config/database';
 import { supabase, TAX_CERTIFICATE_BUCKET } from '@config/supabase';
+import { getAppSettings } from '@services/appSettingsService';
 
 const PLATFORM_LEGAL_NAME = process.env.PLATFORM_LEGAL_NAME || 'HomeEase';
 const PLATFORM_TIN = process.env.PLATFORM_TIN || '';
@@ -10,6 +11,11 @@ const SIGNED_URL_TTL_SECONDS = 300;
 export interface CertificateGenerationResult {
   generated: number;
   skippedNoTin: string[]; // User.ids of workers with no TIN on file
+  // True when nothing was generated because AppSettings.atcCode isn't set —
+  // a loud gap is safer than silently defaulting to a possibly-wrong code
+  // (this is data, not a hardcoded constant, precisely so it can be
+  // corrected without a redeploy — see AppSettings.atcCode's schema comment).
+  blockedNoAtcCode: boolean;
 }
 
 /**
@@ -31,6 +37,11 @@ export async function generateQuarterlyCertificates(
   periodEnd: Date,
   generatedByUserId: string
 ): Promise<CertificateGenerationResult> {
+  const { atcCode } = await getAppSettings();
+  if (!atcCode) {
+    return { generated: 0, skippedNoTin: [], blockedNoAtcCode: true };
+  }
+
   const payments = await prisma.payment.findMany({
     where: {
       status: 'COMPLETED',
@@ -54,7 +65,7 @@ export async function generateQuarterlyCertificates(
     byWorker.set(workerId, agg);
   }
 
-  const result: CertificateGenerationResult = { generated: 0, skippedNoTin: [] };
+  const result: CertificateGenerationResult = { generated: 0, skippedNoTin: [], blockedNoAtcCode: false };
 
   for (const [workerId, agg] of byWorker) {
     const profile = await prisma.workerProfile.findUnique({
@@ -74,6 +85,7 @@ export async function generateQuarterlyCertificates(
       periodEnd,
       totalIncomePayments: agg.income,
       totalTaxWithheld: agg.tax,
+      atcCode,
     });
 
     const pdfPath = `${workerId}/${periodStart.toISOString().slice(0, 10)}_${periodEnd
@@ -129,6 +141,7 @@ function renderCertificatePdf(data: {
   periodEnd: Date;
   totalIncomePayments: number;
   totalTaxWithheld: number;
+  atcCode: string;
 }): Promise<Buffer> {
   return new Promise((resolve, reject) => {
     const doc = new PDFDocument({ size: 'LETTER', margin: 50 });
@@ -154,7 +167,7 @@ function renderCertificatePdf(data: {
     doc.text(`Payee TIN: ${data.workerTin}`);
     doc.moveDown();
     doc.text(`Period Covered: ${fmtDate(data.periodStart)} to ${fmtDate(data.periodEnd)}`);
-    doc.text('ATC Code: WC158 (income payments to certain contractors)');
+    doc.text(`ATC Code: ${data.atcCode}`);
     doc.moveDown();
     doc.text(`Total Income Payments: ${fmtPeso(data.totalIncomePayments)}`);
     doc.text(`Total Tax Withheld: ${fmtPeso(data.totalTaxWithheld)}`);

@@ -275,6 +275,19 @@ export default function Settings() {
             onChange={updatePercentField('withholdingTaxRate', 'withholdingTaxRatePercent')}
             error={fieldErrors.withholdingTaxRatePercent}
           />
+          <div className="detail-block">
+            <label htmlFor="settings-atc-code">BIR ATC Code</label>
+            <input
+              id="settings-atc-code"
+              value={current.atcCode ?? ''}
+              onChange={(e) => setSettings((prev) => ({ ...prev, atcCode: e.target.value }))}
+              className="input"
+              placeholder="e.g. WI120"
+            />
+            <span className="toggle-row__hint">
+              Printed on every generated Form 2307. Certificate generation refuses to run while this is blank.
+            </span>
+          </div>
         </div>
 
         <div className="settings-group">

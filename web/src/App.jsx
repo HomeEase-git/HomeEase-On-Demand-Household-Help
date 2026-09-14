@@ -25,6 +25,7 @@ const Refunds = lazy(() => import('./pages/Refunds'))
 const Payouts = lazy(() => import('./pages/Payouts'))
 const TaxCertificates = lazy(() => import('./pages/TaxCertificates'))
 const TaxRemittance = lazy(() => import('./pages/TaxRemittance'))
+const VatRegistrations = lazy(() => import('./pages/VatRegistrations'))
 const Reviews = lazy(() => import('./pages/Reviews'))
 const ReviewsFlagged = lazy(() => import('./pages/ReviewsFlagged'))
 const ReviewDetail = lazy(() => import('./pages/ReviewDetail'))
@@ -69,6 +70,7 @@ export default function App() {
           { path: 'payments/payouts', element: <Payouts /> },
           { path: 'payments/tax-certificates', element: <TaxCertificates /> },
           { path: 'payments/tax-remittance', element: <TaxRemittance /> },
+          { path: 'payments/vat-registrations', element: <VatRegistrations /> },
           { path: 'reviews', element: <Reviews /> },
           { path: 'reviews/flagged', element: <ReviewsFlagged /> },
           { path: 'reviews/detail/:id', element: <ReviewDetail /> },

@@ -28,6 +28,7 @@ function formatSettings(record: {
   tierExpertMinJobs: number;
   tierExpertMultiplier: number;
   workerDebtHoldLimit: number;
+  atcCode: string | null;
 }) {
   return {
     siteName: record.siteName,
@@ -48,6 +49,7 @@ function formatSettings(record: {
     tierExpertMinJobs: record.tierExpertMinJobs,
     tierExpertMultiplier: record.tierExpertMultiplier,
     workerDebtHoldLimit: record.workerDebtHoldLimit,
+    atcCode: record.atcCode,
   };
 }
 
@@ -87,6 +89,7 @@ export const updateSettings = async (req: AuthRequest, res: Response) => {
       tierExpertMinJobs,
       tierExpertMultiplier,
       workerDebtHoldLimit,
+      atcCode,
     } = req.body as {
       siteName?: string;
       supportEmail?: string;
@@ -106,7 +109,12 @@ export const updateSettings = async (req: AuthRequest, res: Response) => {
       tierExpertMinJobs?: number;
       tierExpertMultiplier?: number;
       workerDebtHoldLimit?: number;
+      atcCode?: string | null;
     };
+
+    if (atcCode !== undefined && atcCode !== null && typeof atcCode !== 'string') {
+      return res.status(400).json(errorResponse(400, 'atcCode must be a string or null'));
+    }
 
     if (!siteName?.trim() || !supportEmail?.trim()) {
       return res.status(400).json(errorResponse(400, 'Site Name and Support Email are required.'));
@@ -162,6 +170,7 @@ export const updateSettings = async (req: AuthRequest, res: Response) => {
         tierExpertMinJobs: tierExpertMinJobs ?? current.tierExpertMinJobs,
         tierExpertMultiplier: tierExpertMultiplier ?? current.tierExpertMultiplier,
         workerDebtHoldLimit: workerDebtHoldLimit ?? current.workerDebtHoldLimit,
+        atcCode: atcCode !== undefined ? (atcCode?.trim() || null) : current.atcCode,
       },
     });
 

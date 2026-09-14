@@ -1,12 +1,27 @@
 import React, { useEffect, useState } from "react";
 import { View, Text, ScrollView, FlatList, Linking } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import * as DocumentPicker from "expo-document-picker";
+import * as ImagePicker from "expo-image-picker";
 import ScreenHeader from "../../../components/ui/ScreenHeader";
 import InputField from "../../../components/ui/InputField";
 import PrimaryButton from "../../../components/ui/PrimaryButton";
-import { cardShadow } from "../../../constants";
+import { colors, cardShadow } from "../../../constants";
 import * as api from "../../../services/api";
+import { compressImage } from "../../../utils/imageCompressor";
 import { useAlertModal } from "../../../contexts/AlertModalContext";
+
+const VAT_STATUS_LABELS: Record<string, string> = {
+  PENDING: "Pending review",
+  APPROVED: "Approved",
+  REJECTED: "Rejected",
+};
+
+const VAT_STATUS_COLORS: Record<string, string> = {
+  PENDING: colors.warning,
+  APPROVED: colors.success,
+  REJECTED: colors.error,
+};
 
 function formatDate(value: string) {
   return new Date(value).toLocaleDateString("en-PH", { year: "numeric", month: "short", day: "numeric" });
@@ -21,17 +36,24 @@ export default function TaxInfoScreen() {
   const [tin, setTin] = useState("");
   const [taxInfo, setTaxInfo] = useState<api.TaxInfo | null>(null);
   const [certificates, setCertificates] = useState<api.TaxCertificate[]>([]);
+  const [vatRegistration, setVatRegistration] = useState<api.VatRegistration | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [submittingVat, setSubmittingVat] = useState(false);
 
   useEffect(() => {
     let active = true;
     async function load() {
       try {
-        const [info, certs] = await Promise.all([api.getTaxInfo(), api.getMyTaxCertificates()]);
+        const [info, certs, vat] = await Promise.all([
+          api.getTaxInfo(),
+          api.getMyTaxCertificates(),
+          api.getMyVatRegistration(),
+        ]);
         if (!active) return;
         setTaxInfo(info);
         setCertificates(certs);
+        setVatRegistration(vat);
       } catch (error) {
         console.error("Load tax info error:", error);
       } finally {
@@ -43,6 +65,48 @@ export default function TaxInfoScreen() {
       active = false;
     };
   }, []);
+
+  const handleSubmitVatDocument = async () => {
+    try {
+      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (status !== "granted") {
+        alertModal.warning("File access required", "Please allow photo access to choose a document file.");
+        return;
+      }
+
+      const result = await DocumentPicker.getDocumentAsync({
+        type: ["application/pdf", "image/*"],
+        copyToCacheDirectory: true,
+      });
+      if (result.canceled) return;
+
+      const document = result.assets[0];
+      if (!document?.uri) return;
+
+      setSubmittingVat(true);
+      let uploadUri = document.uri;
+      let uploadMime = document.mimeType || "application/octet-stream";
+      if (uploadMime.startsWith("image/")) {
+        try {
+          const compressed = await compressImage(document.uri);
+          uploadUri = compressed.uri;
+          uploadMime = "image/jpeg";
+        } catch (err) {
+          console.error("VAT document compression failed, using original", err);
+        }
+      }
+
+      const { url } = await api.uploadVatDocument(uploadUri, uploadMime);
+      const updated = await api.submitVatRegistration(url);
+      setVatRegistration(updated);
+      alertModal.success("Submitted", "Your VAT registration document was submitted for review.");
+    } catch (error) {
+      console.error("Submit VAT registration error:", error);
+      alertModal.error("Error", "Failed to submit your document. Please try again.");
+    } finally {
+      setSubmittingVat(false);
+    }
+  };
 
   const handleSave = async () => {
     if (!tin.trim()) {
@@ -108,6 +172,42 @@ export default function TaxInfoScreen() {
           disabled={saving}
           loading={saving}
         />
+
+        <Text className="text-text-primary font-bold mt-8 mb-2">VAT Registration</Text>
+        <View className="bg-card rounded-2xl p-4 mb-4" style={cardShadow}>
+          <Text className="text-text-secondary text-xs mb-3">
+            Only required if your gross annual earnings cross BIR&apos;s VAT threshold. Submit proof (e.g. your BIR
+            Certificate of Registration) and an admin will review it — VAT only applies to your bookings once approved.
+          </Text>
+          {vatRegistration?.vatRegistered ? (
+            <Text className="font-semibold" style={{ color: colors.success }}>
+              ✓ VAT-registered — verified
+            </Text>
+          ) : vatRegistration?.vatVerificationStatus ? (
+            <>
+              <Text
+                className="font-semibold mb-1"
+                style={{ color: VAT_STATUS_COLORS[vatRegistration.vatVerificationStatus] }}
+              >
+                {VAT_STATUS_LABELS[vatRegistration.vatVerificationStatus]}
+              </Text>
+              {vatRegistration.vatVerificationStatus === "REJECTED" && vatRegistration.vatRejectionReason && (
+                <Text className="text-text-secondary text-xs mb-3">Reason: {vatRegistration.vatRejectionReason}</Text>
+              )}
+            </>
+          ) : (
+            <Text className="text-text-muted text-sm mb-3">Not submitted</Text>
+          )}
+          {vatRegistration?.vatVerificationStatus !== "PENDING" && (
+            <PrimaryButton
+              label={vatRegistration?.vatVerificationStatus === "REJECTED" ? "Resubmit Document" : "Submit Document"}
+              fullWidth
+              onPress={handleSubmitVatDocument}
+              disabled={submittingVat}
+              loading={submittingVat}
+            />
+          )}
+        </View>
 
         <Text className="text-text-primary font-bold mt-8 mb-2">Tax Documents</Text>
         {certificates.length === 0 ? (

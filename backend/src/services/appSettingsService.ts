@@ -19,6 +19,7 @@ export interface AppSettingsConfig {
   tierExpertMinJobs: number;
   tierExpertMultiplier: number;
   workerDebtHoldLimit: number;
+  atcCode: string | null;
 }
 
 // Mirrors the AppSettings model's own @default values — used only if the
@@ -44,6 +45,7 @@ const FALLBACK_DEFAULTS: AppSettingsConfig = {
   tierExpertMinJobs: 50,
   tierExpertMultiplier: 1.3,
   workerDebtHoldLimit: 500,
+  atcCode: null,
 };
 
 // getAppSettings is called on nearly every request path (search, booking,

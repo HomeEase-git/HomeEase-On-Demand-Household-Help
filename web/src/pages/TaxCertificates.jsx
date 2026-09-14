@@ -16,6 +16,7 @@ const SUB_NAV = [
   { to: '/payments/payouts', label: 'Payout Distribution' },
   { to: '/payments/tax-certificates', label: 'Tax Certificates' },
   { to: '/payments/tax-remittance', label: 'Tax Remittance' },
+  { to: '/payments/vat-registrations', label: 'VAT Registrations' },
 ]
 
 const STATUS_BADGE_VARIANT = { ISSUED: 'approved', DRAFT: 'pending' }
