@@ -38,6 +38,14 @@ const QUOTE_AUTO_APPROVE_HOURS = 24;
 // unresolved forever (see bookingController.extendBooking/acknowledgeReschedule).
 const RESCHEDULE_REMINDER_HOURS = 12;
 const RESCHEDULE_AUTO_CONFIRM_HOURS = 24;
+// A client-initiated reschedule REQUEST (see bookingController.
+// requestReschedule) isn't as urgent as the conflict-driven one above — the
+// original slot stays untouched until the worker explicitly accepts, so
+// nothing is stuck in limbo while it's unanswered. Auto-DECLINE rather than
+// auto-confirm is the safer default: it preserves the worker's original
+// commitment instead of forcing a date change nobody explicitly agreed to.
+const RESCHEDULE_REQUEST_REMINDER_HOURS = 24;
+const RESCHEDULE_REQUEST_AUTO_DECLINE_HOURS = 48;
 
 /**
  * A PENDING booking that no worker responded to within an hour is
@@ -502,6 +510,104 @@ export async function remindAndAutoConfirmReschedules(): Promise<void> {
 }
 
 /**
+ * Worker-response safety net for a client-initiated reschedule REQUEST (see
+ * bookingController.requestReschedule/respondToRescheduleRequest) — a 24h
+ * reminder, then an unresponsive worker's request auto-declines at 48h
+ * (releasing the held slot) rather than sitting open forever.
+ */
+export async function remindAndAutoDeclineRescheduleRequests(): Promise<void> {
+  const now = Date.now();
+  const reminderCutoff = new Date(now - RESCHEDULE_REQUEST_REMINDER_HOURS * HOUR_MS);
+  const autoDeclineCutoff = new Date(now - RESCHEDULE_REQUEST_AUTO_DECLINE_HOURS * HOUR_MS);
+
+  const needsReminder = await prisma.booking.findMany({
+    where: {
+      rescheduleRequestedAt: { lte: reminderCutoff },
+      rescheduleRequestReminderSentAt: null,
+      rescheduleRequestRespondedAt: null,
+    },
+  });
+
+  for (const booking of needsReminder) {
+    if (!booking.workerId) continue;
+    await notifyUser({
+      userId: booking.workerId,
+      type: 'BOOKING_RESCHEDULE_REQUESTED',
+      title: 'Reschedule request waiting',
+      message: 'Your client is still waiting on your response to their reschedule request.',
+      relatedId: booking.id,
+    });
+    await prisma.booking.update({
+      where: { id: booking.id },
+      data: { rescheduleRequestReminderSentAt: new Date() },
+    });
+  }
+
+  const staleRequests = await prisma.booking.findMany({
+    where: {
+      rescheduleRequestedAt: { lte: autoDeclineCutoff },
+      rescheduleRequestRespondedAt: null,
+    },
+  });
+
+  for (const booking of staleRequests) {
+    try {
+      await prisma.$transaction(async (tx) => {
+        if (booking.workerId && booking.requestedScheduledDate && booking.requestedTimeSlot) {
+          const workerProfile = await tx.workerProfile.findUnique({
+            where: { userId: booking.workerId },
+            select: { id: true },
+          });
+          if (workerProfile) {
+            await tx.workerAvailability.updateMany({
+              where: {
+                workerProfileId: workerProfile.id,
+                date: booking.requestedScheduledDate,
+                timeSlot: booking.requestedTimeSlot,
+                blockedByBookingId: booking.id,
+                isBooked: false,
+              },
+              data: { isBlocked: false, blockedByBookingId: null },
+            });
+          }
+        }
+
+        await tx.booking.update({
+          where: { id: booking.id },
+          data: { rescheduleRequestRespondedAt: new Date(), rescheduleRequestAccepted: false },
+        });
+      });
+
+      await notifyUser({
+        userId: booking.clientId,
+        type: 'BOOKING_RESCHEDULE_REQUEST_DECLINED',
+        title: 'Reschedule Declined',
+        message: "Your pro didn't respond in time, so your reschedule request was automatically declined. Your booking stays as originally scheduled.",
+        relatedId: booking.id,
+      });
+      if (booking.workerId) {
+        await notifyUser({
+          userId: booking.workerId,
+          type: 'BOOKING_RESCHEDULE_REQUEST_DECLINED',
+          title: 'Reschedule Request Auto-Declined',
+          message: "You didn't respond in time, so the client's reschedule request was automatically declined.",
+          relatedId: booking.id,
+        });
+      }
+
+      await writeAuditLog({
+        action: 'BOOKING_RESCHEDULE_REQUEST_AUTO_DECLINED',
+        category: 'STATUS_CHANGE',
+        message: `Booking ${booking.id}'s reschedule request auto-declined after 48h without worker response`,
+        metadata: { bookingId: booking.id },
+      });
+    } catch (error) {
+      console.error(`Failed to auto-decline reschedule request for booking ${booking.id}:`, error);
+    }
+  }
+}
+
+/**
  * Clears stale isBooked flags on past-dated WorkerAvailability rows. A slot
  * can be left marked isBooked if a booking concluded through a path that
  * didn't explicitly free it (defense-in-depth self-heal, not the primary
@@ -557,6 +663,9 @@ export async function startBookingWorker() {
           break;
         case JOB_NAMES.RESCHEDULE_TIMEOUT_SWEEP:
           await remindAndAutoConfirmReschedules();
+          break;
+        case JOB_NAMES.RESCHEDULE_REQUEST_TIMEOUT_SWEEP:
+          await remindAndAutoDeclineRescheduleRequests();
           break;
         default:
           console.warn(`Unknown booking queue job: ${job.name}`);

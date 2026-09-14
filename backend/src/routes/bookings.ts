@@ -10,6 +10,9 @@ import {
   startBooking,
   extendBooking,
   acknowledgeReschedule,
+  requestReschedule,
+  withdrawRescheduleRequest,
+  respondToRescheduleRequest,
   submitQuote,
   approveQuote,
   disputeQuote,
@@ -75,6 +78,12 @@ router.patch('/:id/extend', restrictTo('WORKER'), extendBooking);
 
 // Client keeps the new date for a booking a worker's spillover moved (client only)
 router.patch('/:id/acknowledge-reschedule', restrictTo('CLIENT'), acknowledgeReschedule);
+
+// Client-initiated reschedule request (ACCEPTED bookings only) — client
+// proposes a new date/time, the assigned worker must accept or decline it.
+router.patch('/:id/request-reschedule', restrictTo('CLIENT'), requestReschedule);
+router.patch('/:id/reschedule-request/withdraw', restrictTo('CLIENT'), withdrawRescheduleRequest);
+router.patch('/:id/reschedule-request/respond', restrictTo('WORKER'), respondToRescheduleRequest);
 
 // Submit quote (worker only)
 router.post('/:id/quote', restrictTo('WORKER'), validateSubmitQuote, submitQuote);

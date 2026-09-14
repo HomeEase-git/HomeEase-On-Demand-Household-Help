@@ -27,6 +27,7 @@ import { calculateWorkerPayout, computeBookingFinalTotal, computeJobPricing, VAT
 import { buildCapabilityFilters } from '@services/matchingService';
 import { schedulePendingExpiry, cancelPendingExpiryJob } from '@queues/bookingQueue';
 import { VALID_TRANSITIONS, isValidTransition } from '@services/bookingStateMachine';
+import { MIN_BOOKING_LEAD_DAYS } from '@middleware/validation';
 import { getAppSettings } from '@services/appSettingsService';
 import { computeWorkerTier, tierMultiplier } from '@utils/workerTier';
 import { VALID_TIME_SLOTS } from '@/constants/bookingEnums';
@@ -852,6 +853,13 @@ export const getBookingDetail = async (req: AuthRequest, res: Response) => {
         previousScheduledDate: booking.previousScheduledDate,
         previousTimeSlot: booking.previousTimeSlot,
         rescheduleAcknowledgedAt: booking.rescheduleAcknowledgedAt,
+        // Reschedule-on-REQUEST (see requestReschedule) — rescheduleRequestRespondedAt
+        // null means still awaiting the worker's accept/decline.
+        rescheduleRequestedAt: booking.rescheduleRequestedAt,
+        requestedScheduledDate: booking.requestedScheduledDate,
+        requestedTimeSlot: booking.requestedTimeSlot,
+        rescheduleRequestRespondedAt: booking.rescheduleRequestRespondedAt,
+        rescheduleRequestAccepted: booking.rescheduleRequestAccepted,
         rooms: booking.rooms,
         condition: booking.condition,
         scopeAnswers: booking.scopeAnswers,
@@ -1670,6 +1678,306 @@ export const acknowledgeReschedule = async (req: AuthRequest, res: Response) => 
   } catch (error) {
     console.error('Error acknowledging reschedule:', error);
     return res.status(500).json(errorResponse(500, 'Failed to acknowledge reschedule'));
+  }
+};
+
+/**
+ * PATCH /api/bookings/:id/request-reschedule
+ * Client-initiated reschedule-on-REQUEST — distinct from extendBooking's
+ * reschedule-on-CONFLICT above (that one is worker/system-triggered and
+ * moves a DIFFERENT booking; this is the client of THIS booking asking for
+ * a different date, which the assigned worker must explicitly accept).
+ * Deliberately narrow: one proposed date/slot, one worker response — NOT a
+ * return of the general free-form reschedule feature removed 2026-08-17.
+ * Only available on an ACCEPTED booking (worker hasn't started yet).
+ */
+export const requestReschedule = async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user || req.user.role !== 'CLIENT') {
+      return res.status(403).json(errorResponse(403, 'Only the client can request a reschedule'));
+    }
+
+    const id = req.params.id as string;
+    const { date, timeSlot } = req.body as { date?: string; timeSlot?: TimeSlot };
+
+    if (!date || isNaN(new Date(date).getTime())) {
+      return res.status(400).json(errorResponse(400, 'date is required and must be a valid date'));
+    }
+    if (!timeSlot || !VALID_TIME_SLOTS.includes(timeSlot)) {
+      return res.status(400).json(errorResponse(400, `timeSlot is required and must be one of ${VALID_TIME_SLOTS.join(', ')}`));
+    }
+
+    const booking = await prisma.booking.findUnique({ where: { id } });
+    if (!booking) {
+      return res.status(404).json(errorResponse(404, 'Booking not found'));
+    }
+    if (booking.clientId !== req.user.userId) {
+      return res.status(403).json(errorResponse(403, 'This booking does not belong to you'));
+    }
+    if (booking.status !== 'ACCEPTED') {
+      return res.status(409).json(errorResponse(409, `Cannot request a reschedule for a booking with status ${booking.status}`));
+    }
+    if (!booking.workerId) {
+      return res.status(409).json(errorResponse(409, 'This booking has no assigned worker'));
+    }
+    if (booking.rescheduleRequestedAt != null && booking.rescheduleRequestRespondedAt == null) {
+      return res.status(409).json(errorResponse(409, 'You already have a pending reschedule request for this booking'));
+    }
+
+    const requestedDate = toDayStart(date);
+
+    // Same minimum-lead-time rule a new booking is held to — the worker
+    // still needs advance notice, a reschedule request shouldn't be a
+    // backdoor around it.
+    const minLeadMs = MIN_BOOKING_LEAD_DAYS * 24 * 60 * 60 * 1000;
+    const todayUtc = toDayStart(new Date());
+    if (requestedDate.getTime() - todayUtc.getTime() < minLeadMs) {
+      return res.status(400).json(errorResponse(400, `date must be at least ${MIN_BOOKING_LEAD_DAYS} days from today`));
+    }
+    if (requestedDate.getTime() === toDayStart(booking.scheduledDate).getTime() && timeSlot === booking.timeSlot) {
+      return res.status(400).json(errorResponse(400, 'That is already this booking\'s current date and time'));
+    }
+
+    const workerProfile = await prisma.workerProfile.findUnique({
+      where: { userId: booking.workerId },
+      select: { id: true },
+    });
+    if (!workerProfile) {
+      return res.status(404).json(errorResponse(404, 'Worker profile not found'));
+    }
+
+    await prisma.$transaction(async (tx) => {
+      const slot = await findSlot(tx, workerProfile.id, requestedDate, timeSlot);
+      if (slot && (slot.isBlocked || slot.isBooked)) {
+        throw new Error('SLOT_TAKEN');
+      }
+
+      await blockSlotForExtend(tx, workerProfile.id, requestedDate, timeSlot, booking.id);
+
+      await tx.booking.update({
+        where: { id },
+        data: {
+          requestedScheduledDate: requestedDate,
+          requestedTimeSlot: timeSlot,
+          rescheduleRequestedAt: new Date(),
+          rescheduleRequestReminderSentAt: null,
+          rescheduleRequestRespondedAt: null,
+          rescheduleRequestAccepted: null,
+        },
+      });
+    });
+
+    await notifyUser({
+      userId: booking.workerId,
+      type: 'BOOKING_RESCHEDULE_REQUESTED',
+      title: 'Reschedule Requested',
+      message: `Your client asked to move this booking to ${requestedDate.toLocaleDateString('en-PH', { month: 'short', day: 'numeric' })}. Review and accept or decline.`,
+      relatedId: id,
+    });
+
+    await writeAuditLog({
+      actorId: req.user.userId,
+      actorRole: req.user.role,
+      action: 'BOOKING_RESCHEDULE_REQUESTED',
+      category: 'STATUS_CHANGE',
+      message: `Client requested a reschedule for booking ${formatDisplayId(id)} to ${requestedDate.toISOString().slice(0, 10)} ${timeSlot}`,
+      metadata: { bookingId: id, requestedDate: requestedDate.toISOString(), timeSlot },
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: 'Reschedule requested — waiting for your pro to respond',
+      data: { id, requestedScheduledDate: requestedDate, requestedTimeSlot: timeSlot },
+    });
+  } catch (error: any) {
+    if (error.message === 'SLOT_TAKEN') {
+      return res.status(409).json(errorResponse(409, 'Your pro is not available at that date/time'));
+    }
+    console.error('Error requesting reschedule:', error);
+    return res.status(500).json(errorResponse(500, 'Failed to request reschedule'));
+  }
+};
+
+/**
+ * PATCH /api/bookings/:id/reschedule-request/withdraw
+ * Client backs out of their own still-pending reschedule request. Recorded
+ * as a resolved episode with rescheduleRequestAccepted left null — distinct
+ * from an explicit accept (true) or decline (false) by the worker.
+ */
+export const withdrawRescheduleRequest = async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user || req.user.role !== 'CLIENT') {
+      return res.status(403).json(errorResponse(403, 'Only the client can withdraw a reschedule request'));
+    }
+
+    const id = req.params.id as string;
+    const booking = await prisma.booking.findUnique({ where: { id } });
+
+    if (!booking) {
+      return res.status(404).json(errorResponse(404, 'Booking not found'));
+    }
+    if (booking.clientId !== req.user.userId) {
+      return res.status(403).json(errorResponse(403, 'This booking does not belong to you'));
+    }
+    if (booking.rescheduleRequestedAt == null || booking.rescheduleRequestRespondedAt != null) {
+      return res.status(409).json(errorResponse(409, 'There is no pending reschedule request to withdraw'));
+    }
+
+    await prisma.$transaction(async (tx) => {
+      if (booking.workerId && booking.requestedScheduledDate && booking.requestedTimeSlot) {
+        const workerProfile = await tx.workerProfile.findUnique({
+          where: { userId: booking.workerId },
+          select: { id: true },
+        });
+        if (workerProfile) {
+          await tx.workerAvailability.updateMany({
+            where: {
+              workerProfileId: workerProfile.id,
+              date: booking.requestedScheduledDate,
+              timeSlot: booking.requestedTimeSlot,
+              blockedByBookingId: booking.id,
+              isBooked: false,
+            },
+            data: { isBlocked: false, blockedByBookingId: null },
+          });
+        }
+      }
+
+      await tx.booking.update({
+        where: { id },
+        data: { rescheduleRequestRespondedAt: new Date(), rescheduleRequestAccepted: null },
+      });
+    });
+
+    return res.status(200).json({ success: true, message: 'Reschedule request withdrawn', data: { id } });
+  } catch (error) {
+    console.error('Error withdrawing reschedule request:', error);
+    return res.status(500).json(errorResponse(500, 'Failed to withdraw reschedule request'));
+  }
+};
+
+/**
+ * PATCH /api/bookings/:id/reschedule-request/respond
+ * Worker accepts or declines the client's proposed new date/time. Accepting
+ * moves the booking for real (frees the old slot, books the new one);
+ * declining just releases the held slot and leaves the booking as-is.
+ */
+export const respondToRescheduleRequest = async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user || req.user.role !== 'WORKER') {
+      return res.status(403).json(errorResponse(403, 'Only the assigned worker can respond to a reschedule request'));
+    }
+
+    const id = req.params.id as string;
+    const { accept } = req.body as { accept?: boolean };
+    if (typeof accept !== 'boolean') {
+      return res.status(400).json(errorResponse(400, 'accept must be true or false'));
+    }
+
+    const booking = await prisma.booking.findUnique({ where: { id } });
+    if (!booking) {
+      return res.status(404).json(errorResponse(404, 'Booking not found'));
+    }
+    if (booking.workerId !== req.user.userId) {
+      return res.status(403).json(errorResponse(403, 'This booking is not assigned to you'));
+    }
+    if (booking.rescheduleRequestedAt == null || booking.rescheduleRequestRespondedAt != null) {
+      return res.status(409).json(errorResponse(409, 'There is no pending reschedule request to respond to'));
+    }
+    if (!booking.requestedScheduledDate || !booking.requestedTimeSlot) {
+      return res.status(409).json(errorResponse(409, 'This reschedule request is missing its requested date/time'));
+    }
+
+    const workerProfile = await prisma.workerProfile.findUnique({
+      where: { userId: req.user.userId },
+      select: { id: true },
+    });
+    if (!workerProfile) {
+      return res.status(404).json(errorResponse(404, 'Worker profile not found'));
+    }
+
+    await prisma.$transaction(async (tx) => {
+      if (accept) {
+        // Re-check the requested slot is still genuinely open — the block
+        // from requestReschedule should have held it, but this guards
+        // against anything that slipped past it (e.g. an admin adjustment).
+        // No row at all is fine (nothing occupies it, same convention
+        // findSlot's other callers use) — only a REAL booking there, or a
+        // block belonging to someone else, is a genuine conflict.
+        const slot = await findSlot(tx, workerProfile.id, booking.requestedScheduledDate!, booking.requestedTimeSlot!);
+        if (slot && (slot.isBooked || (slot.isBlocked && slot.blockedByBookingId !== booking.id))) {
+          throw new Error('SLOT_NO_LONGER_AVAILABLE');
+        }
+
+        if (booking.timeSlot) {
+          await freeSlot(tx, workerProfile.id, booking.scheduledDate, booking.timeSlot);
+        }
+        await markSlotBooked(tx, workerProfile.id, booking.requestedScheduledDate!, booking.requestedTimeSlot!);
+        // markSlotBooked only sets isBooked — explicitly clear the block
+        // fields too, since this slot is a real booking now, not a hold.
+        await tx.workerAvailability.updateMany({
+          where: { workerProfileId: workerProfile.id, date: booking.requestedScheduledDate!, timeSlot: booking.requestedTimeSlot! },
+          data: { isBlocked: false, blockedByBookingId: null },
+        });
+
+        await tx.booking.update({
+          where: { id },
+          data: {
+            scheduledDate: booking.requestedScheduledDate!,
+            timeSlot: booking.requestedTimeSlot!,
+            rescheduleRequestRespondedAt: new Date(),
+            rescheduleRequestAccepted: true,
+          },
+        });
+      } else {
+        await tx.workerAvailability.updateMany({
+          where: {
+            workerProfileId: workerProfile.id,
+            date: booking.requestedScheduledDate!,
+            timeSlot: booking.requestedTimeSlot!,
+            blockedByBookingId: booking.id,
+            isBooked: false,
+          },
+          data: { isBlocked: false, blockedByBookingId: null },
+        });
+
+        await tx.booking.update({
+          where: { id },
+          data: { rescheduleRequestRespondedAt: new Date(), rescheduleRequestAccepted: false },
+        });
+      }
+    });
+
+    await notifyUser({
+      userId: booking.clientId,
+      type: accept ? 'BOOKING_RESCHEDULE_REQUEST_ACCEPTED' : 'BOOKING_RESCHEDULE_REQUEST_DECLINED',
+      title: accept ? 'Reschedule Accepted' : 'Reschedule Declined',
+      message: accept
+        ? 'Your pro accepted the new date for your booking.'
+        : 'Your pro could not accommodate the new date — your booking stays as originally scheduled.',
+      relatedId: id,
+    });
+
+    await writeAuditLog({
+      actorId: req.user.userId,
+      actorRole: req.user.role,
+      action: accept ? 'BOOKING_RESCHEDULE_REQUEST_ACCEPTED' : 'BOOKING_RESCHEDULE_REQUEST_DECLINED',
+      category: 'STATUS_CHANGE',
+      message: `Worker ${accept ? 'accepted' : 'declined'} the reschedule request for booking ${formatDisplayId(id)}`,
+      metadata: { bookingId: id },
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: accept ? 'Reschedule accepted' : 'Reschedule declined',
+      data: { id },
+    });
+  } catch (error: any) {
+    if (error.message === 'SLOT_NO_LONGER_AVAILABLE') {
+      return res.status(409).json(errorResponse(409, 'That slot is no longer available'));
+    }
+    console.error('Error responding to reschedule request:', error);
+    return res.status(500).json(errorResponse(500, 'Failed to respond to reschedule request'));
   }
 };
 

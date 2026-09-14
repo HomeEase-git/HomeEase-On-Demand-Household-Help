@@ -354,7 +354,7 @@ const PH_BOUNDS = { minLat: 4, maxLat: 21.5, minLng: 116, maxLng: 127 };
 // (see below), same normalization workerAvailabilityService.toDayStart uses
 // for scheduledDate elsewhere — PH local time (UTC+8) is always ahead of
 // UTC, so a UTC "today" never rejects a date PH-local "today" should allow.
-const MIN_BOOKING_LEAD_DAYS = 2;
+export const MIN_BOOKING_LEAD_DAYS = 2;
 
 /**
  * Booking creation no longer takes a client-supplied estimatedPrice or free-text
