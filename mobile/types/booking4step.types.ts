@@ -83,38 +83,6 @@ export const CONDITION_LABELS: Record<ConditionType, string> = {
 export const WORKER_TIERS = ['STANDARD', 'PRO', 'EXPERT'] as const;
 export type WorkerTier = (typeof WORKER_TIERS)[number];
 
-// Mirrors backend utils/workerTier.ts default multipliers — actual values
-// are admin-configurable via AppSettings; this is only a client-side preview
-// default, the server recomputes authoritatively at booking creation.
-export const TIER_MULTIPLIER: Record<WorkerTier, number> = {
-  STANDARD: 1.0,
-  PRO: 1.15,
-  EXPERT: 1.3,
-};
-
-export const URGENCY_LEVELS = ['STANDARD', 'URGENT', 'EMERGENCY'] as const;
-export type UrgencyLevel = (typeof URGENCY_LEVELS)[number];
-
-export const URGENCY_LABELS: Record<UrgencyLevel, string> = {
-  STANDARD: 'Standard',
-  URGENT: 'Urgent',
-  EMERGENCY: 'Emergency',
-};
-
-export const URGENCY_DESCRIPTIONS: Record<UrgencyLevel, string> = {
-  STANDARD: 'No rush — regular scheduling',
-  URGENT: 'Needed as soon as possible',
-  EMERGENCY: 'Immediate attention needed',
-};
-
-// Mirrors backend URGENCY_FEE_MULTIPLIER in bookingController.ts — surcharge
-// applied on top of the category base price for faster turnaround.
-export const URGENCY_MODIFIER: Record<UrgencyLevel, number> = {
-  STANDARD: 1.0,
-  URGENT: 1.15,
-  EMERGENCY: 1.3,
-};
-
 export type WorkerCard = {
   id: string;
   fullName: string;
@@ -145,7 +113,6 @@ export type CreateBookingPayload = {
   lng: number;
   date: string;
   timeSlot: TimeSlot;
-  urgencyLevel?: UrgencyLevel;
   addOns?: BookingAddOnInput[];
   packageIds?: string[];
   priorities?: string[];
@@ -166,7 +133,6 @@ export type CreateBookingResponse = {
   status: string;
   scheduledDate: string;
   timeSlot: TimeSlot;
-  urgencyLevel: UrgencyLevel;
   estimatedPrice: number;
   estimatedDurationHours: number | null;
   expiresAt: string;

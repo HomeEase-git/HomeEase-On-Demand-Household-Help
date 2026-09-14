@@ -1,23 +1,32 @@
 import { useMemo } from 'react';
 import { useBookingStore } from '../store/bookingStore';
 import {
-  estimatePrice,
+  estimateRange,
   estimatePricePoint,
-  type PriceEstimate,
+  type PriceRange,
   type PricePointEstimate,
 } from '../utils/bookingPriceEstimate';
 
 export type BookingPriceEstimate =
-  | { mode: 'range'; range: PriceEstimate }
+  | { mode: 'range'; range: PriceRange }
   | { mode: 'point'; point: PricePointEstimate };
 
 /**
- * Live pricing preview for the booking draft. Returns a range while no
- * worker is selected yet (Steps 1-2, since a specific tier isn't known), and
- * a single point estimate once one is picked or auto-match is confirmed
- * (Steps 3-4). This is a client-side UX preview only — see
- * utils/bookingPriceEstimate.ts for why it doesn't need to match the
- * backend's authoritative pricing exactly.
+ * Live pricing preview for the booking draft.
+ *
+ * - `point` mode: once Step 3's `selectWorker` has run, `draft.
+ *   workerEstimatedTotal` holds that worker's exact computed price (the
+ *   backend's real formula, including their real distance fee) — used
+ *   directly as the labor cost so this can never show a different number
+ *   than Step 3 did or than `POST /bookings` will actually charge.
+ * - `range` mode otherwise: `categoryRange` should already be whichever
+ *   spread is right for the current draft — a locked worker's own price
+ *   range for the selected category (the worker-profile "Book Now" entry
+ *   point resolves this before Step 3 ever runs), or the marketplace-wide
+ *   category range for anyone else (plain browsing, or auto-match). Callers
+ *   resolve which one that is (see step-1.tsx's `displayCategories`) rather
+ *   than this hook, since the same resolved number needs to reach both the
+ *   category tiles and this preview.
  *
  * `tipOverride` lets a screen with its own live (not-yet-persisted-to-store)
  * tip state — e.g. step-4's TipSlider, which only writes back to the store
@@ -25,7 +34,7 @@ export type BookingPriceEstimate =
  * user drags the slider, instead of showing the stale `draft.tip`.
  */
 export function useBookingPriceEstimate(
-  categoryRate: number,
+  categoryRange: PriceRange,
   addOnsTotal = 0,
   tipOverride?: number
 ): BookingPriceEstimate {
@@ -33,22 +42,13 @@ export function useBookingPriceEstimate(
   const tip = tipOverride ?? draft.tip ?? 0;
 
   return useMemo(() => {
-    if (draft.workerId != null || draft.isAutoMatched) {
+    if (draft.workerEstimatedTotal != null) {
       return {
         mode: 'point',
-        point: estimatePricePoint({
-          categoryRate,
-          addOnsTotal,
-          tip,
-          urgencyLevel: draft.urgencyLevel,
-          workerTier: draft.workerTier,
-        }),
+        point: estimatePricePoint({ laborCost: draft.workerEstimatedTotal, addOnsTotal, tip }),
       };
     }
 
-    return {
-      mode: 'range',
-      range: estimatePrice(categoryRate, draft.urgencyLevel),
-    };
-  }, [draft.workerId, draft.isAutoMatched, draft.workerTier, draft.urgencyLevel, tip, categoryRate, addOnsTotal]);
+    return { mode: 'range', range: estimateRange(categoryRange) };
+  }, [draft.workerEstimatedTotal, tip, categoryRange.min, categoryRange.max, addOnsTotal]);
 }

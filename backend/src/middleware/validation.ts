@@ -5,7 +5,6 @@ import { isValidTin } from '../utils/taxId';
 import {
   VALID_TIME_SLOTS,
   VALID_CONDITIONS,
-  VALID_URGENCY_LEVELS,
   VALID_ROOM_TYPES,
   VALID_PAYMENT_METHOD_TYPES,
 } from '../constants/bookingEnums';
@@ -347,6 +346,16 @@ export const validateUpdateTaxInfo = (req: Request, res: Response, next: NextFun
 // coastline, since a false rejection is worse than a slightly loose bound.
 const PH_BOUNDS = { minLat: 4, maxLat: 21.5, minLng: 116, maxLng: 127 };
 
+// A booking must be at least this many days out from today — gives a worker
+// advance notice to prepare instead of a same-day/next-day job landing on
+// them with no warning. Mirrored on mobile in DateGridPicker.tsx, which
+// disables those days in the calendar, so this check should only ever catch
+// a tampered/direct API request, not a normal booking. Compared in UTC
+// (see below), same normalization workerAvailabilityService.toDayStart uses
+// for scheduledDate elsewhere — PH local time (UTC+8) is always ahead of
+// UTC, so a UTC "today" never rejects a date PH-local "today" should allow.
+const MIN_BOOKING_LEAD_DAYS = 2;
+
 /**
  * Booking creation no longer takes a client-supplied estimatedPrice or free-text
  * scheduledTime — price is computed server-side (see bookingController.createBooking
@@ -370,7 +379,6 @@ export const validateCreateBooking = (
     lng,
     date,
     timeSlot,
-    urgencyLevel,
     addOns,
     priorities,
     tip,
@@ -430,6 +438,15 @@ export const validateCreateBooking = (
     return res.status(400).json(errorResponse(400, 'date is required and must be a valid date'));
   }
 
+  const requestedDayUtc = new Date(date);
+  requestedDayUtc.setUTCHours(0, 0, 0, 0);
+  const todayUtc = new Date();
+  todayUtc.setUTCHours(0, 0, 0, 0);
+  const minLeadMs = MIN_BOOKING_LEAD_DAYS * 24 * 60 * 60 * 1000;
+  if (requestedDayUtc.getTime() - todayUtc.getTime() < minLeadMs) {
+    return res.status(400).json(errorResponse(400, `date must be at least ${MIN_BOOKING_LEAD_DAYS} days from today`));
+  }
+
   if (!timeSlot || !VALID_TIME_SLOTS.includes(timeSlot)) {
     return res.status(400).json(errorResponse(400, `timeSlot is required and must be one of ${VALID_TIME_SLOTS.join(', ')}`));
   }
@@ -442,10 +459,6 @@ export const validateCreateBooking = (
 
   if (condition !== undefined && condition !== null && !VALID_CONDITIONS.includes(condition)) {
     return res.status(400).json(errorResponse(400, `condition must be one of ${VALID_CONDITIONS.join(', ')}`));
-  }
-
-  if (urgencyLevel !== undefined && !VALID_URGENCY_LEVELS.includes(urgencyLevel)) {
-    return res.status(400).json(errorResponse(400, `urgencyLevel must be one of ${VALID_URGENCY_LEVELS.join(', ')}`));
   }
 
   if (priorities !== undefined) {

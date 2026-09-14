@@ -1,6 +1,5 @@
 import prisma from '@config/database';
 import { getAppSettings } from '@services/appSettingsService';
-import { EXPIRY_MULTIPLIER } from '@queues/bookingQueue';
 import { expirePendingBooking } from '@workers/bookingWorker';
 
 /**
@@ -9,8 +8,8 @@ import { expirePendingBooking } from '@workers/bookingWorker';
  * actually running when its delay elapses — fine normally, but a host that
  * sleeps on idle (Render's free tier) takes the worker down with it, so a
  * booking sitting PENDING while the service is asleep never gets expired on
- * schedule. This sweep finds every PENDING booking whose urgency-scaled
- * expiry window has already passed and expires it through the exact same
+ * schedule. This sweep finds every PENDING booking whose expiry window has
+ * already passed and expires it through the exact same
  * expirePendingBooking() the queue uses, so the two paths can't drift.
  *
  * Safe to call from BullMQ's own tick too (it's a superset, idempotent —
@@ -23,14 +22,14 @@ export async function expireOverduePendingBookings(): Promise<{ expired: number;
 
   const pending = await prisma.booking.findMany({
     where: { status: 'PENDING' },
-    select: { id: true, createdAt: true, urgencyLevel: true },
+    select: { id: true, createdAt: true },
   });
 
   const now = Date.now();
   let expired = 0;
 
   for (const booking of pending) {
-    const minutes = Math.max(1, Math.round(pendingExpiryMinutes * EXPIRY_MULTIPLIER[booking.urgencyLevel]));
+    const minutes = Math.max(1, Math.round(pendingExpiryMinutes));
     const deadline = booking.createdAt.getTime() + minutes * 60 * 1000;
     if (now < deadline) continue;
 

@@ -4,6 +4,12 @@ import { AppIcon as Ionicons } from "../icons/AppIcon";
 import { colors } from "../../constants";
 
 const DAYS_AHEAD = 21;
+// Clients can't book today or tomorrow — gives a worker advance notice to
+// prepare instead of a same-day/next-day job landing on them with no
+// warning. Mirrored on the backend in validation.ts's MIN_BOOKING_LEAD_DAYS,
+// which rejects an earlier date even if a tampered/direct request bypasses
+// this calendar's disabling.
+const MIN_LEAD_DAYS = 2;
 const DAY_LABELS = ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"];
 const MONTHS = [
   "January", "February", "March", "April", "May", "June",
@@ -48,10 +54,8 @@ type Props = {
  * Month-grid date picker, capped to the next DAYS_AHEAD days to match the
  * booking flow's near-term-only scheduling window (dates outside that
  * window render dimmed/disabled rather than being hidden, so the calendar
- * shape stays intact). Today is bookable and priced the same as any other
- * date — the backend has no same-day surcharge (only urgencyLevel affects
- * price, see bookingController.createBooking) — so it's marked with a ring
- * to call it out as "today", not disabled or upcharged.
+ * shape stays intact). The nearest MIN_LEAD_DAYS days (today included) are
+ * disabled the same way — not bookable at all, regardless of price.
  */
 export default function DateGridPicker({ selectedDate, onSelect, unavailableDates = [] }: Props) {
   const today = useMemo(() => {
@@ -59,7 +63,12 @@ export default function DateGridPicker({ selectedDate, onSelect, unavailableDate
     d.setHours(0, 0, 0, 0);
     return d;
   }, []);
-  const todayIso = useMemo(() => toIsoDate(today), [today]);
+
+  const minSelectableDate = useMemo(() => {
+    const d = new Date(today);
+    d.setDate(d.getDate() + MIN_LEAD_DAYS);
+    return d;
+  }, [today]);
 
   const maxDate = useMemo(() => {
     const d = new Date(today);
@@ -141,9 +150,8 @@ export default function DateGridPicker({ selectedDate, onSelect, unavailableDate
 
             const date = new Date(viewYear, viewMonth, day);
             const iso = toIsoDate(date);
-            const isToday = iso === todayIso;
             const isSelected = selectedDate === iso;
-            const isOutOfRange = date < today || date > maxDate;
+            const isOutOfRange = date < minSelectableDate || date > maxDate;
             const isUnavailable = isOutOfRange || unavailableDates.includes(iso);
 
             return (
@@ -154,16 +162,12 @@ export default function DateGridPicker({ selectedDate, onSelect, unavailableDate
                   accessibilityState={{ selected: isSelected, disabled: isUnavailable }}
                   onPress={() => onSelect(iso)}
                   className={`w-10 h-10 rounded-xl items-center justify-center border-2 ${
-                    isSelected
-                      ? "bg-accent border-accent"
-                      : isToday
-                      ? "bg-warning/10 border-warning"
-                      : "bg-transparent border-transparent"
+                    isSelected ? "bg-accent border-accent" : "bg-transparent border-transparent"
                   } ${isUnavailable ? "opacity-30" : ""}`}
                 >
                   <Text
                     className={`text-sm font-semibold ${
-                      isSelected ? "text-white" : isToday ? "text-warning" : "text-text-primary"
+                      isSelected ? "text-white" : "text-text-primary"
                     }`}
                   >
                     {day}

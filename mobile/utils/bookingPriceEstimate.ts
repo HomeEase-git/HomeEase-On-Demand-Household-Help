@@ -2,37 +2,37 @@
  * Client-side live pricing preview for the 4-step booking flow.
  *
  * This is a UX-only estimate — it gives the user fast, real-time feedback as
- * they pick a service/worker/urgency, but the AUTHORITATIVE price is always
- * whatever `POST /bookings` returns in its `pricing` block (computed
- * server-side from ServiceType/ServiceTask base price + distance/urgency/
- * tier fees — see backend `utils/pricing.computeJobPricing`, the single
- * source of truth both the booking-creation endpoint and the worker-search
- * price preview use). This preview mirrors that same formula. Deliberately
- * NOT modeled here: any same-day/date-based premium (the backend has none)
- * and the per-worker distance fee (unknown until a specific worker/address
- * pair is confirmed).
+ * they pick a service/worker, but the AUTHORITATIVE price is always whatever
+ * `POST /bookings` returns in its `pricing` block (computed server-side from
+ * ServiceType/ServiceTask base price + distance/tier fees — see backend
+ * `utils/pricing.computeJobPricing`, the single source of truth both the
+ * booking-creation endpoint and the worker-search price preview use).
+ *
+ * Two shapes come out of this: a `range` (low-high spread) whenever the exact
+ * price isn't knowable yet — either no worker is known at all (auto-match, or
+ * Steps 1-2 before Step 3), or a specific worker is locked in but we only
+ * know their category-level spread, not a job-specific number — and a
+ * `point` (single number) once a specific worker's real computed price is
+ * known (Step 3's `selectWorker`, mirroring the backend's real formula
+ * including that worker's actual distance fee).
  */
-import type { RoomType, UrgencyLevel, WorkerTier } from '../types/booking4step.types';
-import { URGENCY_MODIFIER, TIER_MULTIPLIER } from '../types/booking4step.types';
+import type { RoomType } from '../types/booking4step.types';
 
-export interface PriceEstimate {
-  price: number;
+export interface PriceRange {
+  min: number;
+  max: number;
 }
 
 /**
- * Pre-worker-selection estimate (Steps 1-2): no worker/tier is known yet, so
- * this is the selected service's price plus the urgency surcharge — the same
- * fixed percentage the backend applies, just without the tier or distance
- * fee (neither is known before a worker is picked).
+ * Range estimate: the marketplace-wide spread for a category (nobody/no
+ * specific worker known yet) or one worker's own spread for a category
+ * (worker locked in, but no job-specific total computed yet).
  */
-export function estimatePrice(categoryRate: number, urgencyLevel?: UrgencyLevel | null): PriceEstimate {
-  const urgencyFee = categoryRate * (URGENCY_MODIFIER[urgencyLevel ?? 'STANDARD'] - 1);
-  return { price: round2(categoryRate + urgencyFee) };
+export function estimateRange(range: PriceRange): PriceRange {
+  return { min: round2(Math.max(0, range.min)), max: round2(Math.max(0, range.max)) };
 }
 
 export interface PricePointEstimate {
-  urgencyModifier: number;
-  tierModifier: number;
   laborCost: number;
   addOnsTotal: number;
   tip: number;
@@ -41,29 +41,22 @@ export interface PricePointEstimate {
 }
 
 /**
- * Post-worker-selection estimate (Steps 3-4): the worker's tier is now
- * known, so this adds the tier surcharge to the same base-price + urgency
- * formula used in `estimatePrice` (all fixed percentages of the selected
- * service's price, mirroring the backend — no hourly rate involved).
+ * Exact estimate once a specific worker's real price is known — `laborCost`
+ * is that worker's computed total (base price + their tier fee + their real
+ * distance fee), not re-derived here.
  */
 export function estimatePricePoint(params: {
-  categoryRate: number;
+  laborCost: number;
   addOnsTotal?: number;
   tip?: number;
-  urgencyLevel?: UrgencyLevel | null;
-  workerTier?: WorkerTier | null;
 }): PricePointEstimate {
-  const urgencyModifier = URGENCY_MODIFIER[params.urgencyLevel ?? 'STANDARD'];
-  const tierModifier = TIER_MULTIPLIER[params.workerTier ?? 'STANDARD'];
-  const urgencyFee = params.categoryRate * (urgencyModifier - 1);
-  const tierFee = params.categoryRate * (tierModifier - 1);
-  const laborCost = round2(params.categoryRate + urgencyFee + tierFee);
+  const laborCost = round2(params.laborCost);
   const addOnsTotal = round2(params.addOnsTotal ?? 0);
   const tip = round2(params.tip ?? 0);
   const subtotal = round2(laborCost + addOnsTotal);
   const total = round2(subtotal + tip);
 
-  return { urgencyModifier, tierModifier, laborCost, addOnsTotal, tip, subtotal, total };
+  return { laborCost, addOnsTotal, tip, subtotal, total };
 }
 
 /**

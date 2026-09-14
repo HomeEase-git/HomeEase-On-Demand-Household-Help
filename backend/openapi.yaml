@@ -71,9 +71,6 @@ paths:
           in: query
           schema: { type: string }
           description: When given, prices the estimatedTotal off this task's basePrice instead of the category's.
-        - name: urgencyLevel
-          in: query
-          schema: { type: string, enum: [STANDARD, URGENT, EMERGENCY] }
         - name: lat
           in: query
           schema: { type: number }
@@ -2372,7 +2369,10 @@ components:
         city: { type: string }
         lat: { type: number }
         lng: { type: number }
-        date: { type: string, format: date }
+        date:
+          type: string
+          format: date
+          description: Must be at least 2 days from today — same-day and next-day booking are blocked so workers get advance notice.
         timeSlot: { $ref: '#/components/schemas/TimeSlot' }
         addOns:
           type: array

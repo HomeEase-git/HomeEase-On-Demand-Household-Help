@@ -1,18 +1,6 @@
 import { Queue } from 'bullmq';
-import type { UrgencyLevel } from '@prisma/client';
 import { getAppSettings } from '@services/appSettingsService';
 import { queueConnection as connection } from '@config/redis';
-
-// Scales AppSettings.pendingExpiryMinutes (the STANDARD-urgency base, still
-// admin-configurable exactly as before) down for faster-turnaround bookings
-// — at the 60min default this works out to 60/30/15, matching the product
-// decision. Relative rather than absolute values so an admin changing the
-// base setting scales every urgency tier with it instead of only STANDARD.
-export const EXPIRY_MULTIPLIER: Record<UrgencyLevel, number> = {
-  STANDARD: 1,
-  URGENT: 0.5,
-  EMERGENCY: 0.25,
-};
 
 export const BOOKING_QUEUE_NAME = 'booking-lifecycle';
 
@@ -49,14 +37,12 @@ bookingQueue.on('error', (err) => {
 /**
  * Schedules the PENDING→CANCELLED expiry check for a newly-created booking,
  * after AppSettings.pendingExpiryMinutes (admin-configurable, defaults to
- * 60), scaled down by urgencyLevel (see EXPIRY_MULTIPLIER above) — an
- * EMERGENCY booking shouldn't sit waiting on the same clock as a STANDARD
- * one. jobId = bookingId so accepting/rejecting/cancelling the booking
+ * 60). jobId = bookingId so accepting/rejecting/cancelling the booking
  * before it fires can remove this exact job (see cancelPendingExpiryJob).
  */
-export async function schedulePendingExpiry(bookingId: string, urgencyLevel: UrgencyLevel = 'STANDARD'): Promise<void> {
+export async function schedulePendingExpiry(bookingId: string): Promise<void> {
   const { pendingExpiryMinutes } = await getAppSettings();
-  const minutes = Math.max(1, Math.round(pendingExpiryMinutes * EXPIRY_MULTIPLIER[urgencyLevel]));
+  const minutes = Math.max(1, Math.round(pendingExpiryMinutes));
 
   await bookingQueue.add(
     JOB_NAMES.EXPIRE_PENDING,

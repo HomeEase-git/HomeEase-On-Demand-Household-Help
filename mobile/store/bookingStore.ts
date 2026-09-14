@@ -2,7 +2,7 @@ import { create, type StoreApi, type UseBoundStore } from 'zustand';
 import { bookingStorage } from '../utils/storage';
 import { validateDraftForSubmit as validateDraftUtil } from '../utils/bookingValidation';
 import { mapServiceToCategory } from '../utils/categoryMapping';
-import type { TimeSlot, UrgencyLevel, WorkerTier } from '../types/booking4step.types';
+import type { TimeSlot, WorkerTier } from '../types/booking4step.types';
 
 export type BookingStatus =
   | 'Pending'
@@ -96,7 +96,10 @@ export type DraftBooking = {
   // when entering via the worker profile's "Book Now". Step 1 uses this to
   // restrict the category picker to services this worker can perform, and
   // to resolve the matching serviceTypeId for whichever one is picked.
-  workerServiceTypes?: { id: string; name: string }[] | null;
+  // priceRangeMin/Max (when present) are THIS worker's own price spread for
+  // that category — used instead of the marketplace-wide range so a locked
+  // worker's category tiles/preview reflect what they specifically charge.
+  workerServiceTypes?: { id: string; name: string; priceRangeMin?: number; priceRangeMax?: number }[] | null;
   lat?: number;
   lng?: number;
   lastInvalidationReason?: string | null;
@@ -104,12 +107,13 @@ export type DraftBooking = {
   // ===== 4-step booking flow (Scope/Schedule/Who/Confirm) additions =====
   serviceType?: string | null; // ServiceType.name — sent to the backend as `serviceType`
   serviceTypeId?: string | null; // ServiceType.id — captured from the selected worker's card in Step 3, used to fetch that worker's packages for the selected category
-  categoryBasePrice?: number | null; // ServiceType.basePrice — rate proxy for the pre-worker price range preview
+  categoryBasePrice?: number | null; // ServiceType.basePrice — legacy single-number fallback, kept for old drafts
+  categoryPriceRangeMin?: number | null; // ServiceType-derived marketplace-wide price range for Steps 1-2's preview
+  categoryPriceRangeMax?: number | null;
   selectedPackageIds: string[]; // WorkerPackage ids selected in Step 4 — resolved to priced add-ons server-side
   scopeAnswers?: Record<string, string | string[]>; // scope-step answers, keyed by ScopeField.label
   issuePhotoUrls?: string[]; // photos of the issue the client attached in Step 1, uploaded via POST /bookings/issue-photo/upload
   timeSlot: TimeSlot | null;
-  urgencyLevel: UrgencyLevel;
   priorities: string[]; // Step 4 submits ['Pet-friendly'] when the "I have pets" toggle is on; empty otherwise
 
   addOnToggles: string[]; // AddOnToggleKey[] — free preference toggles, sent as zero-priced addOns
@@ -185,7 +189,6 @@ export type DeclinedBookingDetail = {
   clientLng?: number | null;
   scheduledDate?: string | null;
   timeSlot?: TimeSlot | null;
-  urgencyLevel?: UrgencyLevel | null;
   scopeAnswers?: Record<string, string | string[]> | null;
 };
 
@@ -240,8 +243,9 @@ const initialDraft: DraftBooking = {
   serviceType: null,
   serviceTypeId: null,
   categoryBasePrice: null,
+  categoryPriceRangeMin: null,
+  categoryPriceRangeMax: null,
   selectedPackageIds: [],
-  urgencyLevel: 'STANDARD',
   scopeAnswers: {},
   issuePhotoUrls: [],
   timeSlot: null,
@@ -476,7 +480,6 @@ export const useBookingStore: UseBoundStore<StoreApi<BookingState>> = create<Boo
         // its YYYY-MM-DD, matching what DateGridPicker/step-2 expect.
         date: detail.scheduledDate ? detail.scheduledDate.slice(0, 10) : null,
         timeSlot: detail.timeSlot ?? null,
-        urgencyLevel: detail.urgencyLevel ?? 'STANDARD',
         scopeAnswers: detail.scopeAnswers ?? {},
         entrySource: 're_offer',
         workerLocked: false,
