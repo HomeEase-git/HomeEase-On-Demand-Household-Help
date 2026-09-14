@@ -5,7 +5,7 @@ import { notifyUser } from '@utils/notify';
 import { sendSmsToUser } from '@utils/smsService';
 import { writeAuditLog } from '@utils/auditLog';
 import { BOOKING_QUEUE_NAME, JOB_NAMES, type ExpirePendingBookingJobData } from '@queues/bookingQueue';
-import { freeSlot } from '@services/workerAvailabilityService';
+import { freeSlot, materializeTemplateForWorker } from '@services/workerAvailabilityService';
 import {
   refundOrVoidPayment,
   settleCashBooking,
@@ -614,17 +614,19 @@ export async function remindAndAutoDeclineRescheduleRequests(): Promise<void> {
  * mechanism — accept/complete/cancel free their own slot inline).
  */
 export async function resetExpiredAvailabilitySlots(): Promise<void> {
-  const today = new Date();
-  today.setUTCHours(0, 0, 0, 0);
+  const ACTIVE_STATUSES = ['PENDING', 'ACCEPTED', 'IN_PROGRESS', 'QUOTE_SUBMITTED', 'QUOTE_APPROVED', 'DISPUTED'] as const;
 
-  const staleSlots = await prisma.workerAvailability.findMany({
-    where: { date: { lt: today }, isBooked: true },
+  // Not date-bounded — an isBooked slot with no matching active booking is
+  // stale whether that date is in the past or still upcoming (e.g. a booking
+  // that was cancelled/completed through a path that missed freeSlot). Only
+  // checking past dates left an orphaned future slot stuck as "booked" until
+  // its date happened to lapse.
+  const staleBookedSlots = await prisma.workerAvailability.findMany({
+    where: { isBooked: true },
     include: { workerProfile: { select: { userId: true } } },
   });
 
-  const ACTIVE_STATUSES = ['PENDING', 'ACCEPTED', 'IN_PROGRESS', 'QUOTE_SUBMITTED', 'QUOTE_APPROVED', 'DISPUTED'] as const;
-
-  for (const slot of staleSlots) {
+  for (const slot of staleBookedSlots) {
     const stillActive = await prisma.booking.findFirst({
       where: {
         workerId: slot.workerProfile.userId,
@@ -641,6 +643,53 @@ export async function resetExpiredAvailabilitySlots(): Promise<void> {
         data: { isBooked: false },
       });
     }
+  }
+
+  // Same idea for the soft "isBlocked" hold reschedule-on-conflict and
+  // reschedule-on-request use while a booking is mid-flight (see
+  // bookingController.extendBooking / requestReschedule). Both flows clear
+  // the hold themselves when the episode resolves (accept/decline/withdraw,
+  // or the owning booking is cancelled/completed) — this is only a backstop
+  // for a hold left dangling by a crash or a path that missed that cleanup.
+  const staleBlockedSlots = await prisma.workerAvailability.findMany({
+    where: { isBlocked: true, blockedByBookingId: { not: null } },
+  });
+
+  for (const slot of staleBlockedSlots) {
+    const holdingBooking = await prisma.booking.findUnique({
+      where: { id: slot.blockedByBookingId! },
+      select: { status: true, rescheduleRequestRespondedAt: true },
+    });
+
+    const stale =
+      !holdingBooking ||
+      holdingBooking.status === 'COMPLETED' ||
+      holdingBooking.status === 'CANCELLED' ||
+      holdingBooking.rescheduleRequestRespondedAt != null;
+
+    if (stale) {
+      await prisma.workerAvailability.update({
+        where: { id: slot.id },
+        data: { isBlocked: false, blockedByBookingId: null },
+      });
+    }
+  }
+}
+
+/**
+ * Daily sweep (see B8) that rolls every worker's recurring weekly template
+ * (see WorkerAvailabilityTemplate / workerController.updateMyAvailabilityTemplate)
+ * forward into real WorkerAvailability rows, so the open booking horizon
+ * keeps advancing instead of only covering the day the template was saved.
+ */
+export async function materializeAvailabilityTemplates(): Promise<void> {
+  const workerProfileIds = await prisma.workerAvailabilityTemplate.findMany({
+    distinct: ['workerProfileId'],
+    select: { workerProfileId: true },
+  });
+
+  for (const { workerProfileId } of workerProfileIds) {
+    await materializeTemplateForWorker(prisma, workerProfileId);
   }
 }
 
@@ -666,6 +715,9 @@ export async function startBookingWorker() {
           break;
         case JOB_NAMES.RESCHEDULE_REQUEST_TIMEOUT_SWEEP:
           await remindAndAutoDeclineRescheduleRequests();
+          break;
+        case JOB_NAMES.MATERIALIZE_AVAILABILITY_TEMPLATES:
+          await materializeAvailabilityTemplates();
           break;
         default:
           console.warn(`Unknown booking queue job: ${job.name}`);

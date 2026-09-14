@@ -11,6 +11,7 @@ export const JOB_NAMES = {
   RESET_AVAILABILITY: 'reset-expired-availability-slots',
   RESCHEDULE_TIMEOUT_SWEEP: 'reschedule-timeout-sweep',
   RESCHEDULE_REQUEST_TIMEOUT_SWEEP: 'reschedule-request-timeout-sweep',
+  MATERIALIZE_AVAILABILITY_TEMPLATES: 'materialize-availability-templates',
 } as const;
 
 // Stable jobIds for the repeatable ticks so re-registering them on every
@@ -21,6 +22,7 @@ export const REPEATABLE_JOB_IDS = {
   RESET_AVAILABILITY: 'reset-expired-availability-slots-daily',
   RESCHEDULE_TIMEOUT_SWEEP: 'reschedule-timeout-sweep-hourly',
   RESCHEDULE_REQUEST_TIMEOUT_SWEEP: 'reschedule-request-timeout-sweep-hourly',
+  MATERIALIZE_AVAILABILITY_TEMPLATES: 'materialize-availability-templates-daily',
 } as const;
 
 export interface ExpirePendingBookingJobData {
@@ -134,6 +136,17 @@ export async function registerRepeatableBookingJobs(): Promise<void> {
     {
       jobId: REPEATABLE_JOB_IDS.RESCHEDULE_REQUEST_TIMEOUT_SWEEP,
       repeat: { pattern: '0 * * * *' }, // every hour, on the hour
+      removeOnComplete: true,
+      removeOnFail: true,
+    }
+  );
+
+  await bookingQueue.add(
+    JOB_NAMES.MATERIALIZE_AVAILABILITY_TEMPLATES,
+    {},
+    {
+      jobId: REPEATABLE_JOB_IDS.MATERIALIZE_AVAILABILITY_TEMPLATES,
+      repeat: { pattern: '0 0 * * *' }, // daily at midnight
       removeOnComplete: true,
       removeOnFail: true,
     }

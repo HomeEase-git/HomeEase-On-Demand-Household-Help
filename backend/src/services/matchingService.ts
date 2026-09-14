@@ -11,6 +11,11 @@ export interface MatchCandidate {
   workerId: string;
   rating: number;
   completedJobs: number;
+  // Count of this worker's recent late cancellations (see B6 /
+  // Cancellation.cancelledWithinHours) within LATE_CANCEL_LOOKBACK_DAYS.
+  // Optional — omitted/0 for callers (and existing tests) that don't track
+  // it, in which case it applies no penalty.
+  lateCancelCount?: number;
 }
 
 export interface ScoredCandidate extends MatchCandidate {
@@ -34,6 +39,17 @@ export const MATCH_WEIGHTS = {
   randomness: 0.1,
 } as const;
 
+// A cancellation counts as "late" (see cancelBooking's cancelledWithinHours)
+// under this many hours of notice.
+export const LATE_CANCEL_THRESHOLD_HOURS = 24;
+// Only recent history counts — an old rough patch shouldn't permanently
+// suppress a worker's ranking.
+export const LATE_CANCEL_LOOKBACK_DAYS = 90;
+// Subtracted from the weighted score (not part of the 100% above — this is
+// a penalty, not a positive signal), scaled up to this many incidents.
+export const LATE_CANCEL_PENALTY_WEIGHT = 0.15;
+export const LATE_CANCEL_PENALTY_CAP = 3;
+
 const clamp01 = (n: number): number => Math.min(1, Math.max(0, n));
 
 /**
@@ -52,11 +68,13 @@ export function scoreCandidates(
     const ratingScore = clamp01(c.rating / 5);
     const completedScore = clamp01(c.completedJobs / maxCompleted);
     const randomScore = clamp01(random());
+    const lateCancelPenalty = LATE_CANCEL_PENALTY_WEIGHT * clamp01((c.lateCancelCount ?? 0) / LATE_CANCEL_PENALTY_CAP);
 
     const score =
       MATCH_WEIGHTS.rating * ratingScore +
       MATCH_WEIGHTS.completedJobs * completedScore +
-      MATCH_WEIGHTS.randomness * randomScore;
+      MATCH_WEIGHTS.randomness * randomScore -
+      lateCancelPenalty;
 
     return { ...c, score };
   });
@@ -257,11 +275,25 @@ export async function findAutoMatchWorker(params: AutoMatchParams): Promise<Auto
   });
   const completedByWorkerId = new Map(completedCounts.map((c) => [c.workerId as string, c._count._all]));
 
+  const lateCancelSince = new Date(Date.now() - LATE_CANCEL_LOOKBACK_DAYS * 24 * 60 * 60 * 1000);
+  const lateCancelCounts = await prisma.cancellation.groupBy({
+    by: ['cancelledById'],
+    where: {
+      cancelledById: { in: inRangeWorkers.map((w) => w.userId) },
+      cancelledBy: 'WORKER',
+      cancelledWithinHours: { lt: LATE_CANCEL_THRESHOLD_HOURS },
+      createdAt: { gte: lateCancelSince },
+    },
+    _count: { _all: true },
+  });
+  const lateCancelByWorkerId = new Map(lateCancelCounts.map((c) => [c.cancelledById, c._count._all]));
+
   const candidates: (MatchCandidate & { workerProfileId: string })[] = inRangeWorkers.map((w) => ({
     workerId: w.userId,
     workerProfileId: w.id,
     rating: w.rating,
     completedJobs: completedByWorkerId.get(w.userId) ?? 0,
+    lateCancelCount: lateCancelByWorkerId.get(w.userId) ?? 0,
   }));
 
   const best = selectBestCandidate(candidates);

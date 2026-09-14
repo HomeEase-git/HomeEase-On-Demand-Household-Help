@@ -22,6 +22,8 @@ import {
   blockSlotForExtend,
   findNextOpenSlot,
   RESCHEDULE_SEARCH_WINDOW_DAYS,
+  isOutsideBookedWindow,
+  getSlotStartInstant,
 } from '@services/workerAvailabilityService';
 import { calculateWorkerPayout, computeBookingFinalTotal, computeJobPricing, VAT_RATE } from '@utils/pricing';
 import { buildCapabilityFilters } from '@services/matchingService';
@@ -1253,13 +1255,27 @@ export const arriveBooking = async (req: AuthRequest, res: Response) => {
       );
     }
 
+    const arrivedAt = new Date();
+    // Flag-only, per C9 — never blocks the check-in itself, just surfaces a
+    // suspicious early/late/wrong-day arrival for admin dispute review.
+    // timeSlot is nullable only for legacy rows predating the column; skip
+    // the check rather than flag when it's unknown.
+    const outsideWindow = booking.timeSlot ? isOutsideBookedWindow(booking.scheduledDate, booking.timeSlot, arrivedAt) : false;
+
     const [arrival, updated] = await prisma.$transaction([
       prisma.arrivalVerification.create({
-        data: { bookingId: id, workerLat: lat, workerLng: lng, distanceMeters: distance, isVerified: true },
+        data: {
+          bookingId: id,
+          workerLat: lat,
+          workerLng: lng,
+          distanceMeters: distance,
+          isVerified: true,
+          isOutsideBookedWindow: outsideWindow,
+        },
       }),
       prisma.booking.update({
         where: { id },
-        data: { workerArrivedAt: new Date(), workerLat: lat, workerLng: lng },
+        data: { workerArrivedAt: arrivedAt, workerLat: lat, workerLng: lng },
       }),
     ]);
 
@@ -1271,6 +1287,29 @@ export const arriveBooking = async (req: AuthRequest, res: Response) => {
       relatedId: id,
     });
 
+    if (outsideWindow) {
+      const admins = await prisma.user.findMany({ where: { role: 'ADMIN', isDeleted: false }, select: { id: true } });
+      await Promise.all(
+        admins.map((admin) =>
+          notifyUser({
+            userId: admin.id,
+            type: 'BOOKING_ARRIVAL_FLAGGED',
+            title: 'Arrival Outside Booked Window',
+            message: `Worker checked in for booking ${formatDisplayId(id)} outside its booked date/time — flagged for review.`,
+            relatedId: id,
+          })
+        )
+      );
+      await writeAuditLog({
+        actorId: req.user.userId,
+        actorRole: req.user.role,
+        action: 'ARRIVAL_OUTSIDE_BOOKED_WINDOW',
+        category: 'STATUS_CHANGE',
+        message: `Worker checked in for booking ${formatDisplayId(id)} outside its booked date/time window`,
+        metadata: { bookingId: id, scheduledDate: booking.scheduledDate.toISOString(), timeSlot: booking.timeSlot, arrivedAt: arrivedAt.toISOString() },
+      });
+    }
+
     return res.status(200).json({
       success: true,
       message: 'Arrival verified successfully',
@@ -1281,6 +1320,7 @@ export const arriveBooking = async (req: AuthRequest, res: Response) => {
           id: arrival.id,
           distanceMeters: arrival.distanceMeters,
           isVerified: arrival.isVerified,
+          isOutsideBookedWindow: arrival.isOutsideBookedWindow,
           createdAt: arrival.createdAt,
         },
       },
@@ -2554,6 +2594,15 @@ export const cancelBooking = async (req: AuthRequest, res: Response) => {
 
     const cancelledByRole = req.user.role === 'WORKER' ? 'WORKER' : 'CLIENT';
 
+    // Notice given, in hours — feeds the auto-match penalty for repeated
+    // last-minute cancellations (see B6 / matchingService's lateCancelCount).
+    // Only meaningful for a WORKER backing out of a slot they'd already
+    // committed to; clamped at 0 if the slot had already started.
+    const cancelledWithinHours =
+      cancelledByRole === 'WORKER' && booking.timeSlot
+        ? Math.max(0, Math.round((getSlotStartInstant(booking.scheduledDate, booking.timeSlot).getTime() - Date.now()) / (60 * 60 * 1000)))
+        : null;
+
     const updated = await prisma.$transaction(async (tx) => {
       // If the job was occupying capacity and a calendar slot, free both up.
       // Covers every pre-completion status the state machine allows a
@@ -2606,6 +2655,7 @@ export const cancelBooking = async (req: AuthRequest, res: Response) => {
             : typeof reason === 'string'
               ? reason
               : null,
+          cancelledWithinHours,
         },
       });
 

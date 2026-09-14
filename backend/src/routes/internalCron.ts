@@ -7,6 +7,7 @@ import {
   resetExpiredAvailabilitySlots,
   remindAndAutoConfirmReschedules,
   remindAndAutoDeclineRescheduleRequests,
+  materializeAvailabilityTemplates,
 } from '@workers/bookingWorker';
 import { expireOverduePendingBookings } from '@services/pendingExpirySweep';
 
@@ -19,6 +20,7 @@ const TASKS = {
   'expire-pending': expireOverduePendingBookings,
   'confirm-reschedules': remindAndAutoConfirmReschedules,
   'decline-reschedule-requests': remindAndAutoDeclineRescheduleRequests,
+  'materialize-availability-templates': materializeAvailabilityTemplates,
 } satisfies Record<string, () => Promise<unknown>>;
 
 type TaskName = keyof typeof TASKS;

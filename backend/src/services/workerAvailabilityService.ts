@@ -10,6 +10,43 @@ export function toDayStart(date: Date | string): Date {
   return d;
 }
 
+// The Philippines doesn't observe DST, so a fixed offset is always correct
+// for converting a UTC instant to PH local wall-clock time.
+const PH_UTC_OFFSET_MS = 8 * 60 * 60 * 1000;
+
+// PH-local hour ranges each TimeSlot represents — mirrors mobile's
+// TIME_SLOT_HOURS display labels (8am-12pm / 12pm-4pm / 4pm-8pm).
+const TIME_SLOT_HOUR_RANGES: Record<TimeSlot, { startHour: number; endHour: number }> = {
+  MORNING: { startHour: 8, endHour: 12 },
+  AFTERNOON: { startHour: 12, endHour: 16 },
+  EVENING: { startHour: 16, endHour: 20 },
+};
+
+/** The real UTC instant a booked slot starts, given its PH-local hour window. */
+export function getSlotStartInstant(scheduledDate: Date, timeSlot: TimeSlot): Date {
+  const bookedDay = toDayStart(scheduledDate);
+  const { startHour } = TIME_SLOT_HOUR_RANGES[timeSlot];
+  return new Date(bookedDay.getTime() + startHour * 60 * 60 * 1000 - PH_UTC_OFFSET_MS);
+}
+
+/**
+ * Whether `at` (an instant, e.g. a worker's arrival check-in) falls outside
+ * the booked slot's PH-local date and hour window. Used only to flag a
+ * suspicious/early/late arrival for admin dispute visibility — never to
+ * block the check-in itself.
+ */
+export function isOutsideBookedWindow(scheduledDate: Date, timeSlot: TimeSlot, at: Date): boolean {
+  const phAt = new Date(at.getTime() + PH_UTC_OFFSET_MS);
+  const phDay = new Date(Date.UTC(phAt.getUTCFullYear(), phAt.getUTCMonth(), phAt.getUTCDate()));
+  const bookedDay = toDayStart(scheduledDate);
+
+  if (phDay.getTime() !== bookedDay.getTime()) return true;
+
+  const { startHour, endHour } = TIME_SLOT_HOUR_RANGES[timeSlot];
+  const phHour = phAt.getUTCHours();
+  return phHour < startHour || phHour >= endHour;
+}
+
 type DbClient = typeof prisma | Prisma.TransactionClient;
 
 export function findSlot(db: DbClient, workerProfileId: string, date: Date, timeSlot: TimeSlot) {
@@ -111,4 +148,92 @@ export async function findNextOpenSlot(
     }
   }
   return null;
+}
+
+// How far ahead a recurring weekly template (see B8 / WorkerAvailabilityTemplate)
+// gets materialized into real WorkerAvailability rows. Re-run daily (see
+// bookingWorker.materializeAvailabilityTemplates) so the open horizon keeps
+// rolling forward instead of only covering the day the template was saved.
+export const TEMPLATE_MATERIALIZE_DAYS_AHEAD = 30;
+
+/**
+ * Opens WorkerAvailability rows matching one worker's recurring weekly
+ * template for the next TEMPLATE_MATERIALIZE_DAYS_AHEAD days. Create-only —
+ * never touches a row that already exists, so a manual close or a bulk
+ * "mark unavailable" block (see setUnavailableRange) always wins over the
+ * template, and re-running this is always safe/idempotent.
+ */
+export async function materializeTemplateForWorker(db: DbClient, workerProfileId: string): Promise<void> {
+  const template = await db.workerAvailabilityTemplate.findMany({ where: { workerProfileId } });
+  if (template.length === 0) return;
+
+  const timeSlotsByDayOfWeek = new Map<number, TimeSlot[]>();
+  for (const row of template) {
+    if (!timeSlotsByDayOfWeek.has(row.dayOfWeek)) timeSlotsByDayOfWeek.set(row.dayOfWeek, []);
+    timeSlotsByDayOfWeek.get(row.dayOfWeek)!.push(row.timeSlot);
+  }
+
+  const today = toDayStart(new Date());
+  for (let i = 0; i < TEMPLATE_MATERIALIZE_DAYS_AHEAD; i++) {
+    const date = new Date(today);
+    date.setUTCDate(date.getUTCDate() + i);
+    const timeSlots = timeSlotsByDayOfWeek.get(date.getUTCDay());
+    if (!timeSlots) continue;
+
+    for (const timeSlot of timeSlots) {
+      const existing = await findSlot(db, workerProfileId, date, timeSlot);
+      if (!existing) {
+        await db.workerAvailability.create({ data: { workerProfileId, date, timeSlot, isBlocked: false } });
+      }
+    }
+  }
+}
+
+/**
+ * Bulk "mark unavailable" (see B8) — blocks every TimeSlot across
+ * [startDate, endDate] (inclusive), for a vacation/leave stretch. All-or-
+ * nothing, matching updateAvailabilitySlots' existing conflict rule: if any
+ * date/slot in range already has an active booking, nothing is written and
+ * every conflict is returned so the caller can report them all at once
+ * (rather than the worker discovering conflicts one at a time).
+ */
+export async function setUnavailableRange(
+  db: DbClient,
+  workerProfileId: string,
+  startDate: Date,
+  endDate: Date,
+  timeSlots: readonly TimeSlot[]
+): Promise<{ blocked: number; conflicts: Array<{ date: string; timeSlot: TimeSlot }> }> {
+  const start = toDayStart(startDate);
+  const end = toDayStart(endDate);
+
+  const dates: Date[] = [];
+  for (const date = new Date(start); date.getTime() <= end.getTime(); date.setUTCDate(date.getUTCDate() + 1)) {
+    dates.push(new Date(date));
+  }
+
+  const conflicts: Array<{ date: string; timeSlot: TimeSlot }> = [];
+  for (const date of dates) {
+    for (const timeSlot of timeSlots) {
+      const existing = await findSlot(db, workerProfileId, date, timeSlot);
+      if (existing?.isBooked) {
+        conflicts.push({ date: date.toISOString().slice(0, 10), timeSlot });
+      }
+    }
+  }
+  if (conflicts.length > 0) {
+    return { blocked: 0, conflicts };
+  }
+
+  for (const date of dates) {
+    for (const timeSlot of timeSlots) {
+      await db.workerAvailability.upsert({
+        where: { workerProfileId_date_timeSlot: { workerProfileId, date, timeSlot } },
+        create: { workerProfileId, date, timeSlot, isBlocked: true },
+        update: { isBlocked: true },
+      });
+    }
+  }
+
+  return { blocked: dates.length * timeSlots.length, conflicts: [] };
 }

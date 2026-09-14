@@ -1,7 +1,7 @@
 import { Request, Response } from 'express';
 import prisma from '@config/database';
 import { errorResponse } from '@utils/errorResponse';
-import { toDayStart } from '@services/workerAvailabilityService';
+import { toDayStart, materializeTemplateForWorker, setUnavailableRange } from '@services/workerAvailabilityService';
 import { getAppSettings } from '@services/appSettingsService';
 import { parseWorkerResume } from '@services/resumeParseService';
 import { computeWorkerTier, tierMultiplier } from '@utils/workerTier';
@@ -2381,3 +2381,153 @@ class ActiveBookingConflictError extends Error {
     super(`Slot ${timeSlot} on ${date} has an active booking`);
   }
 }
+
+/**
+ * GET /api/workers/me/availability-template
+ * A worker's recurring weekly pattern (see B8) — distinct from the concrete,
+ * per-date WorkerAvailability rows above. Materialized forward into those
+ * rows by materializeTemplateForWorker (called here on save, and again daily
+ * by the sweep — see bookingWorker.materializeAvailabilityTemplates).
+ */
+export const getMyAvailabilityTemplate = async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      return res.status(401).json(errorResponse(401, 'Not authenticated'));
+    }
+
+    const workerProfile = await prisma.workerProfile.findUnique({
+      where: { userId: req.user.userId },
+      select: { id: true },
+    });
+    if (!workerProfile) {
+      return res.status(404).json(errorResponse(404, 'Worker profile not found'));
+    }
+
+    const template = await prisma.workerAvailabilityTemplate.findMany({
+      where: { workerProfileId: workerProfile.id },
+      orderBy: [{ dayOfWeek: 'asc' }, { timeSlot: 'asc' }],
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: 'Availability template retrieved successfully',
+      data: { template: template.map((t) => ({ dayOfWeek: t.dayOfWeek, timeSlot: t.timeSlot })) },
+    });
+  } catch (error) {
+    console.error('Error fetching availability template:', error);
+    return res.status(500).json(errorResponse(500, 'Failed to fetch availability template'));
+  }
+};
+
+/**
+ * PUT /api/workers/me/availability-template
+ * Body: { days: [{ dayOfWeek, timeSlot }] } — dayOfWeek is 0=Sun..6=Sat.
+ * Fully replaces the worker's template, then immediately materializes it
+ * forward so the effect is visible right away rather than waiting for
+ * tomorrow's sweep.
+ */
+export const updateMyAvailabilityTemplate = async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      return res.status(401).json(errorResponse(401, 'Not authenticated'));
+    }
+
+    const { days } = req.body as { days: Array<{ dayOfWeek: number; timeSlot: TimeSlot }> };
+    if (!Array.isArray(days)) {
+      return res.status(400).json(errorResponse(400, 'days must be an array of { dayOfWeek, timeSlot }'));
+    }
+    for (const d of days) {
+      if (
+        typeof d.dayOfWeek !== 'number' ||
+        d.dayOfWeek < 0 ||
+        d.dayOfWeek > 6 ||
+        !VALID_TIME_SLOTS.includes(d.timeSlot)
+      ) {
+        return res.status(400).json(errorResponse(400, 'Each day must have dayOfWeek 0-6 and a valid timeSlot'));
+      }
+    }
+
+    const workerProfile = await prisma.workerProfile.findUnique({
+      where: { userId: req.user.userId },
+      select: { id: true },
+    });
+    if (!workerProfile) {
+      return res.status(404).json(errorResponse(404, 'Worker profile not found'));
+    }
+
+    await prisma.$transaction([
+      prisma.workerAvailabilityTemplate.deleteMany({ where: { workerProfileId: workerProfile.id } }),
+      prisma.workerAvailabilityTemplate.createMany({
+        data: days.map((d) => ({ workerProfileId: workerProfile.id, dayOfWeek: d.dayOfWeek, timeSlot: d.timeSlot })),
+      }),
+    ]);
+
+    await materializeTemplateForWorker(prisma, workerProfile.id);
+
+    return res.status(200).json({
+      success: true,
+      message: 'Availability template updated successfully',
+      data: { days },
+    });
+  } catch (error) {
+    console.error('Error updating availability template:', error);
+    return res.status(500).json(errorResponse(500, 'Failed to update availability template'));
+  }
+};
+
+/**
+ * POST /api/workers/me/availability/unavailable-range
+ * Body: { startDate, endDate } (YYYY-MM-DD, inclusive) — bulk "mark
+ * unavailable" for a vacation/leave stretch (see B8), covering every
+ * TimeSlot across the range in one call. All-or-nothing: if any date/slot in
+ * range already has an active booking, nothing is changed and every
+ * conflict is reported at once (409), mirroring updateAvailabilitySlots'
+ * existing rule that a worker can't close a slot out from under a booking.
+ */
+export const bulkSetUnavailable = async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      return res.status(401).json(errorResponse(401, 'Not authenticated'));
+    }
+
+    const { startDate, endDate } = req.body as { startDate: string; endDate: string };
+    if (
+      typeof startDate !== 'string' ||
+      typeof endDate !== 'string' ||
+      isNaN(new Date(startDate).getTime()) ||
+      isNaN(new Date(endDate).getTime())
+    ) {
+      return res.status(400).json(errorResponse(400, 'startDate and endDate must be valid YYYY-MM-DD dates'));
+    }
+    const start = toDayStart(startDate);
+    const end = toDayStart(endDate);
+    if (start.getTime() > end.getTime()) {
+      return res.status(400).json(errorResponse(400, 'startDate must not be after endDate'));
+    }
+
+    const workerProfile = await prisma.workerProfile.findUnique({
+      where: { userId: req.user.userId },
+      select: { id: true },
+    });
+    if (!workerProfile) {
+      return res.status(404).json(errorResponse(404, 'Worker profile not found'));
+    }
+
+    const result = await setUnavailableRange(prisma, workerProfile.id, start, end, VALID_TIME_SLOTS);
+    if (result.conflicts.length > 0) {
+      return res.status(409).json({
+        ...errorResponse(409, `${result.conflicts.length} slot(s) in this range have an active booking and can't be closed`),
+        conflicts: result.conflicts,
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: 'Marked unavailable for the selected range',
+      data: { blocked: result.blocked },
+    });
+  } catch (error) {
+    console.error('Error setting unavailable range:', error);
+    return res.status(500).json(errorResponse(500, 'Failed to mark this range unavailable'));
+  }
+};

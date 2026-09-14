@@ -30,6 +30,9 @@ import {
   getMyTaxCertificates,
   getMyAvailabilitySlots,
   updateAvailabilitySlots,
+  getMyAvailabilityTemplate,
+  updateMyAvailabilityTemplate,
+  bulkSetUnavailable,
   parseMyResume,
   listMyPackages,
   createPackage,
@@ -166,5 +169,9 @@ router.patch(
   validateUpdateAvailabilitySlots,
   updateAvailabilitySlots
 );
+
+router.get('/me/availability-template', authMiddleware, restrictTo('WORKER'), getMyAvailabilityTemplate);
+router.put('/me/availability-template', authMiddleware, restrictTo('WORKER'), updateMyAvailabilityTemplate);
+router.post('/me/availability/unavailable-range', authMiddleware, restrictTo('WORKER'), bulkSetUnavailable);
 
 export default router;

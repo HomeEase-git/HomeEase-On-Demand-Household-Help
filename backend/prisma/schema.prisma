@@ -155,6 +155,7 @@ enum NotificationType {
   BOOKING_RESCHEDULE_REQUESTED
   BOOKING_RESCHEDULE_REQUEST_ACCEPTED
   BOOKING_RESCHEDULE_REQUEST_DECLINED
+  BOOKING_ARRIVAL_FLAGGED
 }
 
 enum TimeSlot {
@@ -469,6 +470,7 @@ model WorkerProfile {
   reviews            Review[]
   resumeParseResult  ResumeParseResult?
   availability       WorkerAvailability[]
+  availabilityTemplate WorkerAvailabilityTemplate[]
   packages           WorkerPackage[]
   taskPrices         WorkerTaskPrice[]
   debtLedger         DebtLedgerEntry[]
@@ -510,6 +512,25 @@ model WorkerAvailability {
 
   @@unique([workerProfileId, date, timeSlot])
   @@index([workerProfileId, date])
+}
+
+// A worker's recurring weekly pattern (see B8) — materializeAvailabilityTemplates
+// uses this to auto-open matching WorkerAvailability rows on a rolling
+// forward window, so a worker with a stable schedule doesn't have to
+// manually re-open the same days every week. Only ever CREATES rows that
+// don't exist yet; never flips an existing row (a manual close, or a bulk
+// "mark unavailable" block) back open.
+model WorkerAvailabilityTemplate {
+  id              String        @id @default(cuid())
+  workerProfileId String
+  workerProfile   WorkerProfile @relation(fields: [workerProfileId], references: [id], onDelete: Cascade)
+
+  dayOfWeek Int // 0=Sun ... 6=Sat, matches WorkerProfile.availableDays convention
+  timeSlot  TimeSlot
+
+  createdAt DateTime @default(now())
+
+  @@unique([workerProfileId, dayOfWeek, timeSlot])
 }
 
 // ============================================================================
@@ -1080,6 +1101,10 @@ model ArrivalVerification {
   workerLng      Float
   distanceMeters Float
   isVerified     Boolean @default(false) // within the accepted geofence radius
+  // Flag-only (see C9) — true when the check-in fell outside the booking's
+  // scheduled date/timeSlot window. Never blocks arrival, just surfaces it
+  // for admin dispute review.
+  isOutsideBookedWindow Boolean @default(false)
 
   createdAt DateTime @default(now())
 }
@@ -1092,6 +1117,12 @@ model Cancellation {
   cancelledBy   Role // CLIENT, WORKER, or ADMIN
   cancelledById String // soft reference to the user who cancelled
   reason        String?
+  // Hours of notice between this cancellation and the booking's scheduled
+  // slot start — only recorded for WORKER cancellations (see B6), since
+  // those are the ones that leave a client stranded on short notice. 0 means
+  // the slot had already started (or passed) at cancel time. Null for
+  // CLIENT/ADMIN cancellations, where "notice" isn't the relevant signal.
+  cancelledWithinHours Int?
 
   createdAt DateTime @default(now())
 }
