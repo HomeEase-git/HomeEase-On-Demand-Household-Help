@@ -14,10 +14,14 @@ import { useAlertModal } from "../../../contexts/AlertModalContext";
 import { TIME_SLOTS, TIME_SLOT_LABELS, type TimeSlot } from "../../../types/booking4step.types";
 
 const DAYS_AHEAD = 7;
-const MAX_SLOTS_PER_DAY = 2;
+const DEFAULT_MAX_SLOTS_PER_DAY = 2;
 
+// Local-calendar formatting, not toISOString() — that converts through UTC
+// first, which silently rolls the date back a day for any UTC+ timezone
+// (e.g. PH, UTC+8) when called on a local midnight Date. Mirrors the same
+// fix in booking4step/DateGridPicker.tsx.
 function toIsoDate(d: Date): string {
-  return d.toISOString().slice(0, 10);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
 type DaySlotState = Record<TimeSlot, { open: boolean; booked: boolean }>;
@@ -42,6 +46,7 @@ export default function AvailabilityScreen() {
   const [isAvailable, setIsAvailable] = useState(true);
   const [initialIsAvailable, setInitialIsAvailable] = useState(true);
   const [schedule, setSchedule] = useState<Record<string, DaySlotState>>({});
+  const [maxSlotsPerDay, setMaxSlotsPerDay] = useState(DEFAULT_MAX_SLOTS_PER_DAY);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
@@ -51,16 +56,17 @@ export default function AvailabilityScreen() {
       if (!user?.id) return;
       setLoading(true);
       try {
-        const [detail, slots] = await Promise.all([api.getWorkerDetail(user.id), api.getMyAvailabilitySlots()]);
+        const [detail, slotsResponse] = await Promise.all([api.getWorkerDetail(user.id), api.getMyAvailabilitySlots()]);
         if (!active) return;
 
         if (detail) {
           setIsAvailable(detail.isAvailable);
           setInitialIsAvailable(detail.isAvailable);
         }
+        setMaxSlotsPerDay(slotsResponse.maxSlotsPerDay);
 
         const byDate = new Map<string, WorkerAvailabilitySlot[]>();
-        for (const slot of slots) {
+        for (const slot of slotsResponse.slots) {
           const dateKey = slot.date.slice(0, 10);
           if (!byDate.has(dateKey)) byDate.set(dateKey, []);
           byDate.get(dateKey)!.push(slot);
@@ -99,8 +105,8 @@ export default function AvailabilityScreen() {
 
       if (!current.open) {
         const openCount = TIME_SLOTS.filter((s) => day[s].open).length;
-        if (openCount >= MAX_SLOTS_PER_DAY) {
-          alertModal.warning("Max 2 slots per day", "Turn off another slot on this day first.");
+        if (openCount >= maxSlotsPerDay) {
+          alertModal.warning(`Max ${maxSlotsPerDay} slots per day`, "Turn off another slot on this day first.");
           return prev;
         }
       }
@@ -174,7 +180,7 @@ export default function AvailabilityScreen() {
 
         <Text className="text-text-primary font-bold text-base mb-1">Next 7 days</Text>
         <Text className="text-text-muted text-xs mb-4">
-          Tap a slot to open/close it. Max {MAX_SLOTS_PER_DAY} slots per day. Slots with an active booking can&apos;t
+          Tap a slot to open/close it. Max {maxSlotsPerDay} slots per day. Slots with an active booking can&apos;t
           be closed.
         </Text>
 
