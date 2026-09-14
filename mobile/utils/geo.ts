@@ -123,7 +123,7 @@ export async function geocodeAddress(address: string): Promise<PlaceResult | nul
       formatted_address: viaGoogle.formattedAddress,
       geometry: { location: { lat: viaGoogle.lat, lng: viaGoogle.lng } },
       components: viaGoogle.components,
-      approximate: !PRECISE_GOOGLE_LOCATION_TYPES.has(viaGoogle.locationType),
+      approximate: viaGoogle.partialMatch || !PRECISE_GOOGLE_LOCATION_TYPES.has(viaGoogle.locationType),
     };
   }
 

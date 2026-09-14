@@ -812,6 +812,7 @@ export type GoogleGeocodeResult = {
   lat: number;
   lng: number;
   locationType: string;
+  partialMatch: boolean;
   components: {
     houseNumber?: string;
     street?: string;

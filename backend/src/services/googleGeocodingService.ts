@@ -17,6 +17,13 @@ export type GoogleGeocodeResult = {
   // tell the user when a pin isn't exact, same as the existing `approximate`
   // flag on the Nominatim fallback path.
   locationType: string;
+  // True when Google couldn't match every component of the query (e.g. an
+  // unrecognized barangay name) and substituted the nearest place it does
+  // know — confirmed live: "Bangungon, Paombong, Bulacan" partial-matches to
+  // "San Pedro" (a neighboring sublocality) at ROOFTOP precision. The pin can
+  // still be rooftop-precise for wherever it DID match, but that place isn't
+  // necessarily the one asked for, so this should count as approximate too.
+  partialMatch: boolean;
   components: {
     houseNumber?: string;
     street?: string;
@@ -73,6 +80,7 @@ async function callGeocodeApi(params: Record<string, string>): Promise<GoogleGeo
     lat: result.geometry.location.lat,
     lng: result.geometry.location.lng,
     locationType: result.geometry.location_type,
+    partialMatch: !!result.partial_match,
     components: parseComponents(result.address_components),
   };
 }
