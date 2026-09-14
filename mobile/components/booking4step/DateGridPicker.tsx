@@ -48,6 +48,11 @@ type Props = {
   selectedDate: string | null;
   onSelect: (isoDate: string) => void;
   unavailableDates?: string[];
+  // Overrides for non-client-booking reuse (e.g. a worker's own vacation-range
+  // picker, which has no minimum lead time and wants a longer horizon).
+  // Default to the booking-flow constants above when omitted.
+  minLeadDays?: number;
+  daysAhead?: number;
 };
 
 /**
@@ -57,7 +62,13 @@ type Props = {
  * shape stays intact). The nearest MIN_LEAD_DAYS days (today included) are
  * disabled the same way — not bookable at all, regardless of price.
  */
-export default function DateGridPicker({ selectedDate, onSelect, unavailableDates = [] }: Props) {
+export default function DateGridPicker({
+  selectedDate,
+  onSelect,
+  unavailableDates = [],
+  minLeadDays = MIN_LEAD_DAYS,
+  daysAhead = DAYS_AHEAD,
+}: Props) {
   const today = useMemo(() => {
     const d = new Date();
     d.setHours(0, 0, 0, 0);
@@ -66,15 +77,15 @@ export default function DateGridPicker({ selectedDate, onSelect, unavailableDate
 
   const minSelectableDate = useMemo(() => {
     const d = new Date(today);
-    d.setDate(d.getDate() + MIN_LEAD_DAYS);
+    d.setDate(d.getDate() + minLeadDays);
     return d;
-  }, [today]);
+  }, [today, minLeadDays]);
 
   const maxDate = useMemo(() => {
     const d = new Date(today);
-    d.setDate(d.getDate() + DAYS_AHEAD - 1);
+    d.setDate(d.getDate() + daysAhead - 1);
     return d;
-  }, [today]);
+  }, [today, daysAhead]);
 
   const [viewYear, setViewYear] = useState(today.getFullYear());
   const [viewMonth, setViewMonth] = useState(today.getMonth());

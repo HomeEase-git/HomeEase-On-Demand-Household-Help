@@ -1537,6 +1537,52 @@ export async function updateAvailabilitySlots(
   }
 }
 
+export interface AvailabilityTemplateDay {
+  dayOfWeek: number; // 0=Sun ... 6=Sat
+  timeSlot: TimeSlot;
+}
+
+/**
+ * GET/PUT /workers/me/availability-template — a worker's recurring weekly
+ * pattern (see B8), distinct from the concrete per-date slots above. Saving
+ * it immediately opens matching slots ~30 days ahead and keeps rolling that
+ * window forward daily, so a worker with a stable schedule doesn't have to
+ * re-open the same days every week.
+ */
+export async function getMyAvailabilityTemplate(): Promise<AvailabilityTemplateDay[]> {
+  try {
+    const response = await api.get('/workers/me/availability-template');
+    return response.template ?? [];
+  } catch (error) {
+    console.error('Get availability template error:', error);
+    throw error;
+  }
+}
+
+export async function updateMyAvailabilityTemplate(days: AvailabilityTemplateDay[]): Promise<void> {
+  try {
+    await api.put('/workers/me/availability-template', { days });
+  } catch (error) {
+    console.error('Update availability template error:', error);
+    throw error;
+  }
+}
+
+/**
+ * POST /workers/me/availability/unavailable-range — bulk "mark unavailable"
+ * for a vacation/leave stretch (see B8). All-or-nothing: rejects (409) if
+ * any date/slot in range already has an active booking.
+ */
+export async function setUnavailableRange(startDate: string, endDate: string): Promise<{ blocked: number }> {
+  try {
+    const response = await api.post('/workers/me/availability/unavailable-range', { startDate, endDate });
+    return { blocked: response.blocked ?? 0 };
+  } catch (error) {
+    console.error('Set unavailable range error:', error);
+    throw error;
+  }
+}
+
 export interface MyWorkerProfileDetails {
   bio: string | null;
   serviceAreaRadius: number | null;

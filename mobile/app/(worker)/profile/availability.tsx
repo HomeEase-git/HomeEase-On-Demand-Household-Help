@@ -178,6 +178,27 @@ export default function AvailabilityScreen() {
           />
         </View>
 
+        <View className="flex-row gap-3 mb-6">
+          <Pressable
+            onPress={() => router.push("/(worker)/profile/availability-template")}
+            className="flex-1 bg-card rounded-2xl p-3.5 flex-row items-center gap-2"
+            style={cardShadow}
+          >
+            <Ionicons name="repeat" size={18} color={colors.brand.DEFAULT} />
+            <Text className="text-text-primary font-semibold text-xs flex-1">Repeat Weekly</Text>
+            <Ionicons name="chevron-forward" size={16} color={colors.text.muted} />
+          </Pressable>
+          <Pressable
+            onPress={() => router.push("/(worker)/profile/availability-vacation")}
+            className="flex-1 bg-card rounded-2xl p-3.5 flex-row items-center gap-2"
+            style={cardShadow}
+          >
+            <Ionicons name="airplane" size={18} color={colors.brand.DEFAULT} />
+            <Text className="text-text-primary font-semibold text-xs flex-1">Mark Unavailable</Text>
+            <Ionicons name="chevron-forward" size={16} color={colors.text.muted} />
+          </Pressable>
+        </View>
+
         <Text className="text-text-primary font-bold text-base mb-1">Next 7 days</Text>
         <Text className="text-text-muted text-xs mb-4">
           Tap a slot to open/close it. Max {maxSlotsPerDay} slots per day. Slots with an active booking can&apos;t
