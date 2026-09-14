@@ -14,13 +14,22 @@ import {
   createCompletionInvoice,
   refundOrVoidPayment,
 } from '@services/paymentLifecycleService';
-import { toDayStart, findSlot, markSlotBooked, freeSlot } from '@services/workerAvailabilityService';
+import {
+  toDayStart,
+  findSlot,
+  markSlotBooked,
+  freeSlot,
+  blockSlotForExtend,
+  findNextOpenSlot,
+  RESCHEDULE_SEARCH_WINDOW_DAYS,
+} from '@services/workerAvailabilityService';
 import { calculateWorkerPayout, computeBookingFinalTotal, computeJobPricing, VAT_RATE } from '@utils/pricing';
 import { buildCapabilityFilters } from '@services/matchingService';
 import { schedulePendingExpiry, cancelPendingExpiryJob } from '@queues/bookingQueue';
 import { VALID_TRANSITIONS, isValidTransition } from '@services/bookingStateMachine';
 import { getAppSettings } from '@services/appSettingsService';
 import { computeWorkerTier, tierMultiplier } from '@utils/workerTier';
+import { VALID_TIME_SLOTS } from '@/constants/bookingEnums';
 import { getIO } from '../socket';
 import type { JwtPayload } from '@/types/index';
 
@@ -836,6 +845,13 @@ export const getBookingDetail = async (req: AuthRequest, res: Response) => {
         scheduledTime: booking.scheduledTime,
         timeSlot: booking.timeSlot,
         urgencyLevel: booking.urgencyLevel,
+        // Reschedule-on-conflict (see extendBooking) — rescheduleAcknowledgedAt
+        // null means this is still an open episode awaiting the client's
+        // explicit keep-the-date response (or the 24h auto-confirm sweep).
+        rescheduledAt: booking.rescheduledAt,
+        previousScheduledDate: booking.previousScheduledDate,
+        previousTimeSlot: booking.previousTimeSlot,
+        rescheduleAcknowledgedAt: booking.rescheduleAcknowledgedAt,
         rooms: booking.rooms,
         condition: booking.condition,
         scopeAnswers: booking.scopeAnswers,
@@ -1386,6 +1402,278 @@ export const startBooking = async (req: AuthRequest, res: Response) => {
 };
 
 /**
+ * PATCH /api/bookings/:id/extend
+ * Worker signals a job is running into a second day. Reserves tomorrow's
+ * calendar for the spillover, and — for any other booking of theirs that
+ * collides with it — reschedules it to the worker's next open day (same
+ * TimeSlot), or escalates to an admin-visible dispute if none is found
+ * within RESCHEDULE_SEARCH_WINDOW_DAYS. Deliberately a side-channel field
+ * change, not a new BookingStatus (mirrors arriveBooking writing
+ * workerArrivedAt without transitioning status) — this booking's own status
+ * is untouched by this endpoint.
+ *
+ * Narrow and worker/system-triggered by design — NOT the general client-
+ * facing "reschedule whenever" feature removed 2026-08-17, and not the
+ * client-initiated reschedule-request either (a client never calls this).
+ */
+export const extendBooking = async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user || req.user.role !== 'WORKER') {
+      return res.status(403).json(errorResponse(403, 'Only workers can extend a job'));
+    }
+
+    const id = req.params.id as string;
+    const booking = await prisma.booking.findUnique({ where: { id } });
+
+    if (!booking) {
+      return res.status(404).json(errorResponse(404, 'Booking not found'));
+    }
+    if (booking.workerId !== req.user.userId) {
+      return res.status(403).json(errorResponse(403, 'This booking is not assigned to you'));
+    }
+    if (booking.status !== 'IN_PROGRESS') {
+      return res.status(409).json(errorResponse(409, `Cannot extend a booking with status ${booking.status}`));
+    }
+
+    const workerProfile = await prisma.workerProfile.findUnique({
+      where: { userId: req.user.userId },
+      select: { id: true, availableDays: true },
+    });
+    if (!workerProfile) {
+      return res.status(404).json(errorResponse(404, 'Worker profile not found'));
+    }
+
+    // Anchored to whichever is later: tomorrow relative to right now, or the
+    // day after this booking's ORIGINALLY scheduled date. Plain "tomorrow
+    // relative to now" breaks if the job spills past midnight before the
+    // worker taps this — at 1am on what's now day 2, "tomorrow" would
+    // resolve to day 3, skipping the day actually being worked. A repeat
+    // call (spillover into a third day) still correctly advances past
+    // whichever day was already reserved, since scheduledDate never moves
+    // on the ORIGINAL booking — only the anchor's "now" component changes.
+    const now = new Date();
+    const tomorrowFromNow = toDayStart(now);
+    tomorrowFromNow.setUTCDate(tomorrowFromNow.getUTCDate() + 1);
+    const dayAfterScheduled = toDayStart(booking.scheduledDate);
+    dayAfterScheduled.setUTCDate(dayAfterScheduled.getUTCDate() + 1);
+    const targetDate = tomorrowFromNow.getTime() > dayAfterScheduled.getTime() ? tomorrowFromNow : dayAfterScheduled;
+
+    const { moved, escalated } = await prisma.$transaction(async (tx) => {
+      const moved: { bookingId: string; clientId: string; newDate: Date }[] = [];
+      const escalated: { bookingId: string; clientId: string }[] = [];
+
+      for (const timeSlot of VALID_TIME_SLOTS) {
+        const collision = await tx.booking.findFirst({
+          where: {
+            workerId: req.user!.userId,
+            scheduledDate: targetDate,
+            timeSlot,
+            status: { in: ['PENDING', 'ACCEPTED'] },
+          },
+        });
+
+        if (collision) {
+          let handled = false;
+          let searchFrom = targetDate;
+
+          for (let attempt = 0; attempt < RESCHEDULE_SEARCH_WINDOW_DAYS; attempt++) {
+            const nextOpenDate = await findNextOpenSlot(tx, workerProfile.id, workerProfile.availableDays, searchFrom, timeSlot);
+            if (!nextOpenDate) break;
+
+            try {
+              // Keyed by the collision's expected pre-move fields — a second,
+              // overlapping /extend call racing the same collision matches 0
+              // rows here and silently no-ops instead of double-moving it.
+              const moveResult = await tx.booking.updateMany({
+                where: {
+                  id: collision.id,
+                  scheduledDate: collision.scheduledDate,
+                  timeSlot: collision.timeSlot,
+                  status: { in: ['PENDING', 'ACCEPTED'] },
+                },
+                data: {
+                  scheduledDate: nextOpenDate,
+                  rescheduledAt: new Date(),
+                  previousScheduledDate: collision.scheduledDate,
+                  previousTimeSlot: collision.timeSlot,
+                  rescheduledFromBookingId: booking.id,
+                  rescheduleAcknowledgedAt: null,
+                  rescheduleReminderSentAt: null,
+                },
+              });
+
+              if (moveResult.count === 1) {
+                // Non-null — the collision was found by filtering on this
+                // exact timeSlot above, Booking.timeSlot is just nullable in
+                // the schema for rows that predate it being required.
+                await freeSlot(tx, workerProfile.id, collision.scheduledDate, collision.timeSlot!);
+                await markSlotBooked(tx, workerProfile.id, nextOpenDate, timeSlot);
+                moved.push({ bookingId: collision.id, clientId: collision.clientId, newDate: nextOpenDate });
+              }
+              // count === 0: an overlapping call already moved this exact
+              // collision — treat as handled either way, nothing left to do.
+              handled = true;
+              break;
+            } catch {
+              // worker_slot_unique hit — this candidate day was claimed by a
+              // real booking between the search and the move. Advance one
+              // more day within the same bound and try again.
+              searchFrom = nextOpenDate;
+            }
+          }
+
+          if (!handled) {
+            escalated.push({ bookingId: collision.id, clientId: collision.clientId });
+          }
+        }
+
+        // Reserve targetDate for THIS booking's own spillover regardless of
+        // whether a collision existed there, moved, or got escalated — the
+        // worker still needs the day either way.
+        await blockSlotForExtend(tx, workerProfile.id, targetDate, timeSlot, booking.id);
+      }
+
+      return { moved, escalated };
+    });
+
+    await Promise.all(
+      moved.map((m) =>
+        notifyUser({
+          userId: m.clientId,
+          type: 'BOOKING_RESCHEDULED',
+          title: 'Your Booking Was Moved',
+          message: `Your pro needs another day for a previous job — we moved your booking to ${m.newDate.toLocaleDateString('en-PH', { month: 'short', day: 'numeric' })}. Keep the new date or cancel free of charge.`,
+          relatedId: m.bookingId,
+        })
+      )
+    );
+
+    for (const e of escalated) {
+      const existingDispute = await prisma.dispute.findFirst({
+        where: { bookingId: e.bookingId, status: { in: ['OPEN', 'UNDER_REVIEW'] } },
+      });
+      if (existingDispute) continue;
+
+      const dispute = await prisma.dispute.create({
+        data: {
+          bookingId: e.bookingId,
+          raisedById: req.user.userId,
+          reason: 'A worker needed another day for a previous job and no open slot was found within 14 days to move this booking to.',
+          status: 'OPEN',
+        },
+      });
+
+      const admins = await prisma.user.findMany({ where: { role: 'ADMIN', isDeleted: false }, select: { id: true } });
+      await Promise.all(
+        admins.map((admin) =>
+          notifyUser({
+            userId: admin.id,
+            type: 'BOOKING_RESCHEDULE_ESCALATED',
+            title: 'Reschedule Needs Attention',
+            message: `Booking ${formatDisplayId(e.bookingId)} couldn't be rescheduled automatically — no open slot found for its worker within 14 days.`,
+            relatedId: dispute.id,
+          })
+        )
+      );
+
+      await notifyUser({
+        userId: e.clientId,
+        type: 'BOOKING_RESCHEDULE_ESCALATED',
+        title: 'Your Booking Needs Rescheduling',
+        message: 'Your pro needs another day for a previous job and we could not find a new slot automatically — support will reach out to reschedule this with you.',
+        relatedId: e.bookingId,
+      });
+    }
+
+    await writeAuditLog({
+      actorId: req.user.userId,
+      actorRole: req.user.role,
+      action: 'BOOKING_EXTENDED',
+      category: 'STATUS_CHANGE',
+      message: `Booking ${formatDisplayId(id)} extended into ${targetDate.toISOString().slice(0, 10)} — ${moved.length} booking(s) rescheduled, ${escalated.length} escalated`,
+      metadata: { bookingId: id, targetDate: targetDate.toISOString(), moved: moved.length, escalated: escalated.length },
+    });
+
+    return res.status(200).json({
+      success: true,
+      message:
+        escalated.length > 0
+          ? `Reserved tomorrow. ${moved.length} booking(s) rescheduled; ${escalated.length} escalated to support.`
+          : `Reserved tomorrow.${moved.length > 0 ? ` ${moved.length} booking(s) rescheduled automatically.` : ''}`,
+      data: { targetDate, resolved: moved.length, escalated: escalated.length },
+    });
+  } catch (error) {
+    console.error('Error extending booking:', error);
+    return res.status(500).json(errorResponse(500, 'Failed to extend booking'));
+  }
+};
+
+/**
+ * PATCH /api/bookings/:id/acknowledge-reschedule
+ * Client explicitly keeps the new date for a booking a worker's spillover
+ * moved (see extendBooking) — status-preserving, just resolves the
+ * reschedule episode. The client's other option is the existing cancel
+ * flow, which cancelBooking's hasPendingReschedule carve-out lets through
+ * fee-free while this is still unresolved.
+ */
+export const acknowledgeReschedule = async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user || req.user.role !== 'CLIENT') {
+      return res.status(403).json(errorResponse(403, 'Only the client can acknowledge a reschedule'));
+    }
+
+    const id = req.params.id as string;
+    const booking = await prisma.booking.findUnique({ where: { id } });
+
+    if (!booking) {
+      return res.status(404).json(errorResponse(404, 'Booking not found'));
+    }
+    if (booking.clientId !== req.user.userId) {
+      return res.status(403).json(errorResponse(403, 'This booking does not belong to you'));
+    }
+    if (booking.rescheduledAt == null) {
+      return res.status(409).json(errorResponse(409, 'This booking has not been rescheduled'));
+    }
+    if (booking.rescheduleAcknowledgedAt != null) {
+      return res.status(409).json(errorResponse(409, 'This reschedule has already been acknowledged'));
+    }
+
+    const updated = await prisma.booking.update({
+      where: { id },
+      data: { rescheduleAcknowledgedAt: new Date() },
+    });
+
+    if (booking.workerId) {
+      await notifyUser({
+        userId: booking.workerId,
+        type: 'BOOKING_RESCHEDULE_CONFIRMED',
+        title: 'New Date Confirmed',
+        message: 'The client confirmed the new date for this booking.',
+        relatedId: id,
+      });
+    }
+
+    await writeAuditLog({
+      actorId: req.user.userId,
+      actorRole: req.user.role,
+      action: 'BOOKING_RESCHEDULE_ACKNOWLEDGED',
+      category: 'STATUS_CHANGE',
+      message: `Client confirmed the new date for booking ${formatDisplayId(id)}`,
+      metadata: { bookingId: id },
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: 'New date confirmed',
+      data: { id: updated.id, scheduledDate: updated.scheduledDate, timeSlot: updated.timeSlot },
+    });
+  } catch (error) {
+    console.error('Error acknowledging reschedule:', error);
+    return res.status(500).json(errorResponse(500, 'Failed to acknowledge reschedule'));
+  }
+};
+
+/**
  * POST /api/bookings/:id/quote
  * Worker submits a quote for additional costs on top of the booking's
  * already-settled estimatedPrice (the labor cost, agreed at booking time).
@@ -1744,6 +2032,14 @@ export const completeBooking = async (req: AuthRequest, res: Response) => {
         if (booking.timeSlot) {
           await freeSlot(tx, workerProfile.id, booking.scheduledDate, booking.timeSlot);
         }
+
+        // Same reasoning as cancelBooking's mirrored cleanup — releases any
+        // never-claimed future calendar block this booking created via
+        // /extend, now that the job it was reserved for is actually done.
+        await tx.workerAvailability.updateMany({
+          where: { workerProfileId: workerProfile.id, blockedByBookingId: booking.id, isBooked: false },
+          data: { isBlocked: false, blockedByBookingId: null },
+        });
       }
 
       return b;
@@ -1921,13 +2217,21 @@ export const cancelBooking = async (req: AuthRequest, res: Response) => {
       return res.status(403).json(errorResponse(403, 'You do not have permission to cancel this booking'));
     }
 
+    // A booking a worker's spillover moved to a new date is the one
+    // exception to the rule below — the client didn't choose to be moved,
+    // so declining the new date is a free cancel, not backing out of a job
+    // they already committed to. Resolved (explicitly kept, or auto-confirmed
+    // — see remindAndAutoConfirmReschedules) the moment rescheduleAcknowledgedAt
+    // is set, at which point this carve-out stops applying.
+    const hasPendingReschedule = booking.rescheduledAt != null && booking.rescheduleAcknowledgedAt == null;
+
     // A client's cancellation window closes the moment a worker accepts —
     // by then the worker has committed real capacity and a calendar slot to
     // this job, so backing out is no longer the client's call (a worker
     // still can, from ACCEPTED onward, per the state machine below — e.g.
     // an emergency on their end). This is a hard rule, not a fee: there is
     // no "cancel for a charge" path past PENDING for the client, by design.
-    if (req.user.role === 'CLIENT' && booking.status !== 'PENDING') {
+    if (req.user.role === 'CLIENT' && booking.status !== 'PENDING' && !hasPendingReschedule) {
       return res.status(409).json(
         errorResponse(
           409,
@@ -1966,12 +2270,34 @@ export const cancelBooking = async (req: AuthRequest, res: Response) => {
         }
       }
 
+      // Releases any never-claimed future calendar block this booking
+      // created via /extend (see extendBooking) — otherwise a worker's
+      // reserved spillover day survives the very booking that reserved it.
+      // isBooked: false excludes a block a real different booking has since
+      // moved into (see extendBooking's own move logic), which must stay put.
+      if (booking.workerId) {
+        const workerProfile = await tx.workerProfile.findUnique({
+          where: { userId: booking.workerId },
+          select: { id: true },
+        });
+        if (workerProfile) {
+          await tx.workerAvailability.updateMany({
+            where: { workerProfileId: workerProfile.id, blockedByBookingId: booking.id, isBooked: false },
+            data: { isBlocked: false, blockedByBookingId: null },
+          });
+        }
+      }
+
       await tx.cancellation.create({
         data: {
           bookingId: id,
           cancelledBy: cancelledByRole,
           cancelledById: req.user!.userId,
-          reason: typeof reason === 'string' ? reason : null,
+          reason: hasPendingReschedule
+            ? 'CLIENT_DECLINED_RESCHEDULE'
+            : typeof reason === 'string'
+              ? reason
+              : null,
         },
       });
 
@@ -1979,7 +2305,7 @@ export const cancelBooking = async (req: AuthRequest, res: Response) => {
         where: { id },
         data: {
           status: 'CANCELLED',
-          notes: reason, // schema has no cancelReason; storing in notes
+          notes: reason, // schema has no cancelReason; storing in notes — kept as the client's own free-text reason even when Cancellation.reason is the CLIENT_DECLINED_RESCHEDULE tag
         },
       });
     });

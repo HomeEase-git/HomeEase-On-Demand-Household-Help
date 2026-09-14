@@ -5,6 +5,7 @@ import {
   remindAndAutoSettleCompletions,
   remindAndAutoApproveQuotes,
   resetExpiredAvailabilitySlots,
+  remindAndAutoConfirmReschedules,
 } from '@workers/bookingWorker';
 import { expireOverduePendingBookings } from '@services/pendingExpirySweep';
 
@@ -15,6 +16,7 @@ const TASKS = {
   'approve-quotes': remindAndAutoApproveQuotes,
   'reset-availability': resetExpiredAvailabilitySlots,
   'expire-pending': expireOverduePendingBookings,
+  'confirm-reschedules': remindAndAutoConfirmReschedules,
 } satisfies Record<string, () => Promise<unknown>>;
 
 type TaskName = keyof typeof TASKS;

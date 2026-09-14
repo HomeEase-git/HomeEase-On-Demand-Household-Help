@@ -148,6 +148,10 @@ enum NotificationType {
   ACCOUNT_HOLD_RELEASED
   VAT_REGISTRATION_APPROVED
   VAT_REGISTRATION_REJECTED
+  BOOKING_RESCHEDULED
+  BOOKING_RESCHEDULE_ESCALATED
+  BOOKING_RESCHEDULE_REMINDER
+  BOOKING_RESCHEDULE_CONFIRMED
 }
 
 enum TimeSlot {
@@ -488,6 +492,15 @@ model WorkerAvailability {
   timeSlot  TimeSlot
   isBlocked Boolean  @default(false) // worker explicitly marked this date/slot unavailable
   isBooked  Boolean  @default(false) // an active booking currently occupies this slot — blocks closing it
+
+  // Set when a worker's job overruns into this date/slot (see
+  // bookingController.extendBooking) — a reservation for that spillover
+  // work, not a real Booking. Soft reference (no FK, matches
+  // Cancellation.cancelledById's convention) to the original booking that
+  // caused the block, so cancelBooking/completeBooking/admin-cancel paths
+  // can tell "a block I created that nothing ever claimed" (isBooked: false
+  // -> safe to release) apart from a real booking now occupying it.
+  blockedByBookingId String?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -901,6 +914,24 @@ model Booking {
   // (see bookingWorker.remindAndAutoApproveQuotes) — prevents re-sending it
   // on every hourly sweep tick, distinct from the 24h auto-approve itself.
   quoteReminderSentAt DateTime?
+
+  // Reschedule-on-conflict — set when a DIFFERENT worker's booking spilled
+  // into this one's original slot (see bookingController.extendBooking) and
+  // this booking got moved to the worker's next open day for the same
+  // TimeSlot. Status/workflow stage is untouched — this is a side-channel
+  // schedule change, not a new BookingStatus (mirrors how arriveBooking
+  // writes workerArrivedAt without transitioning status). Overwritten (not
+  // appended) on a second hop if the spillover runs into a third+ day —
+  // always reflects the latest move.
+  rescheduledAt              DateTime?
+  previousScheduledDate      DateTime?
+  previousTimeSlot           TimeSlot?
+  rescheduledFromBookingId   String? // soft reference — the original spilling-over booking's id, same convention as Cancellation.cancelledById
+  rescheduleReminderSentAt   DateTime?
+  // Non-null = this reschedule episode is resolved (client explicitly kept
+  // the date, or the 24h auto-confirm fired) — doubles as the gate that lets
+  // cancelBooking's post-PENDING carve-out apply.
+  rescheduleAcknowledgedAt   DateTime?
 
   // Dispute resolution audit — who (admin userId, no FK to keep this a soft
   // reference like VerificationRequest.reviewedById) resolved it and when.

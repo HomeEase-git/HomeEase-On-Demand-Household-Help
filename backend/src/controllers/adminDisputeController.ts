@@ -228,6 +228,15 @@ export const resolveDispute = async (req: AuthRequest, res: Response) => {
           if (booking.timeSlot) {
             await freeSlot(tx, workerProfile.id, booking.scheduledDate, booking.timeSlot);
           }
+
+          // Same cleanup bookingController.cancelBooking/completeBooking do —
+          // a dispute resolved into CANCELLED is another path that can end a
+          // booking, and without this its /extend-reserved future calendar
+          // block (see bookingController.extendBooking) would survive it.
+          await tx.workerAvailability.updateMany({
+            where: { workerProfileId: workerProfile.id, blockedByBookingId: booking.id, isBooked: false },
+            data: { isBlocked: false, blockedByBookingId: null },
+          });
         }
 
         await tx.booking.update({

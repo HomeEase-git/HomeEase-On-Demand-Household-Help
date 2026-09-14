@@ -33,6 +33,11 @@ const PAYMENT_OVERDUE_DISPUTE_HOURS = 72;
 const RECONCILE_AFTER_HOURS = 1;
 const QUOTE_REMINDER_HOURS = 12;
 const QUOTE_AUTO_APPROVE_HOURS = 24;
+// Same shape as the quote-approval safety net above — a client who never
+// opens the app to explicitly keep/decline a reschedule shouldn't leave it
+// unresolved forever (see bookingController.extendBooking/acknowledgeReschedule).
+const RESCHEDULE_REMINDER_HOURS = 12;
+const RESCHEDULE_AUTO_CONFIRM_HOURS = 24;
 
 /**
  * A PENDING booking that no worker responded to within an hour is
@@ -421,6 +426,82 @@ export async function remindAndAutoApproveQuotes(): Promise<void> {
 }
 
 /**
+ * Client-response safety net for a rescheduled booking (see
+ * bookingController.extendBooking/acknowledgeReschedule) — same shape as
+ * remindAndAutoApproveQuotes: a 12h reminder, then an unresponsive client's
+ * new date auto-confirms at 24h so the episode doesn't sit open forever.
+ */
+export async function remindAndAutoConfirmReschedules(): Promise<void> {
+  const now = Date.now();
+  const reminderCutoff = new Date(now - RESCHEDULE_REMINDER_HOURS * HOUR_MS);
+  const autoConfirmCutoff = new Date(now - RESCHEDULE_AUTO_CONFIRM_HOURS * HOUR_MS);
+
+  const needsReminder = await prisma.booking.findMany({
+    where: {
+      rescheduledAt: { lte: reminderCutoff },
+      rescheduleReminderSentAt: null,
+      rescheduleAcknowledgedAt: null,
+    },
+  });
+
+  for (const booking of needsReminder) {
+    await notifyUser({
+      userId: booking.clientId,
+      type: 'BOOKING_RESCHEDULE_REMINDER',
+      title: 'Your booking was moved',
+      message: 'Your pro needs another day — review the new date and confirm or cancel.',
+      relatedId: booking.id,
+    });
+    await prisma.booking.update({
+      where: { id: booking.id },
+      data: { rescheduleReminderSentAt: new Date() },
+    });
+  }
+
+  const staleReschedules = await prisma.booking.findMany({
+    where: {
+      rescheduledAt: { lte: autoConfirmCutoff },
+      rescheduleAcknowledgedAt: null,
+    },
+  });
+
+  for (const booking of staleReschedules) {
+    try {
+      await prisma.booking.update({
+        where: { id: booking.id },
+        data: { rescheduleAcknowledgedAt: new Date() },
+      });
+
+      await notifyUser({
+        userId: booking.clientId,
+        type: 'BOOKING_RESCHEDULE_CONFIRMED',
+        title: 'New Date Confirmed',
+        message: "You didn't respond in time, so the new date was automatically kept.",
+        relatedId: booking.id,
+      });
+      if (booking.workerId) {
+        await notifyUser({
+          userId: booking.workerId,
+          type: 'BOOKING_RESCHEDULE_CONFIRMED',
+          title: 'New Date Confirmed',
+          message: 'The client did not respond in time, so the moved date was automatically confirmed.',
+          relatedId: booking.id,
+        });
+      }
+
+      await writeAuditLog({
+        action: 'BOOKING_RESCHEDULE_AUTO_CONFIRMED',
+        category: 'STATUS_CHANGE',
+        message: `Booking ${booking.id}'s rescheduled date auto-confirmed after 24h without client response`,
+        metadata: { bookingId: booking.id },
+      });
+    } catch (error) {
+      console.error(`Failed to auto-confirm reschedule for booking ${booking.id}:`, error);
+    }
+  }
+}
+
+/**
  * Clears stale isBooked flags on past-dated WorkerAvailability rows. A slot
  * can be left marked isBooked if a booking concluded through a path that
  * didn't explicitly free it (defense-in-depth self-heal, not the primary
@@ -473,6 +554,9 @@ export async function startBookingWorker() {
           break;
         case JOB_NAMES.RESET_AVAILABILITY:
           await resetExpiredAvailabilitySlots();
+          break;
+        case JOB_NAMES.RESCHEDULE_TIMEOUT_SWEEP:
+          await remindAndAutoConfirmReschedules();
           break;
         default:
           console.warn(`Unknown booking queue job: ${job.name}`);

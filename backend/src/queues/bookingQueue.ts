@@ -9,6 +9,7 @@ export const JOB_NAMES = {
   AUTO_SETTLE_COMPLETED: 'auto-settle-completed-bookings',
   QUOTE_TIMEOUT_SWEEP: 'quote-timeout-sweep',
   RESET_AVAILABILITY: 'reset-expired-availability-slots',
+  RESCHEDULE_TIMEOUT_SWEEP: 'reschedule-timeout-sweep',
 } as const;
 
 // Stable jobIds for the repeatable ticks so re-registering them on every
@@ -17,6 +18,7 @@ export const REPEATABLE_JOB_IDS = {
   AUTO_SETTLE_COMPLETED: 'auto-settle-completed-bookings-hourly',
   QUOTE_TIMEOUT_SWEEP: 'quote-timeout-sweep-hourly',
   RESET_AVAILABILITY: 'reset-expired-availability-slots-daily',
+  RESCHEDULE_TIMEOUT_SWEEP: 'reschedule-timeout-sweep-hourly',
 } as const;
 
 export interface ExpirePendingBookingJobData {
@@ -108,6 +110,17 @@ export async function registerRepeatableBookingJobs(): Promise<void> {
     {
       jobId: REPEATABLE_JOB_IDS.RESET_AVAILABILITY,
       repeat: { pattern: '0 0 * * *' }, // daily at midnight
+      removeOnComplete: true,
+      removeOnFail: true,
+    }
+  );
+
+  await bookingQueue.add(
+    JOB_NAMES.RESCHEDULE_TIMEOUT_SWEEP,
+    {},
+    {
+      jobId: REPEATABLE_JOB_IDS.RESCHEDULE_TIMEOUT_SWEEP,
+      repeat: { pattern: '0 * * * *' }, // every hour, on the hour
       removeOnComplete: true,
       removeOnFail: true,
     }

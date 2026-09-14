@@ -8,6 +8,8 @@ import {
   arriveBooking,
   updateWorkerLiveLocation,
   startBooking,
+  extendBooking,
+  acknowledgeReschedule,
   submitQuote,
   approveQuote,
   disputeQuote,
@@ -66,6 +68,13 @@ router.patch('/:id/live-location', restrictTo('WORKER'), validateLiveLocation, u
 
 // Start booking (worker only) — requires a prior verified arrival
 router.patch('/:id/start', restrictTo('WORKER'), startBooking);
+
+// Worker signals a job is running into a second day (worker only) — see
+// extendBooking's docblock for the reschedule-on-conflict behavior this triggers
+router.patch('/:id/extend', restrictTo('WORKER'), extendBooking);
+
+// Client keeps the new date for a booking a worker's spillover moved (client only)
+router.patch('/:id/acknowledge-reschedule', restrictTo('CLIENT'), acknowledgeReschedule);
 
 // Submit quote (worker only)
 router.post('/:id/quote', restrictTo('WORKER'), validateSubmitQuote, submitQuote);
