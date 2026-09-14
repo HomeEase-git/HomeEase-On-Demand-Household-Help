@@ -2172,6 +2172,39 @@ export const getMyTaxCertificates = async (req: AuthRequest, res: Response) => {
 };
 
 /**
+ * GET /api/workers/me/vat-summary
+ * The worker's own generated VAT-collected summaries (per period) — for
+ * their own 2550Q/2551Q filing. Informational only: this is never remitted
+ * by the platform (see VatCollectionSummary's schema comment).
+ */
+export const getMyVatSummary = async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      return res.status(401).json(errorResponse(401, 'Not authenticated'));
+    }
+
+    const summaries = await prisma.vatCollectionSummary.findMany({
+      where: { workerId: req.user.userId },
+      orderBy: { periodStart: 'desc' },
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: 'VAT summaries retrieved successfully',
+      data: summaries.map((s) => ({
+        id: s.id,
+        periodStart: s.periodStart,
+        periodEnd: s.periodEnd,
+        totalVatCollected: s.totalVatCollected,
+      })),
+    });
+  } catch (error) {
+    console.error('Error fetching VAT summaries:', error);
+    return res.status(500).json(errorResponse(500, 'Failed to fetch VAT summaries'));
+  }
+};
+
+/**
  * GET /api/workers/me/availability-slots?date=YYYY-MM-DD&timeSlot=MORNING
  * Fine-grained per-date/per-timeSlot availability (worker only). Distinct
  * from PATCH /me/availability (coarse isAvailable + weekly availableDays

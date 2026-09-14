@@ -37,6 +37,7 @@ export default function TaxInfoScreen() {
   const [taxInfo, setTaxInfo] = useState<api.TaxInfo | null>(null);
   const [certificates, setCertificates] = useState<api.TaxCertificate[]>([]);
   const [vatRegistration, setVatRegistration] = useState<api.VatRegistration | null>(null);
+  const [vatSummaries, setVatSummaries] = useState<api.VatSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [submittingVat, setSubmittingVat] = useState(false);
@@ -45,15 +46,17 @@ export default function TaxInfoScreen() {
     let active = true;
     async function load() {
       try {
-        const [info, certs, vat] = await Promise.all([
+        const [info, certs, vat, vatSummary] = await Promise.all([
           api.getTaxInfo(),
           api.getMyTaxCertificates(),
           api.getMyVatRegistration(),
+          api.getMyVatSummary(),
         ]);
         if (!active) return;
         setTaxInfo(info);
         setCertificates(certs);
         setVatRegistration(vat);
+        setVatSummaries(vatSummary);
       } catch (error) {
         console.error("Load tax info error:", error);
       } finally {
@@ -208,6 +211,35 @@ export default function TaxInfoScreen() {
             />
           )}
         </View>
+
+        {vatRegistration?.vatRegistered && (
+          <>
+            <Text className="text-text-primary font-bold mt-8 mb-2">VAT You Collected</Text>
+            <Text className="text-text-secondary text-xs mb-3">
+              For your own 2550Q/2551Q filing — not remitted by the platform. Ask an admin to generate a period's
+              summary if it's missing here.
+            </Text>
+            {vatSummaries.length === 0 ? (
+              <Text className="text-text-secondary text-sm">No summaries generated yet.</Text>
+            ) : (
+              <FlatList
+                data={vatSummaries}
+                keyExtractor={(item) => item.id}
+                scrollEnabled={false}
+                renderItem={({ item }) => (
+                  <View className="bg-card rounded-2xl p-3 mb-2" style={cardShadow}>
+                    <Text className="text-text-primary font-semibold">
+                      {formatDate(item.periodStart)} – {formatDate(item.periodEnd)}
+                    </Text>
+                    <Text className="text-text-secondary text-xs mt-1">
+                      VAT collected: {formatPeso(item.totalVatCollected)}
+                    </Text>
+                  </View>
+                )}
+              />
+            )}
+          </>
+        )}
 
         <Text className="text-text-primary font-bold mt-8 mb-2">Tax Documents</Text>
         {certificates.length === 0 ? (

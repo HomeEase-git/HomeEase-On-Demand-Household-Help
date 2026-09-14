@@ -1712,6 +1712,25 @@ export async function setMyTaskPrice(
   }
 }
 
+export type VatSummary = {
+  id: string;
+  periodStart: string;
+  periodEnd: string;
+  totalVatCollected: number;
+};
+
+// Informational only — for the worker's own 2550Q/2551Q filing, never
+// remitted by the platform (see VatCollectionSummary's backend comment).
+export async function getMyVatSummary(): Promise<VatSummary[]> {
+  try {
+    const response = await api.get('/workers/me/vat-summary');
+    return Array.isArray(response) ? response : [];
+  } catch (error) {
+    console.error('Get VAT summary error:', error);
+    throw error;
+  }
+}
+
 export async function deleteMyTaskPrice(serviceTaskId: string) {
   try {
     await api.delete(`/workers/me/task-prices/${serviceTaskId}`);

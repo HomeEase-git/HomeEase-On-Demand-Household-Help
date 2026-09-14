@@ -26,6 +26,7 @@ import {
   updateTaxInfo,
   getMyVatRegistration,
   submitVatRegistration,
+  getMyVatSummary,
   getMyTaxCertificates,
   getMyAvailabilitySlots,
   updateAvailabilitySlots,
@@ -154,6 +155,7 @@ router.get('/me/tax-info', authMiddleware, restrictTo('WORKER'), getTaxInfo);
 router.patch('/me/tax-info', authMiddleware, restrictTo('WORKER'), validateUpdateTaxInfo, updateTaxInfo);
 router.get('/me/vat-registration', authMiddleware, restrictTo('WORKER'), getMyVatRegistration);
 router.post('/me/vat-registration', authMiddleware, restrictTo('WORKER'), submitVatRegistration);
+router.get('/me/vat-summary', authMiddleware, restrictTo('WORKER'), getMyVatSummary);
 router.get('/me/tax-certificates', authMiddleware, restrictTo('WORKER'), getMyTaxCertificates);
 
 router.get('/me/availability-slots', authMiddleware, restrictTo('WORKER'), getMyAvailabilitySlots);

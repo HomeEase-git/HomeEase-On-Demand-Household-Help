@@ -7,6 +7,7 @@ import { buildPaginationMeta, getPaginationParams } from '@utils/pagination';
 import { writeAuditLog } from '@utils/auditLog';
 import { generateQuarterlyCertificates, getCertificateDownloadUrl } from '@services/taxCertificateService';
 import { summarizeRemittancePeriod, markPeriodRemitted } from '@services/taxRemittanceService';
+import { generateVatSummaries } from '@services/vatSummaryService';
 import type { JwtPayload } from '@/types/index';
 
 interface AuthRequest extends Request {
@@ -127,6 +128,78 @@ export const downloadCertificate = async (req: Request, res: Response) => {
   } catch (error) {
     console.error('Download tax certificate error:', error);
     return res.status(500).json(errorResponse(500, 'Failed to generate a download link'));
+  }
+};
+
+/**
+ * POST /api/admin/tax/vat-summary/generate
+ * Aggregates each worker's VAT collected (Payment.vatAmount, never
+ * Payout.amount) for the given period into VatCollectionSummary rows — an
+ * informational report for the worker's own filing, not a platform
+ * remittance obligation (see VatCollectionSummary's schema comment).
+ */
+export const generateVatSummary = async (req: AuthRequest, res: Response) => {
+  try {
+    const period = parsePeriod({ periodStart: req.body.periodStart, periodEnd: req.body.periodEnd });
+    if (!period) {
+      return res.status(400).json(errorResponse(400, 'periodStart and periodEnd must be valid dates with periodStart before periodEnd'));
+    }
+
+    const adminId = req.user?.userId as string;
+    const result = await generateVatSummaries(period.periodStart, period.periodEnd, adminId);
+
+    await writeAuditLog({
+      actorId: adminId,
+      action: 'VAT_SUMMARY_GENERATED',
+      category: 'ADMIN_ACTION',
+      message: `Admin generated ${result.generated} VAT summary/summaries for ${period.periodStart.toISOString().slice(0, 10)}–${period.periodEnd.toISOString().slice(0, 10)}`,
+      metadata: { ...period, ...result },
+    });
+
+    return res.status(201).json({
+      success: true,
+      message: `Generated ${result.generated} VAT summary/summaries.`,
+      data: result,
+    });
+  } catch (error) {
+    console.error('Generate VAT summary error:', error);
+    return res.status(500).json(errorResponse(500, 'Failed to generate VAT summary'));
+  }
+};
+
+/**
+ * GET /api/admin/tax/vat-summary
+ * Paginated list of generated VAT collection summaries, newest period first.
+ */
+export const listVatSummaries = async (req: Request, res: Response) => {
+  try {
+    const { page, limit, skip } = getPaginationParams(req.query);
+
+    const [records, total] = await Promise.all([
+      prisma.vatCollectionSummary.findMany({
+        orderBy: [{ periodStart: 'desc' }, { workerName: 'asc' }],
+        skip,
+        take: limit,
+      }),
+      prisma.vatCollectionSummary.count(),
+    ]);
+
+    return res.json({
+      success: true,
+      data: records.map((r) => ({
+        id: r.id,
+        workerId: r.workerId,
+        workerName: r.workerName,
+        periodStart: r.periodStart,
+        periodEnd: r.periodEnd,
+        totalVatCollected: r.totalVatCollected,
+        totalVatCollectedFormatted: formatPeso(r.totalVatCollected),
+      })),
+      meta: buildPaginationMeta(total, page, limit),
+    });
+  } catch (error) {
+    console.error('List VAT summaries error:', error);
+    return res.status(500).json(errorResponse(500, 'Failed to fetch VAT summaries'));
   }
 };
 
