@@ -11,7 +11,9 @@ import InvalidationBanner from "../../../../components/ui/InvalidationBanner";
 import ServiceCategorySelector, {
   type ServiceCategoryOption,
 } from "../../../../components/booking4step/ServiceCategorySelector";
+import TaskSelector from "../../../../components/booking4step/TaskSelector";
 import DynamicScopeFields from "../../../../components/booking4step/DynamicScopeFields";
+import type { ServiceTaskOption } from "../../../../types/booking4step.types";
 import PricingRangePreview from "../../../../components/booking4step/PricingRangePreview";
 import ImageSourcePickerBottomSheet from "../../../../components/bottom-sheets/ImageSourcePickerBottomSheet";
 import type { BottomSheetHandle } from "../../../../components/bottom-sheets/BottomSheetWrapper";
@@ -40,6 +42,7 @@ export default function BookingStep1Screen() {
   const [loadingCategories, setLoadingCategories] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [selectedCategory, setSelectedCategory] = useState<ServiceCategoryOption | null>(null);
+  const [selectedTask, setSelectedTask] = useState<ServiceTaskOption | null>(null);
   const [scopeAnswers, setScopeAnswers] = useState<Record<string, string | string[]>>({});
   const [description, setDescription] = useState(draft.description);
   const [issuePhotos, setIssuePhotos] = useState<string[]>(draft.issuePhotoUrls ?? []);
@@ -73,6 +76,22 @@ export default function BookingStep1Screen() {
                 maxValue: f.maxValue ?? null,
               }))
             : [],
+          tasks: Array.isArray(t.tasks)
+            ? t.tasks
+                .filter((task: any) => task.isActive)
+                .map((task: any) => ({
+                  id: task.id,
+                  name: task.name,
+                  description: task.description ?? null,
+                  basePrice: task.basePrice,
+                  pricingModel: task.pricingModel,
+                  minPrice: task.minPrice ?? null,
+                  maxPrice: task.maxPrice ?? null,
+                  unitLabel: task.unitLabel ?? null,
+                  quantityScopeFieldId: task.quantityScopeFieldId ?? null,
+                  isActive: task.isActive,
+                }))
+            : [],
         }));
         setCategories(options);
 
@@ -91,6 +110,10 @@ export default function BookingStep1Screen() {
               if (byLabel[f.label] !== undefined) restored[f.id] = byLabel[f.label];
             });
             setScopeAnswers(restored);
+          }
+          if (draft.serviceTaskId) {
+            const matchedTask = matched.tasks.find((task) => task.id === draft.serviceTaskId);
+            if (matchedTask) setSelectedTask(matchedTask);
           }
         }
       } catch {
@@ -131,21 +154,42 @@ export default function BookingStep1Screen() {
           })
       : categories;
 
+  // Every active task under the selected category — a category with none
+  // yet keeps today's flat-category-price booking unchanged.
+  const activeTasks = selectedCategory?.tasks ?? [];
+  const requiresTaskSelection = activeTasks.length > 0;
+  const isCustomQuoteTask = selectedTask?.pricingModel === "CUSTOM_QUOTE";
+
+  // A selected task's own admin-set range replaces the category's
+  // marketplace-wide range once picked — a specific task's real price bound
+  // is more useful than the category's widest possible spread. Custom-quote
+  // has no upfront range at all (worker quotes after inspecting), so it's
+  // fed 0/0 here and the preview is skipped entirely in the JSX below instead.
   const priceEstimate = useBookingPriceEstimate({
-    min: selectedCategory?.priceRangeMin ?? 0,
-    max: selectedCategory?.priceRangeMax ?? 0,
+    min: selectedTask ? (selectedTask.minPrice ?? 0) : (selectedCategory?.priceRangeMin ?? 0),
+    max: selectedTask ? (selectedTask.maxPrice ?? 0) : (selectedCategory?.priceRangeMax ?? 0),
   });
 
   const scopeComplete = !selectedCategory
     ? false
     : selectedCategory.scopeFields.every((f) => !f.required || hasAnswer(scopeAnswers[f.id]));
 
-  const canNext = !!selectedCategory && scopeComplete;
+  const taskComplete = !requiresTaskSelection || !!selectedTask;
+
+  const canNext = !!selectedCategory && taskComplete && scopeComplete;
 
   const handleCategorySelect = (cat: ServiceCategoryOption) => {
     setSelectedCategory(cat);
+    setSelectedTask(null);
     // Switching category can change its fields entirely — start clean
     // rather than carrying over answers that no longer apply.
+    setScopeAnswers({});
+  };
+
+  const handleTaskSelect = (task: ServiceTaskOption) => {
+    setSelectedTask(task);
+    // A different task can have a different (or no) quantity field — start
+    // clean, same reasoning as switching categories above.
     setScopeAnswers({});
   };
 
@@ -191,6 +235,15 @@ export default function BookingStep1Screen() {
       // spread is correct without Step 4 needing to re-derive it.
       categoryPriceRangeMin: selectedCategory!.priceRangeMin,
       categoryPriceRangeMax: selectedCategory!.priceRangeMax,
+      serviceTaskId: selectedTask?.id ?? null,
+      selectedTaskName: selectedTask?.name ?? null,
+      selectedTaskPricingModel: selectedTask?.pricingModel ?? null,
+      selectedTaskUnitLabel: selectedTask?.unitLabel ?? null,
+      selectedTaskPriceRangeMin: selectedTask?.minPrice ?? null,
+      selectedTaskPriceRangeMax: selectedTask?.maxPrice ?? null,
+      selectedTaskQuantityFieldLabel: selectedTask?.quantityScopeFieldId
+        ? (selectedCategory!.scopeFields.find((f) => f.id === selectedTask!.quantityScopeFieldId)?.label ?? null)
+        : null,
       description,
       scopeAnswers: labelAnswers,
       issuePhotoUrls: issuePhotos,
@@ -234,7 +287,14 @@ export default function BookingStep1Screen() {
           </Text>
         )}
 
-        {selectedCategory && (
+        {selectedCategory && requiresTaskSelection && (
+          <View className="mt-6">
+            <Text className="text-text-primary font-bold text-lg mb-3">What specifically?</Text>
+            <TaskSelector tasks={activeTasks} selectedId={selectedTask?.id ?? null} onSelect={handleTaskSelect} />
+          </View>
+        )}
+
+        {selectedCategory && (!requiresTaskSelection || selectedTask) && (
           <View className="mt-6">
             <DynamicScopeFields
               fields={selectedCategory.scopeFields}
@@ -244,9 +304,19 @@ export default function BookingStep1Screen() {
           </View>
         )}
 
-        <View className="mt-6">
-          <PricingRangePreview estimate={priceEstimate} />
-        </View>
+        {isCustomQuoteTask ? (
+          <View className="bg-brand rounded-2xl p-4 mt-6">
+            <Text className="text-white/70 text-xs font-medium">Estimated price</Text>
+            <Text className="text-white font-bold text-base mt-0.5">Quote after inspection</Text>
+            <Text className="text-white/60 text-xs mt-2">
+              Your pro will inspect the job and send a quote before any charge applies.
+            </Text>
+          </View>
+        ) : (
+          <View className="mt-6">
+            <PricingRangePreview estimate={priceEstimate} />
+          </View>
+        )}
 
         <Text className="text-text-secondary font-bold text-sm mb-1 mt-6">Description (optional)</Text>
         <InputField

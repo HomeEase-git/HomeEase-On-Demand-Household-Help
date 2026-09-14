@@ -103,10 +103,14 @@ export default function BookingStep4Screen() {
   const priorities = hasPets ? [PET_FRIENDLY_PRIORITY] : [];
   const effectiveDraft = { ...draft, paymentMethod, priorities, addOnToggles, tip };
   const validation = validateDraftForSubmit(effectiveDraft);
+  // A selected task's own admin range (same source Step 1 used) takes
+  // priority over the category-wide spread once one's been picked — only
+  // matters pre-worker-known (auto-match); a picked worker's real rate
+  // always wins inside the hook regardless of what's passed here.
   const priceEstimate = useBookingPriceEstimate(
     {
-      min: draft.categoryPriceRangeMin ?? draft.categoryBasePrice ?? 0,
-      max: draft.categoryPriceRangeMax ?? draft.categoryBasePrice ?? 0,
+      min: draft.selectedTaskPriceRangeMin ?? draft.categoryPriceRangeMin ?? draft.categoryBasePrice ?? 0,
+      max: draft.selectedTaskPriceRangeMax ?? draft.categoryPriceRangeMax ?? draft.categoryBasePrice ?? 0,
     },
     packagesTotal,
     tip
@@ -130,6 +134,7 @@ export default function BookingStep4Screen() {
   } = useWorkerDiscovery(
     {
       serviceType: draft.serviceType ?? undefined,
+      serviceTaskId: draft.serviceTaskId ?? undefined,
       date: draft.date ?? undefined,
       timeSlot: draft.timeSlot ?? undefined,
       scopeAnswers: draft.scopeAnswers,
@@ -218,6 +223,7 @@ export default function BookingStep4Screen() {
       const response = await api.createBooking({
         workerId: draft.isAutoMatched ? null : draft.workerId,
         serviceType: draft.serviceType || draft.category || "",
+        serviceTaskId: draft.serviceTaskId ?? undefined,
         description: draft.description || undefined,
         address: draft.address || "",
         city: draft.city,

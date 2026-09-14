@@ -90,10 +90,36 @@ export type WorkerCard = {
   rating: number;
   totalReviews: number;
   estimatedTotal: number | null;
+  // Only populated when the search was scoped to a PER_UNIT task — this
+  // worker's tier-adjusted rate, with no total (quantity isn't known to the
+  // backend yet). estimatedTotal stays null in that case; use this instead.
+  unitPrice: number | null;
   matchedServiceTypeId: string | null;
   badges: string[];
   openSlots: TimeSlot[];
   tier?: WorkerTier;
+};
+
+export const TASK_PRICING_MODELS = ['FIXED', 'PER_UNIT', 'CUSTOM_QUOTE'] as const;
+export type TaskPricingModel = (typeof TASK_PRICING_MODELS)[number];
+
+// A specific bookable job within a category (e.g. "Toilet Repair" under
+// "Plumbing Repair") — a worker prices these individually (see
+// WorkerTaskPrice), rather than every worker charging the category's one
+// flat basePrice. minPrice/maxPrice are the admin-allowed bound a worker's
+// own price must fall inside; both null for CUSTOM_QUOTE (worker quotes
+// on-site, no upfront price at all).
+export type ServiceTaskOption = {
+  id: string;
+  name: string;
+  description?: string | null;
+  basePrice: number;
+  pricingModel: TaskPricingModel;
+  minPrice: number | null;
+  maxPrice: number | null;
+  unitLabel: string | null;
+  quantityScopeFieldId: string | null;
+  isActive: boolean;
 };
 
 export type BookingAddOnInput = {

@@ -30,6 +30,7 @@ export default function BookingStep3Screen() {
   const { workers, loading, error } = useWorkerDiscovery(
     {
       serviceType: draft.serviceType ?? undefined,
+      serviceTaskId: draft.serviceTaskId ?? undefined,
       date: draft.date ?? undefined,
       timeSlot: draft.timeSlot ?? undefined,
       scopeAnswers: draft.scopeAnswers,
@@ -46,6 +47,7 @@ export default function BookingStep3Screen() {
       workerName: worker.fullName,
       workerTier: worker.tier ?? "STANDARD",
       workerEstimatedTotal: worker.estimatedTotal,
+      workerUnitPrice: worker.unitPrice,
       workerAvatar: worker.avatar,
       workerRating: worker.rating,
       serviceTypeId: worker.matchedServiceTypeId,
@@ -61,6 +63,7 @@ export default function BookingStep3Screen() {
       workerName: null,
       workerTier: null,
       workerEstimatedTotal: null,
+      workerUnitPrice: null,
       workerAvatar: null,
       workerRating: null,
       isAutoMatched: true,
@@ -156,6 +159,7 @@ export default function BookingStep3Screen() {
               worker={worker}
               selected={draft.workerId === worker.id}
               onSelect={() => selectWorker(worker)}
+              unitLabel={draft.selectedTaskUnitLabel}
             />
           ))}
 

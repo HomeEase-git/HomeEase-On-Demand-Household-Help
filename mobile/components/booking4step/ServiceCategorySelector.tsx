@@ -3,7 +3,7 @@ import { View, Text, Pressable } from "react-native";
 import { AppIcon as Ionicons } from "../icons/AppIcon";
 import { colors } from "../../constants";
 import { getCategoryIcon } from "../../utils/categoryIcons";
-import type { ScopeField } from "../../types/booking4step.types";
+import type { ScopeField, ServiceTaskOption } from "../../types/booking4step.types";
 
 export type ServiceCategoryOption = {
   id: string;
@@ -14,6 +14,7 @@ export type ServiceCategoryOption = {
   description?: string | null;
   scopeFields: ScopeField[];
   icon?: string | null;
+  tasks: ServiceTaskOption[];
 };
 
 type Props = {

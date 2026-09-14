@@ -18,9 +18,12 @@ type Props = {
   worker: WorkerCard;
   selected: boolean;
   onSelect: () => void;
+  // Set only when the search was scoped to a PER_UNIT task — labels
+  // worker.unitPrice as a rate rather than implying it's a total.
+  unitLabel?: string | null;
 };
 
-export default function DiscoveredWorkerCard({ worker, selected, onSelect }: Props) {
+export default function DiscoveredWorkerCard({ worker, selected, onSelect, unitLabel }: Props) {
   return (
     <Pressable
       accessibilityRole="radio"
@@ -66,9 +69,13 @@ export default function DiscoveredWorkerCard({ worker, selected, onSelect }: Pro
 
       <View className="flex-row items-center justify-between mt-3 pt-3 border-t border-divider">
         <View>
-          <Text className="text-text-muted text-xs">Est. total</Text>
+          <Text className="text-text-muted text-xs">{unitLabel ? "Rate" : "Est. total"}</Text>
           <Text className="text-accent font-bold text-sm">
-            {worker.estimatedTotal != null ? `₱${Math.round(worker.estimatedTotal)}` : "—"}
+            {worker.estimatedTotal != null
+              ? `₱${Math.round(worker.estimatedTotal)}`
+              : worker.unitPrice != null
+                ? `₱${Math.round(worker.unitPrice)}/${unitLabel}`
+                : "—"}
           </Text>
         </View>
         <View className="items-end">

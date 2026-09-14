@@ -110,6 +110,25 @@ export type DraftBooking = {
   categoryBasePrice?: number | null; // ServiceType.basePrice — legacy single-number fallback, kept for old drafts
   categoryPriceRangeMin?: number | null; // ServiceType-derived marketplace-wide price range for Steps 1-2's preview
   categoryPriceRangeMax?: number | null;
+  // The specific job within the category (e.g. "Toilet Repair" under
+  // "Plumbing Repair") a worker prices individually — see ServiceTask /
+  // WorkerTaskPrice. Null when the category has no tasks defined yet (falls
+  // back to today's flat category-price booking). Metadata alongside it is
+  // needed downstream (PER_UNIT's live price preview, quantity lookup) without
+  // re-fetching the category's task list at every step.
+  serviceTaskId?: string | null;
+  selectedTaskName?: string | null;
+  selectedTaskPricingModel?: 'FIXED' | 'PER_UNIT' | 'CUSTOM_QUOTE' | null;
+  selectedTaskUnitLabel?: string | null;
+  // The task's own admin-set bound — tighter/more accurate than the
+  // category-wide range once a specific task is picked. Null for
+  // CUSTOM_QUOTE (no upfront range at all).
+  selectedTaskPriceRangeMin?: number | null;
+  selectedTaskPriceRangeMax?: number | null;
+  // ServiceScopeField.label of the NUMBER field that supplies a PER_UNIT
+  // task's quantity — its answer already lives in scopeAnswers under this
+  // same label (it's an ordinary scope field), this just says which one.
+  selectedTaskQuantityFieldLabel?: string | null;
   selectedPackageIds: string[]; // WorkerPackage ids selected in Step 4 — resolved to priced add-ons server-side
   scopeAnswers?: Record<string, string | string[]>; // scope-step answers, keyed by ScopeField.label
   issuePhotoUrls?: string[]; // photos of the issue the client attached in Step 1, uploaded via POST /bookings/issue-photo/upload
@@ -122,6 +141,9 @@ export type DraftBooking = {
   // "book again" entry points that lock a worker before Step 1.
   workerTier?: WorkerTier | null;
   workerEstimatedTotal?: number | null;
+  // Only set when the selected task is PER_UNIT — this worker's tier-adjusted
+  // rate, for the live rate x quantity preview (see useBookingPriceEstimate).
+  workerUnitPrice?: number | null;
   workerAvatar?: string | null;
   workerRating?: number | null;
   isAutoMatched?: boolean;
@@ -245,6 +267,13 @@ const initialDraft: DraftBooking = {
   categoryBasePrice: null,
   categoryPriceRangeMin: null,
   categoryPriceRangeMax: null,
+  serviceTaskId: null,
+  selectedTaskName: null,
+  selectedTaskPricingModel: null,
+  selectedTaskUnitLabel: null,
+  selectedTaskQuantityFieldLabel: null,
+  selectedTaskPriceRangeMin: null,
+  selectedTaskPriceRangeMax: null,
   selectedPackageIds: [],
   scopeAnswers: {},
   issuePhotoUrls: [],
@@ -252,6 +281,7 @@ const initialDraft: DraftBooking = {
   priorities: [],
   addOnToggles: [],
   workerEstimatedTotal: null,
+  workerUnitPrice: null,
   workerAvatar: null,
   workerRating: null,
   isAutoMatched: false,
@@ -291,6 +321,7 @@ export const useBookingStore: UseBoundStore<StoreApi<BookingState>> = create<Boo
         if (!updatedDraft.workerLocked) {
           updatedDraft.workerId = null;
           updatedDraft.workerEstimatedTotal = null;
+          updatedDraft.workerUnitPrice = null;
           updatedDraft.isAutoMatched = false;
           updatedDraft.holdStartedAt = null;
         }
@@ -312,6 +343,7 @@ export const useBookingStore: UseBoundStore<StoreApi<BookingState>> = create<Boo
         updatedDraft.workerId = null;
         updatedDraft.workerName = null;
         updatedDraft.workerEstimatedTotal = null;
+        updatedDraft.workerUnitPrice = null;
         updatedDraft.isAutoMatched = false;
         updatedDraft.holdStartedAt = null;
         updatedDraft.lastInvalidationReason = "Your worker isn't confirmed for the new date/time, so we cleared your selection.";

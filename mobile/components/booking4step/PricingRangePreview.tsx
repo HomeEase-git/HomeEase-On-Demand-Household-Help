@@ -18,19 +18,26 @@ export default function PricingRangePreview({ estimate }: Props) {
   if (estimate.mode === "range") {
     const { min, max } = estimate.range;
     const hasSelection = max > 0;
+    const unitSuffix = estimate.unitLabel ? `/${estimate.unitLabel}` : "";
 
     return (
       <View className="bg-brand rounded-2xl p-4">
         <Text className="text-white/70 text-xs font-medium">
-          Estimated price
+          {estimate.unitLabel ? "Estimated rate" : "Estimated price"}
         </Text>
         <Text className="text-white font-bold text-2xl mt-0.5">
-          {hasSelection ? (min === max ? `~₱${Math.round(min)}` : `₱${Math.round(min)} – ₱${Math.round(max)}`) : "—"}
+          {hasSelection
+            ? min === max
+              ? `~₱${Math.round(min)}${unitSuffix}`
+              : `₱${Math.round(min)} – ₱${Math.round(max)}${unitSuffix}`
+            : "—"}
         </Text>
         <Text className="text-white/60 text-xs mt-2">
-          {hasSelection
-            ? "Exact price shown after you pick a time and worker"
-            : "Select a service to see pricing"}
+          {estimate.unitLabel
+            ? `Total depends on quantity — enter it above to see the full estimate`
+            : hasSelection
+              ? "Exact price shown after you pick a time and worker"
+              : "Select a service to see pricing"}
         </Text>
       </View>
     );
