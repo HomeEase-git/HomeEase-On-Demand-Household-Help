@@ -25,7 +25,7 @@ import {
 } from "../../../../services/api";
 import { colors } from "../../../../constants";
 import { useAlertModal } from "../../../../contexts/AlertModalContext";
-import type { ConditionType, RoomType, TimeSlot, UrgencyLevel } from "../../../../types/booking4step.types";
+import type { ConditionType, RoomType, TimeSlot } from "../../../../types/booking4step.types";
 
 type ApiBookingDetail = {
   id: string;
@@ -39,7 +39,6 @@ type ApiBookingDetail = {
   clientLat?: number | null;
   clientLng?: number | null;
   timeSlot?: TimeSlot | null;
-  urgencyLevel?: UrgencyLevel | null;
   condition?: ConditionType | null;
   rooms?: RoomType[];
   scopeAnswers?: Record<string, string | string[]> | null;

@@ -15,13 +15,12 @@ import AddressPickerBottomSheet, {
 import type { BottomSheetHandle } from "../../../../components/bottom-sheets/BottomSheetWrapper";
 import DateGridPicker from "../../../../components/booking4step/DateGridPicker";
 import TimeSlotPicker from "../../../../components/ui/TimeSlotPicker";
-import UrgencySelector from "../../../../components/booking4step/UrgencySelector";
 import { useBookingStore } from "../../../../store/bookingStore";
 import { useSlotAvailabilityCounts } from "../../../../hooks/useWorkerDiscovery";
 import * as api from "../../../../services/api";
 import { addressStorage } from "../../../../utils/storage";
 import { formatStructuredAddress, geocodeAddressWithFallback } from "../../../../utils/geo";
-import { TIME_SLOTS, type TimeSlot, type UrgencyLevel } from "../../../../types/booking4step.types";
+import { TIME_SLOTS, type TimeSlot } from "../../../../types/booking4step.types";
 
 const BOOKING_STEPS = ["Scope", "Schedule", "Who", "Confirm"];
 
@@ -38,7 +37,6 @@ export default function BookingStep2Screen() {
   const [city, setCity] = useState<string | undefined>(draft.city);
   const [date, setDate] = useState<string | null>(draft.date);
   const [timeSlot, setTimeSlot] = useState<TimeSlot | null>(draft.timeSlot);
-  const [urgencyLevel, setUrgencyLevel] = useState<UrgencyLevel>(draft.urgencyLevel ?? "STANDARD");
 
   const [addresses, setAddresses] = useState<SavedAddress[]>([]);
   const [loadingAddresses, setLoadingAddresses] = useState(true);
@@ -171,7 +169,7 @@ export default function BookingStep2Screen() {
       return;
     }
 
-    setDraft({ address, lat, lng, city, date, timeSlot, urgencyLevel });
+    setDraft({ address, lat, lng, city, date, timeSlot });
     router.push("/(client)/booking/new/step-3");
   };
 
@@ -214,9 +212,6 @@ export default function BookingStep2Screen() {
             different date, or go back and choose another pro.
           </Text>
         )}
-
-        <Text className="text-text-primary font-bold text-lg mt-6 mb-3">How urgent is this?</Text>
-        <UrgencySelector value={urgencyLevel} onChange={setUrgencyLevel} />
 
         <View className="mt-8">
           <PrimaryButton label="Next" fullWidth onPress={handleNext} />

@@ -7,19 +7,17 @@ type Props = {
 };
 
 /**
- * Dynamic pricing preview shown in Step 1/2 (category-rate estimate, no
- * worker chosen yet — "range" mode is a legacy name, it renders one
- * approximate price, not a low-high spread) and Step 3/4 (point estimate
- * with the worker's tier surcharge and add-ons factored in, once a worker
- * is picked or auto-match is confirmed). Client-side estimate for
- * responsive UX — see utils/bookingPriceEstimate.ts for why the authoritative
- * price always comes from the backend instead.
- *
+ * Dynamic pricing preview shown in Step 1/2 (a low-high range — the
+ * marketplace-wide spread for a category, or a locked worker's own spread
+ * for it, since no job-specific number is known yet) and Step 3/4 (an exact
+ * point estimate once a specific worker's real computed price is known).
+ * Client-side estimate for responsive UX — see utils/bookingPriceEstimate.ts
+ * for why the authoritative price always comes from the backend instead.
  */
 export default function PricingRangePreview({ estimate }: Props) {
   if (estimate.mode === "range") {
-    const { price } = estimate.range;
-    const hasSelection = price > 0;
+    const { min, max } = estimate.range;
+    const hasSelection = max > 0;
 
     return (
       <View className="bg-brand rounded-2xl p-4">
@@ -27,7 +25,7 @@ export default function PricingRangePreview({ estimate }: Props) {
           Estimated price
         </Text>
         <Text className="text-white font-bold text-2xl mt-0.5">
-          {hasSelection ? `~₱${Math.round(price)}` : "—"}
+          {hasSelection ? (min === max ? `~₱${Math.round(min)}` : `₱${Math.round(min)} – ₱${Math.round(max)}`) : "—"}
         </Text>
         <Text className="text-white/60 text-xs mt-2">
           {hasSelection

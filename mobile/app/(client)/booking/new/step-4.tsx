@@ -103,7 +103,14 @@ export default function BookingStep4Screen() {
   const priorities = hasPets ? [PET_FRIENDLY_PRIORITY] : [];
   const effectiveDraft = { ...draft, paymentMethod, priorities, addOnToggles, tip };
   const validation = validateDraftForSubmit(effectiveDraft);
-  const priceEstimate = useBookingPriceEstimate(draft.categoryBasePrice ?? 0, packagesTotal, tip);
+  const priceEstimate = useBookingPriceEstimate(
+    {
+      min: draft.categoryPriceRangeMin ?? draft.categoryBasePrice ?? 0,
+      max: draft.categoryPriceRangeMax ?? draft.categoryBasePrice ?? 0,
+    },
+    packagesTotal,
+    tip
+  );
   const scopeAnswersSummary = Object.entries(draft.scopeAnswers ?? {})
     .map(([label, value]) => `${label}: ${Array.isArray(value) ? value.join(", ") : value}`)
     .join(" · ");
@@ -218,7 +225,6 @@ export default function BookingStep4Screen() {
         lng: draft.lng!,
         date: draft.date!,
         timeSlot: draft.timeSlot!,
-        urgencyLevel: draft.urgencyLevel,
         addOns,
         packageIds: selectedPackageIds,
         priorities,

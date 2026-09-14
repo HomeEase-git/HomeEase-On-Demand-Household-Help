@@ -33,7 +33,6 @@ export default function BookingStep3Screen() {
       date: draft.date ?? undefined,
       timeSlot: draft.timeSlot ?? undefined,
       scopeAnswers: draft.scopeAnswers,
-      urgencyLevel: draft.urgencyLevel,
       lat: draft.lat,
       lng: draft.lng,
       limit: 20,
