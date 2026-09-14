@@ -9,6 +9,8 @@ export type ServiceCategoryOption = {
   id: string;
   name: string;
   basePrice: number;
+  priceRangeMin: number;
+  priceRangeMax: number;
   description?: string | null;
   scopeFields: ScopeField[];
   icon?: string | null;
@@ -61,7 +63,11 @@ export default function ServiceCategorySelector({ categories, selectedId, onSele
                 >
                   {cat.name}
                 </Text>
-                <Text className="text-text-muted text-xs mt-0.5">from ₱{cat.basePrice}</Text>
+                <Text className="text-text-muted text-xs mt-0.5">
+                  {cat.priceRangeMin === cat.priceRangeMax
+                    ? `from ₱${cat.priceRangeMin}`
+                    : `₱${cat.priceRangeMin} – ₱${cat.priceRangeMax}`}
+                </Text>
               </View>
             </Pressable>
           </View>

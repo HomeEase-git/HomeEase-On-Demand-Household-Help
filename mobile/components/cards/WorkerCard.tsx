@@ -9,7 +9,8 @@ type Worker = {
   id: string;
   name: string;
   service: string;
-  rate: number;
+  priceRangeMin: number | null;
+  priceRangeMax: number | null;
   rating: number;
   reviews: number;
   status: string;
@@ -67,7 +68,13 @@ export const WorkerCard: React.FC<Props> = ({ worker, onPress }) => {
         )}
       </View>
       <View className="items-end">
-        <Text className="text-accent font-bold">₱{worker.rate}/hr</Text>
+        <Text className="text-accent font-bold">
+          {worker.priceRangeMin != null && worker.priceRangeMax != null
+            ? worker.priceRangeMin === worker.priceRangeMax
+              ? `₱${worker.priceRangeMin}`
+              : `₱${worker.priceRangeMin}–₱${worker.priceRangeMax}`
+            : "—"}
+        </Text>
         <View
           className={`px-2 py-0.5 rounded-full mt-1 ${
             isUnavailable ? "bg-error/20" : "bg-success/20"

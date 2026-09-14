@@ -228,10 +228,11 @@ export default function WorkerProfileScreen() {
             </View>
           )}
           <View className="flex-row items-center justify-between mt-3 pt-3 border-t border-divider">
-            {typeof worker.rate === "number" ? (
+            {worker.priceRangeMin != null && worker.priceRangeMax != null ? (
               <Text className="text-accent font-bold text-lg">
-                ₱{worker.rate}
-                <Text className="text-text-muted text-xs font-normal">/hr</Text>
+                {worker.priceRangeMin === worker.priceRangeMax
+                  ? `₱${worker.priceRangeMin}`
+                  : `₱${worker.priceRangeMin}–₱${worker.priceRangeMax}`}
               </Text>
             ) : (
               <View />
@@ -370,11 +371,15 @@ export default function WorkerProfileScreen() {
         className="absolute bottom-0 left-0 right-0 bg-white px-4 pt-3 pb-4 border-t border-divider flex-row items-center gap-3"
         style={{ ...cardShadow, shadowOffset: { width: 0, height: -2 } }}
       >
-        {typeof worker.rate === "number" && (
+        {worker.priceRangeMin != null && worker.priceRangeMax != null && (
           <View>
-            <Text className="text-text-muted text-xs">Starting at</Text>
+            <Text className="text-text-muted text-xs">
+              {worker.priceRangeMin === worker.priceRangeMax ? "Starting at" : "Range"}
+            </Text>
             <Text className="text-text-primary font-bold text-base">
-              ₱{worker.rate}
+              {worker.priceRangeMin === worker.priceRangeMax
+                ? `₱${worker.priceRangeMin}`
+                : `₱${worker.priceRangeMin}–₱${worker.priceRangeMax}`}
             </Text>
           </View>
         )}
@@ -394,6 +399,8 @@ export default function WorkerProfileScreen() {
                 serviceType: worker.service,
                 serviceTypeId: primaryServiceType?.id ?? null,
                 categoryBasePrice: primaryServiceType?.basePrice ?? null,
+                categoryPriceRangeMin: primaryServiceType?.priceRangeMin ?? null,
+                categoryPriceRangeMax: primaryServiceType?.priceRangeMax ?? null,
                 workerId: worker.id,
                 workerName: worker.name,
                 workerLocked: true,

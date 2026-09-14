@@ -165,7 +165,13 @@ export interface WorkerDetail extends Worker {
   // shown on the card) — lets a "book this worker" entry point (the profile
   // screen) restrict the booking flow's category picker to services this
   // worker actually offers, and resolve the right ServiceType id per pick.
-  services: { id: string; name: string; basePrice: number }[];
+  // priceRangeMin/Max are this worker's own price spread for that category
+  // (task price range at their fixed tier) — not the marketplace-wide range.
+  services: { id: string; name: string; basePrice: number; priceRangeMin: number; priceRangeMax: number }[];
+  // Aggregate across all `services` above — the overall range shown on the
+  // profile before a specific category is picked.
+  priceRangeMin?: number | null;
+  priceRangeMax?: number | null;
   tier?: 'STANDARD' | 'PRO' | 'EXPERT';
 }
 

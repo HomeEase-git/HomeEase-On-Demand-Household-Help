@@ -58,6 +58,8 @@ export default function BookingStep1Screen() {
           id: t.id,
           name: t.name,
           basePrice: t.basePrice,
+          priceRangeMin: typeof t.priceRangeMin === "number" ? t.priceRangeMin : t.basePrice,
+          priceRangeMax: typeof t.priceRangeMax === "number" ? t.priceRangeMax : t.basePrice,
           description: t.description,
           icon: t.icon ?? null,
           scopeFields: Array.isArray(t.scopeFields)
@@ -112,14 +114,27 @@ export default function BookingStep1Screen() {
   // When entering via "Book Now" on a worker's profile, only offer the
   // categories that worker actually provides — picking anything else would
   // leave step-2/step-4 unable to find this worker available at any slot.
+  // Each tile's price range is also swapped for THIS worker's own spread
+  // (rather than the marketplace-wide one) since we already know who's
+  // doing the job — "the range of what the worker offers", not the category.
   const displayCategories =
     draft.workerLocked && draft.workerServiceTypes && draft.workerServiceTypes.length > 0
-      ? categories.filter((c) =>
-          draft.workerServiceTypes!.some((ws) => ws.name.toLowerCase() === c.name.toLowerCase())
-        )
+      ? categories
+          .filter((c) => draft.workerServiceTypes!.some((ws) => ws.name.toLowerCase() === c.name.toLowerCase()))
+          .map((c) => {
+            const workerService = draft.workerServiceTypes!.find(
+              (ws) => ws.name.toLowerCase() === c.name.toLowerCase()
+            );
+            return workerService?.priceRangeMin != null && workerService?.priceRangeMax != null
+              ? { ...c, priceRangeMin: workerService.priceRangeMin, priceRangeMax: workerService.priceRangeMax }
+              : c;
+          })
       : categories;
 
-  const priceEstimate = useBookingPriceEstimate(selectedCategory?.basePrice ?? 0);
+  const priceEstimate = useBookingPriceEstimate({
+    min: selectedCategory?.priceRangeMin ?? 0,
+    max: selectedCategory?.priceRangeMax ?? 0,
+  });
 
   const scopeComplete = !selectedCategory
     ? false
@@ -171,6 +186,11 @@ export default function BookingStep1Screen() {
             ?.id ?? null)
         : (draft.serviceTypeId ?? null),
       categoryBasePrice: selectedCategory!.basePrice,
+      // selectedCategory's range is already the worker-specific one when
+      // workerLocked (see displayCategories above), so this is whichever
+      // spread is correct without Step 4 needing to re-derive it.
+      categoryPriceRangeMin: selectedCategory!.priceRangeMin,
+      categoryPriceRangeMax: selectedCategory!.priceRangeMax,
       description,
       scopeAnswers: labelAnswers,
       issuePhotoUrls: issuePhotos,

@@ -19,8 +19,8 @@ type WorkerListItem = {
   service: string;
   rating: number;
   reviews: number;
-  rate: number;
-  basePrice: number | null;
+  priceRangeMin: number | null;
+  priceRangeMax: number | null;
   status: "available" | "unavailable";
   avatar: string | null;
 };
@@ -33,13 +33,6 @@ function formatCategoryTitle(slug: string) {
 
 function normalizeWorkers(workers: any[]): WorkerListItem[] {
   return workers.map((worker) => {
-    const rate =
-      typeof worker.basePrice === "number"
-        ? worker.basePrice
-        : typeof worker.rate === "number"
-          ? worker.rate
-          : 0;
-
     const status: "available" | "unavailable" =
       worker.status === "unavailable" || worker.status === "busy"
         ? "unavailable"
@@ -51,13 +44,8 @@ function normalizeWorkers(workers: any[]): WorkerListItem[] {
       service: worker.service ?? "General service",
       rating: Number(worker.rating ?? 0),
       reviews: Number(worker.reviews ?? 0),
-      rate,
-      basePrice:
-        typeof worker.basePrice === "number"
-          ? worker.basePrice
-          : typeof worker.rate === "number"
-            ? worker.rate
-            : null,
+      priceRangeMin: typeof worker.priceRangeMin === "number" ? worker.priceRangeMin : null,
+      priceRangeMax: typeof worker.priceRangeMax === "number" ? worker.priceRangeMax : null,
       status,
       avatar: worker.avatar ?? null,
     };

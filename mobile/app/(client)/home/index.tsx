@@ -60,8 +60,8 @@ type HomeWorker = {
   service: string;
   rating: number;
   reviews: number;
-  rate: number;
-  basePrice: number | null;
+  priceRangeMin: number | null;
+  priceRangeMax: number | null;
   status: "available" | "unavailable";
   avatar: string | null;
 };
@@ -74,13 +74,6 @@ function timeOfDayGreeting(): string {
 }
 
 function normalizeHomeWorker(worker: any): HomeWorker {
-  const rate =
-    typeof worker.basePrice === "number"
-      ? worker.basePrice
-      : typeof worker.rate === "number"
-        ? worker.rate
-        : 0;
-
   const status: "available" | "unavailable" =
     worker.status === "unavailable" || worker.status === "busy"
       ? "unavailable"
@@ -92,13 +85,8 @@ function normalizeHomeWorker(worker: any): HomeWorker {
     service: worker.service ?? "General service",
     rating: Number(worker.rating ?? 0),
     reviews: Number(worker.reviews ?? 0),
-    rate,
-    basePrice:
-      typeof worker.basePrice === "number"
-        ? worker.basePrice
-        : typeof worker.rate === "number"
-          ? worker.rate
-          : null,
+    priceRangeMin: typeof worker.priceRangeMin === "number" ? worker.priceRangeMin : null,
+    priceRangeMax: typeof worker.priceRangeMax === "number" ? worker.priceRangeMax : null,
     status,
     avatar: worker.avatar ?? null,
   };
