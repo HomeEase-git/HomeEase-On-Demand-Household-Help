@@ -45,6 +45,8 @@ interface BookingWithAddOns {
   paymentMethodType: 'GCASH' | 'MAYA' | 'CASH' | null;
   paymentAccountIdentifier: string | null;
   awaitingPaymentSince: Date | null;
+  vatApplicable: boolean;
+  vatRate: number | null;
   addOns?: Array<{ price: number }>;
 }
 
@@ -57,18 +59,39 @@ async function loadBooking(bookingId: string): Promise<BookingWithAddOns> {
   return booking as unknown as BookingWithAddOns;
 }
 
+/**
+ * vatApplicable/vatRate are always read from the booking's own frozen
+ * snapshot (see Booking.vatApplicable/vatRate) — never re-derived from the
+ * worker's live WorkerProfile.vatRegistered — so a worker becoming
+ * VAT-registered mid-job can't shift a price the client already agreed to.
+ */
 function priceBooking(booking: BookingWithAddOns, commissionRate: number, withholdingTaxRate: number) {
-  const { subtotal, tip, totalAmount } = computeBookingFinalTotal({
+  const { subtotal, tip, vatAmount, totalAmount } = computeBookingFinalTotal({
     estimatedPrice: booking.estimatedPrice,
     laborCost: booking.laborCost,
     materialsCost: booking.materialsCost,
     tip: booking.tip,
     addOns: booking.addOns,
+    vatApplicable: booking.vatApplicable,
+    vatRate: booking.vatRate,
   });
   const commissionAmount = calculateCommission(subtotal, commissionRate);
   const withholdingTaxAmount = calculateWithholdingTax(subtotal, commissionRate, withholdingTaxRate);
-  const workerPayout = Math.round((subtotal - commissionAmount - withholdingTaxAmount + tip) * 100) / 100;
-  return { subtotal, tip, totalAmount, commissionAmount, withholdingTaxAmount, workerPayout };
+  // VAT is never the worker's or platform's revenue (it's collected on BIR's
+  // behalf) — added back after commission/withholding are taken out, never
+  // taxed or commissioned itself.
+  const workerPayout = Math.round((subtotal - commissionAmount - withholdingTaxAmount + tip + vatAmount) * 100) / 100;
+  return {
+    subtotal,
+    tip,
+    vatApplicable: booking.vatApplicable,
+    vatRate: booking.vatRate,
+    vatAmount,
+    totalAmount,
+    commissionAmount,
+    withholdingTaxAmount,
+    workerPayout,
+  };
 }
 
 /**
@@ -95,6 +118,9 @@ export async function settleCashBooking(bookingId: string) {
       commissionAmount: priced.commissionAmount,
       withholdingTaxRate,
       withholdingTaxAmount: priced.withholdingTaxAmount,
+      vatApplicable: priced.vatApplicable,
+      vatRate: priced.vatRate,
+      vatAmount: priced.vatAmount,
       workerPayout: priced.workerPayout,
       totalAmount: priced.totalAmount,
       status: 'COMPLETED' as const,
@@ -116,7 +142,7 @@ export async function settleCashBooking(bookingId: string) {
 
     await tx.booking.update({
       where: { id: bookingId },
-      data: { status: 'COMPLETED', finalPrice: priced.subtotal, completionDate: new Date() },
+      data: { status: 'COMPLETED', finalPrice: priced.subtotal, vatAmount: priced.vatAmount, completionDate: new Date() },
     });
 
     if (booking.workerId && platformCut > 0) {
@@ -222,6 +248,9 @@ export async function createCompletionInvoice(bookingId: string): Promise<
           commissionAmount: priced.commissionAmount,
           withholdingTaxRate,
           withholdingTaxAmount: priced.withholdingTaxAmount,
+          vatApplicable: priced.vatApplicable,
+          vatRate: priced.vatRate,
+          vatAmount: priced.vatAmount,
           workerPayout: priced.workerPayout,
           totalAmount: priced.totalAmount,
           methodType: method,
@@ -240,6 +269,9 @@ export async function createCompletionInvoice(bookingId: string): Promise<
           commissionAmount: priced.commissionAmount,
           withholdingTaxRate,
           withholdingTaxAmount: priced.withholdingTaxAmount,
+          vatApplicable: priced.vatApplicable,
+          vatRate: priced.vatRate,
+          vatAmount: priced.vatAmount,
           workerPayout: priced.workerPayout,
           totalAmount: priced.totalAmount,
           status: 'PENDING',
@@ -420,7 +452,7 @@ export async function finalizePaidBooking(
 
     await tx.booking.update({
       where: { id: payment.bookingId },
-      data: { status: 'COMPLETED', finalPrice: payment.subtotal, completionDate: new Date() },
+      data: { status: 'COMPLETED', finalPrice: payment.subtotal, vatAmount: payment.vatAmount, completionDate: new Date() },
     });
 
     // If the payment-overdue sweep already opened a dispute and the client

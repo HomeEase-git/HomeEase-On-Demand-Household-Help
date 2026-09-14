@@ -11,7 +11,6 @@ import type {
   CreateBookingResponse,
   WorkerCard,
   TimeSlot,
-  UrgencyLevel,
 } from "../types/booking4step.types";
 
 type NormalizedWorkerListItem = {
@@ -22,6 +21,8 @@ type NormalizedWorkerListItem = {
   rating: number;
   reviews: number;
   basePrice: number | null;
+  priceRangeMin: number | null;
+  priceRangeMax: number | null;
   status: string;
   avatar: string | null;
   activeJobCount: number | null;
@@ -356,7 +357,6 @@ export async function createBooking(details: CreateBookingPayload): Promise<Crea
       lng: details.lng,
       date: details.date,
       timeSlot: details.timeSlot,
-      urgencyLevel: details.urgencyLevel ?? undefined,
       addOns: details.addOns || [],
       packageIds: details.packageIds || [],
       priorities: details.priorities ?? [],
@@ -470,7 +470,6 @@ export interface DiscoverWorkersFilters {
   scopeAnswers?: Record<string, string | string[]>;
   hasPets?: boolean;
   serviceTaskId?: string;
-  urgencyLevel?: UrgencyLevel;
   lat?: number;
   lng?: number;
   // Scopes results to a single worker — used to check a specific (e.g.
@@ -503,7 +502,6 @@ export async function discoverWorkers(filters: DiscoverWorkersFilters): Promise<
     }
     if (filters.hasPets) params.hasPets = 'true';
     if (filters.serviceTaskId) params.serviceTaskId = filters.serviceTaskId;
-    if (filters.urgencyLevel) params.urgencyLevel = filters.urgencyLevel;
     if (filters.lat != null) params.lat = filters.lat;
     if (filters.lng != null) params.lng = filters.lng;
     if (filters.workerId) params.workerId = filters.workerId;
@@ -550,6 +548,8 @@ function normalizeWorkerListItem(worker: any): NormalizedWorkerListItem {
           : typeof worker.estimatedTotal === "number"
             ? worker.estimatedTotal
             : null,
+    priceRangeMin: typeof worker.priceRangeMin === "number" ? worker.priceRangeMin : null,
+    priceRangeMax: typeof worker.priceRangeMax === "number" ? worker.priceRangeMax : null,
     status: normalizedStatus,
     avatar: worker.avatar ?? worker.user?.avatar ?? null,
     activeJobCount: typeof worker.activeJobCount === "number" ? worker.activeJobCount : null,
@@ -560,9 +560,16 @@ function normalizeWorkerListItem(worker: any): NormalizedWorkerListItem {
 export async function getWorkerDetail(workerId: string): Promise<WorkerDetail | null> {
   try {
     const response = await api.get(`/workers/${workerId}`);
-    const services: { id: string; name: string; basePrice: number }[] = Array.isArray(response.services)
-      ? response.services.map((s: any) => ({ id: s.id, name: s.name, basePrice: s.basePrice }))
-      : [];
+    const services: { id: string; name: string; basePrice: number; priceRangeMin: number; priceRangeMax: number }[] =
+      Array.isArray(response.services)
+        ? response.services.map((s: any) => ({
+            id: s.id,
+            name: s.name,
+            basePrice: s.basePrice,
+            priceRangeMin: s.priceRangeMin,
+            priceRangeMax: s.priceRangeMax,
+          }))
+        : [];
     const service = services[0]?.name ?? "General service";
     const skills = response.resumeParseResult?.parsedSkills?.length
       ? response.resumeParseResult.parsedSkills
@@ -576,7 +583,8 @@ export async function getWorkerDetail(workerId: string): Promise<WorkerDetail | 
       tier: response.tier ?? undefined,
       rating: Number(response.rating ?? 0),
       reviews: Number(response.reviewCount ?? 0),
-      rate: typeof services[0]?.basePrice === "number" ? services[0].basePrice : undefined,
+      priceRangeMin: typeof response.priceRangeMin === "number" ? response.priceRangeMin : null,
+      priceRangeMax: typeof response.priceRangeMax === "number" ? response.priceRangeMax : null,
       status: response.isAvailable ? "available" : "busy",
       avatar: response.avatar ?? undefined,
       bio: response.bio ?? "",
@@ -1423,10 +1431,15 @@ export interface WorkerAvailabilitySlot {
  * scoped to a single date for a lighter fetch (see AvailabilityCalendar,
  * which fetches the whole visible 7-day window at once by omitting `date`).
  */
-export async function getMyAvailabilitySlots(date?: string): Promise<WorkerAvailabilitySlot[]> {
+export interface WorkerAvailabilitySlotsResponse {
+  slots: WorkerAvailabilitySlot[];
+  maxSlotsPerDay: number;
+}
+
+export async function getMyAvailabilitySlots(date?: string): Promise<WorkerAvailabilitySlotsResponse> {
   try {
     const response = await api.get('/workers/me/availability-slots', { params: date ? { date } : undefined });
-    return response.slots ?? [];
+    return { slots: response.slots ?? [], maxSlotsPerDay: response.maxSlotsPerDay ?? 2 };
   } catch (error) {
     console.error('Get availability slots error:', error);
     throw error;
@@ -1652,6 +1665,63 @@ export async function getWorkerPackages(workerId: string, serviceTypeId?: string
   }
 }
 
+export type TaskPricingModel = 'FIXED' | 'PER_UNIT' | 'CUSTOM_QUOTE';
+
+export type WorkerTaskPrice = {
+  id: string;
+  workerProfileId: string;
+  serviceTaskId: string;
+  price: number | null;
+  unitPrice: number | null;
+  isActive: boolean;
+};
+
+export type MyTaskPriceEntry = {
+  task: {
+    id: string;
+    name: string;
+    serviceTypeName: string;
+    pricingModel: TaskPricingModel;
+    minPrice: number | null;
+    maxPrice: number | null;
+    unitLabel: string | null;
+  };
+  myPrice: WorkerTaskPrice | null;
+};
+
+export async function getMyTaskPrices(): Promise<MyTaskPriceEntry[]> {
+  try {
+    const response = await api.get('/workers/me/task-prices');
+    return response.taskPrices ?? [];
+  } catch (error) {
+    console.error('Get task prices error:', error);
+    throw error;
+  }
+}
+
+export async function setMyTaskPrice(
+  serviceTaskId: string,
+  data: { price?: number; unitPrice?: number },
+): Promise<WorkerTaskPrice> {
+  try {
+    const response = await api.put(`/workers/me/task-prices/${serviceTaskId}`, data);
+    return response;
+  } catch (error) {
+    console.error('Set task price error:', error);
+    throw error;
+  }
+}
+
+export async function deleteMyTaskPrice(serviceTaskId: string) {
+  try {
+    await api.delete(`/workers/me/task-prices/${serviceTaskId}`);
+    return true;
+  } catch (error) {
+    console.error('Delete task price error:', error);
+    throw error;
+  }
+}
+
 export type Certification = {
   id: string;
   name: string;
@@ -1787,6 +1857,61 @@ export async function updateTaxInfo(tin: string): Promise<TaxInfo> {
     return response;
   } catch (error) {
     console.error('Update tax info error:', error);
+    throw error;
+  }
+}
+
+export type VatVerificationStatus = 'PENDING' | 'APPROVED' | 'REJECTED';
+
+export type VatRegistration = {
+  vatRegistered: boolean;
+  vatDocumentUrl: string | null;
+  vatVerificationStatus: VatVerificationStatus | null;
+  vatRejectionReason: string | null;
+  vatSubmittedAt: string | null;
+  vatReviewedAt: string | null;
+};
+
+export async function getMyVatRegistration(): Promise<VatRegistration> {
+  try {
+    const response = await api.get('/workers/me/vat-registration');
+    return response;
+  } catch (error) {
+    console.error('Get VAT registration error:', error);
+    throw error;
+  }
+}
+
+export async function submitVatRegistration(documentUrl: string): Promise<VatRegistration> {
+  try {
+    const response = await api.post('/workers/me/vat-registration', { documentUrl });
+    return response;
+  } catch (error) {
+    console.error('Submit VAT registration error:', error);
+    throw error;
+  }
+}
+
+// Not part of the onboarding KYC-document flow (submitted any time, not
+// during onboarding) — posts straight to the same upload endpoint/bucket
+// with a hardcoded documentType, bypassing the KycDocumentKey mapping layer
+// that flow uses, since VAT_REGISTRATION deliberately isn't a member of it.
+export async function uploadVatDocument(uri: string, mimeType?: string | null): Promise<{ url: string }> {
+  try {
+    const filename = uri.split('/').pop() ?? `vat-registration-${Date.now()}`;
+    const resolvedMimeType =
+      mimeType || (filename.toLowerCase().endsWith('.pdf') ? 'application/pdf' : 'image/jpeg');
+
+    const formData = new FormData();
+    formData.append('file', { uri, name: filename, type: resolvedMimeType } as any);
+    formData.append('documentType', 'VAT_REGISTRATION');
+
+    const response = await api.post('/users/me/kyc-documents/upload', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+    return response;
+  } catch (error) {
+    console.error('Upload VAT document error:', error);
     throw error;
   }
 }

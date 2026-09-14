@@ -163,6 +163,7 @@ export interface AutoMatchResult {
 export async function findAutoMatchWorker(params: AutoMatchParams): Promise<AutoMatchResult | null> {
   const {
     serviceType,
+    serviceTaskId,
     date,
     timeSlot,
     scopeAnswers,
@@ -179,6 +180,21 @@ export async function findAutoMatchWorker(params: AutoMatchParams): Promise<Auto
 
   const capabilityFilters = await buildCapabilityFilters(serviceType, scopeAnswers);
 
+  // A specific task with a real price to set (FIXED/PER_UNIT) is only
+  // bookable through a worker who has actually priced it — createBooking
+  // would 409 on this exact worker otherwise. CUSTOM_QUOTE tasks have no
+  // WorkerTaskPrice at all (worker quotes on-site), so they impose no filter.
+  let requirePricedTaskId: string | null = null;
+  if (serviceTaskId) {
+    const task = await prisma.serviceTask.findUnique({
+      where: { id: serviceTaskId },
+      select: { pricingModel: true },
+    });
+    if (task && task.pricingModel !== 'CUSTOM_QUOTE') {
+      requirePricedTaskId = serviceTaskId;
+    }
+  }
+
   const workers = await prisma.workerProfile.findMany({
     where: {
       kycStatus: 'APPROVED',
@@ -190,6 +206,9 @@ export async function findAutoMatchWorker(params: AutoMatchParams): Promise<Auto
       OR: [{ declineCooldownUntil: null }, { declineCooldownUntil: { lte: new Date() } }],
       serviceTypes: { some: { name: { equals: serviceType, mode: 'insensitive' } } },
       ...(hasPets ? { acceptsPets: true } : {}),
+      ...(requirePricedTaskId
+        ? { taskPrices: { some: { serviceTaskId: requirePricedTaskId, isActive: true } } }
+        : {}),
       AND: capabilityFilters,
       availability: {
         some: {

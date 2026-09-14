@@ -146,6 +146,8 @@ enum NotificationType {
   PAYOUT_FAILED
   ACCOUNT_ON_HOLD
   ACCOUNT_HOLD_RELEASED
+  VAT_REGISTRATION_APPROVED
+  VAT_REGISTRATION_REJECTED
 }
 
 enum TimeSlot {
@@ -183,6 +185,17 @@ enum ScopeFieldType {
   SELECT
   MULTI_SELECT
   NUMBER
+}
+
+// FIXED: one admin-bounded price, worker sets a single number.
+// PER_UNIT: worker sets a rate; final price = rate x the answer to
+// ServiceTask.quantityScopeField (e.g. per-kilo laundry, per-sqm painting).
+// CUSTOM_QUOTE: no upfront price at all — worker quotes after inspecting,
+// via the existing submitQuote flow (see bookingController.submitQuote).
+enum TaskPricingModel {
+  FIXED
+  PER_UNIT
+  CUSTOM_QUOTE
 }
 
 // ============================================================================
@@ -406,6 +419,23 @@ model WorkerProfile {
   tin           String?   @unique
   tinVerifiedAt DateTime?
 
+  // VAT registration — self-declared then admin-verified (mirrors the
+  // Certification review pattern, not the KYC AI pipeline: one document, one
+  // reviewer decision). vatRegistered is the ONLY field pricing/booking logic
+  // may read — it only flips true on admin APPROVED, never on submission
+  // alone, so an unverified claim can never affect a client's price. Workers
+  // are legally required to register once their gross annual receipts cross
+  // BIR's VAT threshold, regardless of trade — this is unrelated to whether
+  // their trade counts as a PRC-licensed profession (see taxCertificateService
+  // / AppSettings.atcCode, which is a separate, trade-based question).
+  vatRegistered         Boolean            @default(false)
+  vatDocumentUrl        String?
+  vatVerificationStatus KycDocumentStatus?
+  vatRejectionReason    String?
+  vatSubmittedAt        DateTime?
+  vatReviewedAt         DateTime?
+  vatReviewedById       String? // soft reference — User.id of the admin who reviewed it
+
   // Platform commission + withholding tax owed on CASH jobs (paid to the
   // worker in person, so the platform's cut can't be skimmed from a gateway
   // transaction). Accrued by debtLedgerService.accrueDebtTx, netted against
@@ -433,6 +463,7 @@ model WorkerProfile {
   resumeParseResult  ResumeParseResult?
   availability       WorkerAvailability[]
   packages           WorkerPackage[]
+  taskPrices         WorkerTaskPrice[]
   debtLedger         DebtLedgerEntry[]
 
   @@index([userId])
@@ -640,6 +671,11 @@ model ServiceScopeField {
 
   options ServiceScopeFieldOption[]
 
+  // A PER_UNIT ServiceTask pointing at this field (fieldType must be NUMBER)
+  // as its quantity source — see ServiceTask.quantityScopeFieldId. A field
+  // can be reused as the quantity source for more than one task.
+  quantityForTasks ServiceTask[]
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -713,16 +749,67 @@ model ServiceTask {
   serviceTypeId String
   serviceType   ServiceType @relation(fields: [serviceTypeId], references: [id], onDelete: Cascade)
 
-  name          String
-  description   String?
-  basePrice     Float
-  durationHours Float
+  name        String
+  description String?
+
+  // "Typical/suggested" price — shown as the category-level range preview
+  // before a client picks a worker (Booking Steps 1-2). Since WorkerTaskPrice
+  // was introduced, this is NOT what a client is actually charged; see that
+  // model + bookingController.createBooking for the authoritative per-worker
+  // price. Kept as the seed anchor for minPrice/maxPrice below.
+  basePrice Float
+
+  pricingModel TaskPricingModel @default(FIXED)
+
+  // Admin-allowed bound on what a worker may set via WorkerTaskPrice. FIXED:
+  // bounds the flat price. PER_UNIT: bounds the per-unit rate. Both null for
+  // CUSTOM_QUOTE (nothing to bound — worker prices on-site).
+  minPrice Float?
+  maxPrice Float?
+
+  // PER_UNIT only: display unit (e.g. "kilo", "sq.m.", "linear meter") and
+  // the NUMBER-type ServiceScopeField (must belong to this task's
+  // serviceType) whose answer supplies the quantity multiplied against a
+  // worker's WorkerTaskPrice.unitPrice at booking time.
+  unitLabel            String?
+  quantityScopeFieldId String?
+  quantityScopeField   ServiceScopeField? @relation(fields: [quantityScopeFieldId], references: [id])
+
+  // Nullable: CUSTOM_QUOTE jobs don't have a fixed duration.
+  durationHours Float?
   isActive      Boolean @default(true)
 
   // Relations
-  bookings Booking[]
+  bookings   Booking[]
+  workerPrices WorkerTaskPrice[]
 
   @@index([serviceTypeId])
+  @@index([quantityScopeFieldId])
+}
+
+// A worker's own price for one ServiceTask, within that task's admin-set
+// minPrice/maxPrice bound — mirrors WorkerPackage's shape and trust model
+// exactly (ownership-gated CRUD in workerController, never trusted from the
+// client at booking time: bookingController.createBooking re-fetches this
+// row server-side by (workerProfileId, serviceTaskId), same as it already
+// does for WorkerPackage). No row exists for a CUSTOM_QUOTE task — see
+// ServiceTask.pricingModel.
+model WorkerTaskPrice {
+  id              String        @id @default(cuid())
+  workerProfileId String
+  workerProfile   WorkerProfile @relation(fields: [workerProfileId], references: [id], onDelete: Cascade)
+  serviceTaskId   String
+  serviceTask     ServiceTask   @relation(fields: [serviceTaskId], references: [id], onDelete: Cascade)
+
+  price     Float? // FIXED model
+  unitPrice Float? // PER_UNIT model
+  isActive  Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([workerProfileId, serviceTaskId])
+  @@index([serviceTaskId])
 }
 
 // ============================================================================
@@ -781,6 +868,19 @@ model Booking {
   // Pricing — initial estimate
   estimatedPrice Float
   tip            Float? @default(0)
+
+  // VAT snapshot — vatApplicable/vatRate are pinned from the assigned
+  // worker's WorkerProfile.vatRegistered at the earliest point a real price
+  // is shown (createBooking for FIXED/PER_UNIT tasks; submitQuote for
+  // CUSTOM_QUOTE, since estimatedPrice is 0 until then). Settlement
+  // (paymentLifecycleService.priceBooking) always reads these, never the
+  // worker's live status — so a worker becoming VAT-registered mid-job can't
+  // change a price the client already agreed to. vatAmount is filled in at
+  // settlement (the peso amount isn't knowable until the final subtotal is),
+  // mirroring Payment.vatAmount for a permanent record on the booking itself.
+  vatApplicable Boolean @default(false)
+  vatRate       Float?
+  vatAmount     Float?
 
   // Quote lifecycle
   quoteStatus   QuoteStatus?
@@ -1006,9 +1106,20 @@ model Payment {
   commissionRate   Float @default(0.10)
   commissionAmount Float
 
-  // Withholding tax (BIR compliance — contractor-category workers, ATC WC158)
+  // Withholding tax (BIR compliance — contractor-category workers, see
+  // AppSettings.atcCode for the current code)
   withholdingTaxRate   Float @default(0.02)
   withholdingTaxAmount Float
+
+  // VAT collected on behalf of BIR from a VAT-registered worker's price —
+  // snapshotted from the booking (see Booking.vatApplicable/vatRate above),
+  // never re-derived from the worker's live status. This is NOT platform
+  // revenue and is never netted against commission/withholding — see
+  // VatCollectionSummary, which is what sources the worker-facing "VAT you
+  // collected" report from this field, not TaxRemittance.
+  vatApplicable Boolean @default(false)
+  vatRate       Float?
+  vatAmount     Float   @default(0)
 
   // Worker receives
   workerPayout Float
@@ -1287,6 +1398,17 @@ model AppSettings {
   commissionRate       Float @default(0.10)
   withholdingTaxRate   Float @default(0.02)
   maxSlotsPerDay       Int   @default(2)
+
+  // BIR Alphanumeric Tax Code for the withholding tax certificate (Form
+  // 2307) — see taxCertificateService. Data, not a hardcoded constant: kept
+  // null on a fresh environment and certificate generation refuses to issue
+  // rather than silently default to a possibly-wrong code. Current value
+  // (WI120, "income payments to certain contractors") was corrected 2026-09-14
+  // from a mismatched WC158 after checking the actual BIR ATC table — WC158
+  // is goods-suppliers-at-1%, not this. One code covers every worker
+  // regardless of VAT registration: none of this platform's trades are
+  // PRC-licensed professions, so the VAT-status-split article never applied.
+  atcCode String?
   pendingExpiryMinutes Int   @default(60)
   geofenceRadiusMeters Int   @default(100)
 
@@ -1351,6 +1473,34 @@ model TaxCertificate {
   @@unique([workerId, periodStart, periodEnd])
   @@index([workerId])
   @@index([status])
+}
+
+// Deliberately separate from TaxCertificate/TaxRemittance — this is VAT a
+// worker collected on their own sales (12% they charged on top of their
+// price because they're VAT-registered), which the PLATFORM never remits;
+// the worker files it themselves via their own 2550Q/2551Q. Keeping it a
+// distinct model makes "informational only, carries no platform liability"
+// structural rather than a fact someone has to remember when querying.
+// Sourced from Payment.vatAmount (what was legally collected per job), never
+// Payout.amount (see paymentLifecycleService — a cash job's debt clawback can
+// make those two numbers differ).
+model VatCollectionSummary {
+  id       String @id @default(cuid())
+  workerId String // soft reference — User.id, same convention as TaxCertificate.workerId
+
+  periodStart DateTime
+  periodEnd   DateTime
+
+  workerName String // snapshot at generation time, same convention as TaxCertificate.workerName
+
+  totalVatCollected Float // sum of Payment.vatAmount for this worker in the period
+
+  generatedBy String // soft reference — User.id of the admin who triggered generation
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([workerId, periodStart, periodEnd])
+  @@index([workerId])
 }
 
 enum TaxRemittanceStatus {

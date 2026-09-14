@@ -103,6 +103,14 @@ export const getPriceBreakdown = (
   };
 };
 
+// Statutory rate, not a business policy knob like commissionRate — kept as a
+// code constant rather than an AppSettings field. Applied to `subtotal` only
+// (service price + add-ons + mandatory fees, all already rolled into
+// estimatedPrice/laborCost+materialsCost by the time it reaches this
+// function) — a voluntary tip is explicitly NOT part of the VAT base, per
+// NIRC's gross-receipts definition, and is added on afterward instead.
+export const VAT_RATE = 0.12;
+
 /**
  * Single source of truth for a booking's final billable total, used at the
  * pay-after-completion step (bookingController.completeBooking locks it in,
@@ -110,7 +118,12 @@ export const getPriceBreakdown = (
  *
  * subtotal = (approved quote: labor + materials) OR (no quote: the estimate)
  *            + priced add-ons
- * totalAmount = subtotal + tip
+ * vatAmount = subtotal × vatRate, only when vatApplicable (worker is
+ *             VAT-registered) — read from the booking's own frozen snapshot
+ *             (see Booking.vatApplicable/vatRate), never re-derived from the
+ *             worker's live status, so a mid-job VAT-registration change
+ *             can't shift a price the client already agreed to.
+ * totalAmount = subtotal + vatAmount + tip — tip stays outside the VAT base.
  *
  * Add-ons are frozen once a booking reaches PENDING_COMPLETION (see
  * bookingController.addAddon), so this is stable from that point on.
@@ -121,11 +134,13 @@ export interface BookingFinalTotalInput {
   materialsCost?: number | null;
   tip?: number | null;
   addOns?: Array<{ price: number }> | null;
+  vatApplicable?: boolean | null;
+  vatRate?: number | null;
 }
 
 export const computeBookingFinalTotal = (
   booking: BookingFinalTotalInput
-): { subtotal: number; tip: number; totalAmount: number } => {
+): { subtotal: number; tip: number; vatAmount: number; totalAmount: number } => {
   const addOnsTotal = (booking.addOns ?? []).reduce(
     (sum, a) => sum + (typeof a.price === 'number' ? a.price : 0),
     0
@@ -136,8 +151,11 @@ export const computeBookingFinalTotal = (
     : booking.estimatedPrice;
   const subtotal = Math.round((base + addOnsTotal) * 100) / 100;
   const tip = Math.round(((booking.tip ?? 0)) * 100) / 100;
-  const totalAmount = Math.round((subtotal + tip) * 100) / 100;
-  return { subtotal, tip, totalAmount };
+  const vatAmount = booking.vatApplicable
+    ? Math.round(subtotal * (booking.vatRate ?? VAT_RATE) * 100) / 100
+    : 0;
+  const totalAmount = Math.round((subtotal + vatAmount + tip) * 100) / 100;
+  return { subtotal, tip, vatAmount, totalAmount };
 };
 
 /**
@@ -174,14 +192,23 @@ export const formatPrice = (amount: number): string => {
  *
  * Condition is deliberately not a factor here — it's an ordinary
  * admin-defined scope field now, not a platform-wide surcharge.
+ *
+ * Urgency (STANDARD/URGENT/EMERGENCY) used to add a 0/15/30% surcharge here
+ * too, but was removed as a platform concept (2026-09-14) — it only ever
+ * charged more for a "faster" booking without actually doing anything
+ * differently (no matching priority, no different notification), and its
+ * shorter auto-cancel window (see bookingQueue's old EXPIRY_MULTIPLIER)
+ * actively worked against the client who paid for it. `urgencyFee` is kept
+ * (always 0) in the result/log shape below for compatibility with existing
+ * receipts, same as conditionFee. Same-day/next-day booking is now blocked
+ * outright instead (see validation.ts's MIN_BOOKING_LEAD_DAYS), which was
+ * the actual reason anyone reached for "urgent" in the first place.
  */
-const URGENCY_FEE_MULTIPLIER: Record<string, number> = { STANDARD: 0, URGENT: 0.15, EMERGENCY: 0.3 };
 const FREE_DISTANCE_KM = 5;
 const PER_KM_FEE = 10;
 
 export interface JobPricingInput {
   basePrice: number;
-  urgencyLevel: string;
   tierMultiplier: number;
   distanceKm?: number | null;
 }
@@ -199,7 +226,7 @@ export const computeJobPricing = (input: JobPricingInput): JobPricingResult => {
     Math.round(
       (input.distanceKm != null ? Math.max(0, input.distanceKm - FREE_DISTANCE_KM) * PER_KM_FEE : 0) * 100
     ) / 100;
-  const urgencyFee = Math.round(input.basePrice * (URGENCY_FEE_MULTIPLIER[input.urgencyLevel] ?? 0) * 100) / 100;
+  const urgencyFee = 0;
   const tierFee = Math.round(input.basePrice * (input.tierMultiplier - 1) * 100) / 100;
   const estimatedPrice = Math.round((input.basePrice + distanceFee + urgencyFee + tierFee) * 100) / 100;
   return { basePrice: input.basePrice, distanceFee, urgencyFee, tierFee, estimatedPrice };

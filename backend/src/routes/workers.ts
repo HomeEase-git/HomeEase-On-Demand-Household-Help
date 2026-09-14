@@ -24,6 +24,8 @@ import {
   updatePayoutMethod,
   getTaxInfo,
   updateTaxInfo,
+  getMyVatRegistration,
+  submitVatRegistration,
   getMyTaxCertificates,
   getMyAvailabilitySlots,
   updateAvailabilitySlots,
@@ -33,6 +35,9 @@ import {
   updatePackage,
   deletePackage,
   getWorkerPackages,
+  listMyTaskPrices,
+  setMyTaskPrice,
+  deleteMyTaskPrice,
 } from '../controllers/workerController';
 import { authMiddleware } from '../middleware/auth';
 import { restrictTo } from '../middleware/role';
@@ -100,6 +105,10 @@ router.post('/me/packages', authMiddleware, restrictTo('WORKER'), validateCreate
 router.patch('/me/packages/:packageId', authMiddleware, restrictTo('WORKER'), validateUpdatePackage, updatePackage);
 router.delete('/me/packages/:packageId', authMiddleware, restrictTo('WORKER'), deletePackage);
 
+router.get('/me/task-prices', authMiddleware, restrictTo('WORKER'), listMyTaskPrices);
+router.put('/me/task-prices/:serviceTaskId', authMiddleware, restrictTo('WORKER'), setMyTaskPrice);
+router.delete('/me/task-prices/:serviceTaskId', authMiddleware, restrictTo('WORKER'), deleteMyTaskPrice);
+
 // Registered after '/me/packages' above — see the note near the top of the
 // public-routes block.
 router.get('/:workerId/packages', getWorkerPackages);
@@ -143,6 +152,8 @@ router.patch(
 
 router.get('/me/tax-info', authMiddleware, restrictTo('WORKER'), getTaxInfo);
 router.patch('/me/tax-info', authMiddleware, restrictTo('WORKER'), validateUpdateTaxInfo, updateTaxInfo);
+router.get('/me/vat-registration', authMiddleware, restrictTo('WORKER'), getMyVatRegistration);
+router.post('/me/vat-registration', authMiddleware, restrictTo('WORKER'), submitVatRegistration);
 router.get('/me/tax-certificates', authMiddleware, restrictTo('WORKER'), getMyTaxCertificates);
 
 router.get('/me/availability-slots', authMiddleware, restrictTo('WORKER'), getMyAvailabilitySlots);

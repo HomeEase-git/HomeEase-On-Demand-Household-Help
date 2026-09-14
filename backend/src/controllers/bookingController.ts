@@ -1,5 +1,5 @@
 import { Request, Response } from 'express';
-import type { ConditionType, PaymentMethodType, RoomType, TimeSlot, UrgencyLevel } from '@prisma/client';
+import type { ConditionType, PaymentMethodType, RoomType, TimeSlot } from '@prisma/client';
 import prisma from '@config/database';
 import { errorResponse } from '@utils/errorResponse';
 import { notifyUser } from '@utils/notify';
@@ -15,14 +15,13 @@ import {
   refundOrVoidPayment,
 } from '@services/paymentLifecycleService';
 import { toDayStart, findSlot, markSlotBooked, freeSlot } from '@services/workerAvailabilityService';
-import { calculateWorkerPayout, computeBookingFinalTotal, computeJobPricing } from '@utils/pricing';
+import { calculateWorkerPayout, computeBookingFinalTotal, computeJobPricing, VAT_RATE } from '@utils/pricing';
 import { buildCapabilityFilters } from '@services/matchingService';
 import { schedulePendingExpiry, cancelPendingExpiryJob } from '@queues/bookingQueue';
 import { VALID_TRANSITIONS, isValidTransition } from '@services/bookingStateMachine';
 import { getAppSettings } from '@services/appSettingsService';
 import { computeWorkerTier, tierMultiplier } from '@utils/workerTier';
 import { getIO } from '../socket';
-import { VALID_URGENCY_LEVELS } from '@/constants/bookingEnums';
 import type { JwtPayload } from '@/types/index';
 
 export { VALID_TRANSITIONS, isValidTransition };
@@ -74,7 +73,6 @@ export const createBooking = async (req: AuthRequest, res: Response) => {
       lng,
       date,
       timeSlot,
-      urgencyLevel,
       addOns,
       packageIds,
       priorities,
@@ -97,7 +95,6 @@ export const createBooking = async (req: AuthRequest, res: Response) => {
       lng: number;
       date: string;
       timeSlot: TimeSlot;
-      urgencyLevel?: UrgencyLevel;
       addOns?: Array<{ id?: string; name?: string; price: number }>;
       packageIds?: string[];
       priorities?: string[];
@@ -109,10 +106,6 @@ export const createBooking = async (req: AuthRequest, res: Response) => {
       issuePhotoUrls?: string[];
       idempotencyKey?: string;
     };
-
-    if (urgencyLevel !== undefined && !VALID_URGENCY_LEVELS.includes(urgencyLevel)) {
-      return res.status(400).json(errorResponse(400, 'urgencyLevel must be one of STANDARD, URGENT, EMERGENCY'));
-    }
 
     // Idempotent replay — a retried POST (app backgrounded mid-request,
     // network timeout + user taps Submit again) with the same client-
@@ -143,7 +136,6 @@ export const createBooking = async (req: AuthRequest, res: Response) => {
             status: existing.status,
             scheduledDate: existing.scheduledDate,
             timeSlot: existing.timeSlot,
-            urgencyLevel: existing.urgencyLevel,
             workerTier: (log?.breakdown as { workerTier?: string } | null)?.workerTier ?? null,
             estimatedPrice: existing.estimatedPrice,
             estimatedDurationHours: existing.estimatedDurationHours,
@@ -164,14 +156,21 @@ export const createBooking = async (req: AuthRequest, res: Response) => {
         });
       }
     }
-    const effectiveUrgencyLevel: UrgencyLevel = urgencyLevel ?? 'STANDARD';
+    // Urgency was removed as a platform concept (2026-09-14, see
+    // utils/pricing.ts) — every new booking is STANDARD. Kept as a named
+    // constant (rather than deleted outright) so the PricingLog breakdown
+    // JSON below stays self-describing for anyone reading old vs. new rows.
+    const effectiveUrgencyLevel = 'STANDARD' as const;
 
     const scheduledDate = toDayStart(date);
     const clientLocation = { lat, lng };
     const cityName = city ?? '';
 
     const serviceTask = serviceTaskId
-      ? await prisma.serviceTask.findUnique({ where: { id: serviceTaskId }, include: { serviceType: true } })
+      ? await prisma.serviceTask.findUnique({
+          where: { id: serviceTaskId },
+          include: { serviceType: true, quantityScopeField: true },
+        })
       : null;
 
     if (serviceTaskId && !serviceTask) {
@@ -183,11 +182,16 @@ export const createBooking = async (req: AuthRequest, res: Response) => {
     // parent category's scope fields when the client booked straight off a
     // ServiceType rather than a specific ServiceTask.
     const serviceTypeConfig = serviceTask ? null : await resolveServiceTypeConfig(resolvedServiceTypeName);
-    const basePrice = serviceTask?.basePrice ?? serviceTypeConfig?.basePrice ?? null;
 
-    if (basePrice == null) {
+    if (!serviceTask && !serviceTypeConfig) {
       return res.status(404).json(errorResponse(404, 'Service type not found'));
     }
+
+    // basePrice can't be resolved yet for a serviceTask booking — FIXED/
+    // PER_UNIT depend on which worker gets picked (their own WorkerTaskPrice),
+    // and CUSTOM_QUOTE has no upfront price at all. Resolved per-candidate
+    // inside the worker-resolution loop below (see "basePrice resolution").
+    const isCustomQuoteTask = serviceTask?.pricingModel === 'CUSTOM_QUOTE';
 
     const effectiveScopeAnswers =
       scopeAnswers && typeof scopeAnswers === 'object' && !Array.isArray(scopeAnswers) ? scopeAnswers : undefined;
@@ -253,11 +257,45 @@ export const createBooking = async (req: AuthRequest, res: Response) => {
       isAutoMatched = true;
     }
 
+    // Bounded so a pathological run of simultaneous auto-match collisions
+    // can't loop forever — 2 retries (3 attempts total) covers "two clients
+    // landed on the same best worker+slot at once" without turning a single
+    // request into an unbounded worker search. Only an auto-matched booking
+    // retries; a client who explicitly picked this worker gets the same
+    // immediate failure as before — silently substituting a different worker
+    // for a choice they made themselves isn't this fix's job.
+    const MAX_AUTO_MATCH_RETRIES = 2;
+    const triedWorkerIds: string[] = isAutoMatched && resolvedWorkerId ? [resolvedWorkerId] : [];
+    const autoMatchParams = {
+      serviceType: resolvedServiceTypeName,
+      serviceTaskId,
+      date: scheduledDate,
+      timeSlot,
+      scopeAnswers: effectiveScopeAnswers,
+      hasPets,
+      clientLat: lat,
+      clientLng: lng,
+    };
+
+    for (let attempt = 0; ; attempt++) {
     const workerProfile = await prisma.workerProfile.findUnique({ where: { userId: resolvedWorkerId } });
 
     if (!workerProfile) {
       return res.status(404).json(errorResponse(404, 'Worker not found'));
     }
+
+    // Shared by every retryable failure below (slot conflict, unpriced task)
+    // so the "exclude this worker, try the next-best auto-match candidate"
+    // logic exists in exactly one place instead of being copy-pasted per
+    // failure type.
+    const tryNextAutoMatchCandidate = async (): Promise<boolean> => {
+      if (!isAutoMatched || attempt >= MAX_AUTO_MATCH_RETRIES) return false;
+      const nextMatch = await findAutoMatchWorker({ ...autoMatchParams, excludeWorkerIds: triedWorkerIds });
+      if (!nextMatch) return false;
+      resolvedWorkerId = nextMatch.workerId;
+      triedWorkerIds.push(resolvedWorkerId);
+      return true;
+    };
 
     // A client picking a specific worker (not auto-match) could otherwise
     // bypass the capability filter Step 3 already applied — re-check
@@ -294,8 +332,53 @@ export const createBooking = async (req: AuthRequest, res: Response) => {
 
     const slot = await findSlot(prisma, workerProfile.id, scheduledDate, timeSlot);
     if (!slot || slot.isBlocked || slot.isBooked) {
+      if (await tryNextAutoMatchCandidate()) continue;
       return res.status(409).json(errorResponse(409, 'Selected slot is no longer available'));
     }
+
+    // basePrice depends on which worker got picked — FIXED/PER_UNIT read
+    // that worker's own WorkerTaskPrice (findAutoMatchWorker already filters
+    // auto-match candidates down to workers who've priced this task, but an
+    // explicitly-picked worker isn't filtered, hence the 409 fallback below).
+    // CUSTOM_QUOTE has no upfront price; the client is never shown one until
+    // the worker submits a quote, so basePrice is 0 and the VAT snapshot
+    // below is deliberately deferred to that moment instead of now.
+    let basePrice: number;
+    if (serviceTask) {
+      if (isCustomQuoteTask) {
+        basePrice = 0;
+      } else {
+        const workerPrice = await prisma.workerTaskPrice.findUnique({
+          where: {
+            workerProfileId_serviceTaskId: { workerProfileId: workerProfile.id, serviceTaskId: serviceTask.id },
+          },
+        });
+        if (!workerPrice?.isActive) {
+          if (await tryNextAutoMatchCandidate()) continue;
+          return res.status(409).json(errorResponse(409, 'This pro has not priced this service yet'));
+        }
+        if (serviceTask.pricingModel === 'FIXED') {
+          basePrice = workerPrice.price!;
+        } else {
+          const field = serviceTask.quantityScopeField;
+          const quantity = field ? Number(effectiveScopeAnswers?.[field.label]) : NaN;
+          if (!field || Number.isNaN(quantity)) {
+            return res
+              .status(400)
+              .json(errorResponse(400, `"${field?.label ?? 'quantity'}" is required for this service`));
+          }
+          basePrice = round2(workerPrice.unitPrice! * quantity);
+        }
+      }
+    } else {
+      basePrice = serviceTypeConfig!.basePrice;
+    }
+
+    // VAT snapshot — pinned from the worker's status at the earliest point a
+    // real price is shown, so settlement never re-checks the worker's live
+    // vatRegistered flag (see paymentLifecycleService.priceBooking).
+    const vatApplicable = !isCustomQuoteTask && workerProfile.vatRegistered;
+    const vatRate = vatApplicable ? VAT_RATE : null;
 
     // Distance fee is based on the worker's fixed service address, not a
     // live position — bookings are scheduled in advance, not dispatched to
@@ -339,7 +422,6 @@ export const createBooking = async (req: AuthRequest, res: Response) => {
     const addOnsTotal = addOnsList.reduce((sum, a) => sum + (typeof a.price === 'number' ? a.price : 0), 0);
     const { distanceFee, urgencyFee, tierFee, estimatedPrice } = computeJobPricing({
       basePrice,
-      urgencyLevel: effectiveUrgencyLevel,
       tierMultiplier: tierMultiplier(workerTier, appSettings),
       distanceKm: workerDistanceKm,
     });
@@ -387,12 +469,13 @@ export const createBooking = async (req: AuthRequest, res: Response) => {
             issuePhotoUrls: effectiveIssuePhotoUrls,
             scheduledDate,
             timeSlot,
-            urgencyLevel: effectiveUrgencyLevel,
             isAutoMatched,
             declinedWorkerIds: [],
             expiresAt: new Date(Date.now() + 60 * 60 * 1000),
             idempotencyKey: hasIdempotencyKey ? (idempotencyKey as string) : null,
             estimatedPrice,
+            vatApplicable,
+            vatRate,
             tip: typeof tip === 'number' ? tip : 0,
             notes: notes ?? null,
             paymentMethodType: paymentMethodType ?? null,
@@ -464,7 +547,7 @@ export const createBooking = async (req: AuthRequest, res: Response) => {
       // never happened). Worst case if this silently fails: the booking
       // never gets its 1-hour PENDING auto-expiry, which is a smaller,
       // recoverable gap than a false "booking failed" error.
-      await schedulePendingExpiry(booking.id, effectiveUrgencyLevel).catch((error) => {
+      await schedulePendingExpiry(booking.id).catch((error) => {
         console.error(`Failed to schedule pending-expiry for booking ${booking.id}:`, error);
       });
 
@@ -487,7 +570,6 @@ export const createBooking = async (req: AuthRequest, res: Response) => {
           status: booking.status,
           scheduledDate: booking.scheduledDate,
           timeSlot: booking.timeSlot,
-          urgencyLevel: booking.urgencyLevel,
           workerTier,
           estimatedPrice: booking.estimatedPrice,
           estimatedDurationHours: booking.estimatedDurationHours,
@@ -498,6 +580,21 @@ export const createBooking = async (req: AuthRequest, res: Response) => {
         },
       });
     } catch (txErr: any) {
+      const isIdempotencyConflict =
+        txErr.code === 'P2002' &&
+        hasIdempotencyKey &&
+        Array.isArray(txErr.meta?.target) &&
+        txErr.meta.target.includes('idempotencyKey');
+      const isSlotConflict = txErr.message === 'SLOT_TAKEN' || (txErr.code === 'P2002' && !isIdempotencyConflict);
+
+      // Same retry as the pre-transaction slot check above — a second client
+      // can win the race between our findSlot check and this insert
+      // (worker_slot_unique surfaces it as SLOT_TAKEN or a P2002 on that
+      // index). For an auto-matched booking that's not something the client
+      // did wrong, so retry with the next-best candidate instead of making
+      // them resubmit manually.
+      if (isSlotConflict && (await tryNextAutoMatchCandidate())) continue;
+
       if (txErr.message === 'SLOT_TAKEN') {
         return res.status(409).json(errorResponse(409, 'Slot no longer available'));
       }
@@ -516,7 +613,7 @@ export const createBooking = async (req: AuthRequest, res: Response) => {
         // genuine race, not a slot conflict. Whichever loses this race
         // should see the same "already created" reply as a normal replay,
         // not a misleading slot error.
-        if (hasIdempotencyKey && Array.isArray(txErr.meta?.target) && txErr.meta.target.includes('idempotencyKey')) {
+        if (isIdempotencyConflict) {
           return res.status(409).json(
             errorResponse(409, 'This booking request is already being processed — check your bookings list.')
           );
@@ -524,6 +621,7 @@ export const createBooking = async (req: AuthRequest, res: Response) => {
         return res.status(409).json(errorResponse(409, 'Slot no longer available'));
       }
       throw txErr;
+    }
     }
   } catch (error) {
     console.error('Error creating booking:', error);
@@ -1307,6 +1405,7 @@ export const submitQuote = async (req: AuthRequest, res: Response) => {
 
     const booking = await prisma.booking.findUnique({
       where: { id },
+      include: { serviceTask: { select: { pricingModel: true } } },
     });
 
     if (!booking) {
@@ -1321,17 +1420,46 @@ export const submitQuote = async (req: AuthRequest, res: Response) => {
       return res.status(409).json(errorResponse(409, `Cannot submit quote for booking with status ${booking.status}`));
     }
 
+    // CUSTOM_QUOTE tasks have no upfront price (estimatedPrice is 0 from
+    // createBooking) — the worker's laborCost here IS the first real price
+    // the client sees, so it's accepted from the request instead of pinned,
+    // and the VAT snapshot (deliberately deferred at creation — see
+    // createBooking) happens now instead, from the worker's status at this
+    // exact moment. Every other task keeps today's behavior unchanged:
+    // laborCost pinned to the already-agreed estimatedPrice, VAT already
+    // snapshotted at creation, never touched again.
+    const isCustomQuoteTask = booking.serviceTask?.pricingModel === 'CUSTOM_QUOTE';
+    let laborCost = booking.estimatedPrice;
+    let vatUpdate: { vatApplicable: boolean; vatRate: number | null } | undefined;
+
+    if (isCustomQuoteTask) {
+      const requestedLaborCost = Number(req.body.laborCost);
+      if (!Number.isFinite(requestedLaborCost) || requestedLaborCost <= 0) {
+        return res.status(400).json(errorResponse(400, 'laborCost is required for a custom-quote service'));
+      }
+      laborCost = requestedLaborCost;
+
+      const workerProfile = booking.workerId
+        ? await prisma.workerProfile.findUnique({
+            where: { userId: booking.workerId },
+            select: { vatRegistered: true },
+          })
+        : null;
+      const vatApplicable = !!workerProfile?.vatRegistered;
+      vatUpdate = { vatApplicable, vatRate: vatApplicable ? VAT_RATE : null };
+    }
+
     // Quote fields live directly on Booking — no separate Quote model in schema.
-    // laborCost is the booking's settled estimatedPrice, not worker input.
     const updated = await prisma.booking.update({
       where: { id },
       data: {
-        laborCost: booking.estimatedPrice,
+        laborCost,
         materialsCost,
         quoteNotes: notes,
         quoteStatus: 'SUBMITTED',
         quotedAt: new Date(),
         status: 'QUOTE_SUBMITTED',
+        ...vatUpdate,
       },
     });
 

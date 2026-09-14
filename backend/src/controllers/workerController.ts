@@ -10,8 +10,9 @@ import { distanceKm } from '@utils/geo';
 import { buildCapabilityFilters } from '@services/matchingService';
 import { normalizeTin, maskTin } from '@utils/taxId';
 import { getCertificateDownloadUrl } from '@services/taxCertificateService';
-import { VALID_TIME_SLOTS, VALID_URGENCY_LEVELS } from '@/constants/bookingEnums';
-import type { TimeSlot, UrgencyLevel, Prisma } from '@prisma/client';
+import { isPriceWithinTaskBounds } from '@services/taskPriceService';
+import { VALID_TIME_SLOTS } from '@/constants/bookingEnums';
+import type { TimeSlot, Prisma } from '@prisma/client';
 import type { JwtPayload } from '@/types/index';
 
 interface AuthRequest extends Request {
@@ -19,11 +20,27 @@ interface AuthRequest extends Request {
 }
 
 /**
+ * A task's effective price for range/preview purposes: the worker's own
+ * WorkerTaskPrice when they've set one, falling back to the task's own
+ * (admin-set) basePrice for a task they haven't priced yet — shared by
+ * searchWorkers and getWorkerDetail so their category-range previews never
+ * disagree on which number a given worker+task resolves to.
+ */
+function effectiveTaskPrice(
+  task: { basePrice: number; pricingModel: string },
+  workerPrice: { price: number | null; unitPrice: number | null } | undefined
+): number {
+  if (!workerPrice) return task.basePrice;
+  const value = task.pricingModel === 'PER_UNIT' ? workerPrice.unitPrice : workerPrice.price;
+  return value ?? task.basePrice;
+}
+
+/**
  * GET /api/workers
  * Worker discovery search (public). Query params:
  *   serviceType, date (YYYY-MM-DD), timeSlot, hasPets, scopeAnswers (JSON
  *   object string, keyed by ServiceScopeField.label), serviceTaskId,
- *   urgencyLevel, lat, lng, page, limit
+ *   lat, lng, page, limit
  *   — plus legacy category/minRating/maxPrice, kept for existing callers.
  *
  * Filters to isAvailable + kycStatus APPROVED workers under capacity, with an
@@ -45,7 +62,6 @@ export const searchWorkers = async (req: AuthRequest, res: Response) => {
       hasPets,
       scopeAnswers,
       serviceTaskId,
-      urgencyLevel,
       lat,
       lng,
       minRating,
@@ -60,9 +76,6 @@ export const searchWorkers = async (req: AuthRequest, res: Response) => {
 
     if (timeSlot !== undefined && !VALID_TIME_SLOTS.includes(timeSlot as TimeSlot)) {
       return res.status(400).json(errorResponse(400, `timeSlot must be one of ${VALID_TIME_SLOTS.join(', ')}`));
-    }
-    if (urgencyLevel !== undefined && !VALID_URGENCY_LEVELS.includes(urgencyLevel as UrgencyLevel)) {
-      return res.status(400).json(errorResponse(400, `urgencyLevel must be one of ${VALID_URGENCY_LEVELS.join(', ')}`));
     }
     if (date !== undefined && (typeof date !== 'string' || isNaN(new Date(date).getTime()))) {
       return res.status(400).json(errorResponse(400, 'date must be a valid YYYY-MM-DD date'));
@@ -85,11 +98,25 @@ export const searchWorkers = async (req: AuthRequest, res: Response) => {
       ? await buildCapabilityFilters(serviceTypeName, parsedScopeAnswers)
       : [];
 
+    // A specific task with a real price (FIXED/PER_UNIT) is only bookable
+    // through a worker who's actually priced it — createBooking would 409 on
+    // any other candidate. Excluded from results outright (not shown with a
+    // null price) rather than left for the client to discover at checkout.
+    // CUSTOM_QUOTE tasks have no WorkerTaskPrice at all, so they impose no filter.
+    const serviceTask =
+      typeof serviceTaskId === 'string' && serviceTaskId
+        ? await prisma.serviceTask.findUnique({ where: { id: serviceTaskId } })
+        : null;
+    const requirePricedTaskId = serviceTask && serviceTask.pricingModel !== 'CUSTOM_QUOTE' ? serviceTask.id : null;
+
     const whereClause: Prisma.WorkerProfileWhereInput = {
       isAvailable: true,
       kycStatus: 'APPROVED',
       debtHoldAt: null,
       AND: capabilityFilters,
+      ...(requirePricedTaskId
+        ? { taskPrices: { some: { serviceTaskId: requirePricedTaskId, isActive: true } } }
+        : {}),
     };
 
     // Scopes discovery to a single already-known worker — used by the client
@@ -146,7 +173,11 @@ export const searchWorkers = async (req: AuthRequest, res: Response) => {
       where: whereClause,
       include: {
         user: { select: { id: true, fullName: true, avatar: true } },
-        serviceTypes: true,
+        serviceTypes: {
+          include: {
+            tasks: { where: { isActive: true }, select: { id: true, basePrice: true, pricingModel: true } },
+          },
+        },
         availability: dayStart ? { where: { date: dayStart, isBlocked: false, isBooked: false } } : false,
       },
       // Bounded candidate pool — the rating sort below runs in memory (see
@@ -166,13 +197,6 @@ export const searchWorkers = async (req: AuthRequest, res: Response) => {
     const start = (pageNum - 1) * limitNum;
     const page_ = filtered.slice(start, start + limitNum);
 
-    // Task-priced discovery: a specific ServiceTask's basePrice overrides
-    // the category's flat basePrice, mirroring bookingController.createBooking.
-    const serviceTask =
-      typeof serviceTaskId === 'string' && serviceTaskId
-        ? await prisma.serviceTask.findUnique({ where: { id: serviceTaskId } })
-        : null;
-    const effectiveUrgencyLevel = (urgencyLevel as UrgencyLevel) ?? 'STANDARD';
     const clientLat = typeof lat === 'string' ? parseFloat(lat) : NaN;
     const clientLng = typeof lng === 'string' ? parseFloat(lng) : NaN;
     const hasClientLocation = !isNaN(clientLat) && !isNaN(clientLng);
@@ -190,12 +214,50 @@ export const searchWorkers = async (req: AuthRequest, res: Response) => {
     ]);
     const completedByWorkerId = new Map(completedCounts.map((c) => [c.workerId as string, c._count._all]));
 
+    // Batched across the whole page (every task under every candidate's
+    // service types), not just the one requested serviceTaskId — the
+    // category-level price-range preview below needs each worker's own
+    // priced value for every task in their matched category, not just one.
+    const allTaskIds = Array.from(
+      new Set(page_.flatMap((w) => w.serviceTypes.flatMap((st) => st.tasks.map((t) => t.id))))
+    );
+    const workerTaskPrices = allTaskIds.length
+      ? await prisma.workerTaskPrice.findMany({
+          where: { workerProfileId: { in: page_.map((w) => w.id) }, serviceTaskId: { in: allTaskIds }, isActive: true },
+        })
+      : [];
+    const taskPriceByWorkerAndTask = new Map(
+      workerTaskPrices.map((p) => [`${p.workerProfileId}:${p.serviceTaskId}`, p])
+    );
+    // Keeps the category-level browse list from going empty for a worker
+    // still mid-setup (a specific-task search above is strict instead: such a
+    // worker is excluded from results entirely via requirePricedTaskId).
+    const effectiveTaskValue = (
+      workerProfileId: string,
+      task: { id: string; basePrice: number; pricingModel: string }
+    ): number => effectiveTaskPrice(task, taskPriceByWorkerAndTask.get(`${workerProfileId}:${task.id}`));
+
     const cards = page_.map((worker) => {
       const matchedServiceType =
         worker.serviceTypes.find((st) => serviceTypeName && st.name.toLowerCase() === serviceTypeName.toLowerCase()) ??
         worker.serviceTypes[0];
 
-      const basePrice = serviceTask?.basePrice ?? matchedServiceType?.basePrice ?? null;
+      // requirePricedTaskId guarantees (via the DB filter above) that every
+      // candidate here has an active WorkerTaskPrice for this exact task, so
+      // effectiveTaskValue's task.basePrice fallback never actually triggers
+      // for this specific lookup — only for the category-range preview below,
+      // where a worker legitimately may not have priced every task yet.
+      const basePrice = serviceTask
+        ? effectiveTaskValue(worker.id, serviceTask)
+        : matchedServiceType?.basePrice ?? null;
+      // PER_UNIT has no meaningful total until a quantity is known (collected
+      // later, in the booking form's scope-answer step) — expose the raw
+      // rate instead so mobile can compute total × quantity client-side (see
+      // bookingPriceEstimate.ts) rather than showing a misleading total here.
+      const unitPriceForTask =
+        serviceTask?.pricingModel === 'PER_UNIT'
+          ? (taskPriceByWorkerAndTask.get(`${worker.id}:${serviceTask.id}`)?.unitPrice ?? null)
+          : null;
 
       const badges: string[] = ['VERIFIED'];
       if (worker.rating >= 4.8 && worker.totalReviews >= 20) badges.push('TOP_RATED');
@@ -209,19 +271,33 @@ export const searchWorkers = async (req: AuthRequest, res: Response) => {
       // Same formula bookingController.createBooking uses for the real
       // charge (see utils/pricing.computeJobPricing) — this is a genuine
       // per-job preview, not a separate hourly-rate guess.
+      const multiplier = tierMultiplier(tier, tierSettings);
       const workerDistanceKm =
         hasClientLocation && worker.addressLat != null && worker.addressLng != null
           ? distanceKm({ lat: clientLat, lng: clientLng }, { lat: worker.addressLat, lng: worker.addressLng })
           : null;
       const estimatedTotal =
-        basePrice != null
+        basePrice != null && unitPriceForTask == null
           ? computeJobPricing({
               basePrice,
-              urgencyLevel: effectiveUrgencyLevel,
-              tierMultiplier: tierMultiplier(tier, tierSettings),
+              tierMultiplier: multiplier,
               distanceKm: workerDistanceKm,
             }).estimatedPrice
           : null;
+
+      // Browse-time price range for this worker's matched category — the
+      // spread across that category's tasks at THIS worker's own priced
+      // values (falling back to the task's basePrice for one they haven't
+      // priced yet), at THIS worker's own (already fixed) tier, not a flat
+      // single number. Distance isn't factored in here (unlike estimatedTotal
+      // above) since browsing lists don't scope to one client address/booking yet.
+      const matchedTaskPrices = matchedServiceType?.tasks?.length
+        ? matchedServiceType.tasks.map((t) => effectiveTaskValue(worker.id, t))
+        : basePrice != null
+          ? [basePrice]
+          : [];
+      const priceRangeMin = matchedTaskPrices.length ? Math.round(Math.min(...matchedTaskPrices) * multiplier) : null;
+      const priceRangeMax = matchedTaskPrices.length ? Math.round(Math.max(...matchedTaskPrices) * multiplier) : null;
 
       return {
         id: worker.userId,
@@ -230,6 +306,13 @@ export const searchWorkers = async (req: AuthRequest, res: Response) => {
         rating: worker.rating,
         totalReviews: worker.totalReviews,
         estimatedTotal,
+        // Only populated for a PER_UNIT task search — the tier-adjusted
+        // per-unit rate, for mobile to multiply by quantity once the client
+        // enters one (see bookingPriceEstimate.ts / Stage 4 of the task-
+        // pricing plan). Null for every other pricing model.
+        unitPrice: unitPriceForTask != null ? Math.round(unitPriceForTask * multiplier * 100) / 100 : null,
+        priceRangeMin,
+        priceRangeMax,
         tier,
         // Lets the client fetch this worker's packages for the selected
         // category later in the booking flow without an extra round-trip.
@@ -303,7 +386,14 @@ export const getWorkerDetail = async (req: AuthRequest, res: Response) => {
             avatar: true,
           },
         },
-        serviceTypes: true,
+        serviceTypes: {
+          select: {
+            id: true,
+            name: true,
+            basePrice: true,
+            tasks: { where: { isActive: true }, select: { id: true, basePrice: true, pricingModel: true } },
+          },
+        },
         // Only the count is used below (reviewCount) — select just that
         // instead of pulling every review row (comment, photos, etc.) for it.
         _count: { select: { reviews: true } },
@@ -325,6 +415,32 @@ export const getWorkerDetail = async (req: AuthRequest, res: Response) => {
       prisma.booking.count({ where: { workerId: worker.userId, status: 'COMPLETED' } }),
     ]);
     const tier = computeWorkerTier(worker.rating, completedJobs, tierSettings);
+    const multiplier = tierMultiplier(tier, tierSettings);
+
+    const allTaskIds = worker.serviceTypes.flatMap((st) => st.tasks.map((t) => t.id));
+    const workerTaskPrices = allTaskIds.length
+      ? await prisma.workerTaskPrice.findMany({
+          where: { workerProfileId: worker.id, serviceTaskId: { in: allTaskIds }, isActive: true },
+        })
+      : [];
+    const taskPriceByTaskId = new Map(workerTaskPrices.map((p) => [p.serviceTaskId, p]));
+
+    // Per-category price range at this worker's own priced values (falling
+    // back to a task's basePrice for one they haven't priced yet), at this
+    // worker's own (fixed) tier — mirrors serviceController's
+    // marketplace-wide range but narrowed to just this one worker.
+    const services = worker.serviceTypes.map((st) => {
+      const taskPrices = st.tasks.length
+        ? st.tasks.map((t) => effectiveTaskPrice(t, taskPriceByTaskId.get(t.id)))
+        : [st.basePrice];
+      return {
+        id: st.id,
+        name: st.name,
+        basePrice: st.basePrice,
+        priceRangeMin: Math.round(Math.min(...taskPrices) * multiplier),
+        priceRangeMax: Math.round(Math.max(...taskPrices) * multiplier),
+      };
+    });
 
     return res.status(200).json({
       success: true,
@@ -352,7 +468,12 @@ export const getWorkerDetail = async (req: AuthRequest, res: Response) => {
         // Nested relations matching Prisma schema
         resumeParseResult: worker.resumeParseResult,
         certifications: worker.certifications,
-        services: worker.serviceTypes,
+        services,
+        // Aggregate across every category this worker offers — the overall
+        // "range of what this worker offers" shown on their profile before
+        // a specific category is picked.
+        priceRangeMin: services.length ? Math.min(...services.map((s) => s.priceRangeMin)) : null,
+        priceRangeMax: services.length ? Math.max(...services.map((s) => s.priceRangeMax)) : null,
         verificationStatus: worker.kycStatus === 'APPROVED' ? 'VERIFIED' : 'PENDING',
         reviewCount: worker._count.reviews,
         activeJobCount: worker.activeJobCount,
@@ -1205,6 +1326,191 @@ export const getWorkerPackages = async (req: Request, res: Response) => {
 };
 
 /**
+ * GET /api/workers/me/task-prices
+ * Every ServiceTask under the worker's connected service categories,
+ * annotated with the worker's own WorkerTaskPrice row if one exists — so the
+ * mobile "Your Prices" screen can render admin bounds + current value (or a
+ * "set your price" prompt) without a second round trip.
+ */
+export const listMyTaskPrices = async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      return res.status(401).json(errorResponse(401, 'Not authenticated'));
+    }
+
+    const workerProfile = await prisma.workerProfile.findUnique({
+      where: { userId: req.user.userId },
+      select: {
+        id: true,
+        serviceTypes: {
+          select: {
+            id: true,
+            name: true,
+            tasks: { where: { isActive: true }, orderBy: { name: 'asc' } },
+          },
+        },
+      },
+    });
+
+    if (!workerProfile) {
+      return res.status(404).json(errorResponse(404, 'Worker profile not found'));
+    }
+
+    const allTasks = workerProfile.serviceTypes.flatMap((st) => st.tasks.map((t) => ({ ...t, serviceTypeName: st.name })));
+    const myPrices = await prisma.workerTaskPrice.findMany({
+      where: { workerProfileId: workerProfile.id, serviceTaskId: { in: allTasks.map((t) => t.id) } },
+    });
+    const priceByTaskId = new Map(myPrices.map((p) => [p.serviceTaskId, p]));
+
+    const data = allTasks.map((task) => ({
+      task: {
+        id: task.id,
+        name: task.name,
+        serviceTypeName: task.serviceTypeName,
+        pricingModel: task.pricingModel,
+        minPrice: task.minPrice,
+        maxPrice: task.maxPrice,
+        unitLabel: task.unitLabel,
+      },
+      myPrice: priceByTaskId.get(task.id) ?? null,
+    }));
+
+    return res.status(200).json({
+      success: true,
+      message: 'Task prices retrieved successfully',
+      data: { taskPrices: data },
+    });
+  } catch (error) {
+    console.error('Error fetching task prices:', error);
+    return res.status(500).json(errorResponse(500, 'Failed to fetch task prices'));
+  }
+};
+
+/**
+ * PUT /api/workers/me/task-prices/:serviceTaskId
+ * Set (upsert) the worker's own price for one task — { price } for FIXED,
+ * { unitPrice } for PER_UNIT. Ownership gate mirrors createPackage: the
+ * worker must already offer the task's parent service category. Rejects
+ * CUSTOM_QUOTE tasks outright — there's nothing to set, the worker quotes
+ * on-site via submitQuote instead.
+ */
+export const setMyTaskPrice = async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      return res.status(401).json(errorResponse(401, 'Not authenticated'));
+    }
+
+    const serviceTaskId = req.params.serviceTaskId as string;
+    const { price, unitPrice } = req.body as { price?: number; unitPrice?: number };
+
+    const workerProfile = await prisma.workerProfile.findUnique({
+      where: { userId: req.user.userId },
+      select: { id: true, serviceTypes: { select: { id: true } } },
+    });
+
+    if (!workerProfile) {
+      return res.status(404).json(errorResponse(404, 'Worker profile not found'));
+    }
+
+    const task = await prisma.serviceTask.findUnique({ where: { id: serviceTaskId } });
+    if (!task) {
+      return res.status(404).json(errorResponse(404, 'Task not found'));
+    }
+
+    if (!workerProfile.serviceTypes.some((st) => st.id === task.serviceTypeId)) {
+      return res.status(400).json(
+        errorResponse(400, 'Add this service category to your profile before pricing this task')
+      );
+    }
+
+    if (task.pricingModel === 'CUSTOM_QUOTE') {
+      return res.status(400).json(errorResponse(400, 'This task is quoted on-site — there is no upfront price to set'));
+    }
+
+    const value = task.pricingModel === 'PER_UNIT' ? unitPrice : price;
+    if (typeof value !== 'number' || Number.isNaN(value)) {
+      return res.status(400).json(
+        errorResponse(400, task.pricingModel === 'PER_UNIT' ? 'unitPrice is required' : 'price is required')
+      );
+    }
+    if (!isPriceWithinTaskBounds(value, task)) {
+      return res.status(400).json(
+        errorResponse(400, `Must be between ₱${task.minPrice} and ₱${task.maxPrice}`)
+      );
+    }
+
+    const record = await prisma.workerTaskPrice.upsert({
+      where: { workerProfileId_serviceTaskId: { workerProfileId: workerProfile.id, serviceTaskId } },
+      create: {
+        workerProfileId: workerProfile.id,
+        serviceTaskId,
+        price: task.pricingModel === 'FIXED' ? value : null,
+        unitPrice: task.pricingModel === 'PER_UNIT' ? value : null,
+        isActive: true,
+      },
+      update: {
+        price: task.pricingModel === 'FIXED' ? value : null,
+        unitPrice: task.pricingModel === 'PER_UNIT' ? value : null,
+        isActive: true,
+      },
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: 'Price saved successfully',
+      data: record,
+    });
+  } catch (error) {
+    console.error('Error setting task price:', error);
+    return res.status(500).json(errorResponse(500, 'Failed to save price'));
+  }
+};
+
+/**
+ * DELETE /api/workers/me/task-prices/:serviceTaskId
+ * Soft-disable rather than hard delete — matches WorkerPackage's convention,
+ * and gives Stage 3's "excluded from search if unpriced" logic one clean
+ * isActive check to make instead of also having to handle a missing row.
+ */
+export const deleteMyTaskPrice = async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      return res.status(401).json(errorResponse(401, 'Not authenticated'));
+    }
+
+    const serviceTaskId = req.params.serviceTaskId as string;
+
+    const workerProfile = await prisma.workerProfile.findUnique({
+      where: { userId: req.user.userId },
+      select: { id: true },
+    });
+
+    if (!workerProfile) {
+      return res.status(404).json(errorResponse(404, 'Worker profile not found'));
+    }
+
+    const existing = await prisma.workerTaskPrice.findUnique({
+      where: { workerProfileId_serviceTaskId: { workerProfileId: workerProfile.id, serviceTaskId } },
+    });
+
+    if (!existing) {
+      return res.status(404).json(errorResponse(404, 'Price not found on this profile'));
+    }
+
+    await prisma.workerTaskPrice.update({ where: { id: existing.id }, data: { isActive: false } });
+
+    return res.status(200).json({
+      success: true,
+      message: 'Price removed successfully',
+      data: null,
+    });
+  } catch (error) {
+    console.error('Error deleting task price:', error);
+    return res.status(500).json(errorResponse(500, 'Failed to delete price'));
+  }
+};
+
+/**
  * GET /api/workers/me/capacity
  * Get worker capacity info (worker only)
  */
@@ -1736,6 +2042,96 @@ export const updateTaxInfo = async (req: AuthRequest, res: Response) => {
 };
 
 /**
+ * GET /api/workers/me/vat-registration
+ * A worker is legally required to register for VAT once their gross annual
+ * receipts cross BIR's threshold, regardless of trade — unrelated to TIN.
+ * `vatRegistered` (the only field pricing logic reads) only ever flips true
+ * via admin approval below, never from submission alone.
+ */
+export const getMyVatRegistration = async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      return res.status(401).json(errorResponse(401, 'Not authenticated'));
+    }
+
+    const worker = await prisma.workerProfile.findUnique({
+      where: { userId: req.user.userId },
+      select: {
+        vatRegistered: true,
+        vatDocumentUrl: true,
+        vatVerificationStatus: true,
+        vatRejectionReason: true,
+        vatSubmittedAt: true,
+        vatReviewedAt: true,
+      },
+    });
+
+    if (!worker) {
+      return res.status(404).json(errorResponse(404, 'Worker profile not found'));
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: 'VAT registration status retrieved successfully',
+      data: worker,
+    });
+  } catch (error) {
+    console.error('Error fetching VAT registration status:', error);
+    return res.status(500).json(errorResponse(500, 'Failed to fetch VAT registration status'));
+  }
+};
+
+/**
+ * POST /api/workers/me/vat-registration
+ * Worker submits (or resubmits) proof of VAT registration — a document
+ * already uploaded via POST /api/users/me/kyc-documents/upload with
+ * documentType VAT_REGISTRATION. Moves to PENDING for admin review; does NOT
+ * touch vatRegistered itself. Resubmission (e.g. after a rejection) simply
+ * overwrites the previous claim and clears the old rejection reason.
+ */
+export const submitVatRegistration = async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      return res.status(401).json(errorResponse(401, 'Not authenticated'));
+    }
+
+    const { documentUrl } = req.body as { documentUrl?: string };
+    if (!documentUrl || typeof documentUrl !== 'string') {
+      return res.status(400).json(errorResponse(400, 'documentUrl is required'));
+    }
+
+    const updated = await prisma.workerProfile.update({
+      where: { userId: req.user.userId },
+      data: {
+        vatDocumentUrl: documentUrl,
+        vatVerificationStatus: 'PENDING',
+        vatRejectionReason: null,
+        vatSubmittedAt: new Date(),
+        vatReviewedAt: null,
+        vatReviewedById: null,
+      },
+      select: {
+        vatRegistered: true,
+        vatDocumentUrl: true,
+        vatVerificationStatus: true,
+        vatRejectionReason: true,
+        vatSubmittedAt: true,
+        vatReviewedAt: true,
+      },
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: 'VAT registration submitted for review',
+      data: updated,
+    });
+  } catch (error) {
+    console.error('Error submitting VAT registration:', error);
+    return res.status(500).json(errorResponse(500, 'Failed to submit VAT registration'));
+  }
+};
+
+/**
  * GET /api/workers/me/tax-certificates
  * Lists the authenticated worker's ISSUED Form 2307 certificates with a
  * fresh short-lived signed download URL per certificate (worker only). Draft
@@ -1823,10 +2219,16 @@ export const getMyAvailabilitySlots = async (req: AuthRequest, res: Response) =>
       orderBy: [{ date: 'asc' }, { timeSlot: 'asc' }],
     });
 
+    // Included so mobile never hardcodes this admin-configurable cap
+    // separately (see AppSettings.maxSlotsPerDay) — it's enforced for real in
+    // updateAvailabilitySlots below regardless, this is just so the client
+    // can match the server's actual limit instead of guessing at it.
+    const { maxSlotsPerDay } = await getAppSettings();
+
     return res.status(200).json({
       success: true,
       message: 'Availability slots retrieved successfully',
-      data: { slots },
+      data: { slots, maxSlotsPerDay },
     });
   } catch (error) {
     console.error('Error fetching availability slots:', error);
