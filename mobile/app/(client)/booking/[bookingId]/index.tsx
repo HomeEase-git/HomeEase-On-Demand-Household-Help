@@ -23,6 +23,7 @@ import {
   createXenditCheckout,
   getTransactionDetail,
   acknowledgeReschedule as acknowledgeRescheduleApi,
+  withdrawRescheduleRequest as withdrawRescheduleRequestApi,
 } from "../../../../services/api";
 import { colors } from "../../../../constants";
 import { useAlertModal } from "../../../../contexts/AlertModalContext";
@@ -48,6 +49,14 @@ type ApiBookingDetail = {
   previousScheduledDate?: string | null;
   previousTimeSlot?: TimeSlot | null;
   rescheduleAcknowledgedAt?: string | null;
+  // Reschedule-on-REQUEST (see backend requestReschedule) — distinct from
+  // the fields above (this booking's spillover moving a DIFFERENT booking).
+  // rescheduleRequestRespondedAt null means still awaiting the worker.
+  rescheduleRequestedAt?: string | null;
+  requestedScheduledDate?: string | null;
+  requestedTimeSlot?: TimeSlot | null;
+  rescheduleRequestRespondedAt?: string | null;
+  rescheduleRequestAccepted?: boolean | null;
   rooms?: RoomType[];
   scopeAnswers?: Record<string, string | string[]> | null;
   scheduledDate: string;
@@ -130,6 +139,7 @@ export default function BookingDetailScreen() {
   const { bookingId } = useLocalSearchParams<{ bookingId: string }>();
   const { bookings, prefillFromBooking, prefillFromDeclinedBooking, acknowledgeReschedule } = useBookingStore();
   const [confirmingNewDate, setConfirmingNewDate] = useState(false);
+  const [withdrawingReschedule, setWithdrawingReschedule] = useState(false);
   const booking = bookings.find((b) => b.id === bookingId);
   // The shared store's Booking type only keeps payment.totalAmount (used by
   // many other screens) — the real subtotal/addOns/tip breakdown is kept
@@ -218,6 +228,11 @@ export default function BookingDetailScreen() {
   const canCancel = booking.status === "Pending";
   const canTrack =
     booking.status === "Accepted" || booking.status === "InProgress";
+  // Client-initiated reschedule request — only on an ACCEPTED booking
+  // (before the worker arrives/starts), and only one live request at a time.
+  const hasPendingRescheduleRequest =
+    !!rawDetail?.rescheduleRequestedAt && !rawDetail?.rescheduleRequestRespondedAt;
+  const canRequestReschedule = rawDetail?.status === "ACCEPTED" && !hasPendingRescheduleRequest;
   const isCompleted = booking.status === "Completed";
   const isPendingCompletion = booking.status === "PendingCompletion";
   const isAwaitingPayment = booking.status === "AwaitingPayment";
@@ -251,6 +266,28 @@ export default function BookingDetailScreen() {
             alertModal.error("Error", "Failed to confirm the new date. Please try again.");
           } finally {
             setConfirmingNewDate(false);
+          }
+        },
+      },
+    );
+  };
+
+  const handleWithdrawReschedule = () => {
+    alertModal.confirm(
+      "Withdraw Request",
+      "Withdraw your reschedule request? Your booking will stay at its current date and time.",
+      {
+        confirmText: "Withdraw",
+        onConfirm: async () => {
+          setWithdrawingReschedule(true);
+          try {
+            await withdrawRescheduleRequestApi(bookingId);
+            await refreshBookingDetail();
+          } catch (error) {
+            console.error("Withdraw reschedule request error:", error);
+            alertModal.error("Error", "Failed to withdraw your request. Please try again.");
+          } finally {
+            setWithdrawingReschedule(false);
           }
         },
       },
@@ -521,6 +558,31 @@ export default function BookingDetailScreen() {
                   onPress={() => router.push(`/(client)/booking/${bookingId}/cancel`)}
                 />
               </View>
+            </View>
+          </View>
+        )}
+
+        {/* Pending client-initiated reschedule request */}
+        {hasPendingRescheduleRequest && (
+          <View className="bg-accent/10 border border-accent/30 rounded-2xl p-4 mb-4">
+            <View className="flex-row items-center">
+              <Ionicons name="time" size={22} color={colors.accent.DEFAULT} />
+              <Text className="font-bold text-sm text-text-primary ml-2 flex-1">
+                Reschedule request sent
+              </Text>
+            </View>
+            <Text className="text-text-secondary text-xs mt-1.5">
+              Waiting for your pro to respond to your request to move this booking to{" "}
+              {rawDetail?.requestedScheduledDate
+                ? new Date(rawDetail.requestedScheduledDate).toLocaleDateString("en-PH", { month: "short", day: "numeric" })
+                : "the new date"}
+              .
+            </Text>
+            <View className="mt-3">
+              <OutlinedButton
+                label={withdrawingReschedule ? "Withdrawing..." : "Withdraw Request"}
+                onPress={handleWithdrawReschedule}
+              />
             </View>
           </View>
         )}
@@ -845,6 +907,14 @@ export default function BookingDetailScreen() {
               label="Track Service"
               onPress={() =>
                 router.push(`/(client)/booking/${bookingId}/track`)
+              }
+            />
+          )}
+          {canRequestReschedule && (
+            <OutlinedButton
+              label="Request Reschedule"
+              onPress={() =>
+                router.push(`/(client)/booking/${bookingId}/request-reschedule`)
               }
             />
           )}

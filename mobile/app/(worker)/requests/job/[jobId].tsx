@@ -39,6 +39,13 @@ type BookingDetail = {
   workerArrivedAt?: string | null;
   timeline?: { workerArrivedAt?: string | null; workerStartedAt?: string | null } | null;
   review?: { rating: number; comment: string | null } | null;
+  // Client-initiated reschedule request (see backend requestReschedule) —
+  // rescheduleRequestRespondedAt null means still awaiting this worker's
+  // accept/decline.
+  rescheduleRequestedAt?: string | null;
+  requestedScheduledDate?: string | null;
+  requestedTimeSlot?: string | null;
+  rescheduleRequestRespondedAt?: string | null;
   payment?: {
     status: string;
     escrowStatus: string;
@@ -66,6 +73,7 @@ export default function JobDetailScreen() {
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [arriving, setArriving] = useState(false);
+  const [respondingToReschedule, setRespondingToReschedule] = useState(false);
   const [completionPhotoUri, setCompletionPhotoUri] = useState<string | null>(null);
   const [completionPhotoUrl, setCompletionPhotoUrl] = useState<string | null>(null);
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
@@ -203,6 +211,7 @@ export default function JobDetailScreen() {
   // Matches the backend's ADDON_ALLOWED_STATUSES (bookingController.addAddon).
   const canAddAddon = isInProgress || isQuoteSubmitted || isQuoteApproved;
   const canCancelJob = isAccepted || isInProgress || isQuoteSubmitted || isQuoteApproved || isDisputed;
+  const hasPendingRescheduleRequest = !!job.rescheduleRequestedAt && !job.rescheduleRequestRespondedAt;
 
   // Prefer the real settled amounts off the Payment row once one exists;
   // fall back to a rough 10%-commission estimate for jobs still pre-payout.
@@ -278,6 +287,32 @@ export default function JobDetailScreen() {
     }
   };
 
+  const handleRespondToReschedule = (accept: boolean) => {
+    alertModal.confirm(
+      accept ? "Accept New Date?" : "Decline New Date?",
+      accept
+        ? "This will move the booking to the client's proposed date and time."
+        : "The client will be notified and the booking stays at its current date.",
+      {
+        confirmText: accept ? "Accept" : "Decline",
+        destructive: !accept,
+        onConfirm: async () => {
+          setRespondingToReschedule(true);
+          try {
+            await api.respondToRescheduleRequest(job.id, accept);
+            alertModal.success(accept ? "Reschedule Accepted" : "Reschedule Declined", "The client has been notified.");
+            load();
+          } catch (error) {
+            console.error("Respond to reschedule request error:", error);
+            alertModal.error("Error", "Failed to respond to the reschedule request. Please try again.");
+          } finally {
+            setRespondingToReschedule(false);
+          }
+        },
+      },
+    );
+  };
+
   const handleSelectCompletionPhoto = async (uri: string) => {
     setCompletionPhotoUri(uri);
     setCompletionPhotoUrl(null);
@@ -351,6 +386,44 @@ export default function JobDetailScreen() {
         <View className="items-center mb-4">
           <StatusBadge status={status as any} />
         </View>
+
+        {/* Pending client-initiated reschedule request */}
+        {hasPendingRescheduleRequest && (
+          <View className="bg-accent/10 border border-accent/30 rounded-2xl p-4 mb-3">
+            <View className="flex-row items-center">
+              <Ionicons name="time" size={22} color={colors.accent.DEFAULT} />
+              <Text className="font-bold text-sm text-text-primary ml-2 flex-1">
+                Client requested a reschedule
+              </Text>
+            </View>
+            <Text className="text-text-secondary text-xs mt-1.5">
+              {job.client.fullName} asked to move this booking to{" "}
+              {job.requestedScheduledDate
+                ? new Date(job.requestedScheduledDate).toLocaleDateString("en-PH", { month: "short", day: "numeric" })
+                : "a new date"}
+              {job.requestedTimeSlot ? ` (${job.requestedTimeSlot.toLowerCase()})` : ""}.
+            </Text>
+            <View className="flex-row gap-2 mt-3">
+              <View className="flex-1">
+                <PrimaryButton
+                  label="Accept"
+                  fullWidth
+                  disabled={respondingToReschedule}
+                  loading={respondingToReschedule}
+                  onPress={() => handleRespondToReschedule(true)}
+                />
+              </View>
+              <View className="flex-1">
+                <OutlinedButton
+                  label="Decline"
+                  fullWidth
+                  disabled={respondingToReschedule}
+                  onPress={() => handleRespondToReschedule(false)}
+                />
+              </View>
+            </View>
+          </View>
+        )}
 
         {/* Job Info */}
         <View className="bg-card rounded-2xl p-4 mb-3">

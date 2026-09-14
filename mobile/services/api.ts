@@ -1274,6 +1274,45 @@ export async function acknowledgeReschedule(bookingId: string) {
   }
 }
 
+/**
+ * PATCH /bookings/:id/request-reschedule — client proposes a new date/time
+ * for an ACCEPTED booking; the assigned worker must accept or decline it.
+ * Distinct from extendBooking above (worker/system-triggered, moves a
+ * DIFFERENT booking) — this is the client of THIS booking asking for a
+ * different date for it.
+ */
+export async function requestReschedule(bookingId: string, date: string, timeSlot: TimeSlot) {
+  try {
+    const response = await api.patch(`/bookings/${bookingId}/request-reschedule`, { date, timeSlot });
+    return response;
+  } catch (error) {
+    console.error('Request reschedule error:', error);
+    throw error;
+  }
+}
+
+/** PATCH /bookings/:id/reschedule-request/withdraw — client backs out of their own pending request. */
+export async function withdrawRescheduleRequest(bookingId: string) {
+  try {
+    const response = await api.patch(`/bookings/${bookingId}/reschedule-request/withdraw`);
+    return response;
+  } catch (error) {
+    console.error('Withdraw reschedule request error:', error);
+    throw error;
+  }
+}
+
+/** PATCH /bookings/:id/reschedule-request/respond — worker accepts or declines the client's proposed date. */
+export async function respondToRescheduleRequest(bookingId: string, accept: boolean) {
+  try {
+    const response = await api.patch(`/bookings/${bookingId}/reschedule-request/respond`, { accept });
+    return response;
+  } catch (error) {
+    console.error('Respond to reschedule request error:', error);
+    throw error;
+  }
+}
+
 export interface ArrivalVerificationResult {
   id: string;
   workerArrivedAt: string;
