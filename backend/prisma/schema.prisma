@@ -1419,7 +1419,13 @@ model Payment {
   // is populated only once the webhook reports the invoice PAID (Xendit's
   // payment_id, e.g. "ewc_...") and is surfaced to the client as the
   // receipt's transactionId.
-  xenditInvoiceId String?
+  // @unique: defense-in-depth — no known live collision path today, but two
+  // Payment rows must never be able to share an invoice id (the invoice-paid
+  // webhook looks the row up by this field, so a collision would let one
+  // invoice's webhook settle the wrong booking's payment). Postgres treats
+  // multiple NULLs as distinct, so unset values (pre-checkout rows, CASH/
+  // platform-funded payments that never get a Xendit invoice) are unaffected.
+  xenditInvoiceId String? @unique
   xenditPaymentId String?
 
   // Authorize/capture flow — amount is held (authorized) at booking time and
