@@ -168,6 +168,9 @@ enum NotificationType {
   REVIEW_RESPONSE_ADDED
   CERTIFICATION_APPROVED
   CERTIFICATION_REJECTED
+  DISPUTE_OPENED
+  DISPUTE_RESOLVED
+  MESSAGE_REPORTED
 }
 
 enum TimeSlot {
@@ -1613,6 +1616,13 @@ model Message {
   imageUrl String?
   isRead   Boolean   @default(false)
   readAt   DateTime?
+
+  // Minimal report-and-flag-for-admin moderation — not a block-list feature.
+  // Set together by messageController.reportMessage when the recipient
+  // reports a message; every admin is notified (MESSAGE_REPORTED) the same
+  // way KYC/dispute review queues notify admins elsewhere.
+  reportedAt   DateTime?
+  reportReason String?
 
   createdAt DateTime @default(now())
 
