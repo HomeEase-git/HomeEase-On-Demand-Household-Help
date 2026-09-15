@@ -1362,14 +1362,27 @@ export async function submitQuote(
 }
 
 // Mid-job scope-creep item — worker only, and only while the job is active
-// (IN_PROGRESS/QUOTE_SUBMITTED/QUOTE_APPROVED, enforced server-side). Shows
-// up in the client's price breakdown immediately (see getBookingDetail).
+// (IN_PROGRESS/QUOTE_SUBMITTED/QUOTE_APPROVED, enforced server-side). Starts
+// pending — the client must approve it (see respondToBookingAddOn) before it
+// counts toward the price breakdown (see getBookingDetail); it auto-approves
+// after 6h of no response, or auto-rejects if the job completes first.
 export async function addBookingAddOn(bookingId: string, data: { name: string; price: number }) {
   try {
     const response = await api.post(`/bookings/${bookingId}/addons`, data);
     return response;
   } catch (error) {
     console.error('Add booking addon error:', error);
+    throw error;
+  }
+}
+
+// Client approves or rejects a pending addon (see addBookingAddOn).
+export async function respondToBookingAddOn(bookingId: string, addonId: string, approve: boolean) {
+  try {
+    const response = await api.patch(`/bookings/${bookingId}/addons/${addonId}/respond`, { approve });
+    return response;
+  } catch (error) {
+    console.error('Respond to booking addon error:', error);
     throw error;
   }
 }
@@ -1962,6 +1975,7 @@ export async function updatePayoutMethod(data: {
   payoutMethod: 'GCASH' | 'MAYA';
   payoutAccountName?: string;
   payoutAccountNumber?: string;
+  password: string;
 }): Promise<PayoutMethod> {
   try {
     const response = await api.patch('/workers/me/payout', data);

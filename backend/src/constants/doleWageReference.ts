@@ -52,14 +52,38 @@ const CITY_TO_REGION: Record<string, 'NCR' | 'REGION_III'> = {
   bulacan: 'REGION_III',
 };
 
+function buildReference(region: 'NCR' | 'REGION_III'): DoleWageReference {
+  const info = WAGE_REGIONS[region];
+  const hourlyWage = Math.round((info.dailyWage / 8) * 100) / 100;
+  return { ...info, region, hourlyWage };
+}
+
 // Returns the DOLE wage reference for a city, or null if the city isn't
 // recognized — unrecognized cities have no floor to check against.
 export function getDoleWageReference(cityInput: string | undefined | null): DoleWageReference | null {
   const key = (cityInput ?? '').trim().toLowerCase();
   const region = CITY_TO_REGION[key];
   if (!region) return null;
+  return buildReference(region);
+}
 
-  const info = WAGE_REGIONS[region];
-  const hourlyWage = Math.round((info.dailyWage / 8) * 100) / 100;
-  return { ...info, region, hourlyWage };
+/**
+ * The highest wage floor across every region this app operates in —
+ * computed rather than hardcoded to NCR so it stays correct if a future
+ * wage order ever pushes another region above it. Used for city-agnostic
+ * bounds like ServiceTask.minPrice/maxPrice, which (unlike PricingRule)
+ * apply to a task platform-wide with no per-city variant: checking against
+ * the single highest floor is the only check that can't be dodged by
+ * pricing for a cheaper-labor region while a worker in the priciest one
+ * ends up underpaid.
+ */
+export function getHighestDoleWageReference(): DoleWageReference {
+  const [first, ...rest] = Object.keys(WAGE_REGIONS) as Array<'NCR' | 'REGION_III'>;
+  return rest.reduce(
+    (highest, region) => {
+      const candidate = buildReference(region);
+      return candidate.hourlyWage > highest.hourlyWage ? candidate : highest;
+    },
+    buildReference(first)
+  );
 }

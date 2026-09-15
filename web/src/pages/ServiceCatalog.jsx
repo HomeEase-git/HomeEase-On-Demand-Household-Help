@@ -16,6 +16,7 @@ import { useToast } from '../context/ToastContext'
 import IconPicker from '../components/common/IconPicker'
 import { msIconFor } from '../constants/serviceIcons'
 import { useListQuery } from '../hooks/useListQuery'
+import { getHighestDoleWageReference } from '../constants/doleWageReference'
 
 const PAGE_SIZE = 10
 
@@ -45,6 +46,7 @@ function emptyTaskForm() {
     unitLabel: '',
     quantityScopeFieldId: '',
     durationHours: '',
+    overrideReason: '',
   }
 }
 
@@ -59,8 +61,14 @@ function taskToForm(task) {
     unitLabel: task.unitLabel || '',
     quantityScopeFieldId: task.quantityScopeFieldId || '',
     durationHours: task.durationHours != null ? String(task.durationHours) : '',
+    overrideReason: '',
   }
 }
+
+// ServiceTask.minPrice/maxPrice applies platform-wide (no city, unlike
+// PricingRule) — checked against the single highest regional DOLE floor, so
+// there's no per-city lookup needed here, just this one reference value.
+const HIGHEST_DOLE_REF = getHighestDoleWageReference()
 
 function formatPeso(amount) {
   const num = typeof amount === 'number' ? amount : Number(amount)
@@ -362,8 +370,18 @@ export default function ServiceCatalog() {
       if (!Number.isFinite(minPrice) || !Number.isFinite(maxPrice) || minPrice < 0 || minPrice > maxPrice) {
         return setTaskFormError('Min/max price are required and min must be <= max.')
       }
+      // This is a platform-wide bound (no city), so it's checked against the
+      // single highest regional DOLE floor — the backend re-checks and
+      // rejects without a reason either way; this just avoids a round trip.
+      const overrideReason = taskForm.overrideReason.trim()
+      if (minPrice < HIGHEST_DOLE_REF.hourlyWage && !overrideReason) {
+        return setTaskFormError(
+          `Min price is below the DOLE ${HIGHEST_DOLE_REF.label} hourly wage floor (₱${HIGHEST_DOLE_REF.hourlyWage.toFixed(2)}/hr). Enter an override reason to save it anyway.`
+        )
+      }
       payload.minPrice = minPrice
       payload.maxPrice = maxPrice
+      payload.overrideReason = overrideReason || undefined
 
       if (pricingModel === 'PER_UNIT') {
         if (!taskForm.unitLabel.trim()) return setTaskFormError('Unit label is required for a per-unit task (e.g. "kilo").')
@@ -881,6 +899,29 @@ export default function ServiceCatalog() {
                       style={{ flex: 1, padding: '0.5rem 0.75rem', border: '1px solid var(--border)', borderRadius: 8 }}
                     />
                   </div>
+                  <p style={{ color: 'var(--text-muted)', fontSize: '0.8rem', marginTop: '0.35rem' }}>
+                    DOLE wage floor for reference (highest region — this range applies platform-wide, not per city):{' '}
+                    ₱{HIGHEST_DOLE_REF.hourlyWage.toFixed(2)}/hr ({HIGHEST_DOLE_REF.label}, {HIGHEST_DOLE_REF.wageOrder})
+                  </p>
+                  {Number.isFinite(Number(taskForm.minPrice)) &&
+                    taskForm.minPrice !== '' &&
+                    Number(taskForm.minPrice) < HIGHEST_DOLE_REF.hourlyWage && (
+                      <div style={{ marginTop: '0.5rem' }}>
+                        <p style={{ color: 'var(--warning)', fontSize: '0.85rem', marginBottom: '0.35rem' }}>
+                          Min price is below the DOLE {HIGHEST_DOLE_REF.label} hourly wage floor (₱
+                          {HIGHEST_DOLE_REF.hourlyWage.toFixed(2)}/hr, {HIGHEST_DOLE_REF.wageOrder}) — this is a soft
+                          guardrail, not a legal requirement for independent contractors.
+                        </p>
+                        <textarea
+                          className="form-input"
+                          rows={2}
+                          value={taskForm.overrideReason}
+                          onChange={(e) => setTaskForm((p) => ({ ...p, overrideReason: e.target.value }))}
+                          placeholder="Why this price is intentionally below the DOLE reference"
+                          style={{ width: '100%', resize: 'vertical' }}
+                        />
+                      </div>
+                    )}
                 </div>
               )}
 

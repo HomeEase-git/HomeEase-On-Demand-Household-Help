@@ -24,6 +24,7 @@ export default function PayoutEditScreen() {
   const [selected, setSelected] = useState<"GCASH" | "MAYA">("GCASH");
   const [accountName, setAccountName] = useState("");
   const [accountNumber, setAccountNumber] = useState("");
+  const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const alertModal = useAlertModal();
@@ -59,18 +60,27 @@ export default function PayoutEditScreen() {
       alertModal.error("Error", "Please enter the account name and number.");
       return;
     }
+    if (!password) {
+      alertModal.error("Error", "Enter your current password to confirm this change.");
+      return;
+    }
     setSaving(true);
     try {
       await api.updatePayoutMethod({
         payoutMethod: selected,
         payoutAccountName: accountName.trim(),
         payoutAccountNumber: accountNumber.trim(),
+        password,
       });
       alertModal.success("Saved", "Payout method updated");
       router.back();
-    } catch (error) {
+    } catch (error: any) {
       console.error("Save payout method error:", error);
-      alertModal.error("Error", "Failed to update payout method. Please try again.");
+      const message =
+        error?.response?.status === 401
+          ? "Incorrect password."
+          : "Failed to update payout method. Please try again.";
+      alertModal.error("Error", message);
     } finally {
       setSaving(false);
     }
@@ -118,6 +128,13 @@ export default function PayoutEditScreen() {
             onChangeText={setAccountNumber}
             placeholder="e.g. 09171234567"
             keyboardType="phone-pad"
+          />
+          <InputField
+            label="Current Password"
+            value={password}
+            onChangeText={setPassword}
+            placeholder="Confirm it's really you"
+            secureTextEntry
           />
         </View>
         <PrimaryButton

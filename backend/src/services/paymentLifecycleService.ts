@@ -47,16 +47,43 @@ interface BookingWithAddOns {
   awaitingPaymentSince: Date | null;
   vatApplicable: boolean;
   vatRate: number | null;
+  commissionRateSnapshot: number | null;
+  withholdingTaxRateSnapshot: number | null;
   addOns?: Array<{ price: number }>;
 }
 
 async function loadBooking(bookingId: string): Promise<BookingWithAddOns> {
   const booking = await prisma.booking.findUnique({
     where: { id: bookingId },
-    include: { addOns: true },
+    // Only approved add-ons count toward settlement — see
+    // BookingAddOn.clientApprovedAt's schema comment. By the time a booking
+    // reaches settlement, add-ons are already frozen (completeBooking
+    // auto-rejects anything still pending), so this should already match
+    // what was locked into Booking.finalPrice — filtering here too keeps
+    // this the single source of truth rather than trusting that agreement.
+    include: { addOns: { where: { clientApprovedAt: { not: null } } } },
   });
   if (!booking) throw new Error(`Booking ${bookingId} not found`);
   return booking as unknown as BookingWithAddOns;
+}
+
+/**
+ * The commission/withholding-tax rate a booking actually settles at.
+ * Prefers the snapshot pinned in bookingController.acceptBooking (see
+ * Booking.commissionRateSnapshot's schema comment) over the live
+ * AppSettings value, so an admin changing the platform rate after a worker
+ * already accepted a job can't retroactively change their split. Falls
+ * back to the live settings only for bookings accepted before this field
+ * existed (snapshot null) — identical to the old, always-live behavior.
+ */
+function resolveRates(
+  booking: Pick<BookingWithAddOns, 'commissionRateSnapshot' | 'withholdingTaxRateSnapshot'>,
+  liveSettings: { commissionRate: number; withholdingTaxRate: number }
+) {
+  return {
+    commissionRate: booking.commissionRateSnapshot ?? liveSettings.commissionRate,
+    withholdingTaxRate: booking.withholdingTaxRateSnapshot ?? liveSettings.withholdingTaxRate,
+  };
 }
 
 /**
@@ -101,7 +128,7 @@ function priceBooking(booking: BookingWithAddOns, commissionRate: number, withho
  */
 export async function settleCashBooking(bookingId: string) {
   const booking = await loadBooking(bookingId);
-  const { commissionRate, withholdingTaxRate } = await getAppSettings();
+  const { commissionRate, withholdingTaxRate } = resolveRates(booking, await getAppSettings());
   const priced = priceBooking(booking, commissionRate, withholdingTaxRate);
   const platformCut = Math.round((priced.commissionAmount + priced.withholdingTaxAmount) * 100) / 100;
 
@@ -196,7 +223,7 @@ export async function createCompletionInvoice(bookingId: string): Promise<
     where: { id: booking.clientId },
     select: { email: true },
   });
-  const { commissionRate, withholdingTaxRate } = await getAppSettings();
+  const { commissionRate, withholdingTaxRate } = resolveRates(booking, await getAppSettings());
   const priced = priceBooking(booking, commissionRate, withholdingTaxRate);
 
   const existing = await prisma.payment.findUnique({ where: { bookingId } });
@@ -564,6 +591,73 @@ export async function voidUnpaidPayment(bookingId: string, reason: string) {
  *                                     accrual; the worker returns the cash
  *                                     out-of-band.
  */
+/**
+ * Called after a COMPLETED payment is refunded — taxCertificateService/
+ * taxRemittanceService/vatSummaryService all aggregate Payment rows by
+ * `capturedAt` falling in a period at generation time only, with no later
+ * reconciliation if one of those payments is subsequently refunded. Left
+ * unchecked, an already-ISSUED 2307 or already-REMITTED period keeps
+ * overstating real income/tax withheld forever, and a worker's VAT-
+ * collected summary keeps counting VAT that was never actually kept.
+ * Flags (never silently corrects — the real remediation is a human
+ * decision) any record whose stored period contains this payment's
+ * capturedAt, and notifies admins once if anything was flagged.
+ */
+async function flagTaxRecordsForRefundedPayment(payment: {
+  id: string;
+  bookingId: string;
+  capturedAt: Date | null;
+  vatAmount: number;
+  booking: { workerId: string | null };
+}): Promise<void> {
+  if (!payment.capturedAt || !payment.booking.workerId) return;
+  const workerId = payment.booking.workerId;
+  const capturedAt = payment.capturedAt;
+
+  const [certificates, remittances, vatSummaries] = await Promise.all([
+    prisma.taxCertificate.findMany({
+      where: { workerId, status: 'ISSUED', periodStart: { lte: capturedAt }, periodEnd: { gt: capturedAt } },
+    }),
+    prisma.taxRemittance.findMany({
+      where: { status: 'REMITTED', periodStart: { lte: capturedAt }, periodEnd: { gt: capturedAt } },
+    }),
+    payment.vatAmount > 0
+      ? prisma.vatCollectionSummary.findMany({
+          where: { workerId, needsReview: false, periodStart: { lte: capturedAt }, periodEnd: { gt: capturedAt } },
+        })
+      : Promise.resolve([]),
+  ]);
+
+  if (certificates.length === 0 && remittances.length === 0 && vatSummaries.length === 0) return;
+
+  await Promise.all([
+    ...certificates.map((c) => prisma.taxCertificate.update({ where: { id: c.id }, data: { status: 'NEEDS_REVIEW' } })),
+    ...remittances.map((r) => prisma.taxRemittance.update({ where: { id: r.id }, data: { status: 'NEEDS_REVIEW' } })),
+    ...vatSummaries.map((v) => prisma.vatCollectionSummary.update({ where: { id: v.id }, data: { needsReview: true } })),
+  ]);
+
+  await writeAuditLog({
+    action: 'TAX_RECORDS_FLAGGED_FOR_REVIEW',
+    category: 'SYSTEM_ERROR',
+    level: 'WARN',
+    message: `Payment ${payment.id} (booking ${payment.bookingId}) was refunded after being counted in ${certificates.length} tax certificate(s), ${remittances.length} remittance period(s), and ${vatSummaries.length} VAT summary(ies) — flagged for admin review.`,
+    metadata: { paymentId: payment.id, bookingId: payment.bookingId, workerId },
+  });
+
+  const admins = await prisma.user.findMany({ where: { role: 'ADMIN', isDeleted: false }, select: { id: true } });
+  await Promise.all(
+    admins.map((admin) =>
+      notifyUser({
+        userId: admin.id,
+        type: 'TAX_RECORDS_NEED_REVIEW',
+        title: 'Tax records need review after refund',
+        message: `A refunded payment (booking ${payment.bookingId}) was already counted in issued tax records — review and correct before the next filing.`,
+        relatedId: payment.bookingId,
+      })
+    )
+  );
+}
+
 export async function refundOrVoidPayment(bookingId: string, reason: string) {
   const payment = await prisma.payment.findUnique({
     where: { bookingId },
@@ -625,7 +719,7 @@ export async function refundOrVoidPayment(bookingId: string, reason: string) {
     }
   }
 
-  return prisma.payment.update({
+  const refunded = await prisma.payment.update({
     where: { id: payment.id },
     data: {
       status: 'REFUNDED',
@@ -634,6 +728,10 @@ export async function refundOrVoidPayment(bookingId: string, reason: string) {
       refundedAt: new Date(),
     },
   });
+
+  await flagTaxRecordsForRefundedPayment(payment);
+
+  return refunded;
 }
 
 /**

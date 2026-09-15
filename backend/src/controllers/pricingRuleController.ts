@@ -4,6 +4,7 @@ import prisma from '@config/database';
 import { errorResponse } from '@utils/errorResponse';
 import { writeAuditLog } from '@utils/auditLog';
 import { checkDoleFloor } from '@services/pricingRuleService';
+import { getDoleWageReference } from '@/constants/doleWageReference';
 import type { JwtPayload } from '@/types/index';
 
 interface AuthRequest extends Request {
@@ -85,7 +86,7 @@ export const createPricingRule = async (req: AuthRequest, res: Response) => {
       return res.status(400).json(errorResponse(400, validationError));
     }
 
-    const doleCheck = checkDoleFloor(city!.trim(), minPrice!, overrideReason);
+    const doleCheck = checkDoleFloor(getDoleWageReference(city!.trim()), minPrice!, overrideReason);
     if (doleCheck.blocked) {
       return res.status(400).json(errorResponse(400, doleCheck.message));
     }
@@ -138,7 +139,7 @@ export const updatePricingRule = async (req: AuthRequest, res: Response) => {
       return res.status(400).json(errorResponse(400, validationError));
     }
 
-    const doleCheck = checkDoleFloor(city!.trim(), minPrice!, overrideReason);
+    const doleCheck = checkDoleFloor(getDoleWageReference(city!.trim()), minPrice!, overrideReason);
     if (doleCheck.blocked) {
       return res.status(400).json(errorResponse(400, doleCheck.message));
     }

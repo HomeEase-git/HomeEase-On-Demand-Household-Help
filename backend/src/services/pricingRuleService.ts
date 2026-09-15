@@ -1,5 +1,5 @@
 import prisma from '@config/database';
-import { getDoleWageReference } from '@/constants/doleWageReference';
+import type { DoleWageReference } from '@/constants/doleWageReference';
 
 export interface PriceBounds {
   minPrice: number;
@@ -26,8 +26,18 @@ export async function validatePriceWithinPricingRule(
   serviceType: string,
   price: number
 ): Promise<{ ok: true } | { ok: false; bounds: PriceBounds }> {
-  const rule = await prisma.pricingRule.findUnique({
-    where: { city_serviceType: { city, serviceType } },
+  // findFirst + case-insensitive equals, not findUnique on the compound key
+  // — city/serviceType here come from whatever a client typed/geocoded, and
+  // Prisma's findUnique on a compound key can't take a `mode` filter at all,
+  // so a casing mismatch against what an admin typed when creating the rule
+  // ("Manila" vs "City of Manila" vs "manila") silently made this whole
+  // guardrail a no-op. Matches the same equals+insensitive pattern already
+  // used for city/serviceType lookups in matchingService.ts.
+  const rule = await prisma.pricingRule.findFirst({
+    where: {
+      city: { equals: city, mode: 'insensitive' },
+      serviceType: { equals: serviceType, mode: 'insensitive' },
+    },
   });
 
   if (!rule) return { ok: true };
@@ -42,18 +52,20 @@ export type DoleFloorCheck =
 
 /**
  * Soft guardrail, not a legal wage floor (see constants/doleWageReference.ts)
- * — flags a minPrice that wouldn't cover even one hour at the city's
- * DOLE-equivalent hourly wage, which is almost always a pricing mistake
- * rather than intent. Blocks unless the caller supplies a non-empty
- * overrideReason, which is surfaced back as an audit-log note rather than
- * stored on PricingRule itself.
+ * — flags a minPrice that wouldn't cover even one hour at the given DOLE-
+ * equivalent hourly wage, which is almost always a pricing mistake rather
+ * than intent. Blocks unless the caller supplies a non-empty overrideReason,
+ * which is surfaced back as an audit-log note rather than stored anywhere
+ * on the priced record itself. Takes an already-resolved reference (or
+ * null to skip the check) rather than a city, so callers with no city
+ * dimension at all (ServiceTask.minPrice, checked against the highest
+ * region-wide floor via getHighestDoleWageReference) can reuse this too.
  */
 export function checkDoleFloor(
-  city: string,
+  ref: DoleWageReference | null,
   minPrice: number,
   overrideReason: string | undefined
 ): DoleFloorCheck {
-  const ref = getDoleWageReference(city);
   if (!ref || minPrice >= ref.hourlyWage) {
     return { blocked: false, note: null };
   }

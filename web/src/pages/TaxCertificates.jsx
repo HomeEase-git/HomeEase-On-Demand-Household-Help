@@ -19,7 +19,7 @@ const SUB_NAV = [
   { to: '/payments/vat-registrations', label: 'VAT Registrations' },
 ]
 
-const STATUS_BADGE_VARIANT = { ISSUED: 'approved', DRAFT: 'pending' }
+const STATUS_BADGE_VARIANT = { ISSUED: 'approved', DRAFT: 'pending', NEEDS_REVIEW: 'flagged' }
 
 function formatDate(value) {
   return new Date(value).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })

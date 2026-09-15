@@ -261,13 +261,13 @@ export default function VatRegistrations() {
               <table className="table">
                 <thead>
                   <tr>
-                    <th>Worker</th><th>Period</th><th>VAT Collected</th>
+                    <th>Worker</th><th>Period</th><th>VAT Collected</th><th>Status</th>
                   </tr>
                 </thead>
                 <tbody>
                   {summaries.length === 0 ? (
                     <tr>
-                      <td colSpan={3} style={{ textAlign: 'center', color: 'var(--text-muted)' }}>
+                      <td colSpan={4} style={{ textAlign: 'center', color: 'var(--text-muted)' }}>
                         No summaries generated yet.
                       </td>
                     </tr>
@@ -277,6 +277,13 @@ export default function VatRegistrations() {
                         <td>{s.workerName}</td>
                         <td>{formatDate(s.periodStart)} – {formatDate(s.periodEnd)}</td>
                         <td>{s.totalVatCollectedFormatted}</td>
+                        <td>
+                          {s.needsReview ? (
+                            <Badge variant="flagged">Needs Review</Badge>
+                          ) : (
+                            <span style={{ color: 'var(--text-muted)' }}>—</span>
+                          )}
+                        </td>
                       </tr>
                     ))
                   )}

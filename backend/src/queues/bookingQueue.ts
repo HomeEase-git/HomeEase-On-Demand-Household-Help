@@ -8,6 +8,7 @@ export const JOB_NAMES = {
   EXPIRE_PENDING: 'expire-pending-booking',
   AUTO_SETTLE_COMPLETED: 'auto-settle-completed-bookings',
   QUOTE_TIMEOUT_SWEEP: 'quote-timeout-sweep',
+  ADDON_TIMEOUT_SWEEP: 'addon-timeout-sweep',
   RESET_AVAILABILITY: 'reset-expired-availability-slots',
   RESCHEDULE_TIMEOUT_SWEEP: 'reschedule-timeout-sweep',
   RESCHEDULE_REQUEST_TIMEOUT_SWEEP: 'reschedule-request-timeout-sweep',
@@ -19,6 +20,7 @@ export const JOB_NAMES = {
 export const REPEATABLE_JOB_IDS = {
   AUTO_SETTLE_COMPLETED: 'auto-settle-completed-bookings-hourly',
   QUOTE_TIMEOUT_SWEEP: 'quote-timeout-sweep-hourly',
+  ADDON_TIMEOUT_SWEEP: 'addon-timeout-sweep-hourly',
   RESET_AVAILABILITY: 'reset-expired-availability-slots-daily',
   RESCHEDULE_TIMEOUT_SWEEP: 'reschedule-timeout-sweep-hourly',
   RESCHEDULE_REQUEST_TIMEOUT_SWEEP: 'reschedule-request-timeout-sweep-hourly',
@@ -102,6 +104,17 @@ export async function registerRepeatableBookingJobs(): Promise<void> {
     {},
     {
       jobId: REPEATABLE_JOB_IDS.QUOTE_TIMEOUT_SWEEP,
+      repeat: { pattern: '0 * * * *' }, // every hour, on the hour
+      removeOnComplete: true,
+      removeOnFail: true,
+    }
+  );
+
+  await bookingQueue.add(
+    JOB_NAMES.ADDON_TIMEOUT_SWEEP,
+    {},
+    {
+      jobId: REPEATABLE_JOB_IDS.ADDON_TIMEOUT_SWEEP,
       repeat: { pattern: '0 * * * *' }, // every hour, on the hour
       removeOnComplete: true,
       removeOnFail: true,

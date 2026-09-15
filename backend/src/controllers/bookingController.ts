@@ -25,7 +25,14 @@ import {
   isOutsideBookedWindow,
   getSlotStartInstant,
 } from '@services/workerAvailabilityService';
-import { calculateWorkerPayout, computeBookingFinalTotal, computeJobPricing, VAT_RATE } from '@utils/pricing';
+import {
+  calculateWorkerPayout,
+  computeBookingFinalTotal,
+  computeJobPricing,
+  calculateCommission,
+  calculateWithholdingTax,
+  VAT_RATE,
+} from '@utils/pricing';
 import { buildCapabilityFilters } from '@services/matchingService';
 import { schedulePendingExpiry, cancelPendingExpiryJob } from '@queues/bookingQueue';
 import { VALID_TRANSITIONS, isValidTransition } from '@services/bookingStateMachine';
@@ -820,8 +827,13 @@ export const getBookingDetail = async (req: AuthRequest, res: Response) => {
       return res.status(403).json(errorResponse(403, 'You do not have permission to view this booking'));
     }
 
-    // addOns use `price` field (not `cost`) per schema
-    const addonsCost = (booking.addOns || []).reduce((sum: number, addon: any) => sum + addon.price, 0);
+    // addOns use `price` field (not `cost`) per schema. Only approved
+    // add-ons count toward the displayed total — the full list (including
+    // any still-pending ones) is still returned below (`addOns:
+    // booking.addOns`) so the client/worker UI can show and act on them.
+    const addonsCost = (booking.addOns || [])
+      .filter((addon: any) => addon.clientApprovedAt != null)
+      .reduce((sum: number, addon: any) => sum + addon.price, 0);
     const hasQuote = booking.laborCost != null && booking.materialsCost != null;
     const finalPrice = hasQuote
       ? (booking.laborCost ?? 0) + (booking.materialsCost ?? 0) + addonsCost
@@ -1012,10 +1024,40 @@ export const acceptBooking = async (req: AuthRequest, res: Response) => {
           throw new Error('ACCOUNT_ON_HOLD');
         }
 
+        // Pin the platform's current commission/withholding-tax rate onto
+        // the booking now — mirrors how vatApplicable/vatRate are already
+        // pinned early — so a later admin rate change can't retroactively
+        // alter what this worker agreed to for this job (see schema comment).
+        const { commissionRate, withholdingTaxRate, workerDebtHoldLimit } = await getAppSettings();
+
+        // CASH debt accrual is reactive (see debtLedgerService.accrueDebtTx)
+        // — a worker only finds out they've crossed the hold limit after
+        // completing the job that tips them over it. This is a heads-up,
+        // not a gate: the job may still be worth doing even if it risks a
+        // hold, so it's surfaced as a warning in the response, never
+        // blocking acceptance.
+        let debtWarning: string | null = null;
+        if (booking.paymentMethodType === 'CASH' && workerDebtHoldLimit > 0) {
+          const projectedCommission = calculateCommission(booking.estimatedPrice, commissionRate);
+          const projectedWithholding = calculateWithholdingTax(booking.estimatedPrice, commissionRate, withholdingTaxRate);
+          const projectedCut = Math.round((projectedCommission + projectedWithholding) * 100) / 100;
+          const projectedOwed = Math.round((workerProfile.commissionOwed + projectedCut) * 100) / 100;
+          if (projectedOwed >= workerDebtHoldLimit) {
+            debtWarning =
+              `Completing this cash job will add ~₱${projectedCut.toFixed(2)} to your platform dues ` +
+              `(₱${projectedOwed.toFixed(2)} of ₱${workerDebtHoldLimit.toFixed(2)}) and may put your account on hold.`;
+          }
+        }
+
         // Update booking status
         const updated = await tx.booking.update({
           where: { id },
-          data: { status: 'ACCEPTED', acceptedAt: new Date() },
+          data: {
+            status: 'ACCEPTED',
+            acceptedAt: new Date(),
+            commissionRateSnapshot: commissionRate,
+            withholdingTaxRateSnapshot: withholdingTaxRate,
+          },
         });
 
         // Increment activeJobCount
@@ -1028,7 +1070,7 @@ export const acceptBooking = async (req: AuthRequest, res: Response) => {
           await markSlotBooked(tx, workerProfile.id, booking.scheduledDate, booking.timeSlot);
         }
 
-        return updated;
+        return { booking: updated, debtWarning };
       });
 
       // The booking is no longer PENDING, so the 1-hour auto-expiry no
@@ -1043,11 +1085,11 @@ export const acceptBooking = async (req: AuthRequest, res: Response) => {
 
       // Create notification for client
       await notifyUser({
-        userId: result.clientId,
+        userId: result.booking.clientId,
         type: 'BOOKING_ACCEPTED',
         title: 'Booking Accepted',
         message: 'Your booking has been accepted',
-        relatedId: result.id,
+        relatedId: result.booking.id,
       });
 
       // A worker accepting is the "is my booking actually happening" moment —
@@ -1057,16 +1099,17 @@ export const acceptBooking = async (req: AuthRequest, res: Response) => {
       // failed/skipped send (no phone on file, PhilSMS error) is swallowed
       // inside sendSmsToUser.
       void sendSmsToUser({
-        userId: result.clientId,
-        message: `HomeEase: Your booking (${formatDisplayId(result.id)}) has been accepted by the worker. Open the app for details.`,
+        userId: result.booking.clientId,
+        message: `HomeEase: Your booking (${formatDisplayId(result.booking.id)}) has been accepted by the worker. Open the app for details.`,
       });
 
       return res.status(200).json({
         success: true,
         message: 'Booking accepted successfully',
         data: {
-          id: result.id,
-          status: result.status,
+          id: result.booking.id,
+          status: result.booking.status,
+          debtWarning: result.debtWarning,
         },
       });
     } catch (txError: any) {
@@ -2055,7 +2098,18 @@ export const submitQuote = async (req: AuthRequest, res: Response) => {
     }
 
     const id = req.params.id as string;
-    const { materialsCost, notes } = req.body;
+    const { notes } = req.body;
+
+    // Unlike laborCost (validated below for CUSTOM_QUOTE tasks, pinned to
+    // estimatedPrice otherwise), materialsCost was taken straight from the
+    // request with no check at all — a worker could submit a negative value
+    // (reducing the client's total below what labor alone costs) or a
+    // non-numeric value that would silently corrupt the stored quote.
+    const rawMaterialsCost = req.body.materialsCost;
+    const materialsCost = rawMaterialsCost === undefined || rawMaterialsCost === null ? 0 : Number(rawMaterialsCost);
+    if (!Number.isFinite(materialsCost) || materialsCost < 0) {
+      return res.status(400).json(errorResponse(400, 'materialsCost must be a non-negative number'));
+    }
 
     const booking = await prisma.booking.findUnique({
       where: { id },
@@ -2173,7 +2227,9 @@ export const approveQuote = async (req: AuthRequest, res: Response) => {
 
     const booking = await prisma.booking.findUnique({
       where: { id },
-      include: { addOns: true },
+      // Only approved add-ons count toward the locked finalPrice — see
+      // BookingAddOn.clientApprovedAt's schema comment.
+      include: { addOns: { where: { clientApprovedAt: { not: null } } } },
     });
 
     if (!booking) {
@@ -2365,14 +2421,30 @@ export const completeBooking = async (req: AuthRequest, res: Response) => {
       return res.status(409).json(errorResponse(409, `Cannot complete booking with status ${booking.status}`));
     }
 
-    // Lock in the final billable subtotal now — add-ons are frozen from this
-    // point on (see addAddon), so this is what the client pays at confirmation.
+    // Add-ons freeze right here — any still-pending one (never approved or
+    // rejected) can no longer affect anything after this point, so resolve
+    // it as rejected rather than leaving a dangling "Approve/Reject" prompt
+    // the client could still tap on a job that's already done and billed.
+    const stillPendingAddonIds = booking.addOns
+      .filter((addon) => addon.clientApprovedAt == null && addon.clientRejectedAt == null)
+      .map((addon) => addon.id);
+    if (stillPendingAddonIds.length > 0) {
+      await prisma.bookingAddOn.updateMany({
+        where: { id: { in: stillPendingAddonIds } },
+        data: { clientRejectedAt: new Date() },
+      });
+    }
+
+    // Lock in the final billable subtotal now — only approved add-ons count
+    // (see BookingAddOn.clientApprovedAt's schema comment) — this is what
+    // the client pays at confirmation.
+    const approvedAddOns = booking.addOns.filter((addon) => addon.clientApprovedAt != null);
     const { subtotal: lockedFinalPrice } = computeBookingFinalTotal({
       estimatedPrice: booking.estimatedPrice,
       laborCost: booking.laborCost,
       materialsCost: booking.materialsCost,
       tip: booking.tip,
-      addOns: booking.addOns,
+      addOns: approvedAddOns,
     });
 
     const updated = await prisma.$transaction(async (tx) => {
@@ -2758,32 +2830,92 @@ export const addAddon = async (req: AuthRequest, res: Response) => {
       return res.status(409).json(errorResponse(409, `Cannot add an addon to a booking with status ${booking.status}`));
     }
 
-    // prisma client accessor is bookingAddOn (capital O)
+    // prisma client accessor is bookingAddOn (capital O). Starts pending —
+    // see BookingAddOn.clientApprovedAt's schema comment — a worker
+    // unilaterally adding a line item used to count toward the bill
+    // instantly, with zero client consent.
     const addon = await prisma.bookingAddOn.create({
       data: {
         bookingId: id,
-        name,
+        name: name.trim(),
         price,
       },
     });
 
-    // Notify client — no ADDON_ADDED type; use MESSAGE_RECEIVED as proxy
     await notifyUser({
       userId: booking.clientId,
       type: 'ADDON_ADDED',
-      title: 'Additional Service Added',
-      message: `${name} has been added (₱${price})`,
+      title: 'Approval needed: additional service added',
+      message: `${addon.name} (₱${price}) was added to your booking and needs your approval before it's billed.`,
       relatedId: id,
     });
 
     return res.status(201).json({
       success: true,
-      message: 'Addon added successfully',
+      message: 'Addon added — awaiting client approval',
       data: addon,
     });
   } catch (error) {
     console.error('Error adding addon:', error);
     return res.status(500).json(errorResponse(500, 'Failed to add addon'));
+  }
+};
+
+/**
+ * PATCH /api/bookings/:id/addons/:addonId/respond
+ * Client approves or rejects a pending mid-job addon (see addAddon /
+ * BookingAddOn.clientApprovedAt). Only the pending state is actionable —
+ * once resolved (by the client here, or by the reminder/auto-approve sweep,
+ * or automatically at completion) it can't be re-answered.
+ */
+export const respondToAddon = async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user || req.user.role !== 'CLIENT') {
+      return res.status(403).json(errorResponse(403, 'Only clients can respond to an addon'));
+    }
+
+    const { id, addonId } = req.params as { id: string; addonId: string };
+    const { approve } = req.body as { approve?: boolean };
+    if (typeof approve !== 'boolean') {
+      return res.status(400).json(errorResponse(400, 'approve must be true or false'));
+    }
+
+    const addon = await prisma.bookingAddOn.findUnique({
+      where: { id: addonId },
+      include: { booking: { select: { id: true, clientId: true, workerId: true } } },
+    });
+
+    if (!addon || addon.bookingId !== id) {
+      return res.status(404).json(errorResponse(404, 'Addon not found'));
+    }
+    if (addon.booking.clientId !== req.user.userId) {
+      return res.status(403).json(errorResponse(403, 'This booking is not yours'));
+    }
+    if (addon.clientApprovedAt || addon.clientRejectedAt) {
+      return res.status(409).json(errorResponse(409, 'This addon has already been resolved'));
+    }
+
+    const updated = await prisma.bookingAddOn.update({
+      where: { id: addonId },
+      data: approve ? { clientApprovedAt: new Date() } : { clientRejectedAt: new Date() },
+    });
+
+    if (addon.booking.workerId) {
+      await notifyUser({
+        userId: addon.booking.workerId,
+        type: 'ADDON_ADDED',
+        title: approve ? 'Addon approved' : 'Addon rejected',
+        message: approve
+          ? `The client approved "${addon.name}" (₱${addon.price}) — it'll be included in the final bill.`
+          : `The client rejected "${addon.name}" (₱${addon.price}) — it won't be billed.`,
+        relatedId: id,
+      });
+    }
+
+    return res.json({ success: true, data: updated });
+  } catch (error) {
+    console.error('Error responding to addon:', error);
+    return res.status(500).json(errorResponse(500, 'Failed to respond to addon'));
   }
 };
 

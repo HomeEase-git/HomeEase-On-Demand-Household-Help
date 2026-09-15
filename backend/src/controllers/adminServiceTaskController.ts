@@ -3,6 +3,8 @@ import { Prisma, TaskPricingModel } from '@prisma/client';
 import prisma from '@config/database';
 import { errorResponse } from '@utils/errorResponse';
 import { writeAuditLog } from '@utils/auditLog';
+import { checkDoleFloor } from '@services/pricingRuleService';
+import { getHighestDoleWageReference } from '@/constants/doleWageReference';
 import type { JwtPayload } from '@/types/index';
 
 interface AuthRequest extends Request {
@@ -26,6 +28,7 @@ type TaskInputBody = {
   quantityScopeFieldId?: string | null;
   durationHours?: number | null;
   isActive?: boolean;
+  overrideReason?: string;
 };
 
 /**
@@ -122,6 +125,21 @@ export const createTask = async (req: AuthRequest, res: Response) => {
     }
 
     const isCustomQuote = body.pricingModel === 'CUSTOM_QUOTE';
+
+    // ServiceTask.minPrice/maxPrice is the bound a worker's own
+    // WorkerTaskPrice must fall inside (see taskPriceService) — unlike
+    // PricingRule, it applies platform-wide with no per-city variant, so
+    // this was the actual race-to-the-bottom guard the DOLE-floor check was
+    // built for, just never wired to it (only the separate city/service
+    // PricingRule admin screen had it). Checked against the highest
+    // region-wide floor since there's no city here to look up.
+    const doleCheck = isCustomQuote
+      ? ({ blocked: false, note: null } as const)
+      : checkDoleFloor(getHighestDoleWageReference(), body.minPrice!, body.overrideReason);
+    if (doleCheck.blocked) {
+      return res.status(400).json(errorResponse(400, doleCheck.message));
+    }
+
     const task = await prisma.serviceTask.create({
       data: {
         serviceTypeId,
@@ -144,7 +162,9 @@ export const createTask = async (req: AuthRequest, res: Response) => {
       actorRole: req.user?.role,
       action: 'TASK_CREATED',
       category: 'ADMIN_ACTION',
-      message: `Task created: ${task.name} (${serviceType.name})`,
+      level: doleCheck.note ? 'WARN' : 'INFO',
+      message: doleCheck.note ?? `Task created: ${task.name} (${serviceType.name})`,
+      metadata: { taskId: task.id, serviceTypeId, minPrice: task.minPrice, maxPrice: task.maxPrice },
     });
 
     return res.status(201).json({ success: true, data: task });
@@ -177,6 +197,14 @@ export const updateTask = async (req: AuthRequest, res: Response) => {
     }
 
     const isCustomQuote = body.pricingModel === 'CUSTOM_QUOTE';
+
+    const doleCheck = isCustomQuote
+      ? ({ blocked: false, note: null } as const)
+      : checkDoleFloor(getHighestDoleWageReference(), body.minPrice!, body.overrideReason);
+    if (doleCheck.blocked) {
+      return res.status(400).json(errorResponse(400, doleCheck.message));
+    }
+
     const task = await prisma.serviceTask.update({
       where: { id: taskId },
       data: {
@@ -200,7 +228,9 @@ export const updateTask = async (req: AuthRequest, res: Response) => {
       actorRole: req.user?.role,
       action: 'TASK_UPDATED',
       category: 'ADMIN_ACTION',
-      message: `Task updated: ${task.name}`,
+      level: doleCheck.note ? 'WARN' : 'INFO',
+      message: doleCheck.note ?? `Task updated: ${task.name}`,
+      metadata: { taskId: task.id, serviceTypeId, minPrice: task.minPrice, maxPrice: task.maxPrice },
     });
 
     return res.json({ success: true, data: task });

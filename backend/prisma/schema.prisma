@@ -157,6 +157,10 @@ enum NotificationType {
   BOOKING_RESCHEDULE_REQUEST_DECLINED
   BOOKING_ARRIVAL_FLAGGED
   REFUND_FAILED
+  PAYOUT_METHOD_CHANGED
+  PAYOUT_NAME_MISMATCH
+  TAX_RECORDS_NEED_REVIEW
+  VAT_THRESHOLD_CROSSED
 }
 
 enum TimeSlot {
@@ -460,6 +464,16 @@ model WorkerProfile {
   vatSubmittedAt        DateTime?
   vatReviewedAt         DateTime?
   vatReviewedById       String? // soft reference — User.id of the admin who reviewed it
+
+  // Set by the scheduled sweep (vatSummaryService.flagWorkersOverVatThreshold)
+  // the first time this non-VAT-registered worker's trailing-12-month gross
+  // receipts cross BIR's mandatory VAT-registration threshold — advisory
+  // only, never auto-flips vatRegistered (that stays admin-approved-only,
+  // see above). Prevents re-notifying the worker/admins every single sweep
+  // tick once already flagged; naturally stops mattering once the worker
+  // actually registers (vatRegistered becomes true, excluding them from the
+  // sweep's query regardless of this field).
+  vatThresholdFlaggedAt DateTime?
 
   // Platform commission + withholding tax owed on CASH jobs (paid to the
   // worker in person, so the platform's cut can't be skimmed from a gateway
@@ -936,6 +950,19 @@ model Booking {
   vatRate       Float?
   vatAmount     Float?
 
+  // Commission/withholding-tax snapshot — same reasoning as the VAT snapshot
+  // above, pinned in acceptBooking (the one universal PENDING -> ACCEPTED
+  // step every booking passes through, auto-matched or targeted) from
+  // AppSettings.commissionRate/withholdingTaxRate at that moment. Without
+  // this, paymentLifecycleService always read the LIVE AppSettings value at
+  // settlement — potentially weeks after a worker accepted the job — so an
+  // admin changing the platform's commission rate in that window silently
+  // changed the split on jobs a worker had already agreed to and often
+  // already completed. Nullable so older bookings (accepted before this
+  // field existed) fall back to the live rate exactly as before.
+  commissionRateSnapshot     Float?
+  withholdingTaxRateSnapshot Float?
+
   // Quote lifecycle
   quoteStatus   QuoteStatus?
   laborCost     Float?
@@ -1098,6 +1125,30 @@ model BookingAddOn {
 
   name  String
   price Float
+
+  // A worker-added mid-job line item used to count toward the final bill
+  // the instant it was created — no client consent step at all. Both null
+  // = pending the client's response; the two are mutually exclusive.
+  // Excluded from every finalPrice/settlement computation
+  // (bookingController.getBookingDetail/approveQuote/completeBooking,
+  // paymentLifecycleService.loadBooking) until clientApprovedAt is set —
+  // either explicitly (respondToAddon) or by the reminder/auto-approve
+  // sweep (bookingWorker.remindAndAutoApproveAddons) if the client never
+  // responds. Any addon still pending when the job is marked complete
+  // (bookingController.completeBooking) gets clientRejectedAt stamped
+  // automatically — add-ons freeze at completion, so a still-open
+  // approve/reject prompt afterward could never affect the already-locked
+  // finalPrice anyway, and would just confuse the client.
+  clientApprovedAt DateTime?
+  clientRejectedAt DateTime?
+  // Needed for the reminder/auto-approve sweep to know how long an addon
+  // has been pending — nothing else on this model was ever timestamped.
+  createdAt DateTime @default(now())
+  // Set once the 2h "please approve/reject this addon" reminder fires (see
+  // bookingWorker.remindAndAutoApproveAddons) — prevents re-sending it on
+  // every hourly sweep tick, same convention as
+  // Booking.quoteReminderSentAt.
+  reminderSentAt DateTime?
 
   @@index([bookingId])
 }
@@ -1578,6 +1629,13 @@ model AppSettings {
 enum TaxCertificateStatus {
   DRAFT // aggregated + PDF generated, not yet released to the worker
   ISSUED // visible to the worker in-app (see workerController.getMyTaxCertificates)
+  // A payment counted in this certificate's totals was refunded after the
+  // certificate was already issued (see
+  // paymentLifecycleService.flagTaxRecordsForRefundedPayment) — the figures
+  // on the issued PDF now overstate real income/tax withheld. Sits outside
+  // the normal DRAFT->ISSUED flow; an admin must review and reissue a
+  // corrected certificate, there's no automatic correction.
+  NEEDS_REVIEW
 }
 
 // BIR Form 2307 (Certificate of Creditable Tax Withheld at Source) data —
@@ -1634,6 +1692,13 @@ model VatCollectionSummary {
 
   totalVatCollected Float // sum of Payment.vatAmount for this worker in the period
 
+  // Same reasoning as TaxCertificate/TaxRemittance's NEEDS_REVIEW status —
+  // no separate status enum here since this model only ever had one state,
+  // so a boolean flag is enough. Set when a payment counted in
+  // totalVatCollected is refunded after this summary was already generated
+  // (see paymentLifecycleService.flagTaxRecordsForRefundedPayment).
+  needsReview Boolean @default(false)
+
   generatedBy String // soft reference — User.id of the admin who triggered generation
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
@@ -1645,6 +1710,12 @@ model VatCollectionSummary {
 enum TaxRemittanceStatus {
   PENDING
   REMITTED
+  // Same reasoning as TaxCertificateStatus.NEEDS_REVIEW — a payment counted
+  // in this period's totalTaxWithheld was refunded after the period was
+  // already marked REMITTED, so the recorded figure now overstates what was
+  // actually due. Needs an admin to review the real over-remittance amount;
+  // there's no automated BIR correction filing.
+  NEEDS_REVIEW
 }
 
 // Bookkeeping/audit trail for the platform's own BIR remittance of withheld

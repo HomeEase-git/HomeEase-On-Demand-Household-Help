@@ -4,7 +4,7 @@ export interface RemittancePeriodSummary {
   periodStart: Date;
   periodEnd: Date;
   totalTaxWithheld: number;
-  status: 'PENDING' | 'REMITTED';
+  status: 'PENDING' | 'REMITTED' | 'NEEDS_REVIEW';
   referenceNumber: string | null;
   remittedAt: Date | null;
 }

@@ -4,23 +4,27 @@ import { authLimiter } from '@middleware/rateLimit';
 import {
   remindAndAutoSettleCompletions,
   remindAndAutoApproveQuotes,
+  remindAndAutoApproveAddons,
   resetExpiredAvailabilitySlots,
   remindAndAutoConfirmReschedules,
   remindAndAutoDeclineRescheduleRequests,
   materializeAvailabilityTemplates,
 } from '@workers/bookingWorker';
 import { expireOverduePendingBookings } from '@services/pendingExpirySweep';
+import { flagWorkersOverVatThreshold } from '@services/vatSummaryService';
 
 const router = Router();
 
 const TASKS = {
   'settle-completions': remindAndAutoSettleCompletions,
   'approve-quotes': remindAndAutoApproveQuotes,
+  'approve-addons': remindAndAutoApproveAddons,
   'reset-availability': resetExpiredAvailabilitySlots,
   'expire-pending': expireOverduePendingBookings,
   'confirm-reschedules': remindAndAutoConfirmReschedules,
   'decline-reschedule-requests': remindAndAutoDeclineRescheduleRequests,
   'materialize-availability-templates': materializeAvailabilityTemplates,
+  'flag-vat-threshold': flagWorkersOverVatThreshold,
 } satisfies Record<string, () => Promise<unknown>>;
 
 type TaskName = keyof typeof TASKS;

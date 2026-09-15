@@ -24,6 +24,7 @@ import {
   getTransactionDetail,
   acknowledgeReschedule as acknowledgeRescheduleApi,
   withdrawRescheduleRequest as withdrawRescheduleRequestApi,
+  respondToBookingAddOn,
 } from "../../../../services/api";
 import { colors } from "../../../../constants";
 import { useAlertModal } from "../../../../contexts/AlertModalContext";
@@ -76,7 +77,7 @@ type ApiBookingDetail = {
     subtotal?: number;
     tip?: number;
   } | null;
-  addOns?: { id: string; name: string; price: number }[];
+  addOns?: { id: string; name: string; price: number; clientApprovedAt: string | null; clientRejectedAt: string | null }[];
   quote: {
     laborCost: number;
     materialsCost: number;
@@ -211,11 +212,29 @@ export default function BookingDetailScreen() {
   // Real, backend-persisted values only — payment.subtotal/tip/totalAmount
   // are what Xendit actually charged; fall back to the booking amount for
   // the rare case a Payment row doesn't exist yet.
+  const pendingAddOns = rawDetail?.addOns?.filter((a) => !a.clientApprovedAt && !a.clientRejectedAt) ?? [];
+
   const priceBreakdown = {
     subtotal: rawDetail?.payment?.subtotal ?? booking.amount,
-    addOns: rawDetail?.addOns?.map((a) => ({ name: a.name, price: a.price })) ?? [],
+    // Only approved add-ons count toward the total — a still-pending one
+    // shown here would look like it's already been billed.
+    addOns: rawDetail?.addOns?.filter((a) => a.clientApprovedAt).map((a) => ({ name: a.name, price: a.price })) ?? [],
     tip: rawDetail?.payment?.tip ?? 0,
     total: booking.payment?.totalAmount ?? booking.amount,
+  };
+
+  const [respondingAddonId, setRespondingAddonId] = useState<string | null>(null);
+  const handleAddonResponse = async (addonId: string, approve: boolean) => {
+    setRespondingAddonId(addonId);
+    try {
+      await respondToBookingAddOn(booking.id, addonId, approve);
+      await refreshBookingDetail();
+    } catch (error) {
+      console.error("Respond to addon error:", error);
+      alertModal.error("Error", "Failed to respond to this addon. Please try again.");
+    } finally {
+      setRespondingAddonId(null);
+    }
   };
 
   const statusCaption: Partial<Record<Booking["status"], string>> = {
@@ -777,6 +796,42 @@ export default function BookingDetailScreen() {
             </View>
           )}
         </View>
+
+        {/* Pending add-ons — awaiting client approval before they're billed */}
+        {pendingAddOns.length > 0 && (
+          <View className="bg-card rounded-2xl p-4 mb-3 border border-warning/40">
+            <Text className="text-text-primary font-semibold mb-2">
+              Additional services need your approval
+            </Text>
+            {pendingAddOns.map((addon) => (
+              <View key={addon.id} className="mb-3">
+                <View className="flex-row items-center justify-between mb-2">
+                  <Text className="text-text-primary flex-1 mr-2">{addon.name}</Text>
+                  <Text className="text-text-primary font-semibold">
+                    ₱{addon.price.toLocaleString()}
+                  </Text>
+                </View>
+                <View className="flex-row" style={{ gap: 8 }}>
+                  <View className="flex-1">
+                    <OutlinedButton
+                      label="Reject"
+                      onPress={() => handleAddonResponse(addon.id, false)}
+                      disabled={respondingAddonId === addon.id}
+                    />
+                  </View>
+                  <View className="flex-1">
+                    <PrimaryButton
+                      label="Approve"
+                      onPress={() => handleAddonResponse(addon.id, true)}
+                      disabled={respondingAddonId === addon.id}
+                      loading={respondingAddonId === addon.id}
+                    />
+                  </View>
+                </View>
+              </View>
+            ))}
+          </View>
+        )}
 
         {/* Price Breakdown */}
         <View className="mb-3">

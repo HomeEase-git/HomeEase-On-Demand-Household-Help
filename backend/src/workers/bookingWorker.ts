@@ -33,6 +33,13 @@ const PAYMENT_OVERDUE_DISPUTE_HOURS = 72;
 const RECONCILE_AFTER_HOURS = 1;
 const QUOTE_REMINDER_HOURS = 12;
 const QUOTE_AUTO_APPROVE_HOURS = 24;
+// Shorter than the quote window — a mid-job addon happens while the job is
+// actively being worked on (the client is presumably reachable/nearby),
+// and most bookings complete well within a day anyway (completeBooking
+// auto-resolves anything still pending at that point regardless), so this
+// sweep mainly matters for longer-running jobs.
+const ADDON_REMINDER_HOURS = 2;
+const ADDON_AUTO_APPROVE_HOURS = 6;
 // Same shape as the quote-approval safety net above — a client who never
 // opens the app to explicitly keep/decline a reschedule shouldn't leave it
 // unresolved forever (see bookingController.extendBooking/acknowledgeReschedule).
@@ -388,10 +395,17 @@ export async function remindAndAutoApproveQuotes(): Promise<void> {
       status: 'QUOTE_SUBMITTED',
       quotedAt: { lte: autoApproveCutoff },
     },
+    // Only approved add-ons count toward finalPrice — see
+    // BookingAddOn.clientApprovedAt's schema comment. Mirrors
+    // bookingController.approveQuote's own formula, which this sweep is the
+    // unattended equivalent of.
+    include: { addOns: { where: { clientApprovedAt: { not: null } } } },
   });
 
   for (const booking of staleQuotes) {
     if (booking.laborCost == null || booking.materialsCost == null) continue;
+
+    const addonsCost = booking.addOns.reduce((sum, addon) => sum + addon.price, 0);
 
     try {
       await prisma.booking.update({
@@ -400,7 +414,7 @@ export async function remindAndAutoApproveQuotes(): Promise<void> {
           status: 'QUOTE_APPROVED',
           quoteStatus: 'APPROVED',
           approvedAt: new Date(),
-          finalPrice: booking.laborCost! + booking.materialsCost!,
+          finalPrice: booking.laborCost! + booking.materialsCost! + addonsCost,
         },
       });
 
@@ -429,6 +443,83 @@ export async function remindAndAutoApproveQuotes(): Promise<void> {
       });
     } catch (error) {
       console.error(`Failed to auto-approve quote for booking ${booking.id}:`, error);
+    }
+  }
+}
+
+/**
+ * Client-response safety net for a mid-job addon (see
+ * bookingController.addAddon/respondToAddon) — same shape as
+ * remindAndAutoApproveQuotes: a 2h reminder, then an unresponsive client's
+ * addon auto-approves at 6h so a worker who already supplied the extra
+ * materials/labor isn't stuck never getting paid for it because the client
+ * never opened the app. Anything still pending when the job is marked
+ * complete is separately auto-REJECTED by completeBooking itself (add-ons
+ * freeze at completion) — this sweep only ever runs before that point.
+ */
+export async function remindAndAutoApproveAddons(): Promise<void> {
+  const now = Date.now();
+  const reminderCutoff = new Date(now - ADDON_REMINDER_HOURS * HOUR_MS);
+  const autoApproveCutoff = new Date(now - ADDON_AUTO_APPROVE_HOURS * HOUR_MS);
+
+  const pendingWhere = { clientApprovedAt: null, clientRejectedAt: null } as const;
+
+  const needsReminder = await prisma.bookingAddOn.findMany({
+    where: { ...pendingWhere, createdAt: { lte: reminderCutoff }, reminderSentAt: null },
+    include: { booking: { select: { id: true, clientId: true } } },
+  });
+
+  for (const addon of needsReminder) {
+    await notifyUser({
+      userId: addon.booking.clientId,
+      type: 'ADDON_ADDED',
+      title: 'An addon is waiting for your approval',
+      message: `"${addon.name}" (₱${addon.price}) still needs your approval — review it before it auto-approves.`,
+      relatedId: addon.booking.id,
+    });
+    await prisma.bookingAddOn.update({
+      where: { id: addon.id },
+      data: { reminderSentAt: new Date() },
+    });
+  }
+
+  const staleAddons = await prisma.bookingAddOn.findMany({
+    where: { ...pendingWhere, createdAt: { lte: autoApproveCutoff } },
+    include: { booking: { select: { id: true, clientId: true, workerId: true } } },
+  });
+
+  for (const addon of staleAddons) {
+    try {
+      await prisma.bookingAddOn.update({
+        where: { id: addon.id },
+        data: { clientApprovedAt: new Date() },
+      });
+
+      if (addon.booking.workerId) {
+        await notifyUser({
+          userId: addon.booking.workerId,
+          type: 'ADDON_ADDED',
+          title: 'Addon Auto-Approved',
+          message: `The client did not respond in time, so "${addon.name}" (₱${addon.price}) was automatically approved.`,
+          relatedId: addon.booking.id,
+        });
+      }
+      await notifyUser({
+        userId: addon.booking.clientId,
+        type: 'ADDON_ADDED',
+        title: 'Addon Auto-Approved',
+        message: `You didn't respond in time, so "${addon.name}" (₱${addon.price}) was automatically approved and will be billed.`,
+        relatedId: addon.booking.id,
+      });
+
+      await writeAuditLog({
+        action: 'ADDON_AUTO_APPROVED',
+        category: 'STATUS_CHANGE',
+        message: `Addon ${addon.id} on booking ${addon.bookingId} auto-approved after ${ADDON_AUTO_APPROVE_HOURS}h without client response`,
+        metadata: { bookingId: addon.bookingId, addonId: addon.id, price: addon.price },
+      });
+    } catch (error) {
+      console.error(`Failed to auto-approve addon ${addon.id}:`, error);
     }
   }
 }
@@ -706,6 +797,9 @@ export async function startBookingWorker() {
           break;
         case JOB_NAMES.QUOTE_TIMEOUT_SWEEP:
           await remindAndAutoApproveQuotes();
+          break;
+        case JOB_NAMES.ADDON_TIMEOUT_SWEEP:
+          await remindAndAutoApproveAddons();
           break;
         case JOB_NAMES.RESET_AVAILABILITY:
           await resetExpiredAvailabilitySlots();

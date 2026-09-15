@@ -120,11 +120,31 @@ export const approveVerification = async (req: AuthRequest, res: Response) => {
     if (record.type === 'WORKER_ONBOARDING') {
       const submittedTypes = new Set(record.documents.map((d) => d.documentType));
       const missingTypes = TIER_1_REQUIRED_DOCUMENT_TYPES.filter((t) => !submittedTypes.has(t));
-      if (missingTypes.length > 0 && !adminOverrideReason?.trim()) {
+
+      // Without a geocoded address, the distance-based pricing fee
+      // (bookingController.createBooking) silently computes as ₱0 for this
+      // worker forever — a free ride relative to every other worker who did
+      // set one, and a real, easy-to-miss revenue leak. Folded into the
+      // same missing-requirements/override gate as the document check above
+      // rather than a separate hard block, since an admin may legitimately
+      // need to approve someone who'll add their address moments later.
+      const workerProfile = record.user.role === 'WORKER'
+        ? await prisma.workerProfile.findUnique({
+            where: { userId: record.userId },
+            select: { addressLat: true, addressLng: true },
+          })
+        : null;
+      const missingAddress = record.user.role === 'WORKER' && (workerProfile?.addressLat == null || workerProfile?.addressLng == null);
+
+      const missingRequirements = [
+        ...missingTypes,
+        ...(missingAddress ? ['geocoded address'] : []),
+      ];
+      if (missingRequirements.length > 0 && !adminOverrideReason?.trim()) {
         return res.status(400).json(
           errorResponse(
             400,
-            `Missing required documents: ${missingTypes.join(', ')}. Provide adminOverrideReason to approve anyway.`
+            `Missing required documents/info: ${missingRequirements.join(', ')}. Provide adminOverrideReason to approve anyway.`
           )
         );
       }

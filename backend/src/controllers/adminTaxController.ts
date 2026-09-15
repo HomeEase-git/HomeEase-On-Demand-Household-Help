@@ -72,7 +72,7 @@ export const listCertificates = async (req: Request, res: Response) => {
     const { page, limit, skip } = getPaginationParams(req.query);
     const status = typeof req.query.status === 'string' ? req.query.status : undefined;
 
-    const where = status ? { status: status as 'DRAFT' | 'ISSUED' } : {};
+    const where = status ? { status: status as 'DRAFT' | 'ISSUED' | 'NEEDS_REVIEW' } : {};
 
     const [records, total] = await Promise.all([
       prisma.taxCertificate.findMany({
@@ -194,6 +194,7 @@ export const listVatSummaries = async (req: Request, res: Response) => {
         periodEnd: r.periodEnd,
         totalVatCollected: r.totalVatCollected,
         totalVatCollectedFormatted: formatPeso(r.totalVatCollected),
+        needsReview: r.needsReview,
       })),
       meta: buildPaginationMeta(total, page, limit),
     });
