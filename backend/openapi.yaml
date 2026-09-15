@@ -331,6 +331,14 @@ paths:
               properties:
                 lat: { type: number }
                 lng: { type: number }
+                accuracy:
+                  type: number
+                  nullable: true
+                  description: >-
+                    Optional device-reported GPS accuracy radius in meters.
+                    When present and worse than ~100m, the check-in is
+                    rejected as too imprecise to trust — a basic sanity
+                    bound, not device attestation.
       responses:
         '200':
           description: Arrival verified
@@ -340,7 +348,7 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
         '409':
-          description: Not ACCEPTED, no client location on file, or outside the geofence
+          description: Not ACCEPTED, no client location on file, outside the geofence, or GPS accuracy too imprecise
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorEnvelope' }

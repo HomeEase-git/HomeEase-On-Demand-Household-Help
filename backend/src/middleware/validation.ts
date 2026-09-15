@@ -536,7 +536,7 @@ export const validateArriveBooking = (
   res: Response,
   next: NextFunction
 ) => {
-  const { lat, lng } = req.body;
+  const { lat, lng, accuracy } = req.body;
 
   // Number.isFinite rejects NaN/Infinity too (see the same fix in
   // validateCreateBooking) — a NaN here would otherwise make every
@@ -544,6 +544,13 @@ export const validateArriveBooking = (
   // check-in with a "you are NaNm away" message instead of a clear 400.
   if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
     return res.status(400).json(errorResponse(400, 'lat and lng are required and must be numbers'));
+  }
+
+  // Structural check only (mirrors validateLiveLocation) — the actual sanity
+  // bound on how *bad* an accuracy radius is still acceptable is a business
+  // rule enforced in bookingController.arriveBooking, not here.
+  if (accuracy !== undefined && accuracy !== null && (!Number.isFinite(accuracy) || accuracy < 0)) {
+    return res.status(400).json(errorResponse(400, 'accuracy must be a non-negative number'));
   }
 
   return next();
