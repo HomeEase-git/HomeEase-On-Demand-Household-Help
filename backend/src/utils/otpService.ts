@@ -1,5 +1,6 @@
 import prisma from '@config/database';
 import { TokenType } from '@prisma/client';
+import { isOtpAttemptLocked, recordFailedOtpAttempt, clearOtpAttempts } from '@utils/otpAttemptLimiter';
 
 const OTP_EXPIRY_MINUTES = 10;
 
@@ -38,6 +39,14 @@ export const verifyOtp = async (
   otp: string,
   type: TokenType = TokenType.EMAIL_VERIFICATION,
 ): Promise<boolean> => {
+  // Per-account brute-force guard, independent of the IP-keyed authLimiter
+  // middleware — an attacker rotating IPs would otherwise get unlimited
+  // guesses against a single account within the OTP's validity window.
+  // See utils/otpAttemptLimiter.ts.
+  if (await isOtpAttemptLocked(userId, type)) {
+    return false;
+  }
+
   const record = await prisma.authToken.findFirst({
     where: {
       userId,
@@ -49,12 +58,17 @@ export const verifyOtp = async (
     },
   });
 
-  if (!record) return false;
+  if (!record) {
+    await recordFailedOtpAttempt(userId, type, OTP_EXPIRY_MINUTES * 60);
+    return false;
+  }
 
   // Delete used OTP
   await prisma.authToken.delete({
     where: { id: record.id },
   });
+
+  await clearOtpAttempts(userId, type);
 
   return true;
 };
