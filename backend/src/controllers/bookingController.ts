@@ -35,6 +35,7 @@ import {
   calculateWithholdingTax,
   VAT_RATE,
 } from '@utils/pricing';
+import { roundToCentavo } from '@utils/money';
 import { buildCapabilityFilters } from '@services/matchingService';
 import { schedulePendingExpiry, cancelPendingExpiryJob } from '@queues/bookingQueue';
 import { VALID_TRANSITIONS, isValidTransition } from '@services/bookingStateMachine';
@@ -51,7 +52,8 @@ interface AuthRequest extends Request {
   user?: JwtPayload;
 }
 
-const round2 = (n: number): number => Math.round(n * 100) / 100;
+// Local alias — see backend/src/utils/money.ts for the shared money-rounding helper.
+const round2 = roundToCentavo;
 
 async function resolveServiceTypeConfig(name: string) {
   return prisma.serviceType.findFirst({

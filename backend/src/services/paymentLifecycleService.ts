@@ -10,6 +10,7 @@ import { getAppSettings } from '@services/appSettingsService';
 import { schedulePayout } from '@queues/payoutQueue';
 import { writeAuditLog } from '@utils/auditLog';
 import { recoverDebtTx, accrueDebtTx, reverseDebtTx } from '@services/debtLedgerService';
+import { roundToCentavo } from '@utils/money';
 
 /**
  * PAYMENT MODEL: pay-after-completion, no escrow.
@@ -107,7 +108,7 @@ function priceBooking(booking: BookingWithAddOns, commissionRate: number, withho
   // VAT is never the worker's or platform's revenue (it's collected on BIR's
   // behalf) — added back after commission/withholding are taken out, never
   // taxed or commissioned itself.
-  const workerPayout = Math.round((subtotal - commissionAmount - withholdingTaxAmount + tip + vatAmount) * 100) / 100;
+  const workerPayout = roundToCentavo(subtotal - commissionAmount - withholdingTaxAmount + tip + vatAmount);
   return {
     subtotal,
     tip,
@@ -130,7 +131,7 @@ export async function settleCashBooking(bookingId: string) {
   const booking = await loadBooking(bookingId);
   const { commissionRate, withholdingTaxRate } = resolveRates(booking, await getAppSettings());
   const priced = priceBooking(booking, commissionRate, withholdingTaxRate);
-  const platformCut = Math.round((priced.commissionAmount + priced.withholdingTaxAmount) * 100) / 100;
+  const platformCut = roundToCentavo(priced.commissionAmount + priced.withholdingTaxAmount);
 
   const { payment } = await prisma.$transaction(async (tx) => {
     const existing = await tx.payment.findUnique({ where: { bookingId } });
@@ -379,13 +380,13 @@ export async function settleWorkerEarnings(paymentId: string): Promise<void> {
     let payoutAmount = payment.workerPayout;
     if (workerProfile) {
       const debt = Math.max(0, workerProfile.commissionOwed);
-      const applied = Math.round(Math.min(debt, payoutAmount) * 100) / 100;
+      const applied = roundToCentavo(Math.min(debt, payoutAmount));
       if (applied > 0) {
         await recoverDebtTx(tx, workerProfile.id, applied, {
           bookingId: payment.bookingId,
           note: 'Withheld from payout to clear outstanding cash-job commission dues',
         });
-        payoutAmount = Math.round((payoutAmount - applied) * 100) / 100;
+        payoutAmount = roundToCentavo(payoutAmount - applied);
       }
     }
 
@@ -706,8 +707,7 @@ export async function refundOrVoidPayment(bookingId: string, reason: string) {
         where: { userId: workerUserId },
         select: { id: true },
       });
-      const platformCut =
-        Math.round((payment.commissionAmount + payment.withholdingTaxAmount) * 100) / 100;
+      const platformCut = roundToCentavo(payment.commissionAmount + payment.withholdingTaxAmount);
       if (workerProfile && platformCut > 0) {
         await prisma.$transaction((tx) =>
           reverseDebtTx(tx, workerProfile.id, platformCut, {
