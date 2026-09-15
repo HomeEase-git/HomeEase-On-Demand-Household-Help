@@ -6,7 +6,7 @@ import { notifyUser } from '@utils/notify';
 import { writeAuditLog } from '@utils/auditLog';
 import { formatDisplayId, formatPeso } from '@utils/formatters';
 import { buildPaginationMeta, getPaginationParams } from '@utils/pagination';
-import { refundOrVoidPayment } from '@services/paymentLifecycleService';
+import { refundOrVoidPayment, createCompletionInvoice, settlePlatformFundedPayment } from '@services/paymentLifecycleService';
 import { freeSlot } from '@services/workerAvailabilityService';
 import type { JwtPayload } from '@/types/index';
 
@@ -14,14 +14,25 @@ interface AuthRequest extends Request {
   user?: JwtPayload;
 }
 
-const RESOLVE_ACTIONS = ['APPROVE_QUOTE', 'REQUEST_NEW_QUOTE', 'CANCEL_BOOKING'] as const;
+const RESOLVE_ACTIONS = [
+  'APPROVE_QUOTE',
+  'REQUEST_NEW_QUOTE',
+  'CANCEL_BOOKING',
+  // Post-completion non-payment (the 72h auto-escalation case: the worker
+  // did the job, the client never paid). Neither fits the fixed
+  // RESOLVED_STATUS_BY_ACTION lookup below — their outcome depends on what
+  // actually happens (self-heal vs. genuinely unpaid) — so they're handled
+  // in a separate branch of resolveDispute.
+  'RESOLVE_FOR_WORKER',
+  'PAY_WORKER_FROM_PLATFORM',
+] as const;
 type ResolveAction = (typeof RESOLVE_ACTIONS)[number];
 
-const RESOLVED_STATUS_BY_ACTION: Record<ResolveAction, string> = {
+const RESOLVED_STATUS_BY_ACTION = {
   APPROVE_QUOTE: 'RESOLVED_APPROVED',
   REQUEST_NEW_QUOTE: 'RESOLVED_NEW_QUOTE_REQUESTED',
   CANCEL_BOOKING: 'RESOLVED_CANCELLED',
-};
+} as const satisfies Partial<Record<ResolveAction, string>>;
 
 const disputeInclude = {
   booking: {
@@ -43,6 +54,11 @@ function formatDispute(record: DisputeRecord) {
     id: record.id,
     bookingId: booking.id,
     displayId: formatDisplayId(booking.id),
+    // Lets the admin UI show RESOLVE_FOR_WORKER / PAY_WORKER_FROM_PLATFORM
+    // only for a completed-but-unpaid job (AWAITING_PAYMENT) — those two
+    // actions are rejected server-side for any other booking status anyway,
+    // this just keeps the buttons from being offered when they'd just 409.
+    bookingStatus: booking.status,
     client: booking.client?.fullName ?? '—',
     clientId: booking.client?.id ?? null,
     worker: booking.worker?.fullName ?? '—',
@@ -53,6 +69,8 @@ function formatDispute(record: DisputeRecord) {
     resolution: record.resolution,
     resolvedById: record.resolvedById,
     resolvedAt: record.resolvedAt,
+    refundStatus: record.refundStatus,
+    refundFailureReason: record.refundFailureReason,
     createdAt: record.createdAt.toLocaleDateString('en-US', {
       month: 'short',
       day: 'numeric',
@@ -64,7 +82,13 @@ function formatDispute(record: DisputeRecord) {
 function buildDisputeWhere(search: string, status: string): Prisma.DisputeWhereInput {
   const where: Prisma.DisputeWhereInput = {};
 
-  if (status && status !== 'all') {
+  // Pseudo-status, not a real Dispute.status value — the admin dispute list's
+  // dedicated queue for resolved-but-unrefunded cases (see resolveDispute's
+  // refundStatus tracking). Kept out of the normal status filter so it reads
+  // the same way from the query string without a separate endpoint.
+  if (status === 'NEEDS_REFUND_REVIEW') {
+    where.refundStatus = 'FAILED';
+  } else if (status && status !== 'all') {
     where.status = status.toUpperCase();
   }
 
@@ -130,8 +154,128 @@ export const getDisputeById = async (req: Request, res: Response) => {
 };
 
 /**
+ * Handles RESOLVE_FOR_WORKER and PAY_WORKER_FROM_PLATFORM — split out of
+ * resolveDispute because both call into paymentLifecycleService functions
+ * that manage their own transactions (nesting them inside resolveDispute's
+ * existing $transaction block isn't workable), and because their resulting
+ * Dispute.status depends on what actually happens rather than a fixed
+ * action->status lookup.
+ */
+async function resolveNonPaymentDispute(
+  req: AuthRequest,
+  res: Response,
+  params: {
+    disputeId: string;
+    booking: { id: string; clientId: string; workerId: string | null };
+    adminId: string | undefined;
+    action: 'RESOLVE_FOR_WORKER' | 'PAY_WORKER_FROM_PLATFORM';
+    resolution: string | undefined;
+  }
+) {
+  const { disputeId, booking, adminId, action, resolution } = params;
+
+  try {
+    let disputeStatus: string;
+    let disputeResolutionNote: string;
+    let notifyWorkerMessage: string;
+
+    if (action === 'PAY_WORKER_FROM_PLATFORM') {
+      await settlePlatformFundedPayment(booking.id);
+      disputeStatus = 'RESOLVED_PLATFORM_PAID';
+      disputeResolutionNote = resolution!.trim();
+      notifyWorkerMessage = `Booking ${formatDisplayId(booking.id)}: the platform has settled your earnings directly since the client's payment could not be collected.`;
+
+      await writeAuditLog({
+        actorId: adminId,
+        actorName: req.user?.email,
+        actorRole: req.user?.role,
+        action: 'PLATFORM_FUNDED_PAYMENT',
+        category: 'ADMIN_ACTION',
+        level: 'WARN',
+        message: `Booking ${formatDisplayId(booking.id)} settled with platform funds (client never paid): ${disputeResolutionNote}`,
+        metadata: { disputeId, bookingId: booking.id },
+      });
+    } else {
+      const result = await createCompletionInvoice(booking.id);
+
+      if ('alreadyPaid' in result) {
+        // Xendit already showed the invoice PAID — a missed webhook, not a
+        // real non-payment. createCompletionInvoice's own self-heal path
+        // already finalized the booking and settled the worker.
+        disputeStatus = 'RESOLVED_PAID';
+        disputeResolutionNote = resolution?.trim() || 'Payment had already been received (missed webhook) — settled normally.';
+        notifyWorkerMessage = `Booking ${formatDisplayId(booking.id)}: the client's payment had already gone through — it just hadn't been recorded yet.`;
+      } else {
+        // Still genuinely unpaid — hold the client's account so they can't
+        // strand another worker while this stays outstanding, and give them
+        // one more explicit chance via the (possibly freshly re-minted)
+        // checkout link. The existing invoice-paid webhook path clears the
+        // hold automatically the moment they do pay (finalizePaidBooking).
+        await prisma.clientProfile.updateMany({
+          where: { userId: booking.clientId },
+          data: {
+            paymentHoldAt: new Date(),
+            paymentHoldNote: `Unpaid booking ${formatDisplayId(booking.id)} (₱${result.amount.toFixed(2)}) — dispute resolved in the worker's favor by an admin`,
+            outstandingBalance: result.amount,
+          },
+        });
+
+        await notifyUser({
+          userId: booking.clientId,
+          type: 'PAYMENT_REMINDER',
+          title: 'Payment required — account on hold',
+          message: `An admin reviewed booking ${formatDisplayId(booking.id)} and confirmed the job was completed. Your account is on hold until you pay ₱${result.amount.toFixed(2)}: ${result.checkoutUrl}`,
+          relatedId: booking.id,
+        });
+
+        disputeStatus = 'RESOLVED_WORKER_PROTECTED';
+        disputeResolutionNote =
+          resolution?.trim() || "Confirmed the worker completed the job; client's account placed on hold pending payment.";
+        notifyWorkerMessage = `Booking ${formatDisplayId(booking.id)}: we confirmed your completed job and put the client's account on hold until they pay. You'll be notified once it's settled.`;
+      }
+
+      await writeAuditLog({
+        actorId: adminId,
+        actorName: req.user?.email,
+        actorRole: req.user?.role,
+        action: 'DISPUTE_RESOLVED',
+        category: 'ADMIN_ACTION',
+        message: `Dispute for booking ${formatDisplayId(booking.id)} resolved via RESOLVE_FOR_WORKER (${disputeStatus})`,
+        metadata: { disputeId, bookingId: booking.id },
+      });
+    }
+
+    await prisma.dispute.update({
+      where: { id: disputeId },
+      data: {
+        status: disputeStatus,
+        resolution: disputeResolutionNote,
+        resolvedById: adminId,
+        resolvedAt: new Date(),
+      },
+    });
+
+    if (booking.workerId) {
+      await notifyUser({
+        userId: booking.workerId,
+        type: 'QUOTE_DISPUTED',
+        title: 'Dispute Resolved',
+        message: notifyWorkerMessage,
+        relatedId: booking.id,
+      });
+    }
+
+    const updated = await prisma.dispute.findUniqueOrThrow({ where: { id: disputeId }, include: disputeInclude });
+    return res.json({ success: true, data: formatDispute(updated) });
+  } catch (error: any) {
+    console.error('Resolve non-payment dispute error:', error);
+    return res.status(500).json(errorResponse(500, 'Internal server error'));
+  }
+}
+
+/**
  * PATCH /api/admin/disputes/:id/resolve
- * Body: { action: 'APPROVE_QUOTE' | 'REQUEST_NEW_QUOTE' | 'CANCEL_BOOKING', resolution?: string }
+ * Body: { action: ResolveAction, resolution?: string }
  *
  *  - APPROVE_QUOTE: proceeds the booking to QUOTE_APPROVED (final price =
  *    laborCost + materialsCost) and re-affirms the payment hold — the actual
@@ -141,6 +285,16 @@ export const getDisputeById = async (req: Request, res: Response) => {
  *    back to IN_PROGRESS so the worker can resubmit via POST .../quote.
  *  - CANCEL_BOOKING: cancels the booking, writes a Cancellation record, and
  *    releases/refunds the held escrow.
+ *  - RESOLVE_FOR_WORKER: for a completed job the client never paid for
+ *    (booking stuck AWAITING_PAYMENT). Confirms the worker's claim, makes
+ *    one more collection attempt (re-surfacing or re-minting the Xendit
+ *    checkout link — self-heals if Xendit shows it already paid, e.g. a
+ *    missed webhook), and if still unpaid puts the client's account on hold
+ *    via ClientProfile.paymentHoldAt until they pay or an admin releases it.
+ *  - PAY_WORKER_FROM_PLATFORM: explicit override for when collection is a
+ *    lost cause — the platform settles the worker's earnings out of its own
+ *    funds. Requires RESOLVE_FOR_WORKER to have run first (so a Payment row
+ *    exists) and a substantive reason; always audit-logged at WARN.
  */
 export const resolveDispute = async (req: AuthRequest, res: Response) => {
   try {
@@ -166,9 +320,25 @@ export const resolveDispute = async (req: AuthRequest, res: Response) => {
     }
 
     const booking = dispute.booking;
+    const isPaymentAction = action === 'RESOLVE_FOR_WORKER' || action === 'PAY_WORKER_FROM_PLATFORM';
+
     // Quote actions only make sense on a quote dispute; CANCEL_BOOKING can also
     // resolve a payment-overdue or refund-request dispute (booking still in
-    // PENDING_COMPLETION / AWAITING_PAYMENT / COMPLETED).
+    // PENDING_COMPLETION / AWAITING_PAYMENT / COMPLETED); the payment actions
+    // only make sense on a completed-but-unpaid job.
+    if (isPaymentAction) {
+      if (booking.status !== 'AWAITING_PAYMENT') {
+        return res.status(409).json(
+          errorResponse(409, `${action} only applies to a completed job still awaiting payment (booking is ${booking.status})`)
+        );
+      }
+      if (action === 'PAY_WORKER_FROM_PLATFORM' && (!resolution || resolution.trim().length < 20)) {
+        return res.status(400).json(
+          errorResponse(400, 'PAY_WORKER_FROM_PLATFORM requires a detailed reason (20+ characters) — this is a real platform expense.')
+        );
+      }
+      return resolveNonPaymentDispute(req, res, { disputeId: id, booking, adminId, action, resolution });
+    }
     if (action !== 'CANCEL_BOOKING' && booking.status !== 'DISPUTED') {
       return res.status(409).json(errorResponse(409, 'Booking is not currently disputed'));
     }
@@ -179,7 +349,7 @@ export const resolveDispute = async (req: AuthRequest, res: Response) => {
       return res.status(409).json(errorResponse(409, `Cannot resolve — booking is ${booking.status}`));
     }
 
-    const resolvedStatus = RESOLVED_STATUS_BY_ACTION[action as ResolveAction];
+    const resolvedStatus = RESOLVED_STATUS_BY_ACTION[action as keyof typeof RESOLVED_STATUS_BY_ACTION];
     // A COMPLETED booking stays COMPLETED — we refund without un-completing it.
     const cancelKeepsStatus = action === 'CANCEL_BOOKING' && booking.status === 'COMPLETED';
 
@@ -270,9 +440,59 @@ export const resolveDispute = async (req: AuthRequest, res: Response) => {
       });
     });
 
+    // Refund/void outcome, tracked separately from the dispute's own
+    // resolution — the booking-cancel transaction above already committed
+    // regardless of what happens here, since a downstream payment-gateway
+    // failure shouldn't block the booking itself from being cancelled. What
+    // must never happen again is this failing silently: previously a thrown
+    // error here (Xendit refund rejected, or "payout already sent, needs a
+    // manual clawback") was caught and only console.error'd, while the API
+    // still reported success and nothing else in the system ever surfaced
+    // that the client's money never actually moved.
+    let refundStatus: 'NOT_APPLICABLE' | 'SUCCEEDED' | 'FAILED' = 'NOT_APPLICABLE';
+    let refundFailureReason: string | null = null;
+    let refundAmount: number | null = null;
+
     if (action === 'CANCEL_BOOKING') {
-      await refundOrVoidPayment(booking.id, resolution?.trim() || 'Cancelled via dispute resolution').catch((error) => {
-        console.error(`Failed to refund payment for dispute-cancelled booking ${booking.id}:`, error);
+      try {
+        const refundedPayment = await refundOrVoidPayment(
+          booking.id,
+          resolution?.trim() || 'Cancelled via dispute resolution'
+        );
+        refundStatus = 'SUCCEEDED';
+        refundAmount = refundedPayment?.capturedAmount ?? refundedPayment?.totalAmount ?? null;
+      } catch (error: any) {
+        refundStatus = 'FAILED';
+        refundFailureReason = error?.message || 'Unknown error';
+
+        await writeAuditLog({
+          actorId: adminId,
+          actorName: req.user?.email,
+          actorRole: req.user?.role,
+          action: 'DISPUTE_REFUND_FAILED',
+          category: 'ADMIN_ACTION',
+          level: 'ERROR',
+          message: `Refund/void failed while resolving dispute ${id} for booking ${formatDisplayId(booking.id)}: ${refundFailureReason}`,
+          metadata: { disputeId: id, bookingId: booking.id },
+        });
+
+        const admins = await prisma.user.findMany({ where: { role: 'ADMIN', isDeleted: false }, select: { id: true } });
+        await Promise.all(
+          admins.map((admin) =>
+            notifyUser({
+              userId: admin.id,
+              type: 'REFUND_FAILED',
+              title: 'Refund failed — manual action needed',
+              message: `Booking ${formatDisplayId(booking.id)} was cancelled via dispute resolution, but the refund/void failed: ${refundFailureReason}`,
+              relatedId: booking.id,
+            })
+          )
+        );
+      }
+
+      await prisma.dispute.update({
+        where: { id },
+        data: { refundStatus, refundFailureReason, refundAmount },
       });
     }
 

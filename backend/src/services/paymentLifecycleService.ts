@@ -483,6 +483,61 @@ export async function finalizePaidBooking(
 }
 
 /**
+ * Admin override for a post-completion non-payment dispute (see
+ * adminDisputeController's PAY_WORKER_FROM_PLATFORM action) — the platform
+ * settles the worker's earnings out of its own funds rather than continue
+ * chasing a client who confirmed the job but never paid. Requires an
+ * existing Payment (created by createCompletionInvoice when the booking
+ * entered AWAITING_PAYMENT) so this can reuse its already-computed
+ * subtotal/commission/withholdingTax/VAT/workerPayout split — the worker
+ * still received real taxable income regardless of who funded it, so 2307/
+ * withholding reporting stays correct — but marks `platformFunded` so
+ * vatSummaryService excludes it from "VAT collected from clients"
+ * reporting, since no client payment ever happened. Idempotent the same way
+ * finalizePaidBooking is: an already-COMPLETED payment just re-runs
+ * settleWorkerEarnings (safe no-op if already settled).
+ */
+export async function settlePlatformFundedPayment(bookingId: string) {
+  const payment = await prisma.payment.findUnique({ where: { bookingId } });
+  if (!payment) {
+    throw new Error(
+      `No Payment exists yet for booking ${bookingId} — resolve the dispute via RESOLVE_FOR_WORKER first so one gets created.`
+    );
+  }
+
+  if (payment.status === 'COMPLETED') {
+    await settleWorkerEarnings(payment.id);
+    return payment;
+  }
+
+  const updated = await prisma.$transaction(async (tx) => {
+    const p = await tx.payment.update({
+      where: { id: payment.id },
+      data: {
+        status: 'COMPLETED',
+        escrowStatus: 'RELEASED',
+        platformFunded: true,
+        failureReason: null,
+        capturedAmount: payment.totalAmount,
+        capturedAt: new Date(),
+        releasedAt: new Date(),
+      },
+    });
+
+    await tx.booking.update({
+      where: { id: bookingId },
+      data: { status: 'COMPLETED', finalPrice: payment.subtotal, vatAmount: payment.vatAmount, completionDate: new Date() },
+    });
+
+    return p;
+  });
+
+  await settleWorkerEarnings(payment.id);
+
+  return updated;
+}
+
+/**
  * Marks a still-unpaid Payment as FAILED (its Xendit invoice, if any, expires
  * on Xendit's side). Used when a booking is cancelled while awaiting payment.
  * A no-op when there is no Payment row.

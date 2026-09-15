@@ -73,6 +73,23 @@ export const createBooking = async (req: AuthRequest, res: Response) => {
     }
     const clientId = req.user.userId;
 
+    // Payment hold — mirrors WorkerProfile.debtHoldAt's "blocks new activity
+    // until cleared" pattern, applied to the client side of the same
+    // problem. Set by adminDisputeController.resolveDispute's
+    // RESOLVE_FOR_WORKER action when this client confirmed a job (so the
+    // worker's labor is real and done) but the 72h non-payment dispute got
+    // resolved without payment ever landing — without this, that client
+    // could go straight on to book and strand a second worker the same way.
+    const holdingClientProfile = await prisma.clientProfile.findUnique({
+      where: { userId: clientId },
+      select: { paymentHoldAt: true },
+    });
+    if (holdingClientProfile?.paymentHoldAt) {
+      return res.status(403).json(
+        errorResponse(403, 'Your account is on hold for an unpaid booking. Please settle it before booking again.')
+      );
+    }
+
     const {
       workerId: requestedWorkerId,
       serviceType,
@@ -601,8 +618,8 @@ export const createBooking = async (req: AuthRequest, res: Response) => {
 
       // Same retry as the pre-transaction slot check above — a second client
       // can win the race between our findSlot check and this insert
-      // (worker_slot_unique surfaces it as SLOT_TAKEN or a P2002 on that
-      // index). For an auto-matched booking that's not something the client
+      // (worker_live_slot_unique surfaces it as SLOT_TAKEN or a P2002 on
+      // that index). For an auto-matched booking that's not something the client
       // did wrong, so retry with the next-best candidate instead of making
       // them resubmit manually.
       if (isSlotConflict && (await tryNextAutoMatchCandidate())) continue;
@@ -1563,9 +1580,10 @@ export const extendBooking = async (req: AuthRequest, res: Response) => {
               handled = true;
               break;
             } catch {
-              // worker_slot_unique hit — this candidate day was claimed by a
-              // real booking between the search and the move. Advance one
-              // more day within the same bound and try again.
+              // worker_live_slot_unique hit — this candidate day was claimed
+              // by a real, still-live booking between the search and the
+              // move. Advance one more day within the same bound and try
+              // again.
               searchFrom = nextOpenDate;
             }
           }

@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "78683489210",
+    "project_id": "homeease-dad3d",
+    "storage_bucket": "homeease-dad3d.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:78683489210:android:3bc9a63d16872c03005383",
+        "android_client_info": {
+          "package_name": "com.homeease.app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBTwS08zv7ah2eDmfJFwVK1ISjyO2u7uZY"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

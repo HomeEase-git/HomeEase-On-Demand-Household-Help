@@ -7,6 +7,9 @@ import { buildPaginationMeta, getPaginationParams } from '@utils/pagination';
 import { writeAuditLog } from '@utils/auditLog';
 import { getAppSettings } from '@services/appSettingsService';
 import { computeWorkerTier } from '@utils/workerTier';
+import { revokeAllRefreshTokens } from '@utils/otpService';
+import { revokeUserSessions, clearUserSessionRevocation } from '@utils/tokenRevocation';
+import { JWT_EXPIRY } from '@utils/jwt';
 import type { JwtPayload } from '@/types/index';
 
 interface AuthRequest extends Request {
@@ -398,6 +401,21 @@ async function setUserStatus(
       status: targetStatus,
     },
   });
+
+  // A banned/suspended user previously kept full API access on their
+  // existing access token for up to JWT_EXPIRY (7 days by default in
+  // production) and could silently renew it forever via /auth/refresh — the
+  // status change alone never touched their live session. Revoking every
+  // access token (Redis, checked by authMiddleware) and deleting their
+  // refresh tokens (blocks /auth/refresh outright) makes this take effect
+  // immediately. Reinstating clears the revocation so a wrongly-suspended
+  // user isn't still locked out after being cleared.
+  if (targetStatus === 'ACTIVE') {
+    await clearUserSessionRevocation(id);
+  } else {
+    await revokeUserSessions(id, JWT_EXPIRY);
+    await revokeAllRefreshTokens(id);
+  }
 
   await writeAuditLog({
     actorId: req.user?.userId,

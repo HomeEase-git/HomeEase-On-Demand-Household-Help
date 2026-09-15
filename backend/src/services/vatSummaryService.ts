@@ -24,6 +24,9 @@ export async function generateVatSummaries(
     where: {
       status: 'COMPLETED',
       vatApplicable: true,
+      // Platform-funded settlements (PAY_WORKER_FROM_PLATFORM) never
+      // actually collected anything from a client — nothing to report here.
+      platformFunded: false,
       capturedAt: { gte: periodStart, lt: periodEnd },
     },
     select: {

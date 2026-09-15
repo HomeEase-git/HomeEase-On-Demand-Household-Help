@@ -8,7 +8,13 @@ import {
   suspendUser,
   reinstateUser,
 } from '../controllers/adminUserController';
-import { getWorkerDebtAdmin, adjustWorkerDebtAdmin, releaseWorkerHold } from '../controllers/debtController';
+import {
+  getWorkerDebtAdmin,
+  adjustWorkerDebtAdmin,
+  releaseWorkerHold,
+  getClientPaymentHoldAdmin,
+  releaseClientPaymentHold,
+} from '../controllers/debtController';
 import { authMiddleware } from '../middleware/auth';
 import { restrictTo } from '../middleware/role';
 
@@ -18,6 +24,8 @@ router.use(authMiddleware, restrictTo('ADMIN'));
 
 router.get('/clients', listClients);
 router.get('/clients/:id', getClientById);
+router.get('/clients/:id/payment-hold', getClientPaymentHoldAdmin);
+router.patch('/clients/:id/payment-hold/release', releaseClientPaymentHold);
 router.get('/workers', listWorkers);
 router.get('/workers/:id', getWorkerById);
 router.get('/workers/:id/debt', getWorkerDebtAdmin);

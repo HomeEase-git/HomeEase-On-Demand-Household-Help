@@ -156,6 +156,7 @@ enum NotificationType {
   BOOKING_RESCHEDULE_REQUEST_ACCEPTED
   BOOKING_RESCHEDULE_REQUEST_DECLINED
   BOOKING_ARRIVAL_FLAGGED
+  REFUND_FAILED
 }
 
 enum TimeSlot {
@@ -335,6 +336,21 @@ model ClientProfile {
   state   String?
   zipCode String?
 
+  // Payment hold — mirrors WorkerProfile.commissionOwed/debtHoldAt/
+  // debtHoldNote (same shape, opposite party). Set by
+  // adminDisputeController.resolveDispute's RESOLVE_FOR_WORKER action: the
+  // client confirmed a job (so the worker's labor is real and done) but the
+  // 72h auto-escalation dispute got resolved without payment ever landing.
+  // Blocks new bookings (see bookingController.createBooking) until an
+  // admin clears it — either the client pays (the existing AWAITING_PAYMENT
+  // invoice-paid webhook path clears it automatically, see
+  // finalizePaidBooking) or an admin releases it manually. Left in place
+  // (not auto-cleared) even after PAY_WORKER_FROM_PLATFORM, since the
+  // platform then owns the collection problem instead of the worker.
+  outstandingBalance Float     @default(0)
+  paymentHoldAt      DateTime?
+  paymentHoldNote    String?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -342,6 +358,7 @@ model ClientProfile {
   paymentMethods SavedPaymentMethod[]
 
   @@index([userId])
+  @@index([paymentHoldAt])
 }
 
 model WorkerProfile {
@@ -1043,8 +1060,26 @@ model Booking {
   pricingLogs         PricingLog[]
   disputes            Dispute[]
 
-  // NOTE: only enforceable while workerId is set — see merge notes.
-  @@unique([workerId, scheduledDate, timeSlot], name: "worker_slot_unique")
+  // Slot occupancy is enforced by a Postgres PARTIAL unique index
+  // ("worker_live_slot_unique" on (workerId, scheduledDate, timeSlot) WHERE
+  // status NOT IN ('REJECTED','CANCELLED')), hand-written in migration
+  // 20260915000000_partial_unique_live_booking_slot — NOT declared here,
+  // because Prisma's schema DSL has no way to express a partial (WHERE-
+  // qualified) unique index for Postgres. A plain `@@unique` on these three
+  // columns previously lived here, but since bookings are never deleted, a
+  // single REJECTED or CANCELLED booking permanently squatted on that
+  // worker/date/slot tuple forever — re-booking the exact same worker for
+  // the exact same slot after a decline/cancellation failed with a
+  // permanent, misleading 409, even though WorkerAvailability correctly
+  // showed the slot open again. The partial index only makes "live"
+  // bookings (everything except REJECTED/CANCELLED) mutually exclusive per
+  // slot; NULL workerId (open/unassigned requests) stays unconstrained via
+  // Postgres's normal NULL-distinct unique semantics, same as before.
+  // IMPORTANT: because this index isn't in the datamodel, `prisma migrate
+  // dev` cannot see it and may propose dropping it as drift on some future
+  // migration — always review a generated migration's SQL before applying
+  // it near the Booking model, and if one appears, delete that DROP INDEX
+  // statement rather than letting it through.
   // Partial-unique-by-non-null: Postgres/Prisma treats NULL as distinct from
   // NULL in a unique index, so this only ever collides when a client
   // actually sends a (repeated) key — never blocks two real bookings that
@@ -1163,6 +1198,18 @@ model Dispute {
   resolvedAt   DateTime?
   refundAmount Float?
 
+  // Outcome of the CANCEL_BOOKING refund/void attempt (see
+  // adminDisputeController.resolveDispute) — distinct from `status`, which
+  // reflects the dispute itself being resolved. A dispute can be fully
+  // RESOLVED_CANCELLED while its refund still FAILED (Xendit refund
+  // rejected, or the worker payout already went out and needs a manual
+  // clawback) — that combination used to be silently swallowed into a
+  // console.error with the API still reporting success. NOT_APPLICABLE for
+  // every action other than CANCEL_BOOKING, and for CANCEL_BOOKING cases
+  // where there was nothing to refund (no payment, or already PENDING/void).
+  refundStatus        String  @default("NOT_APPLICABLE") // 'NOT_APPLICABLE' | 'SUCCEEDED' | 'FAILED'
+  refundFailureReason String?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -1251,6 +1298,17 @@ model Payment {
   // paymentLifecycleService.settleWorkerEarnings — a replayed webhook or the
   // self-heal sweep must not net the debt or pay out twice.
   workerSettledAt DateTime?
+
+  // True only for the PAY_WORKER_FROM_PLATFORM admin override
+  // (paymentLifecycleService.settlePlatformFundedPayment) — the client
+  // never paid, but the platform settled the worker's earnings out of its
+  // own funds rather than continue chasing an unpaid client. subtotal/
+  // commissionAmount/withholdingTaxAmount/vatAmount/workerPayout still
+  // reflect the normal computed split (the worker received real taxable
+  // income regardless of who funded it, so 2307/withholding reporting stays
+  // correct) — but vatSummaryService must exclude these rows from "VAT
+  // collected from clients" reporting, since no client payment happened.
+  platformFunded Boolean @default(false)
 
   payout Payout?
 

@@ -10,7 +10,13 @@ function buildQuery(params) {
   return query.toString();
 }
 
-export const DISPUTE_ACTIONS = ['APPROVE_QUOTE', 'REQUEST_NEW_QUOTE', 'CANCEL_BOOKING'];
+export const DISPUTE_ACTIONS = [
+  'APPROVE_QUOTE',
+  'REQUEST_NEW_QUOTE',
+  'CANCEL_BOOKING',
+  'RESOLVE_FOR_WORKER',
+  'PAY_WORKER_FROM_PLATFORM',
+];
 
 export async function fetchDisputes(params = {}) {
   const response = await apiRequest(`/admin/disputes?${buildQuery(params)}`);
