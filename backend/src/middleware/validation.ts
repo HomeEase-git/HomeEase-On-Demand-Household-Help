@@ -622,12 +622,21 @@ export const validateDisputeQuote = (
   res: Response,
   next: NextFunction
 ) => {
-  const { reason } = req.body;
-  
+  const { reason, evidenceUrls } = req.body;
+
   if (!reason || typeof reason !== 'string') {
     return res.status(400).json(errorResponse(400, 'reason is required and must be a string'));
   }
-  
+
+  if (
+    evidenceUrls !== undefined &&
+    (!Array.isArray(evidenceUrls) ||
+      evidenceUrls.length > 5 ||
+      !evidenceUrls.every((url) => typeof url === 'string'))
+  ) {
+    return res.status(400).json(errorResponse(400, 'evidenceUrls must be an array of up to 5 URL strings'));
+  }
+
   return next();
 };
 
@@ -743,12 +752,21 @@ export const validateRefundPayment = (
   res: Response,
   next: NextFunction
 ) => {
-  const { reason } = req.body;
-  
+  const { reason, evidenceUrls } = req.body;
+
   if (reason !== undefined && typeof reason !== 'string') {
     return res.status(400).json(errorResponse(400, 'reason must be a string'));
   }
-  
+
+  if (
+    evidenceUrls !== undefined &&
+    (!Array.isArray(evidenceUrls) ||
+      evidenceUrls.length > 5 ||
+      !evidenceUrls.every((url) => typeof url === 'string'))
+  ) {
+    return res.status(400).json(errorResponse(400, 'evidenceUrls must be an array of up to 5 URL strings'));
+  }
+
   return next();
 };
 
@@ -1002,6 +1020,20 @@ export const validateSendMessage = (
 
   if (!hasContent && !hasImage) {
     return res.status(400).json(errorResponse(400, 'Either content or imageUrl is required'));
+  }
+
+  return next();
+};
+
+export const validateReportMessage = (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  const { reason } = req.body;
+
+  if (!reason || typeof reason !== 'string' || !reason.trim()) {
+    return res.status(400).json(errorResponse(400, 'reason is required and must be a non-empty string'));
   }
 
   return next();
