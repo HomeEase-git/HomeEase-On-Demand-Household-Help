@@ -2,6 +2,7 @@ import { create, type StoreApi, type UseBoundStore } from 'zustand';
 import { bookingStorage } from '../utils/storage';
 import { validateDraftForSubmit as validateDraftUtil } from '../utils/bookingValidation';
 import { mapServiceToCategory } from '../utils/categoryMapping';
+import { getBookings } from '../services/api';
 import type { TimeSlot, WorkerTier } from '../types/booking4step.types';
 
 export type BookingStatus =
@@ -239,6 +240,7 @@ export type BookingState = {
   clearInvalidationReason: () => void;
   validateDraftForSubmit: () => { ok: boolean; errors: string[] };
   setBookings: (bookings: Booking[]) => void;
+  refreshBookings: () => Promise<void>;
   setSelectedBooking: (booking: Booking | null) => void;
   setDraft: (draft: Partial<DraftBooking>) => void;
   clearDraft: () => void;
@@ -314,6 +316,24 @@ export const useBookingStore: UseBoundStore<StoreApi<BookingState>> = create<Boo
   draft: initialDraft,
 
   setBookings: (bookings) => set({ bookings }),
+
+  // Full refetch of the client's booking list from the server — shared by
+  // the socket "connect" handler and the AppState foreground listener in
+  // app/_layout.tsx, so the list self-heals after a dropped/restored
+  // socket connection or the app being backgrounded, instead of relying
+  // solely on "notification:new" socket events (which can be missed
+  // entirely while disconnected) or their push-notification fallback
+  // (unreliable on Android). Mirrors workerStore.refreshJobs on the worker
+  // side.
+  refreshBookings: async () => {
+    try {
+      const data = await getBookings();
+      set({ bookings: (data as ApiBookingListItem[]).map(mapApiBooking) });
+    } catch (error) {
+      console.error('Refresh bookings error:', error);
+    }
+  },
+
   setSelectedBooking: (booking) => set({ selectedBooking: booking }),
 
   setDraft: (draft) =>

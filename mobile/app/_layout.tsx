@@ -1,6 +1,7 @@
 import "react-native-reanimated";
 import "../global.css";
 import React, { useEffect } from "react";
+import { AppState, type AppStateStatus } from "react-native";
 import { useFonts } from "expo-font";
 import { Stack } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
@@ -27,6 +28,26 @@ import { colors } from "../constants";
 // Keep splash screen visible while loading
 SplashScreen.preventAutoHideAsync();
 
+// Full active-booking catch-up refetch — shared by the socket "connect"
+// handler (fires on the initial connect AND every reconnect after a drop)
+// and the AppState foreground listener below. Both cover the same gap:
+// live updates normally arrive via "notification:new" socket events, but
+// those are only delivered while connected and in the foreground — a
+// dropped/restored connection or a backgrounded-then-resumed app can miss
+// them entirely, and Android push notifications (the other fallback) are
+// known to not always reach the device either. Refetching in full on both
+// triggers means booking state self-heals regardless of which delivery
+// path failed.
+function refetchActiveBookings() {
+  const currentUser = useAuthStore.getState().user;
+  if (!currentUser) return;
+  if (currentUser.role === "worker") {
+    useWorkerStore.getState().refreshJobs();
+  } else {
+    useBookingStore.getState().refreshBookings();
+  }
+}
+
 export default function RootLayout() {
   const initializeAuth = useAuthStore((state) => state.initializeAuth);
   const restoreDraft = useBookingStore((state) => state.restoreDraft);
@@ -39,6 +60,12 @@ export default function RootLayout() {
     if (!token) return;
 
     const socket = connectSocket(token);
+
+    // Catch-up refetch on every (re)connect — socket.io fires "connect" both
+    // for the initial handshake and again after any reconnect, so this also
+    // covers a flaky network dropping and restoring the connection while the
+    // app stays open/foregrounded.
+    socket.on("connect", refetchActiveBookings);
 
     socket.on("message:new", (message) => {
       const currentUserId = useAuthStore.getState().user?.id;
@@ -101,6 +128,25 @@ export default function RootLayout() {
       disconnectSocket();
     };
   }, [token]);
+
+  useEffect(() => {
+    // The socket's own "connect" event doesn't reliably fire on every
+    // foreground — a brief backgrounding often leaves the underlying
+    // connection alive (no reconnect), yet the app can still have been away
+    // long enough for booking state to go stale. This is the independent
+    // second trigger: refetch on every transition back to "active",
+    // regardless of what the socket did while backgrounded.
+    const subscription = AppState.addEventListener(
+      "change",
+      (nextState: AppStateStatus) => {
+        if (nextState === "active") {
+          refetchActiveBookings();
+        }
+      },
+    );
+
+    return () => subscription.remove();
+  }, []);
 
   useEffect(() => {
     // Initialize all services on app startup
