@@ -238,9 +238,15 @@ export const refundPayment = async (req: AuthRequest, res: Response) => {
 
     const id = req.params.id as string;
     const currentUserId = req.user.userId;
-    const { reason } = req.body;
+    const { reason, evidenceUrls } = req.body;
     const trimmedReason =
       typeof reason === 'string' && reason.trim() ? reason.trim() : 'Refund requested by client';
+    // Optional — already-uploaded image URLs (see uploadController's
+    // upload-then-attach pattern). Never required to file a legitimate
+    // refund/dispute.
+    const cleanEvidenceUrls: string[] = Array.isArray(evidenceUrls)
+      ? evidenceUrls.filter((url): url is string => typeof url === 'string')
+      : [];
 
     const payment = await prisma.payment.findUnique({
       where: { id },
@@ -280,6 +286,7 @@ export const refundPayment = async (req: AuthRequest, res: Response) => {
           raisedById: currentUserId,
           reason: `Refund requested: ${trimmedReason}`,
           status: 'OPEN',
+          evidenceUrls: cleanEvidenceUrls,
         },
       }));
 
@@ -291,7 +298,7 @@ export const refundPayment = async (req: AuthRequest, res: Response) => {
       admins.map((admin) =>
         notifyUser({
           userId: admin.id,
-          type: 'PAYMENT_REFUNDED',
+          type: 'DISPUTE_OPENED',
           title: 'Refund Requested',
           message: `A client requested a refund on booking ${payment.bookingId}: ${trimmedReason}`,
           relatedId: dispute.id,

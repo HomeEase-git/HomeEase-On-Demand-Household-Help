@@ -2432,7 +2432,13 @@ export const disputeQuote = async (req: AuthRequest, res: Response) => {
     }
 
     const id = req.params.id as string;
-    const { reason } = req.body;
+    const { reason, evidenceUrls } = req.body;
+    // Optional — already-uploaded image URLs (see uploadController's
+    // upload-then-attach pattern). Never required to file a legitimate
+    // dispute.
+    const cleanEvidenceUrls: string[] = Array.isArray(evidenceUrls)
+      ? evidenceUrls.filter((url): url is string => typeof url === 'string')
+      : [];
 
     const booking = await prisma.booking.findUnique({
       where: { id },
@@ -2470,6 +2476,7 @@ export const disputeQuote = async (req: AuthRequest, res: Response) => {
           raisedById: req.user.userId,
           reason: typeof reason === 'string' ? reason : 'Client disputed the submitted quote',
           status: 'OPEN',
+          evidenceUrls: cleanEvidenceUrls,
         },
       }),
     ]);
@@ -2478,7 +2485,7 @@ export const disputeQuote = async (req: AuthRequest, res: Response) => {
     if (booking.workerId) {
       await notifyUser({
         userId: booking.workerId,
-        type: 'QUOTE_DISPUTED',
+        type: 'DISPUTE_OPENED',
         title: 'Quote Disputed',
         message: `Client has disputed your quote: ${reason}`,
         relatedId: id,
@@ -2490,7 +2497,7 @@ export const disputeQuote = async (req: AuthRequest, res: Response) => {
       admins.map((admin) =>
         notifyUser({
           userId: admin.id,
-          type: 'QUOTE_DISPUTED',
+          type: 'DISPUTE_OPENED',
           title: 'New Dispute Raised',
           message: `Booking ${formatDisplayId(id)} was disputed by the client: ${reason}`,
           relatedId: dispute.id,
