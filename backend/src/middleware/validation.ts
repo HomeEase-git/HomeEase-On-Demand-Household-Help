@@ -308,7 +308,7 @@ export const validateUpdatePayoutMethod = (
   res: Response,
   next: NextFunction
 ) => {
-  const { payoutMethod, payoutAccountName, payoutAccountNumber } = req.body;
+  const { payoutMethod, payoutAccountName, payoutAccountNumber, password } = req.body;
 
   const allowedMethods = ['GCASH', 'MAYA'];
   if (!payoutMethod || !allowedMethods.includes(payoutMethod)) {
@@ -321,6 +321,12 @@ export const validateUpdatePayoutMethod = (
 
   if (payoutAccountNumber !== undefined && typeof payoutAccountNumber !== 'string') {
     return res.status(400).json(errorResponse(400, 'payoutAccountNumber must be a string'));
+  }
+
+  // Re-auth requirement — a payout-destination change is exactly the kind
+  // of account takeover a phished/compromised session would use.
+  if (typeof password !== 'string' || !password) {
+    return res.status(400).json(errorResponse(400, 'Current password is required to change payout details'));
   }
 
   return next();
@@ -633,8 +639,15 @@ export const validateAddAddon = (
     return res.status(400).json(errorResponse(400, 'name is required and must be a string'));
   }
 
-  if (typeof price !== 'number' || price <= 0) {
-    return res.status(400).json(errorResponse(400, 'price is required and must be a positive number'));
+  // typeof price === 'number' && price > 0 alone lets NaN through (NaN <= 0
+  // is false) and has no upper bound at all — Number.isFinite catches both
+  // NaN and Infinity, and ADDON_MAX_PRICE is a fat-finger/malice backstop
+  // (there's no task-relative bound to check a mid-job addon against). The
+  // real protection is the client-approval gate in bookingController.addAddon
+  // — an unapproved addon never counts toward the bill no matter its price.
+  const ADDON_MAX_PRICE = 500_000;
+  if (typeof price !== 'number' || !Number.isFinite(price) || price <= 0 || price > ADDON_MAX_PRICE) {
+    return res.status(400).json(errorResponse(400, `price must be a positive number up to ₱${ADDON_MAX_PRICE.toLocaleString()}`));
   }
 
   return next();

@@ -11,6 +11,11 @@ import { buildCapabilityFilters } from '@services/matchingService';
 import { normalizeTin, maskTin } from '@utils/taxId';
 import { getCertificateDownloadUrl } from '@services/taxCertificateService';
 import { isPriceWithinTaskBounds } from '@services/taskPriceService';
+import { validatePriceWithinPricingRule } from '@services/pricingRuleService';
+import { comparePassword } from '@utils/passwordHash';
+import { notifyUser } from '@utils/notify';
+import { writeAuditLog } from '@utils/auditLog';
+import { nameSimilarity } from '@utils/nameSimilarity';
 import { VALID_TIME_SLOTS } from '@/constants/bookingEnums';
 import type { TimeSlot, Prisma } from '@prisma/client';
 import type { JwtPayload } from '@/types/index';
@@ -1136,9 +1141,17 @@ export const createPackage = async (req: AuthRequest, res: Response) => {
 
     const { serviceTypeId, name, description, price } = req.body;
 
+    if (typeof price !== 'number' || !Number.isFinite(price) || price <= 0) {
+      return res.status(400).json(errorResponse(400, 'price must be a positive number'));
+    }
+
     const workerProfile = await prisma.workerProfile.findUnique({
       where: { userId: req.user.userId },
-      select: { id: true, serviceTypes: { where: { id: serviceTypeId }, select: { id: true } } },
+      select: {
+        id: true,
+        city: true,
+        serviceTypes: { where: { id: serviceTypeId }, select: { id: true, name: true } },
+      },
     });
 
     if (!workerProfile) {
@@ -1149,6 +1162,23 @@ export const createPackage = async (req: AuthRequest, res: Response) => {
       return res.status(400).json(
         errorResponse(400, 'Add this service category to your profile before creating a package for it')
       );
+    }
+
+    // Same optional (city, category) admin-set ceiling/floor PricingRule
+    // already enforces for task and per-unit prices elsewhere — a package
+    // is still "this category's services, bundled," so it shouldn't be
+    // exempt from the one price guardrail the platform actually has.
+    if (workerProfile.city) {
+      const ruleCheck = await validatePriceWithinPricingRule(
+        workerProfile.city,
+        workerProfile.serviceTypes[0].name,
+        price
+      );
+      if (!ruleCheck.ok) {
+        return res.status(400).json(
+          errorResponse(400, `Price must be between ₱${ruleCheck.bounds.minPrice} and ₱${ruleCheck.bounds.maxPrice} for this city/category`)
+        );
+      }
     }
 
     const created = await prisma.workerPackage.create({
@@ -1187,11 +1217,16 @@ export const updatePackage = async (req: AuthRequest, res: Response) => {
     const packageId = req.params.packageId as string;
     const { serviceTypeId, name, description, price, isActive } = req.body;
 
+    if (price !== undefined && (typeof price !== 'number' || !Number.isFinite(price) || price <= 0)) {
+      return res.status(400).json(errorResponse(400, 'price must be a positive number'));
+    }
+
     const workerProfile = await prisma.workerProfile.findUnique({
       where: { userId: req.user.userId },
       select: {
         id: true,
-        serviceTypes: serviceTypeId ? { where: { id: serviceTypeId }, select: { id: true } } : false,
+        city: true,
+        serviceTypes: serviceTypeId ? { where: { id: serviceTypeId }, select: { id: true, name: true } } : false,
       },
     });
 
@@ -1201,7 +1236,7 @@ export const updatePackage = async (req: AuthRequest, res: Response) => {
 
     const existing = await prisma.workerPackage.findFirst({
       where: { id: packageId, workerProfileId: workerProfile.id },
-      select: { id: true },
+      select: { id: true, serviceType: { select: { name: true } } },
     });
 
     if (!existing) {
@@ -1212,6 +1247,20 @@ export const updatePackage = async (req: AuthRequest, res: Response) => {
       return res.status(400).json(
         errorResponse(400, 'Add this service category to your profile before assigning a package to it')
       );
+    }
+
+    // Same optional (city, category) PricingRule ceiling/floor createPackage
+    // enforces — re-checked here against whichever category applies after
+    // this update (the newly-assigned one, or the package's current one).
+    if (price !== undefined && workerProfile.city) {
+      const effectiveServiceTypeName =
+        serviceTypeId !== undefined ? workerProfile.serviceTypes![0].name : existing.serviceType.name;
+      const ruleCheck = await validatePriceWithinPricingRule(workerProfile.city, effectiveServiceTypeName, price);
+      if (!ruleCheck.ok) {
+        return res.status(400).json(
+          errorResponse(400, `Price must be between ₱${ruleCheck.bounds.minPrice} and ₱${ruleCheck.bounds.maxPrice} for this city/category`)
+        );
+      }
     }
 
     const updateData: any = {};
@@ -1936,13 +1985,40 @@ export const getPayoutMethod = async (req: AuthRequest, res: Response) => {
  * PATCH /api/workers/me/payout
  * Set the authenticated worker's payout method (worker only)
  */
+// Below this, a payoutAccountName is treated as "clearly a different person"
+// from the account holder's own registered name rather than a minor
+// mismatch (nickname, middle initial, maiden name) — flagged for admin
+// review, never blocked outright, since it's a heuristic against
+// User.fullName, not a real identity check (see nameSimilarity.ts).
+const PAYOUT_NAME_MISMATCH_THRESHOLD = 0.34;
+
 export const updatePayoutMethod = async (req: AuthRequest, res: Response) => {
   try {
     if (!req.user) {
       return res.status(401).json(errorResponse(401, 'Not authenticated'));
     }
 
-    const { payoutMethod, payoutAccountName, payoutAccountNumber } = req.body;
+    const { payoutMethod, payoutAccountName, payoutAccountNumber, password } = req.body;
+
+    // A payout-destination change is exactly the kind of account takeover a
+    // phished/compromised session would use to redirect a worker's earnings
+    // — previously this endpoint accepted the change from any authenticated
+    // request with no re-auth and no notification to the real owner.
+    if (!password || typeof password !== 'string') {
+      return res.status(400).json(errorResponse(400, 'Current password is required to change payout details'));
+    }
+
+    const user = await prisma.user.findUnique({
+      where: { id: req.user.userId },
+      select: { id: true, fullName: true, password: true },
+    });
+    if (!user) {
+      return res.status(404).json(errorResponse(404, 'User not found'));
+    }
+    const passwordValid = await comparePassword(password, user.password);
+    if (!passwordValid) {
+      return res.status(401).json(errorResponse(401, 'Incorrect password'));
+    }
 
     const updated = await prisma.workerProfile.update({
       where: { userId: req.user.userId },
@@ -1957,6 +2033,37 @@ export const updatePayoutMethod = async (req: AuthRequest, res: Response) => {
         payoutAccountNumber: true,
       },
     });
+
+    await notifyUser({
+      userId: user.id,
+      type: 'PAYOUT_METHOD_CHANGED',
+      title: 'Payout details changed',
+      message: `Your payout method was updated to ${updated.payoutMethod} (${updated.payoutAccountNumber ?? 'no account number on file'}). If this wasn't you, contact support immediately.`,
+    });
+
+    if (updated.payoutAccountName && nameSimilarity(updated.payoutAccountName, user.fullName) < PAYOUT_NAME_MISMATCH_THRESHOLD) {
+      await writeAuditLog({
+        actorId: user.id,
+        action: 'PAYOUT_NAME_MISMATCH',
+        category: 'SYSTEM_ERROR',
+        level: 'WARN',
+        message: `Worker ${user.id} (${user.fullName}) set a payout account name that doesn't resemble their registered name: "${updated.payoutAccountName}"`,
+        metadata: { workerId: user.id, registeredName: user.fullName, payoutAccountName: updated.payoutAccountName },
+      });
+
+      const admins = await prisma.user.findMany({ where: { role: 'ADMIN', isDeleted: false }, select: { id: true } });
+      await Promise.all(
+        admins.map((admin) =>
+          notifyUser({
+            userId: admin.id,
+            type: 'PAYOUT_NAME_MISMATCH',
+            title: 'Payout name mismatch — review needed',
+            message: `Worker ${user.fullName} set payout account name "${updated.payoutAccountName}", which doesn't resemble their registered name.`,
+            relatedId: user.id,
+          })
+        )
+      );
+    }
 
     return res.status(200).json({
       success: true,

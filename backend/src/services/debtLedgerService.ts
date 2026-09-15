@@ -52,6 +52,24 @@ export async function accrueDebtTx(
           `Your outstanding platform dues (₱${updated.commissionOwed.toFixed(2)}) have reached the ` +
           `limit. You can't accept new jobs until you contact support to resolve this.`,
       });
+
+      // Previously only the worker heard about this — a hold is a
+      // dead end until an admin proactively goes looking for it
+      // (releaseDebtHold requires an admin to act), so nothing ever
+      // surfaced a newly-tripped hold to the people who can actually
+      // clear it.
+      const admins = await prisma.user.findMany({ where: { role: 'ADMIN', isDeleted: false }, select: { id: true } });
+      await Promise.all(
+        admins.map((admin) =>
+          notifyUser({
+            userId: admin.id,
+            type: 'ACCOUNT_ON_HOLD',
+            title: 'Worker account placed on hold',
+            message: `Worker ${updated.userId} was placed on hold — outstanding dues of ₱${updated.commissionOwed.toFixed(2)} reached the limit (₱${workerDebtHoldLimit.toFixed(2)}).`,
+            relatedId: updated.userId,
+          })
+        )
+      );
     }
   }
 

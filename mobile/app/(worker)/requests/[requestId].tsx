@@ -115,11 +115,13 @@ export default function RequestDetailScreen() {
     if (submitting) return;
     setSubmitting(true);
     try {
-      await api.acceptBooking(booking.id);
+      const result = await api.acceptBooking(booking.id);
       updateJobStatus(booking.id, "Accepted");
       alertModal.success(
         "Job Accepted!",
-        "The client has been notified. You can track the job from the job detail screen.",
+        result?.debtWarning
+          ? `The client has been notified. You can track the job from the job detail screen.\n\n⚠️ ${result.debtWarning}`
+          : "The client has been notified. You can track the job from the job detail screen.",
         [
           {
             text: "View Job",

@@ -138,7 +138,15 @@ export default function TaxRemittance() {
                       <td>{period.label}</td>
                       <td>{summary ? summary.totalTaxWithheldFormatted : '—'}</td>
                       <td>
-                        <Badge variant={summary?.status === 'REMITTED' ? 'approved' : 'pending'}>
+                        <Badge
+                          variant={
+                            summary?.status === 'REMITTED'
+                              ? 'approved'
+                              : summary?.status === 'NEEDS_REVIEW'
+                                ? 'flagged'
+                                : 'pending'
+                          }
+                        >
                           {summary?.status ?? 'PENDING'}
                         </Badge>
                       </td>

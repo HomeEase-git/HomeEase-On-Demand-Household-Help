@@ -39,14 +39,26 @@ const CITY_TO_REGION = {
   bulacan: 'REGION_III',
 }
 
+function buildReference(region) {
+  const info = WAGE_REGIONS[region]
+  const hourlyWage = Math.round((info.dailyWage / 8) * 100) / 100
+  return { ...info, region, hourlyWage }
+}
+
 // Returns the DOLE wage reference for a city, or null if the city isn't in
 // CITY_TO_REGION (free-text city names won't always match).
 export function getDoleWageReference(cityInput) {
   const key = (cityInput || '').trim().toLowerCase()
   const region = CITY_TO_REGION[key]
   if (!region) return null
+  return buildReference(region)
+}
 
-  const info = WAGE_REGIONS[region]
-  const hourlyWage = Math.round((info.dailyWage / 8) * 100) / 100
-  return { ...info, region, hourlyWage }
+// The highest wage floor across every region — used for platform-wide
+// bounds with no city dimension (ServiceTask.minPrice/maxPrice), same
+// reasoning as the backend's getHighestDoleWageReference (keep in sync).
+export function getHighestDoleWageReference() {
+  return Object.keys(WAGE_REGIONS)
+    .map(buildReference)
+    .reduce((highest, candidate) => (candidate.hourlyWage > highest.hourlyWage ? candidate : highest))
 }

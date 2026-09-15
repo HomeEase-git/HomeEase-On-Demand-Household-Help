@@ -33,6 +33,15 @@ describe('Admin verification approve/reject', () => {
     const { user: worker } = await createTestUser(label, { role: 'WORKER' });
     createdUserIds.push(worker.id);
 
+    // A geocoded address is now also required for approval (see
+    // adminVerificationController's missing-requirements check) — set one
+    // so this fixture stays a realistic, complete submission rather than
+    // tripping that gate incidentally.
+    await prisma.workerProfile.update({
+      where: { userId: worker.id },
+      data: { address: '123 Test St', city: 'Manila', addressLat: 14.5995, addressLng: 120.9842 },
+    });
+
     const verification = await prisma.verificationRequest.create({
       data: {
         userId: worker.id,

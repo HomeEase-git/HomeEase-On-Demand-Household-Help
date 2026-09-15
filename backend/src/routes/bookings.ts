@@ -20,6 +20,7 @@ import {
   confirmCompletion,
   cancelBooking,
   addAddon,
+  respondToAddon,
   submitReview,
 } from '../controllers/bookingController';
 import { bookingPhotoUpload, uploadBookingCompletionPhoto, uploadIssuePhoto, uploadReviewPhoto } from '../controllers/uploadController';
@@ -108,6 +109,7 @@ router.patch('/:id/cancel', validateBookingStatusUpdate, cancelBooking);
 
 // Add addon (worker only)
 router.post('/:id/addons', restrictTo('WORKER'), validateAddAddon, addAddon);
+router.patch('/:id/addons/:addonId/respond', restrictTo('CLIENT'), respondToAddon);
 
 // Upload a review photo (client only) — no reviewId yet, returned URL is
 // included in the submit-review payload as photoUrls.
