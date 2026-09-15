@@ -2249,6 +2249,19 @@ export async function changePassword(currentPassword: string, newPassword: strin
   }
 }
 
+export async function logoutAllSessions() {
+  try {
+    const response = await api.post('/users/me/logout-all', {});
+    return {
+      success: true,
+      message: response.message || "Logged out of all devices",
+    };
+  } catch (error) {
+    console.error('Logout all sessions error:', error);
+    throw error;
+  }
+}
+
 export async function getUserProfile() {
   try {
     const response = await api.get('/users/me');
