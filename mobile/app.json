@@ -22,6 +22,7 @@
       },
       "predictiveBackGestureEnabled": false,
       "package": "com.homeease.app",
+      "googleServicesFile": "./google-services.json",
       "allowBackup": false,
       "permissions": [
         "android.permission.CAMERA",

@@ -16,6 +16,11 @@
 **/*serviceAccount*.json
 **/*service-account*.json
 **/google-services.json
+# google-services.json is not a secret (it ships inside the public APK anyway,
+# and its API key is restricted server-side to this package name + signing
+# cert) — EAS Build needs it committed to include it in the build archive.
+!mobile/google-services.json
+*firebase-adminsdk*.json
 **/GoogleService-Info.plist
 **/*.pem
 **/*.key
