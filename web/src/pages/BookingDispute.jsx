@@ -19,7 +19,7 @@ const SUB_NAV = [
   { to: '/bookings/dispute', label: 'Booking Dispute' },
 ]
 
-const STATUS_TABS = ['Open', 'Resolved']
+const STATUS_TABS = ['Open', 'Resolved', 'Refund Failed']
 
 const STATUS_BADGE_VARIANT = {
   OPEN: 'pending',
@@ -27,9 +27,12 @@ const STATUS_BADGE_VARIANT = {
   RESOLVED_APPROVED: 'approved',
   RESOLVED_NEW_QUOTE_REQUESTED: 'approved',
   RESOLVED_CANCELLED: 'approved',
+  RESOLVED_PAID: 'approved',
+  RESOLVED_WORKER_PROTECTED: 'approved',
+  RESOLVED_PLATFORM_PAID: 'approved',
 }
 
-const ACTIONS = [
+const QUOTE_DISPUTE_ACTIONS = [
   {
     action: 'APPROVE_QUOTE',
     label: 'Approve Quote',
@@ -42,13 +45,42 @@ const ACTIONS = [
     className: 'btn btn-outline',
     description: 'Sends the booking back to IN_PROGRESS so the worker can submit a revised quote.',
   },
+]
+
+const CANCEL_ACTION = {
+  action: 'CANCEL_BOOKING',
+  label: 'Cancel & Refund',
+  className: 'btn btn-danger',
+  description: 'Cancels the booking and releases/refunds the held payment back to the client.',
+}
+
+// Only valid for a completed job stuck AWAITING_PAYMENT (the 72h
+// non-payment auto-escalation case) — the backend rejects these for any
+// other booking status, so they're only offered here when that applies.
+const NON_PAYMENT_ACTIONS = [
   {
-    action: 'CANCEL_BOOKING',
-    label: 'Cancel & Refund',
+    action: 'RESOLVE_FOR_WORKER',
+    label: 'Resolve for Worker',
+    className: 'btn btn-success',
+    description:
+      'Confirms the worker completed the job and makes one more collection attempt (self-heals if the client already paid and a webhook was missed). If still unpaid, the client’s account is placed on hold until they pay.',
+  },
+  {
+    action: 'PAY_WORKER_FROM_PLATFORM',
+    label: 'Pay Worker From Platform',
     className: 'btn btn-danger',
-    description: 'Cancels the booking and releases the held payment back to the client.',
+    description:
+      'Settles the worker’s earnings out of platform funds instead of continuing to chase the client — a real expense. Requires a detailed reason (20+ characters). Run "Resolve for Worker" first if you haven’t already.',
   },
 ]
+
+function getActionsForDispute(dispute) {
+  if (!dispute) return []
+  if (dispute.bookingStatus === 'AWAITING_PAYMENT') {
+    return [...NON_PAYMENT_ACTIONS, CANCEL_ACTION]
+  }
+  return [...QUOTE_DISPUTE_ACTIONS, CANCEL_ACTION]
+}
 
 export default function BookingDispute() {
   const [selectedId, setSelectedId] = useState(null)
@@ -60,14 +92,28 @@ export default function BookingDispute() {
   // The backend filters on an exact status match; "Resolved" spans 3
   // possible values (RESOLVED_APPROVED/RESOLVED_NEW_QUOTE_REQUESTED/
   // RESOLVED_CANCELLED), so that tab fetches 'all' and filters client-side.
+  // "Refund Failed" is a dedicated backend pseudo-status (NEEDS_REFUND_REVIEW,
+  // matched on Dispute.refundStatus rather than Dispute.status) — the queue
+  // for a CANCEL_BOOKING resolution whose refund/void to Xendit failed and
+  // needs a manual clawback; these disputes are otherwise already RESOLVED
+  // and would be easy to lose track of buried in that tab.
   const fetchFn = useCallback(async (params) => {
+    const statusParam =
+      params.statusTab === 'Open'
+        ? 'OPEN'
+        : params.statusTab === 'Refund Failed'
+          ? 'NEEDS_REFUND_REVIEW'
+          : 'all'
     const response = await fetchDisputes({
       search: params.search || '',
       page: params.page,
       limit: 20,
-      status: params.statusTab === 'Open' ? 'OPEN' : 'all',
+      status: statusParam,
     })
-    const rows = params.statusTab === 'Open' ? response.data : response.data.filter((d) => d.status.startsWith('RESOLVED'))
+    const rows =
+      params.statusTab === 'Resolved'
+        ? response.data.filter((d) => d.status.startsWith('RESOLVED'))
+        : response.data
     return { data: rows, meta: response.meta }
   }, [])
 
@@ -109,12 +155,20 @@ export default function BookingDispute() {
       showError('An audit note is required before resolving a dispute.')
       return
     }
+    if (pendingAction.action === 'PAY_WORKER_FROM_PLATFORM' && note.trim().length < 20) {
+      showError('Paying the worker from platform funds requires a detailed reason (20+ characters).')
+      return
+    }
 
     setSubmitting(true)
     try {
-      await resolveDispute(selected.id, pendingAction.action, note.trim())
+      const updated = await resolveDispute(selected.id, pendingAction.action, note.trim())
       setDisputes((prev) => (params.statusTab === 'Open' ? prev.filter((d) => d.id !== selected.id) : prev))
-      showSuccess(`Dispute resolved: ${pendingAction.label}.`)
+      if (updated?.refundStatus === 'FAILED') {
+        showError(`Dispute resolved, but the refund failed and needs manual follow-up: ${updated.refundFailureReason || 'unknown error'}`)
+      } else {
+        showSuccess(`Dispute resolved: ${pendingAction.label}.`)
+      }
       closeModal()
     } catch (err) {
       showError(err.message || 'Failed to resolve dispute')
@@ -165,6 +219,11 @@ export default function BookingDispute() {
                       <td>{d.amount}</td>
                       <td>
                         <Badge variant={STATUS_BADGE_VARIANT[d.status] ?? 'pending'}>{d.status.replace(/_/g, ' ')}</Badge>
+                        {d.refundStatus === 'FAILED' && (
+                          <span style={{ marginLeft: '0.35rem' }}>
+                            <Badge variant="flagged">Refund Failed</Badge>
+                          </span>
+                        )}
                       </td>
                       <td>
                         <div className="row-actions">
@@ -230,6 +289,15 @@ export default function BookingDispute() {
                   <div className="value">{selected.resolution}</div>
                 </div>
               )}
+              {selected.refundStatus === 'FAILED' && (
+                <div className="detail-block detail-block--full">
+                  <label>Refund Status</label>
+                  <div className="value" style={{ color: 'var(--danger)' }}>
+                    Failed — needs manual follow-up in Xendit.
+                    {selected.refundFailureReason ? ` (${selected.refundFailureReason})` : ''}
+                  </div>
+                </div>
+              )}
             </div>
 
             {selected.status === 'OPEN' && !pendingAction && (
@@ -238,7 +306,7 @@ export default function BookingDispute() {
                   Close
                 </button>
                 <div className="modal-actions__group">
-                  {ACTIONS.map((a) => (
+                  {getActionsForDispute(selected).map((a) => (
                     <button key={a.action} type="button" className={a.className} onClick={() => openActionConfirm(a)}>
                       {a.label}
                     </button>

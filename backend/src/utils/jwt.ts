@@ -42,7 +42,10 @@ const getJwtExpiry = (): number => {
 };
 
 const JWT_SECRET = getJwtSecret();
-const JWT_EXPIRY = getJwtExpiry();
+// Exported so tokenRevocation.ts can size a revocation entry's TTL to
+// exactly this — no access token minted before a revocation call can
+// possibly outlive it, so there's no reason to keep the Redis key longer.
+export const JWT_EXPIRY = getJwtExpiry();
 
 export const generateToken = (payload: JwtPayload): string => {
   return jwt.sign(payload, JWT_SECRET, { expiresIn: JWT_EXPIRY });

@@ -509,6 +509,15 @@ export const refreshToken = async (req: Request, res: Response) => {
       return res.status(401).json(errorResponse(401, 'User not found'));
     }
 
+    // Defense-in-depth: adminUserController.setUserStatus deletes every
+    // AuthToken (including this refresh token) on ban/suspend, which
+    // already makes this unreachable in practice — this is a second,
+    // independent check in case some future path ever creates a refresh
+    // token without going through that ban-aware flow.
+    if (user.status !== 'ACTIVE') {
+      return res.status(401).json(errorResponse(401, 'Account is not active'));
+    }
+
     // Rotate refresh token
     await revokeRefreshToken(token);
     const newRefreshToken = crypto.randomBytes(40).toString('hex');

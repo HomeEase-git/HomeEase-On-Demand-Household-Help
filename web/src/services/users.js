@@ -45,3 +45,22 @@ export async function reinstateUser(id, reason, notes) {
   });
   return response.data;
 }
+
+/**
+ * GET /admin/users/clients/:id/payment-hold — set by a dispute resolved via
+ * RESOLVE_FOR_WORKER (see disputes.js): the client confirmed a job but never
+ * paid, so their account is blocked from new bookings until this is cleared.
+ */
+export async function fetchClientPaymentHold(id) {
+  const response = await apiRequest(`/admin/users/clients/${id}/payment-hold`);
+  return response.data;
+}
+
+/** PATCH /admin/users/clients/:id/payment-hold/release */
+export async function releaseClientPaymentHold(id, note) {
+  const response = await apiRequest(`/admin/users/clients/${id}/payment-hold/release`, {
+    method: 'PATCH',
+    body: JSON.stringify({ note }),
+  });
+  return response.data;
+}

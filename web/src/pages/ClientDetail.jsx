@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import PageHeader from '../components/common/PageHeader'
 import SectionCard from '../components/common/SectionCard'
@@ -7,7 +7,7 @@ import { getBookingStatusVariant } from '../utils/statusBadge'
 import LoadingState from '../components/common/LoadingState'
 import ErrorState from '../components/common/ErrorState'
 import { useDetailQuery } from '../hooks/useListQuery'
-import { fetchClientById, suspendUser, reinstateUser } from '../services/users'
+import { fetchClientById, suspendUser, reinstateUser, fetchClientPaymentHold, releaseClientPaymentHold } from '../services/users'
 import { cancelBookingAdmin } from '../services/bookings'
 import { useToast } from '../context/ToastContext'
 
@@ -21,6 +21,28 @@ export default function ClientDetail() {
   const [reason, setReason] = useState('')
   const [refundTarget, setRefundTarget] = useState(null)
   const [submitting, setSubmitting] = useState(false)
+  const [hold, setHold] = useState(null)
+  const [releaseNote, setReleaseNote] = useState('')
+
+  useEffect(() => {
+    if (!id) return
+    fetchClientPaymentHold(id).then(setHold).catch(() => setHold(null))
+  }, [id])
+
+  const handleReleaseHold = async () => {
+    setSubmitting(true)
+    try {
+      await releaseClientPaymentHold(id, releaseNote.trim() || undefined)
+      showSuccess('Payment hold released.')
+      setReleaseNote('')
+      const updated = await fetchClientPaymentHold(id)
+      setHold(updated)
+    } catch (err) {
+      showError(err.message || 'Failed to release payment hold')
+    } finally {
+      setSubmitting(false)
+    }
+  }
 
   if (loading) return <LoadingState message="Loading client..." />
   if (error) return <ErrorState message={error} onRetry={reload} />
@@ -110,6 +132,34 @@ export default function ClientDetail() {
           </div>
         ))}
       </div>
+      {hold?.paymentHoldAt && (
+        <SectionCard title="Payment Hold">
+          <p style={{ color: 'var(--danger)', fontWeight: 600, marginBottom: '0.35rem' }}>
+            On hold since {new Date(hold.paymentHoldAt).toLocaleString('en-US', {
+              month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit',
+            })} — outstanding balance ₱{(hold.outstandingBalance ?? 0).toFixed(2)}
+          </p>
+          {hold.paymentHoldNote && (
+            <p style={{ color: 'var(--text-muted)', fontSize: '0.8125rem', marginBottom: '0.75rem' }}>{hold.paymentHoldNote}</p>
+          )}
+          <label htmlFor="hold-release-note" style={{ display: 'block', marginBottom: '0.35rem', fontWeight: 600 }}>
+            Release note (optional)
+          </label>
+          <textarea
+            id="hold-release-note"
+            className="form-input"
+            rows={2}
+            value={releaseNote}
+            onChange={(e) => setReleaseNote(e.target.value)}
+            placeholder="e.g. Client paid out of band via bank transfer"
+            style={{ width: '100%', resize: 'vertical', marginBottom: '0.75rem' }}
+          />
+          <button type="button" className="btn btn-success" onClick={handleReleaseHold} disabled={submitting}>
+            {submitting ? 'Releasing...' : 'Release Hold'}
+          </button>
+        </SectionCard>
+      )}
+
       <SectionCard title="Recent Bookings">
         <p style={{ color: 'var(--text-muted)', fontSize: '0.8125rem', marginBottom: '0.75rem' }}>
           Manual refund cancels the booking and releases its held payment — only available while the booking&apos;s
