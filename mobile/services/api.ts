@@ -708,6 +708,7 @@ export async function getWorkerReviews(workerId: string, limit = 50) {
       comment: r.comment ?? "",
       date: r.createdAt,
       bookingId: r.bookingId,
+      workerResponse: r.workerResponse ?? null,
     }));
 
     // Star distribution isn't provided by the backend — approximated from
@@ -733,6 +734,15 @@ export async function getWorkerReviews(workerId: string, limit = 50) {
     };
   } catch (error) {
     console.error('Get worker reviews error:', error);
+    throw error;
+  }
+}
+
+export async function respondToReview(reviewId: string, response: string) {
+  try {
+    return await api.post(`/workers/me/reviews/${reviewId}/response`, { response });
+  } catch (error) {
+    console.error('Respond to review error:', error);
     throw error;
   }
 }
@@ -1884,6 +1894,7 @@ export type Certification = {
   documentUrl: string;
   status: string;
   rejectionReason: string | null;
+  serviceTypeId: string | null;
 };
 
 export async function getMyCertifications(): Promise<Certification[]> {
@@ -1919,6 +1930,7 @@ export async function addCertification(data: {
   issueDate: string;
   expiryDate?: string | null;
   documentUrl: string;
+  serviceTypeId?: string | null;
 }): Promise<Certification> {
   try {
     const response = await api.post('/workers/me/certifications', data);
@@ -1937,6 +1949,7 @@ export async function updateCertification(
     issueDate: string;
     expiryDate?: string | null;
     documentUrl?: string;
+    serviceTypeId?: string | null;
   },
 ): Promise<Certification> {
   try {

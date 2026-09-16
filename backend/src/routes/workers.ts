@@ -4,6 +4,7 @@ import {
   getWorkerDetail,
   getMyDigitalId,
   getWorkerReviews,
+  respondToReview,
   getWorkerAvailability,
   getWorkerBlockedDates,
   updateAvailability,
@@ -123,6 +124,8 @@ router.get(
   restrictTo('WORKER'),
   getWorkerCapacity
 );
+
+router.post('/me/reviews/:reviewId/response', authMiddleware, restrictTo('WORKER'), respondToReview);
 
 router.get('/me/capabilities', authMiddleware, restrictTo('WORKER'), listMyCapabilities);
 router.put('/me/capabilities', authMiddleware, restrictTo('WORKER'), replaceMyCapabilities);

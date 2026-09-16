@@ -11,6 +11,8 @@ import {
   remindAndAutoConfirmReschedules,
   remindAndAutoDeclineRescheduleRequests,
   materializeAvailabilityTemplates,
+  flagExpiredKycDocuments,
+  autoSuspendUnderperformingWorkers,
 } from '@workers/bookingWorker';
 import { expireOverduePendingBookings } from '@services/pendingExpirySweep';
 import { flagWorkersOverVatThreshold } from '@services/vatSummaryService';
@@ -29,6 +31,8 @@ const TASKS = {
   'decline-reschedule-requests': remindAndAutoDeclineRescheduleRequests,
   'materialize-availability-templates': materializeAvailabilityTemplates,
   'flag-vat-threshold': flagWorkersOverVatThreshold,
+  'flag-expired-kyc': flagExpiredKycDocuments,
+  'auto-suspend-workers': autoSuspendUnderperformingWorkers,
 } satisfies Record<string, () => Promise<unknown>>;
 
 type TaskName = keyof typeof TASKS;

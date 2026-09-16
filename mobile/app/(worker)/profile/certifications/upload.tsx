@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { View, ScrollView } from "react-native";
+import { View, ScrollView, Text, Pressable } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter, useLocalSearchParams } from "expo-router";
 import ScreenHeader from "../../../../components/ui/ScreenHeader";
@@ -10,6 +10,8 @@ import ImageSourcePickerBottomSheet from "../../../../components/bottom-sheets/I
 import type { BottomSheetHandle } from "../../../../components/bottom-sheets/BottomSheetWrapper";
 import * as api from "../../../../services/api";
 import { useAlertModal } from "../../../../contexts/AlertModalContext";
+
+type ServiceTypeOption = { id: string; name: string; requiresCertification?: boolean };
 
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -36,6 +38,15 @@ export default function UploadCertificationScreen() {
   const [existingDocumentUrl, setExistingDocumentUrl] = useState<string | null>(null);
   const [loading, setLoading] = useState(isEditMode);
   const [saving, setSaving] = useState(false);
+  const [serviceTypes, setServiceTypes] = useState<ServiceTypeOption[]>([]);
+  const [serviceTypeId, setServiceTypeId] = useState<string | null>(null);
+
+  useEffect(() => {
+    api
+      .getServiceTypes()
+      .then((types: ServiceTypeOption[]) => setServiceTypes(types))
+      .catch((error: unknown) => console.error("Load service types error:", error));
+  }, []);
 
   useEffect(() => {
     if (!certId) return;
@@ -49,6 +60,7 @@ export default function UploadCertificationScreen() {
         setIssueDate(cert.issueDate.slice(0, 10));
         setExpiryDate(cert.expiryDate ? cert.expiryDate.slice(0, 10) : "");
         setExistingDocumentUrl(cert.documentUrl);
+        setServiceTypeId(cert.serviceTypeId ?? null);
       } catch (error) {
         console.error("Load certification error:", error);
         alertModal.error("Error", "Unable to load this certification.");
@@ -100,6 +112,7 @@ export default function UploadCertificationScreen() {
           issueDate: issueDate.trim(),
           expiryDate: expiryDate.trim() || null,
           documentUrl,
+          serviceTypeId,
         });
         alertModal.success("Success", "Certification updated successfully.");
       } else {
@@ -109,6 +122,7 @@ export default function UploadCertificationScreen() {
           issueDate: issueDate.trim(),
           expiryDate: expiryDate.trim() || null,
           documentUrl: documentUrl as string,
+          serviceTypeId,
         });
         alertModal.success("Success", "Certification uploaded successfully.");
       }
@@ -160,6 +174,35 @@ export default function UploadCertificationScreen() {
           keyboardType="number-pad"
           editable={!loading}
         />
+        {serviceTypes.length > 0 && (
+          <View className="mb-4">
+            <Text className="text-text-secondary font-semibold text-sm mb-2">
+              Related Category (optional)
+            </Text>
+            <Text className="text-text-muted text-xs mb-2">
+              Tag this to a licensed trade if it's meant to satisfy that category's certification
+              requirement — an admin still has to approve it.
+            </Text>
+            <View className="flex-row flex-wrap gap-2">
+              {serviceTypes.map((s) => {
+                const isSelected = serviceTypeId === s.id;
+                return (
+                  <Pressable
+                    key={s.id}
+                    onPress={() => setServiceTypeId(isSelected ? null : s.id)}
+                    className={`rounded-xl px-3.5 py-2.5 border-2 ${
+                      isSelected ? "bg-accent/10 border-accent" : "bg-card border-transparent"
+                    }`}
+                  >
+                    <Text className={`text-sm font-medium ${isSelected ? "text-accent" : "text-text-secondary"}`}>
+                      {s.name}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+          </View>
+        )}
         <UploadCard
           label="Tap to upload document photo"
           onPress={() => sheetRef.current?.expand()}

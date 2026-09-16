@@ -35,6 +35,7 @@ function formatReview(record: ReviewRecord) {
     flagged: record.flagged,
     flagReason: record.flagReason,
     status: record.status,
+    workerResponse: record.workerResponse,
     createdAt: record.createdAt.toLocaleDateString('en-US', {
       month: 'short',
       day: 'numeric',
@@ -143,6 +144,24 @@ export const updateReview = async (req: AuthRequest, res: Response) => {
         status: status ?? record.status,
       },
       include: reviewInclude,
+    });
+
+    // Both the rating value and the VISIBLE/HIDDEN status can change here,
+    // and WorkerProfile.rating/totalReviews were previously only ever
+    // recomputed at review-submission time — hiding a fake 5-star review
+    // (or a rating edit) left the worker's public rating permanently wrong
+    // until their next real review happened to trigger a recompute.
+    const ratingStats = await prisma.review.aggregate({
+      where: { workerId: updated.workerId, status: 'VISIBLE' },
+      _avg: { rating: true },
+      _count: true,
+    });
+    await prisma.workerProfile.update({
+      where: { id: updated.workerId },
+      data: {
+        rating: Math.round((ratingStats._avg.rating ?? 0) * 10) / 10,
+        totalReviews: ratingStats._count,
+      },
     });
 
     await writeAuditLog({

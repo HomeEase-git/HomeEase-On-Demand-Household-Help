@@ -22,6 +22,9 @@ export interface AppSettingsConfig {
   atcCode: string | null;
   noShowGraceHours: number;
   disputeEscalationHours: number;
+  autoSuspendRatingThreshold: number | null;
+  autoSuspendDisputeCountThreshold: number | null;
+  autoSuspendDisputeCountWindowDays: number | null;
 }
 
 // Mirrors the AppSettings model's own @default values — used only if the
@@ -50,6 +53,9 @@ const FALLBACK_DEFAULTS: AppSettingsConfig = {
   atcCode: null,
   noShowGraceHours: 2,
   disputeEscalationHours: 48,
+  autoSuspendRatingThreshold: null,
+  autoSuspendDisputeCountThreshold: null,
+  autoSuspendDisputeCountWindowDays: null,
 };
 
 // getAppSettings is called on nearly every request path (search, booking,

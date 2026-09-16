@@ -577,10 +577,14 @@ export const getWorkerReviews = async (req: AuthRequest, res: Response) => {
       return res.status(404).json(errorResponse(404, 'Worker not found'));
     }
 
-    // Review.workerId references WorkerProfile.id, not User.id
+    // Review.workerId references WorkerProfile.id, not User.id. status:
+    // VISIBLE excludes anything an admin has HIDDEN/WARNED (see
+    // ReviewStatus) — previously this filter didn't exist at all, so a
+    // review an admin explicitly hid for, say, containing personal
+    // information or being fraudulent stayed fully visible to the public.
     const [reviews, total] = await Promise.all([
       prisma.review.findMany({
-        where: { workerId: workerProfile.id },
+        where: { workerId: workerProfile.id, status: 'VISIBLE' },
         include: {
           booking: {
             select: {
@@ -602,7 +606,7 @@ export const getWorkerReviews = async (req: AuthRequest, res: Response) => {
         skip,
         take: limitNum,
       }),
-      prisma.review.count({ where: { workerId: workerProfile.id } }),
+      prisma.review.count({ where: { workerId: workerProfile.id, status: 'VISIBLE' } }),
     ]);
 
     const formattedReviews = reviews.map((review) => ({
@@ -620,6 +624,7 @@ export const getWorkerReviews = async (req: AuthRequest, res: Response) => {
       // fabricating an id — booking was already fetched above, just wasn't
       // surfaced in the formatted output.
       bookingId: review.booking?.id ?? null,
+      workerResponse: review.workerResponse,
       createdAt: review.createdAt,
     }));
 
@@ -639,6 +644,69 @@ export const getWorkerReviews = async (req: AuthRequest, res: Response) => {
   } catch (error) {
     console.error('Error fetching worker reviews:', error);
     return res.status(500).json(errorResponse(500, 'Failed to fetch reviews'));
+  }
+};
+
+/**
+ * POST /api/workers/me/reviews/:reviewId/response
+ * Lets a worker post a one-time public reply to a review left on their
+ * profile — previously there was no way to respond to an unfair or
+ * inaccurate review at all. Settable once; not editable after (mirrors the
+ * review itself being immutable once submitted).
+ */
+export const respondToReview = async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      return res.status(401).json(errorResponse(401, 'Not authenticated'));
+    }
+
+    const reviewId = req.params.reviewId as string;
+    const { response } = req.body as { response?: string };
+
+    if (!response?.trim()) {
+      return res.status(400).json(errorResponse(400, 'A response is required'));
+    }
+    if (response.trim().length > 1000) {
+      return res.status(400).json(errorResponse(400, 'Response must be 1000 characters or fewer'));
+    }
+
+    const workerProfile = await prisma.workerProfile.findUnique({
+      where: { userId: req.user.userId },
+      select: { id: true },
+    });
+    if (!workerProfile) {
+      return res.status(404).json(errorResponse(404, 'Worker profile not found'));
+    }
+
+    const review = await prisma.review.findUnique({ where: { id: reviewId } });
+    if (!review || review.workerId !== workerProfile.id) {
+      return res.status(404).json(errorResponse(404, 'Review not found'));
+    }
+    if (review.workerResponse != null) {
+      return res.status(409).json(errorResponse(409, 'You have already responded to this review'));
+    }
+
+    const updated = await prisma.review.update({
+      where: { id: reviewId },
+      data: { workerResponse: response.trim(), workerResponseAt: new Date() },
+    });
+
+    await notifyUser({
+      userId: review.clientId,
+      type: 'REVIEW_RESPONSE_ADDED',
+      title: 'Your pro responded to your review',
+      message: 'The pro you reviewed has posted a public response.',
+      relatedId: review.bookingId,
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: 'Response posted',
+      data: { id: updated.id, workerResponse: updated.workerResponse, workerResponseAt: updated.workerResponseAt },
+    });
+  } catch (error) {
+    console.error('Error responding to review:', error);
+    return res.status(500).json(errorResponse(500, 'Failed to post response'));
   }
 };
 
@@ -939,6 +1007,41 @@ export const addServiceTypes = async (req: AuthRequest, res: Response) => {
 
     if (serviceTypes.length !== serviceTypeIds.length) {
       return res.status(400).json(errorResponse(400, 'One or more service types do not exist'));
+    }
+
+    // Licensed trades (see ServiceType.requiresCertification) previously had
+    // zero credential check — any worker could self-add "Electrical Work" or
+    // "Aircon/Refrigeration Repair" the same way they'd add "Cleaning".
+    // Gate those specific ones on an already-APPROVED Certification tagged
+    // to this exact ServiceType (see Certification.serviceTypeId) — reuses
+    // the existing Certification model/review flow, no new document pipeline.
+    const licensedTypes = serviceTypes.filter((s) => s.requiresCertification);
+    if (licensedTypes.length > 0) {
+      const workerProfileForCert = await prisma.workerProfile.findUnique({
+        where: { userId: req.user.userId },
+        select: { id: true },
+      });
+      if (!workerProfileForCert) {
+        return res.status(404).json(errorResponse(404, 'Worker profile not found'));
+      }
+      const approvedCerts = await prisma.certification.findMany({
+        where: {
+          workerProfileId: workerProfileForCert.id,
+          serviceTypeId: { in: licensedTypes.map((s) => s.id) },
+          verificationStatus: 'APPROVED',
+        },
+        select: { serviceTypeId: true },
+      });
+      const coveredServiceTypeIds = new Set(approvedCerts.map((c) => c.serviceTypeId));
+      const uncovered = licensedTypes.filter((s) => !coveredServiceTypeIds.has(s.id));
+      if (uncovered.length > 0) {
+        return res.status(403).json(
+          errorResponse(
+            403,
+            `These categories require an admin-approved certification before you can add them: ${uncovered.map((s) => s.name).join(', ')}. Upload one tagged to that category first.`
+          )
+        );
+      }
     }
 
     // Connect service types to worker
@@ -1717,6 +1820,7 @@ const formatCertification = (cert: {
   documentUrl: string;
   verificationStatus: string;
   rejectionReason: string | null;
+  serviceTypeId?: string | null;
 }) => {
   const statusLabel: Record<string, string> = {
     PENDING: 'Pending',
@@ -1733,6 +1837,7 @@ const formatCertification = (cert: {
     documentUrl: cert.documentUrl,
     status: statusLabel[cert.verificationStatus] ?? cert.verificationStatus,
     rejectionReason: cert.rejectionReason,
+    serviceTypeId: cert.serviceTypeId ?? null,
   };
 };
 
@@ -1821,7 +1926,14 @@ export const createCertification = async (req: AuthRequest, res: Response) => {
       return res.status(401).json(errorResponse(401, 'Not authenticated'));
     }
 
-    const { name, issuer, issueDate, expiryDate, documentUrl } = req.body;
+    const { name, issuer, issueDate, expiryDate, documentUrl, serviceTypeId } = req.body as {
+      name: string;
+      issuer: string;
+      issueDate: string;
+      expiryDate?: string | null;
+      documentUrl: string;
+      serviceTypeId?: string | null;
+    };
 
     const workerProfile = await prisma.workerProfile.findUnique({
       where: { userId: req.user.userId },
@@ -1832,6 +1944,13 @@ export const createCertification = async (req: AuthRequest, res: Response) => {
       return res.status(404).json(errorResponse(404, 'Worker profile not found'));
     }
 
+    if (serviceTypeId) {
+      const serviceTypeExists = await prisma.serviceType.findUnique({ where: { id: serviceTypeId }, select: { id: true } });
+      if (!serviceTypeExists) {
+        return res.status(400).json(errorResponse(400, 'serviceTypeId does not exist'));
+      }
+    }
+
     const certification = await prisma.certification.create({
       data: {
         workerProfileId: workerProfile.id,
@@ -1840,6 +1959,7 @@ export const createCertification = async (req: AuthRequest, res: Response) => {
         issueDate: new Date(issueDate),
         expiryDate: expiryDate ? new Date(expiryDate) : null,
         documentUrl,
+        serviceTypeId: serviceTypeId || null,
       },
     });
 
@@ -1867,7 +1987,14 @@ export const updateCertification = async (req: AuthRequest, res: Response) => {
     }
 
     const certId = req.params.certId as string;
-    const { name, issuer, issueDate, expiryDate, documentUrl } = req.body;
+    const { name, issuer, issueDate, expiryDate, documentUrl, serviceTypeId } = req.body as {
+      name: string;
+      issuer: string;
+      issueDate: string;
+      expiryDate?: string | null;
+      documentUrl?: string;
+      serviceTypeId?: string | null;
+    };
 
     const workerProfile = await prisma.workerProfile.findUnique({
       where: { userId: req.user.userId },
@@ -1883,6 +2010,13 @@ export const updateCertification = async (req: AuthRequest, res: Response) => {
       return res.status(404).json(errorResponse(404, 'Certification not found'));
     }
 
+    if (serviceTypeId) {
+      const serviceTypeExists = await prisma.serviceType.findUnique({ where: { id: serviceTypeId }, select: { id: true } });
+      if (!serviceTypeExists) {
+        return res.status(400).json(errorResponse(400, 'serviceTypeId does not exist'));
+      }
+    }
+
     const certification = await prisma.certification.update({
       where: { id: certId },
       data: {
@@ -1891,6 +2025,7 @@ export const updateCertification = async (req: AuthRequest, res: Response) => {
         issueDate: new Date(issueDate),
         expiryDate: expiryDate ? new Date(expiryDate) : null,
         documentUrl: documentUrl ?? existing.documentUrl,
+        serviceTypeId: serviceTypeId !== undefined ? serviceTypeId || null : existing.serviceTypeId,
         verificationStatus: 'PENDING',
         rejectionReason: null,
         reviewedAt: null,

@@ -17,6 +17,7 @@ type ReviewItem = {
   rating: number;
   comment: string;
   date: string;
+  workerResponse: string | null;
 };
 
 export default function WorkerReviewsScreen() {
@@ -40,6 +41,7 @@ export default function WorkerReviewsScreen() {
             rating: r.rating,
             comment: r.comment,
             date: r.date,
+            workerResponse: r.workerResponse ?? null,
           })),
         );
       } catch (error) {
@@ -53,6 +55,11 @@ export default function WorkerReviewsScreen() {
       active = false;
     };
   }, [user?.id]);
+
+  const handleRespond = async (reviewId: string, response: string) => {
+    await api.respondToReview(reviewId, response);
+    setReviews((prev) => prev.map((r) => (r.id === reviewId ? { ...r, workerResponse: response } : r)));
+  };
 
   const calculateAverageRating = (): string => {
     if (reviews.length === 0) return "0.0";
@@ -107,7 +114,7 @@ export default function WorkerReviewsScreen() {
             </Text>
           </View>
         }
-        renderItem={({ item }) => <ReviewCard review={item} />}
+        renderItem={({ item }) => <ReviewCard review={item} onRespond={handleRespond} />}
       />
     </SafeAreaView>
   );

@@ -347,11 +347,34 @@ export const getWorkerById = async (req: Request, res: Response) => {
       take: 10,
     });
 
+    const workerProfileForCerts = await prisma.workerProfile.findUnique({
+      where: { userId: id },
+      select: { id: true },
+    });
+    const certifications = workerProfileForCerts
+      ? await prisma.certification.findMany({
+          where: { workerProfileId: workerProfileForCerts.id },
+          include: { serviceType: { select: { id: true, name: true } } },
+          orderBy: { createdAt: 'desc' },
+        })
+      : [];
+
     return res.json({
       success: true,
       data: {
         ...worker,
         recentDeclineCount,
+        certifications: certifications.map((c) => ({
+          id: c.id,
+          title: c.title,
+          issuer: c.issuer,
+          issueDate: c.issueDate,
+          expiryDate: c.expiryDate,
+          documentUrl: c.documentUrl,
+          verificationStatus: c.verificationStatus,
+          rejectionReason: c.rejectionReason,
+          serviceType: c.serviceType ? { id: c.serviceType.id, name: c.serviceType.name } : null,
+        })),
         recentBookings: recentBookings.map((b) => ({
           id: formatDisplayId(b.id),
           bookingId: b.id,

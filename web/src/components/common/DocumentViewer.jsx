@@ -93,6 +93,11 @@ export default function DocumentViewer({ documents = [], onApproveDocument, onRe
                 Rejected: {doc.rejectionReason}
               </div>
             )}
+            {doc.status === 'APPROVED' && doc.expiresAt && (
+              <div style={{ marginTop: '0.5rem', color: 'var(--text-muted)', fontSize: '0.85rem' }}>
+                Expires {new Date(doc.expiresAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+              </div>
+            )}
             {canModerate && doc.status === 'PENDING' && (
               <div style={{ marginTop: '0.75rem', display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
                 <button

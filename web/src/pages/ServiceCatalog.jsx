@@ -86,6 +86,7 @@ function emptyForm() {
     description: '',
     basePrice: '',
     icon: null,
+    requiresCertification: false,
     fields: [],
   }
 }
@@ -96,6 +97,7 @@ function serviceToForm(service) {
     description: service.description || '',
     basePrice: String(service.basePrice),
     icon: service.icon || null,
+    requiresCertification: !!service.requiresCertification,
     fields: (service.scopeFields || []).map((f) => ({
       label: f.label,
       fieldType: f.fieldType,
@@ -254,6 +256,7 @@ export default function ServiceCatalog() {
       description: form.description.trim() || undefined,
       basePrice,
       icon: form.icon,
+      requiresCertification: form.requiresCertification,
       scopeFields: form.fields.map((f) => ({
         label: f.label.trim(),
         fieldType: f.fieldType,
@@ -469,7 +472,14 @@ export default function ServiceCatalog() {
                           <span className="msym" style={{ fontSize: 18 }}>{s.icon ? msIconFor(s.icon) : 'help_outline'}</span>
                         </span>
                       </td>
-                      <td><strong>{s.name}</strong></td>
+                      <td>
+                        <strong>{s.name}</strong>
+                        {s.requiresCertification && (
+                          <span className="badge badge-pending" style={{ marginLeft: '0.4rem' }} title="Requires an admin-approved certification">
+                            Licensed
+                          </span>
+                        )}
+                      </td>
                       <td>{formatPeso(s.basePrice)}</td>
                       <td>
                         {fieldCount} field{fieldCount === 1 ? '' : 's'}
@@ -589,6 +599,21 @@ export default function ServiceCatalog() {
                   onChange={(e) => setForm((p) => ({ ...p, basePrice: e.target.value }))}
                   style={{ width: '100%', padding: '0.5rem 0.75rem', border: '1px solid var(--border)', borderRadius: 8 }}
                 />
+              </div>
+
+              <div className="form-field">
+                <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                  <input
+                    type="checkbox"
+                    checked={form.requiresCertification}
+                    onChange={(e) => setForm((p) => ({ ...p, requiresCertification: e.target.checked }))}
+                  />
+                  Licensed trade — requires an admin-approved certification
+                </label>
+                <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem', margin: '0.25rem 0 0' }}>
+                  A worker can't add this category until they upload a certification tagged to it and an admin
+                  approves it (see a worker's detail page).
+                </p>
               </div>
 
               <div className="form-field">

@@ -8,6 +8,7 @@ import { formatVerification } from '@utils/formatters';
 import { supabase, KYC_DOCUMENT_BUCKET } from '@config/supabase';
 import { normalizeImage, UnsupportedImageError } from '@utils/normalizeImage';
 import { verificationQueue, VERIFICATION_JOB_OPTIONS } from '@queues/verificationQueue';
+import { checkResubmissionCooldown } from '@utils/kycResubmissionCooldown';
 import type { JwtPayload } from '@/types/index';
 
 interface AuthRequest extends Request {
@@ -113,6 +114,18 @@ export const uploadVerificationDocuments = async (req: AuthRequest, res: Respons
       where: { userId: user.id, type: requestType, status: { in: ['PENDING', 'SUBMITTED'] } },
       orderBy: { submittedAt: 'desc' },
     });
+
+    if (!openRequest) {
+      const cooldown = await checkResubmissionCooldown(user.id, requestType);
+      if (!cooldown.allowed) {
+        return res.status(429).json(
+          errorResponse(
+            429,
+            `Your last submission was rejected — you can resubmit after ${cooldown.retryAfter.toISOString()}. Use the time to address the rejection reason.`
+          )
+        );
+      }
+    }
 
     const verification = openRequest
       ? await prisma.$transaction(async (tx) => {

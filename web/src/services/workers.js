@@ -42,3 +42,18 @@ export async function releaseWorkerHold(id, note) {
   });
   return response.data;
 }
+
+/** PATCH /admin/users/certifications/:id/approve */
+export async function approveCertification(id) {
+  const response = await apiRequest(`/admin/users/certifications/${id}/approve`, { method: 'PATCH' });
+  return response.data;
+}
+
+/** PATCH /admin/users/certifications/:id/reject */
+export async function rejectCertification(id, rejectionReason) {
+  const response = await apiRequest(`/admin/users/certifications/${id}/reject`, {
+    method: 'PATCH',
+    body: JSON.stringify({ rejectionReason }),
+  });
+  return response.data;
+}

@@ -6,7 +6,14 @@ import Badge from '../components/common/Badge'
 import LoadingState from '../components/common/LoadingState'
 import ErrorState from '../components/common/ErrorState'
 import { useDetailQuery } from '../hooks/useListQuery'
-import { fetchWorkerById, fetchWorkerDebt, adjustWorkerDebt, releaseWorkerHold } from '../services/workers'
+import {
+  fetchWorkerById,
+  fetchWorkerDebt,
+  adjustWorkerDebt,
+  releaseWorkerHold,
+  approveCertification,
+  rejectCertification,
+} from '../services/workers'
 import { suspendUser, reinstateUser } from '../services/users'
 import { useToast } from '../context/ToastContext'
 
@@ -15,6 +22,12 @@ const DEBT_TYPE_LABELS = {
   DEBT_RECOVERY: 'Recovered from Payout',
   ADMIN_ADJUSTMENT: 'Admin Adjustment',
   REVERSAL: 'Reversed (refund)',
+}
+
+const CERT_STATUS_VARIANT = {
+  PENDING: 'pending',
+  APPROVED: 'active',
+  REJECTED: 'suspended',
 }
 
 export default function WorkerDetail() {
@@ -34,6 +47,43 @@ export default function WorkerDetail() {
   const [releaseModalOpen, setReleaseModalOpen] = useState(false)
   const [releaseNote, setReleaseNote] = useState('')
   const [releaseSubmitting, setReleaseSubmitting] = useState(false)
+
+  const [certActionId, setCertActionId] = useState(null)
+  const [rejectingCert, setRejectingCert] = useState(null)
+  const [certRejectReason, setCertRejectReason] = useState('')
+  const [certRejectSubmitting, setCertRejectSubmitting] = useState(false)
+
+  const handleApproveCertification = async (certId) => {
+    setCertActionId(certId)
+    try {
+      await approveCertification(certId)
+      showSuccess('Certification approved.')
+      reload()
+    } catch (err) {
+      showError(err.message || 'Failed to approve certification')
+    } finally {
+      setCertActionId(null)
+    }
+  }
+
+  const handleRejectCertification = async () => {
+    if (!certRejectReason.trim()) {
+      showError('A rejection reason is required.')
+      return
+    }
+    setCertRejectSubmitting(true)
+    try {
+      await rejectCertification(rejectingCert.id, certRejectReason.trim())
+      showSuccess('Certification rejected.')
+      setRejectingCert(null)
+      setCertRejectReason('')
+      reload()
+    } catch (err) {
+      showError(err.message || 'Failed to reject certification')
+    } finally {
+      setCertRejectSubmitting(false)
+    }
+  }
 
   const loadDebt = async () => {
     setDebtLoading(true)
@@ -224,6 +274,89 @@ export default function WorkerDetail() {
           </table>
         </div>
       </SectionCard>
+
+      <SectionCard title="Certifications">
+        <div className="table-wrap">
+          <table className="table">
+            <thead>
+              <tr>
+                <th>Title</th><th>Issuer</th><th>Category</th><th>Status</th><th>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {(worker.certifications || []).length === 0 ? (
+                <tr>
+                  <td colSpan={5} style={{ textAlign: 'center', color: 'var(--text-muted)' }}>No certifications uploaded.</td>
+                </tr>
+              ) : (
+                worker.certifications.map((c) => (
+                  <tr key={c.id}>
+                    <td>
+                      <a href={c.documentUrl} target="_blank" rel="noreferrer">{c.title}</a>
+                    </td>
+                    <td>{c.issuer}</td>
+                    <td>{c.serviceType?.name ?? '—'}</td>
+                    <td><Badge variant={CERT_STATUS_VARIANT[c.verificationStatus] ?? 'pending'}>{c.verificationStatus}</Badge></td>
+                    <td>
+                      {c.verificationStatus === 'PENDING' && (
+                        <div className="row-actions">
+                          <button
+                            type="button"
+                            className="action-btn approve"
+                            title="Approve"
+                            aria-label={`Approve ${c.title}`}
+                            disabled={certActionId === c.id}
+                            onClick={() => handleApproveCertification(c.id)}
+                          >
+                            <i className="fas fa-check" />
+                          </button>
+                          <button
+                            type="button"
+                            className="action-btn delete"
+                            title="Reject"
+                            aria-label={`Reject ${c.title}`}
+                            onClick={() => { setRejectingCert(c); setCertRejectReason('') }}
+                          >
+                            <i className="fas fa-xmark" />
+                          </button>
+                        </div>
+                      )}
+                      {c.verificationStatus === 'REJECTED' && c.rejectionReason && (
+                        <span style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>{c.rejectionReason}</span>
+                      )}
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      </SectionCard>
+
+      {rejectingCert && (
+        <div className="modal-backdrop" onClick={() => setRejectingCert(null)} role="presentation">
+          <div className="modal" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true">
+            <h2 className="modal-title">Reject Certification</h2>
+            <p className="modal-body">Rejecting "{rejectingCert.title}" — explain why so the worker can fix and resubmit.</p>
+            <div className="form-field">
+              <label htmlFor="cert-reject-reason">Reason</label>
+              <textarea
+                id="cert-reject-reason"
+                value={certRejectReason}
+                onChange={(e) => setCertRejectReason(e.target.value)}
+                rows={3}
+                style={{ width: '100%', padding: '0.5rem 0.75rem', border: '1px solid var(--border)', borderRadius: 8 }}
+              />
+            </div>
+            <div className="modal-actions">
+              <button type="button" className="btn btn-outline" onClick={() => setRejectingCert(null)}>Cancel</button>
+              <button type="button" className="btn btn-danger" disabled={certRejectSubmitting} onClick={handleRejectCertification}>
+                {certRejectSubmitting ? 'Rejecting...' : 'Reject'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <SectionCard title="Platform Dues">
         {debtLoading ? (

@@ -36,6 +36,7 @@ export function formatVerification(
       uploadedAt: doc.createdAt.toISOString(),
       status: doc.status,
       rejectionReason: doc.rejectionReason ?? null,
+      expiresAt: doc.expiresAt ? doc.expiresAt.toISOString() : null,
     })),
   };
 }

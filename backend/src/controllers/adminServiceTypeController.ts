@@ -119,17 +119,21 @@ export const listServiceTypesAdmin = async (_req: Request, res: Response) => {
 
 export const createServiceType = async (req: AuthRequest, res: Response) => {
   try {
-    const { name, description, basePrice, scopeFields, icon } = req.body as {
+    const { name, description, basePrice, scopeFields, icon, requiresCertification } = req.body as {
       name?: string;
       description?: string;
       basePrice?: number;
       scopeFields?: ScopeFieldInput[];
       icon?: string | null;
+      requiresCertification?: boolean;
     };
 
     const validationError = validateServiceTypeInput({ name, basePrice, scopeFields, icon });
     if (validationError) {
       return res.status(400).json(errorResponse(400, validationError));
+    }
+    if (requiresCertification !== undefined && typeof requiresCertification !== 'boolean') {
+      return res.status(400).json(errorResponse(400, 'requiresCertification must be a boolean.'));
     }
 
     const record = await prisma.serviceType.create({
@@ -138,6 +142,7 @@ export const createServiceType = async (req: AuthRequest, res: Response) => {
         description: description?.trim() || null,
         basePrice: basePrice!,
         icon: icon || null,
+        requiresCertification: requiresCertification ?? false,
         scopeFields: { create: buildScopeFieldsCreate(scopeFields) },
       },
       include: serviceTypeInclude,
@@ -165,13 +170,14 @@ export const createServiceType = async (req: AuthRequest, res: Response) => {
 export const updateServiceType = async (req: AuthRequest, res: Response) => {
   try {
     const id = req.params.id as string;
-    const { name, description, basePrice, scopeFields, isActive, icon } = req.body as {
+    const { name, description, basePrice, scopeFields, isActive, icon, requiresCertification } = req.body as {
       name?: string;
       description?: string;
       basePrice?: number;
       scopeFields?: ScopeFieldInput[];
       isActive?: boolean;
       icon?: string | null;
+      requiresCertification?: boolean;
     };
 
     const validationError = validateServiceTypeInput({ name, basePrice, scopeFields, icon });
@@ -180,6 +186,9 @@ export const updateServiceType = async (req: AuthRequest, res: Response) => {
     }
     if (isActive !== undefined && typeof isActive !== 'boolean') {
       return res.status(400).json(errorResponse(400, 'isActive must be a boolean.'));
+    }
+    if (requiresCertification !== undefined && typeof requiresCertification !== 'boolean') {
+      return res.status(400).json(errorResponse(400, 'requiresCertification must be a boolean.'));
     }
 
     const existing = await prisma.serviceType.findUnique({ where: { id } });
@@ -202,6 +211,7 @@ export const updateServiceType = async (req: AuthRequest, res: Response) => {
           basePrice: basePrice!,
           isActive: isActive ?? existing.isActive,
           icon: icon !== undefined ? icon || null : existing.icon,
+          requiresCertification: requiresCertification ?? existing.requiresCertification,
           scopeFields: { create: buildScopeFieldsCreate(scopeFields) },
         },
         include: serviceTypeInclude,

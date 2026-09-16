@@ -336,12 +336,27 @@ export const createBooking = async (req: AuthRequest, res: Response) => {
       clientLng: lng,
     };
 
+    // Fetched once outside the retry loop — a client's own phone doesn't
+    // change across auto-match retries within the same request.
+    const requestingClient = await prisma.user.findUnique({ where: { id: clientId }, select: { phone: true } });
+
     for (let attempt = 0; ; attempt++) {
-    const workerProfile = await prisma.workerProfile.findUnique({ where: { userId: resolvedWorkerId } });
+    const workerProfile = await prisma.workerProfile.findUnique({
+      where: { userId: resolvedWorkerId },
+      include: { user: { select: { phone: true } } },
+    });
 
     if (!workerProfile) {
       return res.status(404).json(errorResponse(404, 'Worker not found'));
     }
+
+    // Client booking themselves (or a shared family line) — see the
+    // resolved policy on Booking.selfDealingFlag's schema comment:
+    // non-blocking, just a signal for admin review. A missing phone on
+    // either side never counts as a match.
+    const selfDealingFlag = Boolean(
+      requestingClient?.phone && workerProfile.user.phone && requestingClient.phone === workerProfile.user.phone
+    );
 
     // Shared by every retryable failure below (slot conflict, unpriced task)
     // so the "exclude this worker, try the next-best auto-match candidate"
@@ -546,6 +561,7 @@ export const createBooking = async (req: AuthRequest, res: Response) => {
             scheduledDate,
             timeSlot,
             isAutoMatched,
+            selfDealingFlag,
             declinedWorkerIds: [],
             expiresAt: new Date(Date.now() + 60 * 60 * 1000),
             idempotencyKey: hasIdempotencyKey ? (idempotencyKey as string) : null,
@@ -3136,8 +3152,10 @@ export const submitReview = async (req: AuthRequest, res: Response) => {
 
     // Update worker's average rating — aggregate in the DB instead of
     // pulling every review row (comment, photoUrls, etc.) just to reduce it.
+    // status: VISIBLE matches adminReviewController.updateReview's own
+    // recompute, so a HIDDEN review never counts toward the public rating.
     const ratingStats = await prisma.review.aggregate({
-      where: { workerId: workerProfile.id },
+      where: { workerId: workerProfile.id, status: 'VISIBLE' },
       _avg: { rating: true },
       _count: true,
     });

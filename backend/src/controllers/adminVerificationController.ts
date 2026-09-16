@@ -7,21 +7,19 @@ import { verificationQueue, VERIFICATION_JOB_OPTIONS } from '@queues/verificatio
 import { writeAuditLog } from '@utils/auditLog';
 import { notifyUser } from '@utils/notify';
 import { sendSmsToUser } from '@utils/smsService';
+import { TIER_1_REQUIRED_DOCUMENT_TYPES, CLEARANCE_VALIDITY_DAYS } from '@/constants/kycRequirements';
 import type { JwtPayload } from '@/types/index';
 
 interface AuthRequest extends Request {
   user?: JwtPayload;
 }
 
-// Tier 1 minimum documents (see documents.MD) required before a worker's
-// initial onboarding verification can be approved without an explicit
-// admin override.
-const TIER_1_REQUIRED_DOCUMENT_TYPES = [
-  'GOVERNMENT_ID_FRONT',
-  'GOVERNMENT_ID_BACK',
-  'SELFIE',
-  'NBI_CLEARANCE',
-] as const;
+// An admin overriding a missing-requirements gate (approveVerification) has
+// to explain why in more than a token word — "ok" or "approved" technically
+// passed the old any-non-empty-string check, which made the reason
+// requirement close to decorative. 20 chars is enough for a real sentence
+// fragment without being onerous.
+const MIN_OVERRIDE_REASON_LENGTH = 20;
 
 export const listVerifications = async (req: Request, res: Response) => {
   try {
@@ -115,6 +113,21 @@ export const approveVerification = async (req: AuthRequest, res: Response) => {
 
     if (record.status === 'APPROVED') {
       return res.status(400).json(errorResponse(400, 'Verification already approved'));
+    }
+
+    // Defense-in-depth — not exploitable today (this route is admin-only,
+    // and a user's own account can't hold the ADMIN role), but the audit
+    // found this guard applied inconsistently across similar admin actions
+    // elsewhere, so it's added here too rather than relying solely on the
+    // role gate.
+    if (record.userId === req.user?.userId) {
+      return res.status(403).json(errorResponse(403, 'You cannot approve your own verification request'));
+    }
+
+    if (adminOverrideReason?.trim() && adminOverrideReason.trim().length < MIN_OVERRIDE_REASON_LENGTH) {
+      return res.status(400).json(
+        errorResponse(400, `adminOverrideReason must be at least ${MIN_OVERRIDE_REASON_LENGTH} characters — explain the actual reason.`)
+      );
     }
 
     if (record.type === 'WORKER_ONBOARDING') {
@@ -231,6 +244,10 @@ export const rejectVerification = async (req: AuthRequest, res: Response) => {
       return res.status(404).json(errorResponse(404, 'Verification request not found'));
     }
 
+    if (record.userId === req.user?.userId) {
+      return res.status(403).json(errorResponse(403, 'You cannot reject your own verification request'));
+    }
+
     const updated = await prisma.$transaction(async (tx) => {
       const verification = await tx.verificationRequest.update({
         where: { id },
@@ -299,6 +316,16 @@ export const approveDocument = async (req: AuthRequest, res: Response) => {
       return res.status(404).json(errorResponse(404, 'Document not found on this verification request'));
     }
 
+    // Government clearances actually expire — auto-computed from each
+    // type's real-world validity period (see CLEARANCE_VALIDITY_DAYS) so
+    // approval doesn't silently create a permanently-valid credential.
+    // bookingWorker.flagExpiredKycDocuments reads this to require
+    // re-verification once it passes.
+    const validityDays = CLEARANCE_VALIDITY_DAYS[document.documentType];
+    const expiresAt = validityDays
+      ? new Date(Date.now() + validityDays * 24 * 60 * 60 * 1000)
+      : null;
+
     const updated = await prisma.kycDocument.update({
       where: { id: documentId },
       data: {
@@ -306,6 +333,7 @@ export const approveDocument = async (req: AuthRequest, res: Response) => {
         rejectionReason: null,
         reviewedById: req.user?.userId,
         reviewedAt: new Date(),
+        expiresAt,
       },
     });
 

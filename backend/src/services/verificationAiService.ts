@@ -201,7 +201,18 @@ async function runClaudeReview(
   const reviewedTypeList = okDocs
     .map((r) => `${r.doc.documentType}${(r.doc.mimeType ?? '') === 'application/pdf' ? ' (PDF)' : ''}`)
     .join(', ');
-  const prompt = `Review these verification documents for a ${requestType} submission. Documents included: ${reviewedTypeList}. Assess whether the documents look legitimate, extract the key facts, and provide a short admin summary (2-3 sentences), noting any concerns. End your reply on its own final line with exactly "CONFIDENCE: 0.NN" — your own certainty (0.00-1.00) in your legitimacy assessment.`;
+  const hasSelfie = okDocs.some((r) => r.doc.documentType === 'SELFIE');
+  const hasIdFront = okDocs.some((r) => r.doc.documentType === 'GOVERNMENT_ID_FRONT');
+  // Previously nothing ever checked the selfie actually matches the person
+  // on the ID — an admin skimming the summary had no signal either way. This
+  // stays advisory-only, same as every other AI verdict in this file: the
+  // instruction below only fires when both documents are actually present,
+  // and the result still just informs the admin's own approve/reject call.
+  const faceMatchInstruction =
+    hasSelfie && hasIdFront
+      ? ' The submission includes both a SELFIE and a GOVERNMENT_ID_FRONT — explicitly compare the face in the selfie against the photo on the ID and state in your summary whether they appear to be the same person, noting your certainty.'
+      : '';
+  const prompt = `Review these verification documents for a ${requestType} submission. Documents included: ${reviewedTypeList}. Assess whether the documents look legitimate, extract the key facts, and provide a short admin summary (2-3 sentences), noting any concerns.${faceMatchInstruction} End your reply on its own final line with exactly "CONFIDENCE: 0.NN" — your own certainty (0.00-1.00) in your legitimacy assessment.`;
 
   const response = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',

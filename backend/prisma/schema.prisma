@@ -163,6 +163,11 @@ enum NotificationType {
   VAT_THRESHOLD_CROSSED
   WORKER_NO_SHOW_FLAGGED
   DISPUTE_STALE_REMINDER
+  KYC_REVERIFICATION_REQUIRED
+  ACCOUNT_AUTO_SUSPENDED
+  REVIEW_RESPONSE_ADDED
+  CERTIFICATION_APPROVED
+  CERTIFICATION_REJECTED
 }
 
 enum TimeSlot {
@@ -620,11 +625,20 @@ model KycDocument {
   reviewedById    String?
   reviewedAt      DateTime?
 
+  // Auto-computed at approval time for the government-clearance types
+  // (NBI/police/barangay/cedula — see adminVerificationController.
+  // approveDocument's CLEARANCE_VALIDITY_DAYS) using each type's real-world
+  // validity period; null for ID/selfie/resume/certification, which don't
+  // expire. Read by bookingWorker.flagExpiredKycDocuments to require
+  // re-verification once it passes.
+  expiresAt DateTime?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@index([verificationRequestId, documentType])
   @@index([status])
+  @@index([expiresAt])
 }
 
 model ResumeParseResult {
@@ -656,6 +670,14 @@ model Certification {
   expiryDate  DateTime?
   documentUrl String
 
+  // Optional tag linking this certification to the specific trade it
+  // licenses — null for a general certification with no licensing weight.
+  // This is what workerController.addServiceTypes checks against
+  // ServiceType.requiresCertification: an APPROVED Certification tagged to
+  // that exact service type is what lets a worker add it.
+  serviceTypeId String?
+  serviceType   ServiceType? @relation(fields: [serviceTypeId], references: [id], onDelete: SetNull)
+
   // Verification tracking
   verificationStatus KycDocumentStatus @default(PENDING)
   rejectionReason    String?
@@ -666,6 +688,7 @@ model Certification {
 
   @@index([workerProfileId])
   @@index([verificationStatus])
+  @@index([serviceTypeId])
 }
 
 // ============================================================================
@@ -704,11 +727,19 @@ model ServiceType {
   // (utils/categoryIcons.ts) in that case.
   icon String?
 
+  // A "licensed trade" (e.g. electrical, plumbing) an admin has flagged as
+  // requiring proof of licensing before a worker can offer it — previously
+  // ANY worker could self-add ANY category with zero credential check.
+  // Enforced in workerController.addServiceTypes: gated on at least one
+  // APPROVED Certification tagged to this exact ServiceType.
+  requiresCertification Boolean @default(false)
+
   // Relations
-  workers     WorkerProfile[]
-  tasks       ServiceTask[]
-  packages    WorkerPackage[]
-  scopeFields ServiceScopeField[]
+  workers        WorkerProfile[]
+  tasks          ServiceTask[]
+  packages       WorkerPackage[]
+  scopeFields    ServiceScopeField[]
+  certifications Certification[]
 
   @@unique([name])
 }
@@ -903,6 +934,14 @@ model Booking {
   isAutoMatched     Boolean   @default(false)
   declinedWorkerIds String[]
   expiresAt         DateTime?
+
+  // Set at creation (see bookingController.createBooking) when the target
+  // worker's phone number matches the requesting client's own phone —
+  // almost certainly the same person booking themselves (or a shared family
+  // line), which could otherwise be used to farm reviews/payouts. Advisory
+  // only, per the resolved policy: flag for admin review, don't block (a
+  // shared household phone is a plausible false positive).
+  selfDealingFlag Boolean @default(false)
 
   // Client-generated key (one per booking-draft submission attempt) so a
   // retried POST /bookings — app backgrounded mid-request, network timeout
@@ -1539,6 +1578,13 @@ model Review {
   flagReason String?
   status     ReviewStatus @default(VISIBLE)
 
+  // The worker's one-time public reply to this review — previously there
+  // was no way for a worker to respond to a review at all, even an unfair
+  // or inaccurate one. Settable once (see workerController.respondToReview);
+  // null means no response yet.
+  workerResponse   String?
+  workerResponseAt DateTime?
+
   createdAt DateTime @default(now())
 
   @@index([workerId])
@@ -1689,6 +1735,18 @@ model AppSettings {
   // dispute an admin never looked at just sat there forever with the
   // booking and worker payout both frozen.
   disputeEscalationHours Int @default(48)
+
+  // Automatic suspension sweep (bookingWorker.autoSuspendUnderperformingWorkers)
+  // — both null by default, meaning OFF: there was previously no mechanism
+  // tying a worker's rating or dispute history to their account status at
+  // all, no matter how bad either got. An admin opts in by setting both a
+  // rating floor and a dispute-count/window pair; leaving either null keeps
+  // the sweep a no-op rather than guessing sensible thresholds on their
+  // behalf. Only ever SUSPENDS (never bans) — reversible, admin still
+  // reviews and reinstates.
+  autoSuspendRatingThreshold        Float?
+  autoSuspendDisputeCountThreshold  Int?
+  autoSuspendDisputeCountWindowDays Int?
 
   updatedAt DateTime @updatedAt
 }
