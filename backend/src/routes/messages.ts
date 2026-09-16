@@ -5,10 +5,11 @@ import {
   sendMessage,
   markConversationRead,
   getUnreadCount,
+  reportMessage,
 } from '../controllers/messageController';
 import { chatImageUpload, uploadChatImage } from '../controllers/uploadController';
 import { authMiddleware } from '../middleware/auth';
-import { validateSendMessage } from '../middleware/validation';
+import { validateSendMessage, validateReportMessage } from '../middleware/validation';
 
 const router = Router();
 
@@ -32,5 +33,8 @@ router.post('/upload-image', chatImageUpload, uploadChatImage);
 
 // Send message
 router.post('/', validateSendMessage, sendMessage);
+
+// Report a message you received (moderation flag-for-admin, not a block-list)
+router.post('/:id/report', validateReportMessage, reportMessage);
 
 export default router;

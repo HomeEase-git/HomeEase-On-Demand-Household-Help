@@ -34,7 +34,7 @@ const RESOLVED_STATUS_BY_ACTION = {
   CANCEL_BOOKING: 'RESOLVED_CANCELLED',
 } as const satisfies Partial<Record<ResolveAction, string>>;
 
-const disputeInclude = {
+export const disputeInclude = {
   booking: {
     include: {
       client: { select: { id: true, fullName: true } },
@@ -44,9 +44,9 @@ const disputeInclude = {
   },
 } satisfies Prisma.DisputeInclude;
 
-type DisputeRecord = Prisma.DisputeGetPayload<{ include: typeof disputeInclude }>;
+export type DisputeRecord = Prisma.DisputeGetPayload<{ include: typeof disputeInclude }>;
 
-function formatDispute(record: DisputeRecord) {
+export function formatDispute(record: DisputeRecord) {
   const booking = record.booking;
   const amount = booking.finalPrice ?? booking.estimatedPrice ?? null;
 
@@ -65,6 +65,7 @@ function formatDispute(record: DisputeRecord) {
     workerId: booking.worker?.id ?? null,
     amount: amount != null ? formatPeso(amount) : '—',
     reason: record.reason,
+    evidenceUrls: record.evidenceUrls,
     status: record.status,
     resolution: record.resolution,
     resolvedById: record.resolvedById,
@@ -93,6 +94,13 @@ function buildDisputeWhere(search: string, status: string): Prisma.DisputeWhereI
   // the same way from the query string without a separate endpoint.
   if (status === 'NEEDS_REFUND_REVIEW') {
     where.refundStatus = 'FAILED';
+  } else if (status === 'OPEN') {
+    // The admin "Open" queue means "not yet resolved", which now spans two
+    // real statuses: OPEN (nobody's looked at it) and UNDER_REVIEW (an admin
+    // opened it via getDisputeById but hasn't resolved it yet). Without this
+    // a dispute would silently vanish from the queue the moment an admin
+    // viewed it, well before anyone actually resolved anything.
+    where.status = { in: ['OPEN', 'UNDER_REVIEW'] };
   } else if (status && status !== 'all') {
     where.status = status.toUpperCase();
   }
@@ -153,9 +161,22 @@ export const getDisputeById = async (req: Request, res: Response) => {
   try {
     const id = req.params.id as string;
 
-    const record = await prisma.dispute.findUnique({ where: { id }, include: disputeInclude });
+    let record = await prisma.dispute.findUnique({ where: { id }, include: disputeInclude });
     if (!record) {
       return res.status(404).json(errorResponse(404, 'Dispute not found'));
+    }
+
+    // An admin opening a specific dispute is what "starts" the review —
+    // flips it out of the raw, untouched OPEN queue into UNDER_REVIEW so the
+    // dispute list can distinguish "nobody has looked at this yet" from
+    // "someone's actively working it". Only fires once, from OPEN; already
+    // UNDER_REVIEW / resolved / rejected disputes are left alone.
+    if (record.status === 'OPEN') {
+      record = await prisma.dispute.update({
+        where: { id },
+        data: { status: 'UNDER_REVIEW' },
+        include: disputeInclude,
+      });
     }
 
     return res.json({ success: true, data: formatDispute(record) });
@@ -270,9 +291,9 @@ async function resolveNonPaymentDispute(
     if (booking.workerId) {
       await notifyUser({
         userId: booking.workerId,
-        type: 'QUOTE_DISPUTED',
+        type: 'DISPUTE_RESOLVED',
         title: 'Dispute Resolved',
-        message: notifyWorkerMessage,
+        message: `${notifyWorkerMessage} Admin note: ${disputeResolutionNote}`,
         relatedId: booking.id,
       });
     }
@@ -517,14 +538,17 @@ export const resolveDispute = async (req: AuthRequest, res: Response) => {
       message: `Dispute for booking ${formatDisplayId(booking.id)} resolved via ${action}`,
     });
 
+    const resolutionNote = resolution?.trim();
     const partiesToNotify = [booking.clientId, booking.workerId].filter((v): v is string => Boolean(v));
     await Promise.all(
       partiesToNotify.map((userId) =>
         notifyUser({
           userId,
-          type: 'QUOTE_DISPUTED',
+          type: 'DISPUTE_RESOLVED',
           title: 'Dispute Resolved',
-          message: `Your dispute for booking ${formatDisplayId(booking.id)} was resolved: ${action.replace(/_/g, ' ').toLowerCase()}`,
+          message: `Your dispute for booking ${formatDisplayId(booking.id)} was resolved: ${action.replace(/_/g, ' ').toLowerCase()}.${
+            resolutionNote ? ` Admin note: ${resolutionNote}` : ''
+          }`,
           relatedId: booking.id,
         })
       )

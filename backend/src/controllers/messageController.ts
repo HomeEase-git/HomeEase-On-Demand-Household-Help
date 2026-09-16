@@ -216,6 +216,26 @@ export const sendMessage = async (req: AuthRequest, res: Response) => {
       return res.status(404).json(errorResponse(404, 'Receiver not found'));
     }
 
+    // Relationship gate — messaging only makes sense between a client and a
+    // worker who actually have a booking together (any status, so a
+    // completed/cancelled job's conversation still works). Without this,
+    // any authenticated user could message any other user in the system.
+    const sharedBooking = await prisma.booking.findFirst({
+      where: {
+        OR: [
+          { clientId: currentUserId, workerId: receiverId },
+          { clientId: receiverId, workerId: currentUserId },
+        ],
+      },
+      select: { id: true },
+    });
+
+    if (!sharedBooking) {
+      return res
+        .status(403)
+        .json(errorResponse(403, 'You can only message someone you have a booking with'));
+    }
+
     const message = await prisma.message.create({
       data: {
         senderId: currentUserId,
@@ -326,5 +346,69 @@ export const getUnreadCount = async (req: AuthRequest, res: Response) => {
   } catch (error) {
     console.error('Error getting unread count:', error);
     return res.status(500).json(errorResponse(500, 'Failed to get unread count'));
+  }
+};
+
+/**
+ * POST /api/messages/:id/report
+ * Minimal report-and-flag-for-admin moderation — not a block-list feature.
+ * Only the message's recipient can report it (not the sender, not a third
+ * party). Stamps Message.reportedAt/reportReason and notifies every admin,
+ * the same "notify every admin" pattern used for KYC submissions and
+ * dispute review queues elsewhere in this codebase.
+ */
+export const reportMessage = async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      return res.status(401).json(errorResponse(401, 'Not authenticated'));
+    }
+
+    const id = req.params.id as string;
+    const { reason } = req.body as { reason?: string };
+    const trimmedReason = typeof reason === 'string' ? reason.trim() : '';
+
+    if (!trimmedReason) {
+      return res.status(400).json(errorResponse(400, 'reason is required'));
+    }
+
+    const message = await prisma.message.findUnique({ where: { id } });
+    if (!message) {
+      return res.status(404).json(errorResponse(404, 'Message not found'));
+    }
+
+    if (message.receiverId !== req.user.userId) {
+      return res.status(403).json(errorResponse(403, 'You can only report messages sent to you'));
+    }
+
+    if (message.reportedAt) {
+      return res.status(409).json(errorResponse(409, 'This message has already been reported'));
+    }
+
+    const updated = await prisma.message.update({
+      where: { id },
+      data: { reportedAt: new Date(), reportReason: trimmedReason },
+    });
+
+    const admins = await prisma.user.findMany({ where: { role: 'ADMIN', isDeleted: false }, select: { id: true } });
+    await Promise.all(
+      admins.map((admin) =>
+        notifyUser({
+          userId: admin.id,
+          type: 'MESSAGE_REPORTED',
+          title: 'Message Reported',
+          message: `A message was reported: ${trimmedReason}`,
+          relatedId: updated.id,
+        })
+      )
+    );
+
+    return res.status(200).json({
+      success: true,
+      message: 'Message reported',
+      data: { id: updated.id, reportedAt: updated.reportedAt },
+    });
+  } catch (error) {
+    console.error('Error reporting message:', error);
+    return res.status(500).json(errorResponse(500, 'Failed to report message'));
   }
 };

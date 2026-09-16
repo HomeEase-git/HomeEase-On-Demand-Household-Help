@@ -8,7 +8,7 @@ import Pagination from '../components/common/Pagination'
 import Badge from '../components/common/Badge'
 import LoadingState from '../components/common/LoadingState'
 import ErrorState from '../components/common/ErrorState'
-import { fetchDisputes, resolveDispute } from '../services/disputes'
+import { fetchDisputes, fetchDisputeById, resolveDispute } from '../services/disputes'
 import { useToast } from '../context/ToastContext'
 import { useListQuery } from '../hooks/useListQuery'
 
@@ -90,6 +90,13 @@ function getActionsForDispute(dispute) {
   return [...QUOTE_DISPUTE_ACTIONS, CANCEL_ACTION]
 }
 
+// A dispute can still be acted on while OPEN (nobody's looked at it yet) or
+// UNDER_REVIEW (an admin opened it via GET /admin/disputes/:id but hasn't
+// resolved it yet) — only a RESOLVED_*/REJECTED status is final.
+function isDisputeActionable(status) {
+  return status === 'OPEN' || status === 'UNDER_REVIEW'
+}
+
 export default function BookingDispute() {
   const [selectedId, setSelectedId] = useState(null)
   const [pendingAction, setPendingAction] = useState(null) // { action, label, description } | null
@@ -155,6 +162,21 @@ export default function BookingDispute() {
 
   const openActionConfirm = (actionDef) => {
     setPendingAction(actionDef)
+  }
+
+  // Opening a dispute for review fetches the single-dispute detail (rather
+  // than reusing the cached list row) so the backend's OPEN -> UNDER_REVIEW
+  // transition (see adminDisputeController.getDisputeById) actually fires,
+  // and so evidenceUrls/resolution are current. The fetched row is merged
+  // back into the list so the table's status badge stays in sync too.
+  const openDispute = async (id) => {
+    setSelectedId(id)
+    try {
+      const detail = await fetchDisputeById(id)
+      setDisputes((prev) => prev.map((d) => (d.id === id ? { ...d, ...detail } : d)))
+    } catch (err) {
+      showError(err.message || 'Failed to load dispute details')
+    }
   }
 
   const submitResolution = async () => {
@@ -244,7 +266,7 @@ export default function BookingDispute() {
                             className="action-btn view"
                             title="Review dispute"
                             aria-label={`Review dispute for booking ${d.displayId}`}
-                            onClick={() => setSelectedId(d.id)}
+                            onClick={() => openDispute(d.id)}
                           >
                             <i className="fas fa-eye" />
                           </button>
@@ -295,6 +317,28 @@ export default function BookingDispute() {
                 <label>Dispute Reason</label>
                 <div className="value">{selected.reason}</div>
               </div>
+              {selected.evidenceUrls?.length > 0 && (
+                <div className="detail-block detail-block--full">
+                  <label>Evidence</label>
+                  <div className="value" style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
+                    {selected.evidenceUrls.map((url, idx) => (
+                      <a key={url} href={url} target="_blank" rel="noopener noreferrer" title={`Evidence ${idx + 1}`}>
+                        <img
+                          src={url}
+                          alt={`Dispute evidence ${idx + 1}`}
+                          style={{
+                            width: '96px',
+                            height: '96px',
+                            objectFit: 'cover',
+                            borderRadius: '6px',
+                            border: '1px solid var(--border-color, #ddd)',
+                          }}
+                        />
+                      </a>
+                    ))}
+                  </div>
+                </div>
+              )}
               {selected.resolution && (
                 <div className="detail-block detail-block--full">
                   <label>Resolution Note</label>
@@ -312,7 +356,7 @@ export default function BookingDispute() {
               )}
             </div>
 
-            {selected.status === 'OPEN' && !pendingAction && (
+            {isDisputeActionable(selected.status) && !pendingAction && (
               <div className="modal-actions modal-actions--dispute" style={{ justifyContent: 'space-between' }}>
                 <button type="button" className="btn btn-outline" onClick={closeModal}>
                   Close
@@ -327,7 +371,7 @@ export default function BookingDispute() {
               </div>
             )}
 
-            {selected.status === 'OPEN' && pendingAction && (
+            {isDisputeActionable(selected.status) && pendingAction && (
               <div style={{ marginTop: '1rem' }}>
                 <p className="modal-body">{pendingAction.description}</p>
                 <label htmlFor="dispute-note" style={{ display: 'block', marginBottom: '0.35rem', fontWeight: 600 }}>
@@ -353,7 +397,7 @@ export default function BookingDispute() {
               </div>
             )}
 
-            {selected.status !== 'OPEN' && (
+            {!isDisputeActionable(selected.status) && (
               <div className="modal-actions" style={{ justifyContent: 'flex-end' }}>
                 <button type="button" className="btn btn-outline" onClick={closeModal}>
                   Close

@@ -138,13 +138,34 @@ async function escalateOverduePayment(booking: { id: string; clientId: string; w
     admins.map((admin) =>
       notifyUser({
         userId: admin.id,
-        type: 'PAYMENT_REFUNDED',
+        type: 'DISPUTE_OPENED',
         title: 'Payment Overdue',
         message: `Booking ${formatDisplayId(booking.id)} has been awaiting client payment for over ${PAYMENT_OVERDUE_DISPUTE_HOURS}h.`,
         relatedId: dispute.id,
       })
     )
   );
+
+  // Both parties should know this happened, not just admins — the client
+  // needs to know they're now in a dispute (and why), and the worker
+  // deserves to know their unpaid job has been escalated rather than
+  // silently sitting there.
+  await notifyUser({
+    userId: booking.clientId,
+    type: 'DISPUTE_OPENED',
+    title: 'Payment overdue — dispute opened',
+    message: `Your payment for a completed booking is over ${PAYMENT_OVERDUE_DISPUTE_HOURS}h overdue, so it's been escalated to our support team for review.`,
+    relatedId: dispute.id,
+  });
+  if (booking.workerId) {
+    await notifyUser({
+      userId: booking.workerId,
+      type: 'DISPUTE_OPENED',
+      title: 'Payment overdue — dispute opened',
+      message: `Booking ${formatDisplayId(booking.id)} still hasn't been paid after ${PAYMENT_OVERDUE_DISPUTE_HOURS}h, so we've escalated it to our support team to chase it up.`,
+      relatedId: dispute.id,
+    });
+  }
 
   await writeAuditLog({
     action: 'PAYMENT_OVERDUE_ESCALATED',
