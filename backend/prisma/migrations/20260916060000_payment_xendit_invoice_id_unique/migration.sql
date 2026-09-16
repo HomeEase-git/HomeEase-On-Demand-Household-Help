@@ -1,0 +1,12 @@
+-- Defense-in-depth: two Payment rows must never be able to share a Xendit
+-- invoice id. The invoice-paid webhook looks up the Payment row by
+-- xenditInvoiceId, so a collision would let one invoice's webhook settle
+-- the wrong booking's payment. No known live collision path today — this
+-- is a sanity constraint, not a fix for an observed bug.
+--
+-- Postgres unique indexes allow multiple NULLs, so pre-checkout rows and
+-- CASH/platform-funded payments (which never get a Xendit invoice) are
+-- unaffected.
+--
+-- CreateIndex
+CREATE UNIQUE INDEX "Payment_xenditInvoiceId_key" ON "Payment"("xenditInvoiceId");

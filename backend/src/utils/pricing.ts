@@ -3,6 +3,7 @@
  * This mirrors the logic in mobile/utils/pricing.ts to ensure both sides agree
  */
 import { COMMISSION_RATE, WITHHOLDING_TAX_RATE } from '@config/pricing';
+import { roundToCentavo } from '@utils/money';
 
 export interface PriceBreakdown {
   subtotal: number;
@@ -32,7 +33,7 @@ const WITHHOLDING_TAX_PERCENTAGE = WITHHOLDING_TAX_RATE * 100; // Convert to per
  * Commission is calculated on the subtotal (labor + materials)
  */
 export const calculateCommission = (subtotal: number, commissionRate: number = COMMISSION_RATE): number => {
-  return Math.round(subtotal * commissionRate * 100) / 100;
+  return roundToCentavo(subtotal * commissionRate);
 };
 
 /**
@@ -45,7 +46,7 @@ export const calculateWithholdingTax = (
   withholdingTaxRate: number = WITHHOLDING_TAX_RATE
 ): number => {
   const afterCommission = subtotal - calculateCommission(subtotal, commissionRate);
-  return Math.round(afterCommission * withholdingTaxRate * 100) / 100;
+  return roundToCentavo(afterCommission * withholdingTaxRate);
 };
 
 /**
@@ -61,7 +62,7 @@ export const calculateWorkerPayout = (
   const commission = calculateCommission(subtotal, commissionRate);
   const tax = calculateWithholdingTax(subtotal, commissionRate, withholdingTaxRate);
   const payout = subtotal - commission - tax + tip;
-  return Math.round(payout * 100) / 100;
+  return roundToCentavo(payout);
 };
 
 /**
@@ -71,7 +72,7 @@ export const calculateWorkerPayout = (
 export const calculatePlatformProfit = (subtotal: number, _tip: number = 0): number => {
   const commission = calculateCommission(subtotal);
   // Note: Withholding tax is collected but remitted to government — not platform profit
-  return Math.round(commission * 100) / 100;
+  return roundToCentavo(commission);
 };
 
 /**
@@ -90,14 +91,14 @@ export const getPriceBreakdown = (
   const total = subtotal + tip + platformFee;
   
   return {
-    subtotal: Math.round(subtotal * 100) / 100,
+    subtotal: roundToCentavo(subtotal),
     commissionAmount: commission,
     commissionPercentage: COMMISSION_PERCENTAGE,
     withholdingTaxAmount: tax,
     withholdingTaxPercentage: WITHHOLDING_TAX_PERCENTAGE,
-    platformFee: Math.round(platformFee * 100) / 100,
-    tip: Math.round(tip * 100) / 100,
-    total: Math.round(total * 100) / 100,
+    platformFee: roundToCentavo(platformFee),
+    tip: roundToCentavo(tip),
+    total: roundToCentavo(total),
     workerPayout: workerPayout,
     platformProfit: platformProfit,
   };
@@ -149,12 +150,12 @@ export const computeBookingFinalTotal = (
   const base = hasQuote
     ? (booking.laborCost ?? 0) + (booking.materialsCost ?? 0)
     : booking.estimatedPrice;
-  const subtotal = Math.round((base + addOnsTotal) * 100) / 100;
-  const tip = Math.round(((booking.tip ?? 0)) * 100) / 100;
+  const subtotal = roundToCentavo(base + addOnsTotal);
+  const tip = roundToCentavo(booking.tip ?? 0);
   const vatAmount = booking.vatApplicable
-    ? Math.round(subtotal * (booking.vatRate ?? VAT_RATE) * 100) / 100
+    ? roundToCentavo(subtotal * (booking.vatRate ?? VAT_RATE))
     : 0;
-  const totalAmount = Math.round((subtotal + vatAmount + tip) * 100) / 100;
+  const totalAmount = roundToCentavo(subtotal + vatAmount + tip);
   return { subtotal, tip, vatAmount, totalAmount };
 };
 
@@ -178,7 +179,7 @@ export const validatePriceBreakdown = (breakdown: PriceBreakdown): boolean => {
  * Format currency for display (Philippine Peso)
  */
 export const formatPrice = (amount: number): string => {
-  return `₱${(Math.round(amount * 100) / 100).toFixed(2)}`;
+  return `₱${roundToCentavo(amount).toFixed(2)}`;
 };
 
 /**
@@ -222,12 +223,11 @@ export interface JobPricingResult {
 }
 
 export const computeJobPricing = (input: JobPricingInput): JobPricingResult => {
-  const distanceFee =
-    Math.round(
-      (input.distanceKm != null ? Math.max(0, input.distanceKm - FREE_DISTANCE_KM) * PER_KM_FEE : 0) * 100
-    ) / 100;
+  const distanceFee = roundToCentavo(
+    input.distanceKm != null ? Math.max(0, input.distanceKm - FREE_DISTANCE_KM) * PER_KM_FEE : 0
+  );
   const urgencyFee = 0;
-  const tierFee = Math.round(input.basePrice * (input.tierMultiplier - 1) * 100) / 100;
-  const estimatedPrice = Math.round((input.basePrice + distanceFee + urgencyFee + tierFee) * 100) / 100;
+  const tierFee = roundToCentavo(input.basePrice * (input.tierMultiplier - 1));
+  const estimatedPrice = roundToCentavo(input.basePrice + distanceFee + urgencyFee + tierFee);
   return { basePrice: input.basePrice, distanceFee, urgencyFee, tierFee, estimatedPrice };
 };

@@ -35,6 +35,7 @@ import {
   calculateWithholdingTax,
   VAT_RATE,
 } from '@utils/pricing';
+import { roundToCentavo } from '@utils/money';
 import { buildCapabilityFilters } from '@services/matchingService';
 import { schedulePendingExpiry, cancelPendingExpiryJob } from '@queues/bookingQueue';
 import { VALID_TRANSITIONS, isValidTransition } from '@services/bookingStateMachine';
@@ -51,7 +52,8 @@ interface AuthRequest extends Request {
   user?: JwtPayload;
 }
 
-const round2 = (n: number): number => Math.round(n * 100) / 100;
+// Local alias — see backend/src/utils/money.ts for the shared money-rounding helper.
+const round2 = roundToCentavo;
 
 async function resolveServiceTypeConfig(name: string) {
   return prisma.serviceType.findFirst({
@@ -1332,6 +1334,10 @@ export const declineBooking = async (req: AuthRequest, res: Response) => {
   }
 };
 
+// Basic sanity bound on a worker's self-reported GPS accuracy radius at
+// check-in — see the comment inside arriveBooking for why 100m.
+const MAX_ARRIVAL_ACCURACY_METERS = 100;
+
 /**
  * PATCH /api/bookings/:id/arrive
  * Worker checks in at the job site. Requires status ACCEPTED and the
@@ -1347,7 +1353,25 @@ export const arriveBooking = async (req: AuthRequest, res: Response) => {
     }
 
     const id = req.params.id as string;
-    const { lat, lng } = req.body as { lat: number; lng: number };
+    const { lat, lng, accuracy } = req.body as { lat: number; lng: number; accuracy?: number | null };
+
+    // Basic sanity bound on reported GPS accuracy — NOT real device
+    // attestation (a spoofed client can still lie about this field, or omit
+    // it entirely, same as it can lie about lat/lng). This only raises the
+    // bar by rejecting check-ins whose own self-reported accuracy radius is
+    // already too coarse to trust against the geofence, mirroring the
+    // precedent set by UserAddress.geocodeAccuracy (also an optional,
+    // self-reported GPS accuracy figure in meters). 100m matches
+    // AppSettings.geofenceRadiusMeters' own default — a fix that imprecise
+    // can't meaningfully confirm presence within a geofence of that size.
+    if (accuracy != null && accuracy > MAX_ARRIVAL_ACCURACY_METERS) {
+      return res.status(409).json(
+        errorResponse(
+          409,
+          `Your location signal is too imprecise to check in (±${Math.round(accuracy)}m) — move to an area with a clearer GPS signal and try again`
+        )
+      );
+    }
 
     const booking = await prisma.booking.findUnique({ where: { id } });
 

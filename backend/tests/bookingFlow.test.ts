@@ -93,6 +93,46 @@ describe('Booking flow — arrival geofencing, quote submission, dispute resolut
       expect(verification?.isVerified).toBe(true);
     });
 
+    it('rejects check-in when the reported GPS accuracy radius is too imprecise, even inside the geofence', async () => {
+      const booking = await createTestBooking({
+        clientId,
+        workerId,
+        status: 'ACCEPTED',
+        clientLat: CLIENT_LOCATION.lat,
+        clientLng: CLIENT_LOCATION.lng,
+      });
+      createdBookingIds.push(booking.id);
+
+      const res = await request(app)
+        .patch(`/api/bookings/${booking.id}/arrive`)
+        .set('Authorization', `Bearer ${workerToken}`)
+        .send({ lat: NEARBY_WORKER_LOCATION.lat, lng: NEARBY_WORKER_LOCATION.lng, accuracy: 500 });
+
+      expect(res.status).toBe(409);
+      expect(res.body.message).toMatch(/imprecise/i);
+
+      const dbBooking = await prisma.booking.findUnique({ where: { id: booking.id } });
+      expect(dbBooking?.workerArrivedAt).toBeNull();
+    });
+
+    it('accepts check-in when reported GPS accuracy is within the sanity bound', async () => {
+      const booking = await createTestBooking({
+        clientId,
+        workerId,
+        status: 'ACCEPTED',
+        clientLat: CLIENT_LOCATION.lat,
+        clientLng: CLIENT_LOCATION.lng,
+      });
+      createdBookingIds.push(booking.id);
+
+      const res = await request(app)
+        .patch(`/api/bookings/${booking.id}/arrive`)
+        .set('Authorization', `Bearer ${workerToken}`)
+        .send({ lat: NEARBY_WORKER_LOCATION.lat, lng: NEARBY_WORKER_LOCATION.lng, accuracy: 15 });
+
+      expect(res.status).toBe(200);
+    });
+
     it('rejects check-in from a worker the booking is not assigned to', async () => {
       const booking = await createTestBooking({
         clientId,

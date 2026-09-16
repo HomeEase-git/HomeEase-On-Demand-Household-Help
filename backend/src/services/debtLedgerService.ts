@@ -1,6 +1,7 @@
 import prisma from '@config/database';
 import { getAppSettings } from '@services/appSettingsService';
 import { notifyUser } from '@utils/notify';
+import { roundToCentavo } from '@utils/money';
 import type { DebtLedgerEntryType, Prisma } from '@prisma/client';
 
 type TxClient = Prisma.TransactionClient;
@@ -88,7 +89,7 @@ async function creditDebtTx(
     where: { id: workerProfileId },
     select: { commissionOwed: true },
   });
-  const newOwed = Math.max(0, Math.round((current.commissionOwed - abs) * 100) / 100);
+  const newOwed = Math.max(0, roundToCentavo(current.commissionOwed - abs));
 
   const updated = await client.workerProfile.update({
     where: { id: workerProfileId },
