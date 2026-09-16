@@ -21,6 +21,14 @@ const SUB_NAV = [
 
 const STATUS_TABS = ['Open', 'Resolved', 'Refund Failed']
 
+function formatAge(ageHours) {
+  if (ageHours == null) return '—'
+  if (ageHours < 24) return `${ageHours}h`
+  const days = Math.floor(ageHours / 24)
+  const hours = ageHours % 24
+  return `${days}d ${hours}h`
+}
+
 const STATUS_BADGE_VARIANT = {
   OPEN: 'pending',
   UNDER_REVIEW: 'pending',
@@ -198,6 +206,7 @@ export default function BookingDispute() {
                   <th>Worker</th>
                   <th>Reason</th>
                   <th>Amount</th>
+                  <th>Age</th>
                   <th>Status</th>
                   <th>Actions</th>
                 </tr>
@@ -205,7 +214,7 @@ export default function BookingDispute() {
               <tbody>
                 {disputes.length === 0 ? (
                   <tr>
-                    <td colSpan={7} style={{ textAlign: 'center', color: 'var(--text-muted)' }}>
+                    <td colSpan={8} style={{ textAlign: 'center', color: 'var(--text-muted)' }}>
                       No {params.statusTab.toLowerCase()} disputes found.
                     </td>
                   </tr>
@@ -217,6 +226,9 @@ export default function BookingDispute() {
                       <td>{d.worker}</td>
                       <td>{d.reason}</td>
                       <td>{d.amount}</td>
+                      <td style={d.ageHours >= 48 && (d.status === 'OPEN' || d.status === 'UNDER_REVIEW') ? { color: 'var(--danger)', fontWeight: 600 } : undefined}>
+                        {formatAge(d.ageHours)}
+                      </td>
                       <td>
                         <Badge variant={STATUS_BADGE_VARIANT[d.status] ?? 'pending'}>{d.status.replace(/_/g, ' ')}</Badge>
                         {d.refundStatus === 'FAILED' && (

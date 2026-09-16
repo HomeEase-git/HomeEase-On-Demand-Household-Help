@@ -20,6 +20,8 @@ export interface AppSettingsConfig {
   tierExpertMultiplier: number;
   workerDebtHoldLimit: number;
   atcCode: string | null;
+  noShowGraceHours: number;
+  disputeEscalationHours: number;
 }
 
 // Mirrors the AppSettings model's own @default values — used only if the
@@ -46,6 +48,8 @@ const FALLBACK_DEFAULTS: AppSettingsConfig = {
   tierExpertMultiplier: 1.3,
   workerDebtHoldLimit: 500,
   atcCode: null,
+  noShowGraceHours: 2,
+  disputeEscalationHours: 48,
 };
 
 // getAppSettings is called on nearly every request path (search, booking,

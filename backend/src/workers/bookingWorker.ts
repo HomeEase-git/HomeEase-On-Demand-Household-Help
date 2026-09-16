@@ -5,7 +5,8 @@ import { notifyUser } from '@utils/notify';
 import { sendSmsToUser } from '@utils/smsService';
 import { writeAuditLog } from '@utils/auditLog';
 import { BOOKING_QUEUE_NAME, JOB_NAMES, type ExpirePendingBookingJobData } from '@queues/bookingQueue';
-import { freeSlot, materializeTemplateForWorker } from '@services/workerAvailabilityService';
+import { freeSlot, materializeTemplateForWorker, getSlotStartInstant } from '@services/workerAvailabilityService';
+import { getAppSettings } from '@services/appSettingsService';
 import {
   refundOrVoidPayment,
   settleCashBooking,
@@ -525,6 +526,133 @@ export async function remindAndAutoApproveAddons(): Promise<void> {
 }
 
 /**
+ * There was previously no concept of a worker no-show at all — an ACCEPTED
+ * booking whose worker simply never opened the app again left the client
+ * with no way out (cancelBooking hard-blocks a client past PENDING by
+ * design). Flags a booking once its scheduled slot start +
+ * AppSettings.noShowGraceHours has passed with no workerArrivedAt, which
+ * lets cancelBooking's carve-out apply and attributes the eventual
+ * cancellation's auto-match penalty to the worker (see
+ * Cancellation.penalizedWorkerId).
+ */
+export async function flagWorkerNoShows(): Promise<void> {
+  const { noShowGraceHours } = await getAppSettings();
+  const now = new Date();
+
+  const candidates = await prisma.booking.findMany({
+    where: {
+      status: 'ACCEPTED',
+      workerArrivedAt: null,
+      workerNoShowFlaggedAt: null,
+      timeSlot: { not: null },
+      // Cheap DB-side pre-filter — a booking scheduled for a future day
+      // can't possibly be a no-show yet. The precise, PH-timezone-aware
+      // slot-start check (getSlotStartInstant) happens per-candidate below.
+      scheduledDate: { lte: now },
+    },
+  });
+
+  for (const booking of candidates) {
+    const slotStart = getSlotStartInstant(booking.scheduledDate, booking.timeSlot!);
+    const graceDeadline = new Date(slotStart.getTime() + noShowGraceHours * HOUR_MS);
+    if (now < graceDeadline) continue;
+
+    try {
+      await prisma.booking.update({
+        where: { id: booking.id },
+        data: { workerNoShowFlaggedAt: now },
+      });
+
+      await notifyUser({
+        userId: booking.clientId,
+        type: 'WORKER_NO_SHOW_FLAGGED',
+        title: "Your worker hasn't checked in",
+        message: `Your worker hasn't checked in, ${noShowGraceHours}h past the scheduled start time. You can now cancel this booking free of charge if you'd like.`,
+        relatedId: booking.id,
+      });
+
+      if (booking.workerId) {
+        await notifyUser({
+          userId: booking.workerId,
+          type: 'WORKER_NO_SHOW_FLAGGED',
+          title: 'Marked as a possible no-show',
+          message: `You haven't checked in for a booking that started ${noShowGraceHours}h ago. Please arrive and check in, or contact support — the client can now cancel this booking free of charge.`,
+          relatedId: booking.id,
+        });
+      }
+
+      await writeAuditLog({
+        action: 'WORKER_NO_SHOW_FLAGGED',
+        category: 'STATUS_CHANGE',
+        level: 'WARN',
+        message: `Booking ${booking.id} flagged as a worker no-show (${noShowGraceHours}h past scheduled start, no check-in)`,
+        metadata: { bookingId: booking.id, workerId: booking.workerId },
+      });
+    } catch (error) {
+      console.error(`Failed to flag worker no-show for booking ${booking.id}:`, error);
+    }
+  }
+}
+
+/**
+ * A dispute has no SLA at all otherwise — resolveDispute
+ * (adminDisputeController.ts) is the only way out of OPEN/UNDER_REVIEW, so
+ * an admin who never looks leaves both the booking and the worker's payout
+ * frozen indefinitely. Re-notifies every admin every
+ * AppSettings.disputeEscalationHours a dispute stays unresolved (a repeat
+ * nag, not a one-shot notice — see Dispute.staleReminderSentAt) until it's
+ * actually resolved.
+ */
+export async function escalateStaleDisputes(): Promise<void> {
+  const { disputeEscalationHours } = await getAppSettings();
+  const cutoff = new Date(Date.now() - disputeEscalationHours * HOUR_MS);
+
+  const staleDisputes = await prisma.dispute.findMany({
+    where: {
+      status: { in: ['OPEN', 'UNDER_REVIEW'] },
+      createdAt: { lte: cutoff },
+      OR: [{ staleReminderSentAt: null }, { staleReminderSentAt: { lte: cutoff } }],
+    },
+    select: { id: true, bookingId: true, createdAt: true },
+  });
+
+  if (staleDisputes.length === 0) return;
+
+  const admins = await prisma.user.findMany({ where: { role: 'ADMIN', isDeleted: false }, select: { id: true } });
+
+  for (const dispute of staleDisputes) {
+    const ageHours = Math.round((Date.now() - dispute.createdAt.getTime()) / HOUR_MS);
+    try {
+      await Promise.all(
+        admins.map((admin) =>
+          notifyUser({
+            userId: admin.id,
+            type: 'DISPUTE_STALE_REMINDER',
+            title: 'Dispute needs attention',
+            message: `Dispute for booking ${formatDisplayId(dispute.bookingId)} has been open for ${ageHours}h with no resolution.`,
+            relatedId: dispute.id,
+          })
+        )
+      );
+      await prisma.dispute.update({
+        where: { id: dispute.id },
+        data: { staleReminderSentAt: new Date() },
+      });
+    } catch (error) {
+      console.error(`Failed to send stale-dispute reminder for dispute ${dispute.id}:`, error);
+    }
+  }
+
+  await writeAuditLog({
+    action: 'DISPUTE_STALE_REMINDER',
+    category: 'STATUS_CHANGE',
+    level: 'WARN',
+    message: `${staleDisputes.length} dispute(s) re-escalated to admins after being open >${disputeEscalationHours}h`,
+    metadata: { disputeIds: staleDisputes.map((d) => d.id) },
+  });
+}
+
+/**
  * Client-response safety net for a rescheduled booking (see
  * bookingController.extendBooking/acknowledgeReschedule) — same shape as
  * remindAndAutoApproveQuotes: a 12h reminder, then an unresponsive client's
@@ -800,6 +928,12 @@ export async function startBookingWorker() {
           break;
         case JOB_NAMES.ADDON_TIMEOUT_SWEEP:
           await remindAndAutoApproveAddons();
+          break;
+        case JOB_NAMES.NO_SHOW_SWEEP:
+          await flagWorkerNoShows();
+          break;
+        case JOB_NAMES.DISPUTE_SLA_SWEEP:
+          await escalateStaleDisputes();
           break;
         case JOB_NAMES.RESET_AVAILABILITY:
           await resetExpiredAvailabilitySlots();

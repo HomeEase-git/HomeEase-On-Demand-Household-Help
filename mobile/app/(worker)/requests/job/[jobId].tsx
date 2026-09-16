@@ -38,6 +38,10 @@ type BookingDetail = {
   completionPhotoUrl?: string | null;
   workerArrivedAt?: string | null;
   timeline?: { workerArrivedAt?: string | null; workerStartedAt?: string | null } | null;
+  // Set once this job's grace period passes with no check-in (see backend
+  // bookingWorker.flagWorkerNoShows) — the client can now cancel free of
+  // charge, so the worker should check in ASAP if they're actually en route.
+  workerNoShowFlaggedAt?: string | null;
   review?: { rating: number; comment: string | null } | null;
   // Client-initiated reschedule request (see backend requestReschedule) —
   // rescheduleRequestRespondedAt null means still awaiting this worker's
@@ -486,6 +490,21 @@ export default function JobDetailScreen() {
             {job.review.comment && (
               <Text className="text-text-secondary text-sm mt-2">&ldquo;{job.review.comment}&rdquo;</Text>
             )}
+          </View>
+        )}
+
+        {/* No-show warning */}
+        {job.workerNoShowFlaggedAt && !hasArrived && (
+          <View className="bg-warning/10 border border-warning/30 rounded-2xl p-4 mb-3 flex-row items-center">
+            <Ionicons name="alert-circle" size={24} color={colors.warning} />
+            <View className="ml-3 flex-1">
+              <Text className="text-warning font-bold text-sm">
+                You haven't checked in
+              </Text>
+              <Text className="text-text-secondary text-xs mt-0.5">
+                The client can now cancel this job free of charge. Check in as soon as you arrive.
+              </Text>
+            </View>
           </View>
         )}
 
