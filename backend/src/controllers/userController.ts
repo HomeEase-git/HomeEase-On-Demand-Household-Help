@@ -7,6 +7,7 @@ import { mimeTypeFromUrl, storagePathFromUrl } from '@utils/kycFileMeta';
 import { verificationQueue, VERIFICATION_JOB_OPTIONS } from '@queues/verificationQueue';
 import { checkResubmissionCooldown } from '@utils/kycResubmissionCooldown';
 import { TIER_1_REQUIRED_DOCUMENT_TYPES } from '@/constants/kycRequirements';
+import { revokeAllRefreshTokens } from '@utils/otpService';
 import type { JwtPayload } from '@/types/index';
 
 interface AuthRequest extends Request {
@@ -164,7 +165,13 @@ export const changePassword = async (req: AuthRequest, res: Response) => {
       where: { id: req.user.userId },
       data: { password: hashedPassword },
     });
-    
+
+    // Revoke all other sessions on self-service password change, same as
+    // the OTP-based resetPassword flow (authController.ts) already does —
+    // a password change should invalidate any refresh tokens issued before
+    // it, in case the change was prompted by a compromised session.
+    await revokeAllRefreshTokens(req.user.userId);
+
     return res.status(200).json({
       success: true,
       message: 'Password changed successfully',
@@ -172,6 +179,33 @@ export const changePassword = async (req: AuthRequest, res: Response) => {
   } catch (error) {
     console.error('Error changing password:', error);
     return res.status(500).json(errorResponse(500, 'Failed to change password'));
+  }
+};
+
+/**
+ * POST /api/users/me/logout-all
+ * Revoke all of the current user's refresh tokens (log out every other
+ * device/session). The caller's own current access token keeps working
+ * until it naturally expires (access tokens aren't tracked server-side),
+ * but no refresh token issued before this call can mint a new one — so a
+ * client that also calls the normal logout/redirect flow after this
+ * effectively signs the user out everywhere.
+ */
+export const logoutAllSessions = async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      return res.status(401).json(errorResponse(401, 'Not authenticated'));
+    }
+
+    await revokeAllRefreshTokens(req.user.userId);
+
+    return res.status(200).json({
+      success: true,
+      message: 'Logged out of all devices',
+    });
+  } catch (error) {
+    console.error('Error logging out all sessions:', error);
+    return res.status(500).json(errorResponse(500, 'Failed to log out all sessions'));
   }
 };
 

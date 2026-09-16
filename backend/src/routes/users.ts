@@ -3,6 +3,7 @@ import {
   getUserProfile,
   updateUserProfile,
   changePassword,
+  logoutAllSessions,
   getAddresses,
   createAddress,
   updateAddress,
@@ -47,6 +48,9 @@ router.delete('/me', deleteAccount);
 
 // Password route
 router.post('/me/change-password', validateChangePassword, changePassword);
+
+// Log out of all devices (revoke every refresh token for this user)
+router.post('/me/logout-all', logoutAllSessions);
 
 // Address routes
 router.get('/me/addresses', getAddresses);
