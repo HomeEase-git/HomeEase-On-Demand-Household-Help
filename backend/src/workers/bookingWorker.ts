@@ -88,7 +88,7 @@ export async function expirePendingBooking(data: ExpirePendingBookingJobData): P
         select: { id: true },
       });
       if (workerProfile) {
-        await freeSlot(tx, workerProfile.id, booking.scheduledDate, booking.timeSlot);
+        await freeSlot(tx, workerProfile.id, booking.scheduledDate, booking.timeSlot, booking.estimatedDurationHours);
       }
     }
   });

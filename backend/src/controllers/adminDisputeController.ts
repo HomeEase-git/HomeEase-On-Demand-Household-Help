@@ -429,7 +429,7 @@ export const resolveDispute = async (req: AuthRequest, res: Response) => {
             data: { activeJobCount: { decrement: 1 } },
           });
           if (booking.timeSlot) {
-            await freeSlot(tx, workerProfile.id, booking.scheduledDate, booking.timeSlot);
+            await freeSlot(tx, workerProfile.id, booking.scheduledDate, booking.timeSlot, booking.estimatedDurationHours);
           }
 
           // Same cleanup bookingController.cancelBooking/completeBooking do —
