@@ -72,7 +72,15 @@ export type Booking = {
   rescheduledAt?: string | null;
   previousScheduledDate?: string | null;
   previousTimeSlot?: string | null;
+  // The true original date, surviving multiple reschedule hops — differs
+  // from previousScheduledDate only after a second+ hop (see backend
+  // Booking.originalScheduledDate).
+  originalScheduledDate?: string | null;
   rescheduleAcknowledgedAt?: string | null;
+  // Set once the worker never checks in past the grace period (see backend
+  // bookingWorker.flagWorkerNoShows) — lets the client cancel penalty-free
+  // even though the booking is past PENDING.
+  workerNoShowFlaggedAt?: string | null;
 };
 
 export type DraftBooking = {
@@ -358,6 +366,23 @@ export const useBookingStore: UseBoundStore<StoreApi<BookingState>> = create<Boo
         updatedDraft.isAutoMatched = false;
         updatedDraft.holdStartedAt = null;
         updatedDraft.lastInvalidationReason = "Your worker isn't confirmed for the new date/time, so we cleared your selection.";
+      }
+
+      // idempotencyKey exists so a retried submit (bad wifi, app backgrounded
+      // mid-request) returns the already-created booking instead of a
+      // duplicate — but it was never cleared on anything short of a full
+      // draft reset. Edit the date/service/address after a hung submit and
+      // resubmit, and the backend's idempotency short-circuit would silently
+      // return the ORIGINAL (unedited) booking, discarding the edit with no
+      // error. Only clear on a change this exact call didn't just make
+      // (draft.X === undefined), matching the same convention
+      // clearingSchedule/clearingWorkerForNewSlot already use above.
+      if (
+        (categoryChanged || addressChanged || cityChanged || dateChanged || slotChanged) &&
+        prev.idempotencyKey &&
+        draft.idempotencyKey === undefined
+      ) {
+        updatedDraft.idempotencyKey = null;
       }
 
       const updated = { draft: updatedDraft };

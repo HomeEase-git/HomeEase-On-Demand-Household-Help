@@ -161,6 +161,8 @@ enum NotificationType {
   PAYOUT_NAME_MISMATCH
   TAX_RECORDS_NEED_REVIEW
   VAT_THRESHOLD_CROSSED
+  WORKER_NO_SHOW_FLAGGED
+  DISPUTE_STALE_REMINDER
 }
 
 enum TimeSlot {
@@ -1000,6 +1002,14 @@ model Booking {
   // the date, or the 24h auto-confirm fired) — doubles as the gate that lets
   // cancelBooking's post-PENDING carve-out apply.
   rescheduleAcknowledgedAt   DateTime?
+  // The TRUE original date/slot, written once (only if still null) on the
+  // FIRST hop and never touched again — previousScheduledDate/
+  // previousTimeSlot above are overwritten on every hop and only ever
+  // reflect the most recent move, so a client bounced twice
+  // (Sept 20 -> Sept 22 -> Sept 25) would otherwise see "previously
+  // Sept 22" with no way to learn they started at Sept 20 at all.
+  originalScheduledDate DateTime?
+  originalTimeSlot      TimeSlot?
 
   // Reschedule-ON-REQUEST — distinct from the reschedule-ON-CONFLICT fields
   // above (that's the worker's OTHER job spilling over onto THIS one; this
@@ -1038,6 +1048,17 @@ model Booking {
   workerArrivedAt   DateTime?
   workerStartedAt   DateTime?
   workerCompletedAt DateTime?
+
+  // Set by the scheduled sweep (bookingWorker.flagWorkerNoShows) once an
+  // ACCEPTED booking's scheduled slot start + AppSettings.noShowGraceHours
+  // has passed with no workerArrivedAt — there was previously no concept of
+  // a worker no-show at all, so a client whose worker simply never opened
+  // the app again had no way to escape the booking (cancelBooking hard-
+  // blocks a client past PENDING by design). Once set, cancelBooking's
+  // post-PENDING carve-out lets the client cancel penalty-free, and the
+  // resulting Cancellation is attributed to the worker
+  // (Cancellation.penalizedWorkerId) for the auto-match scoring penalty.
+  workerNoShowFlaggedAt DateTime?
 
   // Set once the 12h "please confirm this job is done" reminder fires (see
   // bookingWorker.autoSettleCompletedBookings) — prevents re-sending it on
@@ -1210,7 +1231,33 @@ model Cancellation {
   // CLIENT/ADMIN cancellations, where "notice" isn't the relevant signal.
   cancelledWithinHours Int?
 
+  // Required when a worker cancels (bookingController.cancelBooking) — lets
+  // them distinguish "my fault" from "the client wasn't there" or an
+  // unrelated reason. Previously every late worker cancellation was
+  // penalized identically regardless of whose fault it actually was,
+  // discouraging workers from ever honestly reporting a client no-show.
+  workerCancellationReason WorkerCancellationReason?
+
+  // The worker whose matchingService auto-match score should take the late-
+  // cancel penalty for this cancellation, resolved once at creation time
+  // (soft reference, same convention as cancelledById) — null means no
+  // penalty. Two cases set this: (1) the WORKER cancelled within
+  // LATE_CANCEL_THRESHOLD_HOURS AND self-reported WORKER_FAULT (equals
+  // cancelledById); (2) the CLIENT cancelled via the no-show carve-out
+  // after the worker never showed up (see Booking.workerNoShowFlaggedAt) —
+  // equals booking.workerId, NOT cancelledById, since the client performed
+  // the action but the worker is who should be penalized. Replaces the old
+  // matchingService query that only ever looked at cancelledBy='WORKER',
+  // which could never account for case (2).
+  penalizedWorkerId String?
+
   createdAt DateTime @default(now())
+}
+
+enum WorkerCancellationReason {
+  WORKER_FAULT
+  CLIENT_NO_SHOW
+  OTHER
 }
 
 // Itemized pricing snapshot — logged whenever the estimate is (re)computed,
@@ -1260,6 +1307,15 @@ model Dispute {
   // where there was nothing to refund (no payment, or already PENDING/void).
   refundStatus        String  @default("NOT_APPLICABLE") // 'NOT_APPLICABLE' | 'SUCCEEDED' | 'FAILED'
   refundFailureReason String?
+
+  // SLA sweep (bookingWorker.escalateStaleDisputes) — re-notifies admins
+  // every AppSettings.disputeEscalationHours while this dispute stays
+  // OPEN/UNDER_REVIEW, so an admin who never looks at a dispute doesn't
+  // leave it (and the booking + worker payout it's freezing) stuck forever.
+  // Null means never yet escalated; re-set on every repeat reminder, same
+  // recurring-nag convention as a real SLA breach rather than a one-shot
+  // notice that goes silent after the first ping.
+  staleReminderSentAt DateTime?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -1622,6 +1678,17 @@ model AppSettings {
   // Threshold on WorkerProfile.commissionOwed (see debtLedgerService.ts) —
   // crossing this puts the worker's account on hold until an admin clears it.
   workerDebtHoldLimit Float @default(500)
+
+  // Grace period past an ACCEPTED booking's scheduled slot start before the
+  // worker-no-show sweep (bookingWorker.flagWorkerNoShows) flags it —
+  // see Booking.workerNoShowFlaggedAt.
+  noShowGraceHours Int @default(2)
+
+  // How long a dispute can sit OPEN/UNDER_REVIEW before the SLA sweep
+  // (bookingWorker.escalateStaleDisputes) re-notifies admins — previously a
+  // dispute an admin never looked at just sat there forever with the
+  // booking and worker payout both frozen.
+  disputeEscalationHours Int @default(48)
 
   updatedAt DateTime @updatedAt
 }

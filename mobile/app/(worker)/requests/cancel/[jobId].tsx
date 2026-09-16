@@ -13,12 +13,18 @@ import { cancelBooking } from "../../../../services/api";
 import { colors } from "../../../../constants";
 import { useAlertModal } from "../../../../contexts/AlertModalContext";
 
-const REASONS = [
-  "Can no longer make the schedule",
-  "Emergency came up",
-  "Outside my service area",
-  "Job scope is different than described",
-  "Other",
+// category feeds the backend's required workerCancellationReason — only
+// WORKER_FAULT dents the worker's auto-match score (see
+// matchingService/cancelBooking). Letting a worker honestly pick "the
+// client wasn't there" instead of it always counting against them the same
+// as a genuine no-show on their part is the whole point of this field.
+const REASONS: Array<{ label: string; category: "WORKER_FAULT" | "CLIENT_NO_SHOW" | "OTHER" }> = [
+  { label: "Can no longer make the schedule", category: "WORKER_FAULT" },
+  { label: "Outside my service area", category: "WORKER_FAULT" },
+  { label: "Client wasn't home / unreachable", category: "CLIENT_NO_SHOW" },
+  { label: "Job scope is different than described", category: "OTHER" },
+  { label: "Emergency came up", category: "OTHER" },
+  { label: "Other", category: "OTHER" },
 ];
 
 export default function WorkerCancelJobScreen() {
@@ -38,10 +44,11 @@ export default function WorkerCancelJobScreen() {
     if (!jobId) return;
 
     const finalReason = reason === "Other" ? otherText.trim() : reason ?? "";
+    const category = REASONS.find((r) => r.label === reason)?.category ?? "OTHER";
 
     setLoading(true);
     try {
-      await cancelBooking(jobId, finalReason);
+      await cancelBooking(jobId, finalReason, category);
       updateJobStatus(jobId, "Cancelled");
       alertModal.success(
         "Job Cancelled",
@@ -77,20 +84,20 @@ export default function WorkerCancelJobScreen() {
         </Text>
         {REASONS.map((r) => (
           <Pressable
-            key={r}
+            key={r.label}
             className={`bg-card rounded-xl p-3 mb-2 flex-row items-center ${
-              reason === r ? "border-2 border-accent" : "border-2 border-transparent"
+              reason === r.label ? "border-2 border-accent" : "border-2 border-transparent"
             }`}
-            onPress={() => setReason(r)}
+            onPress={() => setReason(r.label)}
           >
             <View
               className={`w-5 h-5 rounded-full border-2 border-accent items-center justify-center mr-3 ${
-                reason === r ? "bg-accent" : ""
+                reason === r.label ? "bg-accent" : ""
               }`}
             >
-              {reason === r && <View className="w-2 h-2 rounded-full bg-white" />}
+              {reason === r.label && <View className="w-2 h-2 rounded-full bg-white" />}
             </View>
-            <Text className="text-text-primary">{r}</Text>
+            <Text className="text-text-primary">{r.label}</Text>
           </Pressable>
         ))}
 

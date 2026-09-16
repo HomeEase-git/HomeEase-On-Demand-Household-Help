@@ -71,6 +71,11 @@ function formatDispute(record: DisputeRecord) {
     resolvedAt: record.resolvedAt,
     refundStatus: record.refundStatus,
     refundFailureReason: record.refundFailureReason,
+    // Raw hours open — lets the admin UI surface "been open 3 days" style
+    // urgency instead of just a date, especially useful once sorted
+    // oldest-first (see listDisputes). Still meaningful for a resolved
+    // dispute (how long it took), so always computed, not just for OPEN.
+    ageHours: Math.round((Date.now() - record.createdAt.getTime()) / (60 * 60 * 1000)),
     createdAt: record.createdAt.toLocaleDateString('en-US', {
       month: 'short',
       day: 'numeric',
@@ -115,13 +120,20 @@ export const listDisputes = async (req: Request, res: Response) => {
 
     const where = buildDisputeWhere(search, status);
 
+    // The OPEN queue is a worklist, not a browsing history — oldest-first
+    // so an admin naturally clears the longest-waiting dispute first
+    // instead of it silently sinking behind newer ones (see also
+    // bookingWorker.escalateStaleDisputes' SLA reminders). Every other view
+    // (Resolved, Refund Failed, all) stays newest-first.
+    const orderBy = status === 'OPEN' ? ({ createdAt: 'asc' } as const) : ({ createdAt: 'desc' } as const);
+
     const [total, records] = await Promise.all([
       prisma.dispute.count({ where }),
       prisma.dispute.findMany({
         where,
         skip,
         take: limit,
-        orderBy: { createdAt: 'desc' },
+        orderBy,
         include: disputeInclude,
       }),
     ]);

@@ -275,18 +275,24 @@ export async function findAutoMatchWorker(params: AutoMatchParams): Promise<Auto
   });
   const completedByWorkerId = new Map(completedCounts.map((c) => [c.workerId as string, c._count._all]));
 
+  // penalizedWorkerId is resolved once at cancellation time (see
+  // Cancellation's schema comment) — covers both a worker self-reporting
+  // fault on a late cancel (the old cancelledBy='WORKER' condition this
+  // replaces) AND a client cancelling because THIS worker never showed up
+  // at all, which the old query could never attribute to the worker since
+  // cancelledById would be the client's id in that case.
   const lateCancelSince = new Date(Date.now() - LATE_CANCEL_LOOKBACK_DAYS * 24 * 60 * 60 * 1000);
   const lateCancelCounts = await prisma.cancellation.groupBy({
-    by: ['cancelledById'],
+    by: ['penalizedWorkerId'],
     where: {
-      cancelledById: { in: inRangeWorkers.map((w) => w.userId) },
-      cancelledBy: 'WORKER',
-      cancelledWithinHours: { lt: LATE_CANCEL_THRESHOLD_HOURS },
+      penalizedWorkerId: { in: inRangeWorkers.map((w) => w.userId) },
       createdAt: { gte: lateCancelSince },
     },
     _count: { _all: true },
   });
-  const lateCancelByWorkerId = new Map(lateCancelCounts.map((c) => [c.cancelledById, c._count._all]));
+  const lateCancelByWorkerId = new Map(
+    lateCancelCounts.map((c) => [c.penalizedWorkerId as string, c._count._all])
+  );
 
   const candidates: (MatchCandidate & { workerProfileId: string })[] = inRangeWorkers.map((w) => ({
     workerId: w.userId,

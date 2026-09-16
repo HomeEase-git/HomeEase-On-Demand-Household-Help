@@ -393,9 +393,12 @@ export async function updateBookingStatus(bookingId: string, status: string) {
   }
 }
 
-export async function cancelBooking(bookingId: string, reason?: string) {
+// workerCancellationReason is required by the backend when the caller is a
+// worker (one of 'WORKER_FAULT' | 'CLIENT_NO_SHOW' | 'OTHER') — omit it
+// entirely for a client's own cancellation.
+export async function cancelBooking(bookingId: string, reason?: string, workerCancellationReason?: string) {
   try {
-    const response = await api.patch(`/bookings/${bookingId}/cancel`, { reason });
+    const response = await api.patch(`/bookings/${bookingId}/cancel`, { reason, workerCancellationReason });
     return response;
   } catch (error) {
     console.error('Cancel booking error:', error);

@@ -9,6 +9,8 @@ export const JOB_NAMES = {
   AUTO_SETTLE_COMPLETED: 'auto-settle-completed-bookings',
   QUOTE_TIMEOUT_SWEEP: 'quote-timeout-sweep',
   ADDON_TIMEOUT_SWEEP: 'addon-timeout-sweep',
+  NO_SHOW_SWEEP: 'worker-no-show-sweep',
+  DISPUTE_SLA_SWEEP: 'dispute-sla-sweep',
   RESET_AVAILABILITY: 'reset-expired-availability-slots',
   RESCHEDULE_TIMEOUT_SWEEP: 'reschedule-timeout-sweep',
   RESCHEDULE_REQUEST_TIMEOUT_SWEEP: 'reschedule-request-timeout-sweep',
@@ -21,6 +23,8 @@ export const REPEATABLE_JOB_IDS = {
   AUTO_SETTLE_COMPLETED: 'auto-settle-completed-bookings-hourly',
   QUOTE_TIMEOUT_SWEEP: 'quote-timeout-sweep-hourly',
   ADDON_TIMEOUT_SWEEP: 'addon-timeout-sweep-hourly',
+  NO_SHOW_SWEEP: 'worker-no-show-sweep-hourly',
+  DISPUTE_SLA_SWEEP: 'dispute-sla-sweep-hourly',
   RESET_AVAILABILITY: 'reset-expired-availability-slots-daily',
   RESCHEDULE_TIMEOUT_SWEEP: 'reschedule-timeout-sweep-hourly',
   RESCHEDULE_REQUEST_TIMEOUT_SWEEP: 'reschedule-request-timeout-sweep-hourly',
@@ -115,6 +119,28 @@ export async function registerRepeatableBookingJobs(): Promise<void> {
     {},
     {
       jobId: REPEATABLE_JOB_IDS.ADDON_TIMEOUT_SWEEP,
+      repeat: { pattern: '0 * * * *' }, // every hour, on the hour
+      removeOnComplete: true,
+      removeOnFail: true,
+    }
+  );
+
+  await bookingQueue.add(
+    JOB_NAMES.NO_SHOW_SWEEP,
+    {},
+    {
+      jobId: REPEATABLE_JOB_IDS.NO_SHOW_SWEEP,
+      repeat: { pattern: '0 * * * *' }, // every hour, on the hour
+      removeOnComplete: true,
+      removeOnFail: true,
+    }
+  );
+
+  await bookingQueue.add(
+    JOB_NAMES.DISPUTE_SLA_SWEEP,
+    {},
+    {
+      jobId: REPEATABLE_JOB_IDS.DISPUTE_SLA_SWEEP,
       repeat: { pattern: '0 * * * *' }, // every hour, on the hour
       removeOnComplete: true,
       removeOnFail: true,

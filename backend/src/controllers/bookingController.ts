@@ -1,5 +1,5 @@
 import { Request, Response } from 'express';
-import type { ConditionType, PaymentMethodType, RoomType, TimeSlot } from '@prisma/client';
+import type { ConditionType, PaymentMethodType, RoomType, TimeSlot, WorkerCancellationReason } from '@prisma/client';
 import prisma from '@config/database';
 import { errorResponse } from '@utils/errorResponse';
 import { notifyUser } from '@utils/notify';
@@ -7,7 +7,7 @@ import { sendSmsToUser } from '@utils/smsService';
 import { writeAuditLog } from '@utils/auditLog';
 import { formatDisplayId } from '@utils/formatters';
 import { distanceKm, distanceMeters, isWithinRadiusMeters } from '@utils/geo';
-import { findAutoMatchWorker } from '@services/matchingService';
+import { findAutoMatchWorker, LATE_CANCEL_THRESHOLD_HOURS } from '@services/matchingService';
 import { validatePriceWithinPricingRule } from '@services/pricingRuleService';
 import {
   settleCashBooking,
@@ -24,6 +24,8 @@ import {
   RESCHEDULE_SEARCH_WINDOW_DAYS,
   isOutsideBookedWindow,
   getSlotStartInstant,
+  isSlotAndOverflowFree,
+  additionalSlotsForDuration,
 } from '@services/workerAvailabilityService';
 import {
   calculateWorkerPayout,
@@ -273,6 +275,23 @@ export const createBooking = async (req: AuthRequest, res: Response) => {
     let resolvedWorkerId = requestedWorkerId ?? null;
     let isAutoMatched = false;
 
+    // DeclinedWorker is scoped to one Booking row, so it never protected a
+    // client across separate booking ATTEMPTS — decline a match, start a
+    // fresh booking request (very plausible right after a "declined" push
+    // notification), and the new row's declinedWorkerIds starts empty,
+    // letting the same worker who just declined get auto-matched right back
+    // immediately. Look up this client's recent declines across ALL their
+    // bookings (joining through Booking.clientId, no schema change needed)
+    // and exclude them from this brand-new booking's very first match too.
+    const RECENT_DECLINE_COOLDOWN_HOURS = 48;
+    const recentDeclineCutoff = new Date(Date.now() - RECENT_DECLINE_COOLDOWN_HOURS * 60 * 60 * 1000);
+    const recentDeclines = await prisma.declinedWorker.findMany({
+      where: { declinedAt: { gte: recentDeclineCutoff }, booking: { clientId } },
+      select: { workerId: true },
+      distinct: ['workerId'],
+    });
+    const recentlyDeclinedWorkerIds = recentDeclines.map((d) => d.workerId);
+
     if (!resolvedWorkerId) {
       const match = await findAutoMatchWorker({
         serviceType: resolvedServiceTypeName,
@@ -283,6 +302,7 @@ export const createBooking = async (req: AuthRequest, res: Response) => {
         hasPets,
         clientLat: lat,
         clientLng: lng,
+        excludeWorkerIds: recentlyDeclinedWorkerIds,
       });
 
       if (!match) {
@@ -301,7 +321,10 @@ export const createBooking = async (req: AuthRequest, res: Response) => {
     // immediate failure as before — silently substituting a different worker
     // for a choice they made themselves isn't this fix's job.
     const MAX_AUTO_MATCH_RETRIES = 2;
-    const triedWorkerIds: string[] = isAutoMatched && resolvedWorkerId ? [resolvedWorkerId] : [];
+    const triedWorkerIds: string[] = [
+      ...recentlyDeclinedWorkerIds,
+      ...(isAutoMatched && resolvedWorkerId ? [resolvedWorkerId] : []),
+    ];
     const autoMatchParams = {
       serviceType: resolvedServiceTypeName,
       serviceTaskId,
@@ -366,8 +389,19 @@ export const createBooking = async (req: AuthRequest, res: Response) => {
       return res.status(409).json(errorResponse(409, 'Worker is at maximum capacity'));
     }
 
-    const slot = await findSlot(prisma, workerProfile.id, scheduledDate, timeSlot);
-    if (!slot || slot.isBlocked || slot.isBooked) {
+    // A job whose estimated duration exceeds one 4h TimeSlot bucket also
+    // needs whichever same-day slot(s) it spills into to be free — checking
+    // only the requested slot let a genuinely double-booking-length job
+    // through the front door in the first place (see
+    // additionalSlotsForDuration's schema-adjacent comment).
+    const slotAndOverflowFree = await isSlotAndOverflowFree(
+      prisma,
+      workerProfile.id,
+      scheduledDate,
+      timeSlot,
+      serviceTask?.durationHours
+    );
+    if (!slotAndOverflowFree) {
       if (await tryNextAutoMatchCandidate()) continue;
       return res.status(409).json(errorResponse(409, 'Selected slot is no longer available'));
     }
@@ -486,8 +520,14 @@ export const createBooking = async (req: AuthRequest, res: Response) => {
         if (workerTx.kycStatus !== 'APPROVED') throw new Error('WORKER_NOT_APPROVED');
         if (workerTx.activeJobCount >= workerTx.maxConcurrentJobs) throw new Error('AT_CAPACITY');
 
-        const slotTx = await findSlot(tx, workerTx.id, scheduledDate, timeSlot);
-        if (!slotTx || slotTx.isBlocked || slotTx.isBooked) throw new Error('SLOT_TAKEN');
+        const slotAndOverflowFreeTx = await isSlotAndOverflowFree(
+          tx,
+          workerTx.id,
+          scheduledDate,
+          timeSlot,
+          serviceTask?.durationHours
+        );
+        if (!slotAndOverflowFreeTx) throw new Error('SLOT_TAKEN');
 
         const created = await tx.booking.create({
           data: {
@@ -569,7 +609,7 @@ export const createBooking = async (req: AuthRequest, res: Response) => {
           },
         });
 
-        await markSlotBooked(tx, workerTx.id, scheduledDate, timeSlot);
+        await markSlotBooked(tx, workerTx.id, scheduledDate, timeSlot, serviceTask?.durationHours);
 
         // No Payment row is created here — the client pays after the job is
         // finished and finally priced (see confirmCompletion). Nothing is held.
@@ -883,6 +923,10 @@ export const getBookingDetail = async (req: AuthRequest, res: Response) => {
         rescheduledAt: booking.rescheduledAt,
         previousScheduledDate: booking.previousScheduledDate,
         previousTimeSlot: booking.previousTimeSlot,
+        // The true original date/slot, surviving multiple reschedule hops —
+        // see Booking.originalScheduledDate's schema comment.
+        originalScheduledDate: booking.originalScheduledDate,
+        originalTimeSlot: booking.originalTimeSlot,
         rescheduleAcknowledgedAt: booking.rescheduleAcknowledgedAt,
         // Reschedule-on-REQUEST (see requestReschedule) — rescheduleRequestRespondedAt
         // null means still awaiting the worker's accept/decline.
@@ -891,6 +935,10 @@ export const getBookingDetail = async (req: AuthRequest, res: Response) => {
         requestedTimeSlot: booking.requestedTimeSlot,
         rescheduleRequestRespondedAt: booking.rescheduleRequestRespondedAt,
         rescheduleRequestAccepted: booking.rescheduleRequestAccepted,
+        // Set by bookingWorker.flagWorkerNoShows — non-null means the
+        // client can cancel penalty-free even though the booking is past
+        // PENDING (see cancelBooking's hasWorkerNoShow carve-out).
+        workerNoShowFlaggedAt: booking.workerNoShowFlaggedAt,
         rooms: booking.rooms,
         condition: booking.condition,
         scopeAnswers: booking.scopeAnswers,
@@ -1067,7 +1115,7 @@ export const acceptBooking = async (req: AuthRequest, res: Response) => {
         });
 
         if (booking.timeSlot) {
-          await markSlotBooked(tx, workerProfile.id, booking.scheduledDate, booking.timeSlot);
+          await markSlotBooked(tx, workerProfile.id, booking.scheduledDate, booking.timeSlot, booking.estimatedDurationHours);
         }
 
         return { booking: updated, debtWarning };
@@ -1183,7 +1231,7 @@ export const declineBooking = async (req: AuthRequest, res: Response) => {
 
       const workerProfile = await tx.workerProfile.findUnique({ where: { userId: workerId }, select: { id: true } });
       if (workerProfile && booking.timeSlot) {
-        await freeSlot(tx, workerProfile.id, booking.scheduledDate, booking.timeSlot);
+        await freeSlot(tx, workerProfile.id, booking.scheduledDate, booking.timeSlot, booking.estimatedDurationHours);
       }
 
       // Decline-limit cooldown — count this worker's declines in the rolling
@@ -1566,9 +1614,10 @@ export const extendBooking = async (req: AuthRequest, res: Response) => {
     dayAfterScheduled.setUTCDate(dayAfterScheduled.getUTCDate() + 1);
     const targetDate = tomorrowFromNow.getTime() > dayAfterScheduled.getTime() ? tomorrowFromNow : dayAfterScheduled;
 
-    const { moved, escalated } = await prisma.$transaction(async (tx) => {
+    const { moved, escalated, steamrolledRequests } = await prisma.$transaction(async (tx) => {
       const moved: { bookingId: string; clientId: string; newDate: Date }[] = [];
       const escalated: { bookingId: string; clientId: string }[] = [];
+      const steamrolledRequests: { bookingId: string; clientId: string }[] = [];
 
       for (const timeSlot of VALID_TIME_SLOTS) {
         const collision = await tx.booking.findFirst({
@@ -1604,6 +1653,16 @@ export const extendBooking = async (req: AuthRequest, res: Response) => {
                   rescheduledAt: new Date(),
                   previousScheduledDate: collision.scheduledDate,
                   previousTimeSlot: collision.timeSlot,
+                  // Written once, only if this is the first hop — see
+                  // Booking.originalScheduledDate's schema comment. `collision`
+                  // reflects the pre-move state fetched moments ago in this
+                  // same transaction, and the where clause above is keyed to
+                  // that exact state, so this stays consistent with the
+                  // existing race-safety guarantee (a losing concurrent call
+                  // matches 0 rows here regardless).
+                  ...(collision.originalScheduledDate == null
+                    ? { originalScheduledDate: collision.scheduledDate, originalTimeSlot: collision.timeSlot }
+                    : {}),
                   rescheduledFromBookingId: booking.id,
                   rescheduleAcknowledgedAt: null,
                   rescheduleReminderSentAt: null,
@@ -1636,13 +1695,39 @@ export const extendBooking = async (req: AuthRequest, res: Response) => {
           }
         }
 
+        // A different booking's pending client-initiated reschedule REQUEST
+        // (see requestReschedule) targeting this exact slot is about to be
+        // silently invalidated by the block below — blockSlotForExtend
+        // always overwrites blockedByBookingId unconditionally, with no
+        // awareness of what it's displacing. Resolve it as declined now
+        // (mirrors respondToRescheduleRequest's own decline shape) and
+        // notify that client immediately instead of letting them find out
+        // later via a generic 409 when the worker tries to accept it.
+        const pendingRequestCollision = await tx.booking.findFirst({
+          where: {
+            workerId: req.user!.userId,
+            requestedScheduledDate: targetDate,
+            requestedTimeSlot: timeSlot,
+            rescheduleRequestedAt: { not: null },
+            rescheduleRequestRespondedAt: null,
+          },
+          select: { id: true, clientId: true },
+        });
+        if (pendingRequestCollision) {
+          await tx.booking.update({
+            where: { id: pendingRequestCollision.id },
+            data: { rescheduleRequestRespondedAt: new Date(), rescheduleRequestAccepted: false },
+          });
+          steamrolledRequests.push({ bookingId: pendingRequestCollision.id, clientId: pendingRequestCollision.clientId });
+        }
+
         // Reserve targetDate for THIS booking's own spillover regardless of
         // whether a collision existed there, moved, or got escalated — the
         // worker still needs the day either way.
         await blockSlotForExtend(tx, workerProfile.id, targetDate, timeSlot, booking.id);
       }
 
-      return { moved, escalated };
+      return { moved, escalated, steamrolledRequests };
     });
 
     await Promise.all(
@@ -1694,13 +1779,31 @@ export const extendBooking = async (req: AuthRequest, res: Response) => {
       });
     }
 
+    await Promise.all(
+      steamrolledRequests.map((r) =>
+        notifyUser({
+          userId: r.clientId,
+          type: 'BOOKING_RESCHEDULE_REQUEST_DECLINED',
+          title: 'Reschedule Declined',
+          message: 'The date/time you requested is no longer available — your pro needed it for another job. Your booking stays as originally scheduled; feel free to request a different date.',
+          relatedId: r.bookingId,
+        })
+      )
+    );
+
     await writeAuditLog({
       actorId: req.user.userId,
       actorRole: req.user.role,
       action: 'BOOKING_EXTENDED',
       category: 'STATUS_CHANGE',
-      message: `Booking ${formatDisplayId(id)} extended into ${targetDate.toISOString().slice(0, 10)} — ${moved.length} booking(s) rescheduled, ${escalated.length} escalated`,
-      metadata: { bookingId: id, targetDate: targetDate.toISOString(), moved: moved.length, escalated: escalated.length },
+      message: `Booking ${formatDisplayId(id)} extended into ${targetDate.toISOString().slice(0, 10)} — ${moved.length} booking(s) rescheduled, ${escalated.length} escalated, ${steamrolledRequests.length} pending reschedule request(s) invalidated`,
+      metadata: {
+        bookingId: id,
+        targetDate: targetDate.toISOString(),
+        moved: moved.length,
+        escalated: escalated.length,
+        steamrolledRequests: steamrolledRequests.length,
+      },
     });
 
     return res.status(200).json({
@@ -2009,11 +2112,21 @@ export const respondToRescheduleRequest = async (req: AuthRequest, res: Response
         if (slot && (slot.isBooked || (slot.isBlocked && slot.blockedByBookingId !== booking.id))) {
           throw new Error('SLOT_NO_LONGER_AVAILABLE');
         }
+        // For a multi-hour job, also guard its overflow slot(s) — unlike the
+        // primary slot, requestReschedule never pre-holds these, so any
+        // occupant at all (booked or blocked, no "belongs to this booking"
+        // exception) is a genuine conflict.
+        for (const extraSlot of additionalSlotsForDuration(booking.requestedTimeSlot!, booking.estimatedDurationHours)) {
+          const extra = await findSlot(tx, workerProfile.id, booking.requestedScheduledDate!, extraSlot);
+          if (extra && (extra.isBooked || extra.isBlocked)) {
+            throw new Error('SLOT_NO_LONGER_AVAILABLE');
+          }
+        }
 
         if (booking.timeSlot) {
-          await freeSlot(tx, workerProfile.id, booking.scheduledDate, booking.timeSlot);
+          await freeSlot(tx, workerProfile.id, booking.scheduledDate, booking.timeSlot, booking.estimatedDurationHours);
         }
-        await markSlotBooked(tx, workerProfile.id, booking.requestedScheduledDate!, booking.requestedTimeSlot!);
+        await markSlotBooked(tx, workerProfile.id, booking.requestedScheduledDate!, booking.requestedTimeSlot!, booking.estimatedDurationHours);
         // markSlotBooked only sets isBooked — explicitly clear the block
         // fields too, since this slot is a real booking now, not a hold.
         await tx.workerAvailability.updateMany({
@@ -2468,7 +2581,7 @@ export const completeBooking = async (req: AuthRequest, res: Response) => {
         });
 
         if (booking.timeSlot) {
-          await freeSlot(tx, workerProfile.id, booking.scheduledDate, booking.timeSlot);
+          await freeSlot(tx, workerProfile.id, booking.scheduledDate, booking.timeSlot, booking.estimatedDurationHours);
         }
 
         // Same reasoning as cancelBooking's mirrored cleanup — releases any
@@ -2640,7 +2753,7 @@ export const cancelBooking = async (req: AuthRequest, res: Response) => {
     }
 
     const id = req.params.id as string;
-    const { reason } = req.body;
+    const { reason, workerCancellationReason } = req.body as { reason?: string; workerCancellationReason?: string };
 
     const booking = await prisma.booking.findUnique({
       where: { id },
@@ -2663,13 +2776,19 @@ export const cancelBooking = async (req: AuthRequest, res: Response) => {
     // is set, at which point this carve-out stops applying.
     const hasPendingReschedule = booking.rescheduledAt != null && booking.rescheduleAcknowledgedAt == null;
 
+    // The other exception — the worker never showed up at all (see
+    // bookingWorker.flagWorkerNoShows / Booking.workerNoShowFlaggedAt).
+    // The client didn't choose this either, so it's the same free-cancel
+    // carve-out as a forced reschedule.
+    const hasWorkerNoShow = booking.workerNoShowFlaggedAt != null;
+
     // A client's cancellation window closes the moment a worker accepts —
     // by then the worker has committed real capacity and a calendar slot to
     // this job, so backing out is no longer the client's call (a worker
     // still can, from ACCEPTED onward, per the state machine below — e.g.
     // an emergency on their end). This is a hard rule, not a fee: there is
     // no "cancel for a charge" path past PENDING for the client, by design.
-    if (req.user.role === 'CLIENT' && booking.status !== 'PENDING' && !hasPendingReschedule) {
+    if (req.user.role === 'CLIENT' && booking.status !== 'PENDING' && !hasPendingReschedule && !hasWorkerNoShow) {
       return res.status(409).json(
         errorResponse(
           409,
@@ -2684,6 +2803,20 @@ export const cancelBooking = async (req: AuthRequest, res: Response) => {
 
     const cancelledByRole = req.user.role === 'WORKER' ? 'WORKER' : 'CLIENT';
 
+    // Required so a worker can distinguish "my fault" from "the client
+    // wasn't there" or an unrelated reason — previously every late worker
+    // cancellation was penalized identically regardless of whose fault it
+    // actually was, which discouraged ever honestly reporting a client
+    // no-show. Validated here rather than in the shared validation
+    // middleware since it only applies when the CALLER turns out to be a
+    // worker, which isn't known until after the booking/ownership lookup.
+    const VALID_WORKER_CANCEL_REASONS = ['WORKER_FAULT', 'CLIENT_NO_SHOW', 'OTHER'];
+    if (cancelledByRole === 'WORKER' && !VALID_WORKER_CANCEL_REASONS.includes(workerCancellationReason ?? '')) {
+      return res.status(400).json(
+        errorResponse(400, `workerCancellationReason must be one of ${VALID_WORKER_CANCEL_REASONS.join(', ')}`)
+      );
+    }
+
     // Notice given, in hours — feeds the auto-match penalty for repeated
     // last-minute cancellations (see B6 / matchingService's lateCancelCount).
     // Only meaningful for a WORKER backing out of a slot they'd already
@@ -2692,6 +2825,21 @@ export const cancelBooking = async (req: AuthRequest, res: Response) => {
       cancelledByRole === 'WORKER' && booking.timeSlot
         ? Math.max(0, Math.round((getSlotStartInstant(booking.scheduledDate, booking.timeSlot).getTime() - Date.now()) / (60 * 60 * 1000)))
         : null;
+
+    // Who (if anyone) takes the auto-match scoring penalty for this
+    // cancellation — see Cancellation.penalizedWorkerId's schema comment.
+    // Two paths set it: the worker self-reporting fault on a late cancel
+    // (unchanged threshold/timing from the old cancelledBy='WORKER' logic),
+    // or the client cancelling because this exact worker never showed up.
+    const penalizedWorkerId =
+      cancelledByRole === 'WORKER' &&
+      workerCancellationReason === 'WORKER_FAULT' &&
+      cancelledWithinHours != null &&
+      cancelledWithinHours < LATE_CANCEL_THRESHOLD_HOURS
+        ? req.user.userId
+        : hasWorkerNoShow && booking.workerId
+          ? booking.workerId
+          : null;
 
     const updated = await prisma.$transaction(async (tx) => {
       // If the job was occupying capacity and a calendar slot, free both up.
@@ -2713,7 +2861,7 @@ export const cancelBooking = async (req: AuthRequest, res: Response) => {
           data: { activeJobCount: { decrement: 1 } },
         });
         if (booking.timeSlot) {
-          await freeSlot(tx, workerProfile.id, booking.scheduledDate, booking.timeSlot);
+          await freeSlot(tx, workerProfile.id, booking.scheduledDate, booking.timeSlot, booking.estimatedDurationHours);
         }
       }
 
@@ -2742,10 +2890,14 @@ export const cancelBooking = async (req: AuthRequest, res: Response) => {
           cancelledById: req.user!.userId,
           reason: hasPendingReschedule
             ? 'CLIENT_DECLINED_RESCHEDULE'
-            : typeof reason === 'string'
-              ? reason
-              : null,
+            : hasWorkerNoShow
+              ? 'WORKER_NO_SHOW'
+              : typeof reason === 'string'
+                ? reason
+                : null,
           cancelledWithinHours,
+          workerCancellationReason: cancelledByRole === 'WORKER' ? (workerCancellationReason as WorkerCancellationReason) : null,
+          penalizedWorkerId,
         },
       });
 

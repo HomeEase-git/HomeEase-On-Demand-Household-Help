@@ -49,7 +49,15 @@ type ApiBookingDetail = {
   rescheduledAt?: string | null;
   previousScheduledDate?: string | null;
   previousTimeSlot?: TimeSlot | null;
+  // The true original date, surviving multiple reschedule hops — differs
+  // from previousScheduledDate only after a second+ hop (see backend
+  // Booking.originalScheduledDate).
+  originalScheduledDate?: string | null;
   rescheduleAcknowledgedAt?: string | null;
+  // Set once the worker never checks in past the grace period (see backend
+  // bookingWorker.flagWorkerNoShows) — lets the client cancel penalty-free
+  // even though the booking is past PENDING.
+  workerNoShowFlaggedAt?: string | null;
   // Reschedule-on-REQUEST (see backend requestReschedule) — distinct from
   // the fields above (this booking's spillover moving a DIFFERENT booking).
   // rescheduleRequestRespondedAt null means still awaiting the worker.
@@ -130,7 +138,9 @@ function mapApiBookingDetail(d: ApiBookingDetail): Booking {
     rescheduledAt: d.rescheduledAt,
     previousScheduledDate: d.previousScheduledDate,
     previousTimeSlot: d.previousTimeSlot,
+    originalScheduledDate: d.originalScheduledDate,
     rescheduleAcknowledgedAt: d.rescheduleAcknowledgedAt,
+    workerNoShowFlaggedAt: d.workerNoShowFlaggedAt,
   };
 }
 
@@ -244,7 +254,11 @@ export default function BookingDetailScreen() {
     AwaitingPayment: "Payment required",
   };
 
-  const canCancel = booking.status === "Pending";
+  // Same free-cancel carve-out as a forced reschedule (see
+  // hasPendingReschedule below) — the client didn't choose either
+  // situation, so backing out shouldn't be blocked past PENDING here.
+  const hasWorkerNoShow = !!booking.workerNoShowFlaggedAt;
+  const canCancel = booking.status === "Pending" || hasWorkerNoShow;
   const canTrack =
     booking.status === "Accepted" || booking.status === "InProgress";
   // Client-initiated reschedule request — only on an ACCEPTED booking
@@ -560,6 +574,16 @@ export default function BookingDetailScreen() {
                 : "a new date"}
               . Keep it, or cancel free of charge.
             </Text>
+            {/* Only shown once a second+ hop has happened — otherwise this
+                is identical to "Moved from" above and would be redundant. */}
+            {booking.originalScheduledDate &&
+              booking.previousScheduledDate &&
+              booking.originalScheduledDate !== booking.previousScheduledDate && (
+                <Text className="text-text-muted text-xs mt-1">
+                  Originally booked for{" "}
+                  {new Date(booking.originalScheduledDate).toLocaleDateString("en-PH", { month: "short", day: "numeric" })}.
+                </Text>
+              )}
             <View className="flex-row gap-2 mt-3">
               <View className="flex-1">
                 <PrimaryButton
@@ -644,6 +668,21 @@ export default function BookingDetailScreen() {
               </Text>
               <Text className="text-text-secondary text-xs mt-0.5">
                 Agreed total: ₱{booking.quote.totalAmount.toFixed(2)}
+              </Text>
+            </View>
+          </View>
+        )}
+
+        {/* Worker no-show banner */}
+        {hasWorkerNoShow && (
+          <View className="bg-warning/10 border border-warning/30 rounded-2xl p-4 mb-4 flex-row items-center">
+            <Ionicons name="alert-circle" size={24} color={colors.warning} />
+            <View className="ml-3 flex-1">
+              <Text className="text-warning font-bold text-sm">
+                Your worker hasn't checked in
+              </Text>
+              <Text className="text-text-secondary text-xs mt-0.5">
+                You can cancel this booking free of charge if you'd like.
               </Text>
             </View>
           </View>
