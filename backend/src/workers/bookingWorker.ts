@@ -16,6 +16,9 @@ import {
 import { retrievePayout } from '@services/xenditDisbursementService';
 import { schedulePayout } from '@queues/payoutQueue';
 import { formatDisplayId } from '@utils/formatters';
+import { revokeUserSessions } from '@utils/tokenRevocation';
+import { revokeAllRefreshTokens } from '@utils/otpService';
+import { JWT_EXPIRY } from '@utils/jwt';
 
 const HOUR_MS = 60 * 60 * 1000;
 const COMPLETION_REMINDER_HOURS = 12;
@@ -912,6 +915,170 @@ export async function materializeAvailabilityTemplates(): Promise<void> {
   }
 }
 
+/**
+ * A government clearance (NBI/police/barangay/cedula) that was approved
+ * once stayed valid forever afterward — KycDocument.expiresAt (see
+ * adminVerificationController.approveDocument, which auto-computes it from
+ * CLEARANCE_VALIDITY_DAYS) now actually tracks the real-world expiry, and
+ * this hourly sweep opens a REVERIFICATION request once one passes. Purely
+ * advisory: doesn't touch kycStatus or block the worker from working, just
+ * asks them to resubmit — matches this file's other "flag, don't block"
+ * sweeps.
+ */
+export async function flagExpiredKycDocuments(): Promise<void> {
+  const now = new Date();
+
+  const expiredDocs = await prisma.kycDocument.findMany({
+    where: {
+      status: 'APPROVED',
+      expiresAt: { lte: now },
+      verificationRequest: { status: 'APPROVED' },
+    },
+    select: { documentType: true, verificationRequest: { select: { userId: true } } },
+  });
+
+  if (expiredDocs.length === 0) return;
+
+  const userIds = Array.from(new Set(expiredDocs.map((d) => d.verificationRequest.userId)));
+
+  for (const userId of userIds) {
+    try {
+      // Already flagged and waiting on the worker — don't re-open/re-notify
+      // every hour while it's still outstanding.
+      const alreadyOpen = await prisma.verificationRequest.findFirst({
+        where: { userId, type: 'REVERIFICATION', status: { in: ['PENDING', 'SUBMITTED'] } },
+        select: { id: true },
+      });
+      if (alreadyOpen) continue;
+
+      const expiredTypes = expiredDocs
+        .filter((d) => d.verificationRequest.userId === userId)
+        .map((d) => d.documentType);
+
+      await prisma.verificationRequest.create({
+        data: { userId, type: 'REVERIFICATION', status: 'PENDING' },
+      });
+
+      await notifyUser({
+        userId,
+        type: 'KYC_REVERIFICATION_REQUIRED',
+        title: 'A verification document has expired',
+        message: `Your ${expiredTypes.join(', ')} has expired. Please upload a current one to keep your account in good standing.`,
+      });
+
+      await writeAuditLog({
+        action: 'KYC_REVERIFICATION_REQUIRED',
+        category: 'STATUS_CHANGE',
+        level: 'WARN',
+        message: `Worker ${userId} flagged for re-verification — expired: ${expiredTypes.join(', ')}`,
+        metadata: { userId, expiredTypes },
+      });
+    } catch (error) {
+      console.error(`Failed to flag expired KYC documents for user ${userId}:`, error);
+    }
+  }
+}
+
+/**
+ * There was previously no mechanism tying a worker's rating or dispute
+ * history to their account status at all — a worker could rack up a 1.5
+ * rating or a dozen disputes and keep taking bookings indefinitely, with an
+ * admin only finding out if they happened to look. Off by default (see
+ * AppSettings.autoSuspendRatingThreshold's schema comment) — an admin opts
+ * in by setting both a rating floor and a dispute-count/window pair. Only
+ * ever SUSPENDS (reversible); an admin still makes the call to ban or
+ * reinstate.
+ */
+export async function autoSuspendUnderperformingWorkers(): Promise<void> {
+  const {
+    autoSuspendRatingThreshold,
+    autoSuspendDisputeCountThreshold,
+    autoSuspendDisputeCountWindowDays,
+  } = await getAppSettings();
+
+  const ratingGateEnabled = autoSuspendRatingThreshold != null;
+  const disputeGateEnabled = autoSuspendDisputeCountThreshold != null && autoSuspendDisputeCountWindowDays != null;
+  if (!ratingGateEnabled && !disputeGateEnabled) return;
+
+  // Deliberately no DB-level rating pre-filter here even though
+  // ratingGateEnabled could support one: when BOTH gates are configured, a
+  // worker breaching only the dispute-count gate (fine rating, too many
+  // disputes) would otherwise be silently excluded before the per-worker
+  // dispute check below ever runs. Correctness over the minor efficiency
+  // loss of scanning every active, KYC-approved worker each hour.
+  const candidateWorkers = await prisma.workerProfile.findMany({
+    where: {
+      user: { status: 'ACTIVE', isDeleted: false },
+      kycStatus: 'APPROVED',
+    },
+    select: { id: true, userId: true, rating: true, totalReviews: true, user: { select: { fullName: true } } },
+  });
+
+  for (const worker of candidateWorkers) {
+    try {
+      const ratingBreach = ratingGateEnabled && worker.totalReviews > 0 && worker.rating <= autoSuspendRatingThreshold!;
+
+      let disputeCount = 0;
+      let disputeBreach = false;
+      if (disputeGateEnabled) {
+        const windowStart = new Date(Date.now() - autoSuspendDisputeCountWindowDays! * 24 * HOUR_MS);
+        disputeCount = await prisma.dispute.count({
+          where: { booking: { workerId: worker.userId }, createdAt: { gte: windowStart } },
+        });
+        disputeBreach = disputeCount >= autoSuspendDisputeCountThreshold!;
+      }
+
+      if (!ratingBreach && !disputeBreach) continue;
+
+      const reasonParts = [
+        ratingBreach ? `rating ${worker.rating.toFixed(1)} <= ${autoSuspendRatingThreshold}` : null,
+        disputeBreach ? `${disputeCount} disputes in the last ${autoSuspendDisputeCountWindowDays} days` : null,
+      ].filter(Boolean);
+
+      await prisma.user.update({
+        where: { id: worker.userId },
+        data: { status: 'SUSPENDED', isDeleted: true, deletedAt: new Date() },
+      });
+      // Same immediate-effect session revocation as a manual admin suspend
+      // (adminUserController.setUserStatus) — otherwise an auto-suspended
+      // worker could keep working off their existing access token for up
+      // to its full remaining lifetime.
+      await revokeUserSessions(worker.userId, JWT_EXPIRY);
+      await revokeAllRefreshTokens(worker.userId);
+
+      await notifyUser({
+        userId: worker.userId,
+        type: 'ACCOUNT_AUTO_SUSPENDED',
+        title: 'Your account has been suspended',
+        message: `Your account was automatically suspended (${reasonParts.join('; ')}). Contact support to appeal.`,
+      });
+
+      const admins = await prisma.user.findMany({ where: { role: 'ADMIN', isDeleted: false }, select: { id: true } });
+      await Promise.all(
+        admins.map((admin) =>
+          notifyUser({
+            userId: admin.id,
+            type: 'ACCOUNT_AUTO_SUSPENDED',
+            title: 'Worker auto-suspended',
+            message: `${worker.user.fullName} was automatically suspended (${reasonParts.join('; ')}).`,
+            relatedId: worker.userId,
+          })
+        )
+      );
+
+      await writeAuditLog({
+        action: 'ACCOUNT_AUTO_SUSPENDED',
+        category: 'STATUS_CHANGE',
+        level: 'WARN',
+        message: `Worker ${worker.user.fullName} (${worker.userId}) auto-suspended: ${reasonParts.join('; ')}`,
+        metadata: { userId: worker.userId, ratingBreach, disputeBreach, disputeCount },
+      });
+    } catch (error) {
+      console.error(`Failed to evaluate auto-suspension for worker ${worker.userId}:`, error);
+    }
+  }
+}
+
 export async function startBookingWorker() {
   const worker = new Worker(
     BOOKING_QUEUE_NAME,
@@ -946,6 +1113,12 @@ export async function startBookingWorker() {
           break;
         case JOB_NAMES.MATERIALIZE_AVAILABILITY_TEMPLATES:
           await materializeAvailabilityTemplates();
+          break;
+        case JOB_NAMES.KYC_EXPIRY_SWEEP:
+          await flagExpiredKycDocuments();
+          break;
+        case JOB_NAMES.AUTO_SUSPEND_SWEEP:
+          await autoSuspendUnderperformingWorkers();
           break;
         default:
           console.warn(`Unknown booking queue job: ${job.name}`);

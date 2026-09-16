@@ -92,6 +92,12 @@ export default function ReviewDetail() {
               <div className="value">{review.flagReason || 'No reason provided'}</div>
             </div>
           )}
+          {review.workerResponse && (
+            <div className="detail-block detail-block--full">
+              <label>Worker's Response</label>
+              <div className="value">{review.workerResponse}</div>
+            </div>
+          )}
         </div>
       </SectionCard>
       <SubNav items={SUB_NAV} />

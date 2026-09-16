@@ -82,6 +82,29 @@ export const signup = async (req: Request, res: Response) => {
       return res.status(409).json(errorResponse(409, 'Email already registered'));
     }
 
+    // Ban evasion via re-registration — previously a banned user could just
+    // sign up again with a new email and pick up exactly where they left
+    // off, with nothing anywhere connecting the two accounts. This is the
+    // lightweight, proportionate version: flag (don't block) a signup whose
+    // phone matches a BANNED user's, surfaced to admins via the audit log —
+    // a shared household phone line is a plausible false positive, so this
+    // stops short of blocking. Full identity dedup (government ID number
+    // extraction + cross-account matching) is a bigger project, intentionally
+    // out of scope here.
+    const bannedPhoneMatch = await prisma.user.findFirst({
+      where: { phone, status: 'BANNED' },
+      select: { id: true, fullName: true },
+    });
+    if (bannedPhoneMatch) {
+      await writeAuditLog({
+        action: 'SIGNUP_PHONE_MATCHES_BANNED_USER',
+        category: 'LOGIN',
+        level: 'WARN',
+        message: `New signup (${email}) shares a phone number with banned user ${bannedPhoneMatch.fullName} (${bannedPhoneMatch.id}) — possible ban evasion.`,
+        metadata: { newSignupEmail: email, bannedUserId: bannedPhoneMatch.id },
+      });
+    }
+
     const hashedPassword = await hashPassword(password);
 
     const user = await prisma.$transaction(async (tx) => {

@@ -214,6 +214,7 @@ export interface WorkerReview {
   comment: string;
   date: string;
   bookingId: string;
+  workerResponse: string | null;
 }
 
 // ============================================================================

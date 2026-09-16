@@ -5,6 +5,8 @@ import prisma from '@config/database';
 import { errorResponse } from '@utils/errorResponse';
 import { mimeTypeFromUrl, storagePathFromUrl } from '@utils/kycFileMeta';
 import { verificationQueue, VERIFICATION_JOB_OPTIONS } from '@queues/verificationQueue';
+import { checkResubmissionCooldown } from '@utils/kycResubmissionCooldown';
+import { TIER_1_REQUIRED_DOCUMENT_TYPES } from '@/constants/kycRequirements';
 import type { JwtPayload } from '@/types/index';
 
 interface AuthRequest extends Request {
@@ -650,6 +652,16 @@ export const submitKYCDocument = async (req: AuthRequest, res: Response) => {
     });
 
     if (!verificationRequest) {
+      const cooldown = await checkResubmissionCooldown(req.user.userId, 'WORKER_ONBOARDING');
+      if (!cooldown.allowed) {
+        return res.status(429).json(
+          errorResponse(
+            429,
+            `Your last submission was rejected — you can resubmit after ${cooldown.retryAfter.toISOString()}. Use the time to address the rejection reason.`
+          )
+        );
+      }
+
       verificationRequest = await prisma.verificationRequest.create({
         data: {
           userId: req.user.userId,
@@ -743,9 +755,29 @@ export const acceptContract = async (req: AuthRequest, res: Response) => {
       const verificationRequest = await prisma.verificationRequest.findFirst({
         where: { userId: req.user.userId, status: 'PENDING' },
         orderBy: { submittedAt: 'desc' },
+        include: { documents: { select: { documentType: true } } },
       });
 
       if (verificationRequest) {
+        // Previously ANY document set — even zero documents — could reach
+        // the admin review queue as long as the worker got through the
+        // contract-acceptance step, since approveVerification's document
+        // check only ever gated APPROVAL, not entry into the queue itself.
+        // That left every incomplete application sitting in front of an
+        // admin who'd just reject it, instead of telling the worker what's
+        // actually missing right when they could still fix it.
+        const submittedTypes = new Set(verificationRequest.documents.map((d) => d.documentType));
+        const missingTypes = TIER_1_REQUIRED_DOCUMENT_TYPES.filter((t) => !submittedTypes.has(t));
+
+        if (missingTypes.length > 0) {
+          return res.status(400).json(
+            errorResponse(
+              400,
+              `Please upload the following before submitting for review: ${missingTypes.join(', ')}.`
+            )
+          );
+        }
+
         await prisma.$transaction([
           prisma.verificationRequest.update({
             where: { id: verificationRequest.id },

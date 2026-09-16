@@ -15,6 +15,8 @@ export const JOB_NAMES = {
   RESCHEDULE_TIMEOUT_SWEEP: 'reschedule-timeout-sweep',
   RESCHEDULE_REQUEST_TIMEOUT_SWEEP: 'reschedule-request-timeout-sweep',
   MATERIALIZE_AVAILABILITY_TEMPLATES: 'materialize-availability-templates',
+  KYC_EXPIRY_SWEEP: 'kyc-expiry-sweep',
+  AUTO_SUSPEND_SWEEP: 'auto-suspend-sweep',
 } as const;
 
 // Stable jobIds for the repeatable ticks so re-registering them on every
@@ -29,6 +31,8 @@ export const REPEATABLE_JOB_IDS = {
   RESCHEDULE_TIMEOUT_SWEEP: 'reschedule-timeout-sweep-hourly',
   RESCHEDULE_REQUEST_TIMEOUT_SWEEP: 'reschedule-request-timeout-sweep-hourly',
   MATERIALIZE_AVAILABILITY_TEMPLATES: 'materialize-availability-templates-daily',
+  KYC_EXPIRY_SWEEP: 'kyc-expiry-sweep-hourly',
+  AUTO_SUSPEND_SWEEP: 'auto-suspend-sweep-hourly',
 } as const;
 
 export interface ExpirePendingBookingJobData {
@@ -186,6 +190,28 @@ export async function registerRepeatableBookingJobs(): Promise<void> {
     {
       jobId: REPEATABLE_JOB_IDS.MATERIALIZE_AVAILABILITY_TEMPLATES,
       repeat: { pattern: '0 0 * * *' }, // daily at midnight
+      removeOnComplete: true,
+      removeOnFail: true,
+    }
+  );
+
+  await bookingQueue.add(
+    JOB_NAMES.KYC_EXPIRY_SWEEP,
+    {},
+    {
+      jobId: REPEATABLE_JOB_IDS.KYC_EXPIRY_SWEEP,
+      repeat: { pattern: '0 * * * *' }, // every hour, on the hour
+      removeOnComplete: true,
+      removeOnFail: true,
+    }
+  );
+
+  await bookingQueue.add(
+    JOB_NAMES.AUTO_SUSPEND_SWEEP,
+    {},
+    {
+      jobId: REPEATABLE_JOB_IDS.AUTO_SUSPEND_SWEEP,
+      repeat: { pattern: '0 * * * *' }, // every hour, on the hour
       removeOnComplete: true,
       removeOnFail: true,
     }

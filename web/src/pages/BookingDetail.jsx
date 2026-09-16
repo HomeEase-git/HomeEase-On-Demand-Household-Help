@@ -75,6 +75,18 @@ export default function BookingDetail() {
         ),
     },
     { label: 'Amount', value: booking.amount },
+    ...(booking.selfDealingFlag
+      ? [
+          {
+            label: 'Flag',
+            value: (
+              <span title="The client and assigned worker share a phone number">
+                <Badge variant="flagged">Possible Self-Dealing</Badge>
+              </span>
+            ),
+          },
+        ]
+      : []),
   ]
 
   return (

@@ -102,6 +102,7 @@ export default function WorkerReviewsScreen() {
                   rating: item.rating,
                   comment: item.comment,
                   date: item.date,
+                  workerResponse: item.workerResponse,
                 }}
               />
             )}

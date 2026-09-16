@@ -15,6 +15,7 @@ import {
   getClientPaymentHoldAdmin,
   releaseClientPaymentHold,
 } from '../controllers/debtController';
+import { approveCertification, rejectCertification } from '../controllers/adminCertificationController';
 import { authMiddleware } from '../middleware/auth';
 import { restrictTo } from '../middleware/role';
 
@@ -31,6 +32,8 @@ router.get('/workers/:id', getWorkerById);
 router.get('/workers/:id/debt', getWorkerDebtAdmin);
 router.patch('/workers/:id/debt/adjust', adjustWorkerDebtAdmin);
 router.patch('/workers/:id/debt/release', releaseWorkerHold);
+router.patch('/certifications/:id/approve', approveCertification);
+router.patch('/certifications/:id/reject', rejectCertification);
 router.patch('/:id/status', updateUserStatus);
 router.patch('/:id/suspend', suspendUser);
 router.patch('/:id/reinstate', reinstateUser);

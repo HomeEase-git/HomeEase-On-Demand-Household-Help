@@ -319,6 +319,7 @@ export default function WorkerProfileScreen() {
                   rating: r.rating,
                   comment: r.comment,
                   date: r.date,
+                  workerResponse: r.workerResponse,
                 }}
               />
             ))

@@ -29,6 +29,11 @@ function formatSettings(record: {
   tierExpertMultiplier: number;
   workerDebtHoldLimit: number;
   atcCode: string | null;
+  noShowGraceHours: number;
+  disputeEscalationHours: number;
+  autoSuspendRatingThreshold: number | null;
+  autoSuspendDisputeCountThreshold: number | null;
+  autoSuspendDisputeCountWindowDays: number | null;
 }) {
   return {
     siteName: record.siteName,
@@ -50,6 +55,11 @@ function formatSettings(record: {
     tierExpertMultiplier: record.tierExpertMultiplier,
     workerDebtHoldLimit: record.workerDebtHoldLimit,
     atcCode: record.atcCode,
+    noShowGraceHours: record.noShowGraceHours,
+    disputeEscalationHours: record.disputeEscalationHours,
+    autoSuspendRatingThreshold: record.autoSuspendRatingThreshold,
+    autoSuspendDisputeCountThreshold: record.autoSuspendDisputeCountThreshold,
+    autoSuspendDisputeCountWindowDays: record.autoSuspendDisputeCountWindowDays,
   };
 }
 
@@ -90,6 +100,11 @@ export const updateSettings = async (req: AuthRequest, res: Response) => {
       tierExpertMultiplier,
       workerDebtHoldLimit,
       atcCode,
+      noShowGraceHours,
+      disputeEscalationHours,
+      autoSuspendRatingThreshold,
+      autoSuspendDisputeCountThreshold,
+      autoSuspendDisputeCountWindowDays,
     } = req.body as {
       siteName?: string;
       supportEmail?: string;
@@ -110,10 +125,30 @@ export const updateSettings = async (req: AuthRequest, res: Response) => {
       tierExpertMultiplier?: number;
       workerDebtHoldLimit?: number;
       atcCode?: string | null;
+      noShowGraceHours?: number;
+      disputeEscalationHours?: number;
+      autoSuspendRatingThreshold?: number | null;
+      autoSuspendDisputeCountThreshold?: number | null;
+      autoSuspendDisputeCountWindowDays?: number | null;
     };
 
     if (atcCode !== undefined && atcCode !== null && typeof atcCode !== 'string') {
       return res.status(400).json(errorResponse(400, 'atcCode must be a string or null'));
+    }
+
+    // Nullable "off by default" thresholds — null/undefined means disabled,
+    // so they're validated separately from the required numericFields sweep
+    // below (which treats a present value as mandatory-range-checked but
+    // has no concept of "null is a valid, meaningful value").
+    const nullableNumericFields: Array<[string, number | null | undefined, number, number]> = [
+      ['autoSuspendRatingThreshold', autoSuspendRatingThreshold, 0, 5],
+      ['autoSuspendDisputeCountThreshold', autoSuspendDisputeCountThreshold, 1, 1000],
+      ['autoSuspendDisputeCountWindowDays', autoSuspendDisputeCountWindowDays, 1, 3650],
+    ];
+    for (const [field, value, min, max] of nullableNumericFields) {
+      if (value != null && (typeof value !== 'number' || Number.isNaN(value) || value < min || value > max)) {
+        return res.status(400).json(errorResponse(400, `${field} must be null or a number between ${min} and ${max}`));
+      }
     }
 
     if (!siteName?.trim() || !supportEmail?.trim()) {
@@ -136,6 +171,8 @@ export const updateSettings = async (req: AuthRequest, res: Response) => {
       ['tierExpertMinJobs', tierExpertMinJobs, 0, 10000],
       ['tierExpertMultiplier', tierExpertMultiplier, 1, 5],
       ['workerDebtHoldLimit', workerDebtHoldLimit, 0, 100000],
+      ['noShowGraceHours', noShowGraceHours, 0, 48],
+      ['disputeEscalationHours', disputeEscalationHours, 1, 720],
     ];
     for (const [field, value, min, max] of numericFields) {
       if (value != null && (typeof value !== 'number' || Number.isNaN(value) || value < min || value > max)) {
@@ -171,6 +208,18 @@ export const updateSettings = async (req: AuthRequest, res: Response) => {
         tierExpertMultiplier: tierExpertMultiplier ?? current.tierExpertMultiplier,
         workerDebtHoldLimit: workerDebtHoldLimit ?? current.workerDebtHoldLimit,
         atcCode: atcCode !== undefined ? (atcCode?.trim() || null) : current.atcCode,
+        noShowGraceHours: noShowGraceHours ?? current.noShowGraceHours,
+        disputeEscalationHours: disputeEscalationHours ?? current.disputeEscalationHours,
+        autoSuspendRatingThreshold:
+          autoSuspendRatingThreshold !== undefined ? autoSuspendRatingThreshold : current.autoSuspendRatingThreshold,
+        autoSuspendDisputeCountThreshold:
+          autoSuspendDisputeCountThreshold !== undefined
+            ? autoSuspendDisputeCountThreshold
+            : current.autoSuspendDisputeCountThreshold,
+        autoSuspendDisputeCountWindowDays:
+          autoSuspendDisputeCountWindowDays !== undefined
+            ? autoSuspendDisputeCountWindowDays
+            : current.autoSuspendDisputeCountWindowDays,
       },
     });
 

@@ -196,7 +196,7 @@ export const validateCreateCertification = (
   res: Response,
   next: NextFunction
 ) => {
-  const { name, issuer, issueDate, expiryDate, documentUrl } = req.body;
+  const { name, issuer, issueDate, expiryDate, documentUrl, serviceTypeId } = req.body;
 
   if (!name || typeof name !== 'string' || !name.trim()) {
     return res.status(400).json(errorResponse(400, 'name is required and must be a non-empty string'));
@@ -218,6 +218,10 @@ export const validateCreateCertification = (
     return res.status(400).json(errorResponse(400, 'documentUrl is required and must be a string'));
   }
 
+  if (serviceTypeId !== undefined && serviceTypeId !== null && typeof serviceTypeId !== 'string') {
+    return res.status(400).json(errorResponse(400, 'serviceTypeId must be a string'));
+  }
+
   return next();
 };
 
@@ -226,7 +230,7 @@ export const validateUpdateCertification = (
   res: Response,
   next: NextFunction
 ) => {
-  const { name, issuer, issueDate, expiryDate, documentUrl } = req.body;
+  const { name, issuer, issueDate, expiryDate, documentUrl, serviceTypeId } = req.body;
 
   if (!name || typeof name !== 'string' || !name.trim()) {
     return res.status(400).json(errorResponse(400, 'name is required and must be a non-empty string'));
@@ -246,6 +250,10 @@ export const validateUpdateCertification = (
 
   if (documentUrl !== undefined && typeof documentUrl !== 'string') {
     return res.status(400).json(errorResponse(400, 'documentUrl must be a string'));
+  }
+
+  if (serviceTypeId !== undefined && serviceTypeId !== null && typeof serviceTypeId !== 'string') {
+    return res.status(400).json(errorResponse(400, 'serviceTypeId must be a string'));
   }
 
   return next();

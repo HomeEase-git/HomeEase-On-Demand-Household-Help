@@ -85,6 +85,22 @@ const NUMBER_FIELD_BOUNDS = {
   tierExpertMinRating: [0, 5],
   tierExpertMinJobs: [0, null],
   tierExpertMultiplier: [1, 5],
+  noShowGraceHours: [0, 48],
+  disputeEscalationHours: [1, 720],
+}
+
+// Separate from NUMBER_FIELD_BOUNDS — these are OFF (null) unless the admin
+// sets them, so an empty field is valid here (not "Required.", unlike every
+// other numeric setting above).
+const NULLABLE_NUMBER_FIELD_BOUNDS = {
+  autoSuspendRatingThreshold: [0, 5],
+  autoSuspendDisputeCountThreshold: [1, 1000],
+  autoSuspendDisputeCountWindowDays: [1, 3650],
+}
+
+function nullableFieldValidationError(raw, min, max) {
+  if (raw === '' || raw === null || raw === undefined) return null
+  return fieldValidationError(raw, min, max)
 }
 
 export default function Settings() {
@@ -124,6 +140,15 @@ export default function Settings() {
     setFieldErrors((prev) => ({ ...prev, [percentKey]: fieldValidationError(raw, 0, 100) }))
   }
 
+  // Blank clears the field back to null (off) rather than failing
+  // validation — see NULLABLE_NUMBER_FIELD_BOUNDS.
+  const updateNullableNumberField = (field) => (e) => {
+    const raw = e.target.value
+    setSettings((prev) => ({ ...prev, [field]: raw === '' ? null : Number(raw) }))
+    const [min, max] = NULLABLE_NUMBER_FIELD_BOUNDS[field]
+    setFieldErrors((prev) => ({ ...prev, [field]: nullableFieldValidationError(raw, min, max) }))
+  }
+
   const handleSubmit = async (e) => {
     e.preventDefault()
     if (!current) return
@@ -138,6 +163,10 @@ export default function Settings() {
         ? Math.round(rawValue * 1000) / 10
         : rawValue
       const err = fieldValidationError(displayValue, min, max)
+      if (err) nextFieldErrors[field] = err
+    })
+    Object.entries(NULLABLE_NUMBER_FIELD_BOUNDS).forEach(([field, [min, max]]) => {
+      const err = nullableFieldValidationError(current[field], min, max)
       if (err) nextFieldErrors[field] = err
     })
     setFieldErrors(nextFieldErrors)
@@ -430,6 +459,76 @@ export default function Settings() {
               value={current.tierExpertMultiplier}
               onChange={updateNumberField('tierExpertMultiplier')}
               error={fieldErrors.tierExpertMultiplier}
+            />
+          </div>
+        </div>
+      </SettingsSection>
+
+      <SettingsSection
+        icon="fa-shield-halved"
+        title="Trust & Safety"
+        description="No-show/dispute handling and automatic suspension. The auto-suspend thresholds are OFF (leave blank) until you set both a rating floor and a dispute-count/window — suspension is reversible, never a ban."
+      >
+        <p className="settings-group__label" style={{ marginTop: 0 }}>Booking &amp; Dispute Handling</p>
+        <div className="detail-grid" style={{ marginBottom: 0 }}>
+          <AdornedNumberField
+            id="settings-no-show-grace"
+            label="Worker No-Show Grace Period"
+            suffix="hrs"
+            min={0}
+            max={48}
+            value={current.noShowGraceHours}
+            onChange={updateNumberField('noShowGraceHours')}
+            error={fieldErrors.noShowGraceHours}
+            hint="How long past the scheduled start before a client can cancel penalty-free."
+          />
+          <AdornedNumberField
+            id="settings-dispute-escalation"
+            label="Dispute Escalation Threshold"
+            suffix="hrs"
+            min={1}
+            max={720}
+            value={current.disputeEscalationHours}
+            onChange={updateNumberField('disputeEscalationHours')}
+            error={fieldErrors.disputeEscalationHours}
+            hint="How long a dispute can sit unresolved before admins are re-notified."
+          />
+        </div>
+
+        <div className="settings-group">
+          <p className="settings-group__label">Automatic Suspension (opt-in)</p>
+          <div className="detail-grid" style={{ marginBottom: 0 }}>
+            <AdornedNumberField
+              id="settings-auto-suspend-rating"
+              label="Rating Floor"
+              min={0}
+              max={5}
+              step={0.1}
+              value={current.autoSuspendRatingThreshold ?? ''}
+              onChange={updateNullableNumberField('autoSuspendRatingThreshold')}
+              error={fieldErrors.autoSuspendRatingThreshold}
+              hint="Leave blank to disable. A worker at or below this rating is auto-suspended."
+            />
+            <AdornedNumberField
+              id="settings-auto-suspend-dispute-count"
+              label="Dispute Count Threshold"
+              min={1}
+              max={1000}
+              value={current.autoSuspendDisputeCountThreshold ?? ''}
+              onChange={updateNullableNumberField('autoSuspendDisputeCountThreshold')}
+              error={fieldErrors.autoSuspendDisputeCountThreshold}
+              hint="Leave blank to disable."
+            />
+            <AdornedNumberField
+              id="settings-auto-suspend-dispute-window"
+              label="Dispute Count Window"
+              suffix="days"
+              min={1}
+              max={3650}
+              value={current.autoSuspendDisputeCountWindowDays ?? ''}
+              onChange={updateNullableNumberField('autoSuspendDisputeCountWindowDays')}
+              error={fieldErrors.autoSuspendDisputeCountWindowDays}
+              hint="Leave blank to disable."
             />
           </div>
         </div>

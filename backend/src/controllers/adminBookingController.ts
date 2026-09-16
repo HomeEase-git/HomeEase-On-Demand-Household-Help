@@ -52,6 +52,7 @@ function formatBooking(record: {
   createdAt: Date;
   status: string;
   urgencyLevel?: string;
+  selfDealingFlag?: boolean;
 }) {
   const amount = record.finalPrice ?? record.estimatedPrice ?? null;
 
@@ -75,6 +76,9 @@ function formatBooking(record: {
         }),
     amount: amount != null ? formatPeso(amount) : '—',
     status: record.status.charAt(0) + record.status.slice(1).toLowerCase(),
+    // Client and assigned worker share a phone number — see
+    // Booking.selfDealingFlag's schema comment. Advisory only.
+    selfDealingFlag: record.selfDealingFlag ?? false,
   };
 }
 
@@ -162,6 +166,7 @@ export const getBookingById = async (req: Request, res: Response) => {
           (booking.finalPrice ?? booking.estimatedPrice) != null
             ? formatPeso(booking.finalPrice ?? booking.estimatedPrice)
             : '—',
+        selfDealingFlag: booking.selfDealingFlag,
       },
     });
   } catch (error) {

@@ -157,7 +157,16 @@ export default function Bookings() {
                     bookings.map((b) => (
                       <tr key={b.id}>
                         <td>{b.displayId}</td>
-                        <td>{b.client}</td>
+                        <td>
+                          {b.client}
+                          {b.selfDealingFlag && (
+                            <i
+                              className="fas fa-triangle-exclamation"
+                              style={{ color: 'var(--warning)', marginLeft: '0.4rem' }}
+                              title="Client and worker share a phone number — possible self-dealing"
+                            />
+                          )}
+                        </td>
                         <td>{b.worker}</td>
                         <td>
                           {b.service}{' '}
