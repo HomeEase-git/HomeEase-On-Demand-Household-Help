@@ -242,6 +242,12 @@ model User {
   // token model). Overwritten on each login/registration; cleared on logout.
   pushToken               String?
 
+  // Admin MFA (TOTP, RFC 6238) — enforced (not merely offered) for ADMIN-role
+  // accounts; see authController.login. False until verify-setup succeeds;
+  // the secret/backup codes themselves live in MfaSecret/MfaBackupCode so a
+  // half-finished setup never flips this true. Irrelevant for CLIENT/WORKER.
+  mfaEnabled Boolean @default(false)
+
   // Soft delete — isDeleted/deletedAt is the single gate used everywhere to
   // exclude a user from active queries. `status` records *why* — self-deleted,
   // admin-suspended, or admin-banned — so those cases stay distinguishable.
@@ -264,6 +270,8 @@ model User {
   authTokens           AuthToken[]
   verificationRequests VerificationRequest[]
   contractAcceptances  ContractAcceptance[]
+  mfaSecret            MfaSecret?
+  mfaBackupCodes       MfaBackupCode[]
 
   @@index([email])
   @@index([role])
@@ -335,6 +343,47 @@ model AuthToken {
 
   @@index([userId])
   @@index([token])
+}
+
+// One row per user (currently only ever created for ADMIN accounts, but not
+// DB-enforced — the role gate lives in authController). `secretEncrypted` is
+// AES-256-GCM ciphertext (see utils/encryption.ts), never the raw TOTP
+// secret. `pending` is true from POST /auth/mfa/setup until
+// POST /auth/mfa/verify-setup confirms the first code, so a secret that was
+// generated but never confirmed can never be used to pass a login
+// challenge or back User.mfaEnabled=true.
+model MfaSecret {
+  id     String @id @default(cuid())
+  userId String @unique
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  secretEncrypted String
+  pending         Boolean @default(true)
+
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  confirmedAt DateTime?
+
+  @@index([userId])
+}
+
+// Ten single-use recovery codes minted alongside a confirmed MfaSecret.
+// `codeHash` uses the same bcrypt helper as User.password (utils/passwordHash)
+// — codes are shown once in the verify-setup response and never stored or
+// retrievable in plaintext again.
+model MfaBackupCode {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  codeHash String
+  used     Boolean   @default(false)
+  usedAt   DateTime?
+
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([userId, used])
 }
 
 // ============================================================================

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { Link } from 'react-router-dom'
 import PageHeader from '../components/common/PageHeader'
 import SectionCard from '../components/common/SectionCard'
 import LoadingState from '../components/common/LoadingState'
@@ -241,6 +242,22 @@ export default function Settings() {
               required
             />
           </div>
+        </div>
+      </SettingsSection>
+
+      <SettingsSection
+        icon="fa-shield-halved"
+        title="Security"
+        description="Two-factor authentication is required for every admin account."
+      >
+        <div className="toggle-row">
+          <div>
+            <div className="toggle-row__label">Two-Factor Authentication</div>
+            <div className="toggle-row__hint">Set up or disable TOTP-based MFA for your own admin account.</div>
+          </div>
+          <Link to="/mfa-setup" className="btn btn-outline">
+            Manage MFA
+          </Link>
         </div>
       </SettingsSection>
 

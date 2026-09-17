@@ -2,7 +2,7 @@ import { Request, Response } from 'express';
 import prisma from '@config/database';
 import { TokenType } from '@prisma/client';
 import { hashPassword, comparePassword } from '@utils/passwordHash';
-import { generateToken } from '@utils/jwt';
+import { generateToken, verifyToken } from '@utils/jwt';
 import { validateEmail, validatePassword, validatePhone, validateOtp } from '@utils/validators';
 import { errorResponse } from '@utils/errorResponse';
 import { writeAuditLog } from '@utils/auditLog';
@@ -20,7 +20,23 @@ import {
   revokeRefreshToken,
   revokeAllRefreshTokens,
 } from '@utils/otpService';
+import {
+  generateMfaSecret,
+  buildProvisioningUri,
+  generateQrCodeDataUrl,
+  verifyTotp,
+  encryptMfaSecret,
+  decryptMfaSecret,
+  generateBackupCodes,
+  verifyMfaCode,
+} from '@utils/mfaService';
 import crypto from 'crypto';
+import type { JwtPayload } from '../types';
+
+// Short-lived challenge token issued mid-login to an MFA-enabled admin (see
+// login/mfaChallenge below) — long enough to type a 6-digit code, short
+// enough that a leaked one is worthless within minutes.
+const MFA_CHALLENGE_TOKEN_TTL_SECONDS = 5 * 60;
 
 type SignupRole = 'CLIENT' | 'WORKER';
 
@@ -214,6 +230,24 @@ export const login = async (req: Request, res: Response) => {
       return res.status(403).json(errorResponse(403, message));
     }
 
+    // Admin MFA — enforced, not optional (closes the "no MFA on admin
+    // accounts" security-audit finding). A password match alone is never
+    // enough for an admin with MFA enabled: no session token is issued
+    // here, only a short-lived challenge token that POST /auth/mfa/challenge
+    // can exchange for one after a correct TOTP/backup code.
+    if (user.role === 'ADMIN' && user.mfaEnabled) {
+      const challengeToken = generateToken(
+        { userId: user.id, email: user.email, role: user.role, type: 'mfa_pending' },
+        MFA_CHALLENGE_TOKEN_TTL_SECONDS,
+      );
+
+      return res.json({
+        success: true,
+        message: 'MFA verification required',
+        data: { mfaRequired: true, challengeToken },
+      });
+    }
+
     const token = generateToken({ userId: user.id, email: user.email, role: user.role });
     const refreshToken = crypto.randomBytes(40).toString('hex');
     await storeRefreshToken(user.id, refreshToken);
@@ -239,6 +273,13 @@ export const login = async (req: Request, res: Response) => {
           )
         : undefined;
 
+    // An admin who hasn't set up MFA yet still gets a normal session (see
+    // the block above for the alternative — hard-blocking login until setup
+    // was rejected as a first-admin lockout risk) but the flag tells the
+    // admin web app to force-route into the setup screen once, immediately
+    // after login, so the gap doesn't just sit open indefinitely.
+    const mfaSetupRequired = user.role === 'ADMIN' && !user.mfaEnabled ? true : undefined;
+
     return res.json({
       success: true,
       message: 'Login successful',
@@ -253,12 +294,305 @@ export const login = async (req: Request, res: Response) => {
         // accounts don't have a workerProfile so this stays undefined.
         kycStatus: user.role === 'WORKER' ? (user.workerProfile?.kycStatus ?? 'PENDING') : undefined,
         hasAcceptedTerms,
+        mfaSetupRequired,
         token,
         refreshToken,
       },
     });
   } catch (error) {
     console.error('Login error:', error);
+    return res.status(500).json(errorResponse(500, 'Internal server error'));
+  }
+};
+
+// ============================================================================
+// ADMIN MFA (TOTP, RFC 6238) — enforced for ADMIN-role accounts
+// ============================================================================
+
+// POST /api/auth/mfa/setup — already-authenticated admin starts (or
+// restarts) enrollment. Generates a secret and stores it encrypted with
+// pending=true; nothing about the account changes (mfaEnabled stays false)
+// until verify-setup confirms the admin actually captured a working code.
+export const mfaSetup = async (req: Request, res: Response) => {
+  try {
+    if (!req.user) {
+      return res.status(401).json(errorResponse(401, 'Not authenticated'));
+    }
+
+    const user = await prisma.user.findUnique({ where: { id: req.user.userId } });
+
+    if (!user) {
+      return res.status(404).json(errorResponse(404, 'User not found'));
+    }
+
+    if (user.mfaEnabled) {
+      return res.status(400).json(errorResponse(400, 'MFA is already enabled on this account'));
+    }
+
+    const secret = generateMfaSecret();
+    const provisioningUri = buildProvisioningUri(user.email, secret);
+    const qrCodeDataUrl = await generateQrCodeDataUrl(provisioningUri);
+
+    await prisma.mfaSecret.upsert({
+      where: { userId: user.id },
+      update: { secretEncrypted: encryptMfaSecret(secret), pending: true, confirmedAt: null },
+      create: { userId: user.id, secretEncrypted: encryptMfaSecret(secret), pending: true },
+    });
+
+    return res.json({
+      success: true,
+      message: 'Scan the QR code with an authenticator app, then confirm with a 6-digit code.',
+      data: { provisioningUri, qrCodeDataUrl, secret },
+    });
+  } catch (error) {
+    console.error('MFA setup error:', error);
+    return res.status(500).json(errorResponse(500, 'Internal server error'));
+  }
+};
+
+// POST /api/auth/mfa/verify-setup — confirms the pending secret with a real
+// code from the authenticator app, only then flips mfaEnabled and mints the
+// one-time backup codes (shown once here, stored only as bcrypt hashes).
+export const mfaVerifySetup = async (req: Request, res: Response) => {
+  try {
+    if (!req.user) {
+      return res.status(401).json(errorResponse(401, 'Not authenticated'));
+    }
+
+    const code = getTrimmedString(req.body.code);
+
+    if (!validateOtp(code)) {
+      return res.status(400).json(errorResponse(400, 'Code must be 6 digits'));
+    }
+
+    const user = await prisma.user.findUnique({ where: { id: req.user.userId } });
+
+    if (!user) {
+      return res.status(404).json(errorResponse(404, 'User not found'));
+    }
+
+    if (user.mfaEnabled) {
+      return res.status(400).json(errorResponse(400, 'MFA is already enabled on this account'));
+    }
+
+    const pendingSecret = await prisma.mfaSecret.findUnique({ where: { userId: user.id } });
+
+    if (!pendingSecret || !pendingSecret.pending) {
+      return res.status(400).json(errorResponse(400, 'No pending MFA setup found. Start setup again.'));
+    }
+
+    const secret = decryptMfaSecret(pendingSecret.secretEncrypted);
+
+    if (!verifyTotp(secret, code)) {
+      return res.status(400).json(errorResponse(400, 'Invalid code. Please try again.'));
+    }
+
+    const backupCodes = generateBackupCodes();
+    const hashedCodes = await Promise.all(backupCodes.map((backupCode) => hashPassword(backupCode)));
+
+    await prisma.$transaction(async (tx) => {
+      await tx.mfaSecret.update({
+        where: { userId: user.id },
+        data: { pending: false, confirmedAt: new Date() },
+      });
+      // Clears any leftover codes from a prior setup attempt that was
+      // abandoned mid-way and restarted — verify-setup always mints a
+      // fresh set of 10.
+      await tx.mfaBackupCode.deleteMany({ where: { userId: user.id } });
+      await tx.mfaBackupCode.createMany({
+        data: hashedCodes.map((codeHash) => ({ userId: user.id, codeHash })),
+      });
+      await tx.user.update({ where: { id: user.id }, data: { mfaEnabled: true } });
+    });
+
+    await writeAuditLog({
+      actorId: user.id,
+      actorName: user.fullName,
+      actorRole: user.role,
+      action: 'MFA_ENABLED',
+      category: 'LOGIN',
+      message: `${user.fullName} enabled MFA`,
+    });
+
+    return res.json({
+      success: true,
+      message: 'MFA enabled. Save these backup codes now — they will not be shown again.',
+      data: { backupCodes },
+    });
+  } catch (error) {
+    console.error('MFA verify-setup error:', error);
+    return res.status(500).json(errorResponse(500, 'Internal server error'));
+  }
+};
+
+// POST /api/auth/mfa/challenge — exchanges a login-issued challenge token
+// plus a correct TOTP/backup code for a real session. Unauthenticated by
+// design (the admin isn't logged in yet) — authLimiter is the brute-force
+// guard here, backed up by verifyMfaCode's own per-account lockout.
+export const mfaChallenge = async (req: Request, res: Response) => {
+  try {
+    const challengeToken = getTrimmedString(req.body.challengeToken);
+    const code = getTrimmedString(req.body.code);
+
+    if (!challengeToken || !code) {
+      return res.status(400).json(errorResponse(400, 'Challenge token and code are required'));
+    }
+
+    let payload: JwtPayload;
+    try {
+      payload = verifyToken(challengeToken);
+    } catch {
+      return res.status(401).json(errorResponse(401, 'Invalid or expired MFA challenge'));
+    }
+
+    if (payload.type !== 'mfa_pending') {
+      return res.status(401).json(errorResponse(401, 'Invalid or expired MFA challenge'));
+    }
+
+    const user = await prisma.user.findUnique({ where: { id: payload.userId } });
+
+    if (!user || user.role !== 'ADMIN' || !user.mfaEnabled) {
+      return res.status(401).json(errorResponse(401, 'Invalid or expired MFA challenge'));
+    }
+
+    if (user.status !== 'ACTIVE') {
+      return res.status(403).json(errorResponse(403, 'This account is not active'));
+    }
+
+    const verified = await verifyMfaCode(user.id, code);
+
+    if (!verified) {
+      await writeAuditLog({
+        actorId: user.id,
+        actorName: user.fullName,
+        actorRole: user.role,
+        action: 'MFA_CHALLENGE_FAILED',
+        category: 'LOGIN',
+        level: 'WARN',
+        message: `MFA challenge failed for ${user.email}`,
+      });
+      return res.status(401).json(errorResponse(401, 'Invalid MFA code'));
+    }
+
+    const token = generateToken({ userId: user.id, email: user.email, role: user.role });
+    const refreshToken = crypto.randomBytes(40).toString('hex');
+    await storeRefreshToken(user.id, refreshToken);
+
+    await writeAuditLog({
+      actorId: user.id,
+      actorName: user.fullName,
+      actorRole: user.role,
+      action: 'MFA_CHALLENGE_SUCCESS',
+      category: 'LOGIN',
+      message: `${user.fullName} completed MFA challenge`,
+    });
+    await writeAuditLog({
+      actorId: user.id,
+      actorName: user.fullName,
+      actorRole: user.role,
+      action: 'USER_LOGIN_SUCCESS',
+      category: 'LOGIN',
+      message: `${user.fullName} logged in`,
+    });
+
+    return res.json({
+      success: true,
+      message: 'Login successful',
+      data: {
+        id: user.id,
+        name: user.fullName,
+        email: user.email,
+        phone: user.phone,
+        role: user.role,
+        isVerified: user.isVerified,
+        kycStatus: undefined,
+        hasAcceptedTerms: undefined,
+        token,
+        refreshToken,
+      },
+    });
+  } catch (error) {
+    console.error('MFA challenge error:', error);
+    return res.status(500).json(errorResponse(500, 'Internal server error'));
+  }
+};
+
+// POST /api/auth/mfa/disable — an already-logged-in admin turning MFA off.
+// Requires the current password AND a valid TOTP/backup code — being
+// logged in alone is not enough for a change this sensitive (a hijacked
+// session shouldn't be able to strip MFA protection by itself).
+export const mfaDisable = async (req: Request, res: Response) => {
+  try {
+    if (!req.user) {
+      return res.status(401).json(errorResponse(401, 'Not authenticated'));
+    }
+
+    const password = getPasswordString(req.body.password);
+    const code = getTrimmedString(req.body.code);
+
+    if (!password || !code) {
+      return res.status(400).json(errorResponse(400, 'Password and MFA code are required'));
+    }
+
+    const user = await prisma.user.findUnique({ where: { id: req.user.userId } });
+
+    if (!user) {
+      return res.status(404).json(errorResponse(404, 'User not found'));
+    }
+
+    if (!user.mfaEnabled) {
+      return res.status(400).json(errorResponse(400, 'MFA is not enabled on this account'));
+    }
+
+    const isPasswordValid = await comparePassword(password, user.password);
+
+    if (!isPasswordValid) {
+      await writeAuditLog({
+        actorId: user.id,
+        actorName: user.fullName,
+        actorRole: user.role,
+        action: 'MFA_CHALLENGE_FAILED',
+        category: 'LOGIN',
+        level: 'WARN',
+        message: `MFA disable rejected for ${user.email}: incorrect password`,
+      });
+      return res.status(401).json(errorResponse(401, 'Incorrect password'));
+    }
+
+    const verified = await verifyMfaCode(user.id, code);
+
+    if (!verified) {
+      await writeAuditLog({
+        actorId: user.id,
+        actorName: user.fullName,
+        actorRole: user.role,
+        action: 'MFA_CHALLENGE_FAILED',
+        category: 'LOGIN',
+        level: 'WARN',
+        message: `MFA disable rejected for ${user.email}: invalid code`,
+      });
+      return res.status(401).json(errorResponse(401, 'Invalid MFA code'));
+    }
+
+    await prisma.$transaction(async (tx) => {
+      await tx.mfaSecret.deleteMany({ where: { userId: user.id } });
+      await tx.mfaBackupCode.deleteMany({ where: { userId: user.id } });
+      await tx.user.update({ where: { id: user.id }, data: { mfaEnabled: false } });
+    });
+
+    await writeAuditLog({
+      actorId: user.id,
+      actorName: user.fullName,
+      actorRole: user.role,
+      action: 'MFA_DISABLED',
+      category: 'LOGIN',
+      level: 'WARN',
+      message: `${user.fullName} disabled MFA`,
+    });
+
+    return res.json({ success: true, message: 'MFA disabled' });
+  } catch (error) {
+    console.error('MFA disable error:', error);
     return res.status(500).json(errorResponse(500, 'Internal server error'));
   }
 };
@@ -292,6 +626,9 @@ export const getMe = async (req: Request, res: Response) => {
         role: user.role,
         isVerified: user.isVerified,
         kycStatus: user.role === 'WORKER' ? (user.workerProfile?.kycStatus ?? 'PENDING') : undefined,
+        // Lets the admin web app know whether to show "set up MFA" or
+        // "disable MFA" on its Security screen — irrelevant for CLIENT/WORKER.
+        mfaEnabled: user.role === 'ADMIN' ? user.mfaEnabled : undefined,
       },
     });
   } catch (error) {

@@ -1,6 +1,11 @@
 import { createContext, useContext, useEffect, useMemo, useState } from 'react';
 import { getStoredToken, getStoredUser } from '../services/apiClient';
-import { fetchCurrentUser, login as loginRequest, logout as logoutRequest } from '../services/auth';
+import {
+  fetchCurrentUser,
+  login as loginRequest,
+  completeMfaChallenge as completeMfaChallengeRequest,
+  logout as logoutRequest,
+} from '../services/auth';
 
 const AuthContext = createContext(null);
 
@@ -56,6 +61,29 @@ export function AuthProvider({ children }) {
 
   const login = async (email, password) => {
     const data = await loginRequest(email, password);
+
+    // MFA-enabled admin — no session yet. Return the challenge info as-is
+    // so the caller (Login.jsx) can render the code-entry step; user/token
+    // stay unset until completeMfaChallenge succeeds.
+    if (data.mfaRequired) {
+      return data;
+    }
+
+    setUser({
+      id: data.id,
+      name: data.name,
+      email: data.email,
+      phone: data.phone,
+      role: data.role,
+    });
+    setToken(data.token);
+    return data;
+  };
+
+  // Second step of admin MFA login — exchanges login's challengeToken plus
+  // a TOTP/backup code for the real session.
+  const completeMfaChallenge = async (challengeToken, code) => {
+    const data = await completeMfaChallengeRequest(challengeToken, code);
     setUser({
       id: data.id,
       name: data.name,
@@ -81,6 +109,7 @@ export function AuthProvider({ children }) {
       isAuthenticated: Boolean(user && token),
       isAdmin: user?.role === 'ADMIN',
       login,
+      completeMfaChallenge,
       logout,
     }),
     [user, token, isLoading]
