@@ -1,5 +1,5 @@
 import { Request, Response } from 'express';
-import { KYCStatus } from '@prisma/client';
+import { KYCStatus, Prisma } from '@prisma/client';
 import prisma from '@config/database';
 import { errorResponse } from '@utils/errorResponse';
 import { formatVerification } from '@utils/formatters';
@@ -20,6 +20,61 @@ interface AuthRequest extends Request {
 // requirement close to decorative. 20 chars is enough for a real sentence
 // fragment without being onerous.
 const MIN_OVERRIDE_REASON_LENGTH = 20;
+
+function titleFromDocumentName(originalName: string | null): string {
+  const base = (originalName ?? '').replace(/\.[^./]+$/, '').replace(/[_-]+/g, ' ').trim();
+  return base || 'Certification (from KYC submission)';
+}
+
+// A worker's onboarding "Certification" KYC document only ever fed this
+// admin review queue — approving the verification never touched the
+// separate Certification model that Profile > My Certifications reads from,
+// so a worker who submitted proof of a certification during onboarding saw
+// nothing on their profile and had to re-upload the same file through
+// "Add Certification" just to have any record of it. This backfills a
+// placeholder Certification per submitted CERTIFICATION document (title
+// guessed from the filename, everything else left for the worker to fill
+// in) the moment the whole verification is approved, so nothing submitted
+// is silently lost. verificationStatus stays PENDING — only the file itself
+// was reviewed here, not the issuer/date claims a real Certification
+// carries — and updateCertification is how the worker (or a later admin
+// review via adminCertificationController) moves it forward.
+async function backfillCertificationsFromKycDocuments(
+  tx: Prisma.TransactionClient,
+  userId: string,
+  documents: Array<{ documentType: string; fileUrl: string; originalName: string | null }>
+): Promise<Array<{ id: string; title: string }>> {
+  const certDocs = documents.filter((doc) => doc.documentType === 'CERTIFICATION');
+  if (!certDocs.length) return [];
+
+  const workerProfile = await tx.workerProfile.findUnique({ where: { userId }, select: { id: true } });
+  if (!workerProfile) return [];
+
+  const created: Array<{ id: string; title: string }> = [];
+  for (const doc of certDocs) {
+    // Guards against double-creation if this ever runs twice for the same
+    // document (it shouldn't — approveVerification only transitions a
+    // request to APPROVED once — but the check is cheap insurance).
+    const existing = await tx.certification.findFirst({
+      where: { workerProfileId: workerProfile.id, documentUrl: doc.fileUrl },
+      select: { id: true },
+    });
+    if (existing) continue;
+
+    const title = titleFromDocumentName(doc.originalName);
+    const certification = await tx.certification.create({
+      data: {
+        workerProfileId: workerProfile.id,
+        title,
+        issuer: 'Not yet specified',
+        issueDate: new Date(),
+        documentUrl: doc.fileUrl,
+      },
+    });
+    created.push({ id: certification.id, title });
+  }
+  return created;
+}
 
 export const listVerifications = async (req: Request, res: Response) => {
   try {
@@ -163,7 +218,7 @@ export const approveVerification = async (req: AuthRequest, res: Response) => {
       }
     }
 
-    const updated = await prisma.$transaction(async (tx) => {
+    const { verification: updated, backfilledCertifications } = await prisma.$transaction(async (tx) => {
       const verification = await tx.verificationRequest.update({
         where: { id },
         data: {
@@ -176,14 +231,16 @@ export const approveVerification = async (req: AuthRequest, res: Response) => {
         include: { user: true, documents: true },
       });
 
+      let backfilledCertifications: Array<{ id: string; title: string }> = [];
       if (record.user.role === 'WORKER') {
         await tx.workerProfile.updateMany({
           where: { userId: record.userId },
           data: { kycStatus: 'APPROVED', kycApprovedAt: new Date() },
         });
+        backfilledCertifications = await backfillCertificationsFromKycDocuments(tx, record.userId, record.documents);
       }
 
-      return verification;
+      return { verification, backfilledCertifications };
     });
 
     const verificationApprovedMessage =
@@ -205,6 +262,16 @@ export const approveVerification = async (req: AuthRequest, res: Response) => {
       userId: record.userId,
       message: `HomeEase: ${verificationApprovedMessage}`,
     });
+
+    for (const cert of backfilledCertifications) {
+      await notifyUser({
+        userId: record.userId,
+        type: 'CERTIFICATION_NEEDS_DETAILS',
+        title: 'Add details to your certification',
+        message: `We added "${cert.title}" to My Certifications from your submitted documents. Add the issuer and date so it can be reviewed.`,
+        relatedId: cert.id,
+      });
+    }
 
     await writeAuditLog({
       actorId: req.user?.userId,

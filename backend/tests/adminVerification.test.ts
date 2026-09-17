@@ -127,6 +127,39 @@ describe('Admin verification approve/reject', () => {
     expect(notifications[0].type).toBe('VERIFICATION_APPROVED');
   });
 
+  it('backfills a placeholder Certification from a submitted CERTIFICATION document on approval', async () => {
+    const { worker, verification } = await seedPendingVerification('cert-backfill');
+
+    await prisma.kycDocument.create({
+      data: {
+        verificationRequestId: verification.id,
+        documentType: 'CERTIFICATION',
+        fileUrl: 'https://example.invalid/certification.pdf',
+        originalName: 'TESDA_Electrical_NC-II.pdf',
+      },
+    });
+
+    const res = await request(app)
+      .patch(`/api/admin/verifications/${verification.id}/approve`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({});
+
+    expect(res.status).toBe(200);
+
+    const workerProfile = await prisma.workerProfile.findUnique({ where: { userId: worker.id } });
+    const certifications = await prisma.certification.findMany({ where: { workerProfileId: workerProfile!.id } });
+
+    expect(certifications).toHaveLength(1);
+    expect(certifications[0].title).toBe('TESDA Electrical NC II');
+    expect(certifications[0].documentUrl).toBe('https://example.invalid/certification.pdf');
+    expect(certifications[0].verificationStatus).toBe('PENDING');
+
+    const notifications = await prisma.notification.findMany({ where: { userId: worker.id } });
+    expect(notifications.map((n) => n.type)).toEqual(
+      expect.arrayContaining(['VERIFICATION_APPROVED', 'CERTIFICATION_NEEDS_DETAILS'])
+    );
+  });
+
   it('rejects an already-approved verification', async () => {
     const { verification } = await seedPendingVerification('double-approve');
 

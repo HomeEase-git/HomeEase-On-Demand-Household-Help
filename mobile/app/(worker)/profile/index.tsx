@@ -24,6 +24,7 @@ const MENU_GROUPS = [
       { label: "My Packages", path: "/(worker)/profile/packages", icon: "cube-outline" },
       { label: "Set Availability", path: "/(worker)/profile/availability", icon: "calendar-outline" },
       { label: "My Certifications", path: "/(worker)/profile/certifications", icon: "ribbon-outline" },
+      { label: "My Documents", path: "/(worker)/profile/documents", icon: "folder-open-outline" },
       { label: "My Reviews", path: "/(worker)/profile/reviews", icon: "star-outline" },
       { label: "Resume Analysis (AI)", path: "/(worker)/profile/resume-preview", icon: "sparkles-outline" },
     ],

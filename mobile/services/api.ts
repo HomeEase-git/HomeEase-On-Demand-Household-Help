@@ -2208,7 +2208,18 @@ export async function submitKycDocument(documentKey: KycDocumentKey, documentUrl
   }
 }
 
-export async function getKycDocuments() {
+export type KycDocumentRecord = {
+  id: string;
+  documentType: string;
+  originalName: string | null;
+  fileUrl: string;
+  status: 'PENDING' | 'APPROVED' | 'REJECTED';
+  rejectionReason: string | null;
+  createdAt: string;
+  expiresAt: string | null;
+};
+
+export async function getKycDocuments(): Promise<KycDocumentRecord[]> {
   try {
     const response = await api.get('/users/me/kyc-documents');
     return Array.isArray(response) ? response : [];
