@@ -66,6 +66,8 @@ services:
         generateValue: true # Render generates and stores a strong random value
       - key: JWT_EXPIRY
         value: "604800" # seconds — 7 days. Must be a number, not "7d"/"1h".
+      - key: MFA_ENCRYPTION_KEY
+        generateValue: true # encrypts admin TOTP secrets at rest — no human needs to know this value
 
       # --- Email (Gmail SMTP) ---
       - key: SMTP_USER
