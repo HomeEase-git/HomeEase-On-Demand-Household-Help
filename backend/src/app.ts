@@ -83,7 +83,10 @@ app.get('/health', (_req, res) => {
 async function checkRedis(): Promise<boolean> {
   try {
     const client = await Promise.race([
-      bookingQueue.client,
+      // Queue.client was removed in BullMQ v6 — the raw Redis client now
+      // lives on the queue's backend (getBackend().client), still the same
+      // adapter-agnostic IRedisClient as before.
+      bookingQueue.getBackend().client,
       new Promise<never>((_, reject) => setTimeout(() => reject(new Error('redis check timed out')), 3000)),
     ]);
     // BullMQ's IRedisClient is adapter-agnostic (ioredis/node-redis/Bun) and
