@@ -5,6 +5,7 @@ import { AppIcon as Ionicons } from "../../../components/icons/AppIcon";
 import { useRouter } from "expo-router";
 import PrimaryButton from "../../../components/ui/PrimaryButton";
 import OutlinedButton from "../../../components/ui/OutlinedButton";
+import PriceBreakdownCard from "../../../components/ui/PriceBreakdown";
 import { colors } from "../../../constants";
 import { useBookingStore } from "../../../store/bookingStore";
 import { useAlertModal } from "../../../contexts/AlertModalContext";
@@ -180,6 +181,26 @@ export default function BookingSuccessScreen() {
               </Text>
             </View>
           </View>
+
+          {selectedBooking?.priceBreakdown && (
+            <View className="w-full mb-6">
+              <Text className="text-text-secondary text-xs mb-2 text-center">
+                Estimated cost — you&apos;ll be charged after the job is completed
+              </Text>
+              <PriceBreakdownCard
+                subtotal={selectedBooking.priceBreakdown.subtotal}
+                basePrice={selectedBooking.priceBreakdown.basePrice}
+                distanceFee={selectedBooking.priceBreakdown.distanceFee}
+                tierFee={selectedBooking.priceBreakdown.tierFee}
+                addOns={selectedBooking.priceBreakdown.addOns}
+                vatApplicable={selectedBooking.priceBreakdown.vatApplicable}
+                vatRate={selectedBooking.priceBreakdown.vatRate}
+                vatAmount={selectedBooking.priceBreakdown.vatAmount}
+                tip={selectedBooking.priceBreakdown.tip}
+                total={selectedBooking.priceBreakdown.total}
+              />
+            </View>
+          )}
 
           <View className="flex-row gap-2 mb-6">
             <QuickAction icon="chatbubble-ellipses-outline" label="Message Pro" onPress={handleMessageWorker} />

@@ -82,6 +82,22 @@ export type Booking = {
   // bookingWorker.flagWorkerNoShows) — lets the client cancel penalty-free
   // even though the booking is past PENDING.
   workerNoShowFlaggedAt?: string | null;
+  // Itemized breakdown for the receipt-style price display — set right after
+  // creation (see step-4.tsx) from POST /bookings' `pricing` block, or
+  // refreshed from GET /bookings/:id's `priceBreakdown` (see
+  // booking/[bookingId]/index.tsx). Absent for older cached bookings.
+  priceBreakdown?: {
+    basePrice: number | null;
+    distanceFee: number;
+    tierFee: number;
+    addOns: { name: string; price: number }[];
+    subtotal: number;
+    vatApplicable: boolean;
+    vatRate: number | null;
+    vatAmount: number;
+    tip: number;
+    total: number;
+  } | null;
 };
 
 export type DraftBooking = {
@@ -158,6 +174,9 @@ export type DraftBooking = {
   // "book again" entry points that lock a worker before Step 1.
   workerTier?: WorkerTier | null;
   workerEstimatedTotal?: number | null;
+  // Itemized version of workerEstimatedTotal — lets the live pricing preview
+  // show Base rate / Distance fee / Tier surcharge as separate lines.
+  workerPriceBreakdown?: { basePrice: number; distanceFee: number; tierFee: number } | null;
   // Only set when the selected task is PER_UNIT — this worker's tier-adjusted
   // rate, for the live rate x quantity preview (see useBookingPriceEstimate).
   workerUnitPrice?: number | null;
@@ -302,6 +321,7 @@ const initialDraft: DraftBooking = {
   priorities: [],
   addOnToggles: [],
   workerEstimatedTotal: null,
+  workerPriceBreakdown: null,
   workerUnitPrice: null,
   workerAvatar: null,
   workerRating: null,
@@ -360,6 +380,7 @@ export const useBookingStore: UseBoundStore<StoreApi<BookingState>> = create<Boo
         if (!updatedDraft.workerLocked) {
           updatedDraft.workerId = null;
           updatedDraft.workerEstimatedTotal = null;
+          updatedDraft.workerPriceBreakdown = null;
           updatedDraft.workerUnitPrice = null;
           updatedDraft.isAutoMatched = false;
           updatedDraft.holdStartedAt = null;
@@ -382,6 +403,7 @@ export const useBookingStore: UseBoundStore<StoreApi<BookingState>> = create<Boo
         updatedDraft.workerId = null;
         updatedDraft.workerName = null;
         updatedDraft.workerEstimatedTotal = null;
+        updatedDraft.workerPriceBreakdown = null;
         updatedDraft.workerUnitPrice = null;
         updatedDraft.isAutoMatched = false;
         updatedDraft.holdStartedAt = null;

@@ -668,7 +668,16 @@ export const createBooking = async (req: AuthRequest, res: Response) => {
           estimatedPrice: booking.estimatedPrice,
           estimatedDurationHours: booking.estimatedDurationHours,
           expiresAt: booking.expiresAt,
-          pricing: { basePrice, conditionFee, distanceFee, urgencyFee, tierFee, addOnsTotal, finalEstimate },
+          pricing: {
+            basePrice,
+            conditionFee,
+            distanceFee,
+            urgencyFee,
+            tierFee,
+            addOnsTotal,
+            finalEstimate,
+            addOns: addOnsList,
+          },
           // Payment is collected after completion — none exists yet.
           payment: null,
         },
@@ -897,6 +906,28 @@ export const getBookingDetail = async (req: AuthRequest, res: Response) => {
       ? (booking.laborCost ?? 0) + (booking.materialsCost ?? 0) + addonsCost
       : booking.estimatedPrice + addonsCost;
 
+    // Client-facing itemized breakdown — assembled from data already fetched
+    // above rather than a fresh query. basePrice/distanceFee/tierFee come
+    // from the most recent PricingLog row (append-only, one per pricing
+    // computation); vatAmount prefers the settled Payment row (Booking.vatAmount
+    // is only filled in at settlement, see schema) over the pre-settlement 0.
+    const latestPricingLog = booking.pricingLogs[booking.pricingLogs.length - 1] ?? null;
+    const breakdownTip = booking.payment?.tip ?? booking.tip ?? 0;
+    const priceBreakdown = {
+      basePrice: latestPricingLog?.basePrice ?? null,
+      distanceFee: latestPricingLog?.distanceFee ?? 0,
+      tierFee: latestPricingLog?.tierFee ?? 0,
+      addOns: (booking.addOns || [])
+        .filter((addon: any) => addon.clientApprovedAt != null)
+        .map((addon: any) => ({ name: addon.name, price: addon.price })),
+      subtotal: finalPrice,
+      vatApplicable: booking.vatApplicable,
+      vatRate: booking.vatRate,
+      vatAmount: booking.payment?.vatAmount ?? booking.vatAmount ?? 0,
+      tip: breakdownTip,
+      total: booking.payment?.totalAmount ?? round2(finalPrice + breakdownTip),
+    };
+
     return res.status(200).json({
       success: true,
       message: 'Booking details retrieved successfully',
@@ -964,6 +995,11 @@ export const getBookingDetail = async (req: AuthRequest, res: Response) => {
         isAutoMatched: booking.isAutoMatched,
         estimatedPrice: booking.estimatedPrice,
         finalPrice,
+        // VAT snapshot — see Booking.vatApplicable/vatRate schema comment.
+        // vatAmount itself lives inside priceBreakdown below (settlement-time).
+        vatApplicable: booking.vatApplicable,
+        vatRate: booking.vatRate,
+        priceBreakdown,
         // Raw tip the client committed at booking time — exposed at top level
         // (not just inside `payment`) so the worker can see it before a
         // Payment row exists (pre-completion: Pending/Accepted/InProgress).

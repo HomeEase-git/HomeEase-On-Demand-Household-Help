@@ -34,6 +34,11 @@ export function estimateRange(range: PriceRange): PriceRange {
 
 export interface PricePointEstimate {
   laborCost: number;
+  // Itemized version of laborCost — set only when the caller has a specific
+  // worker's real basePrice/distanceFee/tierFee (see step-3's
+  // draft.workerPriceBreakdown); null when only the lumped laborCost is known
+  // (e.g. a PER_UNIT rate x quantity, which has no such split).
+  priceBreakdown: { basePrice: number; distanceFee: number; tierFee: number } | null;
   addOnsTotal: number;
   tip: number;
   subtotal: number;
@@ -47,6 +52,7 @@ export interface PricePointEstimate {
  */
 export function estimatePricePoint(params: {
   laborCost: number;
+  priceBreakdown?: { basePrice: number; distanceFee: number; tierFee: number } | null;
   addOnsTotal?: number;
   tip?: number;
 }): PricePointEstimate {
@@ -56,7 +62,7 @@ export function estimatePricePoint(params: {
   const subtotal = round2(laborCost + addOnsTotal);
   const total = round2(subtotal + tip);
 
-  return { laborCost, addOnsTotal, tip, subtotal, total };
+  return { laborCost, priceBreakdown: params.priceBreakdown ?? null, addOnsTotal, tip, subtotal, total };
 }
 
 /**

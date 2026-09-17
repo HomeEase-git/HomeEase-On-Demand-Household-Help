@@ -72,6 +72,20 @@ type ApiBookingDetail = {
   scheduledTime: string | null;
   estimatedPrice: number;
   finalPrice: number | null;
+  vatApplicable?: boolean;
+  vatRate?: number | null;
+  priceBreakdown?: {
+    basePrice: number | null;
+    distanceFee: number;
+    tierFee: number;
+    addOns: { name: string; price: number }[];
+    subtotal: number;
+    vatApplicable: boolean;
+    vatRate: number | null;
+    vatAmount: number;
+    tip: number;
+    total: number;
+  };
   completionPhotoUrl?: string | null;
   // Settled at booking time — used to auto-process payment after completion
   // is confirmed, without asking the client to pick a method again.
@@ -110,6 +124,7 @@ function mapApiBookingDetail(d: ApiBookingDetail): Booking {
     address: d.location,
     status: API_STATUS_MAP[d.status] ?? "Pending",
     amount: d.finalPrice ?? d.estimatedPrice,
+    priceBreakdown: d.priceBreakdown ?? null,
     completionPhotoUrl: d.completionPhotoUrl ?? undefined,
     payment: d.payment
       ? {
@@ -224,11 +239,21 @@ export default function BookingDetailScreen() {
   // the rare case a Payment row doesn't exist yet.
   const pendingAddOns = rawDetail?.addOns?.filter((a) => !a.clientApprovedAt && !a.clientRejectedAt) ?? [];
 
-  const priceBreakdown = {
+  // Prefer the server-assembled breakdown (basePrice/distanceFee/tierFee
+  // from the booking's PricingLog, VAT from settlement) — falls back to a
+  // collapsed subtotal/addOns/tip/total for bookings fetched before that
+  // field existed on the backend response.
+  const priceBreakdown = rawDetail?.priceBreakdown ?? {
+    basePrice: null,
+    distanceFee: 0,
+    tierFee: 0,
     subtotal: rawDetail?.payment?.subtotal ?? booking.amount,
     // Only approved add-ons count toward the total — a still-pending one
     // shown here would look like it's already been billed.
     addOns: rawDetail?.addOns?.filter((a) => a.clientApprovedAt).map((a) => ({ name: a.name, price: a.price })) ?? [],
+    vatApplicable: false,
+    vatRate: null,
+    vatAmount: 0,
     tip: rawDetail?.payment?.tip ?? 0,
     total: booking.payment?.totalAmount ?? booking.amount,
   };
@@ -876,7 +901,13 @@ export default function BookingDetailScreen() {
         <View className="mb-3">
           <PriceBreakdownCard
             subtotal={priceBreakdown.subtotal}
+            basePrice={priceBreakdown.basePrice}
+            distanceFee={priceBreakdown.distanceFee}
+            tierFee={priceBreakdown.tierFee}
             addOns={priceBreakdown.addOns}
+            vatApplicable={priceBreakdown.vatApplicable}
+            vatRate={priceBreakdown.vatRate}
+            vatAmount={priceBreakdown.vatAmount}
             tip={priceBreakdown.tip}
             total={priceBreakdown.total}
             detailed={true}

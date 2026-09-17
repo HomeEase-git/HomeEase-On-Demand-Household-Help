@@ -5,6 +5,7 @@ import { useRouter, useLocalSearchParams } from "expo-router";
 import ScreenHeader from "../../../../../components/ui/ScreenHeader";
 import PrimaryButton from "../../../../../components/ui/PrimaryButton";
 import OutlinedButton from "../../../../../components/ui/OutlinedButton";
+import PriceBreakdownCard from "../../../../../components/ui/PriceBreakdown";
 import { Skeleton } from "../../../../../components/ui/Skeleton";
 import { cardShadow } from "../../../../../constants";
 import * as api from "../../../../../services/api";
@@ -138,13 +139,30 @@ export default function ReceiptScreen() {
           {/* Divider */}
           <View className="border-b border-divider mx-4" />
 
-          {/* Total */}
-          <View className="p-6 flex-row justify-between items-center">
-            <Text className="text-text-primary font-bold text-lg">Total Paid</Text>
-            <Text className="text-accent font-bold text-2xl">
-              ₱{transaction.amount?.toFixed(2)}
-            </Text>
-          </View>
+          {/* Itemized breakdown */}
+          {transaction.breakdown ? (
+            <View className="p-6">
+              <PriceBreakdownCard
+                subtotal={transaction.breakdown.subtotal}
+                basePrice={transaction.breakdown.basePrice}
+                distanceFee={transaction.breakdown.distanceFee}
+                tierFee={transaction.breakdown.tierFee}
+                addOns={transaction.breakdown.addOns}
+                vatApplicable={transaction.breakdown.vatApplicable}
+                vatRate={transaction.breakdown.vatRate}
+                vatAmount={transaction.breakdown.vatAmount}
+                tip={transaction.breakdown.tip}
+                total={transaction.breakdown.total}
+              />
+            </View>
+          ) : (
+            <View className="p-6 flex-row justify-between items-center">
+              <Text className="text-text-primary font-bold text-lg">Total Paid</Text>
+              <Text className="text-accent font-bold text-2xl">
+                ₱{transaction.amount?.toFixed(2)}
+              </Text>
+            </View>
+          )}
 
           {/* Footer */}
           <View className="bg-card p-4 items-center">

@@ -57,7 +57,12 @@ export function useBookingPriceEstimate(
     if (draft.workerEstimatedTotal != null) {
       return {
         mode: 'point',
-        point: estimatePricePoint({ laborCost: draft.workerEstimatedTotal, addOnsTotal, tip }),
+        point: estimatePricePoint({
+          laborCost: draft.workerEstimatedTotal,
+          priceBreakdown: draft.workerPriceBreakdown,
+          addOnsTotal,
+          tip,
+        }),
       };
     }
 
@@ -79,6 +84,7 @@ export function useBookingPriceEstimate(
     return { mode: 'range', range: estimateRange(categoryRange) };
   }, [
     draft.workerEstimatedTotal,
+    draft.workerPriceBreakdown,
     draft.workerUnitPrice,
     draft.selectedTaskUnitLabel,
     isPerUnit,
