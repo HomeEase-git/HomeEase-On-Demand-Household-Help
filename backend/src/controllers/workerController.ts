@@ -281,14 +281,15 @@ export const searchWorkers = async (req: AuthRequest, res: Response) => {
         hasClientLocation && worker.addressLat != null && worker.addressLng != null
           ? distanceKm({ lat: clientLat, lng: clientLng }, { lat: worker.addressLat, lng: worker.addressLng })
           : null;
-      const estimatedTotal =
+      const jobPricing =
         basePrice != null && unitPriceForTask == null
           ? computeJobPricing({
               basePrice,
               tierMultiplier: multiplier,
               distanceKm: workerDistanceKm,
-            }).estimatedPrice
+            })
           : null;
+      const estimatedTotal = jobPricing?.estimatedPrice ?? null;
 
       // Browse-time price range for this worker's matched category — the
       // spread across that category's tasks at THIS worker's own priced
@@ -311,6 +312,13 @@ export const searchWorkers = async (req: AuthRequest, res: Response) => {
         rating: worker.rating,
         totalReviews: worker.totalReviews,
         estimatedTotal,
+        // Itemized version of estimatedTotal — lets the booking flow show a
+        // live "Base rate / Distance fee / Tier surcharge" breakdown instead
+        // of one lumped number, before a booking even exists. Null under the
+        // same conditions estimatedTotal is (PER_UNIT task, or no base price).
+        priceBreakdown: jobPricing
+          ? { basePrice: jobPricing.basePrice, distanceFee: jobPricing.distanceFee, tierFee: jobPricing.tierFee }
+          : null,
         // Only populated for a PER_UNIT task search — the tier-adjusted
         // per-unit rate, for mobile to multiply by quantity once the client
         // enters one (see bookingPriceEstimate.ts / Stage 4 of the task-

@@ -43,7 +43,7 @@ export default function PricingRangePreview({ estimate }: Props) {
     );
   }
 
-  const { total, laborCost, addOnsTotal, tip } = estimate.point;
+  const { total, laborCost, priceBreakdown, addOnsTotal, tip } = estimate.point;
 
   return (
     <View className="bg-brand rounded-2xl p-4">
@@ -54,9 +54,27 @@ export default function PricingRangePreview({ estimate }: Props) {
         ₱{Math.round(total)}
       </Text>
       <View className="flex-row flex-wrap gap-x-4 gap-y-0.5 mt-2">
-        <Text className="text-white/60 text-xs">
-          Labor ₱{Math.round(laborCost)}
-        </Text>
+        {priceBreakdown ? (
+          <>
+            <Text className="text-white/60 text-xs">
+              Base rate ₱{Math.round(priceBreakdown.basePrice)}
+            </Text>
+            {priceBreakdown.distanceFee > 0 && (
+              <Text className="text-white/60 text-xs">
+                Distance fee ₱{Math.round(priceBreakdown.distanceFee)}
+              </Text>
+            )}
+            {priceBreakdown.tierFee > 0 && (
+              <Text className="text-white/60 text-xs">
+                Pro tier ₱{Math.round(priceBreakdown.tierFee)}
+              </Text>
+            )}
+          </>
+        ) : (
+          <Text className="text-white/60 text-xs">
+            Labor ₱{Math.round(laborCost)}
+          </Text>
+        )}
         {addOnsTotal > 0 && (
           <Text className="text-white/60 text-xs">
             Add-ons ₱{Math.round(addOnsTotal)}

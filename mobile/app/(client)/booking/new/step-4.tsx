@@ -253,6 +253,22 @@ export default function BookingStep4Screen() {
         status: "Pending",
         amount: response.pricing?.finalEstimate ?? response.estimatedPrice ?? draft.estimatedPrice ?? 0,
         category: draft.category ?? undefined,
+        priceBreakdown: response.pricing
+          ? {
+              basePrice: response.pricing.basePrice,
+              distanceFee: response.pricing.distanceFee,
+              tierFee: response.pricing.tierFee,
+              addOns: response.pricing.addOns,
+              subtotal: response.pricing.finalEstimate,
+              // VAT isn't known until settlement (see backend
+              // Booking.vatAmount schema comment) — nothing to show yet.
+              vatApplicable: false,
+              vatRate: null,
+              vatAmount: 0,
+              tip,
+              total: Math.round((response.pricing.finalEstimate + tip) * 100) / 100,
+            }
+          : null,
       };
 
       setBookingCreated(createdBooking);

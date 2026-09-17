@@ -46,6 +46,7 @@ export const getPaymentDetail = async (req: AuthRequest, res: Response) => {
             client: true,
             worker: true,
             serviceTask: true,
+            pricingLogs: { orderBy: { createdAt: 'desc' }, take: 1 },
           },
         },
       },
@@ -66,8 +67,22 @@ export const getPaymentDetail = async (req: AuthRequest, res: Response) => {
     // Built from the payment's own stored fields (not recomputed from live
     // config) so the breakdown always reflects the rate actually charged,
     // even after an admin changes the platform commission/tax rate later.
+    // commissionAmount/withholdingTaxAmount/workerPayout/platformProfit are
+    // the platform's cut, deducted from the worker's payout, never charged
+    // to the client — kept here only because the worker-earnings screen
+    // (mobile/app/(worker)/earnings) reuses this same response shape.
+    const latestPricingLog = payment.booking.pricingLogs[0] ?? null;
     const breakdown = {
       subtotal: payment.subtotal,
+      basePrice: latestPricingLog?.basePrice ?? null,
+      distanceFee: latestPricingLog?.distanceFee ?? 0,
+      tierFee: latestPricingLog?.tierFee ?? 0,
+      addOns: payment.booking.addOns
+        .filter((addon) => addon.clientApprovedAt != null)
+        .map((addon) => ({ name: addon.name, price: addon.price })),
+      vatApplicable: payment.vatApplicable,
+      vatRate: payment.vatRate,
+      vatAmount: payment.vatAmount,
       commissionAmount: payment.commissionAmount,
       commissionPercentage: payment.commissionRate * 100,
       withholdingTaxAmount: payment.withholdingTaxAmount,

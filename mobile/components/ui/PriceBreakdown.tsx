@@ -11,7 +11,16 @@ export interface PriceBreakdownAddOn {
 
 interface PriceBreakdownCardProps {
   subtotal: number;
+  // When provided, rendered as their own line items ("Base rate" / "Distance
+  // fee" / "Pro tier surcharge") instead of collapsing everything but add-ons
+  // into one "Service" number. Omit to fall back to the old collapsed view.
+  basePrice?: number | null;
+  distanceFee?: number | null;
+  tierFee?: number | null;
   addOns?: PriceBreakdownAddOn[];
+  vatApplicable?: boolean | null;
+  vatRate?: number | null;
+  vatAmount?: number | null;
   tip: number;
   total: number;
   detailed?: boolean; // If true, show all details; if false, show compact view
@@ -27,7 +36,13 @@ interface PriceBreakdownCardProps {
  */
 export default function PriceBreakdownCard({
   subtotal,
+  basePrice = null,
+  distanceFee = null,
+  tierFee = null,
   addOns = [],
+  vatApplicable = false,
+  vatRate = null,
+  vatAmount = null,
   tip,
   total,
   detailed = true,
@@ -59,13 +74,34 @@ export default function PriceBreakdownCard({
         />
       </View>
 
-      {/* Subtotal */}
-      <View className="flex-row items-center justify-between mb-2">
-        <Text className="text-text-secondary text-sm">Service</Text>
-        <Text className="text-brand font-semibold">
-          {formatPrice(subtotal - addOnsTotal)}
-        </Text>
-      </View>
+      {/* Base rate + fees — itemized when known, else one collapsed "Service" line */}
+      {basePrice != null ? (
+        <>
+          <View className="flex-row items-center justify-between mb-2">
+            <Text className="text-text-secondary text-sm">Base rate</Text>
+            <Text className="text-brand font-semibold">{formatPrice(basePrice)}</Text>
+          </View>
+          {!!distanceFee && (
+            <View className="flex-row items-center justify-between mb-2">
+              <Text className="text-text-secondary text-sm">Distance fee</Text>
+              <Text className="text-brand font-semibold">{formatPrice(distanceFee)}</Text>
+            </View>
+          )}
+          {!!tierFee && (
+            <View className="flex-row items-center justify-between mb-2">
+              <Text className="text-text-secondary text-sm">Pro tier surcharge</Text>
+              <Text className="text-brand font-semibold">{formatPrice(tierFee)}</Text>
+            </View>
+          )}
+        </>
+      ) : (
+        <View className="flex-row items-center justify-between mb-2">
+          <Text className="text-text-secondary text-sm">Service</Text>
+          <Text className="text-brand font-semibold">
+            {formatPrice(subtotal - addOnsTotal)}
+          </Text>
+        </View>
+      )}
 
       {/* Add-ons */}
       {addOns.map((addOn, index) => (
@@ -89,6 +125,18 @@ export default function PriceBreakdownCard({
           {formatPrice(subtotal)}
         </Text>
       </View>
+
+      {/* VAT */}
+      {vatApplicable && !!vatAmount && (
+        <View className="flex-row items-center justify-between mb-3 pb-3 border-b border-card-dark">
+          <Text className="text-text-secondary text-sm">
+            VAT{vatRate ? ` (${Math.round(vatRate * 100)}%)` : ""}
+          </Text>
+          <Text className="text-text-primary font-semibold">
+            {formatPrice(vatAmount)}
+          </Text>
+        </View>
+      )}
 
       {/* Tip */}
       {tip > 0 && (

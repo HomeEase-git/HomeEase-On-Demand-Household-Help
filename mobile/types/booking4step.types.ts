@@ -90,6 +90,10 @@ export type WorkerCard = {
   rating: number;
   totalReviews: number;
   estimatedTotal: number | null;
+  // Itemized version of estimatedTotal (same null conditions) — lets the
+  // booking flow show Base rate / Distance fee / Tier surcharge as separate
+  // lines instead of one lumped number.
+  priceBreakdown: { basePrice: number; distanceFee: number; tierFee: number } | null;
   // Only populated when the search was scoped to a PER_UNIT task — this
   // worker's tier-adjusted rate, with no total (quantity isn't known to the
   // backend yet). estimatedTotal stays null in that case; use this instead.
@@ -167,15 +171,14 @@ export type CreateBookingResponse = {
     conditionFee: number;
     distanceFee: number;
     urgencyFee: number;
+    tierFee: number;
     addOnsTotal: number;
     finalEstimate: number;
+    addOns: { name: string; price: number }[];
   };
-  payment: {
-    id: string;
-    status: string;
-    escrowStatus: string;
-    clientSecret: string | null;
-  };
+  // No Payment row exists yet at booking-creation time — the client pays
+  // after the job is completed (see backend bookingController.createBooking).
+  payment: null;
 };
 
 // The only booking "priority" the backend acts on: any priority string
