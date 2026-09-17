@@ -91,129 +91,123 @@ export async function cancelPendingExpiryJob(bookingId: string): Promise<void> {
 
 /**
  * Registers the repeatable ticks (hourly settle, hourly quote sweep, daily
- * availability reset). Idempotent — BullMQ upserts by (name, repeat pattern,
- * jobId), so calling this on every server boot is safe and keeps the
- * schedule in sync with the pattern defined here.
+ * availability reset) via BullMQ v6's Job Scheduler API. Idempotent —
+ * upsertJobScheduler upserts by jobSchedulerId (REPEATABLE_JOB_IDS.*), so
+ * calling this on every server boot is safe and keeps the schedule in sync
+ * with the pattern defined here.
+ *
+ * This replaces the pre-v6 `queue.add(name, data, { repeat, jobId })` form —
+ * `repeat` is no longer a valid JobsOptions field; repeatable/scheduled jobs
+ * now go through this dedicated scheduler API instead.
  */
 export async function registerRepeatableBookingJobs(): Promise<void> {
-  await bookingQueue.add(
-    JOB_NAMES.AUTO_SETTLE_COMPLETED,
-    {},
+  await bookingQueue.upsertJobScheduler(
+    REPEATABLE_JOB_IDS.AUTO_SETTLE_COMPLETED,
+    { pattern: '0 * * * *' }, // every hour, on the hour
     {
-      jobId: REPEATABLE_JOB_IDS.AUTO_SETTLE_COMPLETED,
-      repeat: { pattern: '0 * * * *' }, // every hour, on the hour
-      removeOnComplete: true,
-      removeOnFail: true,
+      name: JOB_NAMES.AUTO_SETTLE_COMPLETED,
+      data: {},
+      opts: { removeOnComplete: true, removeOnFail: true },
     }
   );
 
-  await bookingQueue.add(
-    JOB_NAMES.QUOTE_TIMEOUT_SWEEP,
-    {},
+  await bookingQueue.upsertJobScheduler(
+    REPEATABLE_JOB_IDS.QUOTE_TIMEOUT_SWEEP,
+    { pattern: '0 * * * *' }, // every hour, on the hour
     {
-      jobId: REPEATABLE_JOB_IDS.QUOTE_TIMEOUT_SWEEP,
-      repeat: { pattern: '0 * * * *' }, // every hour, on the hour
-      removeOnComplete: true,
-      removeOnFail: true,
+      name: JOB_NAMES.QUOTE_TIMEOUT_SWEEP,
+      data: {},
+      opts: { removeOnComplete: true, removeOnFail: true },
     }
   );
 
-  await bookingQueue.add(
-    JOB_NAMES.ADDON_TIMEOUT_SWEEP,
-    {},
+  await bookingQueue.upsertJobScheduler(
+    REPEATABLE_JOB_IDS.ADDON_TIMEOUT_SWEEP,
+    { pattern: '0 * * * *' }, // every hour, on the hour
     {
-      jobId: REPEATABLE_JOB_IDS.ADDON_TIMEOUT_SWEEP,
-      repeat: { pattern: '0 * * * *' }, // every hour, on the hour
-      removeOnComplete: true,
-      removeOnFail: true,
+      name: JOB_NAMES.ADDON_TIMEOUT_SWEEP,
+      data: {},
+      opts: { removeOnComplete: true, removeOnFail: true },
     }
   );
 
-  await bookingQueue.add(
-    JOB_NAMES.NO_SHOW_SWEEP,
-    {},
+  await bookingQueue.upsertJobScheduler(
+    REPEATABLE_JOB_IDS.NO_SHOW_SWEEP,
+    { pattern: '0 * * * *' }, // every hour, on the hour
     {
-      jobId: REPEATABLE_JOB_IDS.NO_SHOW_SWEEP,
-      repeat: { pattern: '0 * * * *' }, // every hour, on the hour
-      removeOnComplete: true,
-      removeOnFail: true,
+      name: JOB_NAMES.NO_SHOW_SWEEP,
+      data: {},
+      opts: { removeOnComplete: true, removeOnFail: true },
     }
   );
 
-  await bookingQueue.add(
-    JOB_NAMES.DISPUTE_SLA_SWEEP,
-    {},
+  await bookingQueue.upsertJobScheduler(
+    REPEATABLE_JOB_IDS.DISPUTE_SLA_SWEEP,
+    { pattern: '0 * * * *' }, // every hour, on the hour
     {
-      jobId: REPEATABLE_JOB_IDS.DISPUTE_SLA_SWEEP,
-      repeat: { pattern: '0 * * * *' }, // every hour, on the hour
-      removeOnComplete: true,
-      removeOnFail: true,
+      name: JOB_NAMES.DISPUTE_SLA_SWEEP,
+      data: {},
+      opts: { removeOnComplete: true, removeOnFail: true },
     }
   );
 
-  await bookingQueue.add(
-    JOB_NAMES.RESET_AVAILABILITY,
-    {},
+  await bookingQueue.upsertJobScheduler(
+    REPEATABLE_JOB_IDS.RESET_AVAILABILITY,
+    { pattern: '0 0 * * *' }, // daily at midnight
     {
-      jobId: REPEATABLE_JOB_IDS.RESET_AVAILABILITY,
-      repeat: { pattern: '0 0 * * *' }, // daily at midnight
-      removeOnComplete: true,
-      removeOnFail: true,
+      name: JOB_NAMES.RESET_AVAILABILITY,
+      data: {},
+      opts: { removeOnComplete: true, removeOnFail: true },
     }
   );
 
-  await bookingQueue.add(
-    JOB_NAMES.RESCHEDULE_TIMEOUT_SWEEP,
-    {},
+  await bookingQueue.upsertJobScheduler(
+    REPEATABLE_JOB_IDS.RESCHEDULE_TIMEOUT_SWEEP,
+    { pattern: '0 * * * *' }, // every hour, on the hour
     {
-      jobId: REPEATABLE_JOB_IDS.RESCHEDULE_TIMEOUT_SWEEP,
-      repeat: { pattern: '0 * * * *' }, // every hour, on the hour
-      removeOnComplete: true,
-      removeOnFail: true,
+      name: JOB_NAMES.RESCHEDULE_TIMEOUT_SWEEP,
+      data: {},
+      opts: { removeOnComplete: true, removeOnFail: true },
     }
   );
 
-  await bookingQueue.add(
-    JOB_NAMES.RESCHEDULE_REQUEST_TIMEOUT_SWEEP,
-    {},
+  await bookingQueue.upsertJobScheduler(
+    REPEATABLE_JOB_IDS.RESCHEDULE_REQUEST_TIMEOUT_SWEEP,
+    { pattern: '0 * * * *' }, // every hour, on the hour
     {
-      jobId: REPEATABLE_JOB_IDS.RESCHEDULE_REQUEST_TIMEOUT_SWEEP,
-      repeat: { pattern: '0 * * * *' }, // every hour, on the hour
-      removeOnComplete: true,
-      removeOnFail: true,
+      name: JOB_NAMES.RESCHEDULE_REQUEST_TIMEOUT_SWEEP,
+      data: {},
+      opts: { removeOnComplete: true, removeOnFail: true },
     }
   );
 
-  await bookingQueue.add(
-    JOB_NAMES.MATERIALIZE_AVAILABILITY_TEMPLATES,
-    {},
+  await bookingQueue.upsertJobScheduler(
+    REPEATABLE_JOB_IDS.MATERIALIZE_AVAILABILITY_TEMPLATES,
+    { pattern: '0 0 * * *' }, // daily at midnight
     {
-      jobId: REPEATABLE_JOB_IDS.MATERIALIZE_AVAILABILITY_TEMPLATES,
-      repeat: { pattern: '0 0 * * *' }, // daily at midnight
-      removeOnComplete: true,
-      removeOnFail: true,
+      name: JOB_NAMES.MATERIALIZE_AVAILABILITY_TEMPLATES,
+      data: {},
+      opts: { removeOnComplete: true, removeOnFail: true },
     }
   );
 
-  await bookingQueue.add(
-    JOB_NAMES.KYC_EXPIRY_SWEEP,
-    {},
+  await bookingQueue.upsertJobScheduler(
+    REPEATABLE_JOB_IDS.KYC_EXPIRY_SWEEP,
+    { pattern: '0 * * * *' }, // every hour, on the hour
     {
-      jobId: REPEATABLE_JOB_IDS.KYC_EXPIRY_SWEEP,
-      repeat: { pattern: '0 * * * *' }, // every hour, on the hour
-      removeOnComplete: true,
-      removeOnFail: true,
+      name: JOB_NAMES.KYC_EXPIRY_SWEEP,
+      data: {},
+      opts: { removeOnComplete: true, removeOnFail: true },
     }
   );
 
-  await bookingQueue.add(
-    JOB_NAMES.AUTO_SUSPEND_SWEEP,
-    {},
+  await bookingQueue.upsertJobScheduler(
+    REPEATABLE_JOB_IDS.AUTO_SUSPEND_SWEEP,
+    { pattern: '0 * * * *' }, // every hour, on the hour
     {
-      jobId: REPEATABLE_JOB_IDS.AUTO_SUSPEND_SWEEP,
-      repeat: { pattern: '0 * * * *' }, // every hour, on the hour
-      removeOnComplete: true,
-      removeOnFail: true,
+      name: JOB_NAMES.AUTO_SUSPEND_SWEEP,
+      data: {},
+      opts: { removeOnComplete: true, removeOnFail: true },
     }
   );
 }
