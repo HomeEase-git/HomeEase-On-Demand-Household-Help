@@ -12,6 +12,7 @@ export const {
   setAuthSession,
   clearAuthSession,
   login: loginUser,
+  mfaChallenge: mfaChallengeRequest,
   fetchCurrentUser,
   logout: clearSession,
 } = client;

@@ -15,6 +15,11 @@ export interface JwtPayload {
   userId: string;
   email: string;
   role: string;
+  // Absent on a normal session token. 'mfa_pending' marks a short-lived
+  // challenge token issued mid-login to an MFA-enabled admin — see
+  // authController.login/mfaChallenge — which authMiddleware must never
+  // accept as a real session (see middleware/auth.ts).
+  type?: 'mfa_pending';
 }
 
 export interface AuthResponse {

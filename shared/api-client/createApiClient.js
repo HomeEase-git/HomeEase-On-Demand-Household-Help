@@ -48,6 +48,35 @@ export function createApiClient({ getBaseUrl, storage }) {
     });
 
     const user = response.data;
+
+    // MFA-enabled admin: the backend deliberately withholds a real session
+    // here (only { mfaRequired: true, challengeToken }) — there's no token
+    // to store yet, so return as-is and let the caller drive the challenge
+    // step (see mfaChallenge below) before any session exists.
+    if (user && user.mfaRequired) {
+      return user;
+    }
+
+    setAuthSession(user.token, {
+      id: user.id,
+      name: user.name,
+      email: user.email,
+      phone: user.phone,
+      role: user.role,
+    });
+
+    return user;
+  }
+
+  // Exchanges a login-issued challengeToken + TOTP/backup code for a real
+  // session — the second step of admin MFA login (see `login` above).
+  async function mfaChallenge(challengeToken, code) {
+    const response = await apiRequest('/auth/mfa/challenge', {
+      method: 'POST',
+      body: JSON.stringify({ challengeToken, code }),
+    });
+
+    const user = response.data;
     setAuthSession(user.token, {
       id: user.id,
       name: user.name,
@@ -93,6 +122,7 @@ export function createApiClient({ getBaseUrl, storage }) {
     setAuthSession,
     clearAuthSession,
     login,
+    mfaChallenge,
     signup,
     fetchCurrentUser,
     logout,

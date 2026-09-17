@@ -10,8 +10,13 @@ import {
   resetPassword,
   refreshToken,
   logout,
+  mfaSetup,
+  mfaVerifySetup,
+  mfaChallenge,
+  mfaDisable,
 } from '@controllers/authController';
 import { authMiddleware } from '@middleware/auth';
+import { restrictTo } from '@middleware/role';
 import { authLimiter } from '@middleware/rateLimit';
 
 const router = Router();
@@ -29,5 +34,15 @@ router.post('/refresh', authLimiter, refreshToken);
 
 router.get('/me', authMiddleware, getMe);
 router.post('/logout', authMiddleware, logout);
+
+// Admin MFA (TOTP) — setup/verify-setup/disable require an existing admin
+// session; challenge is deliberately unauthenticated (the admin isn't
+// logged in yet — it's exchanging login's short-lived challengeToken for a
+// real session) and carries the same strict limiter as every other
+// credential endpoint above.
+router.post('/mfa/setup', authMiddleware, restrictTo('ADMIN'), mfaSetup);
+router.post('/mfa/verify-setup', authMiddleware, restrictTo('ADMIN'), mfaVerifySetup);
+router.post('/mfa/challenge', authLimiter, mfaChallenge);
+router.post('/mfa/disable', authMiddleware, restrictTo('ADMIN'), authLimiter, mfaDisable);
 
 export default router;

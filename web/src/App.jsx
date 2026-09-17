@@ -31,6 +31,7 @@ const ReviewsFlagged = lazy(() => import('./pages/ReviewsFlagged'))
 const ReviewDetail = lazy(() => import('./pages/ReviewDetail'))
 const Reports = lazy(() => import('./pages/Reports'))
 const Settings = lazy(() => import('./pages/Settings'))
+const MfaSetup = lazy(() => import('./pages/MfaSetup'))
 const PriceControl = lazy(() => import('./pages/PriceControl'))
 const ServiceCatalog = lazy(() => import('./pages/ServiceCatalog'))
 
@@ -82,6 +83,7 @@ export default function App() {
           { path: 'price-control', element: <PriceControl /> },
           { path: 'service-catalog', element: <ServiceCatalog /> },
           { path: 'settings', element: <Settings /> },
+          { path: 'mfa-setup', element: <MfaSetup /> },
         ].map(({ path, element }) => (
           <Route
             key={path}

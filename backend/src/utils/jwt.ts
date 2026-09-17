@@ -47,8 +47,8 @@ const JWT_SECRET = getJwtSecret();
 // possibly outlive it, so there's no reason to keep the Redis key longer.
 export const JWT_EXPIRY = getJwtExpiry();
 
-export const generateToken = (payload: JwtPayload): string => {
-  return jwt.sign(payload, JWT_SECRET, { expiresIn: JWT_EXPIRY });
+export const generateToken = (payload: JwtPayload, expiresInSeconds: number = JWT_EXPIRY): string => {
+  return jwt.sign(payload, JWT_SECRET, { expiresIn: expiresInSeconds });
 };
 
 export const verifyToken = (token: string): JwtPayload => {
