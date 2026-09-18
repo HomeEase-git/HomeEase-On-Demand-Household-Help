@@ -27,6 +27,8 @@ function formatSettings(record: {
   tierExpertMinRating: number;
   tierExpertMinJobs: number;
   tierExpertMultiplier: number;
+  freeDistanceKm: number;
+  perKmFee: number;
   workerDebtHoldLimit: number;
   atcCode: string | null;
   noShowGraceHours: number;
@@ -53,6 +55,8 @@ function formatSettings(record: {
     tierExpertMinRating: record.tierExpertMinRating,
     tierExpertMinJobs: record.tierExpertMinJobs,
     tierExpertMultiplier: record.tierExpertMultiplier,
+    freeDistanceKm: record.freeDistanceKm,
+    perKmFee: record.perKmFee,
     workerDebtHoldLimit: record.workerDebtHoldLimit,
     atcCode: record.atcCode,
     noShowGraceHours: record.noShowGraceHours,
@@ -98,6 +102,8 @@ export const updateSettings = async (req: AuthRequest, res: Response) => {
       tierExpertMinRating,
       tierExpertMinJobs,
       tierExpertMultiplier,
+      freeDistanceKm,
+      perKmFee,
       workerDebtHoldLimit,
       atcCode,
       noShowGraceHours,
@@ -123,6 +129,8 @@ export const updateSettings = async (req: AuthRequest, res: Response) => {
       tierExpertMinRating?: number;
       tierExpertMinJobs?: number;
       tierExpertMultiplier?: number;
+      freeDistanceKm?: number;
+      perKmFee?: number;
       workerDebtHoldLimit?: number;
       atcCode?: string | null;
       noShowGraceHours?: number;
@@ -170,6 +178,8 @@ export const updateSettings = async (req: AuthRequest, res: Response) => {
       ['tierExpertMinRating', tierExpertMinRating, 0, 5],
       ['tierExpertMinJobs', tierExpertMinJobs, 0, 10000],
       ['tierExpertMultiplier', tierExpertMultiplier, 1, 5],
+      ['freeDistanceKm', freeDistanceKm, 0, 50],
+      ['perKmFee', perKmFee, 0, 500],
       ['workerDebtHoldLimit', workerDebtHoldLimit, 0, 100000],
       ['noShowGraceHours', noShowGraceHours, 0, 48],
       ['disputeEscalationHours', disputeEscalationHours, 1, 720],
@@ -206,6 +216,8 @@ export const updateSettings = async (req: AuthRequest, res: Response) => {
         tierExpertMinRating: tierExpertMinRating ?? current.tierExpertMinRating,
         tierExpertMinJobs: tierExpertMinJobs ?? current.tierExpertMinJobs,
         tierExpertMultiplier: tierExpertMultiplier ?? current.tierExpertMultiplier,
+        freeDistanceKm: freeDistanceKm ?? current.freeDistanceKm,
+        perKmFee: perKmFee ?? current.perKmFee,
         workerDebtHoldLimit: workerDebtHoldLimit ?? current.workerDebtHoldLimit,
         atcCode: atcCode !== undefined ? (atcCode?.trim() || null) : current.atcCode,
         noShowGraceHours: noShowGraceHours ?? current.noShowGraceHours,

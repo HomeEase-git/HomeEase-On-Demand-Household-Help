@@ -18,6 +18,8 @@ export interface AppSettingsConfig {
   tierExpertMinRating: number;
   tierExpertMinJobs: number;
   tierExpertMultiplier: number;
+  freeDistanceKm: number;
+  perKmFee: number;
   workerDebtHoldLimit: number;
   atcCode: string | null;
   noShowGraceHours: number;
@@ -49,6 +51,8 @@ const FALLBACK_DEFAULTS: AppSettingsConfig = {
   tierExpertMinRating: 4.8,
   tierExpertMinJobs: 50,
   tierExpertMultiplier: 1.3,
+  freeDistanceKm: 5,
+  perKmFee: 10,
   workerDebtHoldLimit: 500,
   atcCode: null,
   noShowGraceHours: 2,

@@ -77,6 +77,8 @@ const NUMBER_FIELD_BOUNDS = {
   maxSlotsPerDay: [1, 24],
   pendingExpiryMinutes: [5, 10080],
   geofenceRadiusMeters: [10, 5000],
+  freeDistanceKm: [0, 50],
+  perKmFee: [0, 500],
   maxDeclinesBeforeCooldown: [1, 20],
   declineWindowHours: [1, 720],
   declineCooldownHours: [1, 720],
@@ -367,6 +369,39 @@ export default function Settings() {
               value={current.geofenceRadiusMeters}
               onChange={updateNumberField('geofenceRadiusMeters')}
               error={fieldErrors.geofenceRadiusMeters}
+            />
+          </div>
+        </div>
+
+        <div className="settings-group">
+          <p className="settings-group__label">Distance Fee</p>
+          <p className="toggle-row__hint" style={{ marginTop: '-4px' }}>
+            Charged when a worker's driving distance to the client exceeds the free radius. Distance is Google's real
+            driving-route distance when configured, falling back to straight-line distance otherwise — never
+            traffic-adjusted.
+          </p>
+          <div className="detail-grid" style={{ marginBottom: 0 }}>
+            <AdornedNumberField
+              id="settings-free-distance-km"
+              label="Free Distance Radius"
+              suffix="km"
+              min={0}
+              max={50}
+              step={0.5}
+              value={current.freeDistanceKm}
+              onChange={updateNumberField('freeDistanceKm')}
+              error={fieldErrors.freeDistanceKm}
+            />
+            <AdornedNumberField
+              id="settings-per-km-fee"
+              label="Fee Per Extra Km"
+              prefix="₱"
+              min={0}
+              max={500}
+              step={1}
+              value={current.perKmFee}
+              onChange={updateNumberField('perKmFee')}
+              error={fieldErrors.perKmFee}
             />
           </div>
         </div>

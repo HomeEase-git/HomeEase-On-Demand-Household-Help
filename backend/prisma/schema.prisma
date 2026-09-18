@@ -172,6 +172,13 @@ enum NotificationType {
   DISPUTE_RESOLVED
   MESSAGE_REPORTED
   CERTIFICATION_NEEDS_DETAILS
+  // Distinct from CERTIFICATION_APPROVED/REJECTED — sent when approving/
+  // rejecting the gating Certification also unlocks/declines a whole
+  // WorkerServiceCategory (see adminCertificationController's side effect).
+  // The meaningful event for a worker here is booking eligibility, not just
+  // document status, so it's a separate, additional notification.
+  SERVICE_CATEGORY_VERIFIED
+  SERVICE_CATEGORY_REJECTED
 }
 
 enum TimeSlot {
@@ -219,6 +226,12 @@ enum ScopeFieldType {
 enum TaskPricingModel {
   FIXED
   PER_UNIT
+  // Worker-defined price steps against the same quantity field PER_UNIT
+  // uses (e.g. "up to 10 sqm -> P1000, up to 20 sqm -> P2100") — see
+  // WorkerTaskTierPrice. Admin config is identical to PER_UNIT (one
+  // quantityScopeFieldId + one minPrice/maxPrice bound); only the worker's
+  // own WorkerTaskTierPrice rows differ from a PER_UNIT worker's single rate.
+  TIERED
   CUSTOM_QUOTE
 }
 
@@ -555,7 +568,8 @@ model WorkerProfile {
   updatedAt DateTime @updatedAt
 
   // Relations
-  serviceTypes       ServiceType[]
+  serviceCategories  WorkerServiceCategory[]
+  taskSelections     WorkerTaskSelection[]
   certifications     Certification[]
   scopeCapabilities  WorkerScopeFieldCapability[]
   reviews            Review[]
@@ -564,6 +578,7 @@ model WorkerProfile {
   availabilityTemplate WorkerAvailabilityTemplate[]
   packages           WorkerPackage[]
   taskPrices         WorkerTaskPrice[]
+  tierPrices         WorkerTaskTierPrice[]
   debtLedger         DebtLedgerEntry[]
 
   @@index([userId])
@@ -725,9 +740,11 @@ model Certification {
 
   // Optional tag linking this certification to the specific trade it
   // licenses — null for a general certification with no licensing weight.
-  // This is what workerController.addServiceTypes checks against
-  // ServiceType.requiresCertification: an APPROVED Certification tagged to
-  // that exact service type is what lets a worker add it.
+  // This is what workerController.addServiceCategory checks against
+  // ServiceType.requiresCertification (and, for a worker's 2nd+ category
+  // regardless of that flag): an APPROVED Certification tagged to that exact
+  // service type is what lets a worker add/unlock it — see
+  // WorkerServiceCategory.gatingCertificationId.
   serviceTypeId String?
   serviceType   ServiceType? @relation(fields: [serviceTypeId], references: [id], onDelete: SetNull)
 
@@ -736,8 +753,21 @@ model Certification {
   rejectionReason    String?
   reviewedAt         DateTime?
 
+  // Worker-controlled display preference, independent of admin review —
+  // a client only ever sees a certification when this is true AND
+  // verificationStatus is APPROVED (see workerController.getWorkerDetail).
+  // Defaults true so certifications already showing on public profiles
+  // before this field existed don't silently disappear.
+  visibleToClients Boolean @default(true)
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  // Reverse side of WorkerServiceCategory.gatingCertificationId — the
+  // category connection(s) this single document is gating approval for. In
+  // practice at most one, since Certification.serviceTypeId ties one document
+  // to one category.
+  gatedCategories WorkerServiceCategory[]
 
   @@index([workerProfileId])
   @@index([verificationStatus])
@@ -783,18 +813,67 @@ model ServiceType {
   // A "licensed trade" (e.g. electrical, plumbing) an admin has flagged as
   // requiring proof of licensing before a worker can offer it — previously
   // ANY worker could self-add ANY category with zero credential check.
-  // Enforced in workerController.addServiceTypes: gated on at least one
-  // APPROVED Certification tagged to this exact ServiceType.
+  // Enforced in workerController.addServiceCategory: gated on at least one
+  // APPROVED Certification tagged to this exact ServiceType. As of
+  // WorkerServiceCategory, a worker's 2nd+ category is gated the same way
+  // regardless of this flag — see that model's docblock.
   requiresCertification Boolean @default(false)
 
   // Relations
-  workers        WorkerProfile[]
+  workerCategories WorkerServiceCategory[]
   tasks          ServiceTask[]
   packages       WorkerPackage[]
   scopeFields    ServiceScopeField[]
   certifications Certification[]
 
   @@unique([name])
+}
+
+// A worker's connection to a service category — replaces what used to be a
+// bare WorkerProfile<->ServiceType many-to-many with no way to carry a status.
+// A worker's FIRST category is VERIFIED immediately (gated only by
+// ServiceType.requiresCertification, exactly as before this model existed).
+// Every category beyond the first always requires the same single-document
+// Certification review (regardless of requiresCertification) and starts
+// PENDING_VERIFICATION — excluded from search/matching/booking (see
+// workerController.searchWorkers, matchingService.findAutoMatchWorker,
+// bookingController.createBooking) until an admin approves the gating
+// Certification via adminCertificationController, which flips this row's
+// status as a side effect. status is stored directly rather than derived
+// from gatingCertification at query time because the exempt case (first
+// category, no cert required) has nothing to join through, and every
+// eligibility filter needs a plain indexed column to query against.
+model WorkerServiceCategory {
+  id              String        @id @default(cuid())
+  workerProfileId String
+  workerProfile   WorkerProfile @relation(fields: [workerProfileId], references: [id], onDelete: Cascade)
+  serviceTypeId   String
+  serviceType     ServiceType   @relation(fields: [serviceTypeId], references: [id], onDelete: Cascade)
+
+  status WorkerServiceCategoryStatus @default(VERIFIED)
+
+  // The Certification gating this connection. Null only for the fully
+  // ungated case (worker's first category, and it doesn't
+  // requireCertification). SetNull (not Cascade) so a hard-deleted
+  // Certification never cascades into deleting the category connection.
+  gatingCertificationId String?
+  gatingCertification   Certification? @relation(fields: [gatingCertificationId], references: [id], onDelete: SetNull)
+
+  verifiedAt DateTime?
+  rejectedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([workerProfileId, serviceTypeId])
+  @@index([serviceTypeId, status])
+  @@index([gatingCertificationId])
+}
+
+enum WorkerServiceCategoryStatus {
+  PENDING_VERIFICATION
+  VERIFIED
+  REJECTED
 }
 
 // Admin-defined question shown in every category's booking "scope" step
@@ -916,15 +995,17 @@ model ServiceTask {
   pricingModel TaskPricingModel @default(FIXED)
 
   // Admin-allowed bound on what a worker may set via WorkerTaskPrice. FIXED:
-  // bounds the flat price. PER_UNIT: bounds the per-unit rate. Both null for
+  // bounds the flat price. PER_UNIT: bounds the per-unit rate. TIERED: bounds
+  // every row of a worker's WorkerTaskTierPrice table. Both null for
   // CUSTOM_QUOTE (nothing to bound — worker prices on-site).
   minPrice Float?
   maxPrice Float?
 
-  // PER_UNIT only: display unit (e.g. "kilo", "sq.m.", "linear meter") and
-  // the NUMBER-type ServiceScopeField (must belong to this task's
-  // serviceType) whose answer supplies the quantity multiplied against a
-  // worker's WorkerTaskPrice.unitPrice at booking time.
+  // PER_UNIT and TIERED only: display unit (e.g. "kilo", "sq.m.", "linear
+  // meter") and the NUMBER-type ServiceScopeField (must belong to this
+  // task's serviceType) whose answer supplies the quantity — multiplied
+  // against a worker's WorkerTaskPrice.unitPrice for PER_UNIT, or resolved
+  // against a worker's WorkerTaskTierPrice rows for TIERED.
   unitLabel            String?
   quantityScopeFieldId String?
   quantityScopeField   ServiceScopeField? @relation(fields: [quantityScopeFieldId], references: [id])
@@ -936,6 +1017,8 @@ model ServiceTask {
   // Relations
   bookings   Booking[]
   workerPrices WorkerTaskPrice[]
+  workerSelections WorkerTaskSelection[]
+  workerTierPrices WorkerTaskTierPrice[]
 
   @@index([serviceTypeId])
   @@index([quantityScopeFieldId])
@@ -947,7 +1030,8 @@ model ServiceTask {
 // client at booking time: bookingController.createBooking re-fetches this
 // row server-side by (workerProfileId, serviceTaskId), same as it already
 // does for WorkerPackage). No row exists for a CUSTOM_QUOTE task — see
-// ServiceTask.pricingModel.
+// ServiceTask.pricingModel. Price-only: whether the worker offers this task
+// at all is WorkerTaskSelection's job, not this model's.
 model WorkerTaskPrice {
   id              String        @id @default(cuid())
   workerProfileId String
@@ -958,6 +1042,63 @@ model WorkerTaskPrice {
   price     Float? // FIXED model
   unitPrice Float? // PER_UNIT model
   isActive  Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([workerProfileId, serviceTaskId])
+  @@index([serviceTaskId])
+}
+
+// A worker's own price *step* for a TIERED task — a worker has several of
+// these per task (not unique per worker+task like WorkerTaskPrice, since a
+// price table is many rows), each row valid for quantities up to `upToQty`.
+// Resolution (see taskPriceService.resolveTierPrice) walks a worker's rows in
+// ascending upToQty order and takes the first one where
+// `upToQty == null || quantity <= upToQty` — null is only meaningful on the
+// last row ("this price and above"). Deliberately NOT admin-defined brackets:
+// every worker sets their own thresholds and prices independently, so there
+// is no shared row for one worker's edit to disturb another's — setMyTaskPrice
+// replaces a worker's whole table wholesale on every save (delete + recreate
+// in one transaction) rather than upserting by id, which is safe here for
+// exactly that reason (nothing else references one specific row by id; a
+// Booking snapshots a plain basePrice number, never a row reference).
+model WorkerTaskTierPrice {
+  id              String        @id @default(cuid())
+  workerProfileId String
+  workerProfile   WorkerProfile @relation(fields: [workerProfileId], references: [id], onDelete: Cascade)
+  serviceTaskId   String
+  serviceTask     ServiceTask   @relation(fields: [serviceTaskId], references: [id], onDelete: Cascade)
+
+  upToQty Float? // null = open-ended top row ("this price and above")
+  price   Float
+
+  isActive Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([workerProfileId, serviceTaskId])
+}
+
+// The single "worker offers this task" signal, for every pricing model —
+// including CUSTOM_QUOTE, which never gets a WorkerTaskPrice row (priced
+// on-site), so before this model existed there was no record at all of
+// task-level selection for quote-based work. setMyTaskPrice upserts a
+// matching row here so a FIXED/PER_UNIT task can't end up priced without
+// being selected or vice versa. A row here may only exist for a task whose
+// parent category has a WorkerServiceCategory row for the same worker (any
+// status) — enforced in application code, not a DB constraint. Soft-toggle
+// (isActive), matching WorkerTaskPrice's convention, so unchecking a task
+// doesn't lose history.
+model WorkerTaskSelection {
+  id              String        @id @default(cuid())
+  workerProfileId String
+  workerProfile   WorkerProfile @relation(fields: [workerProfileId], references: [id], onDelete: Cascade)
+  serviceTaskId   String
+  serviceTask     ServiceTask   @relation(fields: [serviceTaskId], references: [id], onDelete: Cascade)
+
+  isActive Boolean @default(true)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -1786,6 +1927,14 @@ model AppSettings {
   tierExpertMinRating  Float @default(4.8)
   tierExpertMinJobs    Int   @default(50)
   tierExpertMultiplier Float @default(1.3)
+
+  // Distance fee (see utils/pricing.computeJobPricing) — km within
+  // freeDistanceKm of a worker's service address are free, every km beyond
+  // that costs perKmFee. Used to be hardcoded constants; moved here so an
+  // admin can tune them the same way as the tier multipliers above, without
+  // a redeploy.
+  freeDistanceKm Float @default(5)
+  perKmFee       Float @default(10)
 
   // Threshold on WorkerProfile.commissionOwed (see debtLedgerService.ts) —
   // crossing this puts the worker's account on hold until an admin clears it.

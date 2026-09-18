@@ -56,7 +56,7 @@ export const getDashboardStats = async (_req: Request, res: Response) => {
         take: 5,
         include: {
           user: { select: { fullName: true } },
-          serviceTypes: { select: { name: true } },
+          serviceCategories: { where: { status: 'VERIFIED' }, select: { serviceType: { select: { name: true } } } },
         },
       }),
       getBookingsOverTime(7),
@@ -107,7 +107,7 @@ export const getDashboardStats = async (_req: Request, res: Response) => {
         topWorkers: topWorkerRecords.map((worker) => ({
           id: worker.id,
           name: worker.user.fullName,
-          services: worker.serviceTypes.map((s) => s.name).join(', ') || '—',
+          services: worker.serviceCategories.map((c) => c.serviceType.name).join(', ') || '—',
           rating: worker.rating.toFixed(1),
           reviews: worker.totalReviews,
         })),

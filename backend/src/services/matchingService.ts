@@ -1,6 +1,7 @@
 import prisma from '@config/database';
 import type { Prisma, TimeSlot } from '@prisma/client';
 import { isWithinRadiusKm } from '@utils/geo';
+import { resolveTierPrice } from '@services/taskPriceService';
 
 // Fallback when a worker hasn't set WorkerProfile.serviceAreaRadius (it has
 // a DB default, but stay defensive for any row created before that default
@@ -200,16 +201,32 @@ export async function findAutoMatchWorker(params: AutoMatchParams): Promise<Auto
 
   // A specific task with a real price to set (FIXED/PER_UNIT) is only
   // bookable through a worker who has actually priced it — createBooking
-  // would 409 on this exact worker otherwise. CUSTOM_QUOTE tasks have no
-  // WorkerTaskPrice at all (worker quotes on-site), so they impose no filter.
+  // would 409 on this exact worker otherwise. A CUSTOM_QUOTE task has no
+  // WorkerTaskPrice at all (worker quotes on-site), so it's gated instead on
+  // WorkerTaskSelection — the worker must have explicitly picked this task
+  // (see that model's docblock); previously this branch imposed no
+  // task-level filter at all for CUSTOM_QUOTE, so any worker in the category
+  // surfaced regardless of whether they'd ever indicated they do this task.
+  // TIERED lives in a separate table (WorkerTaskTierPrice, many rows per
+  // worker+task) so it gets its own gate — same split searchWorkers uses.
   let requirePricedTaskId: string | null = null;
+  let requireTieredTaskId: string | null = null;
+  let requireSelectedTaskId: string | null = null;
+  let tieredQuantity = NaN;
   if (serviceTaskId) {
     const task = await prisma.serviceTask.findUnique({
       where: { id: serviceTaskId },
-      select: { pricingModel: true },
+      select: { pricingModel: true, quantityScopeField: { select: { label: true } } },
     });
-    if (task && task.pricingModel !== 'CUSTOM_QUOTE') {
-      requirePricedTaskId = serviceTaskId;
+    if (task) {
+      if (task.pricingModel === 'TIERED') {
+        requireTieredTaskId = serviceTaskId;
+        tieredQuantity = task.quantityScopeField ? Number(scopeAnswers?.[task.quantityScopeField.label]) : NaN;
+      } else if (task.pricingModel !== 'CUSTOM_QUOTE') {
+        requirePricedTaskId = serviceTaskId;
+      } else {
+        requireSelectedTaskId = serviceTaskId;
+      }
     }
   }
 
@@ -222,10 +239,19 @@ export async function findAutoMatchWorker(params: AutoMatchParams): Promise<Auto
       // Excludes workers currently serving a decline-limit cooldown (see
       // bookingController.declineBooking) from auto-match candidates.
       OR: [{ declineCooldownUntil: null }, { declineCooldownUntil: { lte: new Date() } }],
-      serviceTypes: { some: { name: { equals: serviceType, mode: 'insensitive' } } },
+      // Only a VERIFIED category connection counts — a 2nd+ category still
+      // PENDING_VERIFICATION (see WorkerServiceCategory's docblock) must
+      // never surface in auto-match.
+      serviceCategories: { some: { status: 'VERIFIED', serviceType: { name: { equals: serviceType, mode: 'insensitive' } } } },
       ...(hasPets ? { acceptsPets: true } : {}),
       ...(requirePricedTaskId
         ? { taskPrices: { some: { serviceTaskId: requirePricedTaskId, isActive: true } } }
+        : {}),
+      ...(requireTieredTaskId
+        ? { tierPrices: { some: { serviceTaskId: requireTieredTaskId, isActive: true } } }
+        : {}),
+      ...(requireSelectedTaskId
+        ? { taskSelections: { some: { serviceTaskId: requireSelectedTaskId, isActive: true } } }
         : {}),
       AND: capabilityFilters,
       availability: {
@@ -244,8 +270,29 @@ export async function findAutoMatchWorker(params: AutoMatchParams): Promise<Auto
       addressLat: true,
       addressLng: true,
       serviceAreaRadius: true,
+      ...(requireTieredTaskId
+        ? {
+            tierPrices: {
+              where: { serviceTaskId: requireTieredTaskId, isActive: true },
+              select: { upToQty: true, price: true },
+            },
+          }
+        : {}),
     },
   });
+
+  // The DB filter above only guarantees "priced at least one tier row" —
+  // once the quantity is actually known (same scopeAnswers a FIXED/PER_UNIT
+  // booking already has by this point), narrow further to workers whose
+  // rows actually cover it. A worker who priced e.g. "up to 20 sqm" simply
+  // isn't a candidate for a 30 sqm job — not an error, see
+  // WorkerTaskTierPrice's docblock.
+  const tierEligibleWorkers =
+    requireTieredTaskId && !Number.isNaN(tieredQuantity)
+      ? workers.filter(
+          (w) => resolveTierPrice((w as { tierPrices?: Array<{ upToQty: number | null; price: number }> }).tierPrices ?? [], tieredQuantity) != null
+        )
+      : workers;
 
   // Hard eligibility cutoff — a worker outside their own configured service
   // radius (default 30km) from the booking address never becomes a
@@ -256,7 +303,7 @@ export async function findAutoMatchWorker(params: AutoMatchParams): Promise<Auto
   // calculation already treats that case.
   const inRangeWorkers =
     clientLat != null && clientLng != null
-      ? workers.filter((w) => {
+      ? tierEligibleWorkers.filter((w) => {
           if (w.addressLat == null || w.addressLng == null) return true;
           return isWithinRadiusKm(
             { lat: clientLat, lng: clientLng },
@@ -264,7 +311,7 @@ export async function findAutoMatchWorker(params: AutoMatchParams): Promise<Auto
             w.serviceAreaRadius ?? DEFAULT_SERVICE_AREA_RADIUS_KM
           );
         })
-      : workers;
+      : tierEligibleWorkers;
 
   if (inRangeWorkers.length === 0) return null;
 

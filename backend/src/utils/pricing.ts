@@ -205,13 +205,19 @@ export const formatPrice = (amount: number): string => {
  * outright instead (see validation.ts's MIN_BOOKING_LEAD_DAYS), which was
  * the actual reason anyone reached for "urgent" in the first place.
  */
-const FREE_DISTANCE_KM = 5;
-const PER_KM_FEE = 10;
+// Fallback only — the live, admin-tunable values are AppSettings.freeDistanceKm
+// / perKmFee (see appSettingsService), passed in by every real caller.
+// Kept here so a caller that doesn't have an AppSettings row handy (tests,
+// scripts) still gets sane defaults instead of a free/zero distance fee.
+const DEFAULT_FREE_DISTANCE_KM = 5;
+const DEFAULT_PER_KM_FEE = 10;
 
 export interface JobPricingInput {
   basePrice: number;
   tierMultiplier: number;
   distanceKm?: number | null;
+  freeDistanceKm?: number;
+  perKmFee?: number;
 }
 
 export interface JobPricingResult {
@@ -223,8 +229,10 @@ export interface JobPricingResult {
 }
 
 export const computeJobPricing = (input: JobPricingInput): JobPricingResult => {
+  const freeDistanceKm = input.freeDistanceKm ?? DEFAULT_FREE_DISTANCE_KM;
+  const perKmFee = input.perKmFee ?? DEFAULT_PER_KM_FEE;
   const distanceFee = roundToCentavo(
-    input.distanceKm != null ? Math.max(0, input.distanceKm - FREE_DISTANCE_KM) * PER_KM_FEE : 0
+    input.distanceKm != null ? Math.max(0, input.distanceKm - freeDistanceKm) * perKmFee : 0
   );
   const urgencyFee = 0;
   const tierFee = roundToCentavo(input.basePrice * (input.tierMultiplier - 1));

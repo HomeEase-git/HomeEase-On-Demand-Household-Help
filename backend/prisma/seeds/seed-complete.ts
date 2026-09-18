@@ -509,7 +509,9 @@ async function createWorker(
           payoutMethod,
           payoutAccountName: fullName,
           payoutAccountNumber: phoneNumber(),
-          serviceTypes: { connect: [{ id: category.id }] },
+          serviceCategories: {
+            create: [{ serviceTypeId: category.id, status: "VERIFIED", verifiedAt: new Date() }],
+          },
         },
       },
       contractAcceptances: {

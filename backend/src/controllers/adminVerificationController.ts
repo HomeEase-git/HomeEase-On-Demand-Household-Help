@@ -130,7 +130,7 @@ export const getVerificationById = async (req: Request, res: Response) => {
     const record = await prisma.verificationRequest.findUnique({
       where: { id },
       include: {
-        user: { include: { workerProfile: { include: { serviceTypes: true } } } },
+        user: { include: { workerProfile: { include: { serviceCategories: { include: { serviceType: true } } } } } },
         documents: true,
       },
     });
@@ -143,7 +143,13 @@ export const getVerificationById = async (req: Request, res: Response) => {
       success: true,
       data: {
         ...formatVerification(record),
-        serviceCategories: record.user.workerProfile?.serviceTypes.map((s) => s.name) ?? null,
+        // Only VERIFIED categories — a still-PENDING_VERIFICATION 2nd+
+        // category isn't live yet and has nothing to do with this
+        // (onboarding) verification request anyway.
+        serviceCategories:
+          record.user.workerProfile?.serviceCategories
+            .filter((c) => c.status === 'VERIFIED')
+            .map((c) => c.serviceType.name) ?? null,
       },
     });
   } catch (error) {

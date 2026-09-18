@@ -151,7 +151,7 @@ export type DraftBooking = {
   // re-fetching the category's task list at every step.
   serviceTaskId?: string | null;
   selectedTaskName?: string | null;
-  selectedTaskPricingModel?: 'FIXED' | 'PER_UNIT' | 'CUSTOM_QUOTE' | null;
+  selectedTaskPricingModel?: 'FIXED' | 'PER_UNIT' | 'TIERED' | 'CUSTOM_QUOTE' | null;
   selectedTaskUnitLabel?: string | null;
   // The task's own admin-set bound — tighter/more accurate than the
   // category-wide range once a specific task is picked. Null for

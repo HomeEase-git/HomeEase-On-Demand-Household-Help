@@ -704,7 +704,9 @@ async function createWorker(
           commissionOwed,
           debtHoldAt,
           debtHoldNote,
-          serviceTypes: { connect: [{ id: category.id }] },
+          serviceCategories: {
+            create: [{ serviceTypeId: category.id, status: "VERIFIED", verifiedAt: new Date() }],
+          },
         },
       },
       contractAcceptances: {

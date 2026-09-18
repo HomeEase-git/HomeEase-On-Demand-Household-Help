@@ -212,7 +212,7 @@ type WorkerRow = {
     rating: number;
     totalReviews: number;
     kycStatus: string;
-    serviceTypes: Array<{ name: string }>;
+    serviceCategories: Array<{ status: string; serviceType: { name: string } }>;
     declineCooldownUntil?: Date | null;
     debtHoldAt?: Date | null;
   } | null;
@@ -264,7 +264,15 @@ async function formatWorkersBatch(users: WorkerRow[]) {
       displayId: formatDisplayId(user.id),
       name: user.fullName,
       email: user.email,
-      services: user.workerProfile?.serviceTypes?.map((t) => t.name).join(', ') ?? '—',
+      // Only VERIFIED categories are joined into the display string — a
+      // still-PENDING_VERIFICATION 2nd+ category isn't live yet, and showing
+      // it plainly here would imply otherwise. Counted separately instead.
+      services: (() => {
+        const verified = user.workerProfile?.serviceCategories?.filter((c) => c.status === 'VERIFIED') ?? [];
+        const pendingCount = user.workerProfile?.serviceCategories?.filter((c) => c.status === 'PENDING_VERIFICATION').length ?? 0;
+        const base = verified.map((c) => c.serviceType.name).join(', ') || '—';
+        return pendingCount > 0 ? `${base} (+${pendingCount} pending)` : base;
+      })(),
       rating: user.workerProfile?.rating.toFixed(1) ?? '0.0',
       reviews: user.workerProfile?.totalReviews ?? 0,
       tier,
@@ -300,7 +308,7 @@ export const listWorkers = async (req: Request, res: Response) => {
         skip,
         take: limit,
         orderBy: { createdAt: 'desc' },
-        include: { workerProfile: { include: { serviceTypes: true } } },
+        include: { workerProfile: { include: { serviceCategories: { include: { serviceType: true } } } } },
       }),
     ]);
 
@@ -323,7 +331,7 @@ export const getWorkerById = async (req: Request, res: Response) => {
 
     const user = await prisma.user.findFirst({
       where: { id, role: 'WORKER' },
-      include: { workerProfile: { include: { serviceTypes: true } } },
+      include: { workerProfile: { include: { serviceCategories: { include: { serviceType: true } } } } },
     });
 
     if (!user) {
@@ -351,13 +359,26 @@ export const getWorkerById = async (req: Request, res: Response) => {
       where: { userId: id },
       select: { id: true },
     });
-    const certifications = workerProfileForCerts
-      ? await prisma.certification.findMany({
-          where: { workerProfileId: workerProfileForCerts.id },
-          include: { serviceType: { select: { id: true, name: true } } },
-          orderBy: { createdAt: 'desc' },
-        })
-      : [];
+    const [certifications, gatedCategories] = workerProfileForCerts
+      ? await Promise.all([
+          prisma.certification.findMany({
+            where: { workerProfileId: workerProfileForCerts.id },
+            include: { serviceType: { select: { id: true, name: true } } },
+            orderBy: { createdAt: 'desc' },
+          }),
+          // Which PENDING category(ies) a certification is gating — surfaced
+          // on the admin's certification review row so approving/rejecting a
+          // PENDING doc there is understood as "this unlocks/declines a whole
+          // service category," not just a document's own status.
+          prisma.workerServiceCategory.findMany({
+            where: { workerProfileId: workerProfileForCerts.id, status: 'PENDING_VERIFICATION' },
+            select: { gatingCertificationId: true, serviceType: { select: { name: true } } },
+          }),
+        ])
+      : [[], []];
+    const gatedCategoryNameByCertId = new Map(
+      gatedCategories.filter((c) => c.gatingCertificationId).map((c) => [c.gatingCertificationId as string, c.serviceType.name])
+    );
 
     return res.json({
       success: true,
@@ -374,6 +395,7 @@ export const getWorkerById = async (req: Request, res: Response) => {
           verificationStatus: c.verificationStatus,
           rejectionReason: c.rejectionReason,
           serviceType: c.serviceType ? { id: c.serviceType.id, name: c.serviceType.name } : null,
+          gatesPendingCategoryName: gatedCategoryNameByCertId.get(c.id) ?? null,
         })),
         recentBookings: recentBookings.map((b) => ({
           id: formatDisplayId(b.id),

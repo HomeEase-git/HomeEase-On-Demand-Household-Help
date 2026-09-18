@@ -6,7 +6,9 @@ import { notifyUser } from '@utils/notify';
 import { sendSmsToUser } from '@utils/smsService';
 import { writeAuditLog } from '@utils/auditLog';
 import { formatDisplayId } from '@utils/formatters';
-import { distanceKm, distanceMeters, isWithinRadiusMeters } from '@utils/geo';
+import { distanceMeters, isWithinRadiusMeters } from '@utils/geo';
+import { resolveDrivingDistanceKm } from '@services/googleDistanceService';
+import { resolveTierPrice } from '@services/taskPriceService';
 import { findAutoMatchWorker, LATE_CANCEL_THRESHOLD_HOURS } from '@services/matchingService';
 import { validatePriceWithinPricingRule } from '@services/pricingRuleService';
 import {
@@ -345,7 +347,10 @@ export const createBooking = async (req: AuthRequest, res: Response) => {
     for (let attempt = 0; ; attempt++) {
     const workerProfile = await prisma.workerProfile.findUnique({
       where: { userId: resolvedWorkerId },
-      include: { user: { select: { phone: true } } },
+      include: {
+        user: { select: { phone: true } },
+        serviceCategories: { include: { serviceType: { select: { name: true } } } },
+      },
     });
 
     if (!workerProfile) {
@@ -376,7 +381,12 @@ export const createBooking = async (req: AuthRequest, res: Response) => {
     // A client picking a specific worker (not auto-match) could otherwise
     // bypass the capability filter Step 3 already applied — re-check
     // server-side so a stale/tampered request can't book a worker who
-    // doesn't actually handle what was asked for.
+    // doesn't actually handle what was asked for. Auto-match is already
+    // guaranteed correct here (findAutoMatchWorker filters on both at the DB
+    // level), so these two checks only matter for an explicitly-picked
+    // worker — but without them, a client could bypass search entirely and
+    // directly book a worker whose category is still PENDING_VERIFICATION
+    // (or who was never connected to it at all), making that gate meaningless.
     if (!isAutoMatched) {
       const capabilityFilters = await buildCapabilityFilters(resolvedServiceTypeName, effectiveScopeAnswers);
       if (capabilityFilters.length > 0) {
@@ -387,6 +397,13 @@ export const createBooking = async (req: AuthRequest, res: Response) => {
         if (!eligible) {
           return res.status(409).json(errorResponse(409, 'This pro does not handle the selected option for this service'));
         }
+      }
+
+      const bookedCategory = workerProfile.serviceCategories.find(
+        (c) => c.serviceType.name.toLowerCase() === resolvedServiceTypeName.toLowerCase()
+      );
+      if (!bookedCategory || bookedCategory.status !== 'VERIFIED') {
+        return res.status(409).json(errorResponse(409, 'This pro does not offer this service'));
       }
     }
 
@@ -433,7 +450,46 @@ export const createBooking = async (req: AuthRequest, res: Response) => {
     let basePrice: number;
     if (serviceTask) {
       if (isCustomQuoteTask) {
+        // No WorkerTaskPrice exists for a CUSTOM_QUOTE task (priced on-site),
+        // so eligibility is checked against WorkerTaskSelection instead —
+        // findAutoMatchWorker already filters auto-match candidates down to
+        // workers who've selected this task, but an explicitly-picked worker
+        // isn't filtered, hence the fallback here (same pattern as the
+        // FIXED/PER_UNIT price check just below).
+        const selection = await prisma.workerTaskSelection.findUnique({
+          where: {
+            workerProfileId_serviceTaskId: { workerProfileId: workerProfile.id, serviceTaskId: serviceTask.id },
+          },
+        });
+        if (!selection?.isActive) {
+          if (await tryNextAutoMatchCandidate()) continue;
+          return res.status(409).json(errorResponse(409, 'This pro does not offer this specific service'));
+        }
         basePrice = 0;
+      } else if (serviceTask.pricingModel === 'TIERED') {
+        // No WorkerTaskPrice row for TIERED — a worker's price table lives
+        // in WorkerTaskTierPrice (many rows per worker+task, one per price
+        // step they defined themselves — see that model's docblock).
+        const field = serviceTask.quantityScopeField;
+        const quantity = field ? Number(effectiveScopeAnswers?.[field.label]) : NaN;
+        if (!field || Number.isNaN(quantity)) {
+          return res
+            .status(400)
+            .json(errorResponse(400, `"${field?.label ?? 'quantity'}" is required for this service`));
+        }
+        const tierRows = await prisma.workerTaskTierPrice.findMany({
+          where: { workerProfileId: workerProfile.id, serviceTaskId: serviceTask.id, isActive: true },
+        });
+        const resolvedPrice = resolveTierPrice(tierRows, quantity);
+        if (resolvedPrice == null) {
+          // Either the worker hasn't priced this task at all, or their price
+          // steps simply don't cover this quantity — both are the worker
+          // not being a valid candidate for this specific job, not an error
+          // to recover from (see WorkerTaskTierPrice's docblock).
+          if (await tryNextAutoMatchCandidate()) continue;
+          return res.status(409).json(errorResponse(409, 'This pro has not priced this service for this quantity'));
+        }
+        basePrice = resolvedPrice;
       } else {
         const workerPrice = await prisma.workerTaskPrice.findUnique({
           where: {
@@ -471,10 +527,12 @@ export const createBooking = async (req: AuthRequest, res: Response) => {
     // live position — bookings are scheduled in advance, not dispatched to
     // wherever the worker happens to be right now, so this is a static
     // "shipping fee" style distance rather than real-time proximity (see
-    // WorkerProfile.addressLat/addressLng comment).
+    // WorkerProfile.addressLat/addressLng comment). Real driving-route
+    // distance (Google Distance Matrix) when configured, falling back to
+    // straight-line distance otherwise — see googleDistanceService.
     const workerDistanceKm =
       workerProfile.addressLat != null && workerProfile.addressLng != null
-        ? distanceKm(clientLocation, { lat: workerProfile.addressLat, lng: workerProfile.addressLng })
+        ? await resolveDrivingDistanceKm(clientLocation, { lat: workerProfile.addressLat, lng: workerProfile.addressLng })
         : null;
 
     // Expertise tier — computed live from rating + completed-job count (see
@@ -511,6 +569,8 @@ export const createBooking = async (req: AuthRequest, res: Response) => {
       basePrice,
       tierMultiplier: tierMultiplier(workerTier, appSettings),
       distanceKm: workerDistanceKm,
+      freeDistanceKm: appSettings.freeDistanceKm,
+      perKmFee: appSettings.perKmFee,
     });
     // Kept in the response/log shape below for compatibility with existing
     // clients/receipts — always 0 now that condition carries no platform fee.

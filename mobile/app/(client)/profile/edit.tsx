@@ -10,6 +10,7 @@ import { useAuthStore } from "../../../store/authStore";
 import * as api from "../../../services/api";
 import { colors } from "../../../constants";
 import { useAlertModal } from "../../../contexts/AlertModalContext";
+import { validateName, validatePhone } from "../../../utils/validators";
 
 export default function EditProfileScreen() {
   const router = useRouter();
@@ -20,19 +21,33 @@ export default function EditProfileScreen() {
   const [phone, setPhone] = useState(user?.phone || "");
   const [email] = useState(user?.email || "");
   const [loading, setLoading] = useState(false);
+  const [nameError, setNameError] = useState("");
+  const [phoneError, setPhoneError] = useState("");
 
   const nameRef = useRef<TextInput>(null);
   const phoneRef = useRef<TextInput>(null);
 
+  const handleNameChange = (text: string) => {
+    setName(text);
+    if (nameError) setNameError("");
+  };
+
+  const handlePhoneChange = (text: string) => {
+    setPhone(text);
+    if (phoneError) setPhoneError("");
+  };
+
   const handleSave = async () => {
-    if (!name.trim()) {
-      alertModal.error("Error", "Name cannot be empty");
+    const nameValidation = validateName(name);
+    const phoneValidation = validatePhone(phone);
+
+    setNameError(nameValidation.error || "");
+    setPhoneError(phoneValidation.error || "");
+
+    if (!nameValidation.valid || !phoneValidation.valid) {
       return;
     }
-    if (phone.length < 10) {
-      alertModal.error("Error", "Please enter a valid phone number");
-      return;
-    }
+
     setLoading(true);
     try {
       const updatedUser = await api.updateUserProfile({
@@ -42,9 +57,9 @@ export default function EditProfileScreen() {
       setUser(updatedUser);
       alertModal.success("Success", "Profile updated");
       router.back();
-    } catch (err) {
+    } catch (err: any) {
       console.error("Update profile error:", err);
-      alertModal.error("Error", "Failed to update profile");
+      alertModal.error("Error", err?.message || "Failed to update profile");
     } finally {
       setLoading(false);
     }
@@ -63,20 +78,22 @@ export default function EditProfileScreen() {
           ref={nameRef}
           label="Full Name"
           value={name}
-          onChangeText={setName}
+          onChangeText={handleNameChange}
           placeholder="Name"
           returnKeyType="next"
           onSubmitEditing={() => phoneRef.current?.focus()}
+          error={nameError}
         />
         <InputField
           ref={phoneRef}
           label="Phone"
           value={phone}
-          onChangeText={setPhone}
+          onChangeText={handlePhoneChange}
           placeholder="09XX-XXX-XXXX"
           keyboardType="phone-pad"
           returnKeyType="done"
           onSubmitEditing={handleSave}
+          error={phoneError}
         />
         <InputField
           label="Email"

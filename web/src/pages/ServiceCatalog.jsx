@@ -32,6 +32,7 @@ const OPTION_FIELD_TYPES = ['SELECT', 'MULTI_SELECT']
 const PRICING_MODEL_LABELS = {
   FIXED: 'Fixed',
   PER_UNIT: 'Per-unit',
+  TIERED: 'Tiered (worker sets price steps)',
   CUSTOM_QUOTE: 'Custom quote',
 }
 
@@ -386,8 +387,8 @@ export default function ServiceCatalog() {
       payload.maxPrice = maxPrice
       payload.overrideReason = overrideReason || undefined
 
-      if (pricingModel === 'PER_UNIT') {
-        if (!taskForm.unitLabel.trim()) return setTaskFormError('Unit label is required for a per-unit task (e.g. "kilo").')
+      if (pricingModel === 'PER_UNIT' || pricingModel === 'TIERED') {
+        if (!taskForm.unitLabel.trim()) return setTaskFormError('Unit label is required for a per-unit or tiered task (e.g. "kilo").')
         if (!taskForm.quantityScopeFieldId) return setTaskFormError('Pick which number field supplies the quantity.')
         payload.unitLabel = taskForm.unitLabel.trim()
         payload.quantityScopeFieldId = taskForm.quantityScopeFieldId
@@ -781,7 +782,7 @@ export default function ServiceCatalog() {
                           <td>
                             {t.pricingModel === 'CUSTOM_QUOTE'
                               ? '—'
-                              : `${formatPeso(t.minPrice)}–${formatPeso(t.maxPrice)}${t.pricingModel === 'PER_UNIT' ? `/${t.unitLabel}` : ''}`}
+                              : `${formatPeso(t.minPrice)}–${formatPeso(t.maxPrice)}${t.pricingModel === 'PER_UNIT' || t.pricingModel === 'TIERED' ? `/${t.unitLabel}` : ''}`}
                           </td>
                           <td>
                             <span className={`badge ${t.isActive ? 'badge-active' : 'badge-suspended'}`}>
@@ -891,6 +892,7 @@ export default function ServiceCatalog() {
                 >
                   <option value="FIXED">Fixed</option>
                   <option value="PER_UNIT">Per-unit</option>
+                  <option value="TIERED">Tiered (worker sets price steps)</option>
                   <option value="CUSTOM_QUOTE">Custom quote</option>
                 </select>
               </div>
@@ -901,9 +903,23 @@ export default function ServiceCatalog() {
                 </p>
               )}
 
+              {taskForm.pricingModel === 'TIERED' && (
+                <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>
+                  Instead of one price, each worker enters their own price steps against the quantity field below
+                  (e.g. "up to 10 sqm → ₱1000, up to 20 sqm → ₱2100") — every step must fall inside the price range
+                  you set here. You don't define the steps yourself, just the guardrail and the quantity field.
+                </p>
+              )}
+
               {taskForm.pricingModel !== 'CUSTOM_QUOTE' && (
                 <div className="form-field">
-                  <label>{taskForm.pricingModel === 'PER_UNIT' ? 'Allowed rate range (₱/unit)' : 'Allowed price range (₱)'}</label>
+                  <label>
+                    {taskForm.pricingModel === 'PER_UNIT'
+                      ? 'Allowed rate range (₱/unit)'
+                      : taskForm.pricingModel === 'TIERED'
+                        ? 'Allowed price range per step (₱)'
+                        : 'Allowed price range (₱)'}
+                  </label>
                   <div style={{ display: 'flex', gap: '0.5rem' }}>
                     <input
                       type="number"
@@ -950,7 +966,7 @@ export default function ServiceCatalog() {
                 </div>
               )}
 
-              {taskForm.pricingModel === 'PER_UNIT' && (
+              {(taskForm.pricingModel === 'PER_UNIT' || taskForm.pricingModel === 'TIERED') && (
                 <>
                   <div className="form-field">
                     <label htmlFor="tk-unit-label">Unit label</label>

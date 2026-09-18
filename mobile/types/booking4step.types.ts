@@ -104,7 +104,7 @@ export type WorkerCard = {
   tier?: WorkerTier;
 };
 
-export const TASK_PRICING_MODELS = ['FIXED', 'PER_UNIT', 'CUSTOM_QUOTE'] as const;
+export const TASK_PRICING_MODELS = ['FIXED', 'PER_UNIT', 'TIERED', 'CUSTOM_QUOTE'] as const;
 export type TaskPricingModel = (typeof TASK_PRICING_MODELS)[number];
 
 // A specific bookable job within a category (e.g. "Toilet Repair" under

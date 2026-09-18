@@ -249,7 +249,9 @@ async function createWorker(
           kycSubmittedAt: faker.date.recent({ days: 30 }),
           kycApprovedAt: isApproved ? faker.date.recent({ days: 15 }) : null,
           resumeUrl: "https://example-storage.dev/resumes/placeholder.pdf",
-          serviceTypes: { connect: [{ id: category.id }] },
+          serviceCategories: {
+            create: [{ serviceTypeId: category.id, status: "VERIFIED", verifiedAt: new Date() }],
+          },
         },
       },
     },
