@@ -30,7 +30,7 @@
     "expo-haptics": "~56.0.3",
     "expo-image": "~56.0.12",
     "expo-image-manipulator": "~56.0.26",
-    "expo-image-picker": "~56.0.25",
+    "expo-image-picker": "~57.0.15",
     "expo-linking": "~56.0.17",
     "expo-location": "~56.0.25",
     "expo-notifications": "~56.0.25",
