@@ -39,10 +39,14 @@ async function main() {
     select: {
       id: true,
       userId: true,
-      serviceTypes: {
+      serviceCategories: {
         select: {
-          tasks: {
-            select: { id: true, name: true, pricingModel: true, basePrice: true },
+          serviceType: {
+            select: {
+              tasks: {
+                select: { id: true, name: true, pricingModel: true, basePrice: true },
+              },
+            },
           },
         },
       },
@@ -56,7 +60,7 @@ async function main() {
   const perUnitPlaceholders: { workerUserId: string; taskName: string }[] = [];
 
   for (const worker of workers) {
-    const tasks = worker.serviceTypes.flatMap((st) => st.tasks);
+    const tasks = worker.serviceCategories.flatMap((c) => c.serviceType.tasks);
     for (const task of tasks) {
       if (task.pricingModel === 'CUSTOM_QUOTE') {
         skippedCustomQuote++;

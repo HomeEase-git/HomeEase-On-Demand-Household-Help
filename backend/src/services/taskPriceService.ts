@@ -10,3 +10,65 @@ export function isPriceWithinTaskBounds(
   if (task.minPrice == null || task.maxPrice == null) return true;
   return price >= task.minPrice && price <= task.maxPrice;
 }
+
+/**
+ * Resolves a TIERED task's price for a given quantity from one worker's own
+ * WorkerTaskTierPrice rows — walks the rows in ascending upToQty order (null
+ * treated as +Infinity, i.e. sorts last) and returns the first row's price
+ * where `upToQty == null || quantity <= upToQty`. Returns null when no row
+ * covers the quantity (the worker simply hasn't priced that range) — this is
+ * an expected, worker-controlled outcome, not an error to recover from; every
+ * caller (search, auto-match, booking) treats it exactly like "hasn't priced
+ * this task at all."
+ */
+export function resolveTierPrice(
+  tiers: Array<{ upToQty: number | null; price: number }>,
+  quantity: number
+): number | null {
+  const sorted = [...tiers].sort((a, b) => (a.upToQty ?? Infinity) - (b.upToQty ?? Infinity));
+  const match = sorted.find((t) => t.upToQty == null || quantity <= t.upToQty);
+  return match ? match.price : null;
+}
+
+export const MAX_TIER_ROWS = 5;
+
+/**
+ * Validates a worker's proposed TIERED price table before it's saved —
+ * 1-MAX_TIER_ROWS rows, strictly ascending upToQty, null (open-ended) allowed
+ * only on the last row, every price within the task's own admin-set bound
+ * (the same bound PER_UNIT's rate is checked against — TIERED has no
+ * separate per-row bound, see ServiceTask.minPrice/maxPrice).
+ */
+export function validateTierRows(
+  rows: Array<{ upToQty: number | null; price: number }>,
+  bounds: { minPrice: number | null; maxPrice: number | null }
+): string | null {
+  if (rows.length === 0) return 'At least one price tier is required.';
+  if (rows.length > MAX_TIER_ROWS) return `At most ${MAX_TIER_ROWS} price tiers are allowed.`;
+
+  for (let i = 0; i < rows.length; i++) {
+    const row = rows[i];
+    if (typeof row.price !== 'number' || Number.isNaN(row.price)) {
+      return 'Every tier needs a valid price.';
+    }
+    if (!isPriceWithinTaskBounds(row.price, bounds)) {
+      return `Every tier's price must be between ₱${bounds.minPrice} and ₱${bounds.maxPrice}.`;
+    }
+    if (row.upToQty == null) {
+      if (i !== rows.length - 1) {
+        return 'Only the last tier may be open-ended (no upper limit).';
+      }
+      continue;
+    }
+    if (typeof row.upToQty !== 'number' || Number.isNaN(row.upToQty) || row.upToQty <= 0) {
+      return 'Every tier\'s quantity limit must be a positive number.';
+    }
+    if (i > 0) {
+      const prev = rows[i - 1].upToQty;
+      if (prev == null || row.upToQty <= prev) {
+        return 'Tier quantity limits must strictly increase.';
+      }
+    }
+  }
+  return null;
+}

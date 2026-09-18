@@ -1078,33 +1078,53 @@ paths:
   /workers/me/service-types:
     get:
       tags: [Worker Profile]
-      summary: List the authenticated worker's connected service categories
+      summary: List the authenticated worker's service category connections
+      description: >-
+        Includes connections still PENDING_VERIFICATION or REJECTED, not just
+        VERIFIED ones — the mobile skills screen needs the full picture to
+        render each category's status.
       responses:
         '200': { description: OK }
         '401': { $ref: '#/components/responses/Unauthorized' }
     post:
       tags: [Worker Profile]
-      summary: Add one or more service categories to the worker's profile
+      summary: Add one service category to the worker's profile
+      description: >-
+        The worker's first category is VERIFIED immediately (gated only by
+        ServiceType.requiresCertification). Every category beyond the first
+        always requires a single-document Certification review, regardless of
+        that flag, and starts PENDING_VERIFICATION until an admin approves the
+        gating certification — see /admin/certifications/{id}/approve.
       requestBody:
         required: true
         content:
           application/json:
             schema:
               type: object
-              required: [serviceTypeIds]
+              required: [serviceTypeId]
               properties:
-                serviceTypeIds:
-                  type: array
-                  items: { type: string }
-                  minItems: 1
+                serviceTypeId: { type: string }
+                certificationId:
+                  type: string
+                  description: An existing PENDING Certification already tagged to this serviceTypeId.
+                certification:
+                  type: object
+                  description: Inline certification to create if certificationId isn't given.
+                  properties:
+                    title: { type: string }
+                    issuer: { type: string }
+                    issueDate: { type: string, format: date }
+                    expiryDate: { type: string, format: date }
+                    documentUrl: { type: string }
       responses:
-        '200': { description: Added }
+        '201': { description: Added or submitted for review }
         '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { description: Missing an admin-approved certification for a requiresCertification category }
 
   /workers/me/service-types/{serviceTypeId}:
     delete:
       tags: [Worker Profile]
-      summary: Remove a service category from the worker's profile
+      summary: Remove a whole service category from the worker's profile
       parameters:
         - name: serviceTypeId
           in: path
@@ -1112,6 +1132,68 @@ paths:
           schema: { type: string }
       responses:
         '200': { description: Removed }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /workers/me/task-catalog:
+    get:
+      tags: [Worker Profile]
+      summary: Full admin task catalog annotated with this worker's category/selection/price state
+      description: >-
+        Consolidated read for the task-first "Skills & Services" screen —
+        every active ServiceType/ServiceTask, grouped by category, each task
+        annotated with this worker's own WorkerTaskSelection and
+        WorkerTaskPrice (if any) and each category with its
+        WorkerServiceCategory status.
+      responses:
+        '200': { description: OK }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /workers/me/task-selections/{serviceTaskId}:
+    put:
+      tags: [Worker Profile]
+      summary: Select a task (worker offers this task)
+      description: >-
+        The task-first counterpart to POST /workers/me/service-types. If the
+        task's parent category isn't connected yet (or was REJECTED), runs
+        the same category gate first, passing through certificationId/
+        certification.
+      parameters:
+        - name: serviceTaskId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                certificationId: { type: string }
+                certification:
+                  type: object
+                  properties:
+                    title: { type: string }
+                    issuer: { type: string }
+                    issueDate: { type: string, format: date }
+                    expiryDate: { type: string, format: date }
+                    documentUrl: { type: string }
+      responses:
+        '200': { description: Selected }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    delete:
+      tags: [Worker Profile]
+      summary: Deselect a task
+      description: >-
+        If this was the last active selection under the task's category, the
+        WorkerServiceCategory connection is removed too.
+      parameters:
+        - name: serviceTaskId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200': { description: Deselected }
         '404': { $ref: '#/components/responses/NotFound' }
 
   /workers/me/capacity:

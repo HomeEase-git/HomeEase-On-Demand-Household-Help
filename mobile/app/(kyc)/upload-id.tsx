@@ -92,11 +92,12 @@ export default function UploadIdScreen() {
         [key]: { uri, mimeType, name },
       }));
       alertModal.success("Success", "Government ID uploaded successfully.");
-    } catch (error) {
+    } catch (error: any) {
       console.error("KYC document submit error", error);
       alertModal.error(
         "Upload failed",
-        "We could not submit your ID document. Please try again.",
+        error?.message ||
+          "We could not submit your ID document. Please try again.",
       );
     }
   };

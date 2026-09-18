@@ -117,19 +117,23 @@ export const validateUpdateWorkerProfile = (
   return next();
 };
 
-export const validateAddServiceTypes = (
+export const validateAddServiceCategory = (
   req: Request,
   res: Response,
   next: NextFunction
 ) => {
-  const { serviceTypeIds } = req.body;
-  
-  if (!Array.isArray(serviceTypeIds) || serviceTypeIds.length === 0) {
-    return res.status(400).json(errorResponse(400, 'serviceTypeIds must be a non-empty array'));
+  const { serviceTypeId, certificationId, certification } = req.body;
+
+  if (typeof serviceTypeId !== 'string' || !serviceTypeId) {
+    return res.status(400).json(errorResponse(400, 'serviceTypeId is required'));
   }
-  
-  if (!serviceTypeIds.every((id: unknown) => typeof id === 'string')) {
-    return res.status(400).json(errorResponse(400, 'All serviceTypeIds must be strings'));
+
+  if (certificationId !== undefined && typeof certificationId !== 'string') {
+    return res.status(400).json(errorResponse(400, 'certificationId must be a string'));
+  }
+
+  if (certification !== undefined && (typeof certification !== 'object' || certification === null || Array.isArray(certification))) {
+    return res.status(400).json(errorResponse(400, 'certification must be an object'));
   }
 
   return next();
@@ -196,7 +200,7 @@ export const validateCreateCertification = (
   res: Response,
   next: NextFunction
 ) => {
-  const { name, issuer, issueDate, expiryDate, documentUrl, serviceTypeId } = req.body;
+  const { name, issuer, issueDate, expiryDate, documentUrl, serviceTypeId, visibleToClients } = req.body;
 
   if (!name || typeof name !== 'string' || !name.trim()) {
     return res.status(400).json(errorResponse(400, 'name is required and must be a non-empty string'));
@@ -222,6 +226,10 @@ export const validateCreateCertification = (
     return res.status(400).json(errorResponse(400, 'serviceTypeId must be a string'));
   }
 
+  if (visibleToClients !== undefined && typeof visibleToClients !== 'boolean') {
+    return res.status(400).json(errorResponse(400, 'visibleToClients must be a boolean'));
+  }
+
   return next();
 };
 
@@ -230,7 +238,7 @@ export const validateUpdateCertification = (
   res: Response,
   next: NextFunction
 ) => {
-  const { name, issuer, issueDate, expiryDate, documentUrl, serviceTypeId } = req.body;
+  const { name, issuer, issueDate, expiryDate, documentUrl, serviceTypeId, visibleToClients } = req.body;
 
   if (!name || typeof name !== 'string' || !name.trim()) {
     return res.status(400).json(errorResponse(400, 'name is required and must be a non-empty string'));
@@ -254,6 +262,24 @@ export const validateUpdateCertification = (
 
   if (serviceTypeId !== undefined && serviceTypeId !== null && typeof serviceTypeId !== 'string') {
     return res.status(400).json(errorResponse(400, 'serviceTypeId must be a string'));
+  }
+
+  if (visibleToClients !== undefined && typeof visibleToClients !== 'boolean') {
+    return res.status(400).json(errorResponse(400, 'visibleToClients must be a boolean'));
+  }
+
+  return next();
+};
+
+export const validateUpdateCertificationVisibility = (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  const { visibleToClients } = req.body;
+
+  if (typeof visibleToClients !== 'boolean') {
+    return res.status(400).json(errorResponse(400, 'visibleToClients is required and must be a boolean'));
   }
 
   return next();

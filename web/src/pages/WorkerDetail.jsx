@@ -295,7 +295,14 @@ export default function WorkerDetail() {
                       <a href={c.documentUrl} target="_blank" rel="noreferrer">{c.title}</a>
                     </td>
                     <td>{c.issuer}</td>
-                    <td>{c.serviceType?.name ?? '—'}</td>
+                    <td>
+                      {c.serviceType?.name ?? '—'}
+                      {c.gatesPendingCategoryName && (
+                        <div style={{ fontSize: '0.8em', color: 'var(--text-muted)' }}>
+                          Approving unlocks "{c.gatesPendingCategoryName}" as an additional service
+                        </div>
+                      )}
+                    </td>
                     <td><Badge variant={CERT_STATUS_VARIANT[c.verificationStatus] ?? 'pending'}>{c.verificationStatus}</Badge></td>
                     <td>
                       {c.verificationStatus === 'PENDING' && (

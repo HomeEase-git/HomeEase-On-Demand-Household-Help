@@ -152,7 +152,7 @@ async function main() {
   if (!cleaning) throw new Error(`Could not find "Home Cleaning" service type via /api/services: ${JSON.stringify(r.data)}`);
   info(`using service type: Home Cleaning (${cleaning.id})`);
 
-  r = await api('post', '/workers/me/service-types', { serviceTypeIds: [cleaning.id] }, workerToken);
+  r = await api('post', '/workers/me/service-types', { serviceTypeId: cleaning.id }, workerToken);
   info(`add service type -> ${r.status} ${JSON.stringify(r.data?.data || r.data)}`);
 
   r = await api(

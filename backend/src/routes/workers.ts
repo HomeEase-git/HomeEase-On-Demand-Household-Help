@@ -10,9 +10,12 @@ import {
   updateAvailability,
   getMyWorkerProfile,
   updateWorkerProfile,
-  addServiceTypes,
+  addServiceCategory,
   listMyServiceTypes,
   removeServiceType,
+  selectTask,
+  deselectTask,
+  getMyTaskCatalog,
   getWorkerCapacity,
   listMyCapabilities,
   replaceMyCapabilities,
@@ -20,6 +23,7 @@ import {
   getCertification,
   createCertification,
   updateCertification,
+  updateCertificationVisibility,
   deleteCertification,
   getPayoutMethod,
   updatePayoutMethod,
@@ -49,9 +53,10 @@ import { restrictTo } from '../middleware/role';
 import {
   validateUpdateAvailability,
   validateUpdateWorkerProfile,
-  validateAddServiceTypes,
+  validateAddServiceCategory,
   validateCreateCertification,
   validateUpdateCertification,
+  validateUpdateCertificationVisibility,
   validateUpdatePayoutMethod,
   validateUpdateTaxInfo,
   validateUpdateAvailabilitySlots,
@@ -100,10 +105,14 @@ router.post(
   '/me/service-types',
   authMiddleware,
   restrictTo('WORKER'),
-  validateAddServiceTypes,
-  addServiceTypes
+  validateAddServiceCategory,
+  addServiceCategory
 );
 router.delete('/me/service-types/:serviceTypeId', authMiddleware, restrictTo('WORKER'), removeServiceType);
+
+router.get('/me/task-catalog', authMiddleware, restrictTo('WORKER'), getMyTaskCatalog);
+router.put('/me/task-selections/:serviceTaskId', authMiddleware, restrictTo('WORKER'), selectTask);
+router.delete('/me/task-selections/:serviceTaskId', authMiddleware, restrictTo('WORKER'), deselectTask);
 
 router.get('/me/packages', authMiddleware, restrictTo('WORKER'), listMyPackages);
 router.post('/me/packages', authMiddleware, restrictTo('WORKER'), validateCreatePackage, createPackage);
@@ -145,6 +154,13 @@ router.patch(
   restrictTo('WORKER'),
   validateUpdateCertification,
   updateCertification
+);
+router.patch(
+  '/me/certifications/:certId/visibility',
+  authMiddleware,
+  restrictTo('WORKER'),
+  validateUpdateCertificationVisibility,
+  updateCertificationVisibility
 );
 router.delete('/me/certifications/:certId', authMiddleware, restrictTo('WORKER'), deleteCertification);
 

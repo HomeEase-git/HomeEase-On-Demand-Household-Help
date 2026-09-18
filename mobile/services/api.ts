@@ -1707,24 +1707,63 @@ export async function replaceMyCapabilities(optionIds: string[]): Promise<string
   }
 }
 
-export type WorkerServiceType = { id: string; name: string; description?: string | null; basePrice: number };
+export type WorkerServiceType = {
+  id: string;
+  name: string;
+  description?: string | null;
+  basePrice: number;
+  icon?: string | null;
+  requiresCertification?: boolean;
+};
 
-export async function getMyServiceTypes(): Promise<WorkerServiceType[]> {
+export type WorkerServiceCategoryStatus = 'PENDING_VERIFICATION' | 'VERIFIED' | 'REJECTED';
+
+export type WorkerServiceCategory = {
+  id: string;
+  serviceTypeId: string;
+  serviceType: WorkerServiceType;
+  status: WorkerServiceCategoryStatus;
+  gatingCertificationId: string | null;
+  verifiedAt: string | null;
+  rejectedAt: string | null;
+};
+
+/** Every category the worker has any connection to — including ones still PENDING_VERIFICATION or REJECTED. */
+export async function getMyServiceTypes(): Promise<WorkerServiceCategory[]> {
   try {
     const response = await api.get('/workers/me/service-types');
-    return response.serviceTypes ?? [];
+    return response.serviceCategories ?? [];
   } catch (error) {
-    console.error('Get my service types error:', error);
+    console.error('Get my service categories error:', error);
     throw error;
   }
 }
 
-export async function addServiceTypes(serviceTypeIds: string[]): Promise<WorkerServiceType[]> {
+export type CertificationGateInput = {
+  title: string;
+  issuer: string;
+  issueDate: string;
+  expiryDate?: string;
+  documentUrl: string;
+};
+
+/**
+ * Add one service category. certificationId/certification are only consulted
+ * when this is the worker's 2nd+ category and they don't already have an
+ * approved certification for it — the resulting category may come back
+ * PENDING_VERIFICATION rather than immediately usable. Also called
+ * internally by selectTask below the first time a task under a not-yet-
+ * connected category is picked.
+ */
+export async function addServiceCategory(
+  serviceTypeId: string,
+  gate?: { certificationId?: string; certification?: CertificationGateInput }
+): Promise<WorkerServiceCategory> {
   try {
-    const response = await api.post('/workers/me/service-types', { serviceTypeIds });
-    return response.serviceTypes ?? [];
+    const response = await api.post('/workers/me/service-types', { serviceTypeId, ...gate });
+    return response.serviceCategory;
   } catch (error) {
-    console.error('Add service types error:', error);
+    console.error('Add service category error:', error);
     throw error;
   }
 }
@@ -1735,6 +1774,71 @@ export async function removeServiceType(serviceTypeId: string) {
     return true;
   } catch (error) {
     console.error('Remove service type error:', error);
+    throw error;
+  }
+}
+
+export type WorkerTaskSelection = { id: string; serviceTaskId: string; isActive: boolean };
+
+export type TaskCatalogEntry = {
+  serviceType: WorkerServiceType;
+  categoryStatus: WorkerServiceCategoryStatus | null;
+  gatingCertificationId: string | null;
+  tasks: Array<{
+    task: {
+      id: string;
+      name: string;
+      description?: string | null;
+      pricingModel: TaskPricingModel;
+      minPrice: number | null;
+      maxPrice: number | null;
+      unitLabel: string | null;
+    };
+    mySelection: WorkerTaskSelection | null;
+    myPrice: WorkerTaskPrice | null;
+    myTiers: WorkerTaskTierPrice[];
+  }>;
+};
+
+/**
+ * One consolidated read for the task-first "Skills & Services" screen —
+ * replaces separately calling getServiceTypes + getMyServiceTypes +
+ * getMyTaskPrices.
+ */
+export async function getMyTaskCatalog(): Promise<TaskCatalogEntry[]> {
+  try {
+    const response = await api.get('/workers/me/task-catalog');
+    return response.categories ?? [];
+  } catch (error) {
+    console.error('Get task catalog error:', error);
+    throw error;
+  }
+}
+
+/**
+ * The primary "I offer this task" action. If the task's parent category
+ * isn't connected yet (or was REJECTED), the backend runs the same category
+ * gate addServiceCategory uses, passing through certificationId/certification.
+ */
+export async function selectTask(
+  serviceTaskId: string,
+  gate?: { certificationId?: string; certification?: CertificationGateInput }
+): Promise<{ taskSelection: WorkerTaskSelection; category: WorkerServiceCategory }> {
+  try {
+    const response = await api.put(`/workers/me/task-selections/${serviceTaskId}`, gate ?? {});
+    return response;
+  } catch (error) {
+    console.error('Select task error:', error);
+    throw error;
+  }
+}
+
+export async function deselectTask(serviceTaskId: string) {
+  try {
+    await api.delete(`/workers/me/task-selections/${serviceTaskId}`);
+    return true;
+  } catch (error) {
+    console.error('Deselect task error:', error);
     throw error;
   }
 }
@@ -1809,7 +1913,7 @@ export async function getWorkerPackages(workerId: string, serviceTypeId?: string
   }
 }
 
-export type TaskPricingModel = 'FIXED' | 'PER_UNIT' | 'CUSTOM_QUOTE';
+export type TaskPricingModel = 'FIXED' | 'PER_UNIT' | 'TIERED' | 'CUSTOM_QUOTE';
 
 export type WorkerTaskPrice = {
   id: string;
@@ -1817,6 +1921,19 @@ export type WorkerTaskPrice = {
   serviceTaskId: string;
   price: number | null;
   unitPrice: number | null;
+  isActive: boolean;
+};
+
+// One row of a worker's own TIERED price table — a worker has several of
+// these per task (not one), each valid for quantities up to `upToQty`; null
+// only on the last (highest) row means "this price and above." See backend
+// WorkerTaskTierPrice's docblock.
+export type WorkerTaskTierPrice = {
+  id: string;
+  workerProfileId: string;
+  serviceTaskId: string;
+  upToQty: number | null;
+  price: number;
   isActive: boolean;
 };
 
@@ -1831,6 +1948,7 @@ export type MyTaskPriceEntry = {
     unitLabel: string | null;
   };
   myPrice: WorkerTaskPrice | null;
+  myTiers: WorkerTaskTierPrice[];
 };
 
 export async function getMyTaskPrices(): Promise<MyTaskPriceEntry[]> {
@@ -1845,8 +1963,8 @@ export async function getMyTaskPrices(): Promise<MyTaskPriceEntry[]> {
 
 export async function setMyTaskPrice(
   serviceTaskId: string,
-  data: { price?: number; unitPrice?: number },
-): Promise<WorkerTaskPrice> {
+  data: { price?: number; unitPrice?: number; tiers?: Array<{ upToQty: number | null; price: number }> },
+): Promise<WorkerTaskPrice | { tiers: WorkerTaskTierPrice[] }> {
   try {
     const response = await api.put(`/workers/me/task-prices/${serviceTaskId}`, data);
     return response;
@@ -1895,6 +2013,7 @@ export type Certification = {
   status: string;
   rejectionReason: string | null;
   serviceTypeId: string | null;
+  visibleToClients: boolean;
 };
 
 export async function getMyCertifications(): Promise<Certification[]> {
@@ -1931,6 +2050,7 @@ export async function addCertification(data: {
   expiryDate?: string | null;
   documentUrl: string;
   serviceTypeId?: string | null;
+  visibleToClients?: boolean;
 }): Promise<Certification> {
   try {
     const response = await api.post('/workers/me/certifications', data);
@@ -1950,6 +2070,7 @@ export async function updateCertification(
     expiryDate?: string | null;
     documentUrl?: string;
     serviceTypeId?: string | null;
+    visibleToClients?: boolean;
   },
 ): Promise<Certification> {
   try {
@@ -1957,6 +2078,23 @@ export async function updateCertification(
     return response.certification;
   } catch (error) {
     console.error('Update certification error:', error);
+    throw error;
+  }
+}
+
+// Dedicated toggle, kept separate from updateCertification — flipping this
+// is a display preference, not an edit to the underlying claim, so it must
+// NOT reset the certification's verificationStatus back to PENDING the way
+// a full edit does.
+export async function updateCertificationVisibility(
+  certId: string,
+  visibleToClients: boolean,
+): Promise<Certification> {
+  try {
+    const response = await api.patch(`/workers/me/certifications/${certId}/visibility`, { visibleToClients });
+    return response.certification;
+  } catch (error) {
+    console.error('Update certification visibility error:', error);
     throw error;
   }
 }

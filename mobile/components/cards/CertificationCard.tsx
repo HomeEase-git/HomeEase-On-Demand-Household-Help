@@ -1,5 +1,5 @@
 import React from "react";
-import { View, Text, Pressable } from "react-native";
+import { View, Text, Pressable, Switch } from "react-native";
 import { AppIcon as Ionicons } from "../icons/AppIcon";
 import StatusBadge from "../ui/StatusBadge";
 import type { StatusType } from "../ui/StatusBadge";
@@ -13,6 +13,7 @@ type Cert = {
   issueDate: string;
   expiryDate: string | null;
   status: string;
+  visibleToClients: boolean;
 };
 
 type Props = {
@@ -20,6 +21,7 @@ type Props = {
   onPress: () => void;
   onEdit: () => void;
   onDelete: () => void;
+  onToggleVisibility: (visibleToClients: boolean) => void;
 };
 
 export const CertificationCard: React.FC<Props> = ({
@@ -27,6 +29,7 @@ export const CertificationCard: React.FC<Props> = ({
   onPress,
   onEdit,
   onDelete,
+  onToggleVisibility,
 }) => {
   const alertModal = useAlertModal();
 
@@ -52,6 +55,22 @@ export const CertificationCard: React.FC<Props> = ({
       <Text className="text-text-muted text-xs mt-1">
         {cert.issueDate} – {cert.expiryDate || "No expiry"}
       </Text>
+      <View className="flex-row items-center justify-between mt-3 pt-3 border-t border-divider">
+        <View className="flex-1 pr-2">
+          <Text className="text-text-primary text-sm">Show to clients</Text>
+          {cert.status !== "Verified" && (
+            <Text className="text-text-muted text-xs mt-0.5">
+              Only shows once verified
+            </Text>
+          )}
+        </View>
+        <Switch
+          value={cert.visibleToClients}
+          onValueChange={onToggleVisibility}
+          trackColor={{ false: colors.toggleOff, true: colors.brand.DEFAULT }}
+          thumbColor={colors.white}
+        />
+      </View>
       <View className="flex-row mt-2">
         <Pressable onPress={onEdit} className="p-2">
           <Ionicons name="pencil-outline" size={18} color={colors.text.muted} />

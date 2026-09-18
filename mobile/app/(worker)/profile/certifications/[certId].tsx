@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { View, Text, Image } from "react-native";
+import { View, Text, Image, Switch } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { AppIcon as Ionicons } from "../../../../components/icons/AppIcon";
 import { useRouter, useLocalSearchParams } from "expo-router";
@@ -61,6 +61,18 @@ export default function CertificationDetailScreen() {
       </SafeAreaView>
     );
   }
+
+  const handleToggleVisibility = async (next: boolean) => {
+    if (!cert) return;
+    setCert({ ...cert, visibleToClients: next });
+    try {
+      await api.updateCertificationVisibility(cert.id, next);
+    } catch (error) {
+      console.error("Update certification visibility error:", error);
+      setCert((prev) => (prev ? { ...prev, visibleToClients: !next } : prev));
+      alertModal.error("Error", "Unable to update visibility right now.");
+    }
+  };
 
   const handleDelete = () => {
     alertModal.confirm(
@@ -128,6 +140,20 @@ export default function CertificationDetailScreen() {
               Reason: {cert.rejectionReason}
             </Text>
           ) : null}
+          <View className="flex-row items-center justify-between mt-3 pt-3 border-t border-divider">
+            <View className="flex-1 pr-2">
+              <Text className="text-text-primary text-sm">Show to clients</Text>
+              {cert.status !== "Verified" && (
+                <Text className="text-text-muted text-xs mt-0.5">Only shows once verified</Text>
+              )}
+            </View>
+            <Switch
+              value={cert.visibleToClients}
+              onValueChange={handleToggleVisibility}
+              trackColor={{ false: colors.toggleOff, true: colors.brand.DEFAULT }}
+              thumbColor={colors.white}
+            />
+          </View>
         </View>
 
         <View className="gap-3">

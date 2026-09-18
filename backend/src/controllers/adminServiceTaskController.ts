@@ -11,7 +11,7 @@ interface AuthRequest extends Request {
   user?: JwtPayload;
 }
 
-const VALID_PRICING_MODELS: TaskPricingModel[] = ['FIXED', 'PER_UNIT', 'CUSTOM_QUOTE'];
+const VALID_PRICING_MODELS: TaskPricingModel[] = ['FIXED', 'PER_UNIT', 'TIERED', 'CUSTOM_QUOTE'];
 
 const taskInclude = {
   quantityScopeField: { select: { id: true, label: true } },
@@ -71,15 +71,15 @@ function validateTaskInput(body: TaskInputBody, existingNumberFieldIds: Set<stri
     return 'minPrice and maxPrice are required and minPrice must be <= maxPrice.';
   }
 
-  if (body.pricingModel === 'PER_UNIT') {
+  if (body.pricingModel === 'PER_UNIT' || body.pricingModel === 'TIERED') {
     if (!body.unitLabel?.trim()) {
-      return 'unitLabel is required for a per-unit task (e.g. "kilo", "sq.m.").';
+      return 'unitLabel is required for a per-unit or tiered task (e.g. "kilo", "sq.m.").';
     }
     if (!body.quantityScopeFieldId || !existingNumberFieldIds.has(body.quantityScopeFieldId)) {
       return 'quantityScopeFieldId must reference a NUMBER-type field on this service category.';
     }
   } else if (body.unitLabel || body.quantityScopeFieldId) {
-    return 'unitLabel and quantityScopeFieldId only apply to per-unit tasks.';
+    return 'unitLabel and quantityScopeFieldId only apply to per-unit or tiered tasks.';
   }
 
   return null;
@@ -149,8 +149,9 @@ export const createTask = async (req: AuthRequest, res: Response) => {
         pricingModel: body.pricingModel as TaskPricingModel,
         minPrice: isCustomQuote ? null : body.minPrice!,
         maxPrice: isCustomQuote ? null : body.maxPrice!,
-        unitLabel: body.pricingModel === 'PER_UNIT' ? body.unitLabel!.trim() : null,
-        quantityScopeFieldId: body.pricingModel === 'PER_UNIT' ? body.quantityScopeFieldId! : null,
+        unitLabel: body.pricingModel === 'PER_UNIT' || body.pricingModel === 'TIERED' ? body.unitLabel!.trim() : null,
+        quantityScopeFieldId:
+          body.pricingModel === 'PER_UNIT' || body.pricingModel === 'TIERED' ? body.quantityScopeFieldId! : null,
         durationHours: isCustomQuote ? null : body.durationHours ?? null,
       },
       include: taskInclude,
@@ -214,8 +215,9 @@ export const updateTask = async (req: AuthRequest, res: Response) => {
         pricingModel: body.pricingModel as TaskPricingModel,
         minPrice: isCustomQuote ? null : body.minPrice!,
         maxPrice: isCustomQuote ? null : body.maxPrice!,
-        unitLabel: body.pricingModel === 'PER_UNIT' ? body.unitLabel!.trim() : null,
-        quantityScopeFieldId: body.pricingModel === 'PER_UNIT' ? body.quantityScopeFieldId! : null,
+        unitLabel: body.pricingModel === 'PER_UNIT' || body.pricingModel === 'TIERED' ? body.unitLabel!.trim() : null,
+        quantityScopeFieldId:
+          body.pricingModel === 'PER_UNIT' || body.pricingModel === 'TIERED' ? body.quantityScopeFieldId! : null,
         durationHours: isCustomQuote ? null : body.durationHours ?? null,
         isActive: body.isActive ?? existing.isActive,
       },

@@ -6,11 +6,11 @@ import { getAppSettings } from '@services/appSettingsService';
 import { parseWorkerResume } from '@services/resumeParseService';
 import { computeWorkerTier, tierMultiplier } from '@utils/workerTier';
 import { computeJobPricing } from '@utils/pricing';
-import { distanceKm } from '@utils/geo';
+import { resolveDrivingDistancesKm } from '@services/googleDistanceService';
 import { buildCapabilityFilters } from '@services/matchingService';
 import { normalizeTin, maskTin } from '@utils/taxId';
 import { getCertificateDownloadUrl } from '@services/taxCertificateService';
-import { isPriceWithinTaskBounds } from '@services/taskPriceService';
+import { isPriceWithinTaskBounds, resolveTierPrice, validateTierRows } from '@services/taskPriceService';
 import { validatePriceWithinPricingRule } from '@services/pricingRuleService';
 import { comparePassword } from '@utils/passwordHash';
 import { notifyUser } from '@utils/notify';
@@ -103,16 +103,40 @@ export const searchWorkers = async (req: AuthRequest, res: Response) => {
       ? await buildCapabilityFilters(serviceTypeName, parsedScopeAnswers)
       : [];
 
-    // A specific task with a real price (FIXED/PER_UNIT) is only bookable
-    // through a worker who's actually priced it — createBooking would 409 on
-    // any other candidate. Excluded from results outright (not shown with a
-    // null price) rather than left for the client to discover at checkout.
-    // CUSTOM_QUOTE tasks have no WorkerTaskPrice at all, so they impose no filter.
+    // A specific task with a real price (FIXED/PER_UNIT/TIERED) is only
+    // bookable through a worker who's actually priced it — createBooking
+    // would 409 on any other candidate. Excluded from results outright (not
+    // shown with a null price) rather than left for the client to discover
+    // at checkout. A CUSTOM_QUOTE task has no WorkerTaskPrice at all (priced
+    // on-site), so it's gated on WorkerTaskSelection instead — see that
+    // model's docblock; must agree with matchingService.findAutoMatchWorker's
+    // identical split so Step 3's list and auto-match never disagree on
+    // eligibility. TIERED lives in a separate table (WorkerTaskTierPrice, a
+    // worker has many rows per task, not one) so it gets its own gate rather
+    // than reusing requirePricedTaskId's taskPrices relation.
     const serviceTask =
       typeof serviceTaskId === 'string' && serviceTaskId
-        ? await prisma.serviceTask.findUnique({ where: { id: serviceTaskId } })
+        ? await prisma.serviceTask.findUnique({
+            where: { id: serviceTaskId },
+            include: { quantityScopeField: true },
+          })
         : null;
-    const requirePricedTaskId = serviceTask && serviceTask.pricingModel !== 'CUSTOM_QUOTE' ? serviceTask.id : null;
+    const requirePricedTaskId =
+      serviceTask && serviceTask.pricingModel !== 'CUSTOM_QUOTE' && serviceTask.pricingModel !== 'TIERED'
+        ? serviceTask.id
+        : null;
+    const requireTieredTaskId = serviceTask && serviceTask.pricingModel === 'TIERED' ? serviceTask.id : null;
+    const requireSelectedTaskId = serviceTask && serviceTask.pricingModel === 'CUSTOM_QUOTE' ? serviceTask.id : null;
+
+    // Quantity for a TIERED task's bracket lookup — same label-keyed
+    // scopeAnswers mechanism PER_UNIT already sources its quantity from (see
+    // bookingController.createBooking), just resolved here too since search
+    // already has scopeAnswers available before a booking exists. NaN when
+    // the field hasn't been answered yet (browse-time, no total resolvable).
+    const tieredQuantityField = serviceTask?.pricingModel === 'TIERED' ? serviceTask.quantityScopeField : null;
+    const tieredQuantity = tieredQuantityField
+      ? Number(parsedScopeAnswers?.[tieredQuantityField.label])
+      : NaN;
 
     const whereClause: Prisma.WorkerProfileWhereInput = {
       isAvailable: true,
@@ -121,6 +145,12 @@ export const searchWorkers = async (req: AuthRequest, res: Response) => {
       AND: capabilityFilters,
       ...(requirePricedTaskId
         ? { taskPrices: { some: { serviceTaskId: requirePricedTaskId, isActive: true } } }
+        : {}),
+      ...(requireTieredTaskId
+        ? { tierPrices: { some: { serviceTaskId: requireTieredTaskId, isActive: true } } }
+        : {}),
+      ...(requireSelectedTaskId
+        ? { taskSelections: { some: { serviceTaskId: requireSelectedTaskId, isActive: true } } }
         : {}),
     };
 
@@ -132,27 +162,30 @@ export const searchWorkers = async (req: AuthRequest, res: Response) => {
       whereClause.userId = workerId;
     }
 
+    // Exact match, not substring — a "contains" match here could pull in an
+    // unrelated category whose name happens to include this one as a
+    // substring (e.g. "Repair"), and it must agree with
+    // matchingService.findAutoMatchWorker's equals check so Step 3's list and
+    // auto-match never disagree on who's eligible. Only a VERIFIED category
+    // connection counts — a 2nd+ category still PENDING_VERIFICATION (see
+    // WorkerServiceCategory's docblock) must never surface in search.
+    const serviceTypeWhere: Prisma.ServiceTypeWhereInput = {};
     if (serviceTypeName) {
-      // Exact match, not substring — a "contains" match here could pull in
-      // an unrelated category whose name happens to include this one as a
-      // substring (e.g. "Repair"), and it must agree with
-      // matchingService.findAutoMatchWorker's equals check so Step 3's list
-      // and auto-match never disagree on who's eligible.
-      whereClause.serviceTypes = { some: { name: { equals: serviceTypeName, mode: 'insensitive' } } };
+      serviceTypeWhere.name = { equals: serviceTypeName, mode: 'insensitive' };
+    }
+    if (maxPrice) {
+      const price = parseFloat(maxPrice as string);
+      if (!isNaN(price)) {
+        serviceTypeWhere.basePrice = { lte: price };
+      }
+    }
+    if (Object.keys(serviceTypeWhere).length > 0) {
+      whereClause.serviceCategories = { some: { status: 'VERIFIED', serviceType: serviceTypeWhere } };
     }
 
     if (minRating) {
       const rating = parseFloat(minRating as string);
       if (!isNaN(rating)) whereClause.rating = { gte: rating };
-    }
-
-    if (maxPrice) {
-      const price = parseFloat(maxPrice as string);
-      if (!isNaN(price)) {
-        whereClause.serviceTypes = {
-          some: { ...(whereClause.serviceTypes as any)?.some, basePrice: { lte: price } },
-        };
-      }
     }
 
     if (hasPetsBool) {
@@ -178,9 +211,14 @@ export const searchWorkers = async (req: AuthRequest, res: Response) => {
       where: whereClause,
       include: {
         user: { select: { id: true, fullName: true, avatar: true } },
-        serviceTypes: {
+        serviceCategories: {
+          where: { status: 'VERIFIED' },
           include: {
-            tasks: { where: { isActive: true }, select: { id: true, basePrice: true, pricingModel: true } },
+            serviceType: {
+              include: {
+                tasks: { where: { isActive: true }, select: { id: true, basePrice: true, pricingModel: true } },
+              },
+            },
           },
         },
         availability: dayStart ? { where: { date: dayStart, isBlocked: false, isBooked: false } } : false,
@@ -206,25 +244,39 @@ export const searchWorkers = async (req: AuthRequest, res: Response) => {
     const clientLng = typeof lng === 'string' ? parseFloat(lng) : NaN;
     const hasClientLocation = !isNaN(clientLat) && !isNaN(clientLng);
 
+    // Distance-eligible candidates on this page — resolved as one batched
+    // Distance Matrix call (real driving distance, falling back to
+    // straight-line per-worker) rather than one request per card.
+    const workersWithAddress = hasClientLocation
+      ? page_.filter((w) => w.addressLat != null && w.addressLng != null)
+      : [];
+
     // Expertise tier — computed live from rating + completed-job count (see
     // utils/workerTier.ts). Batched over just this page, not all candidates.
     // Independent of each other, so run in parallel rather than serially.
-    const [tierSettings, completedCounts] = await Promise.all([
+    const [tierSettings, completedCounts, workerDistancesKm] = await Promise.all([
       getAppSettings(),
       prisma.booking.groupBy({
         by: ['workerId'],
         where: { workerId: { in: page_.map((w) => w.userId) }, status: 'COMPLETED' },
         _count: { _all: true },
       }),
+      resolveDrivingDistancesKm(
+        { lat: clientLat, lng: clientLng },
+        workersWithAddress.map((w) => ({ lat: w.addressLat!, lng: w.addressLng! }))
+      ),
     ]);
     const completedByWorkerId = new Map(completedCounts.map((c) => [c.workerId as string, c._count._all]));
+    const distanceKmByWorkerId = new Map(
+      workersWithAddress.map((w, i) => [w.id, workerDistancesKm[i]])
+    );
 
     // Batched across the whole page (every task under every candidate's
     // service types), not just the one requested serviceTaskId — the
     // category-level price-range preview below needs each worker's own
     // priced value for every task in their matched category, not just one.
     const allTaskIds = Array.from(
-      new Set(page_.flatMap((w) => w.serviceTypes.flatMap((st) => st.tasks.map((t) => t.id))))
+      new Set(page_.flatMap((w) => w.serviceCategories.flatMap((c) => c.serviceType.tasks.map((t) => t.id))))
     );
     const workerTaskPrices = allTaskIds.length
       ? await prisma.workerTaskPrice.findMany({
@@ -234,6 +286,42 @@ export const searchWorkers = async (req: AuthRequest, res: Response) => {
     const taskPriceByWorkerAndTask = new Map(
       workerTaskPrices.map((p) => [`${p.workerProfileId}:${p.serviceTaskId}`, p])
     );
+    const workerTaskTierPrices = allTaskIds.length
+      ? await prisma.workerTaskTierPrice.findMany({
+          where: { workerProfileId: { in: page_.map((w) => w.id) }, serviceTaskId: { in: allTaskIds }, isActive: true },
+        })
+      : [];
+    const tierPricesByWorkerAndTask = new Map<string, Array<{ upToQty: number | null; price: number }>>();
+    for (const tp of workerTaskTierPrices) {
+      const key = `${tp.workerProfileId}:${tp.serviceTaskId}`;
+      const list = tierPricesByWorkerAndTask.get(key) ?? [];
+      list.push({ upToQty: tp.upToQty, price: tp.price });
+      tierPricesByWorkerAndTask.set(key, list);
+    }
+    // TIERED contributes its worker's own min-max spread instead of one
+    // resolved value — used by the category-range preview below, where no
+    // specific quantity is known yet.
+    const tierRangeValues = (workerProfileId: string, task: { id: string; basePrice: number }): number[] => {
+      const tiers = tierPricesByWorkerAndTask.get(`${workerProfileId}:${task.id}`) ?? [];
+      if (tiers.length === 0) return [task.basePrice];
+      const prices = tiers.map((t) => t.price);
+      return [Math.min(...prices), Math.max(...prices)];
+    };
+    // The category-level task preview below only shows tasks the worker has
+    // actually selected (see WorkerTaskSelection) — a client shouldn't see a
+    // price/range for a task the worker never agreed to perform.
+    const workerTaskSelections = allTaskIds.length
+      ? await prisma.workerTaskSelection.findMany({
+          where: { workerProfileId: { in: page_.map((w) => w.id) }, serviceTaskId: { in: allTaskIds }, isActive: true },
+        })
+      : [];
+    const selectedTaskIdsByWorker = new Map<string, Set<string>>();
+    for (const sel of workerTaskSelections) {
+      if (!selectedTaskIdsByWorker.has(sel.workerProfileId)) {
+        selectedTaskIdsByWorker.set(sel.workerProfileId, new Set());
+      }
+      selectedTaskIdsByWorker.get(sel.workerProfileId)!.add(sel.serviceTaskId);
+    }
     // Keeps the category-level browse list from going empty for a worker
     // still mid-setup (a specific-task search above is strict instead: such a
     // worker is excluded from results entirely via requirePricedTaskId).
@@ -243,18 +331,34 @@ export const searchWorkers = async (req: AuthRequest, res: Response) => {
     ): number => effectiveTaskPrice(task, taskPriceByWorkerAndTask.get(`${workerProfileId}:${task.id}`));
 
     const cards = page_.map((worker) => {
+      const categories = worker.serviceCategories.map((c) => c.serviceType);
       const matchedServiceType =
-        worker.serviceTypes.find((st) => serviceTypeName && st.name.toLowerCase() === serviceTypeName.toLowerCase()) ??
-        worker.serviceTypes[0];
+        categories.find((st) => serviceTypeName && st.name.toLowerCase() === serviceTypeName.toLowerCase()) ??
+        categories[0];
+      const selectedTaskIds = selectedTaskIdsByWorker.get(worker.id) ?? new Set<string>();
 
-      // requirePricedTaskId guarantees (via the DB filter above) that every
-      // candidate here has an active WorkerTaskPrice for this exact task, so
-      // effectiveTaskValue's task.basePrice fallback never actually triggers
-      // for this specific lookup — only for the category-range preview below,
-      // where a worker legitimately may not have priced every task yet.
-      const basePrice = serviceTask
-        ? effectiveTaskValue(worker.id, serviceTask)
-        : matchedServiceType?.basePrice ?? null;
+      // requirePricedTaskId/requireTieredTaskId guarantee (via the DB filter
+      // above) that every candidate here has priced this exact task, so the
+      // basePrice fallback never actually triggers for this specific lookup
+      // — only for the category-range preview below, where a worker
+      // legitimately may not have priced every task yet. TIERED resolves the
+      // worker's own tier row matching tieredQuantity (same quantity a
+      // FIXED/PER_UNIT booking would already have from scopeAnswers) — when
+      // that resolves to nothing (quantity known but no row covers it), this
+      // worker is dropped from the results below (see tierQuantityUnresolved)
+      // rather than shown with a misleading null price.
+      const tierQuantityUnresolved =
+        serviceTask?.pricingModel === 'TIERED' && !Number.isNaN(tieredQuantity)
+          ? resolveTierPrice(tierPricesByWorkerAndTask.get(`${worker.id}:${serviceTask.id}`) ?? [], tieredQuantity) ==
+            null
+          : false;
+      const basePrice = !serviceTask
+        ? matchedServiceType?.basePrice ?? null
+        : serviceTask.pricingModel === 'TIERED'
+          ? Number.isNaN(tieredQuantity)
+            ? null
+            : resolveTierPrice(tierPricesByWorkerAndTask.get(`${worker.id}:${serviceTask.id}`) ?? [], tieredQuantity)
+          : effectiveTaskValue(worker.id, serviceTask);
       // PER_UNIT has no meaningful total until a quantity is known (collected
       // later, in the booking form's scope-answer step) — expose the raw
       // rate instead so mobile can compute total × quantity client-side (see
@@ -277,16 +381,15 @@ export const searchWorkers = async (req: AuthRequest, res: Response) => {
       // charge (see utils/pricing.computeJobPricing) — this is a genuine
       // per-job preview, not a separate hourly-rate guess.
       const multiplier = tierMultiplier(tier, tierSettings);
-      const workerDistanceKm =
-        hasClientLocation && worker.addressLat != null && worker.addressLng != null
-          ? distanceKm({ lat: clientLat, lng: clientLng }, { lat: worker.addressLat, lng: worker.addressLng })
-          : null;
+      const workerDistanceKm = distanceKmByWorkerId.get(worker.id) ?? null;
       const jobPricing =
         basePrice != null && unitPriceForTask == null
           ? computeJobPricing({
               basePrice,
               tierMultiplier: multiplier,
               distanceKm: workerDistanceKm,
+              freeDistanceKm: tierSettings.freeDistanceKm,
+              perKmFee: tierSettings.perKmFee,
             })
           : null;
       const estimatedTotal = jobPricing?.estimatedPrice ?? null;
@@ -297,8 +400,11 @@ export const searchWorkers = async (req: AuthRequest, res: Response) => {
       // priced yet), at THIS worker's own (already fixed) tier, not a flat
       // single number. Distance isn't factored in here (unlike estimatedTotal
       // above) since browsing lists don't scope to one client address/booking yet.
-      const matchedTaskPrices = matchedServiceType?.tasks?.length
-        ? matchedServiceType.tasks.map((t) => effectiveTaskValue(worker.id, t))
+      const matchedSelectedTasks = matchedServiceType?.tasks?.filter((t) => selectedTaskIds.has(t.id)) ?? [];
+      const matchedTaskPrices = matchedSelectedTasks.length
+        ? matchedSelectedTasks.flatMap((t) =>
+            t.pricingModel === 'TIERED' ? tierRangeValues(worker.id, t) : [effectiveTaskValue(worker.id, t)]
+          )
         : basePrice != null
           ? [basePrice]
           : [];
@@ -306,6 +412,12 @@ export const searchWorkers = async (req: AuthRequest, res: Response) => {
       const priceRangeMax = matchedTaskPrices.length ? Math.round(Math.max(...matchedTaskPrices) * multiplier) : null;
 
       return {
+        // Dropped below when true — a worker who's priced *some* tier rows
+        // for this task but none covering the requested quantity is not a
+        // match for this specific search (see tierQuantityUnresolved above),
+        // same as if they'd never priced the task at all. Stripped from the
+        // final card shape after the filter.
+        tierQuantityUnresolved,
         id: worker.userId,
         fullName: worker.user.fullName,
         avatar: worker.user.avatar,
@@ -331,7 +443,7 @@ export const searchWorkers = async (req: AuthRequest, res: Response) => {
         // category later in the booking flow without an extra round-trip.
         matchedServiceTypeId: matchedServiceType?.id ?? null,
         service: matchedServiceType?.name ?? 'General service',
-        serviceTypeNames: worker.serviceTypes.map((st) => st.name),
+        serviceTypeNames: categories.map((st) => st.name),
         // At-capacity workers are already filtered out above — these are
         // exposed so a still-available worker's current load can be shown
         // (e.g. "1 active job"), not to signal fullness.
@@ -342,11 +454,19 @@ export const searchWorkers = async (req: AuthRequest, res: Response) => {
       };
     });
 
+    // See tierQuantityUnresolved above — total/pages above already reflect
+    // the coarse "priced at least one tier row" DB filter, not this precise
+    // per-quantity check, so a TIERED search with a known quantity can
+    // legitimately return fewer cards than `total` implies for this one page.
+    const visibleCards = cards
+      .filter((c) => !c.tierQuantityUnresolved)
+      .map(({ tierQuantityUnresolved: _drop, ...card }) => card);
+
     return res.status(200).json({
       success: true,
       message: 'Workers retrieved successfully',
       data: {
-        workers: cards,
+        workers: visibleCards,
         pagination: {
           page: pageNum,
           limit: limitNum,
@@ -388,7 +508,6 @@ export const getWorkerDetail = async (req: AuthRequest, res: Response) => {
         kycStatus: true,
         kycSubmittedAt: true,
         kycApprovedAt: true,
-        resumeUrl: true,
         maxConcurrentJobs: true,
         user: {
           select: {
@@ -399,19 +518,45 @@ export const getWorkerDetail = async (req: AuthRequest, res: Response) => {
             avatar: true,
           },
         },
-        serviceTypes: {
+        serviceCategories: {
+          where: { status: 'VERIFIED' },
           select: {
-            id: true,
-            name: true,
-            basePrice: true,
-            tasks: { where: { isActive: true }, select: { id: true, basePrice: true, pricingModel: true } },
+            serviceType: {
+              select: {
+                id: true,
+                name: true,
+                basePrice: true,
+                tasks: { where: { isActive: true }, select: { id: true, basePrice: true, pricingModel: true } },
+              },
+            },
           },
         },
         // Only the count is used below (reviewCount) — select just that
         // instead of pulling every review row (comment, photos, etc.) for it.
         _count: { select: { reviews: true } },
-        certifications: true,
-        resumeParseResult: true,
+        // Client-facing: only certifications the worker has both gotten
+        // approved AND opted to show (visibleToClients) belong on a public
+        // profile — a PENDING/REJECTED claim or one the worker toggled off
+        // has no business reaching a client's device at all.
+        certifications: {
+          where: { verificationStatus: 'APPROVED', visibleToClients: true },
+        },
+        // resumeUrl and resumeParseResult.rawText are deliberately excluded
+        // here — the raw file/text carry the worker's phone/email, which a
+        // client has no legitimate need to see (and it invites going
+        // off-platform to contact them directly). Only the derived,
+        // non-identifying fields the profile screen actually renders are
+        // selected; the worker's own resume-preview screen fetches the full
+        // record through a different (self-only) endpoint.
+        resumeParseResult: {
+          select: {
+            parsedSkills: true,
+            yearsOfExperience: true,
+            masteryLevel: true,
+            tradeCategory: true,
+            summary: true,
+          },
+        },
       },
     });
 
@@ -430,21 +575,52 @@ export const getWorkerDetail = async (req: AuthRequest, res: Response) => {
     const tier = computeWorkerTier(worker.rating, completedJobs, tierSettings);
     const multiplier = tierMultiplier(tier, tierSettings);
 
-    const allTaskIds = worker.serviceTypes.flatMap((st) => st.tasks.map((t) => t.id));
-    const workerTaskPrices = allTaskIds.length
-      ? await prisma.workerTaskPrice.findMany({
-          where: { workerProfileId: worker.id, serviceTaskId: { in: allTaskIds }, isActive: true },
-        })
-      : [];
+    const categories = worker.serviceCategories.map((c) => c.serviceType);
+    const allTaskIds = categories.flatMap((st) => st.tasks.map((t) => t.id));
+    const [workerTaskPrices, workerTaskSelections, workerTaskTierPrices] = await Promise.all([
+      allTaskIds.length
+        ? prisma.workerTaskPrice.findMany({
+            where: { workerProfileId: worker.id, serviceTaskId: { in: allTaskIds }, isActive: true },
+          })
+        : Promise.resolve([]),
+      allTaskIds.length
+        ? prisma.workerTaskSelection.findMany({
+            where: { workerProfileId: worker.id, serviceTaskId: { in: allTaskIds }, isActive: true },
+          })
+        : Promise.resolve([]),
+      allTaskIds.length
+        ? prisma.workerTaskTierPrice.findMany({
+            where: { workerProfileId: worker.id, serviceTaskId: { in: allTaskIds }, isActive: true },
+          })
+        : Promise.resolve([]),
+    ]);
     const taskPriceByTaskId = new Map(workerTaskPrices.map((p) => [p.serviceTaskId, p]));
+    const selectedTaskIds = new Set(workerTaskSelections.map((s) => s.serviceTaskId));
+    const tierPricesByTaskId = new Map<string, number[]>();
+    for (const tp of workerTaskTierPrices) {
+      const list = tierPricesByTaskId.get(tp.serviceTaskId) ?? [];
+      list.push(tp.price);
+      tierPricesByTaskId.set(tp.serviceTaskId, list);
+    }
 
     // Per-category price range at this worker's own priced values (falling
     // back to a task's basePrice for one they haven't priced yet), at this
     // worker's own (fixed) tier — mirrors serviceController's
-    // marketplace-wide range but narrowed to just this one worker.
-    const services = worker.serviceTypes.map((st) => {
-      const taskPrices = st.tasks.length
-        ? st.tasks.map((t) => effectiveTaskPrice(t, taskPriceByTaskId.get(t.id)))
+    // marketplace-wide range but narrowed to just this one worker. Only
+    // tasks the worker has actually selected count — a client shouldn't see
+    // a price/range for a task the worker never agreed to perform. TIERED
+    // contributes its own min-max spread across the worker's price-tier rows
+    // (see WorkerTaskTierPrice) instead of one resolved value.
+    const services = categories.map((st) => {
+      const selectedTasks = st.tasks.filter((t) => selectedTaskIds.has(t.id));
+      const taskPrices = selectedTasks.length
+        ? selectedTasks.flatMap((t) => {
+            if (t.pricingModel === 'TIERED') {
+              const prices = tierPricesByTaskId.get(t.id) ?? [];
+              return prices.length ? [Math.min(...prices), Math.max(...prices)] : [t.basePrice];
+            }
+            return [effectiveTaskPrice(t, taskPriceByTaskId.get(t.id))];
+          })
         : [st.basePrice];
       return {
         id: st.id,
@@ -477,7 +653,6 @@ export const getWorkerDetail = async (req: AuthRequest, res: Response) => {
         kycStatus: worker.kycStatus,
         kycSubmittedAt: worker.kycSubmittedAt,
         kycApprovedAt: worker.kycApprovedAt,
-        resumeUrl: worker.resumeUrl,
         // Nested relations matching Prisma schema
         resumeParseResult: worker.resumeParseResult,
         certifications: worker.certifications,
@@ -996,87 +1171,195 @@ export const updateWorkerProfile = async (req: AuthRequest, res: Response) => {
   }
 };
 
+type CertificationGateInput = {
+  title?: string;
+  issuer?: string;
+  issueDate?: string;
+  expiryDate?: string;
+  documentUrl?: string;
+};
+
+type CategoryGateResult =
+  | { category: Prisma.WorkerServiceCategoryGetPayload<{}> }
+  | { error: string; status: number };
+
+/**
+ * Shared gating logic for connecting a worker to a service category — used
+ * by both addServiceCategory (explicit "add category" action) and
+ * selectTask (implicit add, the first time a task under a not-yet-connected
+ * category is picked). See WorkerServiceCategory's schema docblock for the
+ * rule: a worker's FIRST category is VERIFIED immediately (gated only by
+ * ServiceType.requiresCertification, exactly as before this model existed).
+ * Every category beyond the first always requires the same single-document
+ * Certification review, regardless of that flag, and starts
+ * PENDING_VERIFICATION until an admin approves it (see
+ * adminCertificationController's approve/reject side effect). Re-attempting
+ * a previously REJECTED category falls through to this same 2nd+ branch and
+ * upserts it back to PENDING_VERIFICATION — it is never a permanent dead end.
+ */
+async function runCategoryGate(
+  workerProfileId: string,
+  serviceTypeId: string,
+  input: { certificationId?: string; certification?: CertificationGateInput }
+): Promise<CategoryGateResult> {
+  const targetServiceType = await prisma.serviceType.findUnique({ where: { id: serviceTypeId } });
+  if (!targetServiceType) {
+    return { error: 'Service type does not exist', status: 400 };
+  }
+
+  const existing = await prisma.workerServiceCategory.findUnique({
+    where: { workerProfileId_serviceTypeId: { workerProfileId, serviceTypeId } },
+  });
+  if (existing && existing.status !== 'REJECTED') {
+    return { category: existing };
+  }
+
+  const existingCount = await prisma.workerServiceCategory.count({
+    where: { workerProfileId, status: { in: ['VERIFIED', 'PENDING_VERIFICATION'] } },
+  });
+
+  const findApprovedCert = () =>
+    prisma.certification.findFirst({
+      where: { workerProfileId, serviceTypeId, verificationStatus: 'APPROVED' },
+    });
+
+  if (existingCount === 0) {
+    // First category — unchanged from before WorkerServiceCategory existed.
+    if (targetServiceType.requiresCertification) {
+      const approvedCert = await findApprovedCert();
+      if (!approvedCert) {
+        return {
+          error: `"${targetServiceType.name}" requires an admin-approved certification before you can add it. Upload one tagged to that category first.`,
+          status: 403,
+        };
+      }
+      const category = await prisma.workerServiceCategory.create({
+        data: { workerProfileId, serviceTypeId, status: 'VERIFIED', gatingCertificationId: approvedCert.id, verifiedAt: new Date() },
+      });
+      return { category };
+    }
+    const category = await prisma.workerServiceCategory.create({
+      data: { workerProfileId, serviceTypeId, status: 'VERIFIED', verifiedAt: new Date() },
+    });
+    return { category };
+  }
+
+  // 2nd+ category (or retrying a REJECTED one) — always gated, regardless of
+  // requiresCertification.
+  const approvedCert = await findApprovedCert();
+  if (approvedCert) {
+    const category = await prisma.workerServiceCategory.upsert({
+      where: { workerProfileId_serviceTypeId: { workerProfileId, serviceTypeId } },
+      create: { workerProfileId, serviceTypeId, status: 'VERIFIED', gatingCertificationId: approvedCert.id, verifiedAt: new Date() },
+      update: { status: 'VERIFIED', gatingCertificationId: approvedCert.id, verifiedAt: new Date(), rejectedAt: null },
+    });
+    return { category };
+  }
+
+  const pendingCert = input.certificationId
+    ? await prisma.certification.findFirst({
+        where: { id: input.certificationId, workerProfileId, serviceTypeId },
+      })
+    : await prisma.certification.findFirst({
+        where: { workerProfileId, serviceTypeId, verificationStatus: 'PENDING' },
+        orderBy: { createdAt: 'desc' },
+      });
+
+  if (!pendingCert && !input.certification) {
+    return {
+      error: `Adding "${targetServiceType.name}" as an additional service requires uploading a supporting document for admin review.`,
+      status: 400,
+    };
+  }
+  if (!pendingCert) {
+    const { title, issuer, issueDate, documentUrl } = input.certification!;
+    if (!title || !issuer || !issueDate || !documentUrl) {
+      return { error: 'certification requires title, issuer, issueDate, and documentUrl', status: 400 };
+    }
+  }
+
+  // Certification create (if needed) + category upsert happen atomically so
+  // the two rows are never observed half-written by a concurrent request.
+  const category = await prisma.$transaction(async (tx) => {
+    const cert =
+      pendingCert ??
+      (await tx.certification.create({
+        data: {
+          workerProfileId,
+          serviceTypeId,
+          title: input.certification!.title!.trim(),
+          issuer: input.certification!.issuer!.trim(),
+          issueDate: new Date(input.certification!.issueDate!),
+          expiryDate: input.certification!.expiryDate ? new Date(input.certification!.expiryDate!) : null,
+          documentUrl: input.certification!.documentUrl!,
+          verificationStatus: 'PENDING',
+        },
+      }));
+
+    return tx.workerServiceCategory.upsert({
+      where: { workerProfileId_serviceTypeId: { workerProfileId, serviceTypeId } },
+      create: { workerProfileId, serviceTypeId, status: 'PENDING_VERIFICATION', gatingCertificationId: cert.id },
+      update: { status: 'PENDING_VERIFICATION', gatingCertificationId: cert.id, verifiedAt: null, rejectedAt: null },
+    });
+  });
+
+  return { category };
+}
+
 /**
  * POST /api/workers/me/service-types
- * Attach ServiceType(s) to worker (worker only)
+ * Explicitly add one service category to the worker's profile (worker
+ * only). Body: { serviceTypeId, certificationId?, certification? } — the
+ * latter two are only consulted when this is the worker's 2nd+ category and
+ * they don't already have an approved certification for it (see
+ * runCategoryGate). Also invoked internally by selectTask the first time a
+ * task under a not-yet-connected category is picked.
  */
-export const addServiceTypes = async (req: AuthRequest, res: Response) => {
+export const addServiceCategory = async (req: AuthRequest, res: Response) => {
   try {
     if (!req.user) {
       return res.status(401).json(errorResponse(401, 'Not authenticated'));
     }
 
-    const { serviceTypeIds } = req.body;
+    const { serviceTypeId, certificationId, certification } = req.body as {
+      serviceTypeId?: string;
+      certificationId?: string;
+      certification?: CertificationGateInput;
+    };
 
-    // Verify all service types exist
-    const serviceTypes = await prisma.serviceType.findMany({
-      where: { id: { in: serviceTypeIds } },
-    });
-
-    if (serviceTypes.length !== serviceTypeIds.length) {
-      return res.status(400).json(errorResponse(400, 'One or more service types do not exist'));
+    if (typeof serviceTypeId !== 'string' || !serviceTypeId) {
+      return res.status(400).json(errorResponse(400, 'serviceTypeId is required'));
     }
 
-    // Licensed trades (see ServiceType.requiresCertification) previously had
-    // zero credential check — any worker could self-add "Electrical Work" or
-    // "Aircon/Refrigeration Repair" the same way they'd add "Cleaning".
-    // Gate those specific ones on an already-APPROVED Certification tagged
-    // to this exact ServiceType (see Certification.serviceTypeId) — reuses
-    // the existing Certification model/review flow, no new document pipeline.
-    const licensedTypes = serviceTypes.filter((s) => s.requiresCertification);
-    if (licensedTypes.length > 0) {
-      const workerProfileForCert = await prisma.workerProfile.findUnique({
-        where: { userId: req.user.userId },
-        select: { id: true },
-      });
-      if (!workerProfileForCert) {
-        return res.status(404).json(errorResponse(404, 'Worker profile not found'));
-      }
-      const approvedCerts = await prisma.certification.findMany({
-        where: {
-          workerProfileId: workerProfileForCert.id,
-          serviceTypeId: { in: licensedTypes.map((s) => s.id) },
-          verificationStatus: 'APPROVED',
-        },
-        select: { serviceTypeId: true },
-      });
-      const coveredServiceTypeIds = new Set(approvedCerts.map((c) => c.serviceTypeId));
-      const uncovered = licensedTypes.filter((s) => !coveredServiceTypeIds.has(s.id));
-      if (uncovered.length > 0) {
-        return res.status(403).json(
-          errorResponse(
-            403,
-            `These categories require an admin-approved certification before you can add them: ${uncovered.map((s) => s.name).join(', ')}. Upload one tagged to that category first.`
-          )
-        );
-      }
-    }
-
-    // Connect service types to worker
-    const updated = await prisma.workerProfile.update({
+    const workerProfile = await prisma.workerProfile.findUnique({
       where: { userId: req.user.userId },
-      data: {
-        serviceTypes: {
-          connect: serviceTypeIds.map((id: string) => ({ id })),
-        },
-      },
-      include: { serviceTypes: true },
+      select: { id: true },
     });
+    if (!workerProfile) {
+      return res.status(404).json(errorResponse(404, 'Worker profile not found'));
+    }
 
-    return res.status(200).json({
+    const result = await runCategoryGate(workerProfile.id, serviceTypeId, { certificationId, certification });
+    if ('error' in result) {
+      return res.status(result.status).json(errorResponse(result.status, result.error));
+    }
+
+    return res.status(201).json({
       success: true,
-      message: 'Service types added successfully',
-      data: { serviceTypes: updated.serviceTypes },
+      message: result.category.status === 'VERIFIED' ? 'Service category added' : 'Category submitted for admin review',
+      data: { serviceCategory: result.category },
     });
   } catch (error) {
-    console.error('Error adding service types:', error);
-    return res.status(500).json(errorResponse(500, 'Failed to add service types'));
+    console.error('Error adding service category:', error);
+    return res.status(500).json(errorResponse(500, 'Failed to add service category'));
   }
 };
 
 /**
  * GET /api/workers/me/service-types
- * List the authenticated worker's connected service types (worker only)
+ * List the authenticated worker's service category connections, including
+ * ones still PENDING_VERIFICATION or REJECTED (worker only) — the mobile
+ * skills screen needs the full picture to render each category's status.
  */
 export const listMyServiceTypes = async (req: AuthRequest, res: Response) => {
   try {
@@ -1086,7 +1369,9 @@ export const listMyServiceTypes = async (req: AuthRequest, res: Response) => {
 
     const workerProfile = await prisma.workerProfile.findUnique({
       where: { userId: req.user.userId },
-      select: { serviceTypes: true },
+      select: {
+        serviceCategories: { include: { serviceType: true }, orderBy: { createdAt: 'asc' } },
+      },
     });
 
     if (!workerProfile) {
@@ -1095,18 +1380,21 @@ export const listMyServiceTypes = async (req: AuthRequest, res: Response) => {
 
     return res.status(200).json({
       success: true,
-      message: 'Service types retrieved successfully',
-      data: { serviceTypes: workerProfile.serviceTypes },
+      message: 'Service categories retrieved successfully',
+      data: { serviceCategories: workerProfile.serviceCategories },
     });
   } catch (error) {
-    console.error('Error fetching service types:', error);
-    return res.status(500).json(errorResponse(500, 'Failed to fetch service types'));
+    console.error('Error fetching service categories:', error);
+    return res.status(500).json(errorResponse(500, 'Failed to fetch service categories'));
   }
 };
 
 /**
  * DELETE /api/workers/me/service-types/:serviceTypeId
- * Remove a service type from the authenticated worker's profile (worker only)
+ * Remove a whole service category connection (worker only) — deactivates
+ * every task selection/price under it and deletes the WorkerServiceCategory
+ * row. Same end-state as deselecting every task under the category one at a
+ * time (see deselectTask), exposed directly as an explicit action.
  */
 export const removeServiceType = async (req: AuthRequest, res: Response) => {
   try {
@@ -1118,34 +1406,252 @@ export const removeServiceType = async (req: AuthRequest, res: Response) => {
 
     const workerProfile = await prisma.workerProfile.findUnique({
       where: { userId: req.user.userId },
-      select: { id: true, serviceTypes: { where: { id: serviceTypeId }, select: { id: true } } },
+      select: { id: true },
     });
 
     if (!workerProfile) {
       return res.status(404).json(errorResponse(404, 'Worker profile not found'));
     }
 
-    if (workerProfile.serviceTypes.length === 0) {
-      return res.status(404).json(errorResponse(404, 'Service type not found on this profile'));
+    const existing = await prisma.workerServiceCategory.findUnique({
+      where: { workerProfileId_serviceTypeId: { workerProfileId: workerProfile.id, serviceTypeId } },
+    });
+
+    if (!existing) {
+      return res.status(404).json(errorResponse(404, 'Service category not found on this profile'));
     }
 
-    await prisma.workerProfile.update({
+    const tasks = await prisma.serviceTask.findMany({ where: { serviceTypeId }, select: { id: true } });
+    const taskIds = tasks.map((t) => t.id);
+
+    await prisma.$transaction([
+      prisma.workerTaskSelection.updateMany({
+        where: { workerProfileId: workerProfile.id, serviceTaskId: { in: taskIds } },
+        data: { isActive: false },
+      }),
+      prisma.workerTaskPrice.updateMany({
+        where: { workerProfileId: workerProfile.id, serviceTaskId: { in: taskIds } },
+        data: { isActive: false },
+      }),
+      prisma.workerServiceCategory.delete({ where: { id: existing.id } }),
+    ]);
+
+    return res.status(200).json({
+      success: true,
+      message: 'Service category removed successfully',
+      data: null,
+    });
+  } catch (error) {
+    console.error('Error removing service category:', error);
+    return res.status(500).json(errorResponse(500, 'Failed to remove service category'));
+  }
+};
+
+/**
+ * PUT /api/workers/me/task-selections/:serviceTaskId
+ * The primary "I offer this task" action (worker only) — the task-first
+ * counterpart to the old whole-category "Add Category" step. If the task's
+ * parent category isn't connected yet (or was previously REJECTED), this
+ * runs the same gate addServiceCategory uses (passing through
+ * certificationId/certification) before recording the selection.
+ */
+export const selectTask = async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      return res.status(401).json(errorResponse(401, 'Not authenticated'));
+    }
+
+    const serviceTaskId = req.params.serviceTaskId as string;
+    const { certificationId, certification } = req.body as {
+      certificationId?: string;
+      certification?: CertificationGateInput;
+    };
+
+    const task = await prisma.serviceTask.findUnique({ where: { id: serviceTaskId } });
+    if (!task) {
+      return res.status(404).json(errorResponse(404, 'Task not found'));
+    }
+
+    const workerProfile = await prisma.workerProfile.findUnique({
       where: { userId: req.user.userId },
-      data: {
-        serviceTypes: {
-          disconnect: { id: serviceTypeId },
-        },
-      },
+      select: { id: true },
+    });
+    if (!workerProfile) {
+      return res.status(404).json(errorResponse(404, 'Worker profile not found'));
+    }
+
+    const gateResult = await runCategoryGate(workerProfile.id, task.serviceTypeId, { certificationId, certification });
+    if ('error' in gateResult) {
+      return res.status(gateResult.status).json(errorResponse(gateResult.status, gateResult.error));
+    }
+
+    const selection = await prisma.workerTaskSelection.upsert({
+      where: { workerProfileId_serviceTaskId: { workerProfileId: workerProfile.id, serviceTaskId } },
+      create: { workerProfileId: workerProfile.id, serviceTaskId, isActive: true },
+      update: { isActive: true },
     });
 
     return res.status(200).json({
       success: true,
-      message: 'Service type removed successfully',
-      data: null,
+      message: 'Task selected',
+      data: { taskSelection: selection, category: gateResult.category },
     });
   } catch (error) {
-    console.error('Error removing service type:', error);
-    return res.status(500).json(errorResponse(500, 'Failed to remove service type'));
+    console.error('Error selecting task:', error);
+    return res.status(500).json(errorResponse(500, 'Failed to select task'));
+  }
+};
+
+/**
+ * DELETE /api/workers/me/task-selections/:serviceTaskId
+ * Deselect a task (worker only) — deactivates the WorkerTaskSelection and
+ * any WorkerTaskPrice row for it. If this was the last active selection
+ * under the task's category, the WorkerServiceCategory connection is removed
+ * too (deselecting every task under a category is how a worker removes that
+ * category — see removeServiceType for the equivalent explicit action).
+ */
+export const deselectTask = async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      return res.status(401).json(errorResponse(401, 'Not authenticated'));
+    }
+
+    const serviceTaskId = req.params.serviceTaskId as string;
+
+    const task = await prisma.serviceTask.findUnique({
+      where: { id: serviceTaskId },
+      select: { id: true, serviceTypeId: true },
+    });
+    if (!task) {
+      return res.status(404).json(errorResponse(404, 'Task not found'));
+    }
+
+    const workerProfile = await prisma.workerProfile.findUnique({
+      where: { userId: req.user.userId },
+      select: { id: true },
+    });
+    if (!workerProfile) {
+      return res.status(404).json(errorResponse(404, 'Worker profile not found'));
+    }
+
+    const existing = await prisma.workerTaskSelection.findUnique({
+      where: { workerProfileId_serviceTaskId: { workerProfileId: workerProfile.id, serviceTaskId } },
+    });
+    if (!existing || !existing.isActive) {
+      return res.status(404).json(errorResponse(404, 'Task not selected on this profile'));
+    }
+
+    await prisma.$transaction(async (tx) => {
+      await tx.workerTaskSelection.update({ where: { id: existing.id }, data: { isActive: false } });
+      await tx.workerTaskPrice.updateMany({
+        where: { workerProfileId: workerProfile.id, serviceTaskId },
+        data: { isActive: false },
+      });
+
+      const remaining = await tx.workerTaskSelection.count({
+        where: {
+          workerProfileId: workerProfile.id,
+          isActive: true,
+          serviceTask: { serviceTypeId: task.serviceTypeId },
+        },
+      });
+      if (remaining === 0) {
+        await tx.workerServiceCategory.deleteMany({
+          where: { workerProfileId: workerProfile.id, serviceTypeId: task.serviceTypeId },
+        });
+      }
+    });
+
+    return res.status(200).json({ success: true, message: 'Task deselected', data: null });
+  } catch (error) {
+    console.error('Error deselecting task:', error);
+    return res.status(500).json(errorResponse(500, 'Failed to deselect task'));
+  }
+};
+
+/**
+ * GET /api/workers/me/task-catalog
+ * One consolidated read for the mobile "Skills & Services" screen: every
+ * active ServiceType/ServiceTask in the admin catalog, annotated with this
+ * worker's own category status, task selection, and price (if any) —
+ * replaces separately calling getServiceTypes + listMyServiceTypes +
+ * listMyTaskPrices.
+ */
+export const getMyTaskCatalog = async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      return res.status(401).json(errorResponse(401, 'Not authenticated'));
+    }
+
+    const workerProfile = await prisma.workerProfile.findUnique({
+      where: { userId: req.user.userId },
+      select: { id: true },
+    });
+    if (!workerProfile) {
+      return res.status(404).json(errorResponse(404, 'Worker profile not found'));
+    }
+
+    const [serviceTypes, myCategories, mySelections, myPrices, myTierPrices] = await Promise.all([
+      prisma.serviceType.findMany({
+        where: { isActive: true },
+        include: { tasks: { where: { isActive: true }, orderBy: { name: 'asc' } } },
+        orderBy: { name: 'asc' },
+      }),
+      prisma.workerServiceCategory.findMany({ where: { workerProfileId: workerProfile.id } }),
+      prisma.workerTaskSelection.findMany({ where: { workerProfileId: workerProfile.id } }),
+      prisma.workerTaskPrice.findMany({ where: { workerProfileId: workerProfile.id } }),
+      prisma.workerTaskTierPrice.findMany({ where: { workerProfileId: workerProfile.id } }),
+    ]);
+
+    const categoryByTypeId = new Map(myCategories.map((c) => [c.serviceTypeId, c]));
+    const selectionByTaskId = new Map(mySelections.map((s) => [s.serviceTaskId, s]));
+    const priceByTaskId = new Map(myPrices.map((p) => [p.serviceTaskId, p]));
+    const tierPricesByTaskId = new Map<string, typeof myTierPrices>();
+    for (const tp of myTierPrices) {
+      const list = tierPricesByTaskId.get(tp.serviceTaskId) ?? [];
+      list.push(tp);
+      tierPricesByTaskId.set(tp.serviceTaskId, list);
+    }
+    const sortTiers = (tiers: typeof myTierPrices) =>
+      [...tiers].sort((a, b) => (a.upToQty ?? Infinity) - (b.upToQty ?? Infinity));
+
+    const categories = serviceTypes.map((st) => {
+      const myCategory = categoryByTypeId.get(st.id) ?? null;
+      return {
+        serviceType: {
+          id: st.id,
+          name: st.name,
+          description: st.description,
+          icon: st.icon,
+          requiresCertification: st.requiresCertification,
+        },
+        categoryStatus: myCategory?.status ?? null,
+        gatingCertificationId: myCategory?.gatingCertificationId ?? null,
+        tasks: st.tasks.map((task) => ({
+          task: {
+            id: task.id,
+            name: task.name,
+            description: task.description,
+            pricingModel: task.pricingModel,
+            minPrice: task.minPrice,
+            maxPrice: task.maxPrice,
+            unitLabel: task.unitLabel,
+          },
+          mySelection: selectionByTaskId.get(task.id) ?? null,
+          myPrice: priceByTaskId.get(task.id) ?? null,
+          myTiers: sortTiers(tierPricesByTaskId.get(task.id) ?? []),
+        })),
+      };
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: 'Task catalog retrieved successfully',
+      data: { categories },
+    });
+  } catch (error) {
+    console.error('Error fetching task catalog:', error);
+    return res.status(500).json(errorResponse(500, 'Failed to fetch task catalog'));
   }
 };
 
@@ -1261,7 +1767,10 @@ export const createPackage = async (req: AuthRequest, res: Response) => {
       select: {
         id: true,
         city: true,
-        serviceTypes: { where: { id: serviceTypeId }, select: { id: true, name: true } },
+        serviceCategories: {
+          where: { serviceTypeId, status: 'VERIFIED' },
+          select: { serviceType: { select: { id: true, name: true } } },
+        },
       },
     });
 
@@ -1269,7 +1778,7 @@ export const createPackage = async (req: AuthRequest, res: Response) => {
       return res.status(404).json(errorResponse(404, 'Worker profile not found'));
     }
 
-    if (workerProfile.serviceTypes.length === 0) {
+    if (workerProfile.serviceCategories.length === 0) {
       return res.status(400).json(
         errorResponse(400, 'Add this service category to your profile before creating a package for it')
       );
@@ -1282,7 +1791,7 @@ export const createPackage = async (req: AuthRequest, res: Response) => {
     if (workerProfile.city) {
       const ruleCheck = await validatePriceWithinPricingRule(
         workerProfile.city,
-        workerProfile.serviceTypes[0].name,
+        workerProfile.serviceCategories[0].serviceType.name,
         price
       );
       if (!ruleCheck.ok) {
@@ -1337,7 +1846,10 @@ export const updatePackage = async (req: AuthRequest, res: Response) => {
       select: {
         id: true,
         city: true,
-        serviceTypes: serviceTypeId ? { where: { id: serviceTypeId }, select: { id: true, name: true } } : false,
+        serviceCategories: {
+          where: { status: 'VERIFIED' },
+          select: { serviceTypeId: true, serviceType: { select: { id: true, name: true } } },
+        },
       },
     });
 
@@ -1354,7 +1866,12 @@ export const updatePackage = async (req: AuthRequest, res: Response) => {
       return res.status(404).json(errorResponse(404, 'Package not found on this profile'));
     }
 
-    if (serviceTypeId !== undefined && (workerProfile.serviceTypes ?? []).length === 0) {
+    const targetCategory =
+      serviceTypeId !== undefined
+        ? workerProfile.serviceCategories.find((c) => c.serviceTypeId === serviceTypeId)
+        : undefined;
+
+    if (serviceTypeId !== undefined && !targetCategory) {
       return res.status(400).json(
         errorResponse(400, 'Add this service category to your profile before assigning a package to it')
       );
@@ -1365,7 +1882,7 @@ export const updatePackage = async (req: AuthRequest, res: Response) => {
     // this update (the newly-assigned one, or the package's current one).
     if (price !== undefined && workerProfile.city) {
       const effectiveServiceTypeName =
-        serviceTypeId !== undefined ? workerProfile.serviceTypes![0].name : existing.serviceType.name;
+        serviceTypeId !== undefined ? targetCategory!.serviceType.name : existing.serviceType.name;
       const ruleCheck = await validatePriceWithinPricingRule(workerProfile.city, effectiveServiceTypeName, price);
       if (!ruleCheck.ok) {
         return res.status(400).json(
@@ -1502,11 +2019,16 @@ export const listMyTaskPrices = async (req: AuthRequest, res: Response) => {
       where: { userId: req.user.userId },
       select: {
         id: true,
-        serviceTypes: {
+        serviceCategories: {
+          where: { status: 'VERIFIED' },
           select: {
-            id: true,
-            name: true,
-            tasks: { where: { isActive: true }, orderBy: { name: 'asc' } },
+            serviceType: {
+              select: {
+                id: true,
+                name: true,
+                tasks: { where: { isActive: true }, orderBy: { name: 'asc' } },
+              },
+            },
           },
         },
       },
@@ -1516,11 +2038,24 @@ export const listMyTaskPrices = async (req: AuthRequest, res: Response) => {
       return res.status(404).json(errorResponse(404, 'Worker profile not found'));
     }
 
-    const allTasks = workerProfile.serviceTypes.flatMap((st) => st.tasks.map((t) => ({ ...t, serviceTypeName: st.name })));
-    const myPrices = await prisma.workerTaskPrice.findMany({
-      where: { workerProfileId: workerProfile.id, serviceTaskId: { in: allTasks.map((t) => t.id) } },
-    });
+    const allTasks = workerProfile.serviceCategories.flatMap((c) =>
+      c.serviceType.tasks.map((t) => ({ ...t, serviceTypeName: c.serviceType.name }))
+    );
+    const [myPrices, myTierPrices] = await Promise.all([
+      prisma.workerTaskPrice.findMany({
+        where: { workerProfileId: workerProfile.id, serviceTaskId: { in: allTasks.map((t) => t.id) } },
+      }),
+      prisma.workerTaskTierPrice.findMany({
+        where: { workerProfileId: workerProfile.id, serviceTaskId: { in: allTasks.map((t) => t.id) } },
+      }),
+    ]);
     const priceByTaskId = new Map(myPrices.map((p) => [p.serviceTaskId, p]));
+    const tierPricesByTaskId = new Map<string, typeof myTierPrices>();
+    for (const tp of myTierPrices) {
+      const list = tierPricesByTaskId.get(tp.serviceTaskId) ?? [];
+      list.push(tp);
+      tierPricesByTaskId.set(tp.serviceTaskId, list);
+    }
 
     const data = allTasks.map((task) => ({
       task: {
@@ -1533,6 +2068,9 @@ export const listMyTaskPrices = async (req: AuthRequest, res: Response) => {
         unitLabel: task.unitLabel,
       },
       myPrice: priceByTaskId.get(task.id) ?? null,
+      myTiers: (tierPricesByTaskId.get(task.id) ?? []).sort(
+        (a, b) => (a.upToQty ?? Infinity) - (b.upToQty ?? Infinity)
+      ),
     }));
 
     return res.status(200).json({
@@ -1549,7 +2087,10 @@ export const listMyTaskPrices = async (req: AuthRequest, res: Response) => {
 /**
  * PUT /api/workers/me/task-prices/:serviceTaskId
  * Set (upsert) the worker's own price for one task — { price } for FIXED,
- * { unitPrice } for PER_UNIT. Ownership gate mirrors createPackage: the
+ * { unitPrice } for PER_UNIT, { tiers: [{upToQty, price}] } for TIERED (see
+ * taskPriceService.validateTierRows — replaces the worker's whole price
+ * table wholesale, not an upsert-per-row, since nothing else references one
+ * specific tier row by id). Ownership gate mirrors createPackage: the
  * worker must already offer the task's parent service category. Rejects
  * CUSTOM_QUOTE tasks outright — there's nothing to set, the worker quotes
  * on-site via submitQuote instead.
@@ -1561,11 +2102,15 @@ export const setMyTaskPrice = async (req: AuthRequest, res: Response) => {
     }
 
     const serviceTaskId = req.params.serviceTaskId as string;
-    const { price, unitPrice } = req.body as { price?: number; unitPrice?: number };
+    const { price, unitPrice, tiers } = req.body as {
+      price?: number;
+      unitPrice?: number;
+      tiers?: Array<{ upToQty: number | null; price: number }>;
+    };
 
     const workerProfile = await prisma.workerProfile.findUnique({
       where: { userId: req.user.userId },
-      select: { id: true, serviceTypes: { select: { id: true } } },
+      select: { id: true, serviceCategories: { where: { status: 'VERIFIED' }, select: { serviceTypeId: true } } },
     });
 
     if (!workerProfile) {
@@ -1577,7 +2122,7 @@ export const setMyTaskPrice = async (req: AuthRequest, res: Response) => {
       return res.status(404).json(errorResponse(404, 'Task not found'));
     }
 
-    if (!workerProfile.serviceTypes.some((st) => st.id === task.serviceTypeId)) {
+    if (!workerProfile.serviceCategories.some((c) => c.serviceTypeId === task.serviceTypeId)) {
       return res.status(400).json(
         errorResponse(400, 'Add this service category to your profile before pricing this task')
       );
@@ -1585,6 +2130,42 @@ export const setMyTaskPrice = async (req: AuthRequest, res: Response) => {
 
     if (task.pricingModel === 'CUSTOM_QUOTE') {
       return res.status(400).json(errorResponse(400, 'This task is quoted on-site — there is no upfront price to set'));
+    }
+
+    if (task.pricingModel === 'TIERED') {
+      const rows = Array.isArray(tiers) ? tiers : [];
+      const validationError = validateTierRows(rows, task);
+      if (validationError) {
+        return res.status(400).json(errorResponse(400, validationError));
+      }
+
+      await prisma.$transaction([
+        prisma.workerTaskTierPrice.deleteMany({ where: { workerProfileId: workerProfile.id, serviceTaskId } }),
+        prisma.workerTaskTierPrice.createMany({
+          data: rows.map((row) => ({
+            workerProfileId: workerProfile.id,
+            serviceTaskId,
+            upToQty: row.upToQty,
+            price: row.price,
+            isActive: true,
+          })),
+        }),
+        prisma.workerTaskSelection.upsert({
+          where: { workerProfileId_serviceTaskId: { workerProfileId: workerProfile.id, serviceTaskId } },
+          create: { workerProfileId: workerProfile.id, serviceTaskId, isActive: true },
+          update: { isActive: true },
+        }),
+      ]);
+
+      const record = await prisma.workerTaskTierPrice.findMany({
+        where: { workerProfileId: workerProfile.id, serviceTaskId },
+      });
+
+      return res.status(200).json({
+        success: true,
+        message: 'Price tiers saved successfully',
+        data: { tiers: record.sort((a, b) => (a.upToQty ?? Infinity) - (b.upToQty ?? Infinity)) },
+      });
     }
 
     const value = task.pricingModel === 'PER_UNIT' ? unitPrice : price;
@@ -1615,6 +2196,16 @@ export const setMyTaskPrice = async (req: AuthRequest, res: Response) => {
       },
     });
 
+    // A priced task is, definitionally, a selected one — keeps
+    // WorkerTaskSelection (the task-first UI's source of truth) and
+    // WorkerTaskPrice from drifting apart if this endpoint is ever called
+    // independently of the skills screen's own select-task action.
+    await prisma.workerTaskSelection.upsert({
+      where: { workerProfileId_serviceTaskId: { workerProfileId: workerProfile.id, serviceTaskId } },
+      create: { workerProfileId: workerProfile.id, serviceTaskId, isActive: true },
+      update: { isActive: true },
+    });
+
     return res.status(200).json({
       success: true,
       message: 'Price saved successfully',
@@ -1630,7 +2221,9 @@ export const setMyTaskPrice = async (req: AuthRequest, res: Response) => {
  * DELETE /api/workers/me/task-prices/:serviceTaskId
  * Soft-disable rather than hard delete — matches WorkerPackage's convention,
  * and gives Stage 3's "excluded from search if unpriced" logic one clean
- * isActive check to make instead of also having to handle a missing row.
+ * isActive check to make instead of also having to handle a missing row. For
+ * a TIERED task this clears the worker's whole price table (there's no
+ * single row to target — see WorkerTaskTierPrice).
  */
 export const deleteMyTaskPrice = async (req: AuthRequest, res: Response) => {
   try {
@@ -1647,6 +2240,19 @@ export const deleteMyTaskPrice = async (req: AuthRequest, res: Response) => {
 
     if (!workerProfile) {
       return res.status(404).json(errorResponse(404, 'Worker profile not found'));
+    }
+
+    const task = await prisma.serviceTask.findUnique({ where: { id: serviceTaskId }, select: { pricingModel: true } });
+
+    if (task?.pricingModel === 'TIERED') {
+      const { count } = await prisma.workerTaskTierPrice.updateMany({
+        where: { workerProfileId: workerProfile.id, serviceTaskId, isActive: true },
+        data: { isActive: false },
+      });
+      if (count === 0) {
+        return res.status(404).json(errorResponse(404, 'Price not found on this profile'));
+      }
+      return res.status(200).json({ success: true, message: 'Price tiers removed successfully', data: null });
     }
 
     const existing = await prisma.workerTaskPrice.findUnique({
@@ -1769,14 +2375,14 @@ export const replaceMyCapabilities = async (req: AuthRequest, res: Response) => 
 
     const workerProfile = await prisma.workerProfile.findUnique({
       where: { userId: req.user.userId },
-      select: { id: true, serviceTypes: { select: { id: true } } },
+      select: { id: true, serviceCategories: { where: { status: 'VERIFIED' }, select: { serviceTypeId: true } } },
     });
 
     if (!workerProfile) {
       return res.status(404).json(errorResponse(404, 'Worker profile not found'));
     }
 
-    const offeredServiceTypeIds = new Set(workerProfile.serviceTypes.map((s) => s.id));
+    const offeredServiceTypeIds = new Set(workerProfile.serviceCategories.map((c) => c.serviceTypeId));
 
     const uniqueOptionIds = Array.from(new Set(optionIds));
     if (uniqueOptionIds.length > 0) {
@@ -1829,6 +2435,7 @@ const formatCertification = (cert: {
   verificationStatus: string;
   rejectionReason: string | null;
   serviceTypeId?: string | null;
+  visibleToClients: boolean;
 }) => {
   const statusLabel: Record<string, string> = {
     PENDING: 'Pending',
@@ -1846,6 +2453,7 @@ const formatCertification = (cert: {
     status: statusLabel[cert.verificationStatus] ?? cert.verificationStatus,
     rejectionReason: cert.rejectionReason,
     serviceTypeId: cert.serviceTypeId ?? null,
+    visibleToClients: cert.visibleToClients,
   };
 };
 
@@ -1934,13 +2542,14 @@ export const createCertification = async (req: AuthRequest, res: Response) => {
       return res.status(401).json(errorResponse(401, 'Not authenticated'));
     }
 
-    const { name, issuer, issueDate, expiryDate, documentUrl, serviceTypeId } = req.body as {
+    const { name, issuer, issueDate, expiryDate, documentUrl, serviceTypeId, visibleToClients } = req.body as {
       name: string;
       issuer: string;
       issueDate: string;
       expiryDate?: string | null;
       documentUrl: string;
       serviceTypeId?: string | null;
+      visibleToClients?: boolean;
     };
 
     const workerProfile = await prisma.workerProfile.findUnique({
@@ -1968,6 +2577,7 @@ export const createCertification = async (req: AuthRequest, res: Response) => {
         expiryDate: expiryDate ? new Date(expiryDate) : null,
         documentUrl,
         serviceTypeId: serviceTypeId || null,
+        ...(visibleToClients !== undefined ? { visibleToClients } : {}),
       },
     });
 
@@ -1995,13 +2605,14 @@ export const updateCertification = async (req: AuthRequest, res: Response) => {
     }
 
     const certId = req.params.certId as string;
-    const { name, issuer, issueDate, expiryDate, documentUrl, serviceTypeId } = req.body as {
+    const { name, issuer, issueDate, expiryDate, documentUrl, serviceTypeId, visibleToClients } = req.body as {
       name: string;
       issuer: string;
       issueDate: string;
       expiryDate?: string | null;
       documentUrl?: string;
       serviceTypeId?: string | null;
+      visibleToClients?: boolean;
     };
 
     const workerProfile = await prisma.workerProfile.findUnique({
@@ -2034,6 +2645,7 @@ export const updateCertification = async (req: AuthRequest, res: Response) => {
         expiryDate: expiryDate ? new Date(expiryDate) : null,
         documentUrl: documentUrl ?? existing.documentUrl,
         serviceTypeId: serviceTypeId !== undefined ? serviceTypeId || null : existing.serviceTypeId,
+        visibleToClients: visibleToClients !== undefined ? visibleToClients : existing.visibleToClients,
         verificationStatus: 'PENDING',
         rejectionReason: null,
         reviewedAt: null,
@@ -2048,6 +2660,53 @@ export const updateCertification = async (req: AuthRequest, res: Response) => {
   } catch (error) {
     console.error('Error updating certification:', error);
     return res.status(500).json(errorResponse(500, 'Failed to update certification'));
+  }
+};
+
+/**
+ * PATCH /api/workers/me/certifications/:certId/visibility
+ * Toggle whether an existing certification is shown on the worker's public
+ * profile (worker only). Deliberately separate from updateCertification —
+ * this is a display preference, not a change to the underlying claim, so it
+ * does NOT reset verificationStatus back to PENDING the way editing the
+ * title/issuer/dates does.
+ */
+export const updateCertificationVisibility = async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      return res.status(401).json(errorResponse(401, 'Not authenticated'));
+    }
+
+    const certId = req.params.certId as string;
+    const { visibleToClients } = req.body as { visibleToClients: boolean };
+
+    const workerProfile = await prisma.workerProfile.findUnique({
+      where: { userId: req.user.userId },
+      select: { id: true },
+    });
+
+    if (!workerProfile) {
+      return res.status(404).json(errorResponse(404, 'Worker profile not found'));
+    }
+
+    const existing = await prisma.certification.findUnique({ where: { id: certId } });
+    if (!existing || existing.workerProfileId !== workerProfile.id) {
+      return res.status(404).json(errorResponse(404, 'Certification not found'));
+    }
+
+    const certification = await prisma.certification.update({
+      where: { id: certId },
+      data: { visibleToClients },
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: 'Certification visibility updated',
+      data: { certification: formatCertification(certification) },
+    });
+  } catch (error) {
+    console.error('Error updating certification visibility:', error);
+    return res.status(500).json(errorResponse(500, 'Failed to update certification visibility'));
   }
 };
 

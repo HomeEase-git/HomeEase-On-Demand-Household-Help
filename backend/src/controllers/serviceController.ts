@@ -17,10 +17,17 @@ export const getServiceTypes = async (_req: Request, res: Response) => {
         // Capacity (activeJobCount < maxConcurrentJobs) can't be compared in
         // a Prisma `where` since both are columns on the same row, so it's
         // filtered in memory below — same pattern as workerController's
-        // searchWorkers.
-        workers: {
-          where: { isAvailable: true, kycStatus: 'APPROVED', debtHoldAt: null },
-          select: { userId: true, rating: true, activeJobCount: true, maxConcurrentJobs: true },
+        // searchWorkers. Only a VERIFIED category connection counts — a
+        // worker whose 2nd+ category is still PENDING_VERIFICATION isn't
+        // actually bookable for it yet (see WorkerServiceCategory's docblock).
+        workerCategories: {
+          where: {
+            status: 'VERIFIED',
+            workerProfile: { isAvailable: true, kycStatus: 'APPROVED', debtHoldAt: null },
+          },
+          select: {
+            workerProfile: { select: { userId: true, rating: true, activeJobCount: true, maxConcurrentJobs: true } },
+          },
         },
       },
       orderBy: { name: 'asc' },
@@ -32,7 +39,9 @@ export const getServiceTypes = async (_req: Request, res: Response) => {
     // cheapest available worker's tier, up to the priciest task at the
     // priciest tier — instead of the old single admin-set basePrice, which
     // didn't even match the cheapest task in most categories.
-    const allWorkerIds = Array.from(new Set(services.flatMap((s) => s.workers.map((w) => w.userId))));
+    const allWorkerIds = Array.from(
+      new Set(services.flatMap((s) => s.workerCategories.map((c) => c.workerProfile.userId)))
+    );
     const [tierSettings, completedCounts] = await Promise.all([
       getAppSettings(),
       allWorkerIds.length
@@ -45,7 +54,8 @@ export const getServiceTypes = async (_req: Request, res: Response) => {
     ]);
     const completedByWorkerId = new Map(completedCounts.map((c) => [c.workerId, c._count._all]));
 
-    const servicesWithWorkerCount = services.map(({ workers, tasks, ...service }) => {
+    const servicesWithWorkerCount = services.map(({ workerCategories, tasks, ...service }) => {
+      const workers = workerCategories.map((c) => c.workerProfile);
       const activeTaskPrices = tasks.filter((t) => t.isActive).map((t) => t.basePrice);
       const taskPrices = activeTaskPrices.length ? activeTaskPrices : [service.basePrice];
 

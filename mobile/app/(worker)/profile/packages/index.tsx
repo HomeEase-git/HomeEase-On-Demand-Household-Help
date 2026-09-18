@@ -29,12 +29,14 @@ export default function PackagesScreen() {
   useEffect(() => {
     (async () => {
       try {
-        const [pkgs, types] = await Promise.all([
+        const [pkgs, categories] = await Promise.all([
           api.getMyPackages(),
           api.getMyServiceTypes(),
         ]);
         setPackages(pkgs);
-        setMyServiceTypes(types);
+        // Only VERIFIED categories — a worker shouldn't create a client-facing
+        // package for a category still pending admin review.
+        setMyServiceTypes(categories.filter((c) => c.status === "VERIFIED").map((c) => c.serviceType));
       } catch (error) {
         console.error("Load packages error:", error);
       } finally {
