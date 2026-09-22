@@ -16,7 +16,8 @@
         "buildType": "apk"
       },
       "env": {
-        "EXPO_PUBLIC_API_URL": "https://homeease-on-demand-household-help.onrender.com"
+        "EXPO_PUBLIC_API_URL": "https://homeease-on-demand-household-help.onrender.com",
+        "EXPO_PUBLIC_GOOGLE_MAPS_API_KEY": "AIzaSyBvOCCh-ki3RtI2cbv_UQpcEDWpJ4SIIdU"
       }
     },
     "production": {
@@ -24,7 +25,8 @@
         "buildType": "apk"
       },
       "env": {
-        "EXPO_PUBLIC_API_URL": "https://homeease-on-demand-household-help.onrender.com"
+        "EXPO_PUBLIC_API_URL": "https://homeease-on-demand-household-help.onrender.com",
+        "EXPO_PUBLIC_GOOGLE_MAPS_API_KEY": "AIzaSyBvOCCh-ki3RtI2cbv_UQpcEDWpJ4SIIdU"
       }
     }
   },

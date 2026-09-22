@@ -17,6 +17,14 @@ export const config = {
   // that deeply idle in the first place, not an ever-longer client timeout.
   API_TIMEOUT_MS: 60000,
 
+  // ===== MAPS =====
+  // Client-side Google Maps JavaScript API key for rendering the in-app map
+  // (see components/ui/GoogleMap.tsx). Separate from the backend's own
+  // GOOGLE_MAPS_API_KEY used for geocoding/distance/directions — see
+  // mobile/.env.example for the restriction this one needs in the Cloud
+  // Console before shipping it inside the app bundle.
+  GOOGLE_MAPS_API_KEY: process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY ?? '',
+
   // ===== APP VERSION =====
   APP_VERSION: '1.0.0',
 

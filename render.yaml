@@ -113,7 +113,7 @@ services:
       - key: ANTHROPIC_MODEL
         value: claude-sonnet-5
 
-      # --- Geocoding (optional — falls back to free Nominatim if unset) ---
+      # --- Geocoding/Distance/Directions (REQUIRED — no fallback provider) ---
       - key: GOOGLE_MAPS_API_KEY
         sync: false
 

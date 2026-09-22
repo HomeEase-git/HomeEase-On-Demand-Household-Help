@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { geocodeAddress, reverseGeocode } from '@controllers/geoController';
+import { geocodeAddress, reverseGeocode, searchAddresses, getDirections } from '@controllers/geoController';
 import { authMiddleware } from '@middleware/auth';
 
 const router = Router();
@@ -10,5 +10,7 @@ router.use(authMiddleware);
 
 router.post('/geocode', geocodeAddress);
 router.post('/reverse-geocode', reverseGeocode);
+router.post('/search', searchAddresses);
+router.post('/directions', getDirections);
 
 export default router;

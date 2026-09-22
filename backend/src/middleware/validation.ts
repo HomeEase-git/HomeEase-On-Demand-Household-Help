@@ -849,7 +849,7 @@ export const validateChangePassword = (
 };
 
 // Shared by both address validators — lat/lng are optional (an address saved
-// before geocoding resolves, or one Nominatim couldn't resolve at all, still
+// before geocoding resolves, or one Google couldn't resolve at all, still
 // has to save), but when present must be real Philippine coordinates so a bad
 // geocode/GPS glitch can't corrupt the distance-fee or arrival-geofence math
 // that reads UserAddress.lat/lng downstream.

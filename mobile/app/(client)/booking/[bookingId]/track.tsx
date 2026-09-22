@@ -5,7 +5,7 @@ import { AppIcon as Ionicons } from "../../../../components/icons/AppIcon";
 import { useFocusEffect, useRouter, useLocalSearchParams } from "expo-router";
 import ScreenHeader from "../../../../components/ui/ScreenHeader";
 import AddressMap from "../../../../components/ui/AddressMap";
-import LeafletMap, { type LeafletMapHandle } from "../../../../components/ui/LeafletMap";
+import GoogleMap, { type GoogleMapHandle } from "../../../../components/ui/GoogleMap";
 import { useBookingStore } from "../../../../store/bookingStore";
 import * as api from "../../../../services/api";
 import { getSocket } from "../../../../services/socket";
@@ -34,7 +34,7 @@ export default function TrackBookingScreen() {
   const [initialWorkerLocation, setInitialWorkerLocation] = useState<{ lat: number; lng: number } | null>(null);
   const [hasWorkerLocation, setHasWorkerLocation] = useState(false);
   const [lastUpdatedAt, setLastUpdatedAt] = useState<string | null>(null);
-  const mapRef = useRef<LeafletMapHandle>(null);
+  const mapRef = useRef<GoogleMapHandle>(null);
 
   useFocusEffect(
     useCallback(() => {
@@ -203,7 +203,7 @@ export default function TrackBookingScreen() {
         {isLiveTrackable && destination ? (
           <View>
             <View className="w-full min-h-[200] rounded-2xl overflow-hidden">
-              <LeafletMap
+              <GoogleMap
                 ref={mapRef}
                 destination={destination}
                 destinationLabel={location ?? undefined}

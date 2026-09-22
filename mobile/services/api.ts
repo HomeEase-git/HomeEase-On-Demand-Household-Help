@@ -844,10 +844,12 @@ export type GoogleGeocodeResult = {
   };
 };
 
-// Backend-proxied Google Geocoding — the API key never ships to the mobile
-// bundle. Resolves to `null` (never throws) whenever Google isn't configured
-// server-side, the address genuinely doesn't resolve, or the request fails —
-// callers (utils/geo.ts) treat all three the same way: fall back to Nominatim.
+// Backend-proxied Google Geocoding — the server-side API key never ships to
+// the mobile bundle. Resolves to `null` (never throws) whenever Google isn't
+// configured server-side, the address genuinely doesn't resolve, or the
+// request fails — callers (utils/geo.ts) treat all three the same way, since
+// there is no other geocoding provider to fall back to (OpenStreetMap/
+// Nominatim has been fully removed).
 export async function geocodeAddressGoogle(address: string): Promise<GoogleGeocodeResult | null> {
   try {
     return await api.post('/geo/geocode', { address });
@@ -862,6 +864,40 @@ export async function reverseGeocodeGoogle(lat: number, lng: number): Promise<Go
     return await api.post('/geo/reverse-geocode', { lat, lng });
   } catch (error) {
     console.error('Google reverse geocode proxy error:', error);
+    return null;
+  }
+}
+
+export type GoogleAddressSuggestion = {
+  formattedAddress: string;
+  lat: number;
+  lng: number;
+  components: GoogleGeocodeResult['components'];
+};
+
+export async function searchAddressesGoogle(query: string, limit = 5): Promise<GoogleAddressSuggestion[]> {
+  try {
+    return await api.post('/geo/search', { query, limit });
+  } catch (error) {
+    console.error('Google address search proxy error:', error);
+    return [];
+  }
+}
+
+export type GoogleDirectionsResult = {
+  coordinates: { lat: number; lng: number }[];
+  distanceKm: number;
+  durationMin: number;
+};
+
+export async function getDirectionsGoogle(
+  origin: { lat: number; lng: number },
+  destination: { lat: number; lng: number },
+): Promise<GoogleDirectionsResult | null> {
+  try {
+    return await api.post('/geo/directions', { origin, destination });
+  } catch (error) {
+    console.error('Google directions proxy error:', error);
     return null;
   }
 }

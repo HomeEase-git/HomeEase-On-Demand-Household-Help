@@ -93,7 +93,7 @@ export default function RecordDetailScreen() {
 
   const openMap = async () => {
     if (!record.location) return;
-    const url = `https://www.openstreetmap.org/search?query=${encodeURIComponent(
+    const url = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
       record.location,
     )}`;
     await Linking.openURL(url);

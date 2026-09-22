@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { View, Text, ActivityIndicator } from "react-native";
 import { AppIcon as Ionicons } from "../icons/AppIcon";
-import LeafletMap from "./LeafletMap";
+import GoogleMap from "./GoogleMap";
 import { geocodeAddress, type LatLng } from "../../utils/geo";
 import { colors } from "../../constants";
 
@@ -67,7 +67,7 @@ export const AddressMap: React.FC<Props> = ({
   if (status === "found" && resolvedCoords) {
     return (
       <View className={`w-full rounded-2xl overflow-hidden ${height}`}>
-        <LeafletMap destination={resolvedCoords} destinationLabel={address ?? undefined} zoom={zoom} />
+        <GoogleMap destination={resolvedCoords} destinationLabel={address ?? undefined} zoom={zoom} />
       </View>
     );
   }
