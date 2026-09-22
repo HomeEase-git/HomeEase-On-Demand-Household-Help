@@ -416,9 +416,9 @@ export async function approveQuote(bookingId: string) {
   }
 }
 
-export async function disputeQuote(bookingId: string, reason: string) {
+export async function disputeQuote(bookingId: string, reason: string, evidenceUrls?: string[]) {
   try {
-    const response = await api.patch(`/bookings/${bookingId}/quote/dispute`, { reason });
+    const response = await api.patch(`/bookings/${bookingId}/quote/dispute`, { reason, evidenceUrls });
     return response;
   } catch (error) {
     console.error('Dispute quote error:', error);

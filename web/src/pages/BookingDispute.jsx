@@ -8,7 +8,7 @@ import Pagination from '../components/common/Pagination'
 import Badge from '../components/common/Badge'
 import LoadingState from '../components/common/LoadingState'
 import ErrorState from '../components/common/ErrorState'
-import { fetchDisputes, fetchDisputeById, resolveDispute } from '../services/disputes'
+import { fetchDisputes, fetchDisputeById, fetchDisputeHistory, resolveDispute } from '../services/disputes'
 import { useToast } from '../context/ToastContext'
 import { useListQuery } from '../hooks/useListQuery'
 
@@ -97,11 +97,29 @@ function isDisputeActionable(status) {
   return status === 'OPEN' || status === 'UNDER_REVIEW'
 }
 
+// Compact repeat-filer signal shown next to a party's name in the review
+// modal — the single highest-leverage fraud indicator here is simply how
+// often this person keeps turning up in disputes, as either side.
+function DisputeHistoryNote({ history }) {
+  if (!history || history.totalDisputes === 0) return null
+  return (
+    <div style={{ fontSize: '0.75rem', color: 'var(--warning, #b45309)', marginTop: '0.15rem' }}>
+      {history.disputesLast90Days} dispute{history.disputesLast90Days === 1 ? '' : 's'} in the last 90 days
+      {history.totalDisputes !== history.disputesLast90Days ? ` (${history.totalDisputes} total)` : ''}
+    </div>
+  )
+}
+
 export default function BookingDispute() {
   const [selectedId, setSelectedId] = useState(null)
   const [pendingAction, setPendingAction] = useState(null) // { action, label, description } | null
   const [note, setNote] = useState('')
   const [submitting, setSubmitting] = useState(false)
+  // Per-user dispute-history counts for whichever client/worker is on the
+  // open dispute — keyed by userId so both parties' panels can render at
+  // once. Reset on close so a stale history never carries into the next
+  // dispute reviewed.
+  const [history, setHistory] = useState({})
   const { showSuccess, showError } = useToast()
 
   // The backend filters on an exact status match; "Resolved" spans 3
@@ -158,6 +176,7 @@ export default function BookingDispute() {
     setSelectedId(null)
     setPendingAction(null)
     setNote('')
+    setHistory({})
   }
 
   const openActionConfirm = (actionDef) => {
@@ -174,6 +193,12 @@ export default function BookingDispute() {
     try {
       const detail = await fetchDisputeById(id)
       setDisputes((prev) => prev.map((d) => (d.id === id ? { ...d, ...detail } : d)))
+
+      const partyIds = [detail.clientId, detail.workerId].filter(Boolean)
+      const results = await Promise.all(
+        partyIds.map((userId) => fetchDisputeHistory(userId).catch(() => null))
+      )
+      setHistory(Object.fromEntries(partyIds.map((userId, i) => [userId, results[i]])))
     } catch (err) {
       showError(err.message || 'Failed to load dispute details')
     }
@@ -303,11 +328,17 @@ export default function BookingDispute() {
             <div className="modal-detail-grid--2col">
               <div className="detail-block">
                 <label>Client</label>
-                <div className="value">{selected.client}</div>
+                <div className="value">
+                  {selected.client}
+                  <DisputeHistoryNote history={history[selected.clientId]} />
+                </div>
               </div>
               <div className="detail-block">
                 <label>Worker</label>
-                <div className="value">{selected.worker}</div>
+                <div className="value">
+                  {selected.worker}
+                  <DisputeHistoryNote history={history[selected.workerId]} />
+                </div>
               </div>
               <div className="detail-block">
                 <label>Amount</label>
@@ -317,6 +348,16 @@ export default function BookingDispute() {
                 <label>Dispute Reason</label>
                 <div className="value">{selected.reason}</div>
               </div>
+              {selected.arrival && (
+                <div className="detail-block detail-block--full">
+                  <label>Worker Arrival Check-In</label>
+                  <div className="value">
+                    {Math.round(selected.arrival.distanceMeters)}m from the client's address
+                    {selected.arrival.isVerified ? ' (within geofence)' : ' (outside geofence)'}
+                    {selected.arrival.isOutsideBookedWindow ? ' — arrived outside the booked date/time window' : ''}
+                  </div>
+                </div>
+              )}
               {selected.evidenceUrls?.length > 0 && (
                 <div className="detail-block detail-block--full">
                   <label>Evidence</label>

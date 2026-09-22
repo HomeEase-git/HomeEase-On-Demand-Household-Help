@@ -40,6 +40,7 @@ export const disputeInclude = {
       client: { select: { id: true, fullName: true } },
       worker: { select: { id: true, fullName: true } },
       payment: { select: { id: true, status: true, escrowStatus: true } },
+      arrivalVerification: true,
     },
   },
 } satisfies Prisma.DisputeInclude;
@@ -72,6 +73,18 @@ export function formatDispute(record: DisputeRecord) {
     resolvedAt: record.resolvedAt,
     refundStatus: record.refundStatus,
     refundFailureReason: record.refundFailureReason,
+    // The worker's GPS check-in record for this booking, if one exists —
+    // lets an admin cross-reference a fraud claim ("worker never showed up")
+    // against the same arrival data the geofence check itself already
+    // enforced, instead of taking either party's word for it.
+    arrival: booking.arrivalVerification
+      ? {
+          distanceMeters: Math.round(booking.arrivalVerification.distanceMeters),
+          isVerified: booking.arrivalVerification.isVerified,
+          isOutsideBookedWindow: booking.arrivalVerification.isOutsideBookedWindow,
+          checkedInAt: booking.arrivalVerification.createdAt,
+        }
+      : null,
     // Raw hours open — lets the admin UI surface "been open 3 days" style
     // urgency instead of just a date, especially useful once sorted
     // oldest-first (see listDisputes). Still meaningful for a resolved
@@ -153,6 +166,50 @@ export const listDisputes = async (req: Request, res: Response) => {
     });
   } catch (error) {
     console.error('List disputes error:', error);
+    return res.status(500).json(errorResponse(500, 'Internal server error'));
+  }
+};
+
+const DISPUTE_HISTORY_WINDOW_DAYS = 90;
+
+/**
+ * GET /api/admin/disputes/history/:userId
+ * Fraud-review signal: how often this user (as either the client or the
+ * worker on the underlying booking) has been party to a dispute — repeat
+ * appearances are the actual fraud pattern to watch for, more than any
+ * single dispute's evidence on its own. `raisedByThisUser` on each recent
+ * entry distinguishes "filed it" from "was disputed against".
+ */
+export const getDisputeHistoryForUser = async (req: Request, res: Response) => {
+  try {
+    const userId = req.params.userId as string;
+    const since = new Date(Date.now() - DISPUTE_HISTORY_WINDOW_DAYS * 24 * 60 * 60 * 1000);
+    const where: Prisma.DisputeWhereInput = {
+      booking: { OR: [{ clientId: userId }, { workerId: userId }] },
+    };
+
+    const [totalDisputes, disputesLast90Days, records] = await Promise.all([
+      prisma.dispute.count({ where }),
+      prisma.dispute.count({ where: { ...where, createdAt: { gte: since } } }),
+      prisma.dispute.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        take: 5,
+        include: disputeInclude,
+      }),
+    ]);
+
+    return res.json({
+      success: true,
+      data: {
+        userId,
+        totalDisputes,
+        disputesLast90Days,
+        recent: records.map((r) => ({ ...formatDispute(r), raisedByThisUser: r.raisedById === userId })),
+      },
+    });
+  } catch (error) {
+    console.error('Get dispute history error:', error);
     return res.status(500).json(errorResponse(500, 'Internal server error'));
   }
 };
