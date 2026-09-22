@@ -133,6 +133,28 @@ describe('Booking flow — arrival geofencing, quote submission, dispute resolut
       expect(res.status).toBe(200);
     });
 
+    it('rejects check-in when the client reports a mock-location provider, even inside the geofence', async () => {
+      const booking = await createTestBooking({
+        clientId,
+        workerId,
+        status: 'ACCEPTED',
+        clientLat: CLIENT_LOCATION.lat,
+        clientLng: CLIENT_LOCATION.lng,
+      });
+      createdBookingIds.push(booking.id);
+
+      const res = await request(app)
+        .patch(`/api/bookings/${booking.id}/arrive`)
+        .set('Authorization', `Bearer ${workerToken}`)
+        .send({ lat: NEARBY_WORKER_LOCATION.lat, lng: NEARBY_WORKER_LOCATION.lng, mocked: true });
+
+      expect(res.status).toBe(409);
+      expect(res.body.message).toMatch(/mock location/i);
+
+      const dbBooking = await prisma.booking.findUnique({ where: { id: booking.id } });
+      expect(dbBooking?.workerArrivedAt).toBeNull();
+    });
+
     it('rejects check-in from a worker the booking is not assigned to', async () => {
       const booking = await createTestBooking({
         clientId,

@@ -262,7 +262,7 @@ export default function JobDetailScreen() {
     setArriving(true);
     try {
       const position = await getCurrentPosition();
-      await api.arriveBooking(job.id, position.lat, position.lng);
+      await api.arriveBooking(job.id, position.lat, position.lng, position.accuracy, position.mocked);
       alertModal.success("Arrival confirmed", "You're checked in at the job site.");
       load();
     } catch (error) {

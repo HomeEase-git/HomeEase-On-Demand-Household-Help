@@ -33,7 +33,7 @@ import {
 import crypto from 'crypto';
 import type { JwtPayload } from '../types';
 
-// Short-lived challenge token issued mid-login to an MFA-enabled admin (see
+// Short-lived challenge token issued mid-login to an MFA-enabled user (see
 // login/mfaChallenge below) — long enough to type a 6-digit code, short
 // enough that a leaked one is worthless within minutes.
 const MFA_CHALLENGE_TOKEN_TTL_SECONDS = 5 * 60;
@@ -230,12 +230,14 @@ export const login = async (req: Request, res: Response) => {
       return res.status(403).json(errorResponse(403, message));
     }
 
-    // Admin MFA — enforced, not optional (closes the "no MFA on admin
-    // accounts" security-audit finding). A password match alone is never
-    // enough for an admin with MFA enabled: no session token is issued
-    // here, only a short-lived challenge token that POST /auth/mfa/challenge
-    // can exchange for one after a correct TOTP/backup code.
-    if (user.role === 'ADMIN' && user.mfaEnabled) {
+    // MFA — mandatory for admins (closes the "no MFA on admin accounts"
+    // security-audit finding), opt-in for clients/workers (see
+    // mfaSetupRequired below, which only force-nudges admins). Either way,
+    // a password match alone is never enough once MFA is enabled: no
+    // session token is issued here, only a short-lived challenge token that
+    // POST /auth/mfa/challenge can exchange for one after a correct
+    // TOTP/backup code.
+    if (user.mfaEnabled) {
       const challengeToken = generateToken(
         { userId: user.id, email: user.email, role: user.role, type: 'mfa_pending' },
         MFA_CHALLENGE_TOKEN_TTL_SECONDS,
@@ -306,13 +308,13 @@ export const login = async (req: Request, res: Response) => {
 };
 
 // ============================================================================
-// ADMIN MFA (TOTP, RFC 6238) — enforced for ADMIN-role accounts
+// MFA (TOTP, RFC 6238) — mandatory for ADMIN, opt-in for CLIENT/WORKER
 // ============================================================================
 
-// POST /api/auth/mfa/setup — already-authenticated admin starts (or
+// POST /api/auth/mfa/setup — already-authenticated user starts (or
 // restarts) enrollment. Generates a secret and stores it encrypted with
 // pending=true; nothing about the account changes (mfaEnabled stays false)
-// until verify-setup confirms the admin actually captured a working code.
+// until verify-setup confirms the user actually captured a working code.
 export const mfaSetup = async (req: Request, res: Response) => {
   try {
     if (!req.user) {
@@ -427,7 +429,7 @@ export const mfaVerifySetup = async (req: Request, res: Response) => {
 
 // POST /api/auth/mfa/challenge — exchanges a login-issued challenge token
 // plus a correct TOTP/backup code for a real session. Unauthenticated by
-// design (the admin isn't logged in yet) — authLimiter is the brute-force
+// design (the user isn't logged in yet) — authLimiter is the brute-force
 // guard here, backed up by verifyMfaCode's own per-account lockout.
 export const mfaChallenge = async (req: Request, res: Response) => {
   try {
@@ -449,9 +451,12 @@ export const mfaChallenge = async (req: Request, res: Response) => {
       return res.status(401).json(errorResponse(401, 'Invalid or expired MFA challenge'));
     }
 
-    const user = await prisma.user.findUnique({ where: { id: payload.userId } });
+    const user = await prisma.user.findUnique({
+      where: { id: payload.userId },
+      include: { workerProfile: { select: { kycStatus: true } } },
+    });
 
-    if (!user || user.role !== 'ADMIN' || !user.mfaEnabled) {
+    if (!user || !user.mfaEnabled) {
       return res.status(401).json(errorResponse(401, 'Invalid or expired MFA challenge'));
     }
 
@@ -495,6 +500,19 @@ export const mfaChallenge = async (req: Request, res: Response) => {
       message: `${user.fullName} logged in`,
     });
 
+    // Same shape login() returns on the non-MFA path — a client/worker
+    // completing an MFA challenge needs kycStatus/hasAcceptedTerms too, to
+    // route into the right screen post-login same as any other sign-in.
+    const hasAcceptedTerms =
+      user.role === 'CLIENT'
+        ? Boolean(
+            await prisma.contractAcceptance.findFirst({
+              where: { userId: user.id, contractType: 'CLIENT_USER_AGREEMENT' },
+              select: { id: true },
+            }),
+          )
+        : undefined;
+
     return res.json({
       success: true,
       message: 'Login successful',
@@ -505,8 +523,8 @@ export const mfaChallenge = async (req: Request, res: Response) => {
         phone: user.phone,
         role: user.role,
         isVerified: user.isVerified,
-        kycStatus: undefined,
-        hasAcceptedTerms: undefined,
+        kycStatus: user.role === 'WORKER' ? (user.workerProfile?.kycStatus ?? 'PENDING') : undefined,
+        hasAcceptedTerms,
         token,
         refreshToken,
       },
@@ -517,7 +535,7 @@ export const mfaChallenge = async (req: Request, res: Response) => {
   }
 };
 
-// POST /api/auth/mfa/disable — an already-logged-in admin turning MFA off.
+// POST /api/auth/mfa/disable — an already-logged-in user turning MFA off.
 // Requires the current password AND a valid TOTP/backup code — being
 // logged in alone is not enough for a change this sensitive (a hijacked
 // session shouldn't be able to strip MFA protection by itself).
@@ -626,9 +644,10 @@ export const getMe = async (req: Request, res: Response) => {
         role: user.role,
         isVerified: user.isVerified,
         kycStatus: user.role === 'WORKER' ? (user.workerProfile?.kycStatus ?? 'PENDING') : undefined,
-        // Lets the admin web app know whether to show "set up MFA" or
-        // "disable MFA" on its Security screen — irrelevant for CLIENT/WORKER.
-        mfaEnabled: user.role === 'ADMIN' ? user.mfaEnabled : undefined,
+        // Lets the client/mobile app show a "set up MFA" or "disable MFA"
+        // toggle on its Security screen — opt-in for CLIENT/WORKER, but the
+        // flag itself is meaningful for every role now.
+        mfaEnabled: user.mfaEnabled,
       },
     });
   } catch (error) {

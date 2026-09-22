@@ -1445,6 +1445,11 @@ model ArrivalVerification {
   // scheduled date/timeSlot window. Never blocks arrival, just surfaces it
   // for admin dispute review.
   isOutsideBookedWindow Boolean @default(false)
+  // Android-only signal (`Location.isFromMockProvider()`) that the reported
+  // fix came from a mock-location provider. A true value hard-blocks the
+  // check-in itself (see arriveBooking) so this only records false/unknown
+  // on the row that actually got created — kept for audit completeness.
+  mockedLocation Boolean @default(false)
 
   createdAt DateTime @default(now())
 }

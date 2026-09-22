@@ -82,6 +82,7 @@ export function formatDispute(record: DisputeRecord) {
           distanceMeters: Math.round(booking.arrivalVerification.distanceMeters),
           isVerified: booking.arrivalVerification.isVerified,
           isOutsideBookedWindow: booking.arrivalVerification.isOutsideBookedWindow,
+          mockedLocation: booking.arrivalVerification.mockedLocation,
           checkedInAt: booking.arrivalVerification.createdAt,
         }
       : null,
