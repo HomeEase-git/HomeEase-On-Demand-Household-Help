@@ -28,6 +28,11 @@ export async function fetchDisputeById(id) {
   return response.data;
 }
 
+export async function fetchDisputeHistory(userId) {
+  const response = await apiRequest(`/admin/disputes/history/${userId}`);
+  return response.data;
+}
+
 /**
  * PATCH /admin/disputes/:id/resolve — action must be one of DISPUTE_ACTIONS.
  * `resolution` is the admin's audit note; the backend stores it on both the

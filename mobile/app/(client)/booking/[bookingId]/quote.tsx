@@ -1,5 +1,5 @@
-import React, { useEffect, useState } from "react";
-import { View, Text, ScrollView, Pressable, ActivityIndicator } from "react-native";
+import React, { useEffect, useRef, useState } from "react";
+import { View, Text, ScrollView, Pressable, ActivityIndicator, Image } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { AppIcon as Ionicons } from "../../../../components/icons/AppIcon";
 import { useRouter, useLocalSearchParams } from "expo-router";
@@ -8,14 +8,19 @@ import InputField from "../../../../components/ui/InputField";
 import PrimaryButton from "../../../../components/ui/PrimaryButton";
 import DangerButton from "../../../../components/ui/DangerButton";
 import OutlinedButton from "../../../../components/ui/OutlinedButton";
+import ImageSourcePickerBottomSheet from "../../../../components/bottom-sheets/ImageSourcePickerBottomSheet";
+import type { BottomSheetHandle } from "../../../../components/bottom-sheets/BottomSheetWrapper";
 import { useBookingStore, API_STATUS_MAP, type Booking } from "../../../../store/bookingStore";
 import {
   approveQuote as apiApproveQuote,
   disputeQuote as apiDisputeQuote,
+  uploadIssuePhoto,
   getBookingDetail,
 } from "../../../../services/api";
 import { colors } from "../../../../constants";
 import { useAlertModal } from "../../../../contexts/AlertModalContext";
+
+const MAX_EVIDENCE_PHOTOS = 5;
 
 // Matches the shape of GET /bookings/:id — this screen needs to hydrate the
 // store itself when opened directly (e.g. a push notification deep link)
@@ -52,6 +57,9 @@ export default function QuoteReviewScreen() {
 
   const [showDisputeForm, setShowDisputeForm] = useState(false);
   const [disputeReason, setDisputeReason] = useState("");
+  const [evidencePhotos, setEvidencePhotos] = useState<string[]>([]);
+  const [uploadingPhoto, setUploadingPhoto] = useState(false);
+  const photoSheetRef = useRef<BottomSheetHandle | null>(null);
   const [loading, setLoading] = useState(false);
   const [checkingBooking, setCheckingBooking] = useState(!booking);
   const [notFound, setNotFound] = useState(false);
@@ -142,6 +150,23 @@ export default function QuoteReviewScreen() {
     );
   };
 
+  const handlePickEvidencePhoto = async (uri: string) => {
+    if (evidencePhotos.length >= MAX_EVIDENCE_PHOTOS) return;
+    setUploadingPhoto(true);
+    try {
+      const { url } = await uploadIssuePhoto(uri);
+      setEvidencePhotos((prev) => [...prev, url]);
+    } catch {
+      alertModal.error("Upload failed", "Could not upload that photo. Please try again.");
+    } finally {
+      setUploadingPhoto(false);
+    }
+  };
+
+  const handleRemoveEvidencePhoto = (url: string) => {
+    setEvidencePhotos((prev) => prev.filter((u) => u !== url));
+  };
+
   const handleDispute = async () => {
     if (!disputeReason.trim()) {
       alertModal.error("Error", "Please describe why you are disputing this quote.");
@@ -149,7 +174,7 @@ export default function QuoteReviewScreen() {
     }
     setLoading(true);
     try {
-      await apiDisputeQuote(booking.id, disputeReason);
+      await apiDisputeQuote(booking.id, disputeReason, evidencePhotos);
       disputeQuote(booking.id, disputeReason);
       alertModal.success(
         "Dispute Submitted",
@@ -291,6 +316,40 @@ export default function QuoteReviewScreen() {
               placeholder="Explain why you disagree with this quote..."
               multiline
             />
+
+            <Text className="text-text-secondary font-bold text-sm mb-1 mt-4">
+              Evidence photos (optional)
+            </Text>
+            <View className="flex-row flex-wrap gap-2 mt-1">
+              {evidencePhotos.map((url) => (
+                <View key={url} className="relative">
+                  <Image source={{ uri: url }} className="w-20 h-20 rounded-xl" />
+                  <Pressable
+                    className="absolute -top-1.5 -right-1.5 bg-black/70 rounded-full w-5 h-5 items-center justify-center"
+                    onPress={() => handleRemoveEvidencePhoto(url)}
+                  >
+                    <Ionicons name="close" size={12} color="#fff" />
+                  </Pressable>
+                </View>
+              ))}
+              {evidencePhotos.length < MAX_EVIDENCE_PHOTOS && (
+                <Pressable
+                  className="w-20 h-20 rounded-xl border border-dashed items-center justify-center"
+                  style={{ borderColor: colors.divider }}
+                  onPress={() => photoSheetRef.current?.expand()}
+                  disabled={uploadingPhoto}
+                >
+                  {uploadingPhoto ? (
+                    <ActivityIndicator size="small" />
+                  ) : (
+                    <>
+                      <Ionicons name="camera-outline" size={20} color={colors.text.muted} />
+                      <Text className="text-text-secondary text-[10px] mt-1">Add photo</Text>
+                    </>
+                  )}
+                </Pressable>
+              )}
+            </View>
           </View>
         )}
 
@@ -339,6 +398,7 @@ export default function QuoteReviewScreen() {
           <OutlinedButton label="Go Back" onPress={() => router.back()} />
         )}
       </ScrollView>
+      <ImageSourcePickerBottomSheet innerRef={photoSheetRef} onSelect={handlePickEvidencePhoto} />
     </SafeAreaView>
   );
 }
