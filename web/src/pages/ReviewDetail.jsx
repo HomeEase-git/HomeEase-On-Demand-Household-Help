@@ -6,7 +6,8 @@ import SectionCard from '../components/common/SectionCard'
 import LoadingState from '../components/common/LoadingState'
 import ErrorState from '../components/common/ErrorState'
 import { useDetailQuery } from '../hooks/useListQuery'
-import { fetchReviewById } from '../services/reviews'
+import { fetchReviewById, updateReview } from '../services/reviews'
+import { useToast } from '../context/ToastContext'
 
 const SUB_NAV = [
   { to: '/reviews', label: 'All Reviews' },
@@ -16,6 +17,37 @@ const SUB_NAV = [
 export default function ReviewDetail() {
   const { id } = useParams()
   const { data: review, loading, error, reload } = useDetailQuery(fetchReviewById, id)
+  const { showSuccess, showError } = useToast()
+
+  const keepPublic = async () => {
+    try {
+      await updateReview(id, { flagged: false, status: 'VISIBLE', flagReason: null })
+      await reload()
+      showSuccess('Review kept public.')
+    } catch (err) {
+      showError(err.message || 'Failed to update review')
+    }
+  }
+
+  const hideReview = async () => {
+    try {
+      await updateReview(id, { flagged: false, status: 'HIDDEN' })
+      await reload()
+      showSuccess('Review hidden from the worker profile.')
+    } catch (err) {
+      showError(err.message || 'Failed to update review')
+    }
+  }
+
+  const warnUser = async () => {
+    try {
+      await updateReview(id, { flagged: false, status: 'WARNED' })
+      await reload()
+      showSuccess('Review hidden and user warned.')
+    } catch (err) {
+      showError(err.message || 'Failed to update review')
+    }
+  }
 
   if (loading) {
     return <LoadingState message="Loading review details..." />
@@ -38,7 +70,38 @@ export default function ReviewDetail() {
       <PageHeader
         title="Review Detail"
         subtitle={`Review ${review.displayId}`}
-        actions={<Link to="/reviews" className="btn btn-outline">Back</Link>}
+        actions={
+          <>
+            <button
+              type="button"
+              className="btn btn-outline"
+              style={{ marginRight: '0.5rem' }}
+              onClick={keepPublic}
+              title="Keep Public (dismiss flag)"
+            >
+              Keep Public
+            </button>
+            <button
+              type="button"
+              className="btn btn-outline"
+              style={{ marginRight: '0.5rem' }}
+              onClick={hideReview}
+              title="Hide review from worker profile"
+            >
+              Hide Review
+            </button>
+            <button
+              type="button"
+              className="btn btn-danger"
+              style={{ marginRight: '0.5rem' }}
+              onClick={warnUser}
+              title="Hide and warn user"
+            >
+              Warn User
+            </button>
+            <Link to="/reviews" className="btn btn-outline">Back</Link>
+          </>
+        }
       />
       <SectionCard>
         <div className="detail-grid">
