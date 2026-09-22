@@ -6,9 +6,10 @@ import { encrypt, decrypt } from '@utils/encryption';
 import { comparePassword } from '@utils/passwordHash';
 import { isOtpAttemptLocked, recordFailedOtpAttempt, clearOtpAttempts } from '@utils/otpAttemptLimiter';
 
-// TOTP (RFC 6238) setup/verification for admin MFA — see
-// controllers/authController.ts (mfaSetup/mfaVerifySetup/mfaChallenge/
-// mfaDisable) for the HTTP surface. Uses otplib's defaults throughout
+// TOTP (RFC 6238) setup/verification for MFA — mandatory for ADMIN, opt-in
+// for CLIENT/WORKER — see controllers/authController.ts
+// (mfaSetup/mfaVerifySetup/mfaChallenge/mfaDisable) for the HTTP surface.
+// Uses otplib's defaults throughout
 // (SHA-1, 6 digits, 30s period), which is what every mainstream
 // authenticator app (Google Authenticator, Authy, 1Password, Microsoft
 // Authenticator) assumes.
@@ -25,7 +26,9 @@ import { isOtpAttemptLocked, recordFailedOtpAttempt, clearOtpAttempts } from '@u
 // + a hex/base32 codec), so it has zero ESM-interop exposure.
 authenticator.options = { window: 1 }; // ±30s clock-drift/typing-delay tolerance
 
-const ISSUER = 'HomeEase Admin';
+// Shown in the authenticator app next to the account email — kept
+// role-neutral since CLIENT/WORKER accounts enroll through this same path.
+const ISSUER = 'HomeEase';
 const BACKUP_CODE_COUNT = 10;
 
 export const generateMfaSecret = (): string => authenticator.generateSecret();

@@ -178,4 +178,80 @@ describe('Admin MFA', () => {
       expect(res.body.data.token).toEqual(expect.any(String));
     });
   });
+
+  // Opt-in MFA for CLIENT/WORKER — the same setup/verify/challenge/disable
+  // routes ADMIN uses above, now widened to these roles too (see
+  // routes/auth.ts). Unlike admin, enrollment must never be forced.
+  describe('Opt-in MFA for CLIENT/WORKER accounts', () => {
+    it('lets a CLIENT enroll (no force-nudge), requires MFA on the next login, and disable works', async () => {
+      const { user, plainPassword } = await createTestUser('mfa-client-optin', { role: 'CLIENT' });
+      createdUserIds.push(user.id);
+
+      const firstLogin = await request(app)
+        .post('/api/auth/login')
+        .send({ email: user.email, password: plainPassword });
+
+      expect(firstLogin.status).toBe(200);
+      // Opt-in, not mandatory — a client who hasn't enrolled gets a normal
+      // session with no force-enroll nudge (that stays admin-only).
+      expect(firstLogin.body.data.mfaSetupRequired).toBeUndefined();
+      const sessionToken = firstLogin.body.data.token;
+
+      const setup = await request(app)
+        .post('/api/auth/mfa/setup')
+        .set('Authorization', `Bearer ${sessionToken}`);
+      expect(setup.status).toBe(200);
+      const totpSecret = setup.body.data.secret;
+
+      const verifySetup = await request(app)
+        .post('/api/auth/mfa/verify-setup')
+        .set('Authorization', `Bearer ${sessionToken}`)
+        .send({ code: authenticator.generate(totpSecret) });
+      expect(verifySetup.status).toBe(200);
+
+      const secondLogin = await request(app)
+        .post('/api/auth/login')
+        .send({ email: user.email, password: plainPassword });
+      expect(secondLogin.body.data.mfaRequired).toBe(true);
+      expect(secondLogin.body.data.token).toBeUndefined();
+
+      const challenge = await request(app)
+        .post('/api/auth/mfa/challenge')
+        .send({ challengeToken: secondLogin.body.data.challengeToken, code: authenticator.generate(totpSecret) });
+
+      expect(challenge.status).toBe(200);
+      expect(challenge.body.data.role).toBe('CLIENT');
+      // hasAcceptedTerms must come back as a real boolean here too — this
+      // endpoint used to hardcode it (and kycStatus) to undefined since only
+      // ADMIN ever reached it.
+      expect(typeof challenge.body.data.hasAcceptedTerms).toBe('boolean');
+      const clientSessionToken = challenge.body.data.token;
+
+      const disable = await request(app)
+        .post('/api/auth/mfa/disable')
+        .set('Authorization', `Bearer ${clientSessionToken}`)
+        .send({ password: plainPassword, code: authenticator.generate(totpSecret) });
+      expect(disable.status).toBe(200);
+
+      const disabled = await prisma.user.findUnique({ where: { id: user.id } });
+      expect(disabled?.mfaEnabled).toBe(false);
+    });
+
+    it('surfaces mfaEnabled and kycStatus in getMe for a WORKER, not just ADMIN', async () => {
+      const { user, plainPassword } = await createTestUser('mfa-worker-getme', { role: 'WORKER' });
+      createdUserIds.push(user.id);
+
+      const login = await request(app)
+        .post('/api/auth/login')
+        .send({ email: user.email, password: plainPassword });
+
+      const me = await request(app)
+        .get('/api/auth/me')
+        .set('Authorization', `Bearer ${login.body.data.token}`);
+
+      expect(me.status).toBe(200);
+      expect(me.body.data.mfaEnabled).toBe(false);
+      expect(me.body.data.kycStatus).toEqual(expect.any(String));
+    });
+  });
 });

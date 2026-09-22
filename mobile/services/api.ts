@@ -216,6 +216,13 @@ export async function postLogin(email: string, password: string) {
       email,
       password,
     });
+
+    // MFA-enabled account — no session yet. The caller renders a code-entry
+    // step and exchanges this challengeToken via postMfaChallenge below.
+    if (response.mfaRequired) {
+      return { mfaRequired: true as const, challengeToken: response.challengeToken as string };
+    }
+
     return {
       id: response.id,
       name: response.fullName || response.name,
@@ -230,6 +237,57 @@ export async function postLogin(email: string, password: string) {
     console.error('Login error:', error);
     throw error;
   }
+}
+
+// POST /auth/mfa/challenge — exchanges postLogin's mfaRequired challengeToken
+// plus a correct TOTP/backup code for a real session. Same response shape
+// as postLogin's success path so callers can route identically either way.
+export async function postMfaChallenge(challengeToken: string, code: string) {
+  try {
+    const response = await api.post('/auth/mfa/challenge', { challengeToken, code });
+    return {
+      id: response.id,
+      name: response.fullName || response.name,
+      email: response.email,
+      phone: response.phone,
+      role: response.role.toLowerCase(),
+      kycStatus: response.kycStatus,
+      hasAcceptedTerms: response.hasAcceptedTerms,
+      token: response.token,
+    };
+  } catch (error) {
+    console.error('MFA challenge error:', error);
+    throw error;
+  }
+}
+
+// ============================================================================
+// MFA (TOTP) — opt-in for client/worker accounts, reached from a Security
+// settings screen; mandatory admin MFA is set up on the web admin panel
+// instead. Same three backend routes as admin (backend/src/routes/auth.ts).
+// ============================================================================
+
+export async function startMfaSetup(): Promise<{ provisioningUri: string; qrCodeDataUrl: string; secret: string }> {
+  return api.post('/auth/mfa/setup');
+}
+
+export async function confirmMfaSetup(code: string): Promise<{ backupCodes: string[] }> {
+  return api.post('/auth/mfa/verify-setup', { code });
+}
+
+export async function disableMfa(password: string, code: string): Promise<{ success: boolean; message: string }> {
+  return api.post('/auth/mfa/disable', { password, code });
+}
+
+// GET /auth/me — lighter than getUserProfile()'s /users/me (no
+// notification prefs, addresses, etc.), used where only the MFA-related
+// flags matter: currently just the Two-Factor Authentication settings screen.
+export async function fetchCurrentUser(): Promise<{
+  id: string;
+  role: string;
+  mfaEnabled: boolean;
+}> {
+  return api.get('/auth/me');
 }
 
 export async function sendPasswordResetEmail(email: string) {
@@ -1379,9 +1437,15 @@ export interface ArrivalVerificationResult {
  * booked lat/lng) and rejects with a 409 if the worker is too far; this
  * wrapper just forwards the device's current GPS reading.
  */
-export async function arriveBooking(bookingId: string, lat: number, lng: number): Promise<ArrivalVerificationResult> {
+export async function arriveBooking(
+  bookingId: string,
+  lat: number,
+  lng: number,
+  accuracy?: number | null,
+  mocked?: boolean | null,
+): Promise<ArrivalVerificationResult> {
   try {
-    const response = await api.patch(`/bookings/${bookingId}/arrive`, { lat, lng });
+    const response = await api.patch(`/bookings/${bookingId}/arrive`, { lat, lng, accuracy, mocked });
     return response;
   } catch (error) {
     console.error('Arrive booking error:', error);

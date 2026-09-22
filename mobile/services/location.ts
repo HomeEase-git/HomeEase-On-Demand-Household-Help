@@ -17,6 +17,8 @@ export class LocationTimeoutError extends Error {
 
 export type PositionWithAccuracy = LatLng & { accuracy: number | null };
 
+export type ArrivalPosition = PositionWithAccuracy & { mocked: boolean | null };
+
 async function ensurePermission(): Promise<void> {
   const { status } = await Location.requestForegroundPermissionsAsync();
   if (status !== "granted") {
@@ -45,7 +47,7 @@ function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
 // precision, so `High` (~10-25m outdoors) is enough and returns faster than
 // `BestForNavigation`. A 12s timeout surfaces a clear error instead of the UI
 // hanging indefinitely when GPS can't get a fix (e.g. indoors).
-export async function getCurrentPosition(): Promise<LatLng> {
+export async function getCurrentPosition(): Promise<ArrivalPosition> {
   await ensurePermission();
 
   const position = await withTimeout(
@@ -53,7 +55,15 @@ export async function getCurrentPosition(): Promise<LatLng> {
     12000,
   );
 
-  return { lat: position.coords.latitude, lng: position.coords.longitude };
+  return {
+    lat: position.coords.latitude,
+    lng: position.coords.longitude,
+    accuracy: position.coords.accuracy ?? null,
+    // Android-only (`Location.isFromMockProvider()` under the hood) —
+    // undefined on iOS, which we surface as null rather than false so the
+    // backend can tell "known not mocked" apart from "platform can't tell".
+    mocked: position.mocked ?? null,
+  };
 }
 
 // Used for "Use my current location" on the address form, where accuracy

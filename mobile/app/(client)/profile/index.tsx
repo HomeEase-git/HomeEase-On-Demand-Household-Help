@@ -31,6 +31,7 @@ const MENU_GROUPS = [
         icon: "notifications-outline",
       },
       { label: "Privacy Settings", path: "/(client)/profile/privacy-settings", icon: "shield-checkmark-outline" },
+      { label: "Two-Factor Authentication", path: "/(client)/profile/two-factor-auth", icon: "lock-closed-outline" },
     ],
   },
   {

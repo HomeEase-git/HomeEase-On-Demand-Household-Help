@@ -1449,7 +1449,24 @@ export const arriveBooking = async (req: AuthRequest, res: Response) => {
     }
 
     const id = req.params.id as string;
-    const { lat, lng, accuracy } = req.body as { lat: number; lng: number; accuracy?: number | null };
+    const { lat, lng, accuracy, mocked } = req.body as {
+      lat: number;
+      lng: number;
+      accuracy?: number | null;
+      mocked?: boolean | null;
+    };
+
+    // Android-only (`Location.isFromMockProvider()`), reported by the client
+    // in `mobile/services/location.ts`. Unlike accuracy drift, a device
+    // deliberately running a mock-location provider is never accidental, so
+    // this hard-blocks rather than just flagging — same as it isn't real
+    // device attestation: a rooted device or a patched client can still lie
+    // about this field entirely. It raises the bar; it doesn't close it.
+    if (mocked === true) {
+      return res.status(409).json(
+        errorResponse(409, 'Mock location detected — disable any mock-location app or GPS spoofing tool to check in')
+      );
+    }
 
     // Basic sanity bound on reported GPS accuracy — NOT real device
     // attestation (a spoofed client can still lie about this field, or omit
@@ -1515,6 +1532,10 @@ export const arriveBooking = async (req: AuthRequest, res: Response) => {
           distanceMeters: distance,
           isVerified: true,
           isOutsideBookedWindow: outsideWindow,
+          // Always false here — a true value already hard-blocked above
+          // before any row could be created; the column just records that
+          // explicitly rather than relying on its schema default.
+          mockedLocation: false,
         },
       }),
       prisma.booking.update({

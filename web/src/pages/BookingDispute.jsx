@@ -355,6 +355,7 @@ export default function BookingDispute() {
                     {Math.round(selected.arrival.distanceMeters)}m from the client's address
                     {selected.arrival.isVerified ? ' (within geofence)' : ' (outside geofence)'}
                     {selected.arrival.isOutsideBookedWindow ? ' — arrived outside the booked date/time window' : ''}
+                    {selected.arrival.mockedLocation ? ' — ⚠ mock-location provider detected at check-in' : ''}
                   </div>
                 </div>
               )}
