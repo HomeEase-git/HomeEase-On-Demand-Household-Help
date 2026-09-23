@@ -137,8 +137,8 @@ export default function MfaSetup() {
         <PageHeader title="Two-Factor Authentication" subtitle="Save your backup codes" />
         <SectionCard>
           <div className="form-error" style={{ marginBottom: '1rem' }}>
-            Save these backup codes now. Each one can be used once to sign in if you lose access to
-            your authenticator app. They will not be shown again.
+            Save these backup codes now. Each works once if you lose your authenticator app, and they
+            won&rsquo;t be shown again.
           </div>
           <div
             style={{
@@ -169,14 +169,13 @@ export default function MfaSetup() {
       <>
         <PageHeader
           title="Two-Factor Authentication"
-          subtitle="Admin accounts are required to enable MFA to close a security-audit gap."
+          subtitle="MFA is required for admin accounts."
         />
         <SectionCard>
           {!setupData ? (
             <>
               <p className="page-subtitle" style={{ marginTop: 0 }}>
-                Set up an authenticator app (Google Authenticator, Authy, 1Password, etc.) to protect
-                this admin account.
+                Use an authenticator app as a second step when you sign in.
               </p>
               <button type="button" className="btn btn-primary" onClick={handleStartSetup} disabled={isStarting}>
                 {isStarting ? 'Starting...' : 'Start setup'}
@@ -185,7 +184,7 @@ export default function MfaSetup() {
           ) : (
             <>
               <p className="page-subtitle" style={{ marginTop: 0 }}>
-                Scan this QR code with your authenticator app, then enter the 6-digit code it shows.
+                Scan the QR code with your authenticator app, then enter the code it shows.
               </p>
               <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '1rem' }}>
                 <img src={setupData.qrCodeDataUrl} alt="MFA QR code" width={200} height={200} />
@@ -226,9 +225,6 @@ export default function MfaSetup() {
     <>
       <PageHeader title="Two-Factor Authentication" subtitle="Enabled on this account" />
       <SectionCard title="Disable MFA">
-        <p className="page-subtitle" style={{ marginTop: 0 }}>
-          Requires your current password and a valid authenticator/backup code.
-        </p>
         <form onSubmit={handleDisable} noValidate>
           <div className="form-field">
             <label htmlFor="disable-password">Current password</label>

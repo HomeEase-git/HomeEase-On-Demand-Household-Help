@@ -57,17 +57,18 @@ export default function Payments() {
     pollIntervalMs: 25000,
   })
 
+  // Backend-aggregated across every Completed payment matching the current
+  // search (not just the current page) — see listPayments' completedWhere.
   const totals = useMemo(() => {
-    const completed = transactions.filter((t) => t.status === 'Completed')
-    const platform = completed.reduce((sum, t) => sum + t.platformFee, 0)
-    const workers = completed.reduce((sum, t) => sum + t.workerAmount, 0)
-    const gross = completed.reduce((sum, t) => sum + t.userAmount, 0)
-    // Derived from the actual listed data rather than a hardcoded constant,
-    // so this always reflects AppSettings.commissionRate as configured —
+    const gross = meta.completedGrossVolume ?? 0
+    const workers = meta.completedWorkerEarnings ?? 0
+    const platform = meta.completedPlatformCommission ?? 0
+    // Derived from the actual totals rather than a hardcoded constant, so
+    // this always reflects AppSettings.commissionRate as configured —
     // whatever an admin sets it to in Settings — instead of going stale.
     const ratePercent = gross > 0 ? Math.round((platform / gross) * 100) : null
     return { gross, workers, platform, ratePercent }
-  }, [transactions])
+  }, [meta.completedGrossVolume, meta.completedWorkerEarnings, meta.completedPlatformCommission])
 
   return (
     <>

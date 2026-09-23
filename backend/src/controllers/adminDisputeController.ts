@@ -25,6 +25,12 @@ const RESOLVE_ACTIONS = [
   // in a separate branch of resolveDispute.
   'RESOLVE_FOR_WORKER',
   'PAY_WORKER_FROM_PLATFORM',
+  // Closes a dispute the booking has already moved past (e.g. a stale quote
+  // dispute whose booking later left DISPUTED some other way, or a
+  // reschedule escalation support handled by hand) without touching the
+  // booking or any money. Not allowed while the booking is still DISPUTED —
+  // that booking is frozen and needs a real outcome.
+  'DISMISS',
 ] as const;
 type ResolveAction = (typeof RESOLVE_ACTIONS)[number];
 
@@ -411,6 +417,33 @@ export const resolveDispute = async (req: AuthRequest, res: Response) => {
     }
 
     const booking = dispute.booking;
+
+    if (action === 'DISMISS') {
+      if (booking.status === 'DISPUTED') {
+        return res.status(409).json(
+          errorResponse(409, 'Booking is still DISPUTED — approve, re-quote, or cancel it instead of dismissing')
+        );
+      }
+      if (!resolution || !resolution.trim()) {
+        return res.status(400).json(errorResponse(400, 'DISMISS requires a note explaining why'));
+      }
+      await prisma.dispute.update({
+        where: { id },
+        data: { status: 'RESOLVED_DISMISSED', resolution: resolution.trim(), resolvedById: adminId, resolvedAt: new Date() },
+      });
+      await writeAuditLog({
+        actorId: adminId,
+        actorName: req.user?.email,
+        actorRole: req.user?.role,
+        action: 'DISPUTE_RESOLVED',
+        category: 'ADMIN_ACTION',
+        message: `Dispute for booking ${formatDisplayId(booking.id)} dismissed (booking is ${booking.status}): ${resolution.trim()}`,
+        metadata: { disputeId: id, bookingId: booking.id },
+      });
+      const updated = await prisma.dispute.findUniqueOrThrow({ where: { id }, include: disputeInclude });
+      return res.json({ success: true, data: formatDispute(updated) });
+    }
+
     const isPaymentAction = action === 'RESOLVE_FOR_WORKER' || action === 'PAY_WORKER_FROM_PLATFORM';
 
     // Quote actions only make sense on a quote dispute; CANCEL_BOOKING can also
