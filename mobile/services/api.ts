@@ -9,6 +9,8 @@ import type { WorkerDetail, WorkerDigitalId, ParsedResume } from "../types/api.t
 import type {
   CreateBookingPayload,
   CreateBookingResponse,
+  CreateMultiDayBookingPayload,
+  CreateMultiDayBookingResponse,
   WorkerCard,
   TimeSlot,
 } from "../types/booking4step.types";
@@ -429,6 +431,37 @@ export async function createBooking(details: CreateBookingPayload): Promise<Crea
     return response;
   } catch (error) {
     console.error('Create booking error:', error);
+    throw error;
+  }
+}
+
+export async function createMultiDayBooking(
+  details: CreateMultiDayBookingPayload
+): Promise<CreateMultiDayBookingResponse> {
+  try {
+    const response = await api.post('/bookings/multi-day', {
+      workerId: details.workerId,
+      serviceType: details.serviceType,
+      serviceTaskId: details.serviceTaskId ?? undefined,
+      description: details.description || '',
+      address: details.address,
+      city: details.city || '',
+      lat: details.lat,
+      lng: details.lng,
+      startDate: details.startDate,
+      dayCount: details.dayCount,
+      timeSlot: details.timeSlot,
+      priorities: details.priorities ?? [],
+      notes: details.notes || '',
+      paymentMethodType: details.paymentMethodType,
+      paymentAccountIdentifier: details.paymentAccountIdentifier,
+      scopeAnswers: details.scopeAnswers ?? undefined,
+      issuePhotoUrls: details.issuePhotoUrls ?? [],
+      idempotencyKey: details.idempotencyKey ?? undefined,
+    });
+    return response;
+  } catch (error) {
+    console.error('Create multi-day booking error:', error);
     throw error;
   }
 }

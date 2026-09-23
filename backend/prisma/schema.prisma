@@ -278,6 +278,8 @@ model User {
   receivedMessages     Message[]             @relation("receiver")
   bookingsAsClient     Booking[]             @relation("client")
   bookingsAsWorker     Booking[]             @relation("worker")
+  bookingGroupsAsClient BookingGroup[]       @relation("bookingGroupClient")
+  bookingGroupsAsWorker BookingGroup[]       @relation("bookingGroupWorker")
   reviews              Review[]
   notifications        Notification[]
   authTokens           AuthToken[]
@@ -1145,6 +1147,19 @@ model Booking {
   // existed and for any caller that doesn't send one.
   idempotencyKey String?
 
+  // Multi-day upfront booking — set when this Booking is one day of a
+  // client-picked worker's multi-day job (see BookingGroup). Nullable
+  // because the overwhelming majority of bookings are still single-day and
+  // never belong to a group. Deliberately NOT a date-range on Booking
+  // itself: every downstream system (pricing, chat threads, arrival/
+  // completion verification, payment/payout, matching) assumes one Booking
+  // = one calendar day, so a multi-day job is just N ordinary Booking rows
+  // linked by groupId — each one's status flow, arrival GPS check, and
+  // payment settle completely independently, same as any single-day
+  // booking (see createMultiDayBooking's docblock for the full rationale).
+  groupId String?
+  group   BookingGroup? @relation(fields: [groupId], references: [id], onDelete: SetNull)
+
   // Service
   serviceType            String
   serviceTaskId          String?
@@ -1370,6 +1385,40 @@ model Booking {
   @@index([workerId, status])
   @@index([scheduledDate])
   @@index([status])
+  @@index([groupId])
+}
+
+// A client-picked worker's multi-day upfront booking (see B/sequence-5
+// "multi-day booking" — created via bookingController.createMultiDayBooking).
+// Purely a grouping label over N ordinary single-day Booking rows: no
+// scheduling, pricing, or status logic of its own lives here, so every
+// existing single-day code path (accept/decline, arrival GPS, chat,
+// payment/payout, cancellation) keeps working completely unmodified per
+// Booking — this model exists only so the client's "My Bookings" list and
+// the worker's job list can show "Day 2 of 3" instead of three unrelated-
+// looking single-day jobs. idempotencyKey mirrors Booking's own convention
+// (a retried POST /bookings/multi-day returns the already-created group
+// instead of double-booking); unlike Booking's, it can't live on the
+// individual Booking rows themselves since all N of a group's rows would
+// otherwise collide on the same (clientId, idempotencyKey) unique pair.
+model BookingGroup {
+  id String @id @default(cuid())
+
+  clientId String
+  client   User   @relation("bookingGroupClient", fields: [clientId], references: [id], onDelete: Cascade)
+  workerId String
+  worker   User   @relation("bookingGroupWorker", fields: [workerId], references: [id], onDelete: Cascade)
+
+  totalDays      Int
+  idempotencyKey String?
+
+  createdAt DateTime @default(now())
+
+  bookings Booking[]
+
+  @@unique([clientId, idempotencyKey], name: "client_group_idempotency_key_unique")
+  @@index([clientId])
+  @@index([workerId])
 }
 
 model BookingAddOn {

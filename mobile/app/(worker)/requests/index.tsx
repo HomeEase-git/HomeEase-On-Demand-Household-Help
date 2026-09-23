@@ -81,6 +81,8 @@ export default function RequestsScreen() {
           distanceKm: item.distanceMeters != null ? item.distanceMeters / 1000 : null,
           payoutEstimate: item.workerPayoutEstimate,
           tip: item.tip,
+          groupTotalDays: item.groupTotalDays,
+          groupDayIndex: item.groupDayIndex,
         }}
         onPress={() => handleRequestPress(item.id)}
       />

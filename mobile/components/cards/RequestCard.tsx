@@ -20,6 +20,8 @@ type Request = {
   distanceKm?: number | null;
   payoutEstimate?: number | null;
   tip?: number | null;
+  groupTotalDays?: number | null;
+  groupDayIndex?: number | null;
 };
 
 type Props = {
@@ -41,9 +43,18 @@ export const RequestCard: React.FC<Props> = ({ request, onPress }) => {
           <Avatar uri={request.clientAvatar} size="md" />
         </View>
         <View className="flex-1">
-          <Text className="text-text-primary font-bold" numberOfLines={1}>
-            {request.client}
-          </Text>
+          <View className="flex-row items-center flex-wrap">
+            <Text className="text-text-primary font-bold" numberOfLines={1}>
+              {request.client}
+            </Text>
+            {!!request.groupTotalDays && (
+              <View className="bg-accent/10 rounded-full px-2 py-0.5 ml-2">
+                <Text className="text-accent text-[10px] font-bold">
+                  Day {request.groupDayIndex ?? "?"} of {request.groupTotalDays}
+                </Text>
+              </View>
+            )}
+          </View>
           <Text className="text-text-secondary text-xs" numberOfLines={1}>
             {request.service}
           </Text>

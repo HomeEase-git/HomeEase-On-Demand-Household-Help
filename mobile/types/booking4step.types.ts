@@ -187,6 +187,46 @@ export type CreateBookingResponse = {
 // toggle and submits this constant when it's on.
 export const PET_FRIENDLY_PRIORITY = 'Pet-friendly';
 
+// Multi-day upfront booking (see backend bookingController.
+// createMultiDayBooking) — books the SAME worker for N consecutive days.
+// Only reachable when a worker is already locked in (draft.workerLocked),
+// since there's no auto-match here; no addOns/packageIds/tip for this first
+// version (see the backend docblock for why).
+export type CreateMultiDayBookingPayload = {
+  workerId: string;
+  serviceType: string;
+  serviceTaskId?: string | null;
+  description?: string;
+  address: string;
+  city?: string;
+  lat: number;
+  lng: number;
+  startDate: string;
+  dayCount: number;
+  timeSlot: TimeSlot;
+  priorities?: string[];
+  notes?: string;
+  paymentMethodType?: 'GCASH' | 'MAYA' | 'CASH';
+  paymentAccountIdentifier?: string;
+  scopeAnswers?: Record<string, string | string[]>;
+  issuePhotoUrls?: string[];
+  idempotencyKey?: string;
+};
+
+export type CreateMultiDayBookingResponse = {
+  groupId: string;
+  totalDays: number;
+  bookings: {
+    id: string;
+    scheduledDate: string;
+    timeSlot: TimeSlot;
+    status: string;
+    estimatedPrice: number;
+    expiresAt: string;
+  }[];
+  totalEstimatedPrice: number;
+};
+
 export type AddOnToggleKey = 'eco_friendly' | 'client_supplies' | 'call_before_arrival';
 
 export const ADD_ON_TOGGLES: Array<{ key: AddOnToggleKey; label: string; description: string }> = [

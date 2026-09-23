@@ -1,5 +1,5 @@
 import { Request, Response } from 'express';
-import type { ConditionType, PaymentMethodType, RoomType, TimeSlot, WorkerCancellationReason } from '@prisma/client';
+import type { ConditionType, PaymentMethodType, Prisma, RoomType, TimeSlot, WorkerCancellationReason } from '@prisma/client';
 import prisma from '@config/database';
 import { errorResponse } from '@utils/errorResponse';
 import { notifyUser } from '@utils/notify';
@@ -793,6 +793,479 @@ export const createBooking = async (req: AuthRequest, res: Response) => {
 };
 
 /**
+ * POST /api/bookings/multi-day
+ * Books the SAME worker for N consecutive calendar days upfront (e.g. a
+ * 3-day deep-clean job) — see the "multi-day upfront booking" backlog item.
+ *
+ * Deliberately NOT a Booking.scheduledDate date-range: every downstream
+ * system (pricing, chat threads, arrival/completion verification, payment/
+ * payout, worker matching) assumes one Booking row = one calendar day, and
+ * reworking that would ripple through all of it. Instead this creates a
+ * lightweight BookingGroup that links N ordinary single-day Booking rows —
+ * each day accepts/declines, checks in, completes, and gets paid completely
+ * independently, exactly like any other single-day booking; BookingGroup
+ * exists purely so "My Bookings" can show "Day 2 of 3" instead of three
+ * unrelated-looking jobs.
+ *
+ * A much narrower version of createBooking above, by design:
+ * - workerId is REQUIRED — no auto-match. A multi-day job needs one worker
+ *   committed across every day, which only makes sense once the client has
+ *   already picked that specific worker (the worker-profile "Book Now"
+ *   entry point, mirrored by mobile's `draft.workerLocked`).
+ * - CUSTOM_QUOTE service tasks aren't supported — there's no price to sum
+ *   across days until a worker inspects the job and quotes it, which is
+ *   inherently a single-job flow, not an upfront multi-day one.
+ * - No packages/addOns/tip for this first version — those interact with
+ *   per-day pricing in ways (charged once? per day?) that have no obvious
+ *   right answer yet, so they're left for a follow-up rather than guessed at.
+ *
+ * All-or-nothing: every one of the N consecutive days is checked for
+ * availability before anything is written, and re-checked again inside the
+ * transaction that creates the group — if ANY day conflicts, the whole
+ * request fails and zero rows are created (mirrors createBooking's own
+ * race-closing re-check, just looped over N days instead of one).
+ */
+export const createMultiDayBooking = async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user || req.user.role !== 'CLIENT') {
+      return res.status(403).json(errorResponse(403, 'Only clients can create bookings'));
+    }
+    const clientId = req.user.userId;
+
+    const holdingClientProfile = await prisma.clientProfile.findUnique({
+      where: { userId: clientId },
+      select: { paymentHoldAt: true },
+    });
+    if (holdingClientProfile?.paymentHoldAt) {
+      return res.status(403).json(
+        errorResponse(403, 'Your account is on hold for an unpaid booking. Please settle it before booking again.')
+      );
+    }
+
+    const {
+      workerId,
+      serviceType,
+      serviceTaskId,
+      description,
+      address,
+      city,
+      lat,
+      lng,
+      startDate,
+      dayCount,
+      timeSlot,
+      priorities,
+      notes,
+      paymentMethodType,
+      paymentAccountIdentifier,
+      scopeAnswers,
+      issuePhotoUrls,
+      idempotencyKey,
+    } = req.body as {
+      workerId: string;
+      serviceType: string;
+      serviceTaskId?: string;
+      description?: string;
+      address: string;
+      city?: string;
+      lat: number;
+      lng: number;
+      startDate: string;
+      dayCount: number;
+      timeSlot: TimeSlot;
+      priorities?: string[];
+      notes?: string;
+      paymentMethodType?: PaymentMethodType;
+      paymentAccountIdentifier?: string;
+      scopeAnswers?: Record<string, string | string[]>;
+      issuePhotoUrls?: string[];
+      idempotencyKey?: string;
+    };
+
+    // Idempotent replay — same rationale as createBooking's, but keyed off
+    // BookingGroup (see its schema comment for why it can't share Booking's
+    // own idempotencyKey column: every one of the N rows in a group would
+    // otherwise collide on the same (clientId, idempotencyKey) pair).
+    const hasIdempotencyKey = typeof idempotencyKey === 'string' && idempotencyKey.trim().length > 0;
+    if (hasIdempotencyKey) {
+      const existingGroup = await prisma.bookingGroup.findUnique({
+        where: { client_group_idempotency_key_unique: { clientId, idempotencyKey: idempotencyKey! } },
+        include: { bookings: { orderBy: { scheduledDate: 'asc' } } },
+      });
+      if (existingGroup) {
+        return res.status(200).json({
+          success: true,
+          message: 'Booking already created for this request',
+          data: formatMultiDayBookingResponse(existingGroup),
+        });
+      }
+    }
+
+    const cityName = city ?? '';
+    const clientLocation = { lat, lng };
+    const startDay = toDayStart(startDate);
+    const scheduledDays: Date[] = Array.from({ length: dayCount }, (_, i) => {
+      const d = new Date(startDay);
+      d.setUTCDate(d.getUTCDate() + i);
+      return d;
+    });
+
+    const serviceTask = serviceTaskId
+      ? await prisma.serviceTask.findUnique({
+          where: { id: serviceTaskId },
+          include: { serviceType: true, quantityScopeField: true },
+        })
+      : null;
+
+    if (serviceTaskId && !serviceTask) {
+      return res.status(404).json(errorResponse(404, 'Service task not found'));
+    }
+
+    if (serviceTask?.pricingModel === 'CUSTOM_QUOTE') {
+      return res.status(400).json(
+        errorResponse(400, "Multi-day bookings aren't available for custom-quote services yet — book one day at a time instead.")
+      );
+    }
+
+    const resolvedServiceTypeName = serviceTask?.serviceType.name ?? serviceType;
+    const serviceTypeConfig = serviceTask ? null : await resolveServiceTypeConfig(resolvedServiceTypeName);
+
+    if (!serviceTask && !serviceTypeConfig) {
+      return res.status(404).json(errorResponse(404, 'Service type not found'));
+    }
+
+    const effectiveScopeAnswers =
+      scopeAnswers && typeof scopeAnswers === 'object' && !Array.isArray(scopeAnswers) ? scopeAnswers : undefined;
+
+    if (serviceTypeConfig) {
+      const answers = effectiveScopeAnswers ?? {};
+      for (const field of serviceTypeConfig.scopeFields) {
+        const answer = answers[field.label];
+        const hasAnswer = Array.isArray(answer) ? answer.length > 0 : typeof answer === 'string' && answer.trim().length > 0;
+        if (field.required && !hasAnswer) {
+          return res.status(400).json(errorResponse(400, `"${field.label}" is required for this service`));
+        }
+        if (hasAnswer && (field.fieldType === 'SELECT' || field.fieldType === 'MULTI_SELECT')) {
+          const validLabels = new Set(field.options.map((o) => o.label));
+          const values = Array.isArray(answer) ? answer : [answer as string];
+          if (!values.every((v) => validLabels.has(v))) {
+            return res.status(400).json(errorResponse(400, `"${field.label}" has an invalid selection`));
+          }
+        }
+        if (hasAnswer && field.fieldType === 'NUMBER') {
+          const n = Number(answer);
+          if (Number.isNaN(n)) {
+            return res.status(400).json(errorResponse(400, `"${field.label}" must be a number`));
+          }
+          if ((field.minValue != null && n < field.minValue) || (field.maxValue != null && n > field.maxValue)) {
+            return res.status(400).json(errorResponse(400, `"${field.label}" is outside the allowed range`));
+          }
+        }
+      }
+    }
+
+    const effectiveIssuePhotoUrls = Array.isArray(issuePhotoUrls)
+      ? issuePhotoUrls.filter((url): url is string => typeof url === 'string' && url.length > 0)
+      : [];
+
+    const requestingClient = await prisma.user.findUnique({ where: { id: clientId }, select: { phone: true } });
+
+    const workerProfile = await prisma.workerProfile.findUnique({
+      where: { userId: workerId },
+      include: {
+        user: { select: { phone: true } },
+        serviceCategories: { include: { serviceType: { select: { name: true } } } },
+      },
+    });
+    if (!workerProfile) {
+      return res.status(404).json(errorResponse(404, 'Worker not found'));
+    }
+
+    const selfDealingFlag = Boolean(
+      requestingClient?.phone && workerProfile.user.phone && requestingClient.phone === workerProfile.user.phone
+    );
+
+    // Same capability/category re-check as createBooking's explicit-worker
+    // path (there is no auto-match path here to have already guaranteed it).
+    const capabilityFilters = await buildCapabilityFilters(resolvedServiceTypeName, effectiveScopeAnswers);
+    if (capabilityFilters.length > 0) {
+      const eligible = await prisma.workerProfile.findFirst({
+        where: { userId: workerId, AND: capabilityFilters },
+        select: { id: true },
+      });
+      if (!eligible) {
+        return res.status(409).json(errorResponse(409, 'This pro does not handle the selected option for this service'));
+      }
+    }
+    const bookedCategory = workerProfile.serviceCategories.find(
+      (c) => c.serviceType.name.toLowerCase() === resolvedServiceTypeName.toLowerCase()
+    );
+    if (!bookedCategory || bookedCategory.status !== 'VERIFIED') {
+      return res.status(409).json(errorResponse(409, 'This pro does not offer this service'));
+    }
+    if (workerProfile.kycStatus !== 'APPROVED') {
+      return res.status(403).json(errorResponse(403, 'Worker is not verified yet'));
+    }
+    if (!workerProfile.isAvailable) {
+      return res.status(409).json(errorResponse(409, 'Worker is not currently available'));
+    }
+    if (workerProfile.debtHoldAt) {
+      return res.status(409).json(errorResponse(409, 'Worker is not currently available'));
+    }
+    if (workerProfile.activeJobCount >= workerProfile.maxConcurrentJobs) {
+      return res.status(409).json(errorResponse(409, 'Worker is at maximum capacity'));
+    }
+
+    // Every day must be free before anything is written — a client-facing
+    // pre-check so a day-5-of-7 conflict is reported clearly instead of a
+    // generic transaction failure, mirrored again (race-closing) inside the
+    // transaction below.
+    for (const day of scheduledDays) {
+      const free = await isSlotAndOverflowFree(prisma, workerProfile.id, day, timeSlot, serviceTask?.durationHours);
+      if (!free) {
+        return res.status(409).json(
+          errorResponse(409, `${workerProfile.user ? 'This pro' : 'The selected worker'} isn't available on ${day.toISOString().slice(0, 10)} — try a different start date or day count.`)
+        );
+      }
+    }
+
+    // basePrice/distance/tier are identical for every day (same worker, same
+    // task, same address) — computed once and reused N times, rather than
+    // re-derived per day.
+    let basePrice: number;
+    if (serviceTask) {
+      if (serviceTask.pricingModel === 'TIERED') {
+        const field = serviceTask.quantityScopeField;
+        const quantity = field ? Number(effectiveScopeAnswers?.[field.label]) : NaN;
+        if (!field || Number.isNaN(quantity)) {
+          return res.status(400).json(errorResponse(400, `"${field?.label ?? 'quantity'}" is required for this service`));
+        }
+        const tierRows = await prisma.workerTaskTierPrice.findMany({
+          where: { workerProfileId: workerProfile.id, serviceTaskId: serviceTask.id, isActive: true },
+        });
+        const resolvedPrice = resolveTierPrice(tierRows, quantity);
+        if (resolvedPrice == null) {
+          return res.status(409).json(errorResponse(409, 'This pro has not priced this service for this quantity'));
+        }
+        basePrice = resolvedPrice;
+      } else {
+        const workerPrice = await prisma.workerTaskPrice.findUnique({
+          where: { workerProfileId_serviceTaskId: { workerProfileId: workerProfile.id, serviceTaskId: serviceTask.id } },
+        });
+        if (!workerPrice?.isActive) {
+          return res.status(409).json(errorResponse(409, 'This pro has not priced this service yet'));
+        }
+        if (serviceTask.pricingModel === 'FIXED') {
+          basePrice = workerPrice.price!;
+        } else {
+          const field = serviceTask.quantityScopeField;
+          const quantity = field ? Number(effectiveScopeAnswers?.[field.label]) : NaN;
+          if (!field || Number.isNaN(quantity)) {
+            return res.status(400).json(errorResponse(400, `"${field?.label ?? 'quantity'}" is required for this service`));
+          }
+          basePrice = round2(workerPrice.unitPrice! * quantity);
+        }
+      }
+    } else {
+      basePrice = serviceTypeConfig!.basePrice;
+    }
+
+    const vatApplicable = workerProfile.vatRegistered;
+    const vatRate = vatApplicable ? VAT_RATE : null;
+
+    const workerDistanceKm =
+      workerProfile.addressLat != null && workerProfile.addressLng != null
+        ? await resolveDrivingDistanceKm(clientLocation, { lat: workerProfile.addressLat, lng: workerProfile.addressLng })
+        : null;
+
+    const appSettings = await getAppSettings();
+    const workerCompletedJobs = await prisma.booking.count({ where: { workerId, status: 'COMPLETED' } });
+    const workerTier = computeWorkerTier(workerProfile.rating, workerCompletedJobs, appSettings);
+
+    const { distanceFee, urgencyFee, tierFee, estimatedPrice } = computeJobPricing({
+      basePrice,
+      tierMultiplier: tierMultiplier(workerTier, appSettings),
+      distanceKm: workerDistanceKm,
+      freeDistanceKm: appSettings.freeDistanceKm,
+      perKmFee: appSettings.perKmFee,
+    });
+    const finalEstimate = round2(estimatedPrice);
+
+    const priceCheck = await validatePriceWithinPricingRule(cityName, resolvedServiceTypeName, finalEstimate);
+    if (!priceCheck.ok) {
+      return res.status(409).json(
+        errorResponse(
+          409,
+          `Calculated price ₱${finalEstimate} is outside the allowed range (₱${priceCheck.bounds.minPrice}–₱${priceCheck.bounds.maxPrice}) for ${cityName || 'this city'}/${resolvedServiceTypeName}`
+        )
+      );
+    }
+
+    try {
+      const group = await prisma.$transaction(async (tx) => {
+        const workerTx = await tx.workerProfile.findUnique({ where: { userId: workerId } });
+        if (!workerTx) throw new Error('WORKER_NOT_FOUND');
+        if (workerTx.kycStatus !== 'APPROVED') throw new Error('WORKER_NOT_APPROVED');
+        if (workerTx.activeJobCount >= workerTx.maxConcurrentJobs) throw new Error('AT_CAPACITY');
+
+        for (const day of scheduledDays) {
+          const freeTx = await isSlotAndOverflowFree(tx, workerTx.id, day, timeSlot, serviceTask?.durationHours);
+          if (!freeTx) throw new Error(`SLOT_TAKEN:${day.toISOString().slice(0, 10)}`);
+        }
+
+        const createdGroup = await tx.bookingGroup.create({
+          data: {
+            clientId,
+            workerId,
+            totalDays: dayCount,
+            idempotencyKey: hasIdempotencyKey ? (idempotencyKey as string) : null,
+          },
+        });
+
+        for (const day of scheduledDays) {
+          const createdBooking = await tx.booking.create({
+            data: {
+              clientId,
+              workerId,
+              groupId: createdGroup.id,
+              serviceType: resolvedServiceTypeName,
+              serviceTaskId: serviceTaskId ?? null,
+              description: description ?? '',
+              estimatedDurationHours: serviceTask?.durationHours ?? null,
+              priorities: Array.isArray(priorities) ? priorities : [],
+              scopeAnswers: effectiveScopeAnswers,
+              issuePhotoUrls: effectiveIssuePhotoUrls,
+              scheduledDate: day,
+              timeSlot,
+              isAutoMatched: false,
+              selfDealingFlag,
+              declinedWorkerIds: [],
+              expiresAt: new Date(Date.now() + 60 * 60 * 1000),
+              estimatedPrice: finalEstimate,
+              vatApplicable,
+              vatRate,
+              tip: 0,
+              notes: notes ?? null,
+              paymentMethodType: paymentMethodType ?? null,
+              paymentAccountIdentifier: paymentAccountIdentifier ?? null,
+              location: address,
+              city: cityName,
+              clientLat: lat,
+              clientLng: lng,
+              workerLat: workerProfile.addressLat ?? null,
+              workerLng: workerProfile.addressLng ?? null,
+              distanceMeters: workerDistanceKm != null ? Math.round(workerDistanceKm * 1000) : null,
+              status: 'PENDING',
+            },
+          });
+
+          await tx.pricingLog.create({
+            data: {
+              bookingId: createdBooking.id,
+              basePrice,
+              conditionFee: 0,
+              distanceFee,
+              urgencyFee,
+              tierFee,
+              addOnsTotal: 0,
+              finalEstimate,
+              breakdown: {
+                basePrice,
+                conditionFee: 0,
+                distanceFee,
+                urgencyFee,
+                tierFee,
+                addOnsTotal: 0,
+                finalEstimate,
+                workerTier,
+                distanceKm: workerDistanceKm,
+                isAutoMatched: false,
+                groupId: createdGroup.id,
+              },
+            },
+          });
+
+          await markSlotBooked(tx, workerTx.id, day, timeSlot, serviceTask?.durationHours);
+        }
+
+        return tx.bookingGroup.findUniqueOrThrow({
+          where: { id: createdGroup.id },
+          include: { bookings: { orderBy: { scheduledDate: 'asc' } } },
+        });
+      });
+
+      // Best-effort, same reasoning as createBooking's — a Redis hiccup here
+      // must not turn an already-committed group into an apparent failure.
+      await Promise.all(
+        group.bookings.map((b) =>
+          schedulePendingExpiry(b.id).catch((error) => {
+            console.error(`Failed to schedule pending-expiry for booking ${b.id}:`, error);
+          })
+        )
+      );
+
+      await notifyUser({
+        userId: workerId,
+        type: 'BOOKING_REQUEST',
+        title: 'New Multi-Day Booking Request',
+        message: `A client has requested your service for ${dayCount} consecutive days starting ${scheduledDays[0].toISOString().slice(0, 10)}`,
+        relatedId: group.bookings[0]?.id,
+      });
+
+      return res.status(201).json({
+        success: true,
+        message: 'Multi-day booking created successfully',
+        data: formatMultiDayBookingResponse(group),
+      });
+    } catch (txErr: any) {
+      if (typeof txErr.message === 'string' && txErr.message.startsWith('SLOT_TAKEN:')) {
+        const conflictDate = txErr.message.split(':')[1];
+        return res.status(409).json(errorResponse(409, `Slot no longer available on ${conflictDate}`));
+      }
+      if (txErr.message === 'AT_CAPACITY') {
+        return res.status(409).json(errorResponse(409, 'Worker is at maximum capacity'));
+      }
+      if (txErr.message === 'WORKER_NOT_FOUND') {
+        return res.status(404).json(errorResponse(404, 'Worker not found'));
+      }
+      if (txErr.message === 'WORKER_NOT_APPROVED') {
+        return res.status(403).json(errorResponse(403, 'Worker is not verified yet'));
+      }
+      if (txErr.code === 'P2002') {
+        if (hasIdempotencyKey && Array.isArray(txErr.meta?.target) && txErr.meta.target.includes('idempotencyKey')) {
+          return res.status(409).json(
+            errorResponse(409, 'This booking request is already being processed — check your bookings list.')
+          );
+        }
+        return res.status(409).json(errorResponse(409, 'Slot no longer available'));
+      }
+      throw txErr;
+    }
+  } catch (error) {
+    console.error('Error creating multi-day booking:', error);
+    return res.status(500).json(errorResponse(500, 'Failed to create multi-day booking'));
+  }
+};
+
+function formatMultiDayBookingResponse(
+  group: Prisma.BookingGroupGetPayload<{ include: { bookings: true } }>
+) {
+  return {
+    groupId: group.id,
+    totalDays: group.totalDays,
+    bookings: group.bookings.map((b) => ({
+      id: b.id,
+      scheduledDate: b.scheduledDate,
+      timeSlot: b.timeSlot,
+      status: b.status,
+      estimatedPrice: b.estimatedPrice,
+      expiresAt: b.expiresAt,
+    })),
+    totalEstimatedPrice: round2(group.bookings.reduce((sum, b) => sum + b.estimatedPrice, 0)),
+  };
+}
+
+/**
  * GET /api/bookings
  * List bookings (role-filtered: clients see their own, workers see assigned to them)
  */
@@ -836,6 +1309,11 @@ export const listBookings = async (req: AuthRequest, res: Response) => {
           },
           serviceTask: { select: { id: true, name: true, serviceType: { select: { name: true } } } },
           review: { select: { rating: true } },
+          // Multi-day upfront booking (see createMultiDayBooking) — lets the
+          // list show "Day 2 of 3" instead of three unrelated-looking jobs.
+          // Ordered by date (not insertion order) so dayIndex below always
+          // reflects calendar position even if rows were created out of order.
+          group: { include: { bookings: { select: { id: true }, orderBy: { scheduledDate: 'asc' } } } },
         },
         orderBy: { createdAt: 'desc' },
         skip,
@@ -885,6 +1363,9 @@ export const listBookings = async (req: AuthRequest, res: Response) => {
       // settled at capture time (see paymentLifecycleService).
       workerPayoutEstimate: calculateWorkerPayout(b.finalPrice ?? b.estimatedPrice, b.tip ?? 0, commissionRate, withholdingTaxRate),
       rating: b.review?.rating ?? null,
+      groupId: b.groupId ?? null,
+      groupTotalDays: b.group?.totalDays ?? null,
+      groupDayIndex: b.group ? b.group.bookings.findIndex((gb: { id: string }) => gb.id === b.id) + 1 : null,
     }));
 
     return res.status(200).json({
@@ -941,6 +1422,10 @@ export const getBookingDetail = async (req: AuthRequest, res: Response) => {
         disputes: { orderBy: { createdAt: 'desc' } },
         arrivalVerification: true,
         cancellation: true,
+        // Multi-day upfront booking (see createMultiDayBooking) — lets the
+        // detail screen show "Day 2 of 3" and offer a "Cancel entire job"
+        // convenience action over the sibling bookings.
+        group: { include: { bookings: { orderBy: { scheduledDate: 'asc' } } } },
       },
     });
 
@@ -993,6 +1478,21 @@ export const getBookingDetail = async (req: AuthRequest, res: Response) => {
       message: 'Booking details retrieved successfully',
       data: {
         id: booking.id,
+        // Multi-day upfront booking (see createMultiDayBooking) — null for
+        // the overwhelming majority of ordinary single-day bookings. Sibling
+        // list is date-ordered so the client can compute "Day X of N" and
+        // offer a "Cancel entire job" action over the other bookingIds.
+        groupId: booking.groupId,
+        group: booking.group
+          ? {
+              totalDays: booking.group.totalDays,
+              bookings: booking.group.bookings.map((gb: { id: string; scheduledDate: Date; status: string }) => ({
+                id: gb.id,
+                scheduledDate: gb.scheduledDate,
+                status: gb.status,
+              })),
+            }
+          : null,
         client: booking.client,
         worker: booking.worker
           ? {
