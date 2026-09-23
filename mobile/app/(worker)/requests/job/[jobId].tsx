@@ -499,7 +499,7 @@ export default function JobDetailScreen() {
             <Ionicons name="alert-circle" size={24} color={colors.warning} />
             <View className="ml-3 flex-1">
               <Text className="text-warning font-bold text-sm">
-                You haven't checked in
+                You haven&apos;t checked in
               </Text>
               <Text className="text-text-secondary text-xs mt-0.5">
                 The client can now cancel this job free of charge. Check in as soon as you arrive.

@@ -216,6 +216,10 @@ export default function BookingDetailScreen() {
     }, [refreshBookingDetail]),
   );
 
+  // Declared before the early returns below so the hook order stays the
+  // same between the loading render and the loaded one.
+  const [respondingAddonId, setRespondingAddonId] = useState<string | null>(null);
+
   if (loading && !booking) {
     return (
       <SafeAreaView className="flex-1 bg-white">
@@ -267,7 +271,6 @@ export default function BookingDetailScreen() {
     total: booking.payment?.totalAmount ?? booking.amount,
   };
 
-  const [respondingAddonId, setRespondingAddonId] = useState<string | null>(null);
   const handleAddonResponse = async (addonId: string, approve: boolean) => {
     setRespondingAddonId(addonId);
     try {
@@ -767,7 +770,7 @@ export default function BookingDetailScreen() {
             <Ionicons name="alert-circle" size={24} color={colors.warning} />
             <View className="ml-3 flex-1">
               <Text className="text-warning font-bold text-sm">
-                Your worker hasn't checked in
+                Your worker hasn&apos;t checked in
               </Text>
               <Text className="text-text-secondary text-xs mt-0.5">
                 You can cancel this booking for free.

@@ -36,21 +36,26 @@ export default function WorkerTwoFactorAuthScreen() {
   const [disableError, setDisableError] = useState("");
   const [isDisabling, setIsDisabling] = useState(false);
 
-  const loadStatus = async () => {
-    setLoading(true);
-    try {
-      const current = await api.fetchCurrentUser();
-      setMfaEnabled(Boolean(current.mfaEnabled));
-    } catch (error) {
-      console.error("Load MFA status error:", error);
-      alertModal.error("Error", "Unable to load your two-factor authentication status.");
-    } finally {
-      setLoading(false);
-    }
-  };
-
+  // `loading` starts true, so the effect only has to clear it once the
+  // status arrives — setting it synchronously here would force an extra render.
   useEffect(() => {
-    loadStatus();
+    let cancelled = false;
+    api
+      .fetchCurrentUser()
+      .then((current) => {
+        if (!cancelled) setMfaEnabled(Boolean(current.mfaEnabled));
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        console.error("Load MFA status error:", error);
+        alertModal.error("Error", "Unable to load your two-factor authentication status.");
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
