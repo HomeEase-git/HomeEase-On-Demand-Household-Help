@@ -62,7 +62,7 @@ export default function ForgotPasswordScreen() {
           Forgot Password?
         </Text>
         <Text className="text-text-secondary mt-2 mb-6">
-          {"Enter your email and we'll send you a 6-digit reset code."}
+          {"Enter your email and we'll send you a 6-digit code."}
         </Text>
 
         <InputField
@@ -84,10 +84,6 @@ export default function ForgotPasswordScreen() {
           onPress={handleSend}
           loading={loading}
         />
-
-        <Text className="text-text-secondary text-xs text-center mt-6">
-          {"We'll send you an email with a 6-digit code to reset your password. Make sure to check your spam folder if you don't see it."}
-        </Text>
       </ScrollView>
     </SafeAreaView>
   );

@@ -32,7 +32,7 @@ export default function AddBookingAddOnScreen() {
 
       alertModal.success(
         "Item Added",
-        "The client can see this added item and its cost on their booking.",
+        "The client can see it on their booking.",
         [{ text: "OK", onPress: () => router.back() }],
       );
     } catch (error) {
@@ -54,9 +54,8 @@ export default function AddBookingAddOnScreen() {
             color={colors.accent.DEFAULT}
           />
           <Text className="text-text-secondary text-sm ml-2 flex-1">
-            Add an extra item or material you used on this job. It&apos;s added to
-            the client&apos;s total immediately and they&apos;ll see it on their
-            receipt.
+            Add an extra item or material used on this job. It&apos;s added to
+            the client&apos;s total right away and shows on their receipt.
           </Text>
         </View>
 

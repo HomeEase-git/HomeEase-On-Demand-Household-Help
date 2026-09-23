@@ -19,7 +19,7 @@ export const DangerButton: React.FC<Props> = ({
 }) => {
   return (
     <Pressable
-      className={`bg-error rounded-xl py-4 px-6 items-center justify-center ${
+      className={`bg-error border-2 border-transparent rounded-xl py-4 px-6 items-center justify-center ${
         fullWidth ? "w-full" : ""
       } ${disabled ? "opacity-50" : ""}`}
       style={
@@ -39,7 +39,9 @@ export const DangerButton: React.FC<Props> = ({
       {loading ? (
         <ActivityIndicator color={colors.white} />
       ) : (
-        <Text className="text-white font-semibold text-center">{label}</Text>
+        <Text className="text-white font-semibold text-center" numberOfLines={1}>
+          {label}
+        </Text>
       )}
     </Pressable>
   );

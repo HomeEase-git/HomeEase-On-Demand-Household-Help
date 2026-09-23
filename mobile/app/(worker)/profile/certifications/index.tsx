@@ -101,13 +101,13 @@ export default function MyDocumentsScreen() {
       <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 40 }}>
         <Text className="text-text-primary font-bold text-base mb-1">Certifications</Text>
         <Text className="text-text-secondary text-xs mb-3">
-          Professional credentials you choose to show on your public profile once verified.
+          Credentials you choose to show on your public profile once verified.
         </Text>
         {certs.length === 0 ? (
           <EmptyState
             icon="ribbon-outline"
             title="No certifications yet"
-            subtitle="Add your professional certifications to build client trust."
+            subtitle="Add certifications to build client trust."
             actionLabel="Add Certification"
             onAction={() => router.push("/(worker)/profile/certifications/upload")}
           />
@@ -138,14 +138,13 @@ export default function MyDocumentsScreen() {
 
         <Text className="text-text-primary font-bold text-base mb-1">Verification Documents</Text>
         <Text className="text-text-secondary text-xs mb-3">
-          Everything you have submitted for identity verification (ID, clearances, resume, etc.) — private
-          to you, never shown to clients.
+          Your ID, clearances, resume and other verification files. Never shown to clients.
         </Text>
         {documents.length === 0 ? (
           <EmptyState
             icon="folder-open-outline"
             title="No documents yet"
-            subtitle="Documents you submit for verification will show up here."
+            subtitle="Verification documents appear here once submitted."
           />
         ) : (
           documents.map((doc) => (

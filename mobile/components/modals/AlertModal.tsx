@@ -45,6 +45,7 @@ export const AlertModal: React.FC<Props> = ({
   const { icon, color, bg } = VARIANT_CONFIG[variant];
   const resolvedButtons: AlertModalButton[] =
     buttons && buttons.length > 0 ? buttons : [{ text: "OK", style: "default" }];
+  const isRow = resolvedButtons.length === 2;
 
   const handlePress = (button: AlertModalButton) => {
     onRequestClose();
@@ -64,16 +65,12 @@ export const AlertModal: React.FC<Props> = ({
       {!!message && (
         <Text className="text-text-secondary text-center mt-2">{message}</Text>
       )}
-      <View
-        className={
-          resolvedButtons.length > 1
-            ? "flex-row gap-3 mt-6"
-            : "mt-6"
-        }
-      >
+      {/* Two buttons sit side by side; one or three-plus stack full width,
+          since three-plus in a row is too narrow for a phone-width modal. */}
+      <View className={isRow ? "flex-row gap-3 mt-6" : "gap-3 mt-6"}>
         {resolvedButtons.map((button, index) => {
           const key = `${button.text}-${index}`;
-          const isFullWidth = resolvedButtons.length === 1;
+          const isFullWidth = !isRow;
 
           if (button.style === "cancel") {
             return (

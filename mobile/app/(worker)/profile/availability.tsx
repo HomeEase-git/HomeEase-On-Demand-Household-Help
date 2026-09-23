@@ -201,8 +201,7 @@ export default function AvailabilityScreen() {
 
         <Text className="text-text-primary font-bold text-base mb-1">Next 7 days</Text>
         <Text className="text-text-muted text-xs mb-4">
-          Tap a slot to open/close it. Max {maxSlotsPerDay} slots per day. Slots with an active booking can&apos;t
-          be closed.
+          Tap a slot to open or close it. Up to {maxSlotsPerDay} slots per day. Booked slots can&apos;t be closed.
         </Text>
 
         <View className="gap-3">

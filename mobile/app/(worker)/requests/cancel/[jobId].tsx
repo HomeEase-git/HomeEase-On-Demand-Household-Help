@@ -73,9 +73,8 @@ export default function WorkerCancelJobScreen() {
         <View className="bg-error/10 border border-error rounded-xl p-4 flex-row items-start mb-4">
           <Ionicons name="warning-outline" size={24} color={colors.error} />
           <Text className="text-error ml-2 flex-1 text-sm">
-            If you already accepted this job, cancelling now forfeits the
-            admin fee you paid to accept it. The client&apos;s payment hold will
-            be released.
+            Cancelling less than 24 hours before the job, for a reason on your
+            end, lowers your ranking in auto-match.
           </Text>
         </View>
 
@@ -130,8 +129,8 @@ export default function WorkerCancelJobScreen() {
         visible={confirmVisible}
         title="Cancel this job?"
         message="This action cannot be undone."
-        confirmLabel="Yes, Cancel"
-        cancelLabel="Keep Job"
+        confirmLabel="Confirm"
+        cancelLabel="Keep"
         onConfirm={handleConfirmCancel}
         onCancel={() => setConfirmVisible(false)}
       />

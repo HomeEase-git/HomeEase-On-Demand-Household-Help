@@ -152,8 +152,7 @@ export default function OtpVerificationScreen() {
           <View className="flex-row items-start">
             <Ionicons name="information-circle" size={20} color={colors.brand.DEFAULT} />
             <Text className="text-xs text-text-secondary ml-2 flex-1">
-              Didn&apos;t receive the code? Check your spam folder or wait a
-              moment before requesting a new code.
+              Didn&apos;t get the code? Check your spam folder.
             </Text>
           </View>
         </View>

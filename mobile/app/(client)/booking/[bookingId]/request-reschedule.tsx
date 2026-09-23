@@ -95,8 +95,7 @@ export default function RequestRescheduleScreen() {
       <ScreenHeader title="Request Reschedule" showBack />
       <ScrollView className="flex-1" contentContainerStyle={{ padding: 24, paddingBottom: 40 }}>
         <Text className="text-text-secondary text-sm mb-4">
-          Propose a new date and time for this booking. {workerName} will need to accept it before anything changes
-          — your current date stays booked until then.
+          Suggest a new date and time. {workerName} has to accept it, and your current date stays booked until then.
         </Text>
 
         <Text className="text-text-primary font-bold text-lg mb-3">New date</Text>

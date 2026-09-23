@@ -337,7 +337,7 @@ export default function JobDetailScreen() {
     if (!completionPhotoUrl) return;
     alertModal.confirm(
       "Mark as Complete?",
-      "Confirm that you have finished this job. The client will review your photo and confirm completion before payment is released.",
+      "Confirm you've finished this job. The client will review your photo and confirm completion.",
       {
         confirmText: "Confirm",
         cancelText: "Cancel",
@@ -542,7 +542,7 @@ export default function JobDetailScreen() {
           )}
           {isAccepted && !hasArrived && (
             <Text className="text-text-muted text-xs text-center -mt-1">
-              You must check in within 100m of the job site before starting.
+              Check in within 100 m of the job site to start.
             </Text>
           )}
           {shouldShareLocation && (

@@ -91,7 +91,7 @@ export default function AddPaymentMethodScreen() {
         <InputField
           ref={accountRef}
           label="Account Identifier"
-          placeholder="e.g., +63912345678 (for GCash/Maya), account number, etc."
+          placeholder="e.g. 09XXXXXXXXX"
           value={accountIdentifier}
           onChangeText={setAccountIdentifier}
           returnKeyType="next"
@@ -101,7 +101,7 @@ export default function AddPaymentMethodScreen() {
         <InputField
           ref={labelRef}
           label="Label (Optional)"
-          placeholder="e.g., My GCash, Work Card"
+          placeholder="e.g. My GCash"
           value={label}
           onChangeText={setLabel}
           returnKeyType="done"

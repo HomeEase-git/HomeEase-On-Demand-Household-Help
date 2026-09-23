@@ -221,9 +221,9 @@ export default function UploadIdScreen() {
       documentRequirements[key].label,
       "Choose how you'd like to add this document.",
       [
-        { text: "Take Photo", onPress: () => captureFromCamera(key) },
-        { text: "Choose from Gallery", onPress: () => pickFromGallery(key) },
-        { text: "Choose File", onPress: () => pickFromFiles(key) },
+        { text: "Camera", onPress: () => captureFromCamera(key) },
+        { text: "Gallery", onPress: () => pickFromGallery(key) },
+        { text: "Files", onPress: () => pickFromFiles(key) },
         { text: "Cancel", style: "cancel" },
       ],
     );

@@ -157,8 +157,7 @@ export default function TaxInfoScreen() {
             {taxInfo?.tinOnFile ? taxInfo.maskedTin : "No TIN saved yet"}
           </Text>
           <Text className="text-text-secondary text-xs mt-1">
-            Required before we can generate your BIR Form 2307 withholding certificate. This is used only for
-            tax-compliance purposes.
+            Needed to issue your BIR Form 2307. Used for tax compliance only.
           </Text>
         </View>
         <InputField
@@ -179,8 +178,8 @@ export default function TaxInfoScreen() {
         <Text className="text-text-primary font-bold mt-8 mb-2">VAT Registration</Text>
         <View className="bg-card rounded-2xl p-4 mb-4" style={cardShadow}>
           <Text className="text-text-secondary text-xs mb-3">
-            Only required if your gross annual earnings cross BIR&apos;s VAT threshold. Submit proof (e.g. your BIR
-            Certificate of Registration) and an admin will review it — VAT only applies to your bookings once approved.
+            Only needed if your annual earnings pass BIR&apos;s VAT threshold. Submit your BIR Certificate of
+            Registration for review. VAT applies to your bookings once approved.
           </Text>
           {vatRegistration?.vatRegistered ? (
             <Text className="font-semibold" style={{ color: colors.success }}>
@@ -216,8 +215,7 @@ export default function TaxInfoScreen() {
           <>
             <Text className="text-text-primary font-bold mt-8 mb-2">VAT You Collected</Text>
             <Text className="text-text-secondary text-xs mb-3">
-              For your own 2550Q/2551Q filing — not remitted by the platform. Ask an admin to generate a period's
-              summary if it's missing here.
+              For your own 2550Q/2551Q filing. HomeEase doesn&apos;t remit this VAT for you.
             </Text>
             {vatSummaries.length === 0 ? (
               <Text className="text-text-secondary text-sm">No summaries generated yet.</Text>
@@ -244,7 +242,7 @@ export default function TaxInfoScreen() {
         <Text className="text-text-primary font-bold mt-8 mb-2">Tax Documents</Text>
         {certificates.length === 0 ? (
           <Text className="text-text-secondary text-sm">
-            No certificates issued yet — these appear here once generated for a completed reporting period.
+            No certificates yet. They appear after each reporting period.
           </Text>
         ) : (
           <FlatList

@@ -41,6 +41,7 @@ export const SearchBar: React.FC<Props> = ({
       ) : (
         <TextInput
           className="flex-1 ml-3 text-brand text-sm"
+          style={{ includeFontPadding: false, textAlignVertical: "center" }}
           placeholder={placeholder}
           placeholderTextColor={colors.text.muted}
           value={inputValue}

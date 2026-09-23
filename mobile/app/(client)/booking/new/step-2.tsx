@@ -217,8 +217,7 @@ export default function BookingStep2Screen() {
 
         {noSlotsForLockedWorker && (
           <Text className="text-error text-sm mt-2">
-            {draft.workerName ?? "This pro"} isn&apos;t available on this date for the selected service. Try a
-            different date, or go back and choose another pro.
+            {draft.workerName ?? "This pro"} isn&apos;t available on this date. Try another date or pro.
           </Text>
         )}
 
@@ -226,8 +225,8 @@ export default function BookingStep2Screen() {
           <>
             <Text className="text-text-primary font-bold text-lg mt-6 mb-1">Multi-day job?</Text>
             <Text className="text-text-secondary text-sm mb-3">
-              Book {draft.workerName ?? "this pro"} for the same time slot on multiple consecutive days, starting
-              from the date above.
+              Book {draft.workerName ?? "this pro"} at the same time on consecutive days, starting from the date
+              above.
             </Text>
             <View className="bg-card rounded-xl px-4 py-3 flex-row items-center justify-between">
               <Text className="text-text-primary font-semibold">

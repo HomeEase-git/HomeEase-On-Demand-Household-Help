@@ -51,8 +51,7 @@ export default function PasswordResetSentScreen() {
           <View className="flex-row items-start gap-3">
             <Ionicons name="information-circle" size={20} color={colors.brand.DEFAULT} />
             <Text className="text-text-secondary text-sm flex-1">
-              Enter the code in the app to set a new password. The code will
-              expire in 10 minutes.
+              The code expires in 10 minutes.
             </Text>
           </View>
         </View>
@@ -62,11 +61,10 @@ export default function PasswordResetSentScreen() {
             <Ionicons name="alert-circle" size={20} color={colors.warning} />
             <View className="flex-1">
               <Text className="text-text-secondary font-semibold text-sm mb-1">
-                Didn&apos;t receive an email?
+                Didn&apos;t get it?
               </Text>
               <Text className="text-text-secondary text-xs">
-                Check your spam folder or wait a minute before requesting a new
-                code.
+                Check your spam folder.
               </Text>
             </View>
           </View>

@@ -102,17 +102,15 @@ export default function ResumeScreen() {
           currentStep={3}
         />
         <Text className="text-text-secondary text-sm mb-4">
-          Resume upload is recommended for workers and must be a PDF file.
+          Your resume is recommended and must be a PDF.
         </Text>
 
         <View className="bg-card rounded-xl p-4 mb-6">
           <Text className="text-primary font-semibold mb-2">
-            Why we need your resume
+            Why we ask
           </Text>
           <Text className="text-text-secondary text-sm">
-            Your resume helps clients understand your experience, skills, and
-            professional background. It will be used for verification and
-            profile completion.
+            It helps clients see your experience and helps us verify you.
           </Text>
         </View>
 

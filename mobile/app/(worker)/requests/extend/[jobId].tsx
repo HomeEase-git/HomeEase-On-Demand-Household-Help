@@ -56,14 +56,13 @@ export default function ExtendJobScreen() {
         <View className="bg-warning/10 border border-warning rounded-xl p-4 flex-row items-start mb-4">
           <Ionicons name="warning-outline" size={24} color={colors.warning} />
           <Text className="text-text-primary ml-2 flex-1 text-sm">
-            This reserves tomorrow on your calendar for this job. If you have another booking at the same time
-            tomorrow, we&apos;ll automatically move it to your next open day and notify that client — or, if no open
-            day is found within 14 days, send it to support to sort out.
+            This reserves tomorrow for this job. Another booking at the same time tomorrow moves to your next open
+            day, or goes to support if none is free within 14 days.
           </Text>
         </View>
 
         <Text className="text-text-secondary text-sm">
-          Only do this if you genuinely need another day to finish this job.
+          Only do this if you need another day to finish.
         </Text>
 
         <View className="flex-row gap-3 mt-8">
@@ -82,9 +81,9 @@ export default function ExtendJobScreen() {
       <GenericConfirmationModal
         visible={confirmVisible}
         title="Reserve tomorrow for this job?"
-        message="Any of your other bookings tomorrow at the same time will be moved automatically."
-        confirmLabel="Yes, Continue Tomorrow"
-        cancelLabel="Not Yet"
+        message="Your other bookings at the same time tomorrow will be moved."
+        confirmLabel="Continue"
+        cancelLabel="Later"
         onConfirm={handleConfirmExtend}
         onCancel={() => setConfirmVisible(false)}
       />

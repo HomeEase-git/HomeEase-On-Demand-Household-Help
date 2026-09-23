@@ -34,17 +34,15 @@ const BOOKING_STEPS = ["Scope", "Schedule", "Who", "Confirm"];
 
 const ACCOUNT_FIELD_CONFIG: Record<
   string,
-  { title: string; description: string; placeholder: string; keyboardType?: "phone-pad" }
+  { title: string; placeholder: string; keyboardType?: "phone-pad" }
 > = {
   gcash: {
-    title: "GCash Details",
-    description: "Enter the mobile number linked to your GCash account.",
+    title: "GCash Number",
     placeholder: "09XXXXXXXXX",
     keyboardType: "phone-pad",
   },
   maya: {
-    title: "Maya Details",
-    description: "Enter the mobile number linked to your Maya account.",
+    title: "Maya Number",
     placeholder: "09XXXXXXXXX",
     keyboardType: "phone-pad",
   },
@@ -393,11 +391,11 @@ export default function BookingStep4Screen() {
         {isMultiDay && (
           <View className="bg-card rounded-xl p-3.5 mt-3">
             <Text className="text-text-secondary text-xs">
-              Estimate shown above is per day. Booking {dayCount} days totals approximately{" "}
+              The estimate above is per day. {dayCount} days come to about{" "}
               {priceEstimate.mode === "point"
                 ? `₱${Math.round(priceEstimate.point.total * dayCount)}`
                 : `₱${Math.round(priceEstimate.range.min * dayCount)} – ₱${Math.round(priceEstimate.range.max * dayCount)}`}
-              . Packages, extra job preferences, and tipping aren&apos;t available for multi-day bookings yet.
+              . Packages, job preferences and tips aren&apos;t available for multi-day bookings.
             </Text>
           </View>
         )}
@@ -442,11 +440,9 @@ export default function BookingStep4Screen() {
             <Text className="text-text-primary font-semibold mb-2">
               {ACCOUNT_FIELD_CONFIG[paymentMethod].title}
             </Text>
-            <Text className="text-text-secondary text-xs mb-2">
-              {ACCOUNT_FIELD_CONFIG[paymentMethod].description}
-            </Text>
             <TextInput
               className="bg-white rounded-xl px-3 py-2 text-text-primary border border-gray-200"
+              style={{ minHeight: 44, includeFontPadding: false, textAlignVertical: "center" }}
               placeholder={ACCOUNT_FIELD_CONFIG[paymentMethod].placeholder}
               placeholderTextColor={colors.text.secondary}
               keyboardType={ACCOUNT_FIELD_CONFIG[paymentMethod].keyboardType}
@@ -483,8 +479,8 @@ export default function BookingStep4Screen() {
       <GenericConfirmationModal
         visible={confirmVisible}
         title="Submit booking request"
-        message="You are about to submit a booking request. No charge now — you'll pay after the job is done and you've confirmed it."
-        confirmLabel="Submit Request"
+        message="No charge now. You'll pay after the job is done and you've confirmed it."
+        confirmLabel="Submit"
         cancelLabel="Cancel"
         onConfirm={onConfirm}
         onCancel={() => setConfirmVisible(false)}

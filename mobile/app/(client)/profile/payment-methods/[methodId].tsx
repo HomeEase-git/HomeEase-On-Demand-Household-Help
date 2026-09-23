@@ -69,7 +69,7 @@ export default function EditPaymentMethodScreen() {
         </View>
         <InputField
           ref={labelRef}
-          label="Label (e.g., My Card, Work Card)"
+          label="Label"
           value={label}
           onChangeText={setLabel}
           returnKeyType="done"

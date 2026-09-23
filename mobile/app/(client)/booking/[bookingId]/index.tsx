@@ -675,7 +675,7 @@ export default function BookingDetailScreen() {
             <View className="flex-row gap-2 mt-3">
               <View className="flex-1">
                 <PrimaryButton
-                  label="Keep New Date"
+                  label="Accept"
                   fullWidth
                   onPress={handleKeepNewDate}
                   disabled={confirmingNewDate}
@@ -684,7 +684,7 @@ export default function BookingDetailScreen() {
               </View>
               <View className="flex-1">
                 <OutlinedButton
-                  label="Cancel Instead"
+                  label="Cancel"
                   fullWidth
                   onPress={() => router.push(`/(client)/booking/${bookingId}/cancel`)}
                 />
@@ -770,7 +770,7 @@ export default function BookingDetailScreen() {
                 Your worker hasn't checked in
               </Text>
               <Text className="text-text-secondary text-xs mt-0.5">
-                You can cancel this booking free of charge if you'd like.
+                You can cancel this booking for free.
               </Text>
             </View>
           </View>
@@ -801,7 +801,7 @@ export default function BookingDetailScreen() {
                   This pro declined the request
                 </Text>
                 <Text className="text-text-secondary text-xs mt-0.5">
-                  Your scope, address, and schedule are unaffected — pick a different pro to continue.
+                  Your booking details are saved. Pick another pro to continue.
                 </Text>
               </View>
             </View>
@@ -1013,7 +1013,7 @@ export default function BookingDetailScreen() {
             />
             {isPendingCompletion && (
               <Text className="text-text-secondary text-xs mt-2">
-                Review the photo above. If the work is done to your satisfaction, confirm completion below.
+                Happy with the work? Confirm completion below.
               </Text>
             )}
           </View>

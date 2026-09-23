@@ -131,7 +131,7 @@ export default function WorkerEditProfileScreen() {
         if (!coords) {
           alertModal.info(
             "Address saved, pricing not updated",
-            "We couldn't verify that address, so distance-based pricing won't use it yet. Everything else was saved."
+            "We couldn't locate that address, so it won't be used for distance pricing yet. Everything else was saved."
           );
         }
       }
@@ -222,8 +222,8 @@ export default function WorkerEditProfileScreen() {
         <View className="bg-card-light rounded-2xl p-4 mb-5" style={cardShadow}>
           <Text className="text-text-primary font-semibold">Service address</Text>
           <Text className="text-text-secondary text-sm mt-1 mb-3">
-            Where you&apos;re based — used to calculate the distance fee on
-            bookings scheduled near you, not to track your live location.
+            Where you&apos;re based. Used for distance fees, not to track your
+            location.
           </Text>
 
           <InputField
@@ -259,8 +259,7 @@ export default function WorkerEditProfileScreen() {
         <View className="bg-card-light rounded-2xl p-4 mb-5" style={cardShadow}>
           <Text className="text-text-primary font-semibold">Digital ID details</Text>
           <Text className="text-text-secondary text-sm mt-1 mb-3">
-            Shown on your Digital ID card alongside your verified photo and
-            name.
+            Shown on your Digital ID card.
           </Text>
 
           <InputField

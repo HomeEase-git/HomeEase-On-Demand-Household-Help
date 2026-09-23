@@ -11,34 +11,16 @@ export default function AccountCreatedSuccessScreen() {
   const router = useRouter();
   const user = useAuthStore((s) => s.user);
   const [scaleAnim] = useState(() => new Animated.Value(0));
-  const [rotateAnim] = useState(() => new Animated.Value(0));
 
   useEffect(() => {
-    // Scale animation for the icon
-    Animated.sequence([
-      Animated.timing(scaleAnim, {
-        toValue: 1,
-        duration: 600,
-        easing: Easing.out(Easing.cubic),
-        useNativeDriver: true,
-      }),
-    ]).start();
-
-    // Continuous rotation for the icon
-    Animated.loop(
-      Animated.timing(rotateAnim, {
-        toValue: 1,
-        duration: 2000,
-        easing: Easing.linear,
-        useNativeDriver: true,
-      }),
-    ).start();
-  }, [scaleAnim, rotateAnim]);
-
-  const rotateDegrees = rotateAnim.interpolate({
-    inputRange: [0, 1],
-    outputRange: ["0deg", "360deg"],
-  });
+    // One-time pop-in for the icon; it stays still afterwards.
+    Animated.timing(scaleAnim, {
+      toValue: 1,
+      duration: 600,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: true,
+    }).start();
+  }, [scaleAnim]);
 
   const handleGetStarted = () => {
     // Clients don't go through worker identity verification — they get a
@@ -63,7 +45,7 @@ export default function AccountCreatedSuccessScreen() {
       >
         <Animated.View
           style={{
-            transform: [{ scale: scaleAnim }, { rotate: rotateDegrees }],
+            transform: [{ scale: scaleAnim }],
             marginBottom: 32,
           }}
         >

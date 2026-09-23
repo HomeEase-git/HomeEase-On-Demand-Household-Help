@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { View, Text, FlatList, Pressable } from "react-native";
+import { View, FlatList, Pressable } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter, useFocusEffect } from "expo-router";
@@ -93,7 +93,7 @@ export default function PaymentMethodsScreen() {
         <EmptyState
           icon="card-outline"
           title="No payment methods"
-          subtitle="Add a wallet or bank account to pay for bookings."
+          subtitle="Add a GCash or Maya account to pay for bookings."
           actionLabel="Add Payment Method"
           onAction={() => router.push("/(client)/profile/payment-methods/new")}
         />
@@ -112,15 +112,6 @@ export default function PaymentMethodsScreen() {
               onSetDefault={() => handleSetDefault(item.id)}
             />
           )}
-          ListHeaderComponent={
-            methods.length > 0 ? (
-              <View className="mb-4">
-                <Text className="text-text-secondary text-sm">
-                  Default payment method is used for automatic bookings
-                </Text>
-              </View>
-            ) : null
-          }
         />
       )}
       <Pressable

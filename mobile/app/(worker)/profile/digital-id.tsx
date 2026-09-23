@@ -336,9 +336,9 @@ export default function DigitalIdScreen() {
                   className="text-xs mt-1 leading-4"
                   style={{ color: colors.neutral[500] }}
                 >
-                  Opens a secure HomeEase page confirming this worker&apos;s
-                  current KYC status and active booking — this printed card alone
-                  is not proof of standing.
+                  Opens a HomeEase page showing this worker&apos;s current
+                  verification status and active booking. The card alone isn&apos;t
+                  proof.
                 </Text>
               </View>
             </View>
@@ -362,9 +362,9 @@ export default function DigitalIdScreen() {
             How to use it
           </Text>
           <Text className="text-text-secondary text-sm">
-            Show this card to clients before starting work. Ask them to compare
-            your photo and name against the worker shown on their booking screen,
-            and to scan the code if they want to confirm your current standing.
+            Show this card to clients before you start. They can compare your
+            photo and name with their booking screen, or scan the code to
+            confirm your status.
           </Text>
         </View>
       </ScrollView>

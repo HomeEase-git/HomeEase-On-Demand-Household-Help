@@ -71,11 +71,11 @@ export const DeclineReasonModal: React.FC<Props> = ({
 
       <View className="flex-row gap-3 mt-6">
         <View className="flex-1">
-          <OutlinedButton label="Never Mind" onPress={onCancel} />
+          <OutlinedButton label="Back" onPress={onCancel} />
         </View>
         <View className="flex-1">
           <PrimaryButton
-            label="Decline Job"
+            label="Decline"
             disabled={!canConfirm || loading}
             loading={loading}
             onPress={handleConfirm}

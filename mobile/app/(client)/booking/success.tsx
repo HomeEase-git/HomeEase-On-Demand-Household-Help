@@ -99,7 +99,7 @@ export default function BookingSuccessScreen() {
 
   const handleCancelBooking = () => {
     if (!selectedBooking) return;
-    alertModal.confirm("Cancel this booking?", "This can't be undone. Any payment hold will be released.", {
+    alertModal.confirm("Cancel this booking?", "This can't be undone.", {
       destructive: true,
       confirmText: "Cancel Booking",
       cancelText: "Keep Booking",
@@ -156,10 +156,10 @@ export default function BookingSuccessScreen() {
           <Text className="text-text-primary text-3xl font-bold text-center mb-2">Booking Confirmed!</Text>
           <Text className="text-text-secondary text-center text-base mb-8">
             {selectedBooking?.groupTotalDays
-              ? `Your ${selectedBooking.groupTotalDays}-day booking request has been submitted — this is Day 1. See My Bookings for the full schedule.`
+              ? `Your ${selectedBooking.groupTotalDays}-day request is in. This is Day 1; see My Bookings for the full schedule.`
               : isAutoMatched
                 ? `You've been matched with ${workerName}!`
-                : "Your booking request has been submitted successfully."}
+                : "Your booking request has been submitted."}
           </Text>
 
           <View className="bg-green-50 rounded-2xl p-4 mb-4">
@@ -187,7 +187,7 @@ export default function BookingSuccessScreen() {
           {selectedBooking?.priceBreakdown && (
             <View className="w-full mb-6">
               <Text className="text-text-secondary text-xs mb-2 text-center">
-                Estimated cost — you&apos;ll be charged after the job is completed
+                Estimated cost. You pay after the job is done.
               </Text>
               <PriceBreakdownCard
                 subtotal={selectedBooking.priceBreakdown.subtotal}

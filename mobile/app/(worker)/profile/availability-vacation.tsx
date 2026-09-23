@@ -72,8 +72,8 @@ export default function AvailabilityVacationScreen() {
       <ScreenHeader title="Mark Unavailable" showBack />
       <ScrollView contentContainerStyle={{ padding: 24, paddingBottom: 40 }}>
         <Text className="text-text-secondary text-sm mb-4">
-          Block off every time slot across a date range — for a vacation or leave stretch. Any date with an active
-          booking won't be touched; you'll need to resolve that job first.
+          Block off every slot in a date range, like for a vacation. Dates with an active booking are skipped, so
+          resolve those jobs first.
         </Text>
 
         <Text className="text-text-primary font-bold text-base mb-2">Start date</Text>

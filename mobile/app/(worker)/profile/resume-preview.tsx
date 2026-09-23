@@ -72,13 +72,13 @@ export default function ResumePreviewScreen() {
       alertModal.success(
         "Profile Updated",
         hasSkills
-          ? "Your trade and bio were updated from your resume. Add the skills listed below from your Skills screen to finish your profile."
+          ? "Your trade and bio were updated from your resume. Add the skills listed below to finish your profile."
           : "Your trade and bio were updated from your resume.",
         hasSkills
           ? [
               { text: "Later", onPress: () => router.back() },
               {
-                text: "Add Skills",
+                text: "Add",
                 onPress: () => router.push("/(worker)/profile/skills"),
               },
             ]
@@ -99,7 +99,7 @@ export default function ResumePreviewScreen() {
         <View className="flex-1 items-center justify-center px-8">
           <ActivityIndicator size="large" color={colors.brand.DEFAULT} />
           <Text className="text-text-secondary text-sm mt-4 text-center">
-            Analyzing your resume with AI — this may take a few seconds…
+            Analyzing your resume. This can take a few seconds…
           </Text>
         </View>
       </SafeAreaView>
@@ -247,8 +247,7 @@ export default function ResumePreviewScreen() {
           />
           <OutlinedButton label="Go Back" onPress={() => router.back()} />
           <Text className="text-text-muted text-xs text-center mt-2">
-            AI analysis may not be 100% accurate. Review your profile after
-            applying.
+            AI results can be wrong. Check your profile after applying.
           </Text>
         </View>
       </ScrollView>

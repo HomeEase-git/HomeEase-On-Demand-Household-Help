@@ -124,14 +124,14 @@ export default function RequestDetailScreen() {
       alertModal.success(
         "Job Accepted!",
         result?.debtWarning
-          ? `The client has been notified. You can track the job from the job detail screen.\n\n⚠️ ${result.debtWarning}`
-          : "The client has been notified. You can track the job from the job detail screen.",
+          ? `The client has been notified.\n\n⚠️ ${result.debtWarning}`
+          : "The client has been notified.",
         [
           {
-            text: "View Job",
+            text: "View",
             onPress: () => router.replace(`/(worker)/requests/job/${booking.id}`),
           },
-          { text: "Go Back", onPress: () => router.back() },
+          { text: "Back", onPress: () => router.back() },
         ],
       );
     } catch (error) {
@@ -141,7 +141,7 @@ export default function RequestDetailScreen() {
           "Account on Hold",
           error.message || "Your account is on hold. Please contact support to continue accepting jobs.",
           [
-            { text: "Contact Support", onPress: () => router.push("/(worker)/profile/help-support") },
+            { text: "Support", onPress: () => router.push("/(worker)/profile/help-support") },
             { text: "Cancel" },
           ],
         );

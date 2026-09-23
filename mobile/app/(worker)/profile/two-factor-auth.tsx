@@ -129,8 +129,8 @@ export default function WorkerTwoFactorAuthScreen() {
         <ScreenHeader title="Save Your Backup Codes" showBack={false} />
         <ScrollView contentContainerStyle={{ padding: 24 }}>
           <Text className="text-error text-sm mb-4">
-            Save these backup codes now. Each one can be used once to sign in if you lose access
-            to your authenticator app. They will not be shown again.
+            Save these backup codes now. Each works once if you lose your authenticator app, and
+            they won&apos;t be shown again.
           </Text>
           <View className="flex-row flex-wrap justify-between mb-6">
             {backupCodes.map((code) => (
@@ -166,8 +166,7 @@ export default function WorkerTwoFactorAuthScreen() {
           {!setupData ? (
             <>
               <Text className="text-text-secondary text-center mb-6">
-                Add an extra layer of security to your account with an authenticator app (Google
-                Authenticator, Authy, 1Password, etc.). This is optional.
+                Use an authenticator app as a second step when you sign in. This is optional.
               </Text>
               <PrimaryButton
                 label={isStarting ? "Starting..." : "Start setup"}
@@ -179,8 +178,7 @@ export default function WorkerTwoFactorAuthScreen() {
           ) : (
             <>
               <Text className="text-text-secondary text-center mb-4">
-                Scan this QR code with your authenticator app, then enter the 6-digit code it
-                shows.
+                Scan the QR code with your authenticator app, then enter the code it shows.
               </Text>
               <View className="items-center mb-4">
                 <Image
@@ -238,9 +236,6 @@ export default function WorkerTwoFactorAuthScreen() {
         >
           <Text className="text-text-muted text-xs font-semibold uppercase tracking-wide mb-3">
             Disable MFA
-          </Text>
-          <Text className="text-text-secondary text-sm mb-4">
-            Requires your current password and a valid authenticator/backup code.
           </Text>
           <InputField
             label="Current password"

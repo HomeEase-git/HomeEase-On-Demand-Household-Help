@@ -58,8 +58,8 @@ export default function WorkerDeleteAccountScreen() {
         </Text>
         <View className="bg-error/10 border border-error rounded-xl p-4 mb-4">
           <Text className="text-error text-sm">
-            This will permanently remove your account, bookings, and data. This
-            action cannot be undone.
+            Your account, bookings and data will be permanently deleted. This
+            can&apos;t be undone.
           </Text>
         </View>
         <Text className="text-text-secondary text-sm mb-2">

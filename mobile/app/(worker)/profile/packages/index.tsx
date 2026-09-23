@@ -139,9 +139,8 @@ export default function PackagesScreen() {
         contentContainerStyle={{ padding: 16, paddingBottom: 80 }}
         ListHeaderComponent={
           <Text className="text-text-muted text-sm mb-4">
-            Offer priced bundles for the service categories you provide — e.g.
-            &quot;Deep Clean Package — ₱1500&quot;. Clients can select these
-            when booking you.
+            Offer priced bundles for your services, like &quot;Deep Clean —
+            ₱1500&quot;. Clients can add them when booking you.
           </Text>
         }
         ListEmptyComponent={
