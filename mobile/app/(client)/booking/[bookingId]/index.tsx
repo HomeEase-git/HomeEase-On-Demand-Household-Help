@@ -25,6 +25,7 @@ import {
   acknowledgeReschedule as acknowledgeRescheduleApi,
   withdrawRescheduleRequest as withdrawRescheduleRequestApi,
   respondToBookingAddOn,
+  cancelBooking as cancelBookingApi,
 } from "../../../../services/api";
 import { colors } from "../../../../constants";
 import { useAlertModal } from "../../../../contexts/AlertModalContext";
@@ -100,6 +101,10 @@ type ApiBookingDetail = {
     tip?: number;
   } | null;
   addOns?: { id: string; name: string; price: number; clientApprovedAt: string | null; clientRejectedAt: string | null }[];
+  // Multi-day upfront booking (see backend createMultiDayBooking) — null for
+  // an ordinary single-day booking. Sibling list is date-ordered.
+  groupId?: string | null;
+  group?: { totalDays: number; bookings: { id: string; scheduledDate: string; status: string }[] } | null;
   quote: {
     laborCost: number;
     materialsCost: number;
@@ -156,6 +161,9 @@ function mapApiBookingDetail(d: ApiBookingDetail): Booking {
     originalScheduledDate: d.originalScheduledDate,
     rescheduleAcknowledgedAt: d.rescheduleAcknowledgedAt,
     workerNoShowFlaggedAt: d.workerNoShowFlaggedAt,
+    groupId: d.groupId ?? undefined,
+    groupTotalDays: d.group?.totalDays ?? undefined,
+    groupDayIndex: d.group ? d.group.bookings.findIndex((b) => b.id === d.id) + 1 : undefined,
   };
 }
 
@@ -166,6 +174,7 @@ export default function BookingDetailScreen() {
   const { bookings, prefillFromBooking, prefillFromDeclinedBooking, acknowledgeReschedule } = useBookingStore();
   const [confirmingNewDate, setConfirmingNewDate] = useState(false);
   const [withdrawingReschedule, setWithdrawingReschedule] = useState(false);
+  const [cancellingGroup, setCancellingGroup] = useState(false);
   const booking = bookings.find((b) => b.id === bookingId);
   // The shared store's Booking type only keeps payment.totalAmount (used by
   // many other screens) — the real subtotal/addOns/tip breakdown is kept
@@ -356,6 +365,53 @@ export default function BookingDetailScreen() {
     if (!rawDetail) return;
     prefillFromDeclinedBooking(rawDetail);
     router.push("/(client)/booking/new/step-1");
+  };
+
+  // Convenience action for a multi-day upfront booking (see backend
+  // createMultiDayBooking) — purely client-side: iterates every sibling day
+  // still in a cancellable state and calls the SAME single-booking cancel
+  // endpoint used everywhere else, one at a time. Each day cancels/frees its
+  // own slot completely independently (this booking's status flow is
+  // unmodified per day, same as a normal single-day booking) — a day
+  // already ACCEPTED or further along is simply skipped, not force-cancelled,
+  // same as the single "Cancel Booking" action would refuse it on its own.
+  const handleCancelEntireJob = () => {
+    const siblings = rawDetail?.group?.bookings ?? [];
+    const cancellableIds = siblings.filter((b) => b.status === "PENDING").map((b) => b.id);
+    if (cancellableIds.length === 0) {
+      alertModal.info("Nothing to cancel", "None of the remaining days in this job can still be cancelled.");
+      return;
+    }
+
+    alertModal.confirm(
+      "Cancel entire job?",
+      `This cancels every day of this ${booking.groupTotalDays}-day job that's still pending (${cancellableIds.length} of ${siblings.length}). Days a pro has already accepted aren't affected.`,
+      {
+        confirmText: "Cancel Entire Job",
+        destructive: true,
+        onConfirm: async () => {
+          setCancellingGroup(true);
+          const results = await Promise.allSettled(
+            cancellableIds.map((id) => cancelBookingApi(id, "Cancelled by client via Cancel Entire Job")),
+          );
+          setCancellingGroup(false);
+          const failed = results.filter((r) => r.status === "rejected").length;
+          try {
+            await refreshBookingDetail();
+          } catch (error) {
+            console.error("Refresh after cancel-entire-job error:", error);
+          }
+          if (failed > 0) {
+            alertModal.error(
+              "Some days couldn't be cancelled",
+              `${cancellableIds.length - failed} of ${cancellableIds.length} pending days were cancelled. The rest may have just been accepted — check My Bookings.`,
+            );
+          } else {
+            alertModal.success("Job cancelled", `${cancellableIds.length} pending day(s) were cancelled.`);
+          }
+        },
+      },
+    );
   };
 
   // Payment is taken after completion and is locked to the method the client
@@ -570,6 +626,13 @@ export default function BookingDetailScreen() {
               {statusCaption[booking.status]}
             </Text>
           ) : null}
+          {!!booking.groupTotalDays && (
+            <View className="bg-accent/10 rounded-full px-2 py-0.5">
+              <Text className="text-accent text-[11px] font-bold">
+                Day {booking.groupDayIndex ?? "?"} of {booking.groupTotalDays}
+              </Text>
+            </View>
+          )}
           <Text
             className="text-text-secondary text-xs ml-auto flex-shrink"
             numberOfLines={1}
@@ -1080,6 +1143,13 @@ export default function BookingDetailScreen() {
               label="Cancel Booking"
               fullWidth
               onPress={() => router.push(`/(client)/booking/${bookingId}/cancel`)}
+            />
+          )}
+          {!!booking.groupTotalDays && booking.groupTotalDays > 1 && (
+            <OutlinedButton
+              label={cancellingGroup ? "Cancelling..." : "Cancel Entire Job"}
+              onPress={handleCancelEntireJob}
+              disabled={cancellingGroup}
             />
           )}
         </View>

@@ -16,6 +16,8 @@ type Booking = {
   payment?: {
     methodType?: string;
   };
+  groupTotalDays?: number | null;
+  groupDayIndex?: number | null;
 };
 
 type Props = {
@@ -38,7 +40,16 @@ export const BookingCard: React.FC<Props> = ({ booking, onPress }) => {
         />
       </View>
       <View className="flex-1">
-        <Text className="text-text-primary font-bold">{booking.service}</Text>
+        <View className="flex-row items-center flex-wrap">
+          <Text className="text-text-primary font-bold">{booking.service}</Text>
+          {!!booking.groupTotalDays && (
+            <View className="bg-accent/10 rounded-full px-2 py-0.5 ml-2">
+              <Text className="text-accent text-[10px] font-bold">
+                Day {booking.groupDayIndex ?? "?"} of {booking.groupTotalDays}
+              </Text>
+            </View>
+          )}
+        </View>
         <Text className="text-text-secondary text-xs">{booking.worker}</Text>
         <Text className="text-text-secondary text-xs">
           {booking.date}

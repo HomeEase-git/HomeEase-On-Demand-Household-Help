@@ -35,6 +35,10 @@ type BookingDetail = {
   scopeAnswers?: Record<string, string | string[]> | null;
   distanceMeters?: number | null;
   payment?: { commissionAmount?: number; workerPayout?: number } | null;
+  // Multi-day upfront booking (see backend createMultiDayBooking) — null for
+  // an ordinary single-day job. Sibling list is date-ordered.
+  groupId?: string | null;
+  group?: { totalDays: number; bookings: { id: string; scheduledDate: string; status: string }[] } | null;
 };
 
 export default function RequestDetailScreen() {
@@ -254,7 +258,16 @@ export default function RequestDetailScreen() {
 
         <View className="bg-card rounded-2xl p-4 mb-3">
           <Text className="text-text-primary font-bold mb-2">Status</Text>
-          <StatusBadge status={status as any} />
+          <View className="flex-row items-center gap-2">
+            <StatusBadge status={status as any} />
+            {!!booking.group && (
+              <View className="bg-accent/10 rounded-full px-2 py-0.5">
+                <Text className="text-accent text-[11px] font-bold">
+                  Day {booking.group.bookings.findIndex((b) => b.id === booking.id) + 1} of {booking.group.totalDays}
+                </Text>
+              </View>
+            )}
+          </View>
         </View>
 
         {/* Location */}

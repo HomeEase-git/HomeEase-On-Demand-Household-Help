@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import {
   createBooking,
+  createMultiDayBooking,
   listBookings,
   getBookingDetail,
   acceptBooking,
@@ -28,6 +29,7 @@ import { authMiddleware } from '../middleware/auth';
 import { restrictTo } from '../middleware/role';
 import {
   validateCreateBooking,
+  validateCreateMultiDayBooking,
   validateSubmitQuote,
   validateBookingStatusUpdate,
   validateApproveQuote,
@@ -51,6 +53,11 @@ router.get('/:id', getBookingDetail);
 
 // Create booking (client only)
 router.post('/', restrictTo('CLIENT'), validateCreateBooking, createBooking);
+
+// Book the same worker for N consecutive days upfront (client only) — see
+// createMultiDayBooking's docblock for how this differs from a single-day
+// POST / above.
+router.post('/multi-day', restrictTo('CLIENT'), validateCreateMultiDayBooking, createMultiDayBooking);
 
 // Upload a pre-booking issue photo (client only) — no bookingId yet, since
 // this runs during Step 1 before the booking exists; the returned URL is

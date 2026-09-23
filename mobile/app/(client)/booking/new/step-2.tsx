@@ -23,6 +23,10 @@ import { formatStructuredAddress, geocodeAddressWithFallback } from "../../../..
 import { TIME_SLOTS, type TimeSlot } from "../../../../types/booking4step.types";
 
 const BOOKING_STEPS = ["Scope", "Schedule", "Who", "Confirm"];
+// Mirrors backend validation.ts's MAX_MULTI_DAY_BOOKING_DAYS — kept as a
+// separate constant (not fetched) since it changes rarely and the real
+// enforcement lives server-side regardless.
+const MAX_MULTI_DAY_BOOKING_DAYS = 14;
 
 export default function BookingStep2Screen() {
   const router = useRouter();
@@ -37,6 +41,11 @@ export default function BookingStep2Screen() {
   const [city, setCity] = useState<string | undefined>(draft.city);
   const [date, setDate] = useState<string | null>(draft.date);
   const [timeSlot, setTimeSlot] = useState<TimeSlot | null>(draft.timeSlot);
+  // Multi-day upfront booking — only offered when the client already locked
+  // in a specific worker (see worker[workerId].tsx's "Book Now"), since a
+  // multi-day job needs one committed worker across every day and there's
+  // no auto-match equivalent for that. 1 = an ordinary single-day booking.
+  const [dayCount, setDayCount] = useState<number>(draft.dayCount ?? 1);
 
   const [addresses, setAddresses] = useState<SavedAddress[]>([]);
   const [loadingAddresses, setLoadingAddresses] = useState(true);
@@ -169,7 +178,7 @@ export default function BookingStep2Screen() {
       return;
     }
 
-    setDraft({ address, lat, lng, city, date, timeSlot });
+    setDraft({ address, lat, lng, city, date, timeSlot, dayCount: draft.workerLocked ? dayCount : 1 });
     router.push("/(client)/booking/new/step-3");
   };
 
@@ -211,6 +220,42 @@ export default function BookingStep2Screen() {
             {draft.workerName ?? "This pro"} isn&apos;t available on this date for the selected service. Try a
             different date, or go back and choose another pro.
           </Text>
+        )}
+
+        {draft.workerLocked && (
+          <>
+            <Text className="text-text-primary font-bold text-lg mt-6 mb-1">Multi-day job?</Text>
+            <Text className="text-text-secondary text-sm mb-3">
+              Book {draft.workerName ?? "this pro"} for the same time slot on multiple consecutive days, starting
+              from the date above.
+            </Text>
+            <View className="bg-card rounded-xl px-4 py-3 flex-row items-center justify-between">
+              <Text className="text-text-primary font-semibold">
+                {dayCount === 1 ? "Single day" : `${dayCount} consecutive days`}
+              </Text>
+              <View className="flex-row items-center">
+                <Pressable
+                  className="w-9 h-9 rounded-full bg-surface items-center justify-center"
+                  disabled={dayCount <= 1}
+                  onPress={() => setDayCount((c) => Math.max(1, c - 1))}
+                >
+                  <Ionicons name="remove" size={18} color={dayCount <= 1 ? colors.text.muted : colors.brand.DEFAULT} />
+                </Pressable>
+                <Text className="text-text-primary font-bold text-base mx-4">{dayCount}</Text>
+                <Pressable
+                  className="w-9 h-9 rounded-full bg-surface items-center justify-center"
+                  disabled={dayCount >= MAX_MULTI_DAY_BOOKING_DAYS}
+                  onPress={() => setDayCount((c) => Math.min(MAX_MULTI_DAY_BOOKING_DAYS, c + 1))}
+                >
+                  <Ionicons
+                    name="add"
+                    size={18}
+                    color={dayCount >= MAX_MULTI_DAY_BOOKING_DAYS ? colors.text.muted : colors.brand.DEFAULT}
+                  />
+                </Pressable>
+              </View>
+            </View>
+          </>
         )}
 
         <View className="mt-8">

@@ -155,9 +155,11 @@ export default function BookingSuccessScreen() {
         <Animated.View style={{ opacity: opacityAnim, width: "100%" }}>
           <Text className="text-text-primary text-3xl font-bold text-center mb-2">Booking Confirmed!</Text>
           <Text className="text-text-secondary text-center text-base mb-8">
-            {isAutoMatched
-              ? `You've been matched with ${workerName}!`
-              : "Your booking request has been submitted successfully."}
+            {selectedBooking?.groupTotalDays
+              ? `Your ${selectedBooking.groupTotalDays}-day booking request has been submitted — this is Day 1. See My Bookings for the full schedule.`
+              : isAutoMatched
+                ? `You've been matched with ${workerName}!`
+                : "Your booking request has been submitted successfully."}
           </Text>
 
           <View className="bg-green-50 rounded-2xl p-4 mb-4">

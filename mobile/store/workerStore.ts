@@ -23,6 +23,9 @@ export type WorkerJob = {
   distanceMeters: number | null;
   workerPayoutEstimate: number | null;
   tip: number;
+  groupId: string | null;
+  groupTotalDays: number | null;
+  groupDayIndex: number | null;
 };
 
 // Shape returned by GET /bookings (services/api.ts getBookings()) for a worker
@@ -46,6 +49,9 @@ export type ApiWorkerBooking = {
   distanceMeters?: number | null;
   workerPayoutEstimate?: number | null;
   tip?: number | null;
+  groupId?: string | null;
+  groupTotalDays?: number | null;
+  groupDayIndex?: number | null;
 };
 
 export function mapApiJob(b: ApiWorkerBooking): WorkerJob {
@@ -69,6 +75,9 @@ export function mapApiJob(b: ApiWorkerBooking): WorkerJob {
     distanceMeters: b.distanceMeters ?? null,
     workerPayoutEstimate: b.workerPayoutEstimate ?? null,
     tip: b.tip ?? 0,
+    groupId: b.groupId ?? null,
+    groupTotalDays: b.groupTotalDays ?? null,
+    groupDayIndex: b.groupDayIndex ?? null,
   };
 }
 

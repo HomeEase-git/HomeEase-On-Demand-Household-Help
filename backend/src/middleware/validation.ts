@@ -557,6 +557,152 @@ export const validateCreateBooking = (
   return next();
 };
 
+// Bounded so a client can't request an absurdly long job (and so the
+// per-day availability-check loop in createMultiDayBooking stays cheap) —
+// same order of magnitude as workerAvailabilityService's own
+// RESCHEDULE_SEARCH_WINDOW_DAYS.
+export const MAX_MULTI_DAY_BOOKING_DAYS = 14;
+
+/**
+ * POST /bookings/multi-day — a lighter validator than validateCreateBooking
+ * above: workerId is REQUIRED (no auto-match — see createMultiDayBooking's
+ * docblock for why a multi-day job needs one committed worker across every
+ * day), startDate+dayCount replace date, and there's no addOns/packageIds/
+ * tip (not supported for a first version of this feature — see the
+ * controller for the full reasoning).
+ */
+export const validateCreateMultiDayBooking = (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  const {
+    workerId,
+    serviceType,
+    serviceTaskId,
+    address,
+    city,
+    lat,
+    lng,
+    startDate,
+    dayCount,
+    timeSlot,
+    priorities,
+    paymentMethodType,
+    paymentAccountIdentifier,
+    scopeAnswers,
+    idempotencyKey,
+  } = req.body;
+
+  if (!workerId || typeof workerId !== 'string') {
+    return res.status(400).json(errorResponse(400, 'workerId is required and must be a string'));
+  }
+
+  if (!serviceType || typeof serviceType !== 'string') {
+    return res.status(400).json(errorResponse(400, 'serviceType is required and must be a string'));
+  }
+
+  if (serviceTaskId !== undefined && serviceTaskId !== null && typeof serviceTaskId !== 'string') {
+    return res.status(400).json(errorResponse(400, 'serviceTaskId must be a string'));
+  }
+
+  if (idempotencyKey !== undefined && (typeof idempotencyKey !== 'string' || idempotencyKey.length > 200)) {
+    return res.status(400).json(errorResponse(400, 'idempotencyKey must be a string of at most 200 characters'));
+  }
+
+  if (!address || typeof address !== 'string') {
+    return res.status(400).json(errorResponse(400, 'address is required and must be a string'));
+  }
+
+  if (!city || typeof city !== 'string' || !city.trim()) {
+    return res.status(400).json(errorResponse(400, 'city is required and must be a non-empty string'));
+  }
+
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+    return res.status(400).json(errorResponse(400, 'lat and lng are required and must be numbers'));
+  }
+
+  if (
+    lat < PH_BOUNDS.minLat || lat > PH_BOUNDS.maxLat ||
+    lng < PH_BOUNDS.minLng || lng > PH_BOUNDS.maxLng
+  ) {
+    return res.status(400).json(errorResponse(400, 'lat/lng must fall within the Philippines'));
+  }
+
+  if (!startDate || isNaN(new Date(startDate).getTime())) {
+    return res.status(400).json(errorResponse(400, 'startDate is required and must be a valid date'));
+  }
+
+  const requestedDayUtc = new Date(startDate);
+  requestedDayUtc.setUTCHours(0, 0, 0, 0);
+  const todayUtc = new Date();
+  todayUtc.setUTCHours(0, 0, 0, 0);
+  const minLeadMs = MIN_BOOKING_LEAD_DAYS * 24 * 60 * 60 * 1000;
+  if (requestedDayUtc.getTime() - todayUtc.getTime() < minLeadMs) {
+    return res.status(400).json(errorResponse(400, `startDate must be at least ${MIN_BOOKING_LEAD_DAYS} days from today`));
+  }
+
+  if (
+    typeof dayCount !== 'number' ||
+    !Number.isInteger(dayCount) ||
+    dayCount < 2 ||
+    dayCount > MAX_MULTI_DAY_BOOKING_DAYS
+  ) {
+    return res.status(400).json(
+      errorResponse(400, `dayCount must be an integer between 2 and ${MAX_MULTI_DAY_BOOKING_DAYS}`)
+    );
+  }
+
+  if (!timeSlot || !VALID_TIME_SLOTS.includes(timeSlot)) {
+    return res.status(400).json(errorResponse(400, `timeSlot is required and must be one of ${VALID_TIME_SLOTS.join(', ')}`));
+  }
+
+  if (priorities !== undefined) {
+    if (!Array.isArray(priorities) || !priorities.every((p: unknown) => typeof p === 'string')) {
+      return res.status(400).json(errorResponse(400, 'priorities must be an array of strings'));
+    }
+  }
+
+  if (paymentMethodType !== undefined) {
+    if (typeof paymentMethodType !== 'string' || !VALID_PAYMENT_METHOD_TYPES.includes(paymentMethodType as (typeof VALID_PAYMENT_METHOD_TYPES)[number])) {
+      return res.status(400).json(
+        errorResponse(400, `paymentMethodType must be one of: ${VALID_PAYMENT_METHOD_TYPES.join(', ')}`)
+      );
+    }
+  }
+
+  if (paymentAccountIdentifier !== undefined && typeof paymentAccountIdentifier !== 'string') {
+    return res.status(400).json(errorResponse(400, 'paymentAccountIdentifier must be a string'));
+  }
+
+  if (scopeAnswers !== undefined) {
+    const isPlainObject = typeof scopeAnswers === 'object' && scopeAnswers !== null && !Array.isArray(scopeAnswers);
+    const hasValidValues =
+      isPlainObject &&
+      Object.values(scopeAnswers).every(
+        (v: unknown) => typeof v === 'string' || (Array.isArray(v) && v.every((x) => typeof x === 'string'))
+      );
+    if (!hasValidValues) {
+      return res
+        .status(400)
+        .json(errorResponse(400, 'scopeAnswers must be an object mapping field labels to a string or string array'));
+    }
+  }
+
+  const { issuePhotoUrls } = req.body;
+  if (issuePhotoUrls !== undefined) {
+    const isValid =
+      Array.isArray(issuePhotoUrls) &&
+      issuePhotoUrls.length <= 5 &&
+      issuePhotoUrls.every((url: unknown) => typeof url === 'string' && url.length <= 2048);
+    if (!isValid) {
+      return res.status(400).json(errorResponse(400, 'issuePhotoUrls must be an array of at most 5 URL strings'));
+    }
+  }
+
+  return next();
+};
+
 export const validateArriveBooking = (
   req: Request,
   res: Response,

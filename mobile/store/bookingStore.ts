@@ -98,6 +98,12 @@ export type Booking = {
     tip: number;
     total: number;
   } | null;
+  // Multi-day upfront booking (see backend createMultiDayBooking) — null for
+  // the overwhelming majority of ordinary single-day bookings. groupDayIndex
+  // is 1-based ("Day 2 of 3" = groupDayIndex 2, groupTotalDays 3).
+  groupId?: string | null;
+  groupTotalDays?: number | null;
+  groupDayIndex?: number | null;
 };
 
 export type DraftBooking = {
@@ -195,6 +201,12 @@ export type DraftBooking = {
   // key instead of letting the backend create a duplicate booking. Cleared
   // whenever the draft resets (successful create, or a fresh "New Booking").
   idempotencyKey?: string | null;
+
+  // Multi-day upfront booking — set only when entering via a locked worker
+  // (see step-2.tsx's day-count stepper). 1 (or undefined) means an ordinary
+  // single-day booking and step-4 submits via the existing POST /bookings;
+  // >1 submits via POST /bookings/multi-day instead (see step-4.tsx).
+  dayCount?: number;
 };
 
 export type ApiBookingListItem = {
@@ -211,6 +223,9 @@ export type ApiBookingListItem = {
   estimatedPrice: number;
   finalPrice: number | null;
   rating: number | null;
+  groupId?: string | null;
+  groupTotalDays?: number | null;
+  groupDayIndex?: number | null;
 };
 
 // Maps the API's booking-list shape into the store's friendly `Booking` shape.
@@ -229,6 +244,9 @@ export function mapApiBooking(b: ApiBookingListItem): Booking {
     status: API_STATUS_MAP[b.status] ?? 'Pending',
     amount: b.finalPrice ?? b.estimatedPrice,
     rating: b.rating ?? undefined,
+    groupId: b.groupId ?? undefined,
+    groupTotalDays: b.groupTotalDays ?? undefined,
+    groupDayIndex: b.groupDayIndex ?? undefined,
   };
 }
 
