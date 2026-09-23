@@ -38,6 +38,7 @@ const STATUS_BADGE_VARIANT = {
   RESOLVED_PAID: 'approved',
   RESOLVED_WORKER_PROTECTED: 'approved',
   RESOLVED_PLATFORM_PAID: 'approved',
+  RESOLVED_DISMISSED: 'approved',
 }
 
 const QUOTE_DISPUTE_ACTIONS = [
@@ -82,12 +83,31 @@ const NON_PAYMENT_ACTIONS = [
   },
 ]
 
+// For a dispute the booking has already moved past — e.g. a quote dispute
+// whose booking left DISPUTED some other way, or a reschedule escalation
+// support already sorted out. Closes the dispute without touching the
+// booking or any money.
+const DISMISS_ACTION = {
+  action: 'DISMISS',
+  label: 'Dismiss',
+  className: 'btn btn-outline',
+  description: 'Closes this dispute without changing the booking or any payment. Use when the booking has already moved on.',
+}
+
+// Mirrors adminDisputeController.resolveDispute's guards so only actions
+// that can actually succeed are offered — quote actions need the booking
+// still DISPUTED, CANCEL_BOOKING needs one of the statuses below.
+const CANCELLABLE_BOOKING_STATUSES = ['DISPUTED', 'PENDING_COMPLETION', 'AWAITING_PAYMENT', 'COMPLETED']
+
 function getActionsForDispute(dispute) {
   if (!dispute) return []
-  if (dispute.bookingStatus === 'AWAITING_PAYMENT') {
-    return [...NON_PAYMENT_ACTIONS, CANCEL_ACTION]
+  if (dispute.bookingStatus === 'DISPUTED') {
+    return [...QUOTE_DISPUTE_ACTIONS, CANCEL_ACTION]
   }
-  return [...QUOTE_DISPUTE_ACTIONS, CANCEL_ACTION]
+  const actions = dispute.bookingStatus === 'AWAITING_PAYMENT' ? [...NON_PAYMENT_ACTIONS] : []
+  if (CANCELLABLE_BOOKING_STATUSES.includes(dispute.bookingStatus)) actions.push(CANCEL_ACTION)
+  actions.push(DISMISS_ACTION)
+  return actions
 }
 
 // A dispute can still be acted on while OPEN (nobody's looked at it yet) or
@@ -324,7 +344,18 @@ export default function BookingDispute() {
             <h2 className="modal-title">Review Dispute — {selected.displayId}</h2>
             <p className="modal-body" style={{ marginBottom: '0.75rem' }}>
               <strong>Status:</strong> <Badge variant={STATUS_BADGE_VARIANT[selected.status] ?? 'pending'}>{selected.status.replace(/_/g, ' ')}</Badge>
+              {selected.bookingStatus && (
+                <>
+                  {' '}
+                  <strong style={{ marginLeft: '0.75rem' }}>Booking:</strong> {selected.bookingStatus.replace(/_/g, ' ')}
+                </>
+              )}
             </p>
+            {isDisputeActionable(selected.status) && !CANCELLABLE_BOOKING_STATUSES.includes(selected.bookingStatus) && (
+              <p className="modal-body" style={{ marginBottom: '0.75rem', color: 'var(--warning, #b45309)' }}>
+                This booking is no longer in dispute ({selected.bookingStatus?.replace(/_/g, ' ')}), so quote actions no longer apply. Dismiss this dispute if nothing else is needed.
+              </p>
+            )}
             <div className="modal-detail-grid--2col">
               <div className="detail-block">
                 <label>Client</label>

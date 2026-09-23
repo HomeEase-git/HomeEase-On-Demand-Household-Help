@@ -122,7 +122,7 @@ export default function BookingStep3Screen() {
             <View className="flex-1">
               <Text className="text-accent font-bold text-sm">Pro auto-assigned</Text>
               <Text className="text-text-secondary text-xs mt-0.5">
-                Your best-matched available pro will be assigned when you submit.
+                The best available pro is assigned when you submit.
               </Text>
             </View>
           </View>
@@ -149,7 +149,7 @@ export default function BookingStep3Screen() {
           <View className="py-10 items-center">
             <Ionicons name="sad-outline" size={32} color={colors.text.muted} />
             <Text className="text-text-secondary text-sm mt-2 text-center">
-              No pros available for this scope/time. Try a different time slot or tap Auto-Match Me.
+              No pros available at this time. Try another slot or tap Auto-Match Me.
             </Text>
           </View>
         )}

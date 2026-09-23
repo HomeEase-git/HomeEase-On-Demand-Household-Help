@@ -218,6 +218,18 @@ export const cancelBookingAdmin = async (req: AuthRequest, res: Response) => {
         });
       }
 
+      // Same as bookingController.cancelBooking — an open dispute on a
+      // booking cancelled from here has nothing left to resolve.
+      await tx.dispute.updateMany({
+        where: { bookingId: id, status: { in: ['OPEN', 'UNDER_REVIEW'] } },
+        data: {
+          status: 'RESOLVED_DISMISSED',
+          resolution: 'Booking was cancelled by an admin outside dispute resolution',
+          resolvedById: adminId,
+          resolvedAt: new Date(),
+        },
+      });
+
       await tx.cancellation.create({
         data: {
           bookingId: id,

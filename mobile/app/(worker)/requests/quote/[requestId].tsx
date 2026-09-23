@@ -129,9 +129,8 @@ export default function SubmitQuoteScreen() {
             color={colors.accent.DEFAULT}
           />
           <Text className="text-text-secondary text-sm ml-2 flex-1">
-            Your labor cost was already settled when the client booked. If the
-            job needs materials or extra costs beyond that, add them below —
-            the client will approve or dispute before payment is processed.
+            Your labor is covered by the booking price. Add any materials or
+            extra costs below. The client will approve or dispute them.
           </Text>
         </View>
 

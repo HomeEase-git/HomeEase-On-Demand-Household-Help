@@ -70,8 +70,7 @@ export default function CancelBookingScreen() {
         <View className="bg-error/10 border border-error rounded-xl p-4 flex-row items-start mb-4">
           <Ionicons name="warning-outline" size={24} color={colors.error} />
           <Text className="text-error ml-2 flex-1 text-sm">
-            Cancellations may not be refundable depending on timing and payment
-            method.
+            There&apos;s no charge for cancelling, but it can&apos;t be undone.
           </Text>
         </View>
 
@@ -139,9 +138,9 @@ export default function CancelBookingScreen() {
       <GenericConfirmationModal
         visible={confirmVisible}
         title="Cancel this booking?"
-        message="This action cannot be undone. Your booking will be permanently cancelled."
-        confirmLabel="Yes, Cancel"
-        cancelLabel="Keep Booking"
+        message="Your booking will be cancelled."
+        confirmLabel="Confirm"
+        cancelLabel="Keep"
         onConfirm={handleConfirmCancel}
         onCancel={() => setConfirmVisible(false)}
       />

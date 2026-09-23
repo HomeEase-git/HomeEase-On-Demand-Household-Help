@@ -70,31 +70,6 @@ export default function WorkerProfileScreen() {
   const [verified, setVerified] = useState(false);
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
 
-  const handleLogoutAllDevices = () => {
-    alertModal.confirm(
-      "Log out of all devices?",
-      "This will sign you out everywhere, including this device. You'll need to sign in again.",
-      {
-        confirmText: "Log Out All",
-        destructive: true,
-        onConfirm: async () => {
-          try {
-            await api.logoutAllSessions();
-          } catch (error) {
-            console.error("Logout all devices error:", error);
-            alertModal.error(
-              "Error",
-              "Unable to log out of all devices right now. Please try again.",
-            );
-            return;
-          }
-          await logout();
-          router.replace("/landing");
-        },
-      },
-    );
-  };
-
   const handleAvatarSelected = async (uri: string) => {
     if (!user) return;
     setUploadingAvatar(true);
@@ -293,28 +268,6 @@ export default function WorkerProfileScreen() {
               <Ionicons name="log-out-outline" size={18} color={colors.error} />
             </View>
             <Text className="text-error flex-1 font-semibold">Log Out</Text>
-            <Ionicons name="chevron-forward" size={20} color={colors.error} />
-          </Pressable>
-          <Pressable
-            className="flex-row items-center py-4 px-4 border-t border-divider"
-            onPress={handleLogoutAllDevices}
-          >
-            <View className="w-9 h-9 rounded-full bg-error/10 items-center justify-center mr-3">
-              <Ionicons name="phone-portrait-outline" size={18} color={colors.error} />
-            </View>
-            <Text className="text-error flex-1 font-semibold">
-              Log Out of All Devices
-            </Text>
-            <Ionicons name="chevron-forward" size={20} color={colors.error} />
-          </Pressable>
-          <Pressable
-            className="flex-row items-center py-4 px-4 border-t border-divider"
-            onPress={() => router.push("/(worker)/profile/delete-account")}
-          >
-            <View className="w-9 h-9 rounded-full bg-error/10 items-center justify-center mr-3">
-              <Ionicons name="trash-outline" size={18} color={colors.error} />
-            </View>
-            <Text className="text-error flex-1 font-semibold">Delete Account</Text>
             <Ionicons name="chevron-forward" size={20} color={colors.error} />
           </Pressable>
         </View>

@@ -187,8 +187,7 @@ export default function DocumentsScreen() {
           currentStep={2}
         />
         <Text className="text-text-secondary text-sm mb-4">
-          Workers must upload their clearances below. Certification is optional
-          but can strengthen your profile.
+          Upload your clearances below. Certification is optional.
         </Text>
 
         <View className="mb-4">

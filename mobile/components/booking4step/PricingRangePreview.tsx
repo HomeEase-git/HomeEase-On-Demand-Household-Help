@@ -34,9 +34,9 @@ export default function PricingRangePreview({ estimate }: Props) {
         </Text>
         <Text className="text-white/60 text-xs mt-2">
           {estimate.unitLabel
-            ? `Total depends on quantity — enter it above to see the full estimate`
+            ? "Enter the quantity above to see the total"
             : hasSelection
-              ? "Exact price shown after you pick a time and worker"
+              ? "Exact price is shown once you pick a time and pro"
               : "Select a service to see pricing"}
         </Text>
       </View>

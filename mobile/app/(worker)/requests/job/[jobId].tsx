@@ -337,7 +337,7 @@ export default function JobDetailScreen() {
     if (!completionPhotoUrl) return;
     alertModal.confirm(
       "Mark as Complete?",
-      "Confirm that you have finished this job. The client will review your photo and confirm completion before payment is released.",
+      "Confirm you've finished this job. The client will review your photo and confirm completion.",
       {
         confirmText: "Confirm",
         cancelText: "Cancel",
@@ -499,7 +499,7 @@ export default function JobDetailScreen() {
             <Ionicons name="alert-circle" size={24} color={colors.warning} />
             <View className="ml-3 flex-1">
               <Text className="text-warning font-bold text-sm">
-                You haven't checked in
+                You haven&apos;t checked in
               </Text>
               <Text className="text-text-secondary text-xs mt-0.5">
                 The client can now cancel this job free of charge. Check in as soon as you arrive.
@@ -542,7 +542,7 @@ export default function JobDetailScreen() {
           )}
           {isAccepted && !hasArrived && (
             <Text className="text-text-muted text-xs text-center -mt-1">
-              You must check in within 100m of the job site before starting.
+              Check in within 100 m of the job site to start.
             </Text>
           )}
           {shouldShareLocation && (

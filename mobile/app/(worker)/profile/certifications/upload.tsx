@@ -136,7 +136,7 @@ export default function UploadCertificationScreen() {
           serviceTypeId,
         });
         await api.selectTask(gateTaskId!, { certificationId: created.id });
-        alertModal.success("Submitted", "This service is now pending admin review — you'll be notified once it's approved.");
+        alertModal.success("Submitted", "Pending admin review. You'll be notified once it's approved.");
       } else {
         await api.addCertification({
           name: name.trim(),
@@ -207,8 +207,8 @@ export default function UploadCertificationScreen() {
               {serviceTypes.find((s) => s.id === gateServiceTypeId)?.name ?? "This service"}
             </Text>
             <Text className="text-text-muted text-xs">
-              Adding another service beyond your first requires one supporting document for an admin to
-              review — this service won&apos;t be bookable until it&apos;s approved.
+              Extra services need one supporting document for admin review. This service isn&apos;t
+              bookable until it&apos;s approved.
             </Text>
           </View>
         ) : (
@@ -218,8 +218,8 @@ export default function UploadCertificationScreen() {
                 Related Category (optional)
               </Text>
               <Text className="text-text-muted text-xs mb-2">
-                Tag this to a licensed trade if it&apos;s meant to satisfy that category&apos;s certification
-                requirement — an admin still has to approve it.
+                Tag a licensed trade if this certificate covers its requirement. An admin still has to
+                approve it.
               </Text>
               <View className="flex-row flex-wrap gap-2">
                 {serviceTypes.map((s) => {

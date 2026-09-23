@@ -159,6 +159,7 @@ export default function WorkerChatScreen() {
         </Pressable>
         <TextInput
           className="flex-1 bg-card rounded-full px-4 py-2 text-primary max-h-24"
+          style={{ includeFontPadding: false }}
           placeholder="Message..."
           placeholderTextColor={colors.text.muted}
           value={input}

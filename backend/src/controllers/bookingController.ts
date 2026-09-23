@@ -3014,6 +3014,15 @@ export const approveQuote = async (req: AuthRequest, res: Response) => {
       return res.status(400).json(errorResponse(400, 'No quote exists for this booking'));
     }
 
+    // DISPUTED -> QUOTE_APPROVED is a valid transition, but only for an
+    // admin resolving the dispute (adminDisputeController APPROVE_QUOTE).
+    // Letting the client approve it here moved the booking on while its
+    // Dispute row stayed OPEN, leaving an orphan in the admin queue whose
+    // quote actions all 409 with "Booking is not currently disputed".
+    if (booking.status === 'DISPUTED') {
+      return res.status(409).json(errorResponse(409, 'This quote is under admin review and can no longer be approved directly'));
+    }
+
     if (!isValidTransition(booking.status, 'QUOTE_APPROVED')) {
       return res.status(409).json(errorResponse(409, `Cannot approve quote for booking with status ${booking.status}`));
     }
@@ -3546,6 +3555,18 @@ export const cancelBooking = async (req: AuthRequest, res: Response) => {
           });
         }
       }
+
+      // A booking cancelled outside dispute resolution (e.g. the worker
+      // backing out of a DISPUTED job) ends whatever dispute was open on it —
+      // otherwise it lingers in the admin queue with nothing left to resolve.
+      await tx.dispute.updateMany({
+        where: { bookingId: id, status: { in: ['OPEN', 'UNDER_REVIEW'] } },
+        data: {
+          status: 'RESOLVED_DISMISSED',
+          resolution: `Booking was cancelled by the ${cancelledByRole.toLowerCase()} before this dispute was resolved`,
+          resolvedAt: new Date(),
+        },
+      });
 
       await tx.cancellation.create({
         data: {

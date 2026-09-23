@@ -14,11 +14,11 @@ const FAQ = [
   },
   {
     q: "How do I pay?",
-    a: "You can pay via GCash, Maya, bank transfer, or cash on completion.",
+    a: "You pay after the job is done, with GCash, Maya, or cash.",
   },
   {
     q: "Can I cancel a booking?",
-    a: "Yes, from the booking detail screen you can cancel if status is Pending.",
+    a: "Yes, until a pro accepts it. Open the booking and tap Cancel Booking.",
   },
 ];
 

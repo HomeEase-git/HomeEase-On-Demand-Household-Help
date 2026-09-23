@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback } from 'react'
 import PageHeader from '../components/common/PageHeader'
 import SubNav from '../components/common/SubNav'
 import SectionCard from '../components/common/SectionCard'
@@ -8,8 +8,6 @@ import ErrorState from '../components/common/ErrorState'
 import Pagination from '../components/common/Pagination'
 import { fetchDisputes } from '../services/disputes'
 import { useListQuery } from '../hooks/useListQuery'
-
-const PAGE_SIZE = 10
 
 const SUB_NAV = [
   { to: '/payments', label: 'All Transactions' },
@@ -34,21 +32,22 @@ function formatPeso(amount) {
  * Resolution Center instead.
  */
 export default function Refunds() {
-  const [page, setPage] = useState(1)
-
-  const fetchFn = useCallback(async () => {
-    const response = await fetchDisputes({ status: 'all', page: 1, limit: 50 })
-    return response.data.filter((d) => d.status === 'RESOLVED_CANCELLED')
-  }, [])
-
-  const { data: refunds, loading, error, reload: loadRefunds } = useListQuery(fetchFn)
-
-  const totalPages = Math.max(1, Math.ceil(refunds.length / PAGE_SIZE))
-  const currentPage = Math.min(page, totalPages)
-  const pagedRefunds = useMemo(
-    () => refunds.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE),
-    [refunds, currentPage]
+  // Server-side filtered and paged (status=RESOLVED_CANCELLED sorts
+  // newest-first, see listDisputes) — a client-side cap here would silently
+  // drop older refunds once dispute volume outgrows a single fetched page.
+  const fetchFn = useCallback(
+    (params) => fetchDisputes({ status: 'RESOLVED_CANCELLED', page: params.page || 1, limit: 10 }),
+    []
   )
+
+  const {
+    data: refunds,
+    meta,
+    loading,
+    error,
+    reload: loadRefunds,
+    goToPage,
+  } = useListQuery(fetchFn, { initialParams: { page: 1 } })
 
   return (
     <>
@@ -83,7 +82,7 @@ export default function Refunds() {
                     </td>
                   </tr>
                 ) : (
-                  pagedRefunds.map((r) => (
+                  refunds.map((r) => (
                     <tr key={r.id}>
                       <td>{r.displayId}</td>
                       <td>{r.client}</td>
@@ -103,13 +102,11 @@ export default function Refunds() {
         )}
         {!loading && !error && refunds.length > 0 && (
           <Pagination
-            info={`Showing ${pagedRefunds.length ? (currentPage - 1) * PAGE_SIZE + 1 : 0}-${
-              (currentPage - 1) * PAGE_SIZE + pagedRefunds.length
-            } of ${refunds.length} refunds`}
-            hasPrev={currentPage > 1}
-            hasNext={currentPage < totalPages}
-            onPrev={() => setPage((p) => Math.max(1, p - 1))}
-            onNext={() => setPage((p) => Math.min(totalPages, p + 1))}
+            info={`Showing ${refunds.length} of ${meta.total} refunds`}
+            hasPrev={meta.hasPrev}
+            hasNext={meta.hasNext}
+            onPrev={() => goToPage(meta.page - 1)}
+            onNext={() => goToPage(meta.page + 1)}
           />
         )}
       </SectionCard>

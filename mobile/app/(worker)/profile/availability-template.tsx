@@ -79,7 +79,7 @@ export default function AvailabilityTemplateScreen() {
       await api.updateMyAvailabilityTemplate(days);
       alertModal.success(
         "Saved",
-        "Your weekly pattern is set — matching slots are now open for the next few weeks and will keep rolling forward automatically.",
+        "Your weekly pattern is saved. Matching slots are open for the next few weeks.",
         [{ text: "OK", onPress: () => router.back() }],
       );
     } catch (error) {
@@ -110,9 +110,8 @@ export default function AvailabilityTemplateScreen() {
       <ScreenHeader title="Repeat Weekly" showBack />
       <ScrollView contentContainerStyle={{ padding: 24, paddingBottom: 48 }}>
         <Text className="text-text-muted text-xs mb-4">
-          Pick the days and times you're normally free. We'll automatically keep matching slots open a few weeks
-          ahead so you don't have to re-open the same days every week. A day you close by hand (or block for
-          vacation) always overrides this pattern.
+          Pick the days and times you&apos;re usually free. Matching slots stay open a few weeks ahead. Days you close
+          by hand or block off always override this pattern.
         </Text>
 
         <View className="gap-3">

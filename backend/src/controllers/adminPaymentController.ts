@@ -78,8 +78,13 @@ export const listPayments = async (req: Request, res: Response) => {
     const status = typeof req.query.status === 'string' ? req.query.status.trim() : 'all';
 
     const where = buildPaymentWhere(search, status);
+    // Commission Overview is always a Completed-payments summary regardless
+    // of which status tab is selected (mirrors the old client-side
+    // `.filter(status === 'Completed')`) — computed over the full matching
+    // set, not just the current page, same as listPayouts' aggregate below.
+    const completedWhere = buildPaymentWhere(search, 'completed');
 
-    const [total, records] = await Promise.all([
+    const [total, records, completedAggregate] = await Promise.all([
       prisma.payment.count({ where }),
       prisma.payment.findMany({
         where,
@@ -88,12 +93,21 @@ export const listPayments = async (req: Request, res: Response) => {
         orderBy: { createdAt: 'desc' },
         include: paymentInclude,
       }),
+      prisma.payment.aggregate({ where: completedWhere, _sum: { totalAmount: true, commissionAmount: true } }),
     ]);
+
+    const completedGross = completedAggregate._sum.totalAmount ?? 0;
+    const completedCommission = completedAggregate._sum.commissionAmount ?? 0;
 
     return res.json({
       success: true,
       data: records.map(formatPayment),
-      meta: buildPaginationMeta(total, page, limit),
+      meta: {
+        ...buildPaginationMeta(total, page, limit),
+        completedGrossVolume: completedGross,
+        completedWorkerEarnings: Math.max(completedGross - completedCommission, 0),
+        completedPlatformCommission: completedCommission,
+      },
     });
   } catch (error) {
     console.error('List payments error:', error);

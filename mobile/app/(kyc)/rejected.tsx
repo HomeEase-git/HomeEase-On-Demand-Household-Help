@@ -9,7 +9,7 @@ import { getUserProfile } from "../../services/api";
 import { KycRejectedIllustration } from "../../components/illustrations/Illustrations";
 
 const FALLBACK_REASON =
-  "Our team found an issue with your submitted documents. Please contact support for details, or re-submit your documents.";
+  "There was a problem with your documents. Contact support or re-submit them.";
 
 export default function KycRejectedScreen() {
   const router = useRouter();

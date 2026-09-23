@@ -34,9 +34,7 @@ export default function Dashboard() {
       <div className="welcome-banner">
         <div>
           <div className="welcome-banner__title">Dashboard Overview</div>
-          <div className="welcome-banner__subtitle">
-            Welcome back! Here&apos;s what&apos;s happening with HomeEase today.
-          </div>
+          <div className="welcome-banner__subtitle">Today&apos;s activity across HomeEase.</div>
         </div>
         <div className="welcome-banner__icon">
           <i className="fas fa-chart-line" />

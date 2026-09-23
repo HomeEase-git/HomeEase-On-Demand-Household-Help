@@ -16,6 +16,7 @@ export const DISPUTE_ACTIONS = [
   'CANCEL_BOOKING',
   'RESOLVE_FOR_WORKER',
   'PAY_WORKER_FROM_PLATFORM',
+  'DISMISS',
 ];
 
 export async function fetchDisputes(params = {}) {

@@ -48,7 +48,7 @@ export const InputField = forwardRef<TextInput, Props>(
         </Text>
         <View
           className={`flex-row items-center bg-gray-100 border rounded-xl px-4 ${
-            multiline ? "py-3" : "py-1.5"
+            multiline ? "py-3" : "py-1"
           } ${!editable ? "opacity-60 bg-card-dark" : ""} ${
             error ? "border-error" : "border-divider"
           }`}
@@ -56,8 +56,20 @@ export const InputField = forwardRef<TextInput, Props>(
           <TextInput
             ref={ref}
             className={`flex-1 text-text-primary ${
-              multiline ? "min-h-[80px] text-top" : "h-10"
+              multiline ? "min-h-[80px] text-top" : ""
             }`}
+            // A fixed height plus Android's built-in font padding clipped
+            // descenders and made the text scroll; let it size to the font.
+            style={
+              multiline
+                ? { includeFontPadding: false }
+                : {
+                    minHeight: 44,
+                    paddingVertical: 0,
+                    includeFontPadding: false,
+                    textAlignVertical: "center",
+                  }
+            }
             value={value}
             onChangeText={onChangeText}
             placeholder={placeholder}

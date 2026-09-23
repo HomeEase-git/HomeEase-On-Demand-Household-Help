@@ -216,6 +216,10 @@ export default function BookingDetailScreen() {
     }, [refreshBookingDetail]),
   );
 
+  // Declared before the early returns below so the hook order stays the
+  // same between the loading render and the loaded one.
+  const [respondingAddonId, setRespondingAddonId] = useState<string | null>(null);
+
   if (loading && !booking) {
     return (
       <SafeAreaView className="flex-1 bg-white">
@@ -267,7 +271,6 @@ export default function BookingDetailScreen() {
     total: booking.payment?.totalAmount ?? booking.amount,
   };
 
-  const [respondingAddonId, setRespondingAddonId] = useState<string | null>(null);
   const handleAddonResponse = async (addonId: string, approve: boolean) => {
     setRespondingAddonId(addonId);
     try {
@@ -675,7 +678,7 @@ export default function BookingDetailScreen() {
             <View className="flex-row gap-2 mt-3">
               <View className="flex-1">
                 <PrimaryButton
-                  label="Keep New Date"
+                  label="Accept"
                   fullWidth
                   onPress={handleKeepNewDate}
                   disabled={confirmingNewDate}
@@ -684,7 +687,7 @@ export default function BookingDetailScreen() {
               </View>
               <View className="flex-1">
                 <OutlinedButton
-                  label="Cancel Instead"
+                  label="Cancel"
                   fullWidth
                   onPress={() => router.push(`/(client)/booking/${bookingId}/cancel`)}
                 />
@@ -767,10 +770,10 @@ export default function BookingDetailScreen() {
             <Ionicons name="alert-circle" size={24} color={colors.warning} />
             <View className="ml-3 flex-1">
               <Text className="text-warning font-bold text-sm">
-                Your worker hasn't checked in
+                Your worker hasn&apos;t checked in
               </Text>
               <Text className="text-text-secondary text-xs mt-0.5">
-                You can cancel this booking free of charge if you'd like.
+                You can cancel this booking for free.
               </Text>
             </View>
           </View>
@@ -801,7 +804,7 @@ export default function BookingDetailScreen() {
                   This pro declined the request
                 </Text>
                 <Text className="text-text-secondary text-xs mt-0.5">
-                  Your scope, address, and schedule are unaffected — pick a different pro to continue.
+                  Your booking details are saved. Pick another pro to continue.
                 </Text>
               </View>
             </View>
@@ -1013,7 +1016,7 @@ export default function BookingDetailScreen() {
             />
             {isPendingCompletion && (
               <Text className="text-text-secondary text-xs mt-2">
-                Review the photo above. If the work is done to your satisfaction, confirm completion below.
+                Happy with the work? Confirm completion below.
               </Text>
             )}
           </View>

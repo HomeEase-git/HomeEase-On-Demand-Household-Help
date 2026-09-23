@@ -33,7 +33,9 @@ export const OutlinedButton: React.FC<Props> = ({
       onPress={onPress}
       disabled={disabled}
     >
-      <Text className="text-brand font-semibold text-center">{label}</Text>
+      <Text className="text-brand font-semibold text-center" numberOfLines={1}>
+        {label}
+      </Text>
     </Pressable>
   );
 };

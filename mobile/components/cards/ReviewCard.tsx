@@ -68,7 +68,7 @@ export const ReviewCard: React.FC<Props> = ({ review, onRespond }) => {
               multiline
               maxLength={1000}
               className="bg-background rounded-xl p-3 text-text-primary text-sm"
-              style={{ minHeight: 72, textAlignVertical: "top" }}
+              style={{ minHeight: 72, textAlignVertical: "top", includeFontPadding: false }}
             />
             <View className="flex-row justify-end mt-2 gap-3">
               <Pressable onPress={() => { setResponding(false); setDraft(""); }} disabled={submitting}>

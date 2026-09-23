@@ -146,8 +146,7 @@ export default function ResetPasswordScreen() {
       >
         <Text className="text-text-primary text-2xl font-bold">Reset Password</Text>
         <Text className="text-text-secondary mt-2 mb-6">
-          Enter the 6-digit code we emailed you, then create a strong new
-          password.
+          Enter the code we emailed you and choose a new password.
         </Text>
 
         <View className="mb-2">

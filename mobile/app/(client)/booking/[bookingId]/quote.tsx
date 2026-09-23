@@ -131,7 +131,7 @@ export default function QuoteReviewScreen() {
             approveQuote(booking.id);
             alertModal.success(
               "Quote Approved",
-              "The worker has been notified. They will proceed with the service.",
+              "The worker has been notified and will proceed.",
               [
                 {
                   text: "OK",
@@ -300,8 +300,7 @@ export default function QuoteReviewScreen() {
               color={colors.brand.DEFAULT}
             />
             <Text className="text-text-secondary text-xs ml-2 flex-1">
-              Payment will only be processed after you approve this quote and
-              the service is completed.
+              You&apos;ll only be charged after the job is done.
             </Text>
           </View>
         )}

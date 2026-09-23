@@ -9,7 +9,7 @@ export default function NotFoundScreen() {
       <EmptyState
         icon="compass-outline"
         title="Page not found"
-        subtitle="The screen you're looking for doesn't exist or may have moved."
+        subtitle="This screen doesn't exist."
       />
       <Link href="/" className="text-accent font-semibold text-center mb-8">
         Go back home

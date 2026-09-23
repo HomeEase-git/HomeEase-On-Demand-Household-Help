@@ -312,9 +312,8 @@ export default function SkillsScreen() {
       <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 80 }}>
         <Text className="text-text-primary font-bold mb-1">Services You Offer</Text>
         <Text className="text-text-muted text-sm mb-4">
-          Check off every task you actually perform, from the list your admin has set up. A brand-new
-          category beyond your first needs one supporting document for an admin to review before it goes
-          live — you&apos;ll see it here as &quot;Pending Admin Review&quot; until then.
+          Check off the tasks you actually do. A new category beyond your first needs one supporting
+          document and shows as &quot;Pending Admin Review&quot; until it&apos;s approved.
         </Text>
 
         {loading && (
@@ -379,15 +378,14 @@ export default function SkillsScreen() {
 
         <Text className="text-text-primary font-bold mb-1 mt-6">Your Specialization</Text>
         <Text className="text-text-muted text-sm mb-3">
-          For categories where it matters, check off exactly what you handle — clients asking for
-          something specific will only be shown pros who&apos;ve checked it.
+          Check off exactly what you handle. Clients who ask for something specific only see pros
+          who&apos;ve checked it.
         </Text>
 
         {!loading && matchingCategories.length === 0 && (
           <View className="bg-card rounded-2xl p-4">
             <Text className="text-text-secondary text-sm">
-              None of your current categories have a specialization question. This section fills in
-              automatically if you add one that does (e.g. Home Appliance &amp; Aircon Repair).
+              None of your categories have specializations yet.
             </Text>
           </View>
         )}
@@ -440,7 +438,7 @@ export default function SkillsScreen() {
 
         <Text className="text-text-primary font-bold mb-1 mt-6">Your Prices</Text>
         <Text className="text-text-muted text-sm mb-3">
-          Set your own price for each task you&apos;ve selected, within the range the admin allows.
+          Set your price for each selected task, within the allowed range.
         </Text>
 
         {!loading && priceableTasks.length === 0 && (

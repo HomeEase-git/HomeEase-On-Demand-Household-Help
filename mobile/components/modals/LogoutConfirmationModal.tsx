@@ -35,7 +35,7 @@ export const LogoutConfirmationModal: React.FC<Props> = ({
           <OutlinedButton label="Cancel" onPress={onCancel} />
         </View>
         <View className="flex-1">
-          <PrimaryButton label="Log Out" onPress={onConfirm} />
+          <PrimaryButton label="Logout" onPress={onConfirm} />
         </View>
       </View>
     </ModalWrapper>
