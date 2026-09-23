@@ -1,7 +1,7 @@
 {
   "expo": {
     "name": "HomeEase",
-    "slug": "homeease-mobile",
+    "slug": "homeease",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
@@ -70,9 +70,9 @@
     "extra": {
       "router": {},
       "eas": {
-        "projectId": "d0a9da9b-3d3c-4458-9a4c-19d98f7e0099"
+        "projectId": "73469bad-9adb-4f27-a974-1b0397982458"
       }
     },
-    "owner": "homeease-organization"
+    "owner": "homeease"
   }
 }
