@@ -13,9 +13,6 @@ const SUB_NAV = [
   { to: '/payments', label: 'All Transactions' },
   { to: '/payments/refunds', label: 'Refund History' },
   { to: '/payments/payouts', label: 'Payout Distribution' },
-  { to: '/payments/tax-certificates', label: 'Tax Certificates' },
-  { to: '/payments/tax-remittance', label: 'Tax Remittance' },
-  { to: '/payments/vat-registrations', label: 'VAT Registrations' },
 ]
 
 function formatPeso(amount) {

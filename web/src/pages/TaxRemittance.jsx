@@ -1,21 +1,11 @@
 import { useEffect, useState } from 'react'
 import PageHeader from '../components/common/PageHeader'
-import SubNav from '../components/common/SubNav'
 import SectionCard from '../components/common/SectionCard'
 import LoadingState from '../components/common/LoadingState'
 import ErrorState from '../components/common/ErrorState'
 import Badge from '../components/common/Badge'
 import { fetchRemittancePeriods, markRemittancePeriodRemitted } from '../services/tax'
 import { useToast } from '../context/ToastContext'
-
-const SUB_NAV = [
-  { to: '/payments', label: 'All Transactions' },
-  { to: '/payments/refunds', label: 'Refund History' },
-  { to: '/payments/payouts', label: 'Payout Distribution' },
-  { to: '/payments/tax-certificates', label: 'Tax Certificates' },
-  { to: '/payments/tax-remittance', label: 'Tax Remittance' },
-  { to: '/payments/vat-registrations', label: 'VAT Registrations' },
-]
 
 function formatDate(value) {
   return new Date(value).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
@@ -112,7 +102,6 @@ export default function TaxRemittance() {
         title="Tax Remittance"
         subtitle="Quarterly withholding tax due to BIR, and a record of what's actually been filed and paid"
       />
-      <SubNav items={SUB_NAV} />
       <p style={{ color: 'var(--text-muted)', fontSize: '0.875rem', margin: '0.5rem 0 1rem' }}>
         There is no public BIR e-filing API — actual filing and payment happen outside this app (eFPS or an
         authorized bank). This page is a bookkeeping record: it shows what's due per quarter and lets you record

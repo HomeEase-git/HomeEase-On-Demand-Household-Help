@@ -1,6 +1,5 @@
 import { useCallback, useState } from 'react'
 import PageHeader from '../components/common/PageHeader'
-import SubNav from '../components/common/SubNav'
 import SectionCard from '../components/common/SectionCard'
 import Pagination from '../components/common/Pagination'
 import LoadingState from '../components/common/LoadingState'
@@ -9,15 +8,6 @@ import Badge from '../components/common/Badge'
 import { useListQuery } from '../hooks/useListQuery'
 import { fetchTaxCertificates, generateTaxCertificates, getCertificateDownloadUrl } from '../services/tax'
 import { useToast } from '../context/ToastContext'
-
-const SUB_NAV = [
-  { to: '/payments', label: 'All Transactions' },
-  { to: '/payments/refunds', label: 'Refund History' },
-  { to: '/payments/payouts', label: 'Payout Distribution' },
-  { to: '/payments/tax-certificates', label: 'Tax Certificates' },
-  { to: '/payments/tax-remittance', label: 'Tax Remittance' },
-  { to: '/payments/vat-registrations', label: 'VAT Registrations' },
-]
 
 const STATUS_BADGE_VARIANT = { ISSUED: 'approved', DRAFT: 'pending', NEEDS_REVIEW: 'flagged' }
 
@@ -90,7 +80,6 @@ export default function TaxCertificates() {
         title="Tax Certificates"
         subtitle="BIR Form 2307 withholding certificates generated per worker per reporting period"
       />
-      <SubNav items={SUB_NAV} />
       <p style={{ color: 'var(--text-muted)', fontSize: '0.875rem', margin: '0.5rem 0 1rem' }}>
         Generates one certificate per worker who has a TIN on file and at least one completed payment in the
         period. Workers without a TIN are skipped — they need to add one in the app first. The generated PDF
