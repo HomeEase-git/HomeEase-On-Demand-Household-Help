@@ -5,6 +5,7 @@ import { errorResponse } from '@utils/errorResponse';
 import { writeAuditLog } from '@utils/auditLog';
 import { VALID_SERVICE_ICONS } from '@/constants/serviceIcons';
 import { checkDoleFloor } from '@services/pricingRuleService';
+import { carryWorkerPricesAcrossModelChange } from '@services/taskPriceService';
 import { getHighestDoleWageReference } from '@/constants/doleWageReference';
 import {
   VALID_FIELD_TYPES,
@@ -196,7 +197,7 @@ async function saveCatalog(req: AuthRequest, res: Response, serviceTypeId: strin
   const existing = serviceTypeId
     ? await prisma.serviceType.findUnique({
         where: { id: serviceTypeId },
-        include: { tasks: { select: { id: true } }, scopeFields: { select: { id: true } } },
+        include: { tasks: { select: { id: true, pricingModel: true } }, scopeFields: { select: { id: true } } },
       })
     : null;
   if (serviceTypeId && !existing) {
@@ -242,8 +243,10 @@ async function saveCatalog(req: AuthRequest, res: Response, serviceTypeId: strin
 
       // 1. Jobs, minus their count question (it may not exist yet).
       const taskIdByRef = new Map<string, string>();
+      const previousModel = new Map(existing?.tasks.map((t) => [t.id, t.pricingModel]) ?? []);
       for (const [index, task] of tasks.entries()) {
         if (task.id) {
+          await carryWorkerPricesAcrossModelChange(tx, task.id, previousModel.get(task.id)!, task.pricingModel!);
           await tx.serviceTask.update({
             where: { id: task.id },
             data: { ...taskData(task, index), ...(task.isActive !== undefined && { isActive: task.isActive }) },

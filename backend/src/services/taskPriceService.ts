@@ -1,3 +1,4 @@
+import type { Prisma } from '@prisma/client';
 /**
  * Pure boundary check for a worker-set WorkerTaskPrice against the admin
  * bounds on its ServiceTask — split out like pricingRuleService's
@@ -71,4 +72,55 @@ export function validateTierRows(
     }
   }
   return null;
+}
+
+/**
+ * The stored WorkerTaskPrice value a FIXED or PER_UNIT task is charged from
+ * (price for FIXED, unitPrice for PER_UNIT), or null when the worker hasn't
+ * set that one. A task whose pricing model changed after the worker priced
+ * it can have only the other value — treated as not priced, never as ₱0.
+ */
+export function storedWorkerPrice(
+  pricingModel: string,
+  workerPrice: { price: number | null; unitPrice: number | null; isActive: boolean } | null
+): number | null {
+  if (!workerPrice?.isActive) return null;
+  return (pricingModel === 'FIXED' ? workerPrice.price : workerPrice.unitPrice) ?? null;
+}
+
+/** Prisma filter: the worker has an active, usable price for this FIXED/PER_UNIT task. */
+export function pricedTaskFilter(serviceTaskId: string, pricingModel: string) {
+  return {
+    taskPrices: {
+      some: {
+        serviceTaskId,
+        isActive: true,
+        ...(pricingModel === 'FIXED' ? { price: { not: null } } : { unitPrice: { not: null } }),
+      },
+    },
+  };
+}
+
+/**
+ * When an admin switches a task between FIXED and PER_UNIT, carry each
+ * worker's price across (flat price <-> per-unit rate) so they stay bookable
+ * at the price they chose. Otherwise their stored value is the one the new
+ * model doesn't read, and they'd silently drop out of search. Only fills an
+ * empty slot; a value the worker set themselves is never overwritten.
+ */
+export async function carryWorkerPricesAcrossModelChange(
+  tx: Prisma.TransactionClient,
+  serviceTaskId: string,
+  fromModel: string,
+  toModel: string
+): Promise<number> {
+  if (fromModel === 'FIXED' && toModel === 'PER_UNIT') {
+    return tx.$executeRaw`UPDATE "WorkerTaskPrice" SET "unitPrice" = "price", "updatedAt" = NOW()
+      WHERE "serviceTaskId" = ${serviceTaskId} AND "unitPrice" IS NULL AND "price" IS NOT NULL`;
+  }
+  if (fromModel === 'PER_UNIT' && toModel === 'FIXED') {
+    return tx.$executeRaw`UPDATE "WorkerTaskPrice" SET "price" = "unitPrice", "updatedAt" = NOW()
+      WHERE "serviceTaskId" = ${serviceTaskId} AND "price" IS NULL AND "unitPrice" IS NOT NULL`;
+  }
+  return 0;
 }

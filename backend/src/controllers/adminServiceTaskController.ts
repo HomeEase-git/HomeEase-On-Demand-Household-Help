@@ -4,6 +4,7 @@ import prisma from '@config/database';
 import { errorResponse } from '@utils/errorResponse';
 import { writeAuditLog } from '@utils/auditLog';
 import { checkDoleFloor } from '@services/pricingRuleService';
+import { carryWorkerPricesAcrossModelChange } from '@services/taskPriceService';
 import { getHighestDoleWageReference } from '@/constants/doleWageReference';
 import type { JwtPayload } from '@/types/index';
 
@@ -207,23 +208,28 @@ export const updateTask = async (req: AuthRequest, res: Response) => {
       return res.status(400).json(errorResponse(400, doleCheck.message));
     }
 
-    const task = await prisma.serviceTask.update({
-      where: { id: taskId },
-      data: {
-        name: body.name!.trim(),
-        description: body.description?.trim() || null,
-        basePrice: body.basePrice!,
-        pricingModel: body.pricingModel as TaskPricingModel,
-        minPrice: isCustomQuote ? null : body.minPrice!,
-        maxPrice: isCustomQuote ? null : body.maxPrice!,
-        // Display-only for FIXED/CUSTOM_QUOTE (the matrix's "per visit").
-        unitLabel: body.unitLabel?.trim() || null,
-        quantityScopeFieldId:
-          body.pricingModel === 'PER_UNIT' || body.pricingModel === 'TIERED' ? body.quantityScopeFieldId! : null,
-        durationHours: isCustomQuote ? null : body.durationHours ?? null,
-        isActive: body.isActive ?? existing.isActive,
-      },
-      include: taskInclude,
+    // Price change + model change together, so a FIXED<->PER_UNIT switch
+    // never leaves workers with only the value the new model doesn't read.
+    const task = await prisma.$transaction(async (tx) => {
+      await carryWorkerPricesAcrossModelChange(tx, taskId, existing.pricingModel, body.pricingModel!);
+      return tx.serviceTask.update({
+        where: { id: taskId },
+        data: {
+          name: body.name!.trim(),
+          description: body.description?.trim() || null,
+          basePrice: body.basePrice!,
+          pricingModel: body.pricingModel as TaskPricingModel,
+          minPrice: isCustomQuote ? null : body.minPrice!,
+          maxPrice: isCustomQuote ? null : body.maxPrice!,
+          // Display-only for FIXED/CUSTOM_QUOTE (the matrix's "per visit").
+          unitLabel: body.unitLabel?.trim() || null,
+          quantityScopeFieldId:
+            body.pricingModel === 'PER_UNIT' || body.pricingModel === 'TIERED' ? body.quantityScopeFieldId! : null,
+          durationHours: isCustomQuote ? null : body.durationHours ?? null,
+          isActive: body.isActive ?? existing.isActive,
+        },
+        include: taskInclude,
+      });
     });
 
     await writeAuditLog({

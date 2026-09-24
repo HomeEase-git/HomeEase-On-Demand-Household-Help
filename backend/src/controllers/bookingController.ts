@@ -8,7 +8,7 @@ import { writeAuditLog } from '@utils/auditLog';
 import { formatDisplayId } from '@utils/formatters';
 import { distanceMeters, isWithinRadiusMeters } from '@utils/geo';
 import { resolveDrivingDistanceKm } from '@services/googleDistanceService';
-import { resolveTierPrice } from '@services/taskPriceService';
+import { resolveTierPrice, storedWorkerPrice } from '@services/taskPriceService';
 import { findAutoMatchWorker, LATE_CANCEL_THRESHOLD_HOURS } from '@services/matchingService';
 import { validatePriceWithinPricingRule } from '@services/pricingRuleService';
 import {
@@ -486,12 +486,13 @@ export const createBooking = async (req: AuthRequest, res: Response) => {
             workerProfileId_serviceTaskId: { workerProfileId: workerProfile.id, serviceTaskId: serviceTask.id },
           },
         });
-        if (!workerPrice?.isActive) {
+        const storedPrice = storedWorkerPrice(serviceTask.pricingModel, workerPrice);
+        if (storedPrice == null) {
           if (await tryNextAutoMatchCandidate()) continue;
           return res.status(409).json(errorResponse(409, 'This pro has not priced this service yet'));
         }
         if (serviceTask.pricingModel === 'FIXED') {
-          basePrice = workerPrice.price!;
+          basePrice = storedPrice;
         } else {
           const field = serviceTask.quantityScopeField;
           const quantity = field ? Number(effectiveScopeAnswers?.[field.label]) : NaN;
@@ -500,7 +501,7 @@ export const createBooking = async (req: AuthRequest, res: Response) => {
               .status(400)
               .json(errorResponse(400, `"${field?.label ?? 'quantity'}" is required for this service`));
           }
-          basePrice = round2(workerPrice.unitPrice! * quantity);
+          basePrice = round2(storedPrice * quantity);
         }
       }
     } else {
@@ -1026,18 +1027,19 @@ export const createMultiDayBooking = async (req: AuthRequest, res: Response) => 
         const workerPrice = await prisma.workerTaskPrice.findUnique({
           where: { workerProfileId_serviceTaskId: { workerProfileId: workerProfile.id, serviceTaskId: serviceTask.id } },
         });
-        if (!workerPrice?.isActive) {
+        const storedPrice = storedWorkerPrice(serviceTask.pricingModel, workerPrice);
+        if (storedPrice == null) {
           return res.status(409).json(errorResponse(409, 'This pro has not priced this service yet'));
         }
         if (serviceTask.pricingModel === 'FIXED') {
-          basePrice = workerPrice.price!;
+          basePrice = storedPrice;
         } else {
           const field = serviceTask.quantityScopeField;
           const quantity = field ? Number(effectiveScopeAnswers?.[field.label]) : NaN;
           if (!field || Number.isNaN(quantity)) {
             return res.status(400).json(errorResponse(400, `"${field?.label ?? 'quantity'}" is required for this service`));
           }
-          basePrice = round2(workerPrice.unitPrice! * quantity);
+          basePrice = round2(storedPrice * quantity);
         }
       }
     } else {

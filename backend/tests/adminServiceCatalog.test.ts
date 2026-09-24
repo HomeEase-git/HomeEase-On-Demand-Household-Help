@@ -221,4 +221,47 @@ describe('Admin service catalog save', () => {
     expect(await buildCapabilityFilters(cat.name, answers, cat.tasks[0].id)).toHaveLength(1);
     expect(await buildCapabilityFilters(cat.name, answers, cat.tasks[2].id)).toHaveLength(0);
   });
+
+  it("carries workers' prices across when a job switches between flat and per-unit pricing", async () => {
+    const cat = (await create(newCatalog())).body.data;
+    createdServiceTypeIds.push(cat.id);
+    const diag = cat.tasks[0];
+    const { user } = await createTestUser('catalog-worker', { role: 'WORKER' });
+    createdUserIds.push(user.id);
+    const profile = await prisma.workerProfile.findUniqueOrThrow({ where: { userId: user.id } });
+    await prisma.workerTaskPrice.create({ data: { workerProfileId: profile.id, serviceTaskId: diag.id, price: 400 } });
+
+    const body = {
+      name: cat.name,
+      basePrice: 350,
+      tasks: cat.tasks.map((t: Record<string, unknown>) => ({
+        id: t.id,
+        name: t.name,
+        basePrice: t.basePrice,
+        pricingModel: t.pricingModel,
+        minPrice: t.minPrice,
+        maxPrice: t.maxPrice,
+        unitLabel: t.unitLabel,
+        quantityFieldRef: t.quantityScopeFieldId,
+      })),
+      scopeFields: cat.scopeFields.map((f: Record<string, any>) => ({
+        id: f.id,
+        label: f.label,
+        fieldType: f.fieldType,
+        required: f.required,
+        options: f.options.map((o: { label: string }) => o.label),
+        minValue: f.minValue,
+        maxValue: f.maxValue,
+        taskRefs: f.taskLinks.map((l: { serviceTaskId: string }) => l.serviceTaskId),
+      })),
+    };
+    // Diagnosis becomes "per unit", counted by a new question.
+    body.tasks[0] = { ...body.tasks[0], pricingModel: 'PER_UNIT', unitLabel: 'unit', quantityFieldRef: 'f-diag-units' };
+    body.scopeFields.push({ key: 'f-diag-units', label: 'Units to check', fieldType: 'NUMBER', minValue: 1, maxValue: 5, taskRefs: [diag.id] } as never);
+
+    expect((await update(cat.id, body)).status).toBe(200);
+    const price = await prisma.workerTaskPrice.findFirstOrThrow({ where: { workerProfileId: profile.id, serviceTaskId: diag.id } });
+    expect(price.unitPrice).toBe(400);
+  });
 });
+

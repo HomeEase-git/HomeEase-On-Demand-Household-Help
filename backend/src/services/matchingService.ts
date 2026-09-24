@@ -2,7 +2,7 @@ import prisma from '@config/database';
 import { fieldAppliesToTask } from '@utils/scopeFields';
 import type { Prisma, TimeSlot } from '@prisma/client';
 import { isWithinRadiusKm } from '@utils/geo';
-import { resolveTierPrice } from '@services/taskPriceService';
+import { pricedTaskFilter, resolveTierPrice } from '@services/taskPriceService';
 
 // Fallback when a worker hasn't set WorkerProfile.serviceAreaRadius (it has
 // a DB default, but stay defensive for any row created before that default
@@ -216,6 +216,7 @@ export async function findAutoMatchWorker(params: AutoMatchParams): Promise<Auto
   // TIERED lives in a separate table (WorkerTaskTierPrice, many rows per
   // worker+task) so it gets its own gate — same split searchWorkers uses.
   let requirePricedTaskId: string | null = null;
+  let requirePricedModel = 'FIXED';
   let requireTieredTaskId: string | null = null;
   let requireSelectedTaskId: string | null = null;
   let tieredQuantity = NaN;
@@ -230,6 +231,7 @@ export async function findAutoMatchWorker(params: AutoMatchParams): Promise<Auto
         tieredQuantity = task.quantityScopeField ? Number(scopeAnswers?.[task.quantityScopeField.label]) : NaN;
       } else if (task.pricingModel !== 'CUSTOM_QUOTE') {
         requirePricedTaskId = serviceTaskId;
+        requirePricedModel = task.pricingModel;
       } else {
         requireSelectedTaskId = serviceTaskId;
       }
@@ -251,7 +253,7 @@ export async function findAutoMatchWorker(params: AutoMatchParams): Promise<Auto
       serviceCategories: { some: { status: 'VERIFIED', serviceType: { name: { equals: serviceType, mode: 'insensitive' } } } },
       ...(hasPets ? { acceptsPets: true } : {}),
       ...(requirePricedTaskId
-        ? { taskPrices: { some: { serviceTaskId: requirePricedTaskId, isActive: true } } }
+        ? pricedTaskFilter(requirePricedTaskId, requirePricedModel)
         : {}),
       ...(requireTieredTaskId
         ? { tierPrices: { some: { serviceTaskId: requireTieredTaskId, isActive: true } } }
