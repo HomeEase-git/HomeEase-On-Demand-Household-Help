@@ -45,6 +45,7 @@ import { MIN_BOOKING_LEAD_DAYS } from '@middleware/validation';
 import { getAppSettings } from '@services/appSettingsService';
 import { computeWorkerTier, tierMultiplier } from '@utils/workerTier';
 import { VALID_TIME_SLOTS } from '@/constants/bookingEnums';
+import { validateScopeAnswers } from '@utils/scopeFields';
 import { getIO } from '../socket';
 import type { JwtPayload } from '@/types/index';
 
@@ -57,11 +58,17 @@ interface AuthRequest extends Request {
 // Local alias — see backend/src/utils/money.ts for the shared money-rounding helper.
 const round2 = roundToCentavo;
 
+const scopeFieldInclude = { options: true, taskLinks: { select: { serviceTaskId: true } } } as const;
+
 async function resolveServiceTypeConfig(name: string) {
   return prisma.serviceType.findFirst({
     where: { name: { equals: name, mode: 'insensitive' } },
-    include: { scopeFields: { include: { options: true } } },
+    include: { scopeFields: { include: scopeFieldInclude } },
   });
+}
+
+async function loadScopeFields(serviceTypeId: string) {
+  return prisma.serviceScopeField.findMany({ where: { serviceTypeId }, include: scopeFieldInclude });
 }
 
 /**
@@ -220,9 +227,8 @@ export const createBooking = async (req: AuthRequest, res: Response) => {
     }
 
     const resolvedServiceTypeName = serviceTask?.serviceType.name ?? serviceType;
-    // Task-priced bookings aren't category-scoped — only fetch/enforce the
-    // parent category's scope fields when the client booked straight off a
-    // ServiceType rather than a specific ServiceTask.
+    // Category config (for its flat basePrice) is only needed when the client
+    // booked straight off a ServiceType rather than a specific ServiceTask.
     const serviceTypeConfig = serviceTask ? null : await resolveServiceTypeConfig(resolvedServiceTypeName);
 
     if (!serviceTask && !serviceTypeConfig) {
@@ -238,31 +244,15 @@ export const createBooking = async (req: AuthRequest, res: Response) => {
     const effectiveScopeAnswers =
       scopeAnswers && typeof scopeAnswers === 'object' && !Array.isArray(scopeAnswers) ? scopeAnswers : undefined;
 
-    if (serviceTypeConfig) {
-      const answers = effectiveScopeAnswers ?? {};
-      for (const field of serviceTypeConfig.scopeFields) {
-        const answer = answers[field.label];
-        const hasAnswer = Array.isArray(answer) ? answer.length > 0 : typeof answer === 'string' && answer.trim().length > 0;
-        if (field.required && !hasAnswer) {
-          return res.status(400).json(errorResponse(400, `"${field.label}" is required for this service`));
-        }
-        if (hasAnswer && (field.fieldType === 'SELECT' || field.fieldType === 'MULTI_SELECT')) {
-          const validLabels = new Set(field.options.map((o) => o.label));
-          const values = Array.isArray(answer) ? answer : [answer as string];
-          if (!values.every((v) => validLabels.has(v))) {
-            return res.status(400).json(errorResponse(400, `"${field.label}" has an invalid selection`));
-          }
-        }
-        if (hasAnswer && field.fieldType === 'NUMBER') {
-          const n = Number(answer);
-          if (Number.isNaN(n)) {
-            return res.status(400).json(errorResponse(400, `"${field.label}" must be a number`));
-          }
-          if ((field.minValue != null && n < field.minValue) || (field.maxValue != null && n > field.maxValue)) {
-            return res.status(400).json(errorResponse(400, `"${field.label}" is outside the allowed range`));
-          }
-        }
-      }
+    // Only the fields that apply to the chosen task are enforced (see
+    // utils/scopeFields.fieldAppliesToTask) — a task booking used to skip
+    // this check entirely, back when every field was category-wide.
+    const scopeFields = serviceTask
+      ? await loadScopeFields(serviceTask.serviceTypeId)
+      : serviceTypeConfig!.scopeFields;
+    const scopeError = validateScopeAnswers(scopeFields, effectiveScopeAnswers ?? {}, serviceTask);
+    if (scopeError) {
+      return res.status(400).json(errorResponse(400, scopeError));
     }
 
     // Condition is no longer a platform-wide concept — new bookings don't
@@ -388,7 +378,7 @@ export const createBooking = async (req: AuthRequest, res: Response) => {
     // directly book a worker whose category is still PENDING_VERIFICATION
     // (or who was never connected to it at all), making that gate meaningless.
     if (!isAutoMatched) {
-      const capabilityFilters = await buildCapabilityFilters(resolvedServiceTypeName, effectiveScopeAnswers);
+      const capabilityFilters = await buildCapabilityFilters(resolvedServiceTypeName, effectiveScopeAnswers, serviceTask?.id);
       if (capabilityFilters.length > 0) {
         const eligible = await prisma.workerProfile.findFirst({
           where: { userId: resolvedWorkerId, AND: capabilityFilters },
@@ -937,31 +927,15 @@ export const createMultiDayBooking = async (req: AuthRequest, res: Response) => 
     const effectiveScopeAnswers =
       scopeAnswers && typeof scopeAnswers === 'object' && !Array.isArray(scopeAnswers) ? scopeAnswers : undefined;
 
-    if (serviceTypeConfig) {
-      const answers = effectiveScopeAnswers ?? {};
-      for (const field of serviceTypeConfig.scopeFields) {
-        const answer = answers[field.label];
-        const hasAnswer = Array.isArray(answer) ? answer.length > 0 : typeof answer === 'string' && answer.trim().length > 0;
-        if (field.required && !hasAnswer) {
-          return res.status(400).json(errorResponse(400, `"${field.label}" is required for this service`));
-        }
-        if (hasAnswer && (field.fieldType === 'SELECT' || field.fieldType === 'MULTI_SELECT')) {
-          const validLabels = new Set(field.options.map((o) => o.label));
-          const values = Array.isArray(answer) ? answer : [answer as string];
-          if (!values.every((v) => validLabels.has(v))) {
-            return res.status(400).json(errorResponse(400, `"${field.label}" has an invalid selection`));
-          }
-        }
-        if (hasAnswer && field.fieldType === 'NUMBER') {
-          const n = Number(answer);
-          if (Number.isNaN(n)) {
-            return res.status(400).json(errorResponse(400, `"${field.label}" must be a number`));
-          }
-          if ((field.minValue != null && n < field.minValue) || (field.maxValue != null && n > field.maxValue)) {
-            return res.status(400).json(errorResponse(400, `"${field.label}" is outside the allowed range`));
-          }
-        }
-      }
+    // Only the fields that apply to the chosen task are enforced (see
+    // utils/scopeFields.fieldAppliesToTask) — a task booking used to skip
+    // this check entirely, back when every field was category-wide.
+    const scopeFields = serviceTask
+      ? await loadScopeFields(serviceTask.serviceTypeId)
+      : serviceTypeConfig!.scopeFields;
+    const scopeError = validateScopeAnswers(scopeFields, effectiveScopeAnswers ?? {}, serviceTask);
+    if (scopeError) {
+      return res.status(400).json(errorResponse(400, scopeError));
     }
 
     const effectiveIssuePhotoUrls = Array.isArray(issuePhotoUrls)
@@ -987,7 +961,7 @@ export const createMultiDayBooking = async (req: AuthRequest, res: Response) => 
 
     // Same capability/category re-check as createBooking's explicit-worker
     // path (there is no auto-match path here to have already guaranteed it).
-    const capabilityFilters = await buildCapabilityFilters(resolvedServiceTypeName, effectiveScopeAnswers);
+    const capabilityFilters = await buildCapabilityFilters(resolvedServiceTypeName, effectiveScopeAnswers, serviceTask?.id);
     if (capabilityFilters.length > 0) {
       const eligible = await prisma.workerProfile.findFirst({
         where: { userId: workerId, AND: capabilityFilters },

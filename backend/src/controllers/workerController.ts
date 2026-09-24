@@ -100,7 +100,11 @@ export const searchWorkers = async (req: AuthRequest, res: Response) => {
     const hasPetsBool = hasPets === 'true' || hasPets === '1';
 
     const capabilityFilters = serviceTypeName
-      ? await buildCapabilityFilters(serviceTypeName, parsedScopeAnswers)
+      ? await buildCapabilityFilters(
+          serviceTypeName,
+          parsedScopeAnswers,
+          typeof serviceTaskId === 'string' ? serviceTaskId : null
+        )
       : [];
 
     // A specific task with a real price (FIXED/PER_UNIT/TIERED) is only

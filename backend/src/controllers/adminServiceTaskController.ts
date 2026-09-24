@@ -17,7 +17,7 @@ const taskInclude = {
   quantityScopeField: { select: { id: true, label: true } },
 };
 
-type TaskInputBody = {
+export type TaskInputBody = {
   name?: string;
   description?: string | null;
   basePrice?: number;
@@ -36,7 +36,7 @@ type TaskInputBody = {
  * must fall inside; CUSTOM_QUOTE has no upfront price at all (worker quotes
  * on-site via submitQuote), so it must NOT carry a range/unit/quantity field.
  */
-function validateTaskInput(body: TaskInputBody, existingNumberFieldIds: Set<string>): string | null {
+export function validateTaskInput(body: TaskInputBody, existingNumberFieldIds: Set<string>): string | null {
   if (!body.name?.trim()) {
     return 'Name is required.';
   }
@@ -54,8 +54,8 @@ function validateTaskInput(body: TaskInputBody, existingNumberFieldIds: Set<stri
     if (body.minPrice != null || body.maxPrice != null) {
       return 'Custom-quote tasks cannot have a price range — the worker quotes on-site.';
     }
-    if (body.unitLabel || body.quantityScopeFieldId) {
-      return 'Custom-quote tasks cannot have a unit or quantity field.';
+    if (body.quantityScopeFieldId) {
+      return 'Custom-quote tasks cannot have a quantity field.';
     }
     return null;
   }
@@ -78,8 +78,8 @@ function validateTaskInput(body: TaskInputBody, existingNumberFieldIds: Set<stri
     if (!body.quantityScopeFieldId || !existingNumberFieldIds.has(body.quantityScopeFieldId)) {
       return 'quantityScopeFieldId must reference a NUMBER-type field on this service category.';
     }
-  } else if (body.unitLabel || body.quantityScopeFieldId) {
-    return 'unitLabel and quantityScopeFieldId only apply to per-unit or tiered tasks.';
+  } else if (body.quantityScopeFieldId) {
+    return 'quantityScopeFieldId only applies to per-unit or tiered tasks.';
   }
 
   return null;
@@ -99,7 +99,7 @@ export const listTasksForServiceType = async (req: Request, res: Response) => {
     const tasks = await prisma.serviceTask.findMany({
       where: { serviceTypeId },
       include: taskInclude,
-      orderBy: { name: 'asc' },
+      orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }],
     });
     return res.json({ success: true, data: tasks });
   } catch (error) {
@@ -149,7 +149,8 @@ export const createTask = async (req: AuthRequest, res: Response) => {
         pricingModel: body.pricingModel as TaskPricingModel,
         minPrice: isCustomQuote ? null : body.minPrice!,
         maxPrice: isCustomQuote ? null : body.maxPrice!,
-        unitLabel: body.pricingModel === 'PER_UNIT' || body.pricingModel === 'TIERED' ? body.unitLabel!.trim() : null,
+        // Display-only for FIXED/CUSTOM_QUOTE (the matrix's "per visit").
+        unitLabel: body.unitLabel?.trim() || null,
         quantityScopeFieldId:
           body.pricingModel === 'PER_UNIT' || body.pricingModel === 'TIERED' ? body.quantityScopeFieldId! : null,
         durationHours: isCustomQuote ? null : body.durationHours ?? null,
@@ -215,7 +216,8 @@ export const updateTask = async (req: AuthRequest, res: Response) => {
         pricingModel: body.pricingModel as TaskPricingModel,
         minPrice: isCustomQuote ? null : body.minPrice!,
         maxPrice: isCustomQuote ? null : body.maxPrice!,
-        unitLabel: body.pricingModel === 'PER_UNIT' || body.pricingModel === 'TIERED' ? body.unitLabel!.trim() : null,
+        // Display-only for FIXED/CUSTOM_QUOTE (the matrix's "per visit").
+        unitLabel: body.unitLabel?.trim() || null,
         quantityScopeFieldId:
           body.pricingModel === 'PER_UNIT' || body.pricingModel === 'TIERED' ? body.quantityScopeFieldId! : null,
         durationHours: isCustomQuote ? null : body.durationHours ?? null,

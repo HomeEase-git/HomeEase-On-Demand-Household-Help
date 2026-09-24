@@ -1,4 +1,5 @@
 import prisma from '@config/database';
+import { fieldAppliesToTask } from '@utils/scopeFields';
 import type { Prisma, TimeSlot } from '@prisma/client';
 import { isWithinRadiusKm } from '@utils/geo';
 import { resolveTierPrice } from '@services/taskPriceService';
@@ -106,11 +107,14 @@ export function selectBestCandidate(
  * A worker with zero WorkerScopeFieldCapability rows for a given field is
  * left unrestricted for it — same "empty declaration = no preference" rule
  * WorkerProfile.preferredRoomTypes used before this replaced it. A field the
- * client didn't answer imposes no constraint at all.
+ * client didn't answer imposes no constraint at all. When a job is given,
+ * only fields asked for that job count (see utils/scopeFields) — a question
+ * limited to another job can share this one's text without narrowing it.
  */
 export async function buildCapabilityFilters(
   serviceType: string,
-  scopeAnswers: Record<string, string | string[]> | null | undefined
+  scopeAnswers: Record<string, string | string[]> | null | undefined,
+  serviceTaskId?: string | null
 ): Promise<Prisma.WorkerProfileWhereInput[]> {
   if (!scopeAnswers || typeof scopeAnswers !== 'object') return [];
 
@@ -119,12 +123,14 @@ export async function buildCapabilityFilters(
       usedForMatching: true,
       serviceType: { name: { equals: serviceType, mode: 'insensitive' } },
     },
-    include: { options: true },
+    include: { options: true, taskLinks: { select: { serviceTaskId: true } } },
   });
   if (matchingFields.length === 0) return [];
+  const task = serviceTaskId ? { id: serviceTaskId } : null;
 
   const filters: Prisma.WorkerProfileWhereInput[] = [];
   for (const field of matchingFields) {
+    if (task && !fieldAppliesToTask(field, task)) continue;
     const answer = scopeAnswers[field.label];
     if (answer == null) continue;
     const answeredLabels = Array.isArray(answer) ? answer : [answer];
@@ -197,7 +203,7 @@ export async function findAutoMatchWorker(params: AutoMatchParams): Promise<Auto
   const dayEnd = new Date(date);
   dayEnd.setUTCHours(23, 59, 59, 999);
 
-  const capabilityFilters = await buildCapabilityFilters(serviceType, scopeAnswers);
+  const capabilityFilters = await buildCapabilityFilters(serviceType, scopeAnswers, serviceTaskId);
 
   // A specific task with a real price to set (FIXED/PER_UNIT) is only
   // bookable through a worker who has actually priced it — createBooking
