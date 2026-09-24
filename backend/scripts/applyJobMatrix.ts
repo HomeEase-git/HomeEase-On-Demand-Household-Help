@@ -29,30 +29,10 @@ import fs from 'fs';
 import path from 'path';
 import { PrismaClient, type Prisma, type TaskPricingModel } from '@prisma/client';
 import defaultPrisma from '@config/database';
-import { validateCatalog, writeCatalog, type CatalogBody } from '@controllers/adminCatalogController';
+import { validateCatalog, writeCatalog } from '@controllers/adminCatalogController';
 import { checkDoleFloor } from '@services/pricingRuleService';
 import { getHighestDoleWageReference } from '@/constants/doleWageReference';
-
-type MatrixQuestion = {
-  label: string;
-  helpText?: string;
-  fieldType: 'TEXT' | 'NUMBER' | 'SELECT' | 'MULTI_SELECT';
-  required: boolean;
-  options?: string[];
-  minValue?: number;
-  maxValue?: number;
-  usedForMatching?: boolean;
-  setsPrice?: boolean;
-};
-type MatrixJob = {
-  name: string;
-  unit: string;
-  pricingModel: 'FIXED' | 'PER_UNIT' | 'CUSTOM_QUOTE';
-  price?: number;
-  replaces?: string;
-  questions: MatrixQuestion[];
-};
-type MatrixCategory = { name: string; commonQuestions: MatrixQuestion[]; jobs: MatrixJob[] };
+import { buildMatrixPayload, loadMatrix, matrixCapMax, type MatrixCategory } from '../prisma/seeds/lib/jobMatrix';
 
 // Old matching-option text -> new option text, where the wording changed.
 const OPTION_ALIASES: Record<string, string> = {
@@ -92,7 +72,6 @@ function dbHost(): string {
   }
 }
 
-const bounds = (price: number) => ({ minPrice: Math.round(price * 0.8), maxPrice: Math.round(price * 1.5) });
 const peso = (n: number) => `₱${n.toLocaleString('en-PH', { maximumFractionDigits: 2 })}`;
 
 async function loadCategory(tx: Prisma.TransactionClient, name: string) {
@@ -122,82 +101,14 @@ async function applyCategory(tx: Prisma.TransactionClient, matrix: MatrixCategor
   const liveByName = new Map(category.tasks.map((t) => [t.name, t]));
 
   // --- build the same payload the admin editor would send ---------------------
-  let keySeq = 0;
-  const qKey = () => `q:${++keySeq}`;
-  const fieldPayload = (q: MatrixQuestion, taskRefs: string[], key: string) => ({
-    key,
-    label: q.label,
-    helpText: q.helpText ?? null,
-    fieldType: q.fieldType,
-    required: q.required,
-    options: q.options ?? [],
-    minValue: q.minValue ?? null,
-    maxValue: q.maxValue ?? null,
-    usedForMatching: !!q.usedForMatching,
-    taskRefs,
-  });
-
-  const tasks: NonNullable<CatalogBody['tasks']> = [];
-  const scopeFields: NonNullable<CatalogBody['scopeFields']> = matrix.commonQuestions.map((q) => fieldPayload(q, [], qKey()));
-  const usedLive = new Set<string>();
-
-  for (const [i, job] of matrix.jobs.entries()) {
-    const live = job.replaces ? liveByName.get(job.replaces) : undefined;
-    if (job.replaces && !live) report.push(`  ! "${job.replaces}" isn't live; "${job.name}" is created as a new job instead.`);
-    if (live) usedLive.add(live.id);
-    const ref = live?.id ?? `job:${i}`;
-    let quantityFieldRef: string | null = null;
-    for (const q of job.questions) {
-      const key = qKey();
-      if (q.setsPrice) quantityFieldRef = key;
-      scopeFields.push(fieldPayload(q, [ref], key));
-    }
-    const quote = job.pricingModel === 'CUSTOM_QUOTE';
-    tasks.push({
-      ...(live ? { id: live.id } : { key: ref }),
-      name: job.name,
-      description: live?.description ?? null,
-      basePrice: quote ? 0 : job.price!,
-      pricingModel: job.pricingModel,
-      ...(quote ? { minPrice: null, maxPrice: null } : bounds(job.price!)),
-      unitLabel: job.unit,
-      quantityFieldRef: job.pricingModel === 'PER_UNIT' ? quantityFieldRef : null,
-      durationHours: quote ? null : live?.durationHours ?? null,
-      isActive: true,
-    });
-  }
-  // Live jobs with no row stay (bookings point at them) but are switched off.
-  for (const live of category.tasks) {
-    if (usedLive.has(live.id)) continue;
-    tasks.push({
-      id: live.id,
-      name: live.name,
-      description: live.description,
-      basePrice: live.basePrice,
-      pricingModel: live.pricingModel,
-      minPrice: live.minPrice,
-      maxPrice: live.maxPrice,
-      unitLabel: live.unitLabel,
-      quantityFieldRef: null,
-      durationHours: live.durationHours,
-      isActive: false,
-    });
-  }
-  const unmatchedCounted = category.tasks.filter((t) => !usedLive.has(t.id) && (t.pricingModel === 'PER_UNIT' || t.pricingModel === 'TIERED'));
+  const { body, warnings, unmatched, jobRef } = buildMatrixPayload(matrix, category, category.tasks);
+  const { tasks, scopeFields } = body as Required<typeof body>;
+  const usedLive = new Set(category.tasks.filter((t) => !unmatched.includes(t)).map((t) => t.id));
+  for (const w of warnings) report.push(`  ! ${w}`);
+  const unmatchedCounted = unmatched.filter((t) => t.pricingModel === 'PER_UNIT' || t.pricingModel === 'TIERED');
   if (unmatchedCounted.length) {
     throw new Error(`Live per-unit job(s) with no matrix row need a manual decision: ${unmatchedCounted.map((t) => t.name).join(', ')}.`);
   }
-
-  const pricedJobs = matrix.jobs.filter((j) => j.pricingModel !== 'CUSTOM_QUOTE');
-  const body: CatalogBody = {
-    name: category.name,
-    description: category.description,
-    basePrice: Math.min(...pricedJobs.map((j) => j.price!)),
-    icon: category.icon,
-    requiresCertification: category.requiresCertification,
-    tasks,
-    scopeFields,
-  };
 
   const invalid = validateCatalog(
     body,
@@ -260,7 +171,7 @@ async function applyCategory(tx: Prisma.TransactionClient, matrix: MatrixCategor
   let signedUp = 0;
   for (const [i, job] of matrix.jobs.entries()) {
     const live = job.replaces ? liveByName.get(job.replaces) : undefined;
-    const taskId = taskIdByRef.get(live?.id ?? `job:${i}`)!;
+    const taskId = taskIdByRef.get(jobRef(i))!;
     const workers = live
       ? [
           ...new Set([
@@ -296,16 +207,7 @@ async function applyCategory(tx: Prisma.TransactionClient, matrix: MatrixCategor
   // --- widen city price caps -------------------------------------------------------
   const settings = await tx.appSettings.findFirst();
   const topTier = Math.max(settings?.tierProMultiplier ?? 1.15, settings?.tierExpertMultiplier ?? 1.3);
-  const largestJob = Math.max(
-    ...pricedJobs.map((j) => {
-      const max = bounds(j.price!).maxPrice;
-      if (j.pricingModel !== 'PER_UNIT') return max;
-      const count = j.questions.find((q) => q.setsPrice)!;
-      return max * (count.maxValue ?? 1);
-    })
-  );
-  // Headroom for the distance fee and worker packages added on top.
-  const capMax = Math.ceil((largestJob * topTier * 1.25) / 1000) * 1000;
+  const capMax = matrixCapMax(matrix, topTier);
   for (const rule of before.pricingRules) {
     const maxPrice = Math.max(rule.maxPrice, capMax);
     await tx.pricingRule.update({ where: { id: rule.id }, data: { minPrice: 0, maxPrice } });
@@ -414,8 +316,7 @@ async function main() {
   let backupFile: string | null = null;
 
   if (categoryName) {
-    const matrix = (JSON.parse(fs.readFileSync(path.join(__dirname, '../prisma/seeds/data/jobOrderMatrix.json'), 'utf8')) as { categories: MatrixCategory[] })
-      .categories.find((c) => c.name === categoryName);
+    const matrix = loadMatrix().find((c) => c.name === categoryName);
     if (!matrix) throw new Error(`jobOrderMatrix.json has no category "${categoryName}".`);
 
     if (APPLY) {
