@@ -225,6 +225,27 @@ export const approveVerification = async (req: AuthRequest, res: Response) => {
     }
 
     const { verification: updated, backfilledCertifications } = await prisma.$transaction(async (tx) => {
+      // Approving the whole request implicitly approves any document the
+      // admin didn't review individually, so none are left showing PENDING.
+      // Documents already approved/rejected one-by-one keep their decision.
+      // Per-document because each clearance type has its own expiresAt.
+      const reviewedAt = new Date();
+      for (const doc of record.documents.filter((d) => d.status === 'PENDING')) {
+        const validityDays = CLEARANCE_VALIDITY_DAYS[doc.documentType];
+        await tx.kycDocument.update({
+          where: { id: doc.id },
+          data: {
+            status: 'APPROVED',
+            rejectionReason: null,
+            reviewedById: req.user?.userId,
+            reviewedAt,
+            expiresAt: validityDays
+              ? new Date(reviewedAt.getTime() + validityDays * 24 * 60 * 60 * 1000)
+              : null,
+          },
+        });
+      }
+
       const verification = await tx.verificationRequest.update({
         where: { id },
         data: {
@@ -322,6 +343,18 @@ export const rejectVerification = async (req: AuthRequest, res: Response) => {
     }
 
     const updated = await prisma.$transaction(async (tx) => {
+      // Mirror of approveVerification: documents the admin didn't review
+      // individually take the request's rejection so none stay PENDING.
+      await tx.kycDocument.updateMany({
+        where: { verificationRequestId: id, status: 'PENDING' },
+        data: {
+          status: 'REJECTED',
+          rejectionReason: rejectReason.trim(),
+          reviewedById: req.user?.userId,
+          reviewedAt: new Date(),
+        },
+      });
+
       const verification = await tx.verificationRequest.update({
         where: { id },
         data: {
