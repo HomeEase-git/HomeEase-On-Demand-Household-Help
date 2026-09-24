@@ -235,11 +235,12 @@ export const listPayouts = async (req: Request, res: Response) => {
       prisma.payout.aggregate({ where, _sum: { amount: true } }),
     ]);
 
-    // Legacy escrow-RELEASED payments from before the Payout table existed
-    // have no Payout row at all — surface the count so admins know to
-    // reconcile them manually rather than assuming payouts are complete.
-    const legacyUnpayoutCount = await prisma.payment.count({
-      where: { escrowStatus: 'RELEASED', payout: null },
+    // Paid jobs whose worker earnings haven't been settled into a Payout yet —
+    // in practice the worker has no payout account (settleWorkerEarnings holds
+    // the payment until they add one). Cash jobs are settled worker-side up
+    // front and never get a Payout by design, so workerSettledAt excludes them.
+    const heldPayoutCount = await prisma.payment.count({
+      where: { escrowStatus: 'RELEASED', payout: null, workerSettledAt: null },
     });
 
     return res.json({
@@ -249,7 +250,7 @@ export const listPayouts = async (req: Request, res: Response) => {
         ...buildPaginationMeta(total, page, limit),
         totalPayoutAmount: aggregate._sum.amount ?? 0,
         totalPayoutFormatted: formatPeso(aggregate._sum.amount ?? 0),
-        legacyUnpayoutCount,
+        heldPayoutCount,
       },
     });
   } catch (error) {

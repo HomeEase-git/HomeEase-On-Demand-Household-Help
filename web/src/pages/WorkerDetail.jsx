@@ -251,7 +251,7 @@ export default function WorkerDetail() {
           <table className="table">
             <thead>
               <tr>
-                <th>Booking ID</th><th>Client</th><th>Service</th><th>Date</th><th>Earnings</th>
+                <th>Booking ID</th><th>Client</th><th>Service</th><th>Scheduled</th><th>Worker Earnings</th>
               </tr>
             </thead>
             <tbody>

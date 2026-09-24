@@ -350,6 +350,44 @@ export async function createCompletionInvoice(bookingId: string): Promise<
  * fails the Payout row is left PENDING and the reconciliation sweep re-enqueues
  * it (jobId dedup makes that safe).
  */
+class PayoutHeldNoMethodError extends Error {
+  constructor(
+    readonly bookingId: string,
+    readonly workerUserId: string,
+    readonly payoutAmount: number,
+    readonly totalAmount: number
+  ) {
+    super('Worker has no payout method');
+  }
+}
+
+/**
+ * Audit + tell the worker, once per booking — the self-heal sweep retries a
+ * held payment every run, so without the dedup the worker would be re-notified
+ * hourly until they add a payout account.
+ */
+async function flagPayoutHeldNoMethod(held: PayoutHeldNoMethodError): Promise<void> {
+  const alreadyFlagged = await prisma.auditLog.findFirst({
+    where: { action: 'PAYOUT_BLOCKED_NO_METHOD', metadata: { path: ['bookingId'], equals: held.bookingId } },
+    select: { id: true },
+  });
+  if (alreadyFlagged) return;
+
+  await writeAuditLog({
+    action: 'PAYOUT_BLOCKED_NO_METHOD',
+    category: 'SYSTEM_ERROR',
+    message: `Worker ${held.workerUserId} has no payout method — payout for booking ${held.bookingId} is held until one is added`,
+    metadata: { bookingId: held.bookingId, workerId: held.workerUserId },
+  });
+  await notifyUser({
+    userId: held.workerUserId,
+    type: 'PAYMENT_RECEIVED',
+    title: 'Add a payout account to get paid',
+    message: `The client paid ₱${held.totalAmount.toFixed(2)}. Add a GCash or Maya payout account to receive your ₱${held.payoutAmount.toFixed(2)} — it's being held for you until then.`,
+    relatedId: held.bookingId,
+  });
+}
+
 export async function settleWorkerEarnings(paymentId: string): Promise<void> {
   const outcome = await prisma.$transaction(async (tx) => {
     // Atomic claim — only the first caller flips workerSettledAt from null.
@@ -392,33 +430,34 @@ export async function settleWorkerEarnings(paymentId: string): Promise<void> {
 
     let payoutId: string | null = null;
     if (payoutAmount > 0) {
-      if (workerProfile?.payoutMethod && workerProfile.payoutAccountNumber) {
-        const payout = await tx.payout.create({
-          data: {
-            paymentId: payment.id,
-            bookingId: payment.bookingId,
-            workerId: workerUserId,
-            amount: payoutAmount,
-            channel: workerProfile.payoutMethod,
-            accountName: workerProfile.payoutAccountName,
-            accountNumber: workerProfile.payoutAccountNumber,
-          },
-        });
-        payoutId = payout.id;
-      } else {
-        await writeAuditLog({
-          action: 'PAYOUT_BLOCKED_NO_METHOD',
-          category: 'SYSTEM_ERROR',
-          message: `Worker ${workerUserId} has no payout method — payout for booking ${payment.bookingId} was not created`,
-          metadata: { bookingId: payment.bookingId, workerId: workerUserId },
-        });
+      if (!workerProfile?.payoutMethod || !workerProfile.payoutAccountNumber) {
+        // Roll back the claim (and any debt netting) so the payment stays
+        // unsettled — the self-heal sweep retries it once the worker adds a
+        // payout account, instead of the earnings being silently dropped.
+        throw new PayoutHeldNoMethodError(payment.bookingId, workerUserId, payoutAmount, payment.totalAmount);
       }
+      const payout = await tx.payout.create({
+        data: {
+          paymentId: payment.id,
+          bookingId: payment.bookingId,
+          workerId: workerUserId,
+          amount: payoutAmount,
+          channel: workerProfile.payoutMethod,
+          accountName: workerProfile.payoutAccountName,
+          accountNumber: workerProfile.payoutAccountNumber,
+        },
+      });
+      payoutId = payout.id;
     }
 
     return { payoutId, payoutAmount, totalAmount: payment.totalAmount, workerUserId, bookingId: payment.bookingId };
+  }).catch(async (error) => {
+    if (!(error instanceof PayoutHeldNoMethodError)) throw error;
+    await flagPayoutHeldNoMethod(error);
+    return null;
   });
 
-  if (!outcome) return; // settlement already claimed by another run
+  if (!outcome) return; // settlement already claimed by another run, or held
 
   if (outcome.payoutId) {
     await schedulePayout(outcome.payoutId).catch((error) => {

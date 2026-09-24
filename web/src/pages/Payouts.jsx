@@ -108,10 +108,10 @@ export default function Payouts() {
         Payouts are sent to the worker&apos;s configured GCash/Maya account via Xendit once a booking&apos;s held
         payment is released. Failed sends can be retried below.
       </p>
-      {meta.legacyUnpayoutCount > 0 && (
+      {meta.heldPayoutCount > 0 && (
         <p style={{ color: 'var(--warning)', fontSize: '0.8125rem', margin: '0 0 1rem' }}>
-          {meta.legacyUnpayoutCount} released payment{meta.legacyUnpayoutCount === 1 ? '' : 's'} predate payout
-          tracking and have no payout record — reconcile these manually.
+          {meta.heldPayoutCount} paid job{meta.heldPayoutCount === 1 ? ' is' : 's are'} waiting on the worker to add a
+          GCash/Maya payout account. The payout is sent automatically once they do.
         </p>
       )}
       <div className="toolbar">
