@@ -159,7 +159,10 @@ export const updateSettings = async (req: AuthRequest, res: Response) => {
       }
     }
 
-    if (!siteName?.trim() || !supportEmail?.trim()) {
+    // Every field is optional so each admin page (Settings, Pricing Rules,
+    // Tax Settings) can save just its own slice of this singleton — but a
+    // field that IS sent can't be blanked, since both are shown publicly.
+    if ((siteName !== undefined && !siteName?.trim()) || (supportEmail !== undefined && !supportEmail?.trim())) {
       return res.status(400).json(errorResponse(400, 'Site Name and Support Email are required.'));
     }
 
@@ -199,9 +202,9 @@ export const updateSettings = async (req: AuthRequest, res: Response) => {
     const record = await prisma.appSettings.update({
       where: { id: 'singleton' },
       data: {
-        siteName: siteName.trim(),
-        supportEmail: supportEmail.trim(),
-        notificationsEnabled: notificationsEnabled ?? true,
+        siteName: siteName !== undefined ? siteName.trim() : current.siteName,
+        supportEmail: supportEmail !== undefined ? supportEmail.trim() : current.supportEmail,
+        notificationsEnabled: notificationsEnabled ?? current.notificationsEnabled,
         commissionRate: commissionRate ?? current.commissionRate,
         withholdingTaxRate: withholdingTaxRate ?? current.withholdingTaxRate,
         maxSlotsPerDay: maxSlotsPerDay ?? current.maxSlotsPerDay,

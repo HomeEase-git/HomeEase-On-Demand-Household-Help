@@ -27,13 +27,29 @@ const NAV_STRUCTURE = [
     children: [
       { to: '/service-catalog', page: 'service-catalog', icon: 'fa-list-check', label: 'Service Catalog' },
       { to: '/price-control', page: 'price-control', icon: 'fa-sliders', label: 'Price Control' },
+      { to: '/pricing-rules', page: 'pricing-rules', icon: 'fa-coins', label: 'Pricing Rules' },
     ],
   },
   // Bookings and Payments already expose their sub-pages (Disputes, Payouts,
   // Refunds) via an in-page SubNav tab strip, so they stay single links here
-  // instead of duplicating that navigation as a sidebar dropdown too.
+  // instead of duplicating that navigation as a sidebar dropdown too. Tax is
+  // deliberately its own group rather than more Payments tabs: it's periodic,
+  // deadline-driven BIR work (2307s, remittances, VAT review), not day-to-day
+  // money movement.
   { type: 'link', to: '/bookings', page: 'bookings', icon: 'fa-calendar-check', label: 'Bookings' },
   { type: 'link', to: '/payments', page: 'payments', icon: 'fa-credit-card', label: 'Payments' },
+  {
+    type: 'group',
+    key: 'tax',
+    icon: 'fa-file-invoice-dollar',
+    label: 'Tax & Compliance',
+    children: [
+      { to: '/tax/certificates', page: 'tax-certificates', icon: 'fa-file-invoice', label: 'Tax Certificates' },
+      { to: '/tax/remittance', page: 'tax-remittance', icon: 'fa-building-columns', label: 'Tax Remittance' },
+      { to: '/tax/vat-registrations', page: 'vat-registrations', icon: 'fa-receipt', label: 'VAT Registrations' },
+      { to: '/tax/settings', page: 'tax-settings', icon: 'fa-gear', label: 'Tax Settings' },
+    ],
+  },
   { type: 'link', to: '/reviews', page: 'reviews', icon: 'fa-star', label: 'Reviews' },
   {
     type: 'group',

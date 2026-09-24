@@ -1,6 +1,5 @@
 import { useCallback, useState } from 'react'
 import PageHeader from '../components/common/PageHeader'
-import SubNav from '../components/common/SubNav'
 import SectionCard from '../components/common/SectionCard'
 import LoadingState from '../components/common/LoadingState'
 import ErrorState from '../components/common/ErrorState'
@@ -31,15 +30,6 @@ function defaultQuarter() {
     periodEnd: periodEnd.toISOString().slice(0, 10),
   }
 }
-
-const SUB_NAV = [
-  { to: '/payments', label: 'All Transactions' },
-  { to: '/payments/refunds', label: 'Refund History' },
-  { to: '/payments/payouts', label: 'Payout Distribution' },
-  { to: '/payments/tax-certificates', label: 'Tax Certificates' },
-  { to: '/payments/tax-remittance', label: 'Tax Remittance' },
-  { to: '/payments/vat-registrations', label: 'VAT Registrations' },
-]
 
 const STATUS_BADGE_VARIANT = { PENDING: 'pending', APPROVED: 'active', REJECTED: 'suspended' }
 
@@ -127,7 +117,6 @@ export default function VatRegistrations() {
         title="VAT Registrations"
         subtitle="Review worker-submitted proof of VAT registration before it affects any booking's pricing"
       />
-      <SubNav items={SUB_NAV} />
       <p style={{ color: 'var(--text-muted)', fontSize: '0.875rem', margin: '0.5rem 0 1rem' }}>
         Approving here is the only thing that makes VAT apply to a worker's future bookings — submitting a document
         alone does nothing. None of this platform's trades are BIR-licensed professions, so one ATC code covers

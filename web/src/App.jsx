@@ -26,6 +26,8 @@ const Payouts = lazy(() => import('./pages/Payouts'))
 const TaxCertificates = lazy(() => import('./pages/TaxCertificates'))
 const TaxRemittance = lazy(() => import('./pages/TaxRemittance'))
 const VatRegistrations = lazy(() => import('./pages/VatRegistrations'))
+const TaxSettings = lazy(() => import('./pages/TaxSettings'))
+const PricingRules = lazy(() => import('./pages/PricingRules'))
 const Reviews = lazy(() => import('./pages/Reviews'))
 const ReviewsFlagged = lazy(() => import('./pages/ReviewsFlagged'))
 const ReviewDetail = lazy(() => import('./pages/ReviewDetail'))
@@ -69,9 +71,15 @@ export default function App() {
           { path: 'payments/transaction/:id', element: <TransactionDetail /> },
           { path: 'payments/refunds', element: <Refunds /> },
           { path: 'payments/payouts', element: <Payouts /> },
-          { path: 'payments/tax-certificates', element: <TaxCertificates /> },
-          { path: 'payments/tax-remittance', element: <TaxRemittance /> },
-          { path: 'payments/vat-registrations', element: <VatRegistrations /> },
+          { path: 'tax', element: <Navigate to="/tax/certificates" replace /> },
+          { path: 'tax/certificates', element: <TaxCertificates /> },
+          { path: 'tax/remittance', element: <TaxRemittance /> },
+          { path: 'tax/vat-registrations', element: <VatRegistrations /> },
+          { path: 'tax/settings', element: <TaxSettings /> },
+          // Old locations from when tax lived under Payments — kept so bookmarks still resolve.
+          { path: 'payments/tax-certificates', element: <Navigate to="/tax/certificates" replace /> },
+          { path: 'payments/tax-remittance', element: <Navigate to="/tax/remittance" replace /> },
+          { path: 'payments/vat-registrations', element: <Navigate to="/tax/vat-registrations" replace /> },
           { path: 'reviews', element: <Reviews /> },
           { path: 'reviews/flagged', element: <ReviewsFlagged /> },
           { path: 'reviews/detail/:id', element: <ReviewDetail /> },
@@ -81,6 +89,7 @@ export default function App() {
           { path: 'reports/activity', element: <Reports /> },
           { path: 'reports/export', element: <Reports /> },
           { path: 'price-control', element: <PriceControl /> },
+          { path: 'pricing-rules', element: <PricingRules /> },
           { path: 'service-catalog', element: <ServiceCatalog /> },
           { path: 'settings', element: <Settings /> },
           { path: 'mfa-setup', element: <MfaSetup /> },
