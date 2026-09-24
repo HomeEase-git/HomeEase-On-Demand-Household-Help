@@ -30,8 +30,14 @@ export const OutlinedButton: React.FC<Props> = ({
               elevation: 2,
             }
       }
-      onPress={onPress}
-      disabled={disabled}
+      // Guard in the handler instead of passing `disabled` to Pressable: a
+      // Pressable that mounts disabled and is later enabled (e.g. while a
+      // screen loads) stops receiving touches on its own surface on Android,
+      // leaving only the label tappable.
+      onPress={() => {
+        if (!(disabled)) onPress();
+      }}
+      accessibilityState={{ disabled: !!(disabled) }}
     >
       <Text className="text-brand font-semibold text-center" numberOfLines={1}>
         {label}

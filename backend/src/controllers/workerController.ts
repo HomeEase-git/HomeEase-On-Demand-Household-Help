@@ -10,7 +10,7 @@ import { resolveDrivingDistancesKm } from '@services/googleDistanceService';
 import { buildCapabilityFilters } from '@services/matchingService';
 import { normalizeTin, maskTin } from '@utils/taxId';
 import { getCertificateDownloadUrl } from '@services/taxCertificateService';
-import { isPriceWithinTaskBounds, resolveTierPrice, validateTierRows } from '@services/taskPriceService';
+import { isPriceWithinTaskBounds, pricedTaskFilter, resolveTierPrice, validateTierRows } from '@services/taskPriceService';
 import { validatePriceWithinPricingRule } from '@services/pricingRuleService';
 import { comparePassword } from '@utils/passwordHash';
 import { notifyUser } from '@utils/notify';
@@ -100,7 +100,11 @@ export const searchWorkers = async (req: AuthRequest, res: Response) => {
     const hasPetsBool = hasPets === 'true' || hasPets === '1';
 
     const capabilityFilters = serviceTypeName
-      ? await buildCapabilityFilters(serviceTypeName, parsedScopeAnswers)
+      ? await buildCapabilityFilters(
+          serviceTypeName,
+          parsedScopeAnswers,
+          typeof serviceTaskId === 'string' ? serviceTaskId : null
+        )
       : [];
 
     // A specific task with a real price (FIXED/PER_UNIT/TIERED) is only
@@ -144,7 +148,7 @@ export const searchWorkers = async (req: AuthRequest, res: Response) => {
       debtHoldAt: null,
       AND: capabilityFilters,
       ...(requirePricedTaskId
-        ? { taskPrices: { some: { serviceTaskId: requirePricedTaskId, isActive: true } } }
+        ? pricedTaskFilter(requirePricedTaskId, serviceTask!.pricingModel)
         : {}),
       ...(requireTieredTaskId
         ? { tierPrices: { some: { serviceTaskId: requireTieredTaskId, isActive: true } } }

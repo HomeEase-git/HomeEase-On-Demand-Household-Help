@@ -13,7 +13,7 @@ import ServiceCategorySelector, {
 } from "../../../../components/booking4step/ServiceCategorySelector";
 import TaskSelector from "../../../../components/booking4step/TaskSelector";
 import DynamicScopeFields from "../../../../components/booking4step/DynamicScopeFields";
-import type { ServiceTaskOption } from "../../../../types/booking4step.types";
+import { fieldAppliesToTask, type ServiceTaskOption } from "../../../../types/booking4step.types";
 import PricingRangePreview from "../../../../components/booking4step/PricingRangePreview";
 import ImageSourcePickerBottomSheet from "../../../../components/bottom-sheets/ImageSourcePickerBottomSheet";
 import type { BottomSheetHandle } from "../../../../components/bottom-sheets/BottomSheetWrapper";
@@ -69,11 +69,13 @@ export default function BookingStep1Screen() {
             ? t.scopeFields.map((f: any) => ({
                 id: f.id,
                 label: f.label,
+                helpText: f.helpText ?? null,
                 fieldType: f.fieldType,
                 required: f.required,
                 options: Array.isArray(f.options) ? f.options.map((o: any) => ({ id: o.id, label: o.label })) : [],
                 minValue: f.minValue ?? null,
                 maxValue: f.maxValue ?? null,
+                taskIds: Array.isArray(f.taskLinks) ? f.taskLinks.map((l: any) => l.serviceTaskId) : [],
               }))
             : [],
           tasks: Array.isArray(t.tasks)
@@ -170,9 +172,14 @@ export default function BookingStep1Screen() {
     max: selectedTask ? (selectedTask.maxPrice ?? 0) : (selectedCategory?.priceRangeMax ?? 0),
   });
 
+  // Only the category's common questions plus the chosen job's own.
+  const visibleFields = selectedCategory
+    ? selectedCategory.scopeFields.filter((f) => fieldAppliesToTask(f, selectedTask))
+    : [];
+
   const scopeComplete = !selectedCategory
     ? false
-    : selectedCategory.scopeFields.every((f) => !f.required || hasAnswer(scopeAnswers[f.id]));
+    : visibleFields.every((f) => !f.required || hasAnswer(scopeAnswers[f.id]));
 
   const taskComplete = !requiresTaskSelection || !!selectedTask;
 
@@ -217,7 +224,7 @@ export default function BookingStep1Screen() {
     }
 
     const labelAnswers: Record<string, string | string[]> = {};
-    selectedCategory!.scopeFields.forEach((f) => {
+    visibleFields.forEach((f) => {
       const value = scopeAnswers[f.id];
       if (hasAnswer(value)) labelAnswers[f.label] = value;
     });
@@ -238,7 +245,12 @@ export default function BookingStep1Screen() {
       serviceTaskId: selectedTask?.id ?? null,
       selectedTaskName: selectedTask?.name ?? null,
       selectedTaskPricingModel: selectedTask?.pricingModel ?? null,
-      selectedTaskUnitLabel: selectedTask?.unitLabel ?? null,
+      // Only a per-unit/tiered job's unit is a rate unit; a flat job's unit
+      // ("per visit") is display-only and would make step 3 show a rate.
+      selectedTaskUnitLabel:
+        selectedTask?.pricingModel === "PER_UNIT" || selectedTask?.pricingModel === "TIERED"
+          ? (selectedTask.unitLabel ?? null)
+          : null,
       selectedTaskPriceRangeMin: selectedTask?.minPrice ?? null,
       selectedTaskPriceRangeMax: selectedTask?.maxPrice ?? null,
       selectedTaskQuantityFieldLabel: selectedTask?.quantityScopeFieldId
@@ -297,7 +309,7 @@ export default function BookingStep1Screen() {
         {selectedCategory && (!requiresTaskSelection || selectedTask) && (
           <View className="mt-6">
             <DynamicScopeFields
-              fields={selectedCategory.scopeFields}
+              fields={visibleFields}
               answers={scopeAnswers}
               onChange={setScopeAnswers}
             />

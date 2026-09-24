@@ -889,6 +889,9 @@ model ServiceScopeField {
   serviceType   ServiceType @relation(fields: [serviceTypeId], references: [id], onDelete: Cascade)
 
   label     String
+  // Optional one-line hint shown under the question in the booking flow
+  // (e.g. "Check the sticker on the indoor unit").
+  helpText  String?
   fieldType ScopeFieldType
   required  Boolean        @default(true)
   sortOrder Int            @default(0)
@@ -911,10 +914,31 @@ model ServiceScopeField {
   // can be reused as the quantity source for more than one task.
   quantityForTasks ServiceTask[]
 
+  // The specific jobs this question is asked for — see ServiceScopeFieldTask.
+  // Empty means it's asked for every job in the category (the behavior every
+  // field had before this existed).
+  taskLinks ServiceScopeFieldTask[]
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@index([serviceTypeId])
+}
+
+// Limits a scope field to specific jobs in its category, so e.g. "How many
+// toilets?" is only asked when the client picks a toilet job rather than on
+// every Plumbing booking. A field with zero rows here applies to every job;
+// a PER_UNIT/TIERED task's quantityScopeField always applies to that task
+// regardless (see utils/scopeFields.fieldAppliesToTask). Both sides must be
+// in the same ServiceType — enforced in application code, not a constraint.
+model ServiceScopeFieldTask {
+  fieldId       String
+  field         ServiceScopeField @relation(fields: [fieldId], references: [id], onDelete: Cascade)
+  serviceTaskId String
+  serviceTask   ServiceTask       @relation(fields: [serviceTaskId], references: [id], onDelete: Cascade)
+
+  @@id([fieldId, serviceTaskId])
+  @@index([serviceTaskId])
 }
 
 model ServiceScopeFieldOption {
@@ -986,6 +1010,9 @@ model ServiceTask {
 
   name        String
   description String?
+  // Position in the category's job list (the admin's job order matrix);
+  // ties fall back to name.
+  sortOrder   Int     @default(0)
 
   // "Typical/suggested" price — shown as the category-level range preview
   // before a client picks a worker (Booking Steps 1-2). Since WorkerTaskPrice
@@ -1003,8 +1030,10 @@ model ServiceTask {
   minPrice Float?
   maxPrice Float?
 
-  // PER_UNIT and TIERED only: display unit (e.g. "kilo", "sq.m.", "linear
-  // meter") and the NUMBER-type ServiceScopeField (must belong to this
+  // Display unit (e.g. "kilo", "sq.m.", "visit"), shown as "per <unit>".
+  // Required for PER_UNIT/TIERED, where the rate is per this unit; optional
+  // and display-only otherwise. quantityScopeFieldId is PER_UNIT/TIERED only:
+  // the NUMBER-type ServiceScopeField (must belong to this
   // task's serviceType) whose answer supplies the quantity — multiplied
   // against a worker's WorkerTaskPrice.unitPrice for PER_UNIT, or resolved
   // against a worker's WorkerTaskTierPrice rows for TIERED.
@@ -1021,6 +1050,7 @@ model ServiceTask {
   workerPrices WorkerTaskPrice[]
   workerSelections WorkerTaskSelection[]
   workerTierPrices WorkerTaskTierPrice[]
+  scopeFieldLinks  ServiceScopeFieldTask[]
 
   @@index([serviceTypeId])
   @@index([quantityScopeFieldId])

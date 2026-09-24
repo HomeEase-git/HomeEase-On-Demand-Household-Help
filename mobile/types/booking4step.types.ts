@@ -60,12 +60,30 @@ export type ScopeFieldOption = {
 export type ScopeField = {
   id: string;
   label: string;
+  // Optional hint shown under the question.
+  helpText?: string | null;
   fieldType: ScopeFieldType;
   required: boolean;
   options: ScopeFieldOption[];
   minValue?: number | null;
   maxValue?: number | null;
+  // Jobs (ServiceTask ids) this question is asked for. Empty = every job.
+  taskIds: string[];
 };
+
+/**
+ * Whether a question is asked for the chosen job — mirrors the backend's
+ * utils/scopeFields.fieldAppliesToTask. A question with no job links applies
+ * to every job, and a per-unit job's own count question always applies.
+ */
+export function fieldAppliesToTask(
+  field: Pick<ScopeField, 'id' | 'taskIds'>,
+  task: { id: string; quantityScopeFieldId?: string | null } | null
+): boolean {
+  if (task && task.quantityScopeFieldId === field.id) return true;
+  if (field.taskIds.length === 0) return true;
+  return task ? field.taskIds.includes(task.id) : false;
+}
 
 // Condition is no longer a platform-wide booking input (a category that
 // wants a condition-style question defines it as an ordinary field now) —

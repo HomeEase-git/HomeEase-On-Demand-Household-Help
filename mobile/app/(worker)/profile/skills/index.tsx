@@ -18,9 +18,23 @@ type CatalogField = {
   fieldType: string;
   usedForMatching?: boolean;
   options?: { id: string; label: string }[];
+  // Jobs this question is limited to; empty = every job in the category.
+  taskLinks?: { serviceTaskId: string }[];
 };
 
-type ScopeServiceType = WorkerServiceType & { scopeFields?: CatalogField[] };
+type ScopeServiceType = WorkerServiceType & {
+  scopeFields?: CatalogField[];
+  tasks?: { id: string; name: string }[];
+};
+
+// "for Aircon Cleaning, Freon Recharge" under a question limited to certain
+// jobs, so two jobs' questions with the same text can be told apart.
+function jobsCaption(field: CatalogField, category: ScopeServiceType): string | null {
+  const names = (field.taskLinks ?? [])
+    .map((l) => category.tasks?.find((t) => t.id === l.serviceTaskId)?.name)
+    .filter(Boolean);
+  return names.length ? `for ${names.join(", ")}` : null;
+}
 
 type PriceableTask = TaskCatalogEntry["tasks"][number] & { serviceTypeName: string };
 
@@ -398,7 +412,12 @@ export default function SkillsScreen() {
                 .filter((f) => f.usedForMatching)
                 .map((field) => (
                   <View key={field.id} className="mb-3 last:mb-0">
-                    <Text className="text-text-secondary font-semibold text-xs mb-2">{field.label}</Text>
+                    <Text className="text-text-secondary font-semibold text-xs mb-2">
+                      {field.label}
+                      {jobsCaption(field, category) && (
+                        <Text className="text-text-muted font-normal"> · {jobsCaption(field, category)}</Text>
+                      )}
+                    </Text>
                     <View className="flex-row flex-wrap gap-2">
                       {(field.options ?? []).map((option) => {
                         const isSelected = selectedOptionIds.has(option.id);

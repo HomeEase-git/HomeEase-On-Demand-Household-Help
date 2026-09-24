@@ -34,10 +34,11 @@ export default function DynamicScopeFields({ fields, answers, onChange }: Props)
         const value = answers[field.id];
         return (
           <View key={field.id}>
-            <Text className="text-text-secondary font-bold text-sm mb-2">
+            <Text className={`text-text-secondary font-bold text-sm ${field.helpText ? "mb-0.5" : "mb-2"}`}>
               {field.label}
               {field.required ? " *" : " (optional)"}
             </Text>
+            {!!field.helpText && <Text className="text-text-muted text-xs mb-2">{field.helpText}</Text>}
 
             {field.fieldType === "TEXT" && (
               <InputField

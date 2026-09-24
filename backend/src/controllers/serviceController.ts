@@ -9,10 +9,14 @@ export const getServiceTypes = async (_req: Request, res: Response) => {
     const services = await prisma.serviceType.findMany({
       where: { isActive: true },
       include: {
-        tasks: true,
+        tasks: { orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }] },
         scopeFields: {
           orderBy: { sortOrder: 'asc' },
-          include: { options: { orderBy: { sortOrder: 'asc' } } },
+          include: {
+            options: { orderBy: { sortOrder: 'asc' } },
+            // Jobs this question is limited to — empty means every job.
+            taskLinks: { select: { serviceTaskId: true } },
+          },
         },
         // Capacity (activeJobCount < maxConcurrentJobs) can't be compared in
         // a Prisma `where` since both are columns on the same row, so it's
