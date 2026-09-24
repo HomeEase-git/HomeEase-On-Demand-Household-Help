@@ -1,0 +1,3352 @@
+{
+  "note": "Job order matrix applied by scripts/applyJobMatrix.ts. Prices are standard labor rates in PHP; worker range = 80%-150%. \"replaces\" names the live job renamed in place.",
+  "categories": [
+    {
+      "name": "Home Appliance & Aircon Repair",
+      "commonQuestions": [
+        {
+          "label": "Brand",
+          "fieldType": "TEXT",
+          "required": false
+        },
+        {
+          "label": "Approximate age",
+          "fieldType": "SELECT",
+          "required": true,
+          "options": [
+            "Under 2 years",
+            "2–5 years",
+            "Over 5 years",
+            "Not sure"
+          ]
+        }
+      ],
+      "jobs": [
+        {
+          "name": "Diagnosis / Checkup / Repair Attempt Fee",
+          "unit": "unit",
+          "pricingModel": "PER_UNIT",
+          "price": 350,
+          "replaces": "General Appliance Diagnosis",
+          "questions": [
+            {
+              "label": "How many units?",
+              "fieldType": "NUMBER",
+              "required": true,
+              "minValue": 1,
+              "maxValue": 5,
+              "setsPrice": true
+            },
+            {
+              "label": "Appliance type",
+              "fieldType": "SELECT",
+              "required": true,
+              "options": [
+                "Washing machine",
+                "Refrigerator",
+                "Stove or oven",
+                "Microwave",
+                "Aircon",
+                "Other"
+              ],
+              "usedForMatching": true
+            },
+            {
+              "label": "Symptom",
+              "fieldType": "SELECT",
+              "required": true,
+              "options": [
+                "Won't turn on",
+                "Leaking",
+                "Not heating or cooling",
+                "Unusual noise",
+                "Error code",
+                "Other"
+              ]
+            },
+            {
+              "label": "Error code",
+              "helpText": "Shown on the display, e.g. E4 or IE.",
+              "fieldType": "TEXT",
+              "required": false
+            }
+          ]
+        },
+        {
+          "name": "Microwave / Small Appliance Repair",
+          "unit": "unit",
+          "pricingModel": "PER_UNIT",
+          "price": 500,
+          "questions": [
+            {
+              "label": "How many units?",
+              "fieldType": "NUMBER",
+              "required": true,
+              "minValue": 1,
+              "maxValue": 5,
+              "setsPrice": true
+            },
+            {
+              "label": "Appliance",
+              "fieldType": "SELECT",
+              "required": true,
+              "options": [
+                "Microwave",
+                "Rice cooker",
+                "Electric fan",
+                "Blender",
+                "Water dispenser",
+                "Other"
+              ]
+            },
+            {
+              "label": "Symptom",
+              "fieldType": "SELECT",
+              "required": true,
+              "options": [
+                "Won't turn on",
+                "Leaking",
+                "Not heating or cooling",
+                "Unusual noise",
+                "Error code",
+                "Other"
+              ]
+            }
+          ]
+        },
+        {
+          "name": "Parts Installation (client-supplied)",
+          "unit": "part",
+          "pricingModel": "PER_UNIT",
+          "price": 500,
+          "questions": [
+            {
+              "label": "How many parts?",
+              "fieldType": "NUMBER",
+              "required": true,
+              "minValue": 1,
+              "maxValue": 5,
+              "setsPrice": true
+            },
+            {
+              "label": "Appliance type",
+              "fieldType": "SELECT",
+              "required": true,
+              "options": [
+                "Washing machine",
+                "Refrigerator",
+                "Stove or oven",
+                "Microwave",
+                "Aircon",
+                "Other"
+              ]
+            },
+            {
+              "label": "Part name",
+              "fieldType": "TEXT",
+              "required": true
+            },
+            {
+              "label": "Part already on hand?",
+              "helpText": "The client supplies the part for this job.",
+              "fieldType": "SELECT",
+              "required": true,
+              "options": [
+                "Yes",
+                "No"
+              ]
+            }
+          ]
+        },
+        {
+          "name": "Aircon Cleaning – Window Type",
+          "unit": "unit",
+          "pricingModel": "PER_UNIT",
+          "price": 800,
+          "questions": [
+            {
+              "label": "How many units?",
+              "fieldType": "NUMBER",
+              "required": true,
+              "minValue": 1,
+              "maxValue": 10,
+              "setsPrice": true
+            },
+            {
+              "label": "HP",
+              "helpText": "Check the sticker on the side of the unit.",
+              "fieldType": "SELECT",
+              "required": true,
+              "options": [
+                "0.5–1 HP",
+                "1.5 HP",
+                "2 HP+",
+                "Not sure"
+              ]
+            },
+            {
+              "label": "Last cleaned",
+              "fieldType": "SELECT",
+              "required": true,
+              "options": [
+                "Under 6 months",
+                "6–12 months",
+                "Over 1 year",
+                "Never"
+              ]
+            },
+            {
+              "label": "Mount height",
+              "fieldType": "SELECT",
+              "required": true,
+              "options": [
+                "Reachable",
+                "Needs ladder (over 2 m)"
+              ]
+            }
+          ]
+        },
+        {
+          "name": "Washing Machine Repair",
+          "unit": "unit",
+          "pricingModel": "PER_UNIT",
+          "price": 800,
+          "replaces": "Washing Machine Repair",
+          "questions": [
+            {
+              "label": "How many units?",
+              "fieldType": "NUMBER",
+              "required": true,
+              "minValue": 1,
+              "maxValue": 3,
+              "setsPrice": true
+            },
+            {
+              "label": "Type",
+              "fieldType": "SELECT",
+              "required": true,
+              "options": [
+                "Twin-tub",
+                "Top-load automatic",
+                "Front-load"
+              ]
+            },
+            {
+              "label": "Symptom",
+              "fieldType": "SELECT",
+              "required": true,
+              "options": [
+                "Won't spin",
+                "Won't drain",
+                "Leaking",
+                "No power",
+                "Noisy",
+                "Error code"
+              ]
+            },
+            {
+              "label": "Error code",
+              "fieldType": "TEXT",
+              "required": false
+            }
+          ]
+        },
+        {
+          "name": "Stove / Oven / Range Repair",
+          "unit": "unit",
+          "pricingModel": "PER_UNIT",
+          "price": 800,
+          "replaces": "Oven/Stove Repair",
+          "questions": [
+            {
+              "label": "How many units?",
+              "fieldType": "NUMBER",
+              "required": true,
+              "minValue": 1,
+              "maxValue": 3,
+              "setsPrice": true
+            },
+            {
+              "label": "Type",
+              "fieldType": "SELECT",
+              "required": true,
+              "options": [
+                "Gas range",
+                "Electric range",
+                "Built-in hob",
+                "Oven"
+              ]
+            },
+            {
+              "label": "Fuel",
+              "fieldType": "SELECT",
+              "required": true,
+              "options": [
+                "LPG",
+                "Electric"
+              ]
+            },
+            {
+              "label": "Symptom",
+              "fieldType": "SELECT",
+              "required": true,
+              "options": [
+                "Won't ignite or heat",
+                "Gas smell",
+                "Uneven heat",
+                "Knob or door broken",
+                "Other"
+              ]
+            }
+          ]
+        },
+        {
+          "name": "Refrigerator Repair",
+          "unit": "unit",
+          "pricingModel": "PER_UNIT",
+          "price": 1000,
+          "replaces": "Refrigerator Repair",
+          "questions": [
+            {
+              "label": "How many units?",
+              "fieldType": "NUMBER",
+              "required": true,
+              "minValue": 1,
+              "maxValue": 3,
+              "setsPrice": true
+            },
+            {
+              "label": "Type",
+              "fieldType": "SELECT",
+              "required": true,
+              "options": [
+                "Single-door",
+                "Two-door",
+                "Side-by-side",
+                "Chest freezer"
+              ]
+            },
+            {
+              "label": "Inverter?",
+              "fieldType": "SELECT",
+              "required": true,
+              "options": [
+                "Yes",
+                "No",
+                "Not sure"
+              ]
+            },
+            {
+              "label": "Symptom",
+              "fieldType": "SELECT",
+              "required": true,
+              "options": [
+                "Not cooling",
+                "Too cold",
+                "Leaking water",
+                "Noisy",
+                "No power",
+                "Frost build-up"
+              ]
+            }
+          ]
+        },
+        {
+          "name": "Aircon Dismantle / Relocation",
+          "unit": "unit",
+          "pricingModel": "PER_UNIT",
+          "price": 1200,
+          "questions": [
+            {
+              "label": "How many units?",
+              "fieldType": "NUMBER",
+              "required": true,
+              "minValue": 1,
+              "maxValue": 10,
+              "setsPrice": true
+            },
+            {
+              "label": "Type",
+              "fieldType": "SELECT",
+              "required": true,
+              "options": [
+                "Window",
+                "Split"
+              ]
+            },
+            {
+              "label": "HP",
+              "fieldType": "SELECT",
+              "required": true,
+              "options": [
+                "0.5–1 HP",
+                "1.5 HP",
+                "2 HP+",
+                "Not sure"
+              ]
+            },
+            {
+              "label": "Job",
+              "fieldType": "SELECT",
+              "required": true,
+              "options": [
+                "Dismantle only",
+                "Dismantle + reinstall in the same house"
+              ]
+            }
+          ]
+        },
+        {
+          "name": "Aircon Cleaning – Split Type",
+          "unit": "unit",
+          "pricingModel": "PER_UNIT",
+          "price": 1500,
+          "questions": [
+            {
+              "label": "How many units?",
+              "fieldType": "NUMBER",
+              "required": true,
+              "minValue": 1,
+              "maxValue": 10,
+              "setsPrice": true
+            },
+            {
+              "label": "HP",
+              "helpText": "Check the sticker on the indoor unit.",
+              "fieldType": "SELECT",
+              "required": true,
+              "options": [
+                "0.5–1 HP",
+                "1.5 HP",
+                "2 HP+",
+                "Not sure"
+              ]
+            },
+            {
+              "label": "Last cleaned",
+              "fieldType": "SELECT",
+              "required": true,
+              "options": [
+                "Under 6 months",
+                "6–12 months",
+                "Over 1 year",
+                "Never"
+              ]
+            },
+            {
+              "label": "Outdoor unit location",
+              "fieldType": "SELECT",
+              "required": true,
+              "options": [
+                "Ground or balcony",
+                "High wall bracket",
+                "Roof"
+              ]
+            }
+          ]
+        },
+        {
+          "name": "Aircon Installation – Window Type",
+          "unit": "unit",
+          "pricingModel": "PER_UNIT",
+          "price": 1500,
+          "questions": [
+            {
+              "label": "How many units?",
+              "fieldType": "NUMBER",
+              "required": true,
+              "minValue": 1,
+              "maxValue": 10,
+              "setsPrice": true
+            },
+            {
+              "label": "HP",
+              "fieldType": "SELECT",
+              "required": true,
+              "options": [
+                "0.5–1 HP",
+                "1.5 HP",
+                "2 HP+",
+                "Not sure"
+              ]
+            },
+            {
+              "label": "Wall opening already made?",
+              "fieldType": "SELECT",
+              "required": true,
+              "options": [
+                "Yes",
+                "No"
+              ]
+            },
+            {
+              "label": "Dedicated outlet available?",
+              "fieldType": "SELECT",
+              "required": true,
+              "options": [
+                "Yes",
+                "No"
+              ]
+            }
+          ]
+        },
+        {
+          "name": "Aircon Freon Recharge",
+          "unit": "unit",
+          "pricingModel": "PER_UNIT",
+          "price": 1800,
+          "questions": [
+            {
+              "label": "How many units?",
+              "fieldType": "NUMBER",
+              "required": true,
+              "minValue": 1,
+              "maxValue": 10,
+              "setsPrice": true
+            },
+            {
+              "label": "Type",
+              "fieldType": "SELECT",
+              "required": true,
+              "options": [
+                "Window",
+                "Split"
+              ]
+            },
+            {
+              "label": "Refrigerant",
+              "fieldType": "SELECT",
+              "required": true,
+              "options": [
+                "R22",
+                "R410A",
+                "R32",
+                "Not sure"
+              ]
+            },
+            {
+              "label": "Inverter?",
+              "fieldType": "SELECT",
+              "required": true,
+              "options": [
+                "Yes",
+                "No",
+                "Not sure"
+              ]
+            },
+            {
+              "label": "Symptom",
+              "fieldType": "SELECT",
+              "required": true,
+              "options": [
+                "Not cold",
+                "Ice on pipes",
+                "Blowing warm air"
+              ]
+            }
+          ]
+        },
+        {
+          "name": "Refrigerator Regas / Compressor Replacement",
+          "unit": "unit",
+          "pricingModel": "PER_UNIT",
+          "price": 2500,
+          "questions": [
+            {
+              "label": "How many units?",
+              "fieldType": "NUMBER",
+              "required": true,
+              "minValue": 1,
+              "maxValue": 3,
+              "setsPrice": true
+            },
+            {
+              "label": "Type",
+              "fieldType": "SELECT",
+              "required": true,
+              "options": [
+                "Single-door",
+                "Two-door",
+                "Side-by-side",
+                "Chest freezer"
+              ]
+            },
+            {
+              "label": "Already diagnosed by a technician?",
+              "helpText": "If not, book the Diagnosis job first.",
+              "fieldType": "SELECT",
+              "required": true,
+              "options": [
+                "Yes",
+                "No"
+              ]
+            }
+          ]
+        },
+        {
+          "name": "Aircon Installation – Split Type",
+          "unit": "unit",
+          "pricingModel": "PER_UNIT",
+          "price": 3500,
+          "questions": [
+            {
+              "label": "How many units?",
+              "fieldType": "NUMBER",
+              "required": true,
+              "minValue": 1,
+              "maxValue": 10,
+              "setsPrice": true
+            },
+            {
+              "label": "HP",
+              "fieldType": "SELECT",
+              "required": true,
+              "options": [
+                "0.5–1 HP",
+                "1.5 HP",
+                "2 HP+",
+                "Not sure"
+              ]
+            },
+            {
+              "label": "Pipe run between indoor and outdoor unit (m)",
+              "fieldType": "NUMBER",
+              "required": true,
+              "minValue": 1,
+              "maxValue": 15
+            },
+            {
+              "label": "Outdoor unit location",
+              "fieldType": "SELECT",
+              "required": true,
+              "options": [
+                "Ground or balcony",
+                "High wall bracket",
+                "Roof"
+              ]
+            },
+            {
+              "label": "Copper pipes and bracket supplied by",
+              "fieldType": "SELECT",
+              "required": true,
+              "options": [
+                "Client",
+                "Technician (cost added)"
+              ]
+            },
+            {
+              "label": "Dedicated line available?",
+              "fieldType": "SELECT",
+              "required": true,
+              "options": [
+                "Yes",
+                "No"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Plumbing Repair",
+      "commonQuestions": [
+        {
+          "label": "Where is the problem?",
+          "fieldType": "SELECT",
+          "required": true,
+          "options": [
+            "Kitchen",
+            "Bathroom",
+            "Laundry area",
+            "Outdoor",
+            "Whole house"
+          ]
+        },
+        {
+          "label": "Can the water supply be shut off?",
+          "fieldType": "SELECT",
+          "required": true,
+          "options": [
+            "Yes",
+            "No",
+            "Not sure"
+          ]
+        },
+        {
+          "label": "Parts supplied by",
+          "fieldType": "SELECT",
+          "required": true,
+          "options": [
+            "Client",
+            "Technician sources (cost added)"
+          ]
+        }
+      ],
+      "jobs": [
+        {
+          "name": "Diagnosis / Leak Inspection Fee",
+          "unit": "visit",
+          "pricingModel": "FIXED",
+          "price": 350,
+          "questions": [
+            {
+              "label": "What's happening?",
+              "fieldType": "MULTI_SELECT",
+              "required": true,
+              "options": [
+                "Leak",
+                "Low pressure",
+                "Clog or slow drain",
+                "No water",
+                "Running toilet",
+                "Bad smell",
+                "Noisy pipes",
+                "Other"
+              ]
+            },
+            {
+              "label": "Active leak right now?",
+              "fieldType": "SELECT",
+              "required": true,
+              "options": [
+                "Yes",
+                "No"
+              ]
+            }
+          ]
+        },
+        {
+          "name": "Faucet / Shower Head Replacement",
+          "unit": "piece",
+          "pricingModel": "PER_UNIT",
+          "price": 500,
+          "replaces": "Fixture Installation",
+          "questions": [
+            {
+              "label": "How many pieces?",
+              "fieldType": "NUMBER",
+              "required": true,
+              "minValue": 1,
+              "maxValue": 10,
+              "setsPrice": true
+            },
+            {
+              "label": "Type",
+              "fieldType": "SELECT",
+              "required": true,
+              "options": [
+                "Kitchen faucet",
+                "Lavatory faucet",
+                "Shower head",
+                "Bidet spray",
+                "Hose bibb"
+              ]
+            }
+          ]
+        },
+        {
+          "name": "Toilet Flush / Fill Valve Repair",
+          "unit": "toilet",
+          "pricingModel": "PER_UNIT",
+          "price": 700,
+          "questions": [
+            {
+              "label": "How many toilets?",
+              "fieldType": "NUMBER",
+              "required": true,
+              "minValue": 1,
+              "maxValue": 5,
+              "setsPrice": true
+            },
+            {
+              "label": "Symptom",
+              "fieldType": "SELECT",
+              "required": true,
+              "options": [
+                "Keeps running",
+                "Won't flush",
+                "Weak flush",
+                "Won't refill"
+              ]
+            }
+          ]
+        },
+        {
+          "name": "Leak Repair (Pipe / Fitting)",
+          "unit": "job",
+          "pricingModel": "FIXED",
+          "price": 800,
+          "replaces": "Leak Repair",
+          "questions": [
+            {
+              "label": "Leak location",
+              "fieldType": "SELECT",
+              "required": true,
+              "options": [
+                "Exposed pipe",
+                "Under sink",
+                "Inside wall",
+                "Ceiling",
+                "Under floor",
+                "Not sure"
+              ]
+            },
+            {
+              "label": "Pipe material",
+              "fieldType": "SELECT",
+              "required": true,
+              "options": [
+                "PVC",
+                "PPR",
+                "GI",
+                "Copper",
+                "Not sure"
+              ]
+            },
+            {
+              "label": "Active leak right now?",
+              "fieldType": "SELECT",
+              "required": true,
+              "options": [
+                "Yes",
+                "No"
+              ]
+            }
+          ]
+        },
+        {
+          "name": "Sink / Floor Drain Declogging",
+          "unit": "drain",
+          "pricingModel": "PER_UNIT",
+          "price": 800,
+          "replaces": "Drain & Clog Clearing",
+          "questions": [
+            {
+              "label": "How many drains?",
+              "fieldType": "NUMBER",
+              "required": true,
+              "minValue": 1,
+              "maxValue": 10,
+              "setsPrice": true
+            },
+            {
+              "label": "Drain type",
+              "fieldType": "SELECT",
+              "required": true,
+              "options": [
+                "Kitchen sink",
+                "Lavatory",
+                "Floor drain",
+                "Shower drain"
+              ]
+            },
+            {
+              "label": "Used a chemical declogger in the last 24 hours?",
+              "helpText": "Tells the plumber to wear protection.",
+              "fieldType": "SELECT",
+              "required": true,
+              "options": [
+                "Yes",
+                "No"
+              ]
+            }
+          ]
+        },
+        {
+          "name": "Toilet Declogging",
+          "unit": "toilet",
+          "pricingModel": "PER_UNIT",
+          "price": 1000,
+          "questions": [
+            {
+              "label": "How many toilets?",
+              "fieldType": "NUMBER",
+              "required": true,
+              "minValue": 1,
+              "maxValue": 5,
+              "setsPrice": true
+            },
+            {
+              "label": "Water overflowing?",
+              "fieldType": "SELECT",
+              "required": true,
+              "options": [
+                "Yes",
+                "No"
+              ]
+            },
+            {
+              "label": "Object possibly flushed?",
+              "fieldType": "SELECT",
+              "required": true,
+              "options": [
+                "No",
+                "Yes",
+                "Not sure"
+              ]
+            }
+          ]
+        },
+        {
+          "name": "Sink / Lavatory Installation",
+          "unit": "piece",
+          "pricingModel": "PER_UNIT",
+          "price": 1200,
+          "questions": [
+            {
+              "label": "How many pieces?",
+              "fieldType": "NUMBER",
+              "required": true,
+              "minValue": 1,
+              "maxValue": 5,
+              "setsPrice": true
+            },
+            {
+              "label": "Type",
+              "fieldType": "SELECT",
+              "required": true,
+              "options": [
+                "Kitchen sink",
+                "Lavatory"
+              ]
+            },
+            {
+              "label": "Mount",
+              "fieldType": "SELECT",
+              "required": true,
+              "options": [
+                "Countertop",
+                "Undermount",
+                "Wall-hung",
+                "Pedestal"
+              ]
+            },
+            {
+              "label": "Old unit to remove?",
+              "fieldType": "SELECT",
+              "required": true,
+              "options": [
+                "Yes",
+                "No"
+              ]
+            }
+          ]
+        },
+        {
+          "name": "Toilet Bowl Installation",
+          "unit": "piece",
+          "pricingModel": "PER_UNIT",
+          "price": 1500,
+          "questions": [
+            {
+              "label": "How many pieces?",
+              "fieldType": "NUMBER",
+              "required": true,
+              "minValue": 1,
+              "maxValue": 5,
+              "setsPrice": true
+            },
+            {
+              "label": "Type",
+              "fieldType": "SELECT",
+              "required": true,
+              "options": [
+                "One-piece",
+                "Two-piece"
+              ]
+            },
+            {
+              "label": "Old bowl to remove?",
+              "fieldType": "SELECT",
+              "required": true,
+              "options": [
+                "Yes",
+                "No"
+              ]
+            },
+            {
+              "label": "Floor tiles finished?",
+              "fieldType": "SELECT",
+              "required": true,
+              "options": [
+                "Yes",
+                "No"
+              ]
+            }
+          ]
+        },
+        {
+          "name": "Water Heater Installation",
+          "unit": "unit",
+          "pricingModel": "PER_UNIT",
+          "price": 1500,
+          "replaces": "Water Heater Service",
+          "questions": [
+            {
+              "label": "How many units?",
+              "fieldType": "NUMBER",
+              "required": true,
+              "minValue": 1,
+              "maxValue": 5,
+              "setsPrice": true
+            },
+            {
+              "label": "Type",
+              "fieldType": "SELECT",
+              "required": true,
+              "options": [
+                "Single-point (shower)",
+                "Multi-point",
+                "Tank type"
+              ]
+            },
+            {
+              "label": "Power outlet or line nearby?",
+              "fieldType": "SELECT",
+              "required": true,
+              "options": [
+                "Yes",
+                "No",
+                "Not sure"
+              ]
+            }
+          ]
+        },
+        {
+          "name": "Water Pump / Tank Installation",
+          "unit": "unit",
+          "pricingModel": "PER_UNIT",
+          "price": 2500,
+          "questions": [
+            {
+              "label": "How many units?",
+              "fieldType": "NUMBER",
+              "required": true,
+              "minValue": 1,
+              "maxValue": 3,
+              "setsPrice": true
+            },
+            {
+              "label": "Type",
+              "fieldType": "SELECT",
+              "required": true,
+              "options": [
+                "Booster pump",
+                "Jet pump",
+                "Water tank",
+                "Pump + tank"
+              ]
+            },
+            {
+              "label": "Location",
+              "fieldType": "SELECT",
+              "required": true,
+              "options": [
+                "Ground level",
+                "Rooftop or elevated"
+              ]
+            },
+            {
+              "label": "Old unit to remove?",
+              "fieldType": "SELECT",
+              "required": true,
+              "options": [
+                "Yes",
+                "No"
+              ]
+            }
+          ]
+        },
+        {
+          "name": "Pipe Replacement / Re-routing",
+          "unit": "job",
+          "pricingModel": "FIXED",
+          "price": 2500,
+          "replaces": "Pipe Installation / Replacement",
+          "questions": [
+            {
+              "label": "Approximate length (m)",
+              "fieldType": "NUMBER",
+              "required": false,
+              "minValue": 1,
+              "maxValue": 100
+            },
+            {
+              "label": "Pipe material",
+              "fieldType": "SELECT",
+              "required": true,
+              "options": [
+                "PVC",
+                "PPR",
+                "GI",
+                "Copper",
+                "Not sure"
+              ]
+            },
+            {
+              "label": "Pipe runs",
+              "fieldType": "SELECT",
+              "required": true,
+              "options": [
+                "Exposed",
+                "Inside wall",
+                "Under floor",
+                "Not sure"
+              ]
+            }
+          ]
+        },
+        {
+          "name": "Septic Tank Siphoning",
+          "unit": "tank",
+          "pricingModel": "PER_UNIT",
+          "price": 6000,
+          "replaces": "Sewer / Septic Service",
+          "questions": [
+            {
+              "label": "How many tanks?",
+              "fieldType": "NUMBER",
+              "required": true,
+              "minValue": 1,
+              "maxValue": 3,
+              "setsPrice": true
+            },
+            {
+              "label": "Last siphoned",
+              "fieldType": "SELECT",
+              "required": true,
+              "options": [
+                "Under 2 years",
+                "2–5 years",
+                "Over 5 years",
+                "Never or not sure"
+              ]
+            },
+            {
+              "label": "Truck can park within 30 m of the manhole?",
+              "fieldType": "SELECT",
+              "required": true,
+              "options": [
+                "Yes",
+                "No",
+                "Not sure"
+              ]
+            },
+            {
+              "label": "Manhole cover",
+              "fieldType": "SELECT",
+              "required": true,
+              "options": [
+                "Accessible",
+                "Must be broken open",
+                "Not sure"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Electrical Repair",
+      "commonQuestions": [
+        {
+          "label": "Safety check",
+          "fieldType": "MULTI_SELECT",
+          "required": true,
+          "options": [
+            "Burning smell",
+            "Sparking",
+            "Exposed wires",
+            "Breaker won't reset",
+            "None of these"
+          ]
+        },
+        {
+          "label": "Area or room",
+          "fieldType": "TEXT",
+          "required": true
+        },
+        {
+          "label": "Property type",
+          "helpText": "Condos may need an admin office permit.",
+          "fieldType": "SELECT",
+          "required": true,
+          "options": [
+            "House",
+            "Condo or apartment",
+            "Commercial"
+          ]
+        },
+        {
+          "label": "Materials supplied by",
+          "fieldType": "SELECT",
+          "required": true,
+          "options": [
+            "Client",
+            "Electrician sources (cost added)"
+          ]
+        }
+      ],
+      "jobs": [
+        {
+          "name": "Diagnosis / Troubleshooting Fee",
+          "unit": "visit",
+          "pricingModel": "FIXED",
+          "price": 400,
+          "questions": [
+            {
+              "label": "Problem",
+              "fieldType": "MULTI_SELECT",
+              "required": true,
+              "options": [
+                "No power in part of house",
+                "Breaker keeps tripping",
+                "Outlet not working",
+                "Flickering lights",
+                "Shock from wall or appliance",
+                "Suspected power leak (high bill)",
+                "Other"
+              ]
+            }
+          ]
+        },
+        {
+          "name": "Outlet / Switch Replacement",
+          "unit": "piece",
+          "pricingModel": "PER_UNIT",
+          "price": 350,
+          "replaces": "Outlet / Switch Repair or Installation",
+          "questions": [
+            {
+              "label": "How many pieces?",
+              "helpText": "Replacing an existing one. For a new spot, book New Outlet Line.",
+              "fieldType": "NUMBER",
+              "required": true,
+              "minValue": 1,
+              "maxValue": 20,
+              "setsPrice": true
+            },
+            {
+              "label": "Type",
+              "fieldType": "SELECT",
+              "required": true,
+              "options": [
+                "Outlet",
+                "Switch",
+                "Outlet + switch combo",
+                "220V outlet"
+              ]
+            }
+          ]
+        },
+        {
+          "name": "Light Fixture Installation",
+          "unit": "fixture",
+          "pricingModel": "PER_UNIT",
+          "price": 500,
+          "replaces": "Lighting Fixture Installation",
+          "questions": [
+            {
+              "label": "How many fixtures?",
+              "fieldType": "NUMBER",
+              "required": true,
+              "minValue": 1,
+              "maxValue": 20,
+              "setsPrice": true
+            },
+            {
+              "label": "Type",
+              "fieldType": "SELECT",
+              "required": true,
+              "options": [
+                "Bulb socket or LED panel",
+                "Pin light",
+                "Chandelier or pendant",
+                "Wall or outdoor lamp",
+                "Tube light"
+              ]
+            },
+            {
+              "label": "Ceiling height",
+              "fieldType": "SELECT",
+              "required": true,
+              "options": [
+                "Standard (up to 3 m)",
+                "High (over 3 m)"
+              ]
+            }
+          ]
+        },
+        {
+          "name": "Ceiling Fan Installation",
+          "unit": "fan",
+          "pricingModel": "PER_UNIT",
+          "price": 800,
+          "replaces": "Ceiling Fan Installation",
+          "questions": [
+            {
+              "label": "How many fans?",
+              "fieldType": "NUMBER",
+              "required": true,
+              "minValue": 1,
+              "maxValue": 5,
+              "setsPrice": true
+            },
+            {
+              "label": "Existing wiring at the spot?",
+              "fieldType": "SELECT",
+              "required": true,
+              "options": [
+                "Yes",
+                "No"
+              ]
+            },
+            {
+              "label": "Ceiling type",
+              "fieldType": "SELECT",
+              "required": true,
+              "options": [
+                "Concrete",
+                "Wood or plywood",
+                "Gypsum board"
+              ]
+            },
+            {
+              "label": "Ceiling height",
+              "fieldType": "SELECT",
+              "required": true,
+              "options": [
+                "Standard (up to 3 m)",
+                "High (over 3 m)"
+              ]
+            }
+          ]
+        },
+        {
+          "name": "Circuit Breaker Replacement",
+          "unit": "breaker",
+          "pricingModel": "PER_UNIT",
+          "price": 800,
+          "replaces": "Circuit Breaker / Panel Repair",
+          "questions": [
+            {
+              "label": "How many breakers?",
+              "fieldType": "NUMBER",
+              "required": true,
+              "minValue": 1,
+              "maxValue": 10,
+              "setsPrice": true
+            },
+            {
+              "label": "Breaker rating, if known",
+              "fieldType": "TEXT",
+              "required": false
+            },
+            {
+              "label": "Panel type",
+              "fieldType": "SELECT",
+              "required": true,
+              "options": [
+                "Breaker box",
+                "Fuse box",
+                "Not sure"
+              ]
+            }
+          ]
+        },
+        {
+          "name": "Short Circuit / Tripping Breaker Repair",
+          "unit": "job",
+          "pricingModel": "FIXED",
+          "price": 1200,
+          "questions": [
+            {
+              "label": "Symptom",
+              "fieldType": "SELECT",
+              "required": true,
+              "options": [
+                "Trips immediately",
+                "Trips when a certain appliance runs",
+                "Trips randomly"
+              ]
+            },
+            {
+              "label": "Affected rooms or appliances",
+              "fieldType": "TEXT",
+              "required": false
+            }
+          ]
+        },
+        {
+          "name": "New Outlet Line (Roughing-in)",
+          "unit": "line",
+          "pricingModel": "PER_UNIT",
+          "price": 1500,
+          "questions": [
+            {
+              "label": "How many lines?",
+              "fieldType": "NUMBER",
+              "required": true,
+              "minValue": 1,
+              "maxValue": 10,
+              "setsPrice": true
+            },
+            {
+              "label": "Distance from panel, approx. (m)",
+              "fieldType": "NUMBER",
+              "required": false,
+              "minValue": 1,
+              "maxValue": 100
+            },
+            {
+              "label": "Wiring style",
+              "fieldType": "SELECT",
+              "required": true,
+              "options": [
+                "Exposed with molding",
+                "Concealed in wall"
+              ]
+            }
+          ]
+        },
+        {
+          "name": "Dedicated Line (Aircon / Water Heater)",
+          "unit": "line",
+          "pricingModel": "PER_UNIT",
+          "price": 2500,
+          "questions": [
+            {
+              "label": "How many lines?",
+              "fieldType": "NUMBER",
+              "required": true,
+              "minValue": 1,
+              "maxValue": 5,
+              "setsPrice": true
+            },
+            {
+              "label": "For",
+              "fieldType": "SELECT",
+              "required": true,
+              "options": [
+                "Aircon",
+                "Water heater",
+                "Range or oven",
+                "Other"
+              ]
+            },
+            {
+              "label": "Appliance HP or watts",
+              "fieldType": "TEXT",
+              "required": false
+            },
+            {
+              "label": "Distance from panel, approx. (m)",
+              "fieldType": "NUMBER",
+              "required": false,
+              "minValue": 1,
+              "maxValue": 100
+            }
+          ]
+        },
+        {
+          "name": "Panel Board Upgrade",
+          "unit": "panel",
+          "pricingModel": "FIXED",
+          "price": 5000,
+          "replaces": "Panel Upgrade",
+          "questions": [
+            {
+              "label": "Current panel",
+              "fieldType": "SELECT",
+              "required": true,
+              "options": [
+                "Fuse box",
+                "Breaker panel"
+              ]
+            },
+            {
+              "label": "Circuits needed",
+              "fieldType": "NUMBER",
+              "required": true,
+              "minValue": 2,
+              "maxValue": 40
+            },
+            {
+              "label": "Needs coordination with Meralco or the local power utility?",
+              "fieldType": "SELECT",
+              "required": true,
+              "options": [
+                "Yes",
+                "No",
+                "Not sure"
+              ]
+            }
+          ]
+        },
+        {
+          "name": "House Rewiring",
+          "unit": "job",
+          "pricingModel": "CUSTOM_QUOTE",
+          "questions": [
+            {
+              "label": "Number of rooms",
+              "fieldType": "NUMBER",
+              "required": true,
+              "minValue": 1,
+              "maxValue": 30
+            },
+            {
+              "label": "Number of floors",
+              "fieldType": "NUMBER",
+              "required": true,
+              "minValue": 1,
+              "maxValue": 4
+            },
+            {
+              "label": "House age",
+              "fieldType": "SELECT",
+              "required": true,
+              "options": [
+                "Under 10 years",
+                "10–30 years",
+                "Over 30 years"
+              ]
+            },
+            {
+              "label": "Occupied during the work?",
+              "fieldType": "SELECT",
+              "required": true,
+              "options": [
+                "Yes",
+                "No"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Carpentry & Furniture Repair",
+      "commonQuestions": [
+        {
+          "label": "Location",
+          "fieldType": "SELECT",
+          "required": true,
+          "options": [
+            "Indoor",
+            "Outdoor"
+          ]
+        },
+        {
+          "label": "Materials supplied by",
+          "fieldType": "SELECT",
+          "required": true,
+          "options": [
+            "Client",
+            "Carpenter sources (cost added)"
+          ]
+        }
+      ],
+      "jobs": [
+        {
+          "name": "Inspection / Estimate Visit Fee",
+          "unit": "visit",
+          "pricingModel": "FIXED",
+          "price": 350,
+          "questions": [
+            {
+              "label": "What needs work?",
+              "fieldType": "MULTI_SELECT",
+              "required": true,
+              "options": [
+                "Furniture",
+                "Doors",
+                "Cabinets",
+                "Ceiling",
+                "Shelving",
+                "Termite damage",
+                "Other"
+              ]
+            },
+            {
+              "label": "Describe the job",
+              "fieldType": "TEXT",
+              "required": true
+            }
+          ]
+        },
+        {
+          "name": "Furniture Assembly",
+          "unit": "item",
+          "pricingModel": "PER_UNIT",
+          "price": 500,
+          "replaces": "Furniture Assembly",
+          "questions": [
+            {
+              "label": "How many items?",
+              "fieldType": "NUMBER",
+              "required": true,
+              "minValue": 1,
+              "maxValue": 20,
+              "setsPrice": true
+            },
+            {
+              "label": "Item type",
+              "fieldType": "MULTI_SELECT",
+              "required": true,
+              "options": [
+                "Bed frame",
+                "Wardrobe",
+                "Table or desk",
+                "Chair",
+                "Shelf or rack",
+                "TV stand",
+                "Other"
+              ]
+            },
+            {
+              "label": "Store or brand",
+              "fieldType": "TEXT",
+              "required": false
+            }
+          ]
+        },
+        {
+          "name": "Door Lock / Knob Installation",
+          "unit": "door",
+          "pricingModel": "PER_UNIT",
+          "price": 500,
+          "questions": [
+            {
+              "label": "How many doors?",
+              "fieldType": "NUMBER",
+              "required": true,
+              "minValue": 1,
+              "maxValue": 10,
+              "setsPrice": true
+            },
+            {
+              "label": "Type",
+              "fieldType": "SELECT",
+              "required": true,
+              "options": [
+                "Knob",
+                "Lever handle",
+                "Deadbolt",
+                "Digital or smart lock"
+              ]
+            },
+            {
+              "label": "Door material",
+              "fieldType": "SELECT",
+              "required": true,
+              "options": [
+                "Wood",
+                "Metal",
+                "Glass or aluminum"
+              ]
+            }
+          ]
+        },
+        {
+          "name": "Door Hinge / Alignment Repair",
+          "unit": "door",
+          "pricingModel": "PER_UNIT",
+          "price": 600,
+          "questions": [
+            {
+              "label": "How many doors?",
+              "fieldType": "NUMBER",
+              "required": true,
+              "minValue": 1,
+              "maxValue": 10,
+              "setsPrice": true
+            },
+            {
+              "label": "Symptom",
+              "fieldType": "SELECT",
+              "required": true,
+              "options": [
+                "Sagging or scrapes the floor",
+                "Won't latch",
+                "Loose hinges",
+                "Swollen or sticking"
+              ]
+            },
+            {
+              "label": "Door material",
+              "fieldType": "SELECT",
+              "required": true,
+              "options": [
+                "Wood",
+                "Metal",
+                "Glass or aluminum"
+              ]
+            }
+          ]
+        },
+        {
+          "name": "Furniture Repair (joints, drawers, hinges)",
+          "unit": "item",
+          "pricingModel": "PER_UNIT",
+          "price": 800,
+          "replaces": "Furniture Repair",
+          "questions": [
+            {
+              "label": "How many items?",
+              "fieldType": "NUMBER",
+              "required": true,
+              "minValue": 1,
+              "maxValue": 10,
+              "setsPrice": true
+            },
+            {
+              "label": "Item type",
+              "fieldType": "MULTI_SELECT",
+              "required": true,
+              "options": [
+                "Bed frame",
+                "Wardrobe",
+                "Table or desk",
+                "Chair",
+                "Shelf or rack",
+                "TV stand",
+                "Other"
+              ]
+            },
+            {
+              "label": "Damage",
+              "fieldType": "SELECT",
+              "required": true,
+              "options": [
+                "Loose joints",
+                "Broken drawer or slide",
+                "Hinge",
+                "Broken panel or leg",
+                "Other"
+              ]
+            }
+          ]
+        },
+        {
+          "name": "Cabinet Installation",
+          "unit": "module",
+          "pricingModel": "PER_UNIT",
+          "price": 1200,
+          "replaces": "Cabinet Installation",
+          "questions": [
+            {
+              "label": "How many modules?",
+              "fieldType": "NUMBER",
+              "required": true,
+              "minValue": 1,
+              "maxValue": 20,
+              "setsPrice": true
+            },
+            {
+              "label": "Type",
+              "fieldType": "SELECT",
+              "required": true,
+              "options": [
+                "Wall-hung",
+                "Base cabinet",
+                "Tall or pantry"
+              ]
+            },
+            {
+              "label": "Wall type",
+              "fieldType": "SELECT",
+              "required": true,
+              "options": [
+                "Concrete",
+                "Hollow block",
+                "Drywall or gypsum"
+              ]
+            }
+          ]
+        },
+        {
+          "name": "Door Installation",
+          "unit": "door",
+          "pricingModel": "PER_UNIT",
+          "price": 1500,
+          "replaces": "Door & Window Framing",
+          "questions": [
+            {
+              "label": "How many doors?",
+              "fieldType": "NUMBER",
+              "required": true,
+              "minValue": 1,
+              "maxValue": 10,
+              "setsPrice": true
+            },
+            {
+              "label": "Door already bought?",
+              "fieldType": "SELECT",
+              "required": true,
+              "options": [
+                "Yes",
+                "No"
+              ]
+            },
+            {
+              "label": "Frame (jamb)",
+              "fieldType": "SELECT",
+              "required": true,
+              "options": [
+                "Existing, reuse",
+                "Needs a new frame"
+              ]
+            },
+            {
+              "label": "Size",
+              "fieldType": "SELECT",
+              "required": true,
+              "options": [
+                "Standard",
+                "Custom"
+              ]
+            }
+          ]
+        },
+        {
+          "name": "Custom Shelving",
+          "unit": "shelf unit",
+          "pricingModel": "PER_UNIT",
+          "price": 1500,
+          "replaces": "Custom Shelving",
+          "questions": [
+            {
+              "label": "How many shelf units?",
+              "fieldType": "NUMBER",
+              "required": true,
+              "minValue": 1,
+              "maxValue": 10,
+              "setsPrice": true
+            },
+            {
+              "label": "Dimensions (W × H × D)",
+              "fieldType": "TEXT",
+              "required": true
+            },
+            {
+              "label": "Mount",
+              "fieldType": "SELECT",
+              "required": true,
+              "options": [
+                "Wall-mounted",
+                "Freestanding"
+              ]
+            },
+            {
+              "label": "Wall type",
+              "fieldType": "SELECT",
+              "required": true,
+              "options": [
+                "Concrete",
+                "Hollow block",
+                "Drywall or gypsum"
+              ]
+            }
+          ]
+        },
+        {
+          "name": "Kitchen Cabinet / Built-in Repair",
+          "unit": "job",
+          "pricingModel": "FIXED",
+          "price": 1500,
+          "questions": [
+            {
+              "label": "Problem",
+              "fieldType": "MULTI_SELECT",
+              "required": true,
+              "options": [
+                "Doors or hinges",
+                "Drawers",
+                "Water-damaged base",
+                "Countertop",
+                "Other"
+              ]
+            },
+            {
+              "label": "Approximate length (m)",
+              "fieldType": "NUMBER",
+              "required": false,
+              "minValue": 1,
+              "maxValue": 20
+            }
+          ]
+        },
+        {
+          "name": "Termite-Damaged Wood Replacement",
+          "unit": "job",
+          "pricingModel": "FIXED",
+          "price": 2000,
+          "questions": [
+            {
+              "label": "What's damaged",
+              "fieldType": "MULTI_SELECT",
+              "required": true,
+              "options": [
+                "Door jamb",
+                "Cabinet",
+                "Floor or stairs",
+                "Ceiling joist",
+                "Other"
+              ]
+            },
+            {
+              "label": "Termites still active?",
+              "helpText": "If yes, book Pest Control first.",
+              "fieldType": "SELECT",
+              "required": true,
+              "options": [
+                "Yes",
+                "No",
+                "Not sure"
+              ]
+            },
+            {
+              "label": "Approximate size",
+              "fieldType": "TEXT",
+              "required": true
+            }
+          ]
+        },
+        {
+          "name": "Ceiling / Partition Repair",
+          "unit": "job",
+          "pricingModel": "FIXED",
+          "price": 2500,
+          "questions": [
+            {
+              "label": "Type",
+              "fieldType": "SELECT",
+              "required": true,
+              "options": [
+                "Ceiling",
+                "Partition wall"
+              ]
+            },
+            {
+              "label": "Material",
+              "fieldType": "SELECT",
+              "required": true,
+              "options": [
+                "Gypsum",
+                "Plywood",
+                "PVC",
+                "Fiber-cement board"
+              ]
+            },
+            {
+              "label": "Area, approx. (sq.m.)",
+              "fieldType": "NUMBER",
+              "required": true,
+              "minValue": 1,
+              "maxValue": 200
+            },
+            {
+              "label": "Cause",
+              "fieldType": "SELECT",
+              "required": true,
+              "options": [
+                "Water leak",
+                "Termites",
+                "Impact",
+                "Sagging"
+              ]
+            },
+            {
+              "label": "Has the leak been fixed?",
+              "fieldType": "SELECT",
+              "required": true,
+              "options": [
+                "Yes",
+                "No",
+                "Not applicable"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "House Painting",
+      "commonQuestions": [
+        {
+          "label": "Interior or exterior",
+          "fieldType": "SELECT",
+          "required": true,
+          "options": [
+            "Interior",
+            "Exterior"
+          ]
+        },
+        {
+          "label": "Paint supplied by",
+          "fieldType": "SELECT",
+          "required": true,
+          "options": [
+            "Client",
+            "Include in service (cost added)"
+          ]
+        },
+        {
+          "label": "Color change",
+          "fieldType": "SELECT",
+          "required": true,
+          "options": [
+            "Similar shade",
+            "Going lighter",
+            "Going darker or bold"
+          ]
+        },
+        {
+          "label": "Is the area furnished?",
+          "fieldType": "SELECT",
+          "required": true,
+          "options": [
+            "Furnished, needs moving",
+            "Empty"
+          ]
+        }
+      ],
+      "jobs": [
+        {
+          "name": "Inspection / Color Consultation Fee",
+          "unit": "visit",
+          "pricingModel": "FIXED",
+          "price": 350,
+          "questions": [
+            {
+              "label": "Surfaces",
+              "fieldType": "MULTI_SELECT",
+              "required": true,
+              "options": [
+                "Walls",
+                "Ceiling",
+                "Doors and trim",
+                "Gate or grills",
+                "Exterior"
+              ]
+            },
+            {
+              "label": "Approximate number of rooms",
+              "fieldType": "NUMBER",
+              "required": false,
+              "minValue": 1,
+              "maxValue": 20
+            },
+            {
+              "label": "Want color suggestions?",
+              "fieldType": "SELECT",
+              "required": true,
+              "options": [
+                "Yes",
+                "No"
+              ]
+            }
+          ]
+        },
+        {
+          "name": "Door / Trim Painting",
+          "unit": "door",
+          "pricingModel": "PER_UNIT",
+          "price": 600,
+          "replaces": "Trim & Door Painting",
+          "questions": [
+            {
+              "label": "How many doors?",
+              "fieldType": "NUMBER",
+              "required": true,
+              "minValue": 1,
+              "maxValue": 20,
+              "setsPrice": true
+            },
+            {
+              "label": "Material",
+              "fieldType": "SELECT",
+              "required": true,
+              "options": [
+                "Wood",
+                "Metal"
+              ]
+            },
+            {
+              "label": "Finish",
+              "fieldType": "SELECT",
+              "required": true,
+              "options": [
+                "Enamel or gloss",
+                "Varnish or stain",
+                "Flat"
+              ]
+            },
+            {
+              "label": "Paint both sides?",
+              "fieldType": "SELECT",
+              "required": true,
+              "options": [
+                "Yes",
+                "No"
+              ]
+            }
+          ]
+        },
+        {
+          "name": "Touch-Up Painting",
+          "unit": "job",
+          "pricingModel": "FIXED",
+          "price": 800,
+          "replaces": "Touch-Up Painting",
+          "questions": [
+            {
+              "label": "Extent",
+              "fieldType": "SELECT",
+              "required": true,
+              "options": [
+                "Small spots",
+                "One wall",
+                "Several walls"
+              ]
+            },
+            {
+              "label": "Have leftover matching paint?",
+              "fieldType": "SELECT",
+              "required": true,
+              "options": [
+                "Yes",
+                "No"
+              ]
+            }
+          ]
+        },
+        {
+          "name": "Wall Crack / Patch Repair",
+          "unit": "job",
+          "pricingModel": "FIXED",
+          "price": 800,
+          "questions": [
+            {
+              "label": "Number of cracks or holes",
+              "fieldType": "NUMBER",
+              "required": true,
+              "minValue": 1,
+              "maxValue": 20
+            },
+            {
+              "label": "Size",
+              "fieldType": "SELECT",
+              "required": true,
+              "options": [
+                "Hairline",
+                "Under 1 inch",
+                "Larger (may be structural)"
+              ]
+            },
+            {
+              "label": "Wall type",
+              "fieldType": "SELECT",
+              "required": true,
+              "options": [
+                "Concrete",
+                "Gypsum"
+              ]
+            }
+          ]
+        },
+        {
+          "name": "Ceiling Painting",
+          "unit": "room",
+          "pricingModel": "PER_UNIT",
+          "price": 1500,
+          "questions": [
+            {
+              "label": "How many rooms?",
+              "fieldType": "NUMBER",
+              "required": true,
+              "minValue": 1,
+              "maxValue": 20,
+              "setsPrice": true
+            },
+            {
+              "label": "Ceiling height",
+              "fieldType": "SELECT",
+              "required": true,
+              "options": [
+                "Standard (up to 3 m)",
+                "High (over 3 m)"
+              ]
+            },
+            {
+              "label": "Material",
+              "fieldType": "SELECT",
+              "required": true,
+              "options": [
+                "Concrete",
+                "Gypsum",
+                "Plywood"
+              ]
+            },
+            {
+              "label": "Water stains present?",
+              "fieldType": "SELECT",
+              "required": true,
+              "options": [
+                "Yes",
+                "No"
+              ]
+            }
+          ]
+        },
+        {
+          "name": "Gate / Grill / Metal Painting",
+          "unit": "job",
+          "pricingModel": "FIXED",
+          "price": 1500,
+          "questions": [
+            {
+              "label": "Item",
+              "fieldType": "MULTI_SELECT",
+              "required": true,
+              "options": [
+                "Gate",
+                "Window grills",
+                "Railings",
+                "Fence"
+              ]
+            },
+            {
+              "label": "Approximate size",
+              "fieldType": "TEXT",
+              "required": true
+            },
+            {
+              "label": "Rust",
+              "fieldType": "SELECT",
+              "required": true,
+              "options": [
+                "Light",
+                "Heavy (needs scraping)"
+              ]
+            }
+          ]
+        },
+        {
+          "name": "Interior Room Painting",
+          "unit": "room",
+          "pricingModel": "PER_UNIT",
+          "price": 3000,
+          "replaces": "Interior Room Painting",
+          "questions": [
+            {
+              "label": "How many rooms?",
+              "fieldType": "NUMBER",
+              "required": true,
+              "minValue": 1,
+              "maxValue": 20,
+              "setsPrice": true
+            },
+            {
+              "label": "Room size",
+              "fieldType": "SELECT",
+              "required": true,
+              "options": [
+                "Small (under 10 sq.m.)",
+                "Medium (10–20 sq.m.)",
+                "Large (over 20 sq.m.)"
+              ]
+            },
+            {
+              "label": "Wall condition",
+              "fieldType": "SELECT",
+              "required": true,
+              "options": [
+                "Good",
+                "Previously painted, peeling",
+                "Needs patching"
+              ]
+            },
+            {
+              "label": "Include ceiling?",
+              "fieldType": "SELECT",
+              "required": true,
+              "options": [
+                "Yes",
+                "No"
+              ]
+            }
+          ]
+        },
+        {
+          "name": "Exterior Wall Painting",
+          "unit": "sq.m.",
+          "pricingModel": "PER_UNIT",
+          "price": 150,
+          "replaces": "Exterior Wall Painting",
+          "questions": [
+            {
+              "label": "Wall area (sq.m.)",
+              "fieldType": "NUMBER",
+              "required": true,
+              "minValue": 10,
+              "maxValue": 1000,
+              "setsPrice": true
+            },
+            {
+              "label": "Storeys",
+              "fieldType": "SELECT",
+              "required": true,
+              "options": [
+                "1",
+                "2",
+                "3 or more"
+              ]
+            },
+            {
+              "label": "Scaffolding needed?",
+              "fieldType": "SELECT",
+              "required": true,
+              "options": [
+                "Yes",
+                "No",
+                "Not sure"
+              ]
+            },
+            {
+              "label": "Wall condition",
+              "fieldType": "SELECT",
+              "required": true,
+              "options": [
+                "Good",
+                "Peeling",
+                "Mold or algae"
+              ]
+            }
+          ]
+        },
+        {
+          "name": "Roof Deck / Gutter Waterproofing",
+          "unit": "job",
+          "pricingModel": "CUSTOM_QUOTE",
+          "questions": [
+            {
+              "label": "Area",
+              "fieldType": "SELECT",
+              "required": true,
+              "options": [
+                "Roof deck",
+                "Gutter",
+                "Balcony",
+                "Wall"
+              ]
+            },
+            {
+              "label": "Area (sq.m.)",
+              "fieldType": "NUMBER",
+              "required": true,
+              "minValue": 1,
+              "maxValue": 500
+            },
+            {
+              "label": "Active leak?",
+              "fieldType": "SELECT",
+              "required": true,
+              "options": [
+                "Yes",
+                "No"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Pest Control",
+      "commonQuestions": [
+        {
+          "label": "Pets or children in the home?",
+          "fieldType": "SELECT",
+          "required": true,
+          "options": [
+            "Yes",
+            "No"
+          ]
+        },
+        {
+          "label": "Previously treated?",
+          "fieldType": "SELECT",
+          "required": true,
+          "options": [
+            "Never",
+            "Self-treated",
+            "Professionally treated, came back"
+          ]
+        },
+        {
+          "label": "Property type",
+          "fieldType": "SELECT",
+          "required": true,
+          "options": [
+            "House",
+            "Condo or apartment",
+            "Commercial"
+          ]
+        }
+      ],
+      "jobs": [
+        {
+          "name": "Inspection / Assessment Fee",
+          "unit": "visit",
+          "pricingModel": "FIXED",
+          "price": 500,
+          "questions": [
+            {
+              "label": "Pest type",
+              "fieldType": "MULTI_SELECT",
+              "required": true,
+              "options": [
+                "Termites",
+                "Rodents",
+                "Cockroaches",
+                "Ants",
+                "Bed bugs",
+                "Mosquitoes",
+                "Other"
+              ],
+              "usedForMatching": true
+            },
+            {
+              "label": "Severity",
+              "fieldType": "SELECT",
+              "required": true,
+              "options": [
+                "A few sightings",
+                "Regular activity",
+                "Nest, droppings or damage visible"
+              ]
+            },
+            {
+              "label": "Affected areas",
+              "fieldType": "MULTI_SELECT",
+              "required": true,
+              "options": [
+                "Kitchen",
+                "Bathroom",
+                "Bedroom",
+                "Ceiling or attic",
+                "Yard",
+                "Whole property"
+              ]
+            }
+          ]
+        },
+        {
+          "name": "Follow-up Treatment",
+          "unit": "visit",
+          "pricingModel": "FIXED",
+          "price": 800,
+          "questions": [
+            {
+              "label": "Previous HomeEase booking reference",
+              "fieldType": "TEXT",
+              "required": false
+            },
+            {
+              "label": "Pest type",
+              "fieldType": "MULTI_SELECT",
+              "required": true,
+              "options": [
+                "Termites",
+                "Rodents",
+                "Cockroaches",
+                "Ants",
+                "Bed bugs",
+                "Mosquitoes",
+                "Other"
+              ]
+            },
+            {
+              "label": "Still seeing activity?",
+              "fieldType": "SELECT",
+              "required": true,
+              "options": [
+                "Yes",
+                "No"
+              ]
+            }
+          ]
+        },
+        {
+          "name": "Cockroach & Ant Gel Treatment",
+          "unit": "house",
+          "pricingModel": "FIXED",
+          "price": 1200,
+          "questions": [
+            {
+              "label": "Pest",
+              "fieldType": "SELECT",
+              "required": true,
+              "options": [
+                "Cockroaches",
+                "Ants",
+                "Both"
+              ]
+            },
+            {
+              "label": "Affected areas",
+              "fieldType": "MULTI_SELECT",
+              "required": true,
+              "options": [
+                "Kitchen",
+                "Bathroom",
+                "Bedroom",
+                "Ceiling or attic",
+                "Yard",
+                "Whole property"
+              ]
+            },
+            {
+              "label": "Severity",
+              "fieldType": "SELECT",
+              "required": true,
+              "options": [
+                "A few sightings",
+                "Regular activity",
+                "Nest, droppings or damage visible"
+              ]
+            }
+          ]
+        },
+        {
+          "name": "General Pest Spraying (up to 100 sq.m.)",
+          "unit": "house",
+          "pricingModel": "FIXED",
+          "price": 1500,
+          "replaces": "General Pest Spraying",
+          "questions": [
+            {
+              "label": "Floor area (sq.m.)",
+              "fieldType": "NUMBER",
+              "required": true,
+              "minValue": 10,
+              "maxValue": 100
+            },
+            {
+              "label": "Pest type",
+              "fieldType": "MULTI_SELECT",
+              "required": true,
+              "options": [
+                "Termites",
+                "Rodents",
+                "Cockroaches",
+                "Ants",
+                "Bed bugs",
+                "Mosquitoes",
+                "Other"
+              ]
+            },
+            {
+              "label": "Affected areas",
+              "fieldType": "MULTI_SELECT",
+              "required": true,
+              "options": [
+                "Kitchen",
+                "Bathroom",
+                "Bedroom",
+                "Ceiling or attic",
+                "Yard",
+                "Whole property"
+              ]
+            }
+          ]
+        },
+        {
+          "name": "Mosquito Misting / Fogging",
+          "unit": "house",
+          "pricingModel": "FIXED",
+          "price": 1500,
+          "questions": [
+            {
+              "label": "Area to treat",
+              "fieldType": "SELECT",
+              "required": true,
+              "options": [
+                "Indoor",
+                "Yard or garden",
+                "Both"
+              ]
+            },
+            {
+              "label": "Lot size, approx. (sq.m.)",
+              "fieldType": "NUMBER",
+              "required": false,
+              "minValue": 10,
+              "maxValue": 2000
+            }
+          ]
+        },
+        {
+          "name": "Rodent Control (baiting & trapping)",
+          "unit": "house",
+          "pricingModel": "FIXED",
+          "price": 1500,
+          "replaces": "Rodent Control",
+          "questions": [
+            {
+              "label": "Signs",
+              "fieldType": "MULTI_SELECT",
+              "required": true,
+              "options": [
+                "Droppings",
+                "Gnaw marks",
+                "Sightings",
+                "Noises in the ceiling"
+              ]
+            },
+            {
+              "label": "Affected areas",
+              "fieldType": "MULTI_SELECT",
+              "required": true,
+              "options": [
+                "Kitchen",
+                "Ceiling",
+                "Storage",
+                "Yard"
+              ]
+            }
+          ]
+        },
+        {
+          "name": "Bed Bug Treatment",
+          "unit": "room",
+          "pricingModel": "PER_UNIT",
+          "price": 2000,
+          "replaces": "Bed Bug Treatment",
+          "questions": [
+            {
+              "label": "How many rooms?",
+              "fieldType": "NUMBER",
+              "required": true,
+              "minValue": 1,
+              "maxValue": 10,
+              "setsPrice": true
+            },
+            {
+              "label": "Number of beds or mattresses",
+              "fieldType": "NUMBER",
+              "required": true,
+              "minValue": 1,
+              "maxValue": 20
+            },
+            {
+              "label": "Bites reported?",
+              "fieldType": "SELECT",
+              "required": true,
+              "options": [
+                "Yes",
+                "No"
+              ]
+            }
+          ]
+        },
+        {
+          "name": "Termite Spot Treatment",
+          "unit": "area",
+          "pricingModel": "PER_UNIT",
+          "price": 3500,
+          "replaces": "Termite Treatment",
+          "questions": [
+            {
+              "label": "How many areas?",
+              "fieldType": "NUMBER",
+              "required": true,
+              "minValue": 1,
+              "maxValue": 10,
+              "setsPrice": true
+            },
+            {
+              "label": "Where",
+              "fieldType": "MULTI_SELECT",
+              "required": true,
+              "options": [
+                "Door frame",
+                "Cabinet",
+                "Floor",
+                "Ceiling",
+                "Wall"
+              ]
+            },
+            {
+              "label": "Visible mud tubes or swarms?",
+              "fieldType": "SELECT",
+              "required": true,
+              "options": [
+                "Yes",
+                "No"
+              ]
+            }
+          ]
+        },
+        {
+          "name": "Termite Soil Poisoning (whole house)",
+          "unit": "house",
+          "pricingModel": "CUSTOM_QUOTE",
+          "questions": [
+            {
+              "label": "Floor area (sq.m.)",
+              "fieldType": "NUMBER",
+              "required": true,
+              "minValue": 20,
+              "maxValue": 2000
+            },
+            {
+              "label": "Floor type",
+              "fieldType": "SELECT",
+              "required": true,
+              "options": [
+                "Tiled",
+                "Plain concrete",
+                "Wood",
+                "Bare soil"
+              ]
+            },
+            {
+              "label": "House stage",
+              "fieldType": "SELECT",
+              "required": true,
+              "options": [
+                "Existing house",
+                "Under construction"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Home Cleaning",
+      "commonQuestions": [
+        {
+          "label": "Pets in the home?",
+          "fieldType": "SELECT",
+          "required": true,
+          "options": [
+            "Yes",
+            "No"
+          ]
+        },
+        {
+          "label": "Last professionally cleaned",
+          "fieldType": "SELECT",
+          "required": true,
+          "options": [
+            "Within a week",
+            "A few weeks ago",
+            "A month or more",
+            "Never"
+          ]
+        },
+        {
+          "label": "Cleaning supplies from",
+          "fieldType": "SELECT",
+          "required": true,
+          "options": [
+            "Client",
+            "Cleaner brings (cost added)"
+          ]
+        }
+      ],
+      "jobs": [
+        {
+          "name": "Bathroom Deep Clean",
+          "unit": "bathroom",
+          "pricingModel": "PER_UNIT",
+          "price": 800,
+          "questions": [
+            {
+              "label": "How many bathrooms?",
+              "fieldType": "NUMBER",
+              "required": true,
+              "minValue": 1,
+              "maxValue": 10,
+              "setsPrice": true
+            },
+            {
+              "label": "Problems",
+              "fieldType": "MULTI_SELECT",
+              "required": true,
+              "options": [
+                "Hard-water stains",
+                "Mold",
+                "Slow drain",
+                "None"
+              ]
+            }
+          ]
+        },
+        {
+          "name": "Window & Glass Cleaning",
+          "unit": "job",
+          "pricingModel": "FIXED",
+          "price": 800,
+          "questions": [
+            {
+              "label": "Number of windows, approx.",
+              "fieldType": "NUMBER",
+              "required": true,
+              "minValue": 1,
+              "maxValue": 50
+            },
+            {
+              "label": "Sides",
+              "fieldType": "SELECT",
+              "required": true,
+              "options": [
+                "Inside only",
+                "Both sides, reachable",
+                "Both sides, high floor"
+              ]
+            },
+            {
+              "label": "Sliding glass doors",
+              "fieldType": "NUMBER",
+              "required": false,
+              "minValue": 0,
+              "maxValue": 10
+            }
+          ]
+        },
+        {
+          "name": "Standard Cleaning – Studio / 1BR",
+          "unit": "visit",
+          "pricingModel": "FIXED",
+          "price": 1000,
+          "replaces": "Standard Cleaning",
+          "questions": [
+            {
+              "label": "Bedrooms",
+              "fieldType": "NUMBER",
+              "required": true,
+              "minValue": 0,
+              "maxValue": 1
+            },
+            {
+              "label": "Bathrooms",
+              "fieldType": "NUMBER",
+              "required": true,
+              "minValue": 1,
+              "maxValue": 2
+            },
+            {
+              "label": "Additional areas",
+              "fieldType": "MULTI_SELECT",
+              "required": false,
+              "options": [
+                "Kitchen",
+                "Living room",
+                "Dining room",
+                "Home office",
+                "Garage",
+                "Balcony"
+              ]
+            }
+          ]
+        },
+        {
+          "name": "Sofa / Mattress Cleaning",
+          "unit": "piece",
+          "pricingModel": "PER_UNIT",
+          "price": 1000,
+          "questions": [
+            {
+              "label": "How many pieces?",
+              "fieldType": "NUMBER",
+              "required": true,
+              "minValue": 1,
+              "maxValue": 10,
+              "setsPrice": true
+            },
+            {
+              "label": "Item",
+              "fieldType": "MULTI_SELECT",
+              "required": true,
+              "options": [
+                "Sofa",
+                "Mattress",
+                "Chair",
+                "Carpet"
+              ]
+            },
+            {
+              "label": "Material",
+              "fieldType": "SELECT",
+              "required": true,
+              "options": [
+                "Fabric",
+                "Leather",
+                "Velvet"
+              ]
+            },
+            {
+              "label": "Stains or odor",
+              "fieldType": "MULTI_SELECT",
+              "required": true,
+              "options": [
+                "Pet urine",
+                "Food",
+                "Mold",
+                "None"
+              ]
+            }
+          ]
+        },
+        {
+          "name": "Kitchen Deep Clean",
+          "unit": "kitchen",
+          "pricingModel": "FIXED",
+          "price": 1500,
+          "questions": [
+            {
+              "label": "Include appliances",
+              "fieldType": "MULTI_SELECT",
+              "required": true,
+              "options": [
+                "Refrigerator interior",
+                "Oven",
+                "Range hood",
+                "None"
+              ]
+            },
+            {
+              "label": "Grease level",
+              "fieldType": "SELECT",
+              "required": true,
+              "options": [
+                "Light",
+                "Heavy"
+              ]
+            }
+          ]
+        },
+        {
+          "name": "Standard Cleaning – 2 to 3BR",
+          "unit": "visit",
+          "pricingModel": "FIXED",
+          "price": 1800,
+          "questions": [
+            {
+              "label": "Bedrooms",
+              "fieldType": "NUMBER",
+              "required": true,
+              "minValue": 2,
+              "maxValue": 3
+            },
+            {
+              "label": "Bathrooms",
+              "fieldType": "NUMBER",
+              "required": true,
+              "minValue": 1,
+              "maxValue": 4
+            },
+            {
+              "label": "Additional areas",
+              "fieldType": "MULTI_SELECT",
+              "required": false,
+              "options": [
+                "Kitchen",
+                "Living room",
+                "Dining room",
+                "Home office",
+                "Garage",
+                "Balcony"
+              ]
+            }
+          ]
+        },
+        {
+          "name": "Deep Cleaning – Studio / 1BR",
+          "unit": "visit",
+          "pricingModel": "FIXED",
+          "price": 2500,
+          "replaces": "Deep Cleaning",
+          "questions": [
+            {
+              "label": "Bedrooms",
+              "fieldType": "NUMBER",
+              "required": true,
+              "minValue": 0,
+              "maxValue": 1
+            },
+            {
+              "label": "Bathrooms",
+              "fieldType": "NUMBER",
+              "required": true,
+              "minValue": 1,
+              "maxValue": 2
+            },
+            {
+              "label": "Focus areas",
+              "fieldType": "MULTI_SELECT",
+              "required": true,
+              "options": [
+                "Inside cabinets",
+                "Inside fridge",
+                "Walls and baseboards",
+                "Windows"
+              ]
+            }
+          ]
+        },
+        {
+          "name": "Deep Cleaning – 2 to 3BR",
+          "unit": "visit",
+          "pricingModel": "FIXED",
+          "price": 4000,
+          "questions": [
+            {
+              "label": "Bedrooms",
+              "fieldType": "NUMBER",
+              "required": true,
+              "minValue": 2,
+              "maxValue": 3
+            },
+            {
+              "label": "Bathrooms",
+              "fieldType": "NUMBER",
+              "required": true,
+              "minValue": 1,
+              "maxValue": 4
+            },
+            {
+              "label": "Focus areas",
+              "fieldType": "MULTI_SELECT",
+              "required": true,
+              "options": [
+                "Inside cabinets",
+                "Inside fridge",
+                "Walls and baseboards",
+                "Windows"
+              ]
+            }
+          ]
+        },
+        {
+          "name": "Move-In / Move-Out Cleaning",
+          "unit": "visit",
+          "pricingModel": "FIXED",
+          "price": 4500,
+          "replaces": "Move-In / Move-Out Cleaning",
+          "questions": [
+            {
+              "label": "Bedrooms",
+              "fieldType": "NUMBER",
+              "required": true,
+              "minValue": 0,
+              "maxValue": 5
+            },
+            {
+              "label": "Bathrooms",
+              "fieldType": "NUMBER",
+              "required": true,
+              "minValue": 1,
+              "maxValue": 5
+            },
+            {
+              "label": "Unit empty?",
+              "fieldType": "SELECT",
+              "required": true,
+              "options": [
+                "Yes",
+                "No"
+              ]
+            },
+            {
+              "label": "Floor area (sq.m.)",
+              "fieldType": "NUMBER",
+              "required": false,
+              "minValue": 10,
+              "maxValue": 500
+            }
+          ]
+        },
+        {
+          "name": "Post-Construction Cleaning",
+          "unit": "visit",
+          "pricingModel": "FIXED",
+          "price": 6000,
+          "replaces": "Post-Construction Cleanup",
+          "questions": [
+            {
+              "label": "Floor area (sq.m.)",
+              "fieldType": "NUMBER",
+              "required": true,
+              "minValue": 10,
+              "maxValue": 1000
+            },
+            {
+              "label": "Floors",
+              "fieldType": "SELECT",
+              "required": true,
+              "options": [
+                "1",
+                "2",
+                "3 or more"
+              ]
+            },
+            {
+              "label": "Debris already hauled out?",
+              "fieldType": "SELECT",
+              "required": true,
+              "options": [
+                "Yes",
+                "No"
+              ]
+            },
+            {
+              "label": "Dust level",
+              "fieldType": "SELECT",
+              "required": true,
+              "options": [
+                "Light",
+                "Heavy"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Laundry & Ironing",
+      "commonQuestions": [
+        {
+          "label": "Washing setup at home",
+          "fieldType": "SELECT",
+          "required": true,
+          "options": [
+            "Automatic machine",
+            "Twin-tub",
+            "None (hand-wash)"
+          ]
+        },
+        {
+          "label": "Detergent supplied by",
+          "fieldType": "SELECT",
+          "required": true,
+          "options": [
+            "Client",
+            "Worker (cost added)"
+          ]
+        },
+        {
+          "label": "Drying area",
+          "fieldType": "SELECT",
+          "required": true,
+          "options": [
+            "Outdoor line",
+            "Dryer",
+            "Indoor"
+          ]
+        },
+        {
+          "label": "Fabric care notes",
+          "fieldType": "TEXT",
+          "required": false
+        }
+      ],
+      "jobs": [
+        {
+          "name": "Dry-Clean Drop-off Coordination",
+          "unit": "trip",
+          "pricingModel": "FIXED",
+          "price": 150,
+          "replaces": "Dry-Clean Drop-off Coordination",
+          "questions": [
+            {
+              "label": "Number of items",
+              "fieldType": "NUMBER",
+              "required": true,
+              "minValue": 1,
+              "maxValue": 30
+            },
+            {
+              "label": "Preferred shop",
+              "fieldType": "TEXT",
+              "required": false
+            },
+            {
+              "label": "Needed back by",
+              "fieldType": "TEXT",
+              "required": true
+            }
+          ]
+        },
+        {
+          "name": "Wash & Fold",
+          "unit": "basket",
+          "pricingModel": "PER_UNIT",
+          "price": 200,
+          "replaces": "Wash & Fold",
+          "questions": [
+            {
+              "label": "How many baskets?",
+              "helpText": "One basket is about 6–7 kg.",
+              "fieldType": "NUMBER",
+              "required": true,
+              "minValue": 1,
+              "maxValue": 10,
+              "setsPrice": true
+            },
+            {
+              "label": "Separate whites and colors?",
+              "fieldType": "SELECT",
+              "required": true,
+              "options": [
+                "Yes",
+                "No"
+              ]
+            }
+          ]
+        },
+        {
+          "name": "Iron Only",
+          "unit": "basket",
+          "pricingModel": "PER_UNIT",
+          "price": 250,
+          "replaces": "Iron Only",
+          "questions": [
+            {
+              "label": "How many baskets?",
+              "helpText": "One basket is about 6–7 kg.",
+              "fieldType": "NUMBER",
+              "required": true,
+              "minValue": 1,
+              "maxValue": 10,
+              "setsPrice": true
+            },
+            {
+              "label": "Special items",
+              "fieldType": "MULTI_SELECT",
+              "required": true,
+              "options": [
+                "Barong or formal wear",
+                "Pleated",
+                "Uniforms",
+                "None"
+              ]
+            }
+          ]
+        },
+        {
+          "name": "Comforter / Blanket Wash",
+          "unit": "piece",
+          "pricingModel": "PER_UNIT",
+          "price": 250,
+          "questions": [
+            {
+              "label": "How many pieces?",
+              "fieldType": "NUMBER",
+              "required": true,
+              "minValue": 1,
+              "maxValue": 10,
+              "setsPrice": true
+            },
+            {
+              "label": "Size",
+              "fieldType": "SELECT",
+              "required": true,
+              "options": [
+                "Single",
+                "Double or Queen",
+                "King"
+              ]
+            }
+          ]
+        },
+        {
+          "name": "Bedsheets / Curtains Wash",
+          "unit": "set",
+          "pricingModel": "PER_UNIT",
+          "price": 300,
+          "questions": [
+            {
+              "label": "How many sets?",
+              "fieldType": "NUMBER",
+              "required": true,
+              "minValue": 1,
+              "maxValue": 10,
+              "setsPrice": true
+            },
+            {
+              "label": "Take down and re-hang curtains?",
+              "fieldType": "SELECT",
+              "required": true,
+              "options": [
+                "Yes",
+                "No"
+              ]
+            }
+          ]
+        },
+        {
+          "name": "Hand-wash Delicates",
+          "unit": "basket",
+          "pricingModel": "PER_UNIT",
+          "price": 300,
+          "questions": [
+            {
+              "label": "How many baskets?",
+              "fieldType": "NUMBER",
+              "required": true,
+              "minValue": 1,
+              "maxValue": 5,
+              "setsPrice": true
+            },
+            {
+              "label": "Items",
+              "fieldType": "MULTI_SELECT",
+              "required": true,
+              "options": [
+                "Silk",
+                "Wool",
+                "Lingerie",
+                "Embroidered",
+                "Other"
+              ]
+            }
+          ]
+        },
+        {
+          "name": "Wash & Iron",
+          "unit": "basket",
+          "pricingModel": "PER_UNIT",
+          "price": 350,
+          "replaces": "Wash & Iron",
+          "questions": [
+            {
+              "label": "How many baskets?",
+              "helpText": "One basket is about 6–7 kg.",
+              "fieldType": "NUMBER",
+              "required": true,
+              "minValue": 1,
+              "maxValue": 10,
+              "setsPrice": true
+            },
+            {
+              "label": "Special items",
+              "fieldType": "MULTI_SELECT",
+              "required": true,
+              "options": [
+                "Barong or formal wear",
+                "Pleated",
+                "Uniforms",
+                "None"
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
