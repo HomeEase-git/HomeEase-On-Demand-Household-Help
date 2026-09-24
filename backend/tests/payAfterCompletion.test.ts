@@ -17,6 +17,7 @@ import {
   settleCashBooking,
   createCompletionInvoice,
   finalizePaidBooking,
+  settleWorkerEarnings,
 } from '@services/paymentLifecycleService';
 import { releaseDebtHold } from '@services/debtLedgerService';
 import { createTestUser, deleteTestUser, deleteTestBooking } from './helpers';
@@ -236,6 +237,58 @@ describe('Pay-after-completion payment lifecycle', () => {
 
     const workerProfile = await prisma.workerProfile.findUniqueOrThrow({ where: { id: workerProfileId } });
     expect(workerProfile.commissionOwed).toBeCloseTo(5000 - payment.workerPayout, 2);
+  });
+
+  it('GCASH: a worker with no payout account has the payout held, not dropped, until they add one', async () => {
+    await prisma.workerProfile.update({
+      where: { id: workerProfileId },
+      data: { payoutMethod: null, payoutAccountNumber: null, commissionOwed: 50 },
+    });
+    try {
+      const booking = await seedPendingCompletion('GCASH', 1000);
+      (createInvoice as jest.Mock).mockResolvedValueOnce({
+        id: 'inv_pac_held',
+        status: 'PENDING',
+        invoiceUrl: 'https://checkout.xendit.co/inv_pac_held',
+      });
+      const { paymentId } = expectInvoice(await createCompletionInvoice(booking.id));
+
+      await finalizePaidBooking(paymentId, 'ewc_pac_held', 1000, new Date());
+
+      // Booking still completes, but the worker side stays unsettled and the
+      // debt netting is rolled back with it.
+      expect((await prisma.booking.findUniqueOrThrow({ where: { id: booking.id } })).status).toBe('COMPLETED');
+      let payment = await prisma.payment.findUniqueOrThrow({ where: { id: paymentId } });
+      expect(payment.workerSettledAt).toBeNull();
+      expect(await prisma.payout.findUnique({ where: { paymentId } })).toBeNull();
+      expect((await prisma.workerProfile.findUniqueOrThrow({ where: { id: workerProfileId } })).commissionOwed).toBeCloseTo(50, 2);
+
+      // A sweep retry doesn't re-flag or re-notify.
+      await settleWorkerEarnings(paymentId);
+      const heldNotices = await prisma.notification.count({
+        where: { userId: workerId, relatedId: booking.id, title: 'Add a payout account to get paid' },
+      });
+      expect(heldNotices).toBe(1);
+
+      // Once the worker adds an account, the next settle pays out (net of dues).
+      await prisma.workerProfile.update({
+        where: { id: workerProfileId },
+        data: { payoutMethod: 'GCASH', payoutAccountNumber: '09171234567' },
+      });
+      await settleWorkerEarnings(paymentId);
+
+      payment = await prisma.payment.findUniqueOrThrow({ where: { id: paymentId } });
+      expect(payment.workerSettledAt).not.toBeNull();
+      const payout = await prisma.payout.findUniqueOrThrow({ where: { paymentId } });
+      expect(payout.amount).toBeCloseTo(payment.workerPayout - 50, 2);
+      expect(schedulePayout).toHaveBeenCalledWith(payout.id);
+    } finally {
+      await prisma.auditLog.deleteMany({ where: { action: 'PAYOUT_BLOCKED_NO_METHOD', metadata: { path: ['workerId'], equals: workerId } } });
+      await prisma.workerProfile.update({
+        where: { id: workerProfileId },
+        data: { payoutMethod: 'GCASH', payoutAccountName: 'Test Worker', payoutAccountNumber: '09171234567' },
+      });
+    }
   });
 
   it('finalizePaidBooking is idempotent (a replayed webhook does not double-pay)', async () => {

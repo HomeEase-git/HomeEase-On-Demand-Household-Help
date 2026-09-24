@@ -350,7 +350,11 @@ export const getWorkerById = async (req: Request, res: Response) => {
 
     const recentBookings = await prisma.booking.findMany({
       where: { workerId: id },
-      include: { client: { select: { fullName: true } }, serviceTask: { select: { name: true } } },
+      include: {
+        client: { select: { fullName: true } },
+        serviceTask: { select: { name: true } },
+        payment: { select: { status: true, workerPayout: true } },
+      },
       orderBy: { createdAt: 'desc' },
       take: 10,
     });
@@ -401,7 +405,7 @@ export const getWorkerById = async (req: Request, res: Response) => {
           id: formatDisplayId(b.id),
           bookingId: b.id,
           client: b.client.fullName,
-          service: b.serviceTask?.name ?? '—',
+          service: b.serviceTask?.name ?? b.serviceType ?? '—',
           date: b.scheduledDate
             ? b.scheduledDate.toLocaleDateString('en-US', {
                 month: 'short',
@@ -413,7 +417,14 @@ export const getWorkerById = async (req: Request, res: Response) => {
                 day: 'numeric',
                 year: 'numeric',
               }),
-          earnings: (b.finalPrice ?? b.estimatedPrice) != null ? formatPeso(b.finalPrice ?? b.estimatedPrice) : '—',
+          // The worker's actual take (after commission/withholding) once paid;
+          // before that only the job price is known, so it's flagged as an estimate.
+          earnings:
+            b.payment?.status === 'COMPLETED'
+              ? formatPeso(b.payment.workerPayout)
+              : (b.finalPrice ?? b.estimatedPrice) != null
+                ? `${formatPeso(b.finalPrice ?? b.estimatedPrice)} (est.)`
+                : '—',
           status: b.status,
         })),
       },
