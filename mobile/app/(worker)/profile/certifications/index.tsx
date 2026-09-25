@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
-import { View, Text, ScrollView, Pressable, ActivityIndicator, Linking } from "react-native";
+import { View, Text, ScrollView, Pressable, Linking } from "react-native";
+import { ScreenSkeleton } from "../../../../components/feedback/ScreenSkeleton";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
@@ -87,10 +88,7 @@ export default function MyDocumentsScreen() {
     return (
       <SafeAreaView className="flex-1 bg-white">
         <ScreenHeader title="My Documents" showBack />
-        <View className="flex-1 items-center justify-center">
-          <ActivityIndicator color={colors.accent.DEFAULT} />
-          <Text className="text-text-secondary mt-3">Loading documents...</Text>
-        </View>
+        <ScreenSkeleton />
       </SafeAreaView>
     );
   }

@@ -30,7 +30,7 @@ export const ErrorBanner: React.FC<Props> = ({ message, onDismiss }) => {
       />
       <Text className="text-error text-sm flex-1 ml-2">{message}</Text>
       {onDismiss && (
-        <Pressable onPress={onDismiss} className="ml-2 p-0.5">
+        <Pressable accessibilityRole="button" accessibilityLabel="Dismiss" onPress={onDismiss} className="ml-2 p-0.5">
           <Ionicons name="close" size={16} color={colors.error} />
         </Pressable>
       )}

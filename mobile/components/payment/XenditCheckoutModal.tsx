@@ -61,7 +61,7 @@ export default function XenditCheckoutModal({
             borderBottomColor: colors.divider,
           }}
         >
-          <Pressable onPress={onCancel} hitSlop={10}>
+          <Pressable accessibilityRole="button" accessibilityLabel="Close" onPress={onCancel} hitSlop={10}>
             <Ionicons name="close" size={24} color={colors.text.primary} />
           </Pressable>
         </View>

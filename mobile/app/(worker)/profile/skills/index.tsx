@@ -516,7 +516,7 @@ export default function SkillsScreen() {
             <View className="bg-white rounded-t-3xl p-6 pb-8">
               <View className="flex-row justify-between items-center mb-6">
                 <Text className="text-text-primary text-xl font-bold">{priceModalEntry?.task.name}</Text>
-                <Pressable onPress={closePriceModal}>
+                <Pressable accessibilityRole="button" accessibilityLabel="Close" onPress={closePriceModal}>
                   <Ionicons name="close" size={24} color={colors.text.primary} />
                 </Pressable>
               </View>
@@ -554,7 +554,7 @@ export default function SkillsScreen() {
                             />
                           </View>
                           {tierRows.length > 1 && (
-                            <Pressable onPress={() => removeTierRow(index)} className="mb-3 p-2">
+                            <Pressable accessibilityRole="button" accessibilityLabel="Remove price step" onPress={() => removeTierRow(index)} className="mb-3 p-2">
                               <Ionicons name="trash-outline" size={18} color={colors.error} />
                             </Pressable>
                           )}

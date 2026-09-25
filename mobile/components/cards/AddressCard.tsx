@@ -51,10 +51,10 @@ export const AddressCard: React.FC<Props> = ({
           </View>
           <Text className="text-text-secondary text-sm mt-1">{address.address}</Text>
         </View>
-        <Pressable onPress={onEdit} className="p-2">
+        <Pressable accessibilityRole="button" accessibilityLabel="Edit address" onPress={onEdit} className="p-2">
           <Ionicons name="pencil-outline" size={20} color={colors.text.muted} />
         </Pressable>
-        <Pressable onPress={handleDelete} className="p-2">
+        <Pressable accessibilityRole="button" accessibilityLabel="Delete address" onPress={handleDelete} className="p-2">
           <Ionicons name="trash-outline" size={20} color={colors.error} />
         </Pressable>
       </View>

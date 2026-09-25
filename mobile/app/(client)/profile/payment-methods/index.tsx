@@ -114,7 +114,7 @@ export default function PaymentMethodsScreen() {
           )}
         />
       )}
-      <Pressable
+      <Pressable accessibilityRole="button" accessibilityLabel="Add payment method"
         className="absolute bottom-6 right-6 w-14 h-14 bg-accent rounded-full items-center justify-center"
         style={cardShadow}
         onPress={() => router.push("/(client)/profile/payment-methods/new")}

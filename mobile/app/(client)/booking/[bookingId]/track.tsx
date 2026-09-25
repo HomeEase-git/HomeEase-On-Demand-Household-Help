@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { View, Text, Image, Pressable, Linking } from "react-native";
+import { View, Text, Pressable, Linking } from "react-native";
+import { RemoteImage } from "../../../../components/ui/RemoteImage";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { AppIcon as Ionicons } from "../../../../components/icons/AppIcon";
 import { useFocusEffect, useRouter, useLocalSearchParams } from "expo-router";
@@ -239,7 +240,7 @@ export default function TrackBookingScreen() {
         <View className="bg-card rounded-2xl p-4 mt-6 flex-row items-center">
           <View className="w-12 h-12 bg-card-dark rounded-full items-center justify-center mr-3 overflow-hidden">
             {booking.workerAvatar ? (
-              <Image
+              <RemoteImage
                 source={{ uri: booking.workerAvatar }}
                 style={{ width: 48, height: 48 }}
                 resizeMode="cover"
@@ -267,7 +268,7 @@ export default function TrackBookingScreen() {
               {booking.status}
             </Text>
           </View>
-          <Pressable
+          <Pressable accessibilityRole="button" accessibilityLabel="Message"
             onPress={() => {
               if (!booking.workerId) {
                 alertModal.info("Unavailable", "This worker cannot be messaged yet.");
@@ -279,7 +280,7 @@ export default function TrackBookingScreen() {
           >
             <Ionicons name="chatbubble" size={20} color={colors.white} />
           </Pressable>
-          <Pressable
+          <Pressable accessibilityRole="button" accessibilityLabel="Call"
             onPress={() => {
               if (!booking.workerPhone) {
                 alertModal.info("No phone number", "This worker has no phone number on file.");

@@ -1,5 +1,6 @@
 import React, { useCallback, useState } from "react";
-import { View, Text, Image, ScrollView, Linking } from "react-native";
+import { View, Text, ScrollView, Linking } from "react-native";
+import { RemoteImage } from "../../../components/ui/RemoteImage";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import ScreenHeader from "../../../components/ui/ScreenHeader";
@@ -169,7 +170,7 @@ export default function RecordDetailScreen() {
             <Text className="text-text-primary font-bold mb-2">
               Completion Photo
             </Text>
-            <Image
+            <RemoteImage
               source={{ uri: record.completionPhotoUrl }}
               style={{ width: "100%", height: 180, borderRadius: 16 }}
               resizeMode="cover"

@@ -1,5 +1,6 @@
 import React from "react";
-import { View, Text, Image, Pressable } from "react-native";
+import { View, Text, Pressable } from "react-native";
+import { RemoteImage } from "../ui/RemoteImage";
 import { AppIcon as Ionicons } from "../icons/AppIcon";
 import { colors } from "../../constants";
 
@@ -19,7 +20,7 @@ export const BookingWorkerCard: React.FC<Props> = ({ name, avatarUrl, verified, 
       <View className="flex-row items-center">
         <View className="w-12 h-12 rounded-full bg-accent/20 items-center justify-center overflow-hidden">
           {avatarUrl ? (
-            <Image source={{ uri: avatarUrl }} style={{ width: 48, height: 48 }} resizeMode="cover" />
+            <RemoteImage source={{ uri: avatarUrl }} style={{ width: 48, height: 48 }} resizeMode="cover" />
           ) : (
             <Ionicons name="person" size={24} color={colors.accent.DEFAULT} />
           )}

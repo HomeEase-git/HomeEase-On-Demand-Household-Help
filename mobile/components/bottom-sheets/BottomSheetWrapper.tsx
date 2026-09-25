@@ -118,7 +118,7 @@ const BottomSheetWrapper: React.FC<Props> = ({
             {title && (
               <View className="flex-row items-center justify-between mb-4">
                 <Text className="text-text-primary font-bold text-lg">{title}</Text>
-                <Pressable
+                <Pressable accessibilityRole="button" accessibilityLabel="Close"
                   className="w-8 h-8 rounded-full bg-card-light items-center justify-center"
                   hitSlop={8}
                   onPress={close}

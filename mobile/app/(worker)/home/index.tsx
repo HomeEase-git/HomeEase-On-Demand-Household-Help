@@ -111,7 +111,7 @@ export default function WorkerHomeScreen() {
       >
         <View className="flex-row items-center justify-between px-4 pt-2 pb-2 bg-white z-10">
           <Text className="text-text-primary text-xl font-bold">HomeEase</Text>
-          <Pressable
+          <Pressable accessibilityRole="button" accessibilityLabel="Notifications"
             className="p-2"
             onPress={() => router.push("/(worker)/inbox")}
           >

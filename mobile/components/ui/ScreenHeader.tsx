@@ -8,6 +8,8 @@ type Props = {
   showBack?: boolean;
   rightIcon?: keyof typeof Ionicons.glyphMap;
   onRightPress?: () => void;
+  /** What the right-hand icon button does, for screen readers. */
+  rightLabel?: string;
 };
 
 export const ScreenHeader: React.FC<Props> = ({
@@ -15,6 +17,7 @@ export const ScreenHeader: React.FC<Props> = ({
   showBack = true,
   rightIcon,
   onRightPress,
+  rightLabel,
 }) => {
   const router = useRouter();
 
@@ -24,6 +27,8 @@ export const ScreenHeader: React.FC<Props> = ({
         <Pressable
           className="w-10 h-10 rounded-full items-center justify-center mr-2"
           onPress={() => router.back()}
+          accessibilityRole="button"
+          accessibilityLabel="Go back"
         >
           <Ionicons name="chevron-back" size={22} color={colors.text.primary} />
         </Pressable>
@@ -37,6 +42,8 @@ export const ScreenHeader: React.FC<Props> = ({
         <Pressable
           className="w-10 h-10 rounded-full items-center justify-center ml-2"
           onPress={onRightPress}
+          accessibilityRole="button"
+          accessibilityLabel={rightLabel}
         >
           <Ionicons name={rightIcon} size={22} color={colors.text.primary} />
         </Pressable>

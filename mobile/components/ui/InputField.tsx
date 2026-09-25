@@ -96,7 +96,12 @@ export const InputField = forwardRef<TextInput, Props>(
             importantForAutofill="no"
           />
           {secureTextEntry && (
-            <Pressable onPress={() => setIsSecure((prev) => !prev)}>
+            <Pressable
+              onPress={() => setIsSecure((prev) => !prev)}
+              accessibilityRole="button"
+              accessibilityLabel={isSecure ? "Show password" : "Hide password"}
+              hitSlop={8}
+            >
               <Ionicons
                 name={isSecure ? "eye-off-outline" : "eye-outline"}
                 size={20}

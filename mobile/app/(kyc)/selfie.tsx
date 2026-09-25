@@ -161,7 +161,7 @@ export default function SelfieScreen() {
             paddingHorizontal: 32,
           }}
         >
-          <Pressable
+          <Pressable accessibilityRole="button" accessibilityLabel="Close camera"
             style={{
               width: 48,
               height: 48,

@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { View, Text, Image, ScrollView, Share } from "react-native";
+import { RemoteImage } from "../../../../components/ui/RemoteImage";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useFocusEffect, useRouter, useLocalSearchParams } from "expo-router";
 import { AppIcon as Ionicons } from "../../../../components/icons/AppIcon";
@@ -474,7 +475,7 @@ export default function JobDetailScreen() {
             <Text className="text-text-primary font-bold mb-2">
               Submitted Completion Photo
             </Text>
-            <Image
+            <RemoteImage
               source={{ uri: job.completionPhotoUrl }}
               style={{ width: "100%", height: 180, borderRadius: 16 }}
               resizeMode="cover"
