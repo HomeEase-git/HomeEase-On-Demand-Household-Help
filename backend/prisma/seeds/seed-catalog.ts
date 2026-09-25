@@ -46,6 +46,7 @@ const CATEGORY_DETAILS: Record<string, { description: string; icon: string }> = 
   "Pest Control": { description: "Termite, rodent and general pest treatment", icon: "bug-outline" },
   "Home Cleaning": { description: "Standard, deep and specialty home cleaning", icon: "sparkles-outline" },
   "Laundry & Ironing": { description: "Wash, fold and ironing priced by basket", icon: "shirt-outline" },
+  "Device Repair": { description: "Computer and laptop repair, software and networking", icon: "desktop-outline" },
 };
 
 async function main() {

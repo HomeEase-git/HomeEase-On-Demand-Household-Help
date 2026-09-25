@@ -3347,6 +3347,537 @@
           ]
         }
       ]
+    },
+    {
+      "name": "Device Repair",
+      "commonQuestions": [
+        {
+          "label": "Brand and model",
+          "helpText": "Usually on a sticker under the laptop or behind the PC.",
+          "fieldType": "TEXT",
+          "required": false
+        },
+        {
+          "label": "Is your data backed up?",
+          "helpText": "Some repairs can erase files. The technician can back up first if needed.",
+          "fieldType": "SELECT",
+          "required": true,
+          "options": [
+            "Yes",
+            "No",
+            "Not sure"
+          ]
+        }
+      ],
+      "jobs": [
+        {
+          "name": "Diagnosis / Checkup / Repair Attempt Fee",
+          "unit": "device",
+          "pricingModel": "PER_UNIT",
+          "price": 350,
+          "questions": [
+            {
+              "label": "How many devices?",
+              "fieldType": "NUMBER",
+              "required": true,
+              "minValue": 1,
+              "maxValue": 5,
+              "setsPrice": true
+            },
+            {
+              "label": "Device type",
+              "fieldType": "SELECT",
+              "required": true,
+              "options": [
+                "Laptop",
+                "Desktop PC",
+                "All-in-one PC",
+                "MacBook or iMac",
+                "Other"
+              ],
+              "usedForMatching": true
+            },
+            {
+              "label": "Problem",
+              "fieldType": "SELECT",
+              "required": true,
+              "options": [
+                "Won't turn on",
+                "Slow or freezing",
+                "Blue screen or crashing",
+                "No display",
+                "Overheating or loud fan",
+                "Battery or charging",
+                "Other"
+              ]
+            }
+          ]
+        },
+        {
+          "name": "Reformat & Reinstall OS",
+          "unit": "device",
+          "pricingModel": "PER_UNIT",
+          "price": 1000,
+          "questions": [
+            {
+              "label": "How many devices?",
+              "fieldType": "NUMBER",
+              "required": true,
+              "minValue": 1,
+              "maxValue": 5,
+              "setsPrice": true
+            },
+            {
+              "label": "Device type",
+              "fieldType": "SELECT",
+              "required": true,
+              "options": [
+                "Laptop",
+                "Desktop PC",
+                "All-in-one PC",
+                "MacBook or iMac",
+                "Other"
+              ]
+            },
+            {
+              "label": "Operating system to install",
+              "fieldType": "SELECT",
+              "required": true,
+              "options": [
+                "Windows 11",
+                "Windows 10",
+                "Linux",
+                "Same as now"
+              ]
+            },
+            {
+              "label": "Keep your files?",
+              "fieldType": "SELECT",
+              "required": true,
+              "options": [
+                "Yes, back up and restore my files",
+                "No, erase everything"
+              ]
+            },
+            {
+              "label": "Do you have a valid Windows license?",
+              "helpText": "Most laptops that came with Windows have one built in.",
+              "fieldType": "SELECT",
+              "required": true,
+              "options": [
+                "Yes",
+                "No"
+              ]
+            }
+          ]
+        },
+        {
+          "name": "Software Installation",
+          "unit": "device",
+          "pricingModel": "PER_UNIT",
+          "price": 500,
+          "questions": [
+            {
+              "label": "How many devices?",
+              "fieldType": "NUMBER",
+              "required": true,
+              "minValue": 1,
+              "maxValue": 5,
+              "setsPrice": true
+            },
+            {
+              "label": "Device type",
+              "fieldType": "SELECT",
+              "required": true,
+              "options": [
+                "Laptop",
+                "Desktop PC",
+                "All-in-one PC",
+                "MacBook or iMac",
+                "Other"
+              ]
+            },
+            {
+              "label": "Software to install",
+              "helpText": "e.g. Microsoft Office, Adobe Photoshop, printer drivers",
+              "fieldType": "TEXT",
+              "required": true
+            },
+            {
+              "label": "Do you have the installers and licenses?",
+              "fieldType": "SELECT",
+              "required": true,
+              "options": [
+                "Yes",
+                "No"
+              ]
+            }
+          ]
+        },
+        {
+          "name": "Virus Removal / Debloat",
+          "unit": "device",
+          "pricingModel": "PER_UNIT",
+          "price": 800,
+          "questions": [
+            {
+              "label": "How many devices?",
+              "fieldType": "NUMBER",
+              "required": true,
+              "minValue": 1,
+              "maxValue": 5,
+              "setsPrice": true
+            },
+            {
+              "label": "Device type",
+              "fieldType": "SELECT",
+              "required": true,
+              "options": [
+                "Laptop",
+                "Desktop PC",
+                "All-in-one PC",
+                "MacBook or iMac",
+                "Other"
+              ]
+            },
+            {
+              "label": "Symptoms",
+              "fieldType": "MULTI_SELECT",
+              "required": true,
+              "options": [
+                "Pop-ups or ads",
+                "Slow performance",
+                "Unknown programs",
+                "Browser redirects",
+                "Ransom message",
+                "Other"
+              ]
+            }
+          ]
+        },
+        {
+          "name": "Maintenance Cleaning",
+          "unit": "device",
+          "pricingModel": "PER_UNIT",
+          "price": 800,
+          "questions": [
+            {
+              "label": "How many devices?",
+              "fieldType": "NUMBER",
+              "required": true,
+              "minValue": 1,
+              "maxValue": 5,
+              "setsPrice": true
+            },
+            {
+              "label": "Device type",
+              "fieldType": "SELECT",
+              "required": true,
+              "options": [
+                "Laptop",
+                "Desktop PC",
+                "All-in-one PC",
+                "MacBook or iMac",
+                "Other"
+              ]
+            },
+            {
+              "label": "Last cleaned",
+              "fieldType": "SELECT",
+              "required": true,
+              "options": [
+                "Under 1 year",
+                "1–2 years",
+                "Over 2 years",
+                "Never"
+              ]
+            },
+            {
+              "label": "Replace thermal paste too?",
+              "helpText": "Helps with overheating on older devices.",
+              "fieldType": "SELECT",
+              "required": true,
+              "options": [
+                "Yes",
+                "No"
+              ]
+            }
+          ]
+        },
+        {
+          "name": "Parts Installation",
+          "unit": "part",
+          "pricingModel": "PER_UNIT",
+          "price": 800,
+          "questions": [
+            {
+              "label": "How many parts?",
+              "fieldType": "NUMBER",
+              "required": true,
+              "minValue": 1,
+              "maxValue": 5,
+              "setsPrice": true
+            },
+            {
+              "label": "Device type",
+              "fieldType": "SELECT",
+              "required": true,
+              "options": [
+                "Laptop",
+                "Desktop PC",
+                "All-in-one PC",
+                "MacBook or iMac",
+                "Other"
+              ]
+            },
+            {
+              "label": "Part type",
+              "fieldType": "MULTI_SELECT",
+              "required": true,
+              "options": [
+                "RAM",
+                "SSD or hard drive",
+                "Battery",
+                "Screen",
+                "Keyboard",
+                "Graphics card",
+                "Power supply",
+                "Other"
+              ]
+            },
+            {
+              "label": "Part already on hand?",
+              "helpText": "The client supplies the part for this job.",
+              "fieldType": "SELECT",
+              "required": true,
+              "options": [
+                "Yes",
+                "No"
+              ]
+            }
+          ]
+        },
+        {
+          "name": "PC Build / Rebuild",
+          "unit": "PC",
+          "pricingModel": "PER_UNIT",
+          "price": 2000,
+          "questions": [
+            {
+              "label": "How many PCs?",
+              "fieldType": "NUMBER",
+              "required": true,
+              "minValue": 1,
+              "maxValue": 3,
+              "setsPrice": true
+            },
+            {
+              "label": "Build type",
+              "fieldType": "SELECT",
+              "required": true,
+              "options": [
+                "New build from parts",
+                "Move to a new case",
+                "Upgrade existing PC"
+              ]
+            },
+            {
+              "label": "All parts on hand?",
+              "fieldType": "SELECT",
+              "required": true,
+              "options": [
+                "Yes",
+                "No"
+              ]
+            },
+            {
+              "label": "Parts list",
+              "fieldType": "TEXT",
+              "required": false
+            }
+          ]
+        },
+        {
+          "name": "Chassis / Hinge Repair",
+          "unit": "device",
+          "pricingModel": "PER_UNIT",
+          "price": 800,
+          "questions": [
+            {
+              "label": "How many devices?",
+              "fieldType": "NUMBER",
+              "required": true,
+              "minValue": 1,
+              "maxValue": 3,
+              "setsPrice": true
+            },
+            {
+              "label": "Device type",
+              "fieldType": "SELECT",
+              "required": true,
+              "options": [
+                "Laptop",
+                "All-in-one PC",
+                "Desktop PC",
+                "Other"
+              ]
+            },
+            {
+              "label": "Damage",
+              "fieldType": "SELECT",
+              "required": true,
+              "options": [
+                "Broken hinge",
+                "Cracked casing",
+                "Loose screen",
+                "Other"
+              ]
+            }
+          ]
+        },
+        {
+          "name": "Motherboard Level Repair",
+          "unit": "device",
+          "pricingModel": "PER_UNIT",
+          "price": 2500,
+          "questions": [
+            {
+              "label": "How many devices?",
+              "fieldType": "NUMBER",
+              "required": true,
+              "minValue": 1,
+              "maxValue": 3,
+              "setsPrice": true
+            },
+            {
+              "label": "Device type",
+              "fieldType": "SELECT",
+              "required": true,
+              "options": [
+                "Laptop",
+                "Desktop PC",
+                "All-in-one PC",
+                "MacBook or iMac",
+                "Other"
+              ]
+            },
+            {
+              "label": "Symptom",
+              "fieldType": "SELECT",
+              "required": true,
+              "options": [
+                "No power",
+                "Liquid damage",
+                "No display",
+                "Charging port",
+                "Other"
+              ]
+            },
+            {
+              "label": "Already diagnosed by a technician?",
+              "helpText": "If not, book the Diagnosis job first.",
+              "fieldType": "SELECT",
+              "required": true,
+              "options": [
+                "Yes",
+                "No"
+              ]
+            }
+          ]
+        },
+        {
+          "name": "Networking Setup",
+          "unit": "site",
+          "pricingModel": "FIXED",
+          "price": 9000,
+          "questions": [
+            {
+              "label": "Site type",
+              "fieldType": "SELECT",
+              "required": true,
+              "options": [
+                "Home",
+                "Small office",
+                "Other"
+              ]
+            },
+            {
+              "label": "Devices to connect",
+              "fieldType": "NUMBER",
+              "required": true,
+              "minValue": 1,
+              "maxValue": 100
+            },
+            {
+              "label": "What needs setting up",
+              "fieldType": "MULTI_SELECT",
+              "required": true,
+              "options": [
+                "Router and Wi-Fi",
+                "Network cabling",
+                "Network switch",
+                "Printer or file sharing",
+                "CCTV or NVR",
+                "Other"
+              ]
+            },
+            {
+              "label": "Floor area, approx. (sq.m.)",
+              "fieldType": "NUMBER",
+              "required": false,
+              "minValue": 10,
+              "maxValue": 5000
+            }
+          ]
+        },
+        {
+          "name": "Data Recovery Services",
+          "unit": "device",
+          "pricingModel": "PER_UNIT",
+          "price": 2000,
+          "questions": [
+            {
+              "label": "How many devices?",
+              "fieldType": "NUMBER",
+              "required": true,
+              "minValue": 1,
+              "maxValue": 3,
+              "setsPrice": true
+            },
+            {
+              "label": "Storage type",
+              "fieldType": "SELECT",
+              "required": true,
+              "options": [
+                "Laptop or PC drive",
+                "External drive",
+                "USB flash drive",
+                "Memory card",
+                "Phone",
+                "Other"
+              ]
+            },
+            {
+              "label": "What happened",
+              "fieldType": "SELECT",
+              "required": true,
+              "options": [
+                "Deleted files",
+                "Formatted drive",
+                "Drive not detected",
+                "Physical or water damage",
+                "Other"
+              ]
+            },
+            {
+              "label": "Most important files",
+              "helpText": "e.g. photos from 2024, work documents",
+              "fieldType": "TEXT",
+              "required": false
+            }
+          ]
+        }
+      ]
     }
   ]
 }
