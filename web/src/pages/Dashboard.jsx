@@ -173,14 +173,6 @@ export default function Dashboard() {
           </div>
         </SectionCard>
       </div>
-      <div className="cta-buttons">
-        <Link to="/verification" className="btn btn-primary">Approve Workers ({stats.pendingApprovals})</Link>
-        <Link to="/bookings" className="btn btn-success">View Bookings ({stats.activeBookings})</Link>
-        <Link to="/bookings/dispute" className="btn btn-danger">Resolve Disputes ({stats.openDisputes})</Link>
-        <Link to="/payments" className="btn btn-purple">Process Payments</Link>
-        <Link to="/reports" className="btn btn-orange">Check Reports</Link>
-        <Link to="/analytics" className="btn btn-outline">Analytics & Reports</Link>
-      </div>
     </div>
   )
 }

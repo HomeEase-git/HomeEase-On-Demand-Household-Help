@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import { Prisma } from '@prisma/client';
 import prisma from '@config/database';
+import { parseListSort } from '@utils/listSort';
 import { errorResponse } from '@utils/errorResponse';
 import { formatDisplayId, formatPeso } from '@utils/formatters';
 import { buildPaginationMeta, getPaginationParams } from '@utils/pagination';
@@ -74,6 +75,19 @@ function buildPaymentWhere(search: string, status?: string): Prisma.PaymentWhere
 export const listPayments = async (req: Request, res: Response) => {
   try {
     const { page, limit, skip } = getPaginationParams(req.query);
+    // Server-side so the order covers every page, not just the visible one.
+    const { orderBy } = parseListSort<Prisma.PaymentOrderByWithRelationInput>(
+      req.query,
+      {
+        date: (dir) => ({ createdAt: dir }),
+        client: (dir) => ({ booking: { client: { fullName: dir } } }),
+        worker: (dir) => ({ booking: { worker: { fullName: dir } } }),
+        clientPaid: (dir) => ({ totalAmount: dir }),
+        workerEarnings: (dir) => ({ workerPayout: dir }),
+        platformFee: (dir) => ({ commissionAmount: dir }),
+      },
+      { key: 'date', dir: 'desc' },
+    );
     const search = typeof req.query.search === 'string' ? req.query.search.trim() : '';
     const status = typeof req.query.status === 'string' ? req.query.status.trim() : 'all';
 
@@ -90,7 +104,7 @@ export const listPayments = async (req: Request, res: Response) => {
         where,
         skip,
         take: limit,
-        orderBy: { createdAt: 'desc' },
+        orderBy,
         include: paymentInclude,
       }),
       prisma.payment.aggregate({ where: completedWhere, _sum: { totalAmount: true, commissionAmount: true } }),

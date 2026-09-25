@@ -5,6 +5,7 @@ import SearchBar from '../components/common/SearchBar'
 import FilterTabs from '../components/common/FilterTabs'
 import SectionCard from '../components/common/SectionCard'
 import Pagination from '../components/common/Pagination'
+import SortableTh from '../components/common/SortableTh'
 import Badge from '../components/common/Badge'
 import LoadingState from '../components/common/LoadingState'
 import ErrorState from '../components/common/ErrorState'
@@ -19,6 +20,8 @@ export default function Workers() {
       fetchWorkers({
         page: params.page || 1,
         limit: 10,
+        sortBy: params.sortBy || '',
+        sortDir: params.sortDir || '',
         search: params.search || '',
         status: STATUS_MAP[params.statusTab] || 'all',
       }),
@@ -35,6 +38,7 @@ export default function Workers() {
     setSearch,
     setFilter,
     goToPage,
+    setSort,
   } = useListQuery(fetchFn, {
     initialParams: { page: 1, statusTab: 'All' },
   })
@@ -60,9 +64,9 @@ export default function Workers() {
                 <thead>
                   <tr>
                     <th>Worker ID</th>
-                    <th>Name</th>
+                    <SortableTh label="Name" sortKey="name" params={params} onSort={setSort} />
                     <th>Services</th>
-                    <th>Rating</th>
+                    <SortableTh label="Rating" sortKey="rating" params={params} onSort={setSort} firstDir="desc" />
                     <th>Status</th>
                     <th>Earnings</th>
                     <th>Actions</th>

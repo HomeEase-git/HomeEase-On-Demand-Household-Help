@@ -3,6 +3,7 @@ import { Link, useNavigate } from 'react-router-dom'
 import { useAuth } from '../../context/AuthContext'
 import { useAdminNotifications } from '../../hooks/useAdminNotifications'
 import LogoutConfirmModal from '../common/LogoutConfirmModal'
+import { OPEN_COMMAND_PALETTE_EVENT } from './CommandPalette'
 
 function getGreeting() {
   const hour = new Date().getHours()
@@ -75,6 +76,16 @@ export default function Header({ onMenuClick }) {
           </div>
         </div>
         <div className="header-right">
+          <button
+            type="button"
+            className="header-search"
+            onClick={() => window.dispatchEvent(new Event(OPEN_COMMAND_PALETTE_EVENT))}
+            aria-label="Search pages (Ctrl+K)"
+          >
+            <i className="fas fa-magnifying-glass" aria-hidden="true" />
+            <span className="header-search__text">Search pages</span>
+            <kbd className="header-search__kbd">Ctrl K</kbd>
+          </button>
           <div className="header-dropdown-wrap" ref={notifRef}>
             <button
               type="button"

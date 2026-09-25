@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import { Prisma } from '@prisma/client';
 import prisma from '@config/database';
+import { parseListSort } from '@utils/listSort';
 import { errorResponse } from '@utils/errorResponse';
 import { formatDisplayId, formatPeso } from '@utils/formatters';
 import { buildPaginationMeta, getPaginationParams } from '@utils/pagination';
@@ -85,6 +86,17 @@ function formatBooking(record: {
 export const listBookings = async (req: Request, res: Response) => {
   try {
     const { page, limit, skip } = getPaginationParams(req.query);
+    // Server-side so the order covers every page, not just the visible one.
+    const { orderBy } = parseListSort<Prisma.BookingOrderByWithRelationInput>(
+      req.query,
+      {
+        created: (dir) => ({ createdAt: dir }),
+        date: (dir) => ({ scheduledDate: dir }),
+        client: (dir) => ({ client: { fullName: dir } }),
+        worker: (dir) => ({ worker: { fullName: dir } }),
+      },
+      { key: 'created', dir: 'desc' },
+    );
     const search = typeof req.query.search === 'string' ? req.query.search.trim() : '';
     const status = typeof req.query.status === 'string' ? req.query.status.toLowerCase() : 'all';
     const dateFrom = typeof req.query.dateFrom === 'string' ? req.query.dateFrom : undefined;
@@ -98,7 +110,7 @@ export const listBookings = async (req: Request, res: Response) => {
         where,
         skip,
         take: limit,
-        orderBy: { createdAt: 'desc' },
+        orderBy,
         include: {
           client: { select: { fullName: true } },
           worker: { select: { fullName: true } },
