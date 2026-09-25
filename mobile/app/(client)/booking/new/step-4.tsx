@@ -7,7 +7,7 @@ import { AppIcon as Ionicons } from "../../../../components/icons/AppIcon";
 import { colors } from "../../../../constants";
 import ScreenHeader from "../../../../components/ui/ScreenHeader";
 import StepperHorizontal from "../../../../components/steppers/StepperHorizontal";
-import PrimaryButton from "../../../../components/ui/PrimaryButton";
+import { BookingFooterBar } from "../../../../components/booking4step/BookingFooterBar";
 import OutlinedButton from "../../../../components/ui/OutlinedButton";
 import AddOnsToggleGroup from "../../../../components/booking4step/AddOnsToggleGroup";
 import PackageSelector from "../../../../components/booking4step/PackageSelector";
@@ -462,22 +462,22 @@ export default function BookingStep4Screen() {
           </>
         )}
 
-        <View className="mt-8">
-          <PrimaryButton
-            label={isMultiDay ? `Submit ${dayCount}-day booking request` : "Submit booking request"}
-            fullWidth
-            disabled={
-              !paymentMethod ||
-              loading ||
-              !validation.ok ||
-              slotNoLongerAvailable ||
-              (requiresAccountValue && !accountValue.trim())
-            }
-            loading={loading}
-            onPress={handleSubmit}
-          />
-        </View>
       </KeyboardAwareScrollView>
+      <BookingFooterBar
+        estimate={draft.selectedTaskPricingModel === "CUSTOM_QUOTE" ? null : priceEstimate}
+        noPriceText="Quote after inspection"
+        label={isMultiDay ? `Per day · ${dayCount} days` : undefined}
+        buttonLabel="Submit request"
+        disabled={
+          !paymentMethod ||
+          loading ||
+          !validation.ok ||
+          slotNoLongerAvailable ||
+          (requiresAccountValue && !accountValue.trim())
+        }
+        loading={loading}
+        onPress={handleSubmit}
+      />
 
       <GenericConfirmationModal
         visible={confirmVisible}

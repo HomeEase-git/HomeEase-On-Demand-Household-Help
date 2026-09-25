@@ -6,7 +6,8 @@ import { AppIcon as Ionicons } from "../../../../components/icons/AppIcon";
 import ScreenHeader from "../../../../components/ui/ScreenHeader";
 import Avatar from "../../../../components/ui/Avatar";
 import StepperHorizontal from "../../../../components/steppers/StepperHorizontal";
-import PrimaryButton from "../../../../components/ui/PrimaryButton";
+import { BookingFooterBar } from "../../../../components/booking4step/BookingFooterBar";
+import { useDraftPriceEstimate } from "../../../../hooks/useBookingPriceEstimate";
 import DiscoveredWorkerCard from "../../../../components/booking4step/DiscoveredWorkerCard";
 import SurpriseMeButton from "../../../../components/booking4step/SurpriseMeButton";
 import HoldTimerBadge from "../../../../components/booking4step/HoldTimerBadge";
@@ -21,6 +22,8 @@ const BOOKING_STEPS = ["Scope", "Schedule", "Who", "Confirm"];
 
 export default function BookingStep3Screen() {
   const router = useRouter();
+  // Same estimate as Step 4, from what Step 1 saved (null for custom-quote jobs).
+  const draftEstimate = useDraftPriceEstimate();
   const alertModal = useAlertModal();
   const draft = useBookingStore((s) => s.draft);
   const setDraft = useBookingStore((s) => s.setDraft);
@@ -102,10 +105,13 @@ export default function BookingStep3Screen() {
             </View>
             <Ionicons name="lock-closed" size={18} color={colors.text.muted} />
           </View>
-          <View className="mt-8">
-            <PrimaryButton label="Next" fullWidth onPress={() => router.push("/(client)/booking/new/step-4")} />
-          </View>
         </ScrollView>
+        <BookingFooterBar
+          estimate={draftEstimate}
+          noPriceText="Quote after inspection"
+          buttonLabel="Next"
+          onPress={() => router.push("/(client)/booking/new/step-4")}
+        />
       </SafeAreaView>
     );
   }
@@ -165,10 +171,8 @@ export default function BookingStep3Screen() {
             />
           ))}
 
-        <View className="mt-4">
-          <PrimaryButton label="Next" fullWidth onPress={handleNext} />
-        </View>
       </ScrollView>
+      <BookingFooterBar estimate={draftEstimate} noPriceText="Quote after inspection" buttonLabel="Next" onPress={handleNext} />
     </SafeAreaView>
   );
 }

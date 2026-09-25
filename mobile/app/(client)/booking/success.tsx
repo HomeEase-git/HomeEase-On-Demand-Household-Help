@@ -33,6 +33,7 @@ export default function BookingSuccessScreen() {
   const updateBookingStatus = useBookingStore((s) => s.updateBookingStatus);
   const [scaleAnim] = useState(() => new Animated.Value(0));
   const [opacityAnim] = useState(() => new Animated.Value(0));
+  const [ringAnim] = useState(() => new Animated.Value(0));
 
   const [detail, setDetail] = useState<BookingDetail | null>(null);
   const [canCancel, setCanCancel] = useState(false);
@@ -40,14 +41,17 @@ export default function BookingSuccessScreen() {
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
-    Animated.timing(scaleAnim, {
-      toValue: 1,
-      duration: 600,
-      easing: Easing.out(Easing.cubic),
-      useNativeDriver: true,
-    }).start();
-    Animated.timing(opacityAnim, { toValue: 1, duration: 500, delay: 300, useNativeDriver: true }).start();
-  }, [scaleAnim, opacityAnim]);
+    // The check pops in with a little overshoot, then two soft rings ripple
+    // out behind it before the text fades in.
+    Animated.spring(scaleAnim, { toValue: 1, friction: 5, tension: 80, useNativeDriver: true }).start();
+    Animated.sequence([
+      Animated.delay(250),
+      Animated.timing(ringAnim, { toValue: 1, duration: 900, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
+      Animated.timing(ringAnim, { toValue: 0, duration: 0, useNativeDriver: true }),
+      Animated.timing(ringAnim, { toValue: 1, duration: 900, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
+    ]).start();
+    Animated.timing(opacityAnim, { toValue: 1, duration: 500, delay: 350, useNativeDriver: true }).start();
+  }, [scaleAnim, opacityAnim, ringAnim]);
 
   // Status tracker: poll booking detail every 5s until it reaches a terminal
   // status. This also resolves the real worker (id + name), which the
@@ -146,14 +150,27 @@ export default function BookingSuccessScreen() {
         className="flex-1"
         contentContainerStyle={{ paddingHorizontal: 24, paddingVertical: 40, alignItems: "center" }}
       >
-        <Animated.View style={{ transform: [{ scale: scaleAnim }], marginBottom: 32 }}>
-          <View className="w-40 h-40 bg-success/20 rounded-full items-center justify-center">
-            <Ionicons name="checkmark-circle" size={100} color={colors.success} />
-          </View>
-        </Animated.View>
+        <View style={{ marginBottom: 32, alignItems: "center", justifyContent: "center" }}>
+          <Animated.View
+            pointerEvents="none"
+            className="absolute w-40 h-40 rounded-full border-4 border-success"
+            style={{
+              opacity: ringAnim.interpolate({ inputRange: [0, 1], outputRange: [0.5, 0] }),
+              transform: [{ scale: ringAnim.interpolate({ inputRange: [0, 1], outputRange: [1, 1.6] }) }],
+            }}
+          />
+          <Animated.View style={{ transform: [{ scale: scaleAnim }] }}>
+            <View className="w-40 h-40 bg-success/20 rounded-full items-center justify-center">
+              <Ionicons name="checkmark-circle" size={100} color={colors.success} />
+            </View>
+          </Animated.View>
+        </View>
 
         <Animated.View style={{ opacity: opacityAnim, width: "100%" }}>
-          <Text className="text-text-primary text-3xl font-bold text-center mb-2">Booking Confirmed!</Text>
+          <Text className="text-text-primary text-3xl font-bold text-center mb-2">
+            {/* Only "confirmed" once a pro has actually accepted; until then it's a request. */}
+            {detail?.status === "ACCEPTED" ? "Booking confirmed!" : "Request sent!"}
+          </Text>
           <Text className="text-text-secondary text-center text-base mb-8">
             {selectedBooking?.groupTotalDays
               ? `Your ${selectedBooking.groupTotalDays}-day request is in. This is Day 1; see My Bookings for the full schedule.`
