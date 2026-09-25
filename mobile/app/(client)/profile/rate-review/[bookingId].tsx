@@ -224,7 +224,7 @@ export default function RateBookingScreen() {
               ) : (
                 <>
                   <Ionicons name="camera-outline" size={20} color={colors.text.muted} />
-                  <Text className="text-text-secondary text-[10px] mt-1">Add photo</Text>
+                  <Text className="text-text-secondary text-xs mt-1">Add photo</Text>
                 </>
               )}
             </Pressable>

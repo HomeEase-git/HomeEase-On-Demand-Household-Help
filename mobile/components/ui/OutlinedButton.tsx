@@ -1,5 +1,6 @@
 import React from "react";
-import { Pressable, Text } from "react-native";
+import { Text } from "react-native";
+import { PressableScale } from "./PressableScale";
 
 type Props = {
   label: string;
@@ -15,7 +16,8 @@ export const OutlinedButton: React.FC<Props> = ({
   fullWidth,
 }) => {
   return (
-    <Pressable
+    <PressableScale
+      inert={!!(disabled)}
       className={`bg-white border-2 border-brand rounded-xl py-4 px-6 items-center justify-center ${
         fullWidth ? "w-full" : ""
       } ${disabled ? "opacity-50" : ""}`}
@@ -42,7 +44,7 @@ export const OutlinedButton: React.FC<Props> = ({
       <Text className="text-brand font-semibold text-center" numberOfLines={1}>
         {label}
       </Text>
-    </Pressable>
+    </PressableScale>
   );
 };
 

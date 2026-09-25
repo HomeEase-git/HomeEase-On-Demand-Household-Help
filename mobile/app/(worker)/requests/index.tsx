@@ -11,6 +11,7 @@ import { summarizeFlatRoomTypes } from "../../../utils/bookingPriceEstimate";
 import { ROOM_TYPE_LABELS } from "../../../types/booking4step.types";
 import { usePolling } from "../../../hooks/usePolling";
 import { useTabRefresh } from "../../../hooks/useTabRefresh";
+import { usePullToRefresh } from "../../../hooks/usePullToRefresh";
 
 const TABS = ["Pending", "Accepted"] as const;
 // A real-time socket layer already pushes updates here — this poll is a
@@ -56,6 +57,8 @@ export default function RequestsScreen() {
   usePolling(() => load(true), POLL_INTERVAL_MS, { paused: !focused });
 
   useTabRefresh("worker:requests", load);
+  // Pull refreshes silently so the list stays put under the spinner.
+  const refreshControl = usePullToRefresh(useCallback(() => load(true), [load]));
 
   const filtered = jobs.filter((j) => j.status === tab);
 
@@ -121,6 +124,7 @@ export default function RequestsScreen() {
       ) : (
         <FlatList
           data={filtered}
+          refreshControl={refreshControl}
           keyExtractor={(item) => item.id}
           contentContainerStyle={{ padding: 16 }}
           renderItem={renderItem}

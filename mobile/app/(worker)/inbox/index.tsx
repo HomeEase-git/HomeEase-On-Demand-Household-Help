@@ -12,6 +12,7 @@ import { formatDate } from "../../../utils/formatDate";
 import * as api from "../../../services/api";
 import { useAlertModal } from "../../../contexts/AlertModalContext";
 import { useTabRefresh } from "../../../hooks/useTabRefresh";
+import { usePullToRefresh } from "../../../hooks/usePullToRefresh";
 
 export default function WorkerInboxScreen() {
   const router = useRouter();
@@ -48,10 +49,14 @@ export default function WorkerInboxScreen() {
     fetchNotifications();
   }, [fetchNotifications]);
 
-  useTabRefresh("worker:inbox", useCallback(() => {
-    loadConversations();
-    fetchNotifications();
-  }, [loadConversations, fetchNotifications]));
+  const refreshInbox = useCallback(
+    async () => {
+      await Promise.all([loadConversations(), fetchNotifications()]);
+    },
+    [loadConversations, fetchNotifications],
+  );
+  useTabRefresh("worker:inbox", refreshInbox);
+  const refreshControl = usePullToRefresh(refreshInbox);
 
   return (
     <SafeAreaView className="flex-1 bg-white">
@@ -113,6 +118,7 @@ export default function WorkerInboxScreen() {
           </View>
         ) : conversations.length > 0 ? (
           <FlatList
+            refreshControl={refreshControl}
             data={[...conversations].sort((a, b) =>
               (b.lastMessageTime ?? "").localeCompare(a.lastMessageTime ?? ""),
             )}
@@ -147,6 +153,7 @@ export default function WorkerInboxScreen() {
         </View>
       ) : notifications.length > 0 ? (
         <FlatList
+          refreshControl={refreshControl}
           data={notifications}
           keyExtractor={(item) => item.id}
           contentContainerStyle={{ padding: 16 }}

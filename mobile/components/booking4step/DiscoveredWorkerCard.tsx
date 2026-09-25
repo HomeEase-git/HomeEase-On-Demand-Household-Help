@@ -56,7 +56,7 @@ export default function DiscoveredWorkerCard({ worker, selected, onSelect, unitL
                 if (!style) return null;
                 return (
                   <View key={badge} className={`px-2 py-0.5 rounded-full ${style.bg}`}>
-                    <Text className={`text-[10px] font-semibold ${style.text}`}>{style.label}</Text>
+                    <Text className={`text-xs font-semibold ${style.text}`}>{style.label}</Text>
                   </View>
                 );
               })}

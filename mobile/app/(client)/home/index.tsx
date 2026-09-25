@@ -25,6 +25,7 @@ import { Skeleton } from "../../../components/ui/Skeleton";
 import type { BottomSheetHandle } from "../../../components/bottom-sheets/BottomSheetWrapper";
 import { colors } from "../../../constants";
 import { useTabRefresh } from "../../../hooks/useTabRefresh";
+import { usePullToRefresh } from "../../../hooks/usePullToRefresh";
 import { usePushNotificationPrompt } from "../../../hooks/usePushNotificationPrompt";
 
 const DEFAULT_FILTERS: SearchFilters = { sort: "rating", availableOnly: false };
@@ -150,10 +151,12 @@ export default function ClientHomeScreen() {
   }, [loadHomeData]);
 
   useTabRefresh("client:home", loadHomeData);
+  const refreshControl = usePullToRefresh(loadHomeData);
 
   return (
     <SafeAreaView className="flex-1 bg-white" edges={["top"]}>
       <ScrollView
+        refreshControl={refreshControl}
         className="flex-1"
         contentContainerStyle={{ paddingBottom: 24 }}
         showsVerticalScrollIndicator={false}

@@ -27,6 +27,7 @@ import {
   type CreateMultiDayBookingResponse,
 } from "../../../../types/booking4step.types";
 import { generateIdempotencyKey } from "../../../../utils/idempotencyKey";
+import { feedback } from "../../../../utils/feedback";
 import * as api from "../../../../services/api";
 import { useAlertModal } from "../../../../contexts/AlertModalContext";
 
@@ -320,6 +321,7 @@ export default function BookingStep4Screen() {
       }
 
       setBookingCreated(createdBooking);
+      feedback.success();
       router.push("/(client)/booking/success");
     } catch (err) {
       console.error("Booking creation error:", err);

@@ -1,5 +1,6 @@
 import React from "react";
 import { View, Text, Pressable, Switch } from "react-native";
+import { PressableScale } from "../ui/PressableScale";
 import { AppIcon as Ionicons } from "../icons/AppIcon";
 import StatusBadge from "../ui/StatusBadge";
 import type { StatusType } from "../ui/StatusBadge";
@@ -42,7 +43,7 @@ export const CertificationCard: React.FC<Props> = ({
   };
 
   return (
-    <Pressable
+    <PressableScale
       className="bg-card rounded-2xl p-4 mb-3"
       style={cardShadow}
       onPress={onPress}
@@ -79,7 +80,7 @@ export const CertificationCard: React.FC<Props> = ({
           <Ionicons name="trash-outline" size={18} color={colors.error} />
         </Pressable>
       </View>
-    </Pressable>
+    </PressableScale>
   );
 };
 

@@ -106,7 +106,7 @@ export default function ResumeScreen() {
         </Text>
 
         <View className="bg-card rounded-xl p-4 mb-6">
-          <Text className="text-primary font-semibold mb-2">
+          <Text className="text-text-primary font-semibold mb-2">
             Why we ask
           </Text>
           <Text className="text-text-secondary text-sm">

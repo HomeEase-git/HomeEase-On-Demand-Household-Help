@@ -163,7 +163,7 @@ export default function ResetPasswordScreen() {
           ) : (
             <Text className="text-text-muted text-sm">
               Resend code in{" "}
-              <Text className="font-semibold text-primary">{countdown}s</Text>
+              <Text className="font-semibold text-text-primary">{countdown}s</Text>
             </Text>
           )}
         </View>

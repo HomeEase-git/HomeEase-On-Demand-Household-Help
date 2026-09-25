@@ -112,7 +112,7 @@ export default function OtpVerificationScreen() {
         <Text className="text-text-secondary mt-2 mb-2">
           We sent a 6-digit code to
         </Text>
-        <Text className="text-primary font-semibold mb-6">
+        <Text className="text-text-primary font-semibold mb-6">
           {maskEmail(email)}
         </Text>
 
@@ -143,7 +143,7 @@ export default function OtpVerificationScreen() {
           ) : (
             <Text className="text-text-muted text-sm">
               Resend code in{" "}
-              <Text className="font-semibold text-primary">{countdown}s</Text>
+              <Text className="font-semibold text-text-primary">{countdown}s</Text>
             </Text>
           )}
         </View>
