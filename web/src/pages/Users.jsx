@@ -5,6 +5,7 @@ import SearchBar from '../components/common/SearchBar'
 import FilterTabs from '../components/common/FilterTabs'
 import SectionCard from '../components/common/SectionCard'
 import Pagination from '../components/common/Pagination'
+import SortableTh from '../components/common/SortableTh'
 import Badge from '../components/common/Badge'
 import LoadingState from '../components/common/LoadingState'
 import ErrorState from '../components/common/ErrorState'
@@ -19,6 +20,8 @@ export default function Users() {
       fetchClients({
         page: params.page || 1,
         limit: 10,
+        sortBy: params.sortBy || '',
+        sortDir: params.sortDir || '',
         search: params.search || '',
         status: STATUS_MAP[params.statusTab] || 'all',
       }),
@@ -35,6 +38,7 @@ export default function Users() {
     setSearch,
     setFilter,
     goToPage,
+    setSort,
   } = useListQuery(fetchFn, {
     initialParams: { page: 1, statusTab: 'All' },
   })
@@ -64,8 +68,8 @@ export default function Users() {
                 <thead>
                   <tr>
                     <th>User ID</th>
-                    <th>Name</th>
-                    <th>Email</th>
+                    <SortableTh label="Name" sortKey="name" params={params} onSort={setSort} />
+                    <SortableTh label="Email" sortKey="email" params={params} onSort={setSort} />
                     <th>Phone</th>
                     <th>Status</th>
                     <th>Bookings</th>

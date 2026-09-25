@@ -6,6 +6,9 @@ import SearchBar from '../components/common/SearchBar'
 import FilterTabs from '../components/common/FilterTabs'
 import SectionCard from '../components/common/SectionCard'
 import Pagination from '../components/common/Pagination'
+import SortableTh from '../components/common/SortableTh'
+import { exportListToCsv, csvDateStamp } from '../utils/exportList'
+import { useToast } from '../context/ToastContext'
 import Badge from '../components/common/Badge'
 import { getPaymentStatusVariant } from '../utils/statusBadge'
 import LoadingState from '../components/common/LoadingState'
@@ -27,15 +30,20 @@ const STATUS_MAP = {
   Failed: 'failed',
 }
 
+// The filters and sort behind the table, shared by the table and the CSV export
+// so an export always matches what's on screen.
+function toApiParams(params) {
+  return {
+    sortBy: params.sortBy || '',
+    sortDir: params.sortDir || '',
+    search: params.search || '',
+    status: STATUS_MAP[params.statusTab] || 'all',
+  }
+}
+
 export default function Payments() {
   const fetchFn = useCallback(
-    (params) =>
-      fetchPayments({
-        page: params.page || 1,
-        limit: 10,
-        search: params.search || '',
-        status: STATUS_MAP[params.statusTab] || 'all',
-      }),
+    (params) => fetchPayments({ page: params.page || 1, limit: 10, ...toApiParams(params) }),
     []
   )
 
@@ -49,6 +57,7 @@ export default function Payments() {
     setSearch,
     setFilter,
     goToPage,
+    setSort,
   } = useListQuery(fetchFn, {
     initialParams: { page: 1, statusTab: 'All' },
     pollIntervalMs: 25000,
@@ -67,9 +76,46 @@ export default function Payments() {
     return { gross, workers, platform, ratePercent }
   }, [meta.completedGrossVolume, meta.completedWorkerEarnings, meta.completedPlatformCommission])
 
+  const { showSuccess, showError } = useToast()
+  const [exporting, setExporting] = useState(false)
+  const handleExport = async () => {
+    setExporting(true)
+    try {
+      const { count, total, truncated } = await exportListToCsv({
+        fetchPage: ({ page, limit }) => fetchPayments({ page, limit, ...toApiParams(params) }),
+        filename: `payments-${csvDateStamp()}.csv`,
+        mapRow: (t) => ({
+          'Transaction ID': t.displayId || t.id,
+          Booking: t.booking,
+          Client: t.client,
+          Worker: t.worker,
+          'Client Paid': t.userAmount,
+          'Worker Earnings': t.workerAmount,
+          'Platform Fee': t.platformFee,
+          Method: t.method,
+          Date: t.date,
+          Status: t.status,
+        }),
+      })
+      if (!count) showError('Nothing to export for these filters')
+      else if (truncated) showSuccess(`Exported the first ${count} of ${total} payments. Narrow the filters to get the rest.`)
+      else showSuccess(`Exported ${count} payments`)
+    } catch (err) {
+      showError(err.message || 'Export failed')
+    } finally {
+      setExporting(false)
+    }
+  }
+
   return (
     <>
-      <PageHeader title="Payment Management" subtitle="All transactions" />
+      <PageHeader
+        actions={
+          <button type="button" className="btn btn-outline" onClick={handleExport} disabled={exporting}>
+            <i className={`fas ${exporting ? 'fa-spinner fa-spin' : 'fa-file-csv'}`} /> {exporting ? 'Exporting…' : 'Export CSV'}
+          </button>
+        }
+        title="Payment Management" subtitle="All transactions" />
       <SubNav items={SUB_NAV} />
       <div className="toolbar">
         <SearchBar
@@ -117,13 +163,13 @@ export default function Payments() {
                   <tr>
                     <th>Transaction ID</th>
                     <th>Booking</th>
-                    <th>Client</th>
-                    <th>Worker</th>
-                    <th>Client Paid</th>
-                    <th>Worker Earnings</th>
-                    <th>Platform Fee</th>
+                    <SortableTh label="Client" sortKey="client" params={params} onSort={setSort} />
+                    <SortableTh label="Worker" sortKey="worker" params={params} onSort={setSort} />
+                    <SortableTh label="Client Paid" sortKey="clientPaid" params={params} onSort={setSort} firstDir="desc" />
+                    <SortableTh label="Worker Earnings" sortKey="workerEarnings" params={params} onSort={setSort} firstDir="desc" />
+                    <SortableTh label="Platform Fee" sortKey="platformFee" params={params} onSort={setSort} firstDir="desc" />
                     <th>Method</th>
-                    <th>Date</th>
+                    <SortableTh label="Date" sortKey="date" params={params} onSort={setSort} firstDir="desc" />
                     <th>Status</th>
                     <th>Actions</th>
                   </tr>

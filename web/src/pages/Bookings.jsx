@@ -6,6 +6,8 @@ import SearchBar from '../components/common/SearchBar'
 import FilterTabs from '../components/common/FilterTabs'
 import SectionCard from '../components/common/SectionCard'
 import Pagination from '../components/common/Pagination'
+import SortableTh from '../components/common/SortableTh'
+import { exportListToCsv, csvDateStamp } from '../utils/exportList'
 import Badge from '../components/common/Badge'
 import LoadingState from '../components/common/LoadingState'
 import ErrorState from '../components/common/ErrorState'
@@ -28,6 +30,19 @@ const STATUS_MAP = {
 
 const TERMINAL_STATUSES = ['Completed', 'Cancelled', 'Rejected']
 
+// The filters and sort behind the table, shared by the table and the CSV export
+// so an export always matches what's on screen.
+function toApiParams(params) {
+  return {
+    sortBy: params.sortBy || '',
+    sortDir: params.sortDir || '',
+    search: params.search || '',
+    status: STATUS_MAP[params.statusTab] || 'all',
+    dateFrom: params.dateFrom || '',
+    dateTo: params.dateTo || '',
+  }
+}
+
 export default function Bookings() {
   const { showSuccess, showError } = useToast()
   const [dateFrom, setDateFrom] = useState('')
@@ -37,15 +52,7 @@ export default function Bookings() {
   const [submitting, setSubmitting] = useState(false)
 
   const fetchFn = useCallback(
-    (params) =>
-      fetchBookings({
-        page: params.page || 1,
-        limit: 10,
-        search: params.search || '',
-        status: STATUS_MAP[params.statusTab] || 'all',
-        dateFrom: params.dateFrom || '',
-        dateTo: params.dateTo || '',
-      }),
+    (params) => fetchBookings({ page: params.page || 1, limit: 10, ...toApiParams(params) }),
     []
   )
 
@@ -59,6 +66,7 @@ export default function Bookings() {
     setSearch,
     setFilter,
     goToPage,
+    setSort,
   } = useListQuery(fetchFn, {
     initialParams: { page: 1, statusTab: 'All', dateFrom: '', dateTo: '' },
     // Paused while the force-cancel modal is open so a background refresh
@@ -98,9 +106,42 @@ export default function Bookings() {
     }
   }
 
+  const [exporting, setExporting] = useState(false)
+  const handleExport = async () => {
+    setExporting(true)
+    try {
+      const { count, total, truncated } = await exportListToCsv({
+        fetchPage: ({ page, limit }) => fetchBookings({ page, limit, ...toApiParams(params) }),
+        filename: `bookings-${csvDateStamp()}.csv`,
+        mapRow: (b) => ({
+          'Booking ID': b.displayId,
+          Client: b.client,
+          Worker: b.worker,
+          Service: b.service,
+          Date: b.date,
+          Amount: b.amount,
+          Status: b.status,
+        }),
+      })
+      if (!count) showError('Nothing to export for these filters')
+      else if (truncated) showSuccess(`Exported the first ${count} of ${total} bookings. Narrow the filters to get the rest.`)
+      else showSuccess(`Exported ${count} bookings`)
+    } catch (err) {
+      showError(err.message || 'Export failed')
+    } finally {
+      setExporting(false)
+    }
+  }
+
   return (
     <>
-      <PageHeader title="Booking Management" subtitle="All bookings" />
+      <PageHeader
+        actions={
+          <button type="button" className="btn btn-outline" onClick={handleExport} disabled={exporting}>
+            <i className={`fas ${exporting ? 'fa-spinner fa-spin' : 'fa-file-csv'}`} /> {exporting ? 'Exporting…' : 'Export CSV'}
+          </button>
+        }
+        title="Booking Management" subtitle="All bookings" />
       <SubNav items={SUB_NAV} />
       <div className="toolbar">
         <SearchBar placeholder="Search bookings..." value={params.search || ''} onChange={setSearch} />
@@ -145,7 +186,7 @@ export default function Bookings() {
               <table className="table">
                 <thead>
                   <tr>
-                    <th>Booking ID</th><th>Client</th><th>Worker</th><th>Service</th><th>Date</th><th>Amount</th><th>Status</th><th>Actions</th>
+                    <th>Booking ID</th><SortableTh label="Client" sortKey="client" params={params} onSort={setSort} /><SortableTh label="Worker" sortKey="worker" params={params} onSort={setSort} /><th>Service</th><SortableTh label="Date" sortKey="date" params={params} onSort={setSort} firstDir="desc" /><th>Amount</th><th>Status</th><th>Actions</th>
                   </tr>
                 </thead>
                 <tbody>

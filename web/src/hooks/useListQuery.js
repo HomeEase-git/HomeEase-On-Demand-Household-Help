@@ -69,6 +69,16 @@ export function useListQuery(
   const setSearch = (search) => setParams((prev) => ({ ...prev, search, page: 1 }));
   const setFilter = (key, value) => setParams((prev) => ({ ...prev, [key]: value, page: 1 }));
   const goToPage = (page) => setParams((prev) => ({ ...prev, page }));
+  // Clicking a column sorts by it; clicking the same column again flips the
+  // direction. Dates/amounts usually read best newest/largest first, so
+  // callers can pass that as the first direction.
+  const setSort = (sortBy, firstDir = 'asc') =>
+    setParams((prev) => ({
+      ...prev,
+      sortBy,
+      sortDir: prev.sortBy === sortBy ? (prev.sortDir === 'asc' ? 'desc' : 'asc') : firstDir,
+      page: 1,
+    }));
 
   // Optimistic escape hatch — patches both the rendered `data` and the
   // shared cache entry for the current cacheKey without a network round
@@ -100,6 +110,7 @@ export function useListQuery(
     setSearch,
     setFilter,
     goToPage,
+    setSort,
   };
 }
 
