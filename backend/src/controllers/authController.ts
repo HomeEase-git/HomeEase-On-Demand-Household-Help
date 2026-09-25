@@ -134,6 +134,21 @@ export const signup = async (req: Request, res: Response) => {
         await tx.clientProfile.create({ data: { userId: createdUser.id } });
       }
 
+      // Sign-up's separate "I have read the Privacy Policy" checkbox. Optional
+      // so older app builds (which don't send it) can still sign up.
+      const privacyNoticeVersion = getTrimmedString(req.body.privacyNoticeVersion);
+      if (privacyNoticeVersion && /^[\w.-]{1,32}$/.test(privacyNoticeVersion)) {
+        await tx.contractAcceptance.create({
+          data: {
+            userId: createdUser.id,
+            contractType: 'PRIVACY_NOTICE',
+            contractVersion: privacyNoticeVersion,
+            ipAddress: req.ip ?? null,
+            userAgent: req.get('user-agent')?.slice(0, 512) ?? null,
+          },
+        });
+      }
+
       return createdUser;
     });
 

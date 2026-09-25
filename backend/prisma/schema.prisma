@@ -116,6 +116,10 @@ enum KycDocumentStatus {
 enum ContractType {
   WORKER_SERVICE_AGREEMENT
   CLIENT_USER_AGREEMENT
+  // Separate, specific consents (Data Privacy Act §12–13 / NPC guidance: not
+  // bundled into the Terms checkbox).
+  PRIVACY_NOTICE
+  KYC_CONSENT
 }
 
 enum NotificationType {
