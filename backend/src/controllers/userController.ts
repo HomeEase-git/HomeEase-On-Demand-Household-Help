@@ -4,6 +4,8 @@ import * as bcrypt from 'bcryptjs';
 import prisma from '@config/database';
 import { errorResponse } from '@utils/errorResponse';
 import { toOwnedStoredUrl } from '@utils/storageUrls';
+import { eraseAccount, findDeletionBlockers } from '@services/accountDeletionService';
+import { JWT_EXPIRY } from '@utils/jwt';
 import { mimeTypeFromUrl, storagePathFromUrl } from '@utils/kycFileMeta';
 import { verificationQueue, VERIFICATION_JOB_OPTIONS } from '@queues/verificationQueue';
 import { checkResubmissionCooldown } from '@utils/kycResubmissionCooldown';
@@ -870,18 +872,18 @@ export const deleteAccount = async (req: AuthRequest, res: Response) => {
       return res.status(401).json(errorResponse(401, 'Password is incorrect'));
     }
     
-    await prisma.user.update({
-      where: { id: req.user.userId },
-      data: {
-        isDeleted: true,
-        deletedAt: new Date(),
-        status: 'DELETED',
-      },
-    });
-    
+    const blockers = await findDeletionBlockers(req.user.userId);
+    if (blockers.length > 0) {
+      return res.status(409).json({ ...errorResponse(409, blockers.join(' ')), blockers });
+    }
+
+    // Anonymizes the account and removes personal data and files; keeps
+    // bookings, payments and tax records (see accountDeletionService).
+    await eraseAccount(req.user.userId, JWT_EXPIRY);
+
     return res.status(200).json({
       success: true,
-      message: 'Account deleted successfully',
+      message: 'Your account and personal data have been deleted. Booking, payment and tax records are kept as required by law.',
     });
   } catch (error) {
     console.error('Error deleting account:', error);

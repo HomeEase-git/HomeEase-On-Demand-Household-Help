@@ -1058,7 +1058,7 @@ export async function autoSuspendUnderperformingWorkers(): Promise<void> {
 
       await prisma.user.update({
         where: { id: worker.userId },
-        data: { status: 'SUSPENDED', isDeleted: true, deletedAt: new Date() },
+        data: { status: 'SUSPENDED' },
       });
       // Same immediate-effect session revocation as a manual admin suspend
       // (adminUserController.setUserStatus) — otherwise an auto-suspended
