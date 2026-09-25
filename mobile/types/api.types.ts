@@ -215,6 +215,8 @@ export interface WorkerReview {
   date: string;
   bookingId: string;
   workerResponse: string | null;
+  /** Photos the client attached to the review (visible reviews only). */
+  photoUrls?: string[];
 }
 
 // ============================================================================

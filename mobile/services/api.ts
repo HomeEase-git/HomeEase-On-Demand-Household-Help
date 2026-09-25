@@ -800,6 +800,7 @@ export async function getWorkerReviews(workerId: string, limit = 50) {
       date: r.createdAt,
       bookingId: r.bookingId,
       workerResponse: r.workerResponse ?? null,
+      photoUrls: Array.isArray(r.photoUrls) ? (r.photoUrls as string[]) : [],
     }));
 
     // Star distribution isn't provided by the backend — approximated from
