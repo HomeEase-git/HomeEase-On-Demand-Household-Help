@@ -18,6 +18,7 @@ import { useWorkerStore } from "../store/workerStore";
 import * as api from "../services/api";
 import { connectSocket, disconnectSocket } from "../services/socket";
 import { initializeNotificationService } from "../services/notificationService";
+import { initSounds, playSound, type SoundName } from "../utils/sounds";
 import {
   setupNotificationReceivedHandler,
   setupNotificationInteractionHandler,
@@ -86,10 +87,27 @@ export default function RootLayout() {
       }
 
       useMessageStore.getState().receiveMessage(currentUserId, message);
+
+      // Incoming only, and not for the chat that's already on screen.
+      if (
+        message.senderId !== currentUserId &&
+        useMessageStore.getState().openChatUserId !== message.senderId
+      ) {
+        playSound("message");
+      }
     });
 
     socket.on("notification:new", (notification) => {
       useNotificationStore.getState().receiveNotification(notification);
+
+      // Messages already chime from "message:new" above (which knows which
+      // chat is open), so MESSAGE_RECEIVED isn't mapped here.
+      const NOTIFICATION_SOUNDS: Record<string, SoundName> = {
+        BOOKING_REQUEST: "newJob",
+        BOOKING_ACCEPTED: "bookingConfirmed",
+      };
+      const sound = NOTIFICATION_SOUNDS[notification.type];
+      if (sound) playSound(sound);
 
       const currentUser = useAuthStore.getState().user;
 
@@ -181,6 +199,7 @@ export default function RootLayout() {
 
         // Initialize notifications
         await initializeNotificationService();
+        await initSounds();
         setupNotificationReceivedHandler();
         setupNotificationInteractionHandler();
 

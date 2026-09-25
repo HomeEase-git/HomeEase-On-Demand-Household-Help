@@ -28,11 +28,17 @@ type MessageState = {
   appendMessage: (userId: string, message: Message) => void;
   markConversationRead: (userId: string) => void;
   receiveMessage: (currentUserId: string, message: Message) => void;
+  /** The chat currently on screen, so its incoming messages don't play a sound. */
+  openChatUserId: string | null;
+  setOpenChatUserId: (userId: string | null) => void;
 };
 
 export const useMessageStore = create<MessageState>((set) => ({
   conversations: [],
   messagesByUser: {},
+  openChatUserId: null,
+
+  setOpenChatUserId: (openChatUserId) => set({ openChatUserId }),
 
   setConversations: (conversations) => set({ conversations }),
 

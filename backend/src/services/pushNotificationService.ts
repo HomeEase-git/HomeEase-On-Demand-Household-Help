@@ -10,6 +10,20 @@ type SendPushInput = {
   data?: Record<string, unknown>;
 };
 
+/**
+ * Android notification channel per notification type — the channel decides
+ * which sound plays when the app is closed or in the background. The mobile
+ * app creates these channels on startup (NOTIFICATION_CHANNELS in
+ * mobile/services/notificationService.ts), so keep the ids in sync. Types not
+ * listed use the default channel and sound. On an older app build that
+ * doesn't have the channel yet, Android falls back to the default channel.
+ */
+const CHANNEL_FOR_TYPE: Record<string, string> = {
+  BOOKING_REQUEST: 'new-job',
+  MESSAGE_RECEIVED: 'messages',
+  BOOKING_ACCEPTED: 'bookings',
+};
+
 type ExpoPushTicket =
   | { status: 'ok'; id: string }
   | { status: 'error'; message: string; details?: { error?: string } };
@@ -54,6 +68,7 @@ export async function sendPushToUser({ userId, title, body, data }: SendPushInpu
         body,
         data: data ?? {},
         sound: 'default',
+        ...channelFor(data),
       }),
       // This runs fire-and-forget off the main request path (see notify.ts),
       // but an unbounded call still leaks a pending connection if Expo's
@@ -73,4 +88,9 @@ export async function sendPushToUser({ userId, title, body, data }: SendPushInpu
   } catch (error) {
     console.error(`[Push] Unexpected error sending push to user ${userId}:`, error);
   }
+}
+
+function channelFor(data: Record<string, unknown> | undefined): { channelId?: string } {
+  const channelId = typeof data?.type === 'string' ? CHANNEL_FOR_TYPE[data.type] : undefined;
+  return channelId ? { channelId } : {};
 }

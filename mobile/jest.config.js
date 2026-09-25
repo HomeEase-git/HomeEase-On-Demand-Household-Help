@@ -9,6 +9,7 @@ module.exports = {
   ],
   moduleNameMapper: {
     "^@/(.*)$": "<rootDir>/$1",
+    "\\.(wav|mp3)$": "<rootDir>/jest.assetMock.js",
   },
   collectCoverageFrom: [
     "mobile/**/*.{ts,tsx}",

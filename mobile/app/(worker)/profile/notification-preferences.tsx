@@ -8,6 +8,7 @@ import PrimaryButton from "../../../components/ui/PrimaryButton";
 import { colors, cardShadow } from "../../../constants";
 import * as api from "../../../services/api";
 import { useAlertModal } from "../../../contexts/AlertModalContext";
+import { areSoundsEnabled, playSound, setSoundsEnabled } from "../../../utils/sounds";
 
 export default function WorkerNotificationPreferencesScreen() {
   const router = useRouter();
@@ -17,6 +18,15 @@ export default function WorkerNotificationPreferencesScreen() {
   const [promos, setPromos] = useState(false);
   const [system, setSystem] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [sounds, setSounds] = useState(areSoundsEnabled());
+
+  // Stored on this phone and applied right away (not part of Save below,
+  // which updates the account's notification settings on the server).
+  const toggleSounds = (value: boolean) => {
+    setSounds(value);
+    setSoundsEnabled(value);
+    if (value) playSound("message");
+  };
 
   useEffect(() => {
     const loadPreferences = async () => {
@@ -89,6 +99,28 @@ export default function WorkerNotificationPreferencesScreen() {
               />
             </View>
           ))}
+        </View>
+        <Text className="text-text-muted text-xs font-semibold uppercase tracking-wide mt-6 mb-1">
+          Sound
+        </Text>
+        <View className="bg-card rounded-2xl overflow-hidden" style={cardShadow}>
+          <View className="flex-row items-center py-3.5 px-4">
+            <View className="w-9 h-9 rounded-full bg-accent/10 items-center justify-center mr-3">
+              <Ionicons name="volume-high-outline" size={18} color={colors.accent.DEFAULT} />
+            </View>
+            <View className="flex-1 mr-3">
+              <Text className="text-text-primary">In-app sounds</Text>
+              <Text className="text-text-muted text-xs mt-0.5">
+                New jobs, messages and confirmations while the app is open
+              </Text>
+            </View>
+            <Switch
+              value={sounds}
+              onValueChange={toggleSounds}
+              trackColor={{ false: colors.toggleOff, true: colors.brand.DEFAULT }}
+              thumbColor={colors.white}
+            />
+          </View>
         </View>
         <View className="mt-6">
           <PrimaryButton

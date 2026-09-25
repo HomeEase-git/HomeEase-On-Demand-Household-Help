@@ -1,9 +1,9 @@
-import React, { useState, useRef, useEffect } from "react";
+import React, { useState, useRef, useEffect, useCallback } from "react";
 import { View, Text, FlatList, TextInput, Pressable, Linking } from "react-native";
 import { KeyboardAvoidingView } from "react-native-keyboard-controller";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { AppIcon as Ionicons } from "../../../../components/icons/AppIcon";
-import { useRouter, useLocalSearchParams } from "expo-router";
+import { useRouter, useLocalSearchParams, useFocusEffect } from "expo-router";
 import ChatBubbleSent from "../../../../components/chat/ChatBubbleSent";
 import ChatBubbleReceived from "../../../../components/chat/ChatBubbleReceived";
 import Avatar from "../../../../components/ui/Avatar";
@@ -32,6 +32,15 @@ export default function WorkerChatScreen() {
   // Keep the newest message in view: on first load, when a message arrives,
   // and when the keyboard opening makes the list shorter.
   const scrollToLatest = () => listRef.current?.scrollToEnd({ animated: false });
+
+  // While this chat is on screen, its incoming messages stay silent.
+  const setOpenChatUserId = useMessageStore((s) => s.setOpenChatUserId);
+  useFocusEffect(
+    useCallback(() => {
+      setOpenChatUserId(userId ?? null);
+      return () => setOpenChatUserId(null);
+    }, [userId, setOpenChatUserId]),
+  );
   const currentUserId = useAuthStore((s) => s.user?.id);
   const alertModal = useAlertModal();
 

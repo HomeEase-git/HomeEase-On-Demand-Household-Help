@@ -61,7 +61,25 @@
       ],
       "expo-image",
       "expo-status-bar",
-      "expo-web-browser"
+      "expo-web-browser",
+      [
+        "expo-audio",
+        {
+          "microphonePermission": false,
+          "recordAudioAndroid": false,
+          "enableBackgroundPlayback": false
+        }
+      ],
+      [
+        "expo-notifications",
+        {
+          "sounds": [
+            "./assets/sounds/new_job.wav",
+            "./assets/sounds/message.wav",
+            "./assets/sounds/booking_confirmed.wav"
+          ]
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true,
