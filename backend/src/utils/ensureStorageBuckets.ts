@@ -6,6 +6,7 @@ import {
   CHAT_IMAGE_BUCKET,
   KYC_DOCUMENT_BUCKET,
   TAX_CERTIFICATE_BUCKET,
+  PROMO_BANNER_BUCKET,
 } from '@config/supabase';
 
 /**
@@ -30,7 +31,7 @@ export const ensureStorageBuckets = async () => {
   }
 
   const existingNames = new Set((buckets ?? []).map((bucket) => bucket.name));
-  const publicBuckets = [AVATAR_BUCKET, RESUME_BUCKET, BOOKING_PHOTO_BUCKET, CHAT_IMAGE_BUCKET, KYC_DOCUMENT_BUCKET];
+  const publicBuckets = [AVATAR_BUCKET, RESUME_BUCKET, BOOKING_PHOTO_BUCKET, CHAT_IMAGE_BUCKET, KYC_DOCUMENT_BUCKET, PROMO_BANNER_BUCKET];
 
   for (const bucketName of publicBuckets) {
     if (existingNames.has(bucketName)) {

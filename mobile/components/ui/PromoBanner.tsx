@@ -6,13 +6,18 @@ import {
   Dimensions,
   ImageBackground,
   ImageSourcePropType,
+  Pressable,
 } from "react-native";
 
 type Banner = {
+  id?: string;
   title: string;
-  subtitle?: string;
-  color: string;
-  image?: ImageSourcePropType;
+  subtitle?: string | null;
+  color?: string;
+  /** A bundled image, or a remote URL (admin-managed banners). */
+  image?: ImageSourcePropType | string;
+  /** Tapping the banner; omitted for display-only banners. */
+  onPress?: () => void;
 };
 
 type Props = {
@@ -63,48 +68,56 @@ export const PromoBanner: React.FC<Props> = ({ banners }) => {
           );
           setIndex(i);
         }}
-        keyExtractor={(_, i) => String(i)}
-        renderItem={({ item }) =>
-          item.image ? (
-            <ImageBackground
-              source={item.image}
-              resizeMode="cover"
-              className="rounded-2xl h-40 justify-end px-6 pb-5 mr-4 overflow-hidden"
-              style={{ width: CARD_WIDTH }}
-            >
-              <View
-                className="absolute inset-0"
-                style={{ backgroundColor: "rgba(0,0,0,0.15)" }}
-              />
-              <Text
-                className="text-white font-extrabold text-2xl"
-                style={TEXT_SHADOW}
+        keyExtractor={(item, i) => item.id ?? String(i)}
+        renderItem={({ item }) => (
+          <Pressable
+            onPress={item.onPress}
+            disabled={!item.onPress}
+            accessibilityRole={item.onPress ? "button" : undefined}
+            accessibilityLabel={item.title}
+            className="active:opacity-[0.9]"
+          >
+            {item.image ? (
+              <ImageBackground
+                source={typeof item.image === "string" ? { uri: item.image } : item.image}
+                resizeMode="cover"
+                className="rounded-2xl h-40 justify-end px-6 pb-5 mr-4 overflow-hidden"
+                style={{ width: CARD_WIDTH }}
               >
-                {item.title}
-              </Text>
-              {item.subtitle && (
+                <View
+                  className="absolute inset-0"
+                  style={{ backgroundColor: "rgba(0,0,0,0.15)" }}
+                />
                 <Text
-                  className="text-white font-semibold text-sm mt-1"
+                  className="text-white font-extrabold text-2xl"
                   style={TEXT_SHADOW}
                 >
-                  {item.subtitle}
+                  {item.title}
                 </Text>
-              )}
-            </ImageBackground>
-          ) : (
-            <View
-              className="rounded-2xl h-40 justify-center px-6 mr-4"
-              style={{ width: CARD_WIDTH, backgroundColor: item.color }}
-            >
-              <Text className="text-text-primary font-bold text-xl">{item.title}</Text>
-              {item.subtitle && (
-                <Text className="text-brand/80 text-sm mt-1">
-                  {item.subtitle}
-                </Text>
-              )}
-            </View>
-          )
-        }
+                {item.subtitle && (
+                  <Text
+                    className="text-white font-semibold text-sm mt-1"
+                    style={TEXT_SHADOW}
+                  >
+                    {item.subtitle}
+                  </Text>
+                )}
+              </ImageBackground>
+            ) : (
+              <View
+                className="rounded-2xl h-40 justify-center px-6 mr-4"
+                style={{ width: CARD_WIDTH, backgroundColor: item.color ?? "#E0E0E0" }}
+              >
+                <Text className="text-text-primary font-bold text-xl">{item.title}</Text>
+                {item.subtitle && (
+                  <Text className="text-brand/80 text-sm mt-1">
+                    {item.subtitle}
+                  </Text>
+                )}
+              </View>
+            )}
+          </Pressable>
+        )}
       />
       <View className="flex-row justify-center gap-2 mt-2">
         {banners.map((_, i) => (

@@ -2167,3 +2167,26 @@ model TaxRemittance {
   @@unique([periodStart, periodEnd])
   @@index([status])
 }
+
+// Promotional banners on the client app's home screen, managed from the
+// admin dashboard (Catalog & Pricing → Promo Banners). The client app shows
+// active banners whose schedule window (if any) includes now, by sortOrder.
+model PromoBanner {
+  id       String  @id @default(cuid())
+  title    String
+  subtitle String?
+  // Public URL in the promo-banners storage bucket.
+  imageUrl String
+  // Optional: tapping the banner opens this service category in the app.
+  // Plain id rather than a relation so deleting a category never blocks on
+  // (or cascades into) banners; the app ignores an id it can't find.
+  linkServiceTypeId String?
+  sortOrder Int       @default(0)
+  isActive  Boolean   @default(true)
+  startsAt  DateTime?
+  endsAt    DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  @@index([isActive, sortOrder])
+}

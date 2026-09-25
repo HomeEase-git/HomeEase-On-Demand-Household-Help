@@ -2648,3 +2648,17 @@ export async function getServiceTypes() {
 
   return servicesPromise;
 }
+export type PromoBannerItem = {
+  id: string;
+  title: string;
+  subtitle: string | null;
+  imageUrl: string;
+  /** Service category to open when tapped, or null for display-only. */
+  linkServiceTypeId: string | null;
+};
+
+/** Live home-screen banners, managed by admins (Catalog & Pricing → Promo Banners). */
+export async function getPromoBanners(): Promise<PromoBannerItem[]> {
+  const response = await api.get('/promo-banners');
+  return Array.isArray(response) ? (response as PromoBannerItem[]) : [];
+}

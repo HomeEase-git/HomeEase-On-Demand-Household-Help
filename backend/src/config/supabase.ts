@@ -14,3 +14,4 @@ export const BOOKING_PHOTO_BUCKET = process.env.SUPABASE_BOOKING_PHOTO_BUCKET ||
 // worker's TIN and income figures, so this one is never made public;
 // callers must go through supabase.storage.createSignedUrl().
 export const TAX_CERTIFICATE_BUCKET = process.env.SUPABASE_TAX_CERTIFICATE_BUCKET || 'tax-certificates';
+export const PROMO_BANNER_BUCKET = process.env.SUPABASE_PROMO_BANNER_BUCKET || 'promo-banners';
