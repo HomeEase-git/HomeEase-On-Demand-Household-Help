@@ -28,6 +28,7 @@ const NAV_STRUCTURE = [
       { to: '/service-catalog', page: 'service-catalog', icon: 'fa-list-check', label: 'Service Catalog' },
       { to: '/price-control', page: 'price-control', icon: 'fa-sliders', label: 'Price Control' },
       { to: '/pricing-rules', page: 'pricing-rules', icon: 'fa-coins', label: 'Pricing Rules' },
+      { to: '/promo-banners', page: 'promo-banners', icon: 'fa-images', label: 'Promo Banners' },
     ],
   },
   // Bookings and Payments already expose their sub-pages (Disputes, Payouts,

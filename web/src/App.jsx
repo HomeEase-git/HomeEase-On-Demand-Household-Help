@@ -36,6 +36,7 @@ const Settings = lazy(() => import('./pages/Settings'))
 const MfaSetup = lazy(() => import('./pages/MfaSetup'))
 const PriceControl = lazy(() => import('./pages/PriceControl'))
 const ServiceCatalog = lazy(() => import('./pages/ServiceCatalog'))
+const PromoBanners = lazy(() => import('./pages/PromoBanners'))
 const ServiceCatalogEditor = lazy(() => import('./pages/ServiceCatalogEditor'))
 
 export default function App() {
@@ -94,6 +95,7 @@ export default function App() {
           { path: 'service-catalog', element: <ServiceCatalog /> },
           { path: 'service-catalog/new', element: <ServiceCatalogEditor /> },
           { path: 'service-catalog/:id', element: <ServiceCatalogEditor /> },
+          { path: 'promo-banners', element: <PromoBanners /> },
           { path: 'settings', element: <Settings /> },
           { path: 'mfa-setup', element: <MfaSetup /> },
         ].map(({ path, element }) => (

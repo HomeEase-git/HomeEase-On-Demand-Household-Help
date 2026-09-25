@@ -31,6 +31,8 @@ import adminAuditLogRoutes from '@routes/adminAuditLogs';
 import adminReportsRoutes from '@routes/adminReports';
 import adminSettingsRoutes from '@routes/adminSettings';
 import adminTaxRoutes from '@routes/adminTax';
+import adminPromoBannerRoutes from '@routes/adminPromoBanners';
+import promoBannerRoutes from '@routes/promoBanners';
 import internalCronRoutes from '@routes/internalCron';
 import internalDiagRoutes from '@routes/internalDiag';
 import { errorHandler } from '@middleware/errorHandler';
@@ -154,6 +156,8 @@ app.use('/api/admin/service-types', adminServiceTypeRoutes);
 app.use('/api/admin/service-types/:serviceTypeId/tasks', adminServiceTaskRoutes);
 app.use('/api/admin/audit-logs', adminAuditLogRoutes);
 app.use('/api/admin/reports', adminReportsRoutes);
+app.use('/api/admin/promo-banners', adminPromoBannerRoutes);
+app.use('/api/promo-banners', promoBannerRoutes);
 app.use('/api/admin/settings', adminSettingsRoutes);
 app.use('/api/admin/tax', adminTaxRoutes);
 

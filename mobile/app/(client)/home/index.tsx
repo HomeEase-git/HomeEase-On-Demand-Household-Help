@@ -14,7 +14,11 @@ import { PromoBanner } from "../../../components/ui/PromoBanner";
 import { CategoryCard } from "../../../components/cards/CategoryCard";
 import { WorkerCard } from "../../../components/cards/WorkerCard";
 import { NotificationBadge } from "../../../components/ui/NotificationBadge";
-import { getServiceTypes, searchWorkers } from "../../../services/api";
+import { getServiceTypes, searchWorkers, getPromoBanners, getBookings, type PromoBannerItem } from "../../../services/api";
+import { mapApiBooking, type Booking, type ApiBookingListItem } from "../../../store/bookingStore";
+import { pickUpcomingBooking, pickBookAgainWorkers, type BookAgainWorker } from "../../../utils/homeBookings";
+import { StatusBadge } from "../../../components/ui/StatusBadge";
+import { Avatar } from "../../../components/ui/Avatar";
 import { useNotificationStore } from "../../../store/notificationStore";
 import { useAuthStore } from "../../../store/authStore";
 import {
@@ -29,24 +33,6 @@ import { usePullToRefresh } from "../../../hooks/usePullToRefresh";
 import { usePushNotificationPrompt } from "../../../hooks/usePushNotificationPrompt";
 
 const DEFAULT_FILTERS: SearchFilters = { sort: "rating", availableOnly: false };
-
-const PROMO_BANNERS = [
-  {
-    title: "20% Off Cleaning!",
-    color: colors.banner1,
-    image: require("../../../assets/images/banner/Banner1.jpg"),
-  },
-  {
-    title: "New Workers Near You!",
-    color: colors.banner2,
-    image: require("../../../assets/images/banner/Banner2.jpg"),
-  },
-  {
-    title: "Verified & Trusted Pros!",
-    color: colors.banner3,
-    image: require("../../../assets/images/banner/Banner3.jpg"),
-  },
-];
 
 type ServiceCategory = {
   id: string;
@@ -103,6 +89,9 @@ export default function ClientHomeScreen() {
     [],
   );
   const [workers, setWorkers] = useState<HomeWorker[]>([]);
+  const [banners, setBanners] = useState<(PromoBannerItem & { categorySlug: string | null })[]>([]);
+  const [upcoming, setUpcoming] = useState<Booking | null>(null);
+  const [bookAgain, setBookAgain] = useState<BookAgainWorker[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [filters, setFilters] = useState<SearchFilters>(DEFAULT_FILTERS);
   const user = useAuthStore((s) => s.user);
@@ -113,7 +102,7 @@ export default function ClientHomeScreen() {
     setLoading(true);
     setError(null);
     try {
-      const [serviceTypes, workersResponse] = await Promise.all([
+      const [serviceTypes, workersResponse, promoBanners, bookings] = await Promise.all([
         getServiceTypes(),
         // Only the top 3 are shown below — a small fetchLimit avoids
         // downloading a full 50-worker page just for this preview.
@@ -122,7 +111,25 @@ export default function ClientHomeScreen() {
           availableOnly: filters.availableOnly,
           fetchLimit: 6,
         }),
+        // Extras: if either fails, its section is just hidden rather than
+        // failing the whole home screen.
+        getPromoBanners().catch(() => [] as PromoBannerItem[]),
+        getBookings().catch(() => [] as ApiBookingListItem[]),
       ]);
+
+      // Category screens are addressed by a slug of the name; banners link by id.
+      const slugById = new Map<string, string>(
+        serviceTypes.map((st: any) => [st.id, st.name.toLowerCase().replace(/\s+/g, "-")]),
+      );
+      setBanners(
+        promoBanners.map((banner) => ({
+          ...banner,
+          categorySlug: banner.linkServiceTypeId ? (slugById.get(banner.linkServiceTypeId) ?? null) : null,
+        })),
+      );
+      const myBookings = (bookings as ApiBookingListItem[]).map(mapApiBooking);
+      setUpcoming(pickUpcomingBooking(myBookings));
+      setBookAgain(pickBookAgainWorkers(myBookings));
 
       setServiceCategories(
         serviceTypes.map((serviceType: any) => ({
@@ -215,9 +222,48 @@ export default function ClientHomeScreen() {
               </View>
             </View>
 
-            <View className="mx-4">
-              <PromoBanner banners={PROMO_BANNERS} />
-            </View>
+            {upcoming && (
+              <Pressable
+                className="mx-4 mt-3 rounded-2xl border border-brand/20 bg-brand/5 p-4 flex-row items-center active:opacity-[0.85]"
+                onPress={() => router.push(`/(client)/booking/${upcoming.id}`)}
+                accessibilityRole="button"
+                accessibilityLabel={`Your next booking: ${upcoming.category ?? upcoming.service}`}
+              >
+                <View className="w-11 h-11 rounded-full bg-brand/10 items-center justify-center mr-3">
+                  <Ionicons name="calendar" size={20} color={colors.brand.DEFAULT} />
+                </View>
+                <View className="flex-1">
+                  <Text className="text-text-secondary text-xs">Your next booking</Text>
+                  <Text className="text-text-primary font-bold" numberOfLines={1}>
+                    {upcoming.category ?? upcoming.service}
+                  </Text>
+                  <Text className="text-text-secondary text-xs mt-0.5" numberOfLines={1}>
+                    {new Date(upcoming.date).toLocaleDateString("en-PH", { weekday: "short", month: "short", day: "numeric" })}
+                    {upcoming.worker && upcoming.worker !== "Unassigned" ? ` · ${upcoming.worker}` : ""}
+                  </Text>
+                </View>
+                <View className="items-end ml-2">
+                  <StatusBadge status={upcoming.status} />
+                  <Ionicons name="chevron-forward" size={18} color={colors.text.muted} style={{ marginTop: 6 }} />
+                </View>
+              </Pressable>
+            )}
+
+            {banners.length > 0 && (
+              <View className="mx-4">
+                <PromoBanner
+                  banners={banners.map((banner) => ({
+                    id: banner.id,
+                    title: banner.title,
+                    subtitle: banner.subtitle,
+                    image: banner.imageUrl,
+                    onPress: banner.categorySlug
+                      ? () => router.push(`/(client)/category/${banner.categorySlug}`)
+                      : undefined,
+                  }))}
+                />
+              </View>
+            )}
 
             <View className="mx-4 mt-4">
               <SectionHeader
@@ -238,6 +284,31 @@ export default function ClientHomeScreen() {
                 )}
               />
             </View>
+
+            {bookAgain.length > 0 && (
+              <View className="mx-4 mt-6">
+                <SectionHeader title="Book again" />
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 12 }}>
+                  {bookAgain.map((w) => (
+                    <Pressable
+                      key={w.workerId}
+                      className="bg-card rounded-2xl p-3 items-center w-28 active:opacity-[0.85]"
+                      onPress={() => router.push(`/(client)/category/worker/${w.workerId}`)}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Book ${w.name} again`}
+                    >
+                      <Avatar uri={w.avatar} size="md" />
+                      <Text className="text-text-primary text-sm font-semibold mt-2 text-center" numberOfLines={1}>
+                        {w.name}
+                      </Text>
+                      <Text className="text-text-secondary text-xs text-center" numberOfLines={1}>
+                        {w.service}
+                      </Text>
+                    </Pressable>
+                  ))}
+                </ScrollView>
+              </View>
+            )}
 
             <View className="mx-4 mt-6">
               <SectionHeader
