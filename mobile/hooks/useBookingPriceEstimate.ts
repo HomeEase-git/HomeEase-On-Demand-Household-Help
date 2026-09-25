@@ -96,3 +96,18 @@ export function useBookingPriceEstimate(
     addOnsTotal,
   ]);
 }
+
+/**
+ * The estimate for the draft as it stands, from the ranges Step 1 saved to
+ * the store — the same inputs Step 4 uses — for steps that don't compute
+ * their own (Steps 2-3's footer). Null for custom-quote jobs, which have no
+ * upfront price.
+ */
+export function useDraftPriceEstimate(): BookingPriceEstimate | null {
+  const draft = useBookingStore((s) => s.draft);
+  const estimate = useBookingPriceEstimate({
+    min: draft.selectedTaskPriceRangeMin ?? draft.categoryPriceRangeMin ?? draft.categoryBasePrice ?? 0,
+    max: draft.selectedTaskPriceRangeMax ?? draft.categoryPriceRangeMax ?? draft.categoryBasePrice ?? 0,
+  });
+  return draft.selectedTaskPricingModel === 'CUSTOM_QUOTE' ? null : estimate;
+}

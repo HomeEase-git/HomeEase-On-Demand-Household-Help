@@ -7,7 +7,8 @@ import { colors } from "../../../../constants";
 import { useAlertModal } from "../../../../contexts/AlertModalContext";
 import ScreenHeader from "../../../../components/ui/ScreenHeader";
 import StepperHorizontal from "../../../../components/steppers/StepperHorizontal";
-import PrimaryButton from "../../../../components/ui/PrimaryButton";
+import { BookingFooterBar } from "../../../../components/booking4step/BookingFooterBar";
+import { useDraftPriceEstimate } from "../../../../hooks/useBookingPriceEstimate";
 import InvalidationBanner from "../../../../components/ui/InvalidationBanner";
 import AddressPickerBottomSheet, {
   type SavedAddress,
@@ -30,6 +31,8 @@ const MAX_MULTI_DAY_BOOKING_DAYS = 14;
 
 export default function BookingStep2Screen() {
   const router = useRouter();
+  // Same estimate as Step 4, from what Step 1 saved (null for custom-quote jobs).
+  const draftEstimate = useDraftPriceEstimate();
   const alertModal = useAlertModal();
   const draft = useBookingStore((s) => s.draft);
   const setDraft = useBookingStore((s) => s.setDraft);
@@ -257,10 +260,8 @@ export default function BookingStep2Screen() {
           </>
         )}
 
-        <View className="mt-8">
-          <PrimaryButton label="Next" fullWidth onPress={handleNext} />
-        </View>
       </ScrollView>
+      <BookingFooterBar estimate={draftEstimate} noPriceText="Quote after inspection" buttonLabel="Next" onPress={handleNext} />
 
       <AddressPickerBottomSheet
         innerRef={addressSheetRef}

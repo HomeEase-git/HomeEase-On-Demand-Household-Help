@@ -6,7 +6,6 @@ import { useRouter } from "expo-router";
 import ScreenHeader from "../../../../components/ui/ScreenHeader";
 import StepperHorizontal from "../../../../components/steppers/StepperHorizontal";
 import InputField from "../../../../components/ui/InputField";
-import PrimaryButton from "../../../../components/ui/PrimaryButton";
 import OutlinedButton from "../../../../components/ui/OutlinedButton";
 import InvalidationBanner from "../../../../components/ui/InvalidationBanner";
 import ServiceCategorySelector, {
@@ -16,6 +15,7 @@ import TaskSelector from "../../../../components/booking4step/TaskSelector";
 import DynamicScopeFields from "../../../../components/booking4step/DynamicScopeFields";
 import { fieldAppliesToTask, type ServiceTaskOption } from "../../../../types/booking4step.types";
 import PricingRangePreview from "../../../../components/booking4step/PricingRangePreview";
+import { BookingFooterBar } from "../../../../components/booking4step/BookingFooterBar";
 import ImageSourcePickerBottomSheet from "../../../../components/bottom-sheets/ImageSourcePickerBottomSheet";
 import type { BottomSheetHandle } from "../../../../components/bottom-sheets/BottomSheetWrapper";
 import { AppIcon as Ionicons } from "../../../../components/icons/AppIcon";
@@ -373,10 +373,14 @@ export default function BookingStep1Screen() {
           )}
         </View>
 
-        <View className="mt-8">
-          <PrimaryButton label="Next" fullWidth disabled={loadingCategories} onPress={handleNext} />
-        </View>
       </KeyboardAwareScrollView>
+      <BookingFooterBar
+        estimate={selectedCategory && !isCustomQuoteTask ? priceEstimate : null}
+        noPriceText={isCustomQuoteTask ? "Quote after inspection" : undefined}
+        buttonLabel="Next"
+        disabled={loadingCategories}
+        onPress={handleNext}
+      />
       <ImageSourcePickerBottomSheet innerRef={photoSheetRef} onSelect={handlePickIssuePhoto} />
     </SafeAreaView>
   );
