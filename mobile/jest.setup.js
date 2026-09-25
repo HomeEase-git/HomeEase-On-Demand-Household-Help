@@ -117,6 +117,10 @@ try {
   // Module not required for tests
 }
 
+jest.mock("react-native-keyboard-controller", () =>
+  require("react-native-keyboard-controller/jest"),
+);
+
 // Add TextEncoder if not available
 if (typeof global.TextEncoder === "undefined") {
   const { TextEncoder } = require("util");

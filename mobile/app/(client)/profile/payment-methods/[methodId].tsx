@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useRef } from "react";
-import { View, TextInput, ScrollView } from "react-native";
+import { View, TextInput } from "react-native";
+import { KeyboardAwareScrollView } from "../../../../components/ui/KeyboardAwareScrollView";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter, useLocalSearchParams } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
@@ -61,7 +62,7 @@ export default function EditPaymentMethodScreen() {
   return (
     <SafeAreaView className="flex-1 bg-white">
       <ScreenHeader title="Edit Payment Method" showBack />
-      <ScrollView contentContainerStyle={{ padding: 24 }}>
+      <KeyboardAwareScrollView contentContainerStyle={{ padding: 24 }}>
         <View className="items-center mb-5">
           <View className="w-16 h-16 rounded-full bg-accent/10 items-center justify-center">
             <Ionicons name="card-outline" size={30} color={colors.accent.DEFAULT} />
@@ -82,7 +83,7 @@ export default function EditPaymentMethodScreen() {
           loading={saving}
           disabled={saving || loading}
         />
-      </ScrollView>
+      </KeyboardAwareScrollView>
     </SafeAreaView>
   );
 }

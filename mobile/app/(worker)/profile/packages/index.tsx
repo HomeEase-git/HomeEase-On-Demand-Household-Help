@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { View, Text, FlatList, Pressable, Modal, ScrollView } from "react-native";
+import { KeyboardAvoidingView } from "react-native-keyboard-controller";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { AppIcon as Ionicons } from "../../../../components/icons/AppIcon";
 import ScreenHeader from "../../../../components/ui/ScreenHeader";
@@ -173,85 +174,88 @@ export default function PackagesScreen() {
       </Pressable>
 
       <Modal visible={showModal} transparent animationType="slide">
-        <View className="flex-1 bg-black/40 justify-end">
-          <View className="bg-white rounded-t-3xl p-6 pb-8">
-            <View className="flex-row justify-between items-center mb-6">
-              <Text className="text-text-primary text-xl font-bold">
-                {editingId ? "Edit Package" : "Add Package"}
-              </Text>
-              <Pressable onPress={() => setShowModal(false)}>
-                <Ionicons name="close" size={24} color={colors.text.primary} />
-              </Pressable>
-            </View>
+        {/* Keeps the sheet's fields above the keyboard. */}
+        <KeyboardAvoidingView behavior="padding" style={{ flex: 1 }}>
+          <View className="flex-1 bg-black/40 justify-end">
+            <View className="bg-white rounded-t-3xl p-6 pb-8">
+              <View className="flex-row justify-between items-center mb-6">
+                <Text className="text-text-primary text-xl font-bold">
+                  {editingId ? "Edit Package" : "Add Package"}
+                </Text>
+                <Pressable onPress={() => setShowModal(false)}>
+                  <Ionicons name="close" size={24} color={colors.text.primary} />
+                </Pressable>
+              </View>
 
-            {myServiceTypes.length === 0 ? (
-              <Text className="text-text-secondary text-sm mb-4">
-                Add a service category from &quot;My Skills &amp; Services&quot;
-                before creating a package.
-              </Text>
-            ) : (
-              <View className="mb-4">
-                <Text className="text-text-secondary text-xs mb-2">Service Category</Text>
-                <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-                  <View className="flex-row gap-2">
-                    {myServiceTypes.map((service) => {
-                      const isSelected = selectedServiceTypeId === service.id;
-                      return (
-                        <Pressable
-                          key={service.id}
-                          onPress={() => setSelectedServiceTypeId(service.id)}
-                          className={`rounded-xl px-3.5 py-2.5 border-2 ${
-                            isSelected ? "bg-accent/10 border-accent" : "bg-card border-transparent"
-                          }`}
-                        >
-                          <Text
-                            className={`text-sm font-medium ${
-                              isSelected ? "text-accent" : "text-text-secondary"
+              {myServiceTypes.length === 0 ? (
+                <Text className="text-text-secondary text-sm mb-4">
+                  Add a service category from &quot;My Skills &amp; Services&quot;
+                  before creating a package.
+                </Text>
+              ) : (
+                <View className="mb-4">
+                  <Text className="text-text-secondary text-xs mb-2">Service Category</Text>
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                    <View className="flex-row gap-2">
+                      {myServiceTypes.map((service) => {
+                        const isSelected = selectedServiceTypeId === service.id;
+                        return (
+                          <Pressable
+                            key={service.id}
+                            onPress={() => setSelectedServiceTypeId(service.id)}
+                            className={`rounded-xl px-3.5 py-2.5 border-2 ${
+                              isSelected ? "bg-accent/10 border-accent" : "bg-card border-transparent"
                             }`}
                           >
-                            {service.name}
-                          </Text>
-                        </Pressable>
-                      );
-                    })}
-                  </View>
-                </ScrollView>
-              </View>
-            )}
+                            <Text
+                              className={`text-sm font-medium ${
+                                isSelected ? "text-accent" : "text-text-secondary"
+                              }`}
+                            >
+                              {service.name}
+                            </Text>
+                          </Pressable>
+                        );
+                      })}
+                    </View>
+                  </ScrollView>
+                </View>
+              )}
 
-            <InputField
-              label="Package Name"
-              value={name}
-              onChangeText={setName}
-              placeholder="e.g. Deep Clean Package"
-            />
-            <InputField
-              label="Description (optional)"
-              value={description}
-              onChangeText={setDescription}
-              placeholder="e.g. Includes fridge, oven, and windows"
-              multiline
-            />
-            <InputField
-              label="Price (₱)"
-              value={price}
-              onChangeText={setPrice}
-              placeholder="e.g. 1500"
-              keyboardType="number-pad"
-            />
-
-            <View className="gap-3 mt-2">
-              <PrimaryButton
-                label={editingId ? "Save Changes" : "Add Package"}
-                fullWidth
-                onPress={handleSave}
-                disabled={saving || myServiceTypes.length === 0}
-                loading={saving}
+              <InputField
+                label="Package Name"
+                value={name}
+                onChangeText={setName}
+                placeholder="e.g. Deep Clean Package"
               />
-              <OutlinedButton label="Cancel" onPress={() => setShowModal(false)} />
+              <InputField
+                label="Description (optional)"
+                value={description}
+                onChangeText={setDescription}
+                placeholder="e.g. Includes fridge, oven, and windows"
+                multiline
+              />
+              <InputField
+                label="Price (₱)"
+                value={price}
+                onChangeText={setPrice}
+                placeholder="e.g. 1500"
+                keyboardType="number-pad"
+              />
+
+              <View className="gap-3 mt-2">
+                <PrimaryButton
+                  label={editingId ? "Save Changes" : "Add Package"}
+                  fullWidth
+                  onPress={handleSave}
+                  disabled={saving || myServiceTypes.length === 0}
+                  loading={saving}
+                />
+                <OutlinedButton label="Cancel" onPress={() => setShowModal(false)} />
+              </View>
             </View>
           </View>
-        </View>
+        </KeyboardAvoidingView>
       </Modal>
     </SafeAreaView>
   );

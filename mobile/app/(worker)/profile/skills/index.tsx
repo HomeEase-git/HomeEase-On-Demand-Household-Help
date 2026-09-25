@@ -1,5 +1,7 @@
 import React, { useCallback, useMemo, useState } from "react";
-import { View, Text, ScrollView, Pressable, Modal, ActivityIndicator } from "react-native";
+import { View, Text, Pressable, Modal, ActivityIndicator, ScrollView } from "react-native";
+import { KeyboardAvoidingView } from "react-native-keyboard-controller";
+import { KeyboardAwareScrollView } from "../../../../components/ui/KeyboardAwareScrollView";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter, useFocusEffect } from "expo-router";
 import { AppIcon as Ionicons } from "../../../../components/icons/AppIcon";
@@ -323,7 +325,7 @@ export default function SkillsScreen() {
   return (
     <SafeAreaView className="flex-1 bg-white">
       <ScreenHeader title="Skills & Services" showBack />
-      <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 80 }}>
+      <KeyboardAwareScrollView contentContainerStyle={{ padding: 16, paddingBottom: 80 }}>
         <Text className="text-text-primary font-bold mb-1">Services You Offer</Text>
         <Text className="text-text-muted text-sm mb-4">
           Check off the tasks you actually do. A new category beyond your first needs one supporting
@@ -505,100 +507,103 @@ export default function SkillsScreen() {
               </Pressable>
             );
           })}
-      </ScrollView>
+      </KeyboardAwareScrollView>
 
       <Modal visible={!!priceModalEntry} transparent animationType="slide">
-        <View className="flex-1 bg-black/40 justify-end">
-          <View className="bg-white rounded-t-3xl p-6 pb-8">
-            <View className="flex-row justify-between items-center mb-6">
-              <Text className="text-text-primary text-xl font-bold">{priceModalEntry?.task.name}</Text>
-              <Pressable onPress={closePriceModal}>
-                <Ionicons name="close" size={24} color={colors.text.primary} />
-              </Pressable>
-            </View>
+        {/* Keeps the sheet's fields above the keyboard. */}
+        <KeyboardAvoidingView behavior="padding" style={{ flex: 1 }}>
+          <View className="flex-1 bg-black/40 justify-end">
+            <View className="bg-white rounded-t-3xl p-6 pb-8">
+              <View className="flex-row justify-between items-center mb-6">
+                <Text className="text-text-primary text-xl font-bold">{priceModalEntry?.task.name}</Text>
+                <Pressable onPress={closePriceModal}>
+                  <Ionicons name="close" size={24} color={colors.text.primary} />
+                </Pressable>
+              </View>
 
-            {priceModalEntry && priceModalEntry.task.pricingModel === "TIERED" && (
-              <>
-                <Text className="text-text-muted text-sm mb-1">
-                  Admin allows ₱{priceModalEntry.task.minPrice}–₱{priceModalEntry.task.maxPrice}/
-                  {priceModalEntry.task.unitLabel} per step.
-                </Text>
-                {!!priceModalEntry.task.description && (
-                  <Text className="text-text-muted text-xs mb-4">{priceModalEntry.task.description}</Text>
-                )}
-                <ScrollView style={{ maxHeight: 320 }} contentContainerStyle={{ paddingBottom: 4 }}>
-                  {tierRows.map((row, index) => {
-                    const isLast = index === tierRows.length - 1;
-                    return (
-                      <View key={index} className="flex-row items-end gap-2 mb-3">
-                        <View className="flex-1">
-                          <InputField
-                            label={isLast ? `Up to (${priceModalEntry.task.unitLabel}, blank = no limit)` : `Up to (${priceModalEntry.task.unitLabel})`}
-                            value={row.upToQty}
-                            onChangeText={(v) => updateTierRow(index, "upToQty", v)}
-                            placeholder={isLast ? "e.g. 20 or blank" : "e.g. 20"}
-                            keyboardType="number-pad"
-                          />
+              {priceModalEntry && priceModalEntry.task.pricingModel === "TIERED" && (
+                <>
+                  <Text className="text-text-muted text-sm mb-1">
+                    Admin allows ₱{priceModalEntry.task.minPrice}–₱{priceModalEntry.task.maxPrice}/
+                    {priceModalEntry.task.unitLabel} per step.
+                  </Text>
+                  {!!priceModalEntry.task.description && (
+                    <Text className="text-text-muted text-xs mb-4">{priceModalEntry.task.description}</Text>
+                  )}
+                  <ScrollView style={{ maxHeight: 320 }} contentContainerStyle={{ paddingBottom: 4 }}>
+                    {tierRows.map((row, index) => {
+                      const isLast = index === tierRows.length - 1;
+                      return (
+                        <View key={index} className="flex-row items-end gap-2 mb-3">
+                          <View className="flex-1">
+                            <InputField
+                              label={isLast ? `Up to (${priceModalEntry.task.unitLabel}, blank = no limit)` : `Up to (${priceModalEntry.task.unitLabel})`}
+                              value={row.upToQty}
+                              onChangeText={(v) => updateTierRow(index, "upToQty", v)}
+                              placeholder={isLast ? "e.g. 20 or blank" : "e.g. 20"}
+                              keyboardType="number-pad"
+                            />
+                          </View>
+                          <View className="flex-1">
+                            <InputField
+                              label="Price (₱)"
+                              value={row.price}
+                              onChangeText={(v) => updateTierRow(index, "price", v)}
+                              placeholder="e.g. 1000"
+                              keyboardType="number-pad"
+                            />
+                          </View>
+                          {tierRows.length > 1 && (
+                            <Pressable onPress={() => removeTierRow(index)} className="mb-3 p-2">
+                              <Ionicons name="trash-outline" size={18} color={colors.error} />
+                            </Pressable>
+                          )}
                         </View>
-                        <View className="flex-1">
-                          <InputField
-                            label="Price (₱)"
-                            value={row.price}
-                            onChangeText={(v) => updateTierRow(index, "price", v)}
-                            placeholder="e.g. 1000"
-                            keyboardType="number-pad"
-                          />
-                        </View>
-                        {tierRows.length > 1 && (
-                          <Pressable onPress={() => removeTierRow(index)} className="mb-3 p-2">
-                            <Ionicons name="trash-outline" size={18} color={colors.error} />
-                          </Pressable>
-                        )}
-                      </View>
-                    );
-                  })}
-                </ScrollView>
-                {tierRows.length < MAX_TIER_ROWS && (
-                  <Pressable onPress={addTierRow} className="flex-row items-center mb-2">
-                    <Ionicons name="add-circle-outline" size={18} color={colors.accent.DEFAULT} />
-                    <Text className="text-accent text-sm font-semibold ml-1.5">Add a price step</Text>
-                  </Pressable>
-                )}
-              </>
-            )}
+                      );
+                    })}
+                  </ScrollView>
+                  {tierRows.length < MAX_TIER_ROWS && (
+                    <Pressable onPress={addTierRow} className="flex-row items-center mb-2">
+                      <Ionicons name="add-circle-outline" size={18} color={colors.accent.DEFAULT} />
+                      <Text className="text-accent text-sm font-semibold ml-1.5">Add a price step</Text>
+                    </Pressable>
+                  )}
+                </>
+              )}
 
-            {priceModalEntry && priceModalEntry.task.pricingModel !== "TIERED" && (
-              <>
-                <Text className="text-text-muted text-sm mb-4">
-                  Admin allows ₱{priceModalEntry.task.minPrice}–₱{priceModalEntry.task.maxPrice}
-                  {priceModalEntry.task.pricingModel === "PER_UNIT" ? `/${priceModalEntry.task.unitLabel}` : ""}
-                </Text>
-                <InputField
-                  label={
-                    priceModalEntry.task.pricingModel === "PER_UNIT"
-                      ? `Your rate (₱/${priceModalEntry.task.unitLabel})`
-                      : "Your price (₱)"
-                  }
-                  value={priceInput}
-                  onChangeText={setPriceInput}
-                  placeholder="e.g. 800"
-                  keyboardType="number-pad"
+              {priceModalEntry && priceModalEntry.task.pricingModel !== "TIERED" && (
+                <>
+                  <Text className="text-text-muted text-sm mb-4">
+                    Admin allows ₱{priceModalEntry.task.minPrice}–₱{priceModalEntry.task.maxPrice}
+                    {priceModalEntry.task.pricingModel === "PER_UNIT" ? `/${priceModalEntry.task.unitLabel}` : ""}
+                  </Text>
+                  <InputField
+                    label={
+                      priceModalEntry.task.pricingModel === "PER_UNIT"
+                        ? `Your rate (₱/${priceModalEntry.task.unitLabel})`
+                        : "Your price (₱)"
+                    }
+                    value={priceInput}
+                    onChangeText={setPriceInput}
+                    placeholder="e.g. 800"
+                    keyboardType="number-pad"
+                  />
+                </>
+              )}
+
+              <View className="gap-3 mt-2">
+                <PrimaryButton
+                  label="Save Price"
+                  fullWidth
+                  onPress={handleSavePrice}
+                  disabled={savingPrice}
+                  loading={savingPrice}
                 />
-              </>
-            )}
-
-            <View className="gap-3 mt-2">
-              <PrimaryButton
-                label="Save Price"
-                fullWidth
-                onPress={handleSavePrice}
-                disabled={savingPrice}
-                loading={savingPrice}
-              />
-              <OutlinedButton label="Cancel" onPress={closePriceModal} />
+                <OutlinedButton label="Cancel" onPress={closePriceModal} />
+              </View>
             </View>
           </View>
-        </View>
+        </KeyboardAvoidingView>
       </Modal>
     </SafeAreaView>
   );

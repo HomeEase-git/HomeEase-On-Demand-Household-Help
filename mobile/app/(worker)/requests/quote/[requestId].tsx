@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
-import { View, Text, ScrollView } from "react-native";
+import { View, Text } from "react-native";
+import { KeyboardAwareScrollView } from "../../../../components/ui/KeyboardAwareScrollView";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter, useLocalSearchParams } from "expo-router";
@@ -61,7 +62,7 @@ export default function SubmitQuoteScreen() {
     return (
       <SafeAreaView className="flex-1 bg-white">
         <ScreenHeader title="Submit Quote" showBack />
-        <ScrollView contentContainerStyle={{ padding: 24, paddingBottom: 40 }}>
+        <KeyboardAwareScrollView contentContainerStyle={{ padding: 24, paddingBottom: 40 }}>
           <View className="bg-card rounded-2xl p-4 mb-6">
             <Skeleton width="25%" height={10} marginBottom={6} />
             <Skeleton width="60%" height={16} marginBottom={6} />
@@ -71,7 +72,7 @@ export default function SubmitQuoteScreen() {
           <Skeleton width="100%" height={48} borderRadius={12} marginBottom={16} />
           <Skeleton width="100%" height={48} borderRadius={12} marginBottom={16} />
           <Skeleton width="100%" height={80} borderRadius={12} marginBottom={0} />
-        </ScrollView>
+        </KeyboardAwareScrollView>
       </SafeAreaView>
     );
   }
@@ -111,7 +112,7 @@ export default function SubmitQuoteScreen() {
   return (
     <SafeAreaView className="flex-1 bg-white">
       <ScreenHeader title="Submit Quote" showBack />
-      <ScrollView contentContainerStyle={{ padding: 24, paddingBottom: 40 }}>
+      <KeyboardAwareScrollView contentContainerStyle={{ padding: 24, paddingBottom: 40 }}>
         {/* Booking Summary */}
         <View className="bg-card rounded-2xl p-4 mb-6">
           <Text className="text-text-secondary text-xs mb-1">Booking</Text>
@@ -230,7 +231,7 @@ export default function SubmitQuoteScreen() {
           />
           <OutlinedButton label="Cancel" onPress={() => router.back()} />
         </View>
-      </ScrollView>
+      </KeyboardAwareScrollView>
     </SafeAreaView>
   );
 }

@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
-import { View, Text, ScrollView, Pressable } from "react-native";
+import { View, Text, Pressable } from "react-native";
+import { KeyboardAwareScrollView } from "../../../../components/ui/KeyboardAwareScrollView";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import ScreenHeader from "../../../../components/ui/ScreenHeader";
@@ -100,7 +101,7 @@ export default function PayoutEditScreen() {
   return (
     <SafeAreaView className="flex-1 bg-white">
       <ScreenHeader title="Set Payout Method" showBack />
-      <ScrollView contentContainerStyle={{ padding: 24 }}>
+      <KeyboardAwareScrollView contentContainerStyle={{ padding: 24 }}>
         {METHODS.map((m) => (
           <Pressable
             key={m.id}
@@ -117,12 +118,14 @@ export default function PayoutEditScreen() {
         ))}
         <View className="mt-2">
           <InputField
+            returnKeyType="next"
             label="Account Name"
             value={accountName}
             onChangeText={setAccountName}
             placeholder="e.g. Juan Dela Cruz"
           />
           <InputField
+            returnKeyType="next"
             label="Mobile Number"
             value={accountNumber}
             onChangeText={setAccountNumber}
@@ -144,7 +147,7 @@ export default function PayoutEditScreen() {
           disabled={saving}
           loading={saving}
         />
-      </ScrollView>
+      </KeyboardAwareScrollView>
     </SafeAreaView>
   );
 }

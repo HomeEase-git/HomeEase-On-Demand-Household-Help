@@ -7,6 +7,7 @@ import { Stack } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { SafeAreaProvider } from "react-native-safe-area-context";
+import { KeyboardProvider } from "react-native-keyboard-controller";
 import { ToastProvider } from "../contexts/ToastContext";
 import { AlertModalProvider } from "../contexts/AlertModalContext";
 import { useAuthStore } from "../store/authStore";
@@ -199,23 +200,28 @@ export default function RootLayout() {
 
   return (
     <GestureHandlerRootView className="flex-1 bg-white">
-      <SafeAreaProvider>
-        <ToastProvider>
-          <AlertModalProvider>
-            <Stack
-              screenOptions={{
-                headerShown: false,
-                animation: "slide_from_right",
-                animationDuration: 250,
-                contentStyle: { backgroundColor: colors.surface },
-                headerStyle: { backgroundColor: colors.surface },
-                headerTintColor: colors.text.primary,
-                headerShadowVisible: false,
-              }}
-            />
-          </AlertModalProvider>
-        </ToastProvider>
-      </SafeAreaProvider>
+      {/* Tracks the keyboard for KeyboardAwareScrollView & co. The app is
+          already edge-to-edge, so keep both system bars translucent rather
+          than letting the provider change the window layout. */}
+      <KeyboardProvider statusBarTranslucent navigationBarTranslucent>
+        <SafeAreaProvider>
+          <ToastProvider>
+            <AlertModalProvider>
+              <Stack
+                screenOptions={{
+                  headerShown: false,
+                  animation: "slide_from_right",
+                  animationDuration: 250,
+                  contentStyle: { backgroundColor: colors.surface },
+                  headerStyle: { backgroundColor: colors.surface },
+                  headerTintColor: colors.text.primary,
+                  headerShadowVisible: false,
+                }}
+              />
+            </AlertModalProvider>
+          </ToastProvider>
+        </SafeAreaProvider>
+      </KeyboardProvider>
     </GestureHandlerRootView>
   );
 }

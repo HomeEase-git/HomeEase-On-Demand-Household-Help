@@ -1,5 +1,6 @@
 import React, { useState } from "react";
-import { View, Text, ScrollView, Pressable } from "react-native";
+import { View, Text, Pressable } from "react-native";
+import { KeyboardAwareScrollView } from "../../../../components/ui/KeyboardAwareScrollView";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { AppIcon as Ionicons } from "../../../../components/icons/AppIcon";
 import { useRouter, useLocalSearchParams } from "expo-router";
@@ -63,7 +64,7 @@ export default function CancelBookingScreen() {
   return (
     <SafeAreaView className="flex-1 bg-white">
       <ScreenHeader title="Cancel Booking" showBack />
-      <ScrollView
+      <KeyboardAwareScrollView
         className="flex-1"
         contentContainerStyle={{ padding: 24, paddingBottom: 40 }}
       >
@@ -133,7 +134,7 @@ export default function CancelBookingScreen() {
             />
           </View>
         </View>
-      </ScrollView>
+      </KeyboardAwareScrollView>
 
       <GenericConfirmationModal
         visible={confirmVisible}

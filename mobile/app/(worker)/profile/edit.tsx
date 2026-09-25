@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useRef } from "react";
-import { View, ScrollView, TextInput, Text } from "react-native";
+import { View, TextInput, Text } from "react-native";
+import { KeyboardAwareScrollView } from "../../../components/ui/KeyboardAwareScrollView";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import ScreenHeader from "../../../components/ui/ScreenHeader";
@@ -177,7 +178,7 @@ export default function WorkerEditProfileScreen() {
   return (
     <SafeAreaView className="flex-1 bg-white">
       <ScreenHeader title="Edit Profile" showBack />
-      <ScrollView contentContainerStyle={{ padding: 24 }}>
+      <KeyboardAwareScrollView contentContainerStyle={{ padding: 24 }}>
         <InputField
           ref={nameRef}
           label="Full Name"
@@ -227,24 +228,28 @@ export default function WorkerEditProfileScreen() {
           </Text>
 
           <InputField
+            returnKeyType="next"
             label="Street address"
             value={address}
             onChangeText={(v) => addressChanged(() => setAddress(v))}
             placeholder="123 Rizal St."
           />
           <InputField
+            returnKeyType="next"
             label="City"
             value={city}
             onChangeText={(v) => addressChanged(() => setCity(v))}
             placeholder="Quezon City"
           />
           <InputField
+            returnKeyType="next"
             label="Province / State"
             value={addressState}
             onChangeText={(v) => addressChanged(() => setAddressState(v))}
             placeholder="Metro Manila"
           />
           <InputField
+            returnKeyType="next"
             label="ZIP Code"
             value={zipCode}
             onChangeText={(v) => addressChanged(() => setZipCode(v))}
@@ -263,12 +268,14 @@ export default function WorkerEditProfileScreen() {
           </Text>
 
           <InputField
+            returnKeyType="next"
             label="Trade / Profession"
             value={trade}
             onChangeText={setTrade}
             placeholder="Plumbing"
           />
           <InputField
+            returnKeyType="next"
             label="Service Area"
             value={serviceArea}
             onChangeText={setServiceArea}
@@ -289,7 +296,7 @@ export default function WorkerEditProfileScreen() {
           disabled={submitting}
           loading={submitting}
         />
-      </ScrollView>
+      </KeyboardAwareScrollView>
     </SafeAreaView>
   );
 }

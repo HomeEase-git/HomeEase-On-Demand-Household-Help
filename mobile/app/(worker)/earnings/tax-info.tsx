@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
-import { View, Text, ScrollView, FlatList, Linking } from "react-native";
+import { View, Text, FlatList, Linking } from "react-native";
+import { KeyboardAwareScrollView } from "../../../components/ui/KeyboardAwareScrollView";
 import { SafeAreaView } from "react-native-safe-area-context";
 import * as DocumentPicker from "expo-document-picker";
 import * as ImagePicker from "expo-image-picker";
@@ -150,7 +151,7 @@ export default function TaxInfoScreen() {
   return (
     <SafeAreaView className="flex-1 bg-white">
       <ScreenHeader title="Tax Information" showBack />
-      <ScrollView contentContainerStyle={{ padding: 24 }}>
+      <KeyboardAwareScrollView contentContainerStyle={{ padding: 24 }}>
         <Text className="text-text-primary font-bold mb-2">TIN on File</Text>
         <View className="bg-card rounded-2xl p-4 mb-4" style={cardShadow}>
           <Text className="text-text-primary">
@@ -271,7 +272,7 @@ export default function TaxInfoScreen() {
             )}
           />
         )}
-      </ScrollView>
+      </KeyboardAwareScrollView>
     </SafeAreaView>
   );
 }

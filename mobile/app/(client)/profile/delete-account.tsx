@@ -1,5 +1,6 @@
 import React, { useState } from "react";
-import { View, Text, ScrollView } from "react-native";
+import { View, Text } from "react-native";
+import { KeyboardAwareScrollView } from "../../../components/ui/KeyboardAwareScrollView";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
@@ -50,7 +51,7 @@ export default function DeleteAccountScreen() {
   return (
     <SafeAreaView className="flex-1 bg-white">
       <ScreenHeader title="Delete Account" showBack />
-      <ScrollView contentContainerStyle={{ padding: 24 }}>
+      <KeyboardAwareScrollView contentContainerStyle={{ padding: 24 }}>
         <View className="items-center mb-6">
           <View className="w-24 h-24 bg-error/20 rounded-full items-center justify-center">
             <Ionicons name="warning" size={60} color={colors.error} />
@@ -69,6 +70,7 @@ export default function DeleteAccountScreen() {
           Type DELETE to confirm
         </Text>
         <InputField
+          returnKeyType="next"
           value={confirmText}
           onChangeText={setConfirmText}
           placeholder="DELETE"
@@ -91,7 +93,7 @@ export default function DeleteAccountScreen() {
           />
           <OutlinedButton label="Cancel" onPress={() => router.back()} />
         </View>
-      </ScrollView>
+      </KeyboardAwareScrollView>
       <GenericSuccessModal
         visible={successVisible}
         title="Your account has been permanently deleted"

@@ -1,5 +1,6 @@
 import React, { useCallback, useState } from "react";
-import { View, Text, ScrollView, TextInput, Switch } from "react-native";
+import { View, Text, TextInput, Switch } from "react-native";
+import { KeyboardAwareScrollView } from "../../../../components/ui/KeyboardAwareScrollView";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter, useFocusEffect } from "expo-router";
 import { AppIcon as Ionicons } from "../../../../components/icons/AppIcon";
@@ -337,7 +338,7 @@ export default function BookingStep4Screen() {
   return (
     <SafeAreaView className="flex-1 bg-white">
       <ScreenHeader title="Confirm & Book" showBack />
-      <ScrollView className="flex-1" contentContainerStyle={{ padding: 24, paddingBottom: 40 }}>
+      <KeyboardAwareScrollView className="flex-1" contentContainerStyle={{ padding: 24, paddingBottom: 40 }}>
         <StepperHorizontal steps={BOOKING_STEPS} currentStep={3} />
 
         {!validation.ok && (
@@ -476,7 +477,7 @@ export default function BookingStep4Screen() {
             onPress={handleSubmit}
           />
         </View>
-      </ScrollView>
+      </KeyboardAwareScrollView>
 
       <GenericConfirmationModal
         visible={confirmVisible}

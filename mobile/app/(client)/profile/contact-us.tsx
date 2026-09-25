@@ -1,5 +1,6 @@
 import React, { useState } from "react";
-import { View, Text, ScrollView, Linking } from "react-native";
+import { View, Text, Linking } from "react-native";
+import { KeyboardAwareScrollView } from "../../../components/ui/KeyboardAwareScrollView";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
@@ -39,7 +40,7 @@ export default function ContactUsScreen() {
   return (
     <SafeAreaView className="flex-1 bg-white">
       <ScreenHeader title="Contact Us" showBack />
-      <ScrollView contentContainerStyle={{ padding: 24 }}>
+      <KeyboardAwareScrollView contentContainerStyle={{ padding: 24 }}>
         <Text className="text-text-muted text-xs font-semibold uppercase tracking-wide mb-1">
           Get in Touch
         </Text>
@@ -83,7 +84,7 @@ export default function ContactUsScreen() {
           />
           <PrimaryButton label="Send via Email" fullWidth onPress={handleSend} />
         </View>
-      </ScrollView>
+      </KeyboardAwareScrollView>
     </SafeAreaView>
   );
 }

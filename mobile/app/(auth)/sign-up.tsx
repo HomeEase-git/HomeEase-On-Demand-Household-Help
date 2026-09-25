@@ -1,5 +1,6 @@
 import React, { useState, useRef } from "react";
-import { View, Text, ScrollView, Pressable, TextInput } from "react-native";
+import { View, Text, Pressable, TextInput } from "react-native";
+import { KeyboardAwareScrollView } from "../../components/ui/KeyboardAwareScrollView";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter, useLocalSearchParams } from "expo-router";
 import { InputField } from "../../components/ui/InputField";
@@ -146,7 +147,7 @@ export default function SignUpScreen() {
 
   return (
     <SafeAreaView className="flex-1 bg-white">
-      <ScrollView
+      <KeyboardAwareScrollView
         className="flex-1"
         contentContainerStyle={{ paddingHorizontal: 24, paddingBottom: 40 }}
         keyboardShouldPersistTaps="handled"
@@ -273,7 +274,7 @@ export default function SignUpScreen() {
           <Text className="text-text-secondary">Already have an account? </Text>
           <Text className="text-accent font-semibold">Sign In</Text>
         </Pressable>
-      </ScrollView>
+      </KeyboardAwareScrollView>
     </SafeAreaView>
   );
 }
