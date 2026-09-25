@@ -1,4 +1,5 @@
 import prisma from '@config/database';
+import { downloadStorageObject } from '@utils/storageUrls';
 import type { VerificationJobDocument } from '@queues/verificationQueue';
 
 export interface VerificationReviewResult {
@@ -139,11 +140,9 @@ async function fetchReviewableDocs(candidates: VerificationJobDocument[]): Promi
       }
 
       try {
-        const response = await fetch(doc.fileUrl);
-        if (!response.ok) {
-          throw new Error(`HTTP ${response.status}`);
-        }
-        const buffer = Buffer.from(await response.arrayBuffer());
+        // Service-key download: the KYC bucket is private, so the stored
+        // object URL isn't directly fetchable.
+        const buffer = await downloadStorageObject(doc.fileUrl);
         const base64 = buffer.toString('base64');
 
         const alreadyCommitted = out.some((r) => r?.status === 'ok');

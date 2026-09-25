@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import prisma from '@config/database';
 import { errorResponse } from '@utils/errorResponse';
+import { toOwnedStoredUrl } from '@utils/storageUrls';
 import { toDayStart, materializeTemplateForWorker, setUnavailableRange } from '@services/workerAvailabilityService';
 import { getAppSettings } from '@services/appSettingsService';
 import { parseWorkerResume } from '@services/resumeParseService';
@@ -1138,7 +1139,13 @@ export const updateWorkerProfile = async (req: AuthRequest, res: Response) => {
     // time (see bookingController.createBooking). Not matching/search input.
     if (addressLat !== undefined) updateData.addressLat = addressLat;
     if (addressLng !== undefined) updateData.addressLng = addressLng;
-    if (resumeUrl !== undefined) updateData.resumeUrl = resumeUrl;
+    if (resumeUrl !== undefined) {
+      const storedResumeUrl = resumeUrl ? toOwnedStoredUrl(resumeUrl, req.user.userId) : resumeUrl;
+      if (storedResumeUrl === null) {
+        return res.status(400).json(errorResponse(400, 'That file does not belong to your account. Please upload it again.'));
+      }
+      updateData.resumeUrl = storedResumeUrl;
+    }
     if (digitalIdTrade !== undefined) updateData.digitalIdTrade = digitalIdTrade;
     if (digitalIdServiceArea !== undefined) updateData.digitalIdServiceArea = digitalIdServiceArea;
     if (licenseNumber !== undefined) updateData.licenseNumber = licenseNumber;
@@ -1280,6 +1287,12 @@ async function runCategoryGate(
     if (!title || !issuer || !issueDate || !documentUrl) {
       return { error: 'certification requires title, issuer, issueDate, and documentUrl', status: 400 };
     }
+    const owner = await prisma.workerProfile.findUnique({ where: { id: workerProfileId }, select: { userId: true } });
+    const storedDocumentUrl = owner ? toOwnedStoredUrl(documentUrl, owner.userId) : null;
+    if (!storedDocumentUrl) {
+      return { error: 'That file does not belong to your account. Please upload it again.', status: 400 };
+    }
+    input.certification!.documentUrl = storedDocumentUrl;
   }
 
   // Certification create (if needed) + category upsert happen atomically so
@@ -2572,6 +2585,11 @@ export const createCertification = async (req: AuthRequest, res: Response) => {
       }
     }
 
+    const storedDocumentUrl = toOwnedStoredUrl(documentUrl, req.user.userId);
+    if (!storedDocumentUrl) {
+      return res.status(400).json(errorResponse(400, 'That file does not belong to your account. Please upload it again.'));
+    }
+
     const certification = await prisma.certification.create({
       data: {
         workerProfileId: workerProfile.id,
@@ -2579,7 +2597,7 @@ export const createCertification = async (req: AuthRequest, res: Response) => {
         issuer: issuer.trim(),
         issueDate: new Date(issueDate),
         expiryDate: expiryDate ? new Date(expiryDate) : null,
-        documentUrl,
+        documentUrl: storedDocumentUrl,
         serviceTypeId: serviceTypeId || null,
         ...(visibleToClients !== undefined ? { visibleToClients } : {}),
       },
@@ -2640,6 +2658,11 @@ export const updateCertification = async (req: AuthRequest, res: Response) => {
       }
     }
 
+    const storedDocumentUrl = documentUrl ? toOwnedStoredUrl(documentUrl, req.user.userId) : undefined;
+    if (storedDocumentUrl === null) {
+      return res.status(400).json(errorResponse(400, 'That file does not belong to your account. Please upload it again.'));
+    }
+
     const certification = await prisma.certification.update({
       where: { id: certId },
       data: {
@@ -2647,7 +2670,7 @@ export const updateCertification = async (req: AuthRequest, res: Response) => {
         issuer: issuer.trim(),
         issueDate: new Date(issueDate),
         expiryDate: expiryDate ? new Date(expiryDate) : null,
-        documentUrl: documentUrl ?? existing.documentUrl,
+        documentUrl: storedDocumentUrl ?? existing.documentUrl,
         serviceTypeId: serviceTypeId !== undefined ? serviceTypeId || null : existing.serviceTypeId,
         visibleToClients: visibleToClients !== undefined ? visibleToClients : existing.visibleToClients,
         verificationStatus: 'PENDING',
@@ -3013,10 +3036,15 @@ export const submitVatRegistration = async (req: AuthRequest, res: Response) => 
       return res.status(400).json(errorResponse(400, 'documentUrl is required'));
     }
 
+    const storedDocumentUrl = toOwnedStoredUrl(documentUrl, req.user.userId);
+    if (!storedDocumentUrl) {
+      return res.status(400).json(errorResponse(400, 'That file does not belong to your account. Please upload it again.'));
+    }
+
     const updated = await prisma.workerProfile.update({
       where: { userId: req.user.userId },
       data: {
-        vatDocumentUrl: documentUrl,
+        vatDocumentUrl: storedDocumentUrl,
         vatVerificationStatus: 'PENDING',
         vatRejectionReason: null,
         vatSubmittedAt: new Date(),
