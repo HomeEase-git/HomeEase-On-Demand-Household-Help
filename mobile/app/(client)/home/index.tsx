@@ -170,7 +170,7 @@ export default function ClientHomeScreen() {
       >
         <View className="flex-row items-center justify-between px-4 pt-2 pb-2">
           <Text className="text-text-primary text-xl font-bold">HomeEase</Text>
-          <Pressable
+          <Pressable accessibilityRole="button" accessibilityLabel="Notifications"
             className="p-2"
             onPress={() => router.push("/(client)/inbox")}
           >
@@ -316,7 +316,7 @@ export default function ClientHomeScreen() {
                 actionLabel="See All"
                 onActionPress={() => router.push("/(client)/category")}
                 rightElement={
-                  <Pressable
+                  <Pressable accessibilityRole="button" accessibilityLabel="Filter and sort"
                     onPress={() => filterRef.current?.expand()}
                     hitSlop={8}
                   >

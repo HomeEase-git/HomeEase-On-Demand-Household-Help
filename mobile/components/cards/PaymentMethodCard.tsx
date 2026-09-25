@@ -85,10 +85,10 @@ export const PaymentMethodCard: React.FC<Props> = ({
             </Text>
           </Pressable>
         )}
-        <Pressable onPress={onEdit} className="p-2">
+        <Pressable accessibilityRole="button" accessibilityLabel="Edit payment method" onPress={onEdit} className="p-2">
           <Ionicons name="pencil-outline" size={20} color={colors.text.muted} />
         </Pressable>
-        <Pressable onPress={handleDelete} className="p-2">
+        <Pressable accessibilityRole="button" accessibilityLabel="Delete payment method" onPress={handleDelete} className="p-2">
           <Ionicons name="trash-outline" size={20} color={colors.error} />
         </Pressable>
       </View>

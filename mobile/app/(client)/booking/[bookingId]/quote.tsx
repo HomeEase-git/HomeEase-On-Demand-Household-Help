@@ -1,5 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
-import { View, Text, Pressable, ActivityIndicator, Image } from "react-native";
+import { View, Text, Pressable, ActivityIndicator } from "react-native";
+import { ScreenSkeleton } from "../../../../components/feedback/ScreenSkeleton";
+import { RemoteImage } from "../../../../components/ui/RemoteImage";
 import { KeyboardAwareScrollView } from "../../../../components/ui/KeyboardAwareScrollView";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { AppIcon as Ionicons } from "../../../../components/icons/AppIcon";
@@ -92,9 +94,7 @@ export default function QuoteReviewScreen() {
     return (
       <SafeAreaView className="flex-1 bg-white">
         <ScreenHeader title="Review Quote" showBack />
-        <View className="flex-1 items-center justify-center">
-          <ActivityIndicator size="small" color={colors.accent.DEFAULT} />
-        </View>
+        <ScreenSkeleton />
       </SafeAreaView>
     );
   }
@@ -323,8 +323,8 @@ export default function QuoteReviewScreen() {
             <View className="flex-row flex-wrap gap-2 mt-1">
               {evidencePhotos.map((url) => (
                 <View key={url} className="relative">
-                  <Image source={{ uri: url }} className="w-20 h-20 rounded-xl" />
-                  <Pressable
+                  <RemoteImage source={{ uri: url }} className="w-20 h-20 rounded-xl" />
+                  <Pressable accessibilityRole="button" accessibilityLabel="Remove photo" hitSlop={8}
                     className="absolute -top-1.5 -right-1.5 bg-black/70 rounded-full w-5 h-5 items-center justify-center"
                     onPress={() => handleRemoveEvidencePhoto(url)}
                   >

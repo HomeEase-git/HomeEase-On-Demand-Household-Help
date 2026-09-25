@@ -127,7 +127,7 @@ export default function ChatScreen() {
   return (
     <SafeAreaView className="flex-1 bg-white" edges={["top"]}>
       <View className="flex-row items-center px-4 py-3 border-b border-divider bg-white">
-        <Pressable onPress={() => router.back()} className="mr-2">
+        <Pressable accessibilityRole="button" accessibilityLabel="Go back" onPress={() => router.back()} className="mr-2">
           <Ionicons name="chevron-back" size={24} color={colors.text.primary} />
         </Pressable>
         <Pressable
@@ -147,7 +147,7 @@ export default function ChatScreen() {
             {conversation?.name ?? "Chat"}
           </Text>
         </View>
-        <Pressable onPress={call}>
+        <Pressable accessibilityRole="button" accessibilityLabel="Call" onPress={call}>
           <Ionicons name="call-outline" size={22} color={colors.text.primary} />
         </Pressable>
       </View>
@@ -190,7 +190,7 @@ export default function ChatScreen() {
         />
 
         <View className="flex-row items-center p-3 border-t border-divider">
-          <Pressable
+          <Pressable accessibilityRole="button" accessibilityLabel="Attach a photo"
             className="p-2 mr-2"
             onPress={() => imageSheetRef.current?.expand()}
           >
@@ -205,7 +205,7 @@ export default function ChatScreen() {
             onChangeText={setInput}
             multiline
           />
-          <Pressable
+          <Pressable accessibilityRole="button" accessibilityLabel="Send message"
             className={`bg-accent rounded-full p-2 ml-2 ${sending ? "opacity-50" : ""}`}
             onPress={send}
             disabled={sending}

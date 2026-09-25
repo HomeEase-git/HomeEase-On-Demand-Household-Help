@@ -1,12 +1,7 @@
 import React, { useCallback, useState } from "react";
-import {
-  View,
-  Text,
-  Image,
-  ScrollView,
-  ActivityIndicator,
-  useWindowDimensions,
-} from "react-native";
+import { View, Text, ScrollView, useWindowDimensions } from "react-native";
+import { ScreenSkeleton } from "../../../components/feedback/ScreenSkeleton";
+import { RemoteImage } from "../../../components/ui/RemoteImage";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useFocusEffect } from "expo-router";
 import Svg, { Rect, Line } from "react-native-svg";
@@ -105,9 +100,7 @@ export default function DigitalIdScreen() {
     return (
       <SafeAreaView className="flex-1 bg-white">
         <ScreenHeader title="Digital ID" showBack />
-        <View className="flex-1 items-center justify-center">
-          <ActivityIndicator color={colors.accent.DEFAULT} />
-        </View>
+        <ScreenSkeleton />
       </SafeAreaView>
     );
   }
@@ -196,7 +189,7 @@ export default function DigitalIdScreen() {
             <View className="flex-row mt-5">
               <View className="w-[86px] h-[86px] rounded-2xl bg-white/15 border border-white/20 items-center justify-center overflow-hidden mr-4">
                 {card.avatar ? (
-                  <Image
+                  <RemoteImage
                     source={{ uri: card.avatar }}
                     style={{ width: 86, height: 86 }}
                     resizeMode="cover"

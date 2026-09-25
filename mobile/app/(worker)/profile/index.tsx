@@ -1,5 +1,6 @@
 import React, { useCallback, useRef, useState } from "react";
-import { View, Text, ScrollView, Pressable, Image, ActivityIndicator } from "react-native";
+import { View, Text, ScrollView, Pressable, ActivityIndicator } from "react-native";
+import { RemoteImage } from "../../../components/ui/RemoteImage";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { AppIcon as Ionicons } from "../../../components/icons/AppIcon";
 import { useRouter, useFocusEffect } from "expo-router";
@@ -131,7 +132,7 @@ export default function WorkerProfileScreen() {
           <View className="relative mr-3">
             <View className="w-16 h-16 bg-accent rounded-full items-center justify-center overflow-hidden">
               {user?.avatar ? (
-                <Image
+                <RemoteImage
                   source={{ uri: user.avatar }}
                   style={{ width: 64, height: 64 }}
                   resizeMode="cover"
@@ -148,7 +149,7 @@ export default function WorkerProfileScreen() {
                 </View>
               )}
             </View>
-            <Pressable
+            <Pressable accessibilityRole="button" accessibilityLabel="Change profile photo"
               className="absolute bottom-0 right-0 w-6 h-6 bg-brand rounded-full items-center justify-center"
               onPress={() => imageSheetRef.current?.expand()}
               disabled={uploadingAvatar}

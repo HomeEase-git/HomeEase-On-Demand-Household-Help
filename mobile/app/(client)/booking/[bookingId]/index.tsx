@@ -1,5 +1,6 @@
 import React, { useState } from "react";
-import { View, Text, Image, ScrollView, Pressable, Linking } from "react-native";
+import { View, Text, ScrollView, Pressable, Linking } from "react-native";
+import { RemoteImage } from "../../../../components/ui/RemoteImage";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useFocusEffect, useRouter, useLocalSearchParams } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
@@ -794,7 +795,7 @@ export default function BookingDetailScreen() {
             <Text className="text-text-primary font-bold mb-2">
               {isPendingCompletion ? "Worker Submitted Completed Work" : "Completion Photo"}
             </Text>
-            <Image
+            <RemoteImage
               source={{ uri: booking.completionPhotoUrl }}
               style={{ width: "100%", height: 220, borderRadius: 16 }}
               resizeMode="cover"

@@ -236,7 +236,7 @@ export default function BookingStep2Screen() {
                 {dayCount === 1 ? "Single day" : `${dayCount} consecutive days`}
               </Text>
               <View className="flex-row items-center">
-                <Pressable
+                <Pressable accessibilityRole="button" accessibilityLabel="One day fewer"
                   className="w-9 h-9 rounded-full bg-surface items-center justify-center"
                   disabled={dayCount <= 1}
                   onPress={() => setDayCount((c) => Math.max(1, c - 1))}

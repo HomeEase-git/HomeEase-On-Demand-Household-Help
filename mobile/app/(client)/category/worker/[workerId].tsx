@@ -1,5 +1,7 @@
 import React, { useEffect, useState } from "react";
-import { View, Text, ScrollView, Pressable, ActivityIndicator, Image } from "react-native";
+import { View, Text, ScrollView, Pressable } from "react-native";
+import { ScreenSkeleton } from "../../../../components/feedback/ScreenSkeleton";
+import { RemoteImage } from "../../../../components/ui/RemoteImage";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { AppIcon as Ionicons } from "../../../../components/icons/AppIcon";
 import { useRouter, useLocalSearchParams } from "expo-router";
@@ -86,9 +88,7 @@ export default function WorkerProfileScreen() {
     return (
       <SafeAreaView className="flex-1 bg-white">
         <ScreenHeader title="Worker" showBack />
-        <View className="flex-1 items-center justify-center">
-          <ActivityIndicator size="small" color={colors.brand.DEFAULT} />
-        </View>
+        <ScreenSkeleton variant="profile" />
       </SafeAreaView>
     );
   }
@@ -114,7 +114,7 @@ export default function WorkerProfileScreen() {
   return (
     <SafeAreaView className="flex-1 bg-white">
       <View className="absolute top-2 left-4 z-10">
-        <Pressable
+        <Pressable accessibilityRole="button" accessibilityLabel="Go back"
           className="w-10 h-10 rounded-full items-center justify-center bg-black/35"
           onPress={() => router.back()}
           hitSlop={8}
@@ -129,7 +129,7 @@ export default function WorkerProfileScreen() {
       >
         <View className="w-full h-64 bg-card-dark items-center justify-center">
           {worker.avatar ? (
-            <Image
+            <RemoteImage
               source={{ uri: worker.avatar }}
               style={{ width: "100%", height: "100%" }}
               resizeMode="cover"
@@ -302,7 +302,7 @@ export default function WorkerProfileScreen() {
                   accessibilityLabel="Open photo from a past job"
                   className="active:opacity-[0.85]"
                 >
-                  <Image source={{ uri: url }} className="w-24 h-24 rounded-xl bg-card-dark" resizeMode="cover" />
+                  <RemoteImage source={{ uri: url }} className="w-24 h-24 rounded-xl bg-card-dark" resizeMode="cover" />
                 </Pressable>
               ))}
             </ScrollView>

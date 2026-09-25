@@ -1,5 +1,6 @@
 import React, { useRef, useState } from "react";
-import { View, Text, ScrollView, Pressable, Image, ActivityIndicator } from "react-native";
+import { View, Text, ScrollView, Pressable, ActivityIndicator } from "react-native";
+import { RemoteImage } from "../../../components/ui/RemoteImage";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { AppIcon as Ionicons } from "../../../components/icons/AppIcon";
 import { useRouter } from "expo-router";
@@ -92,7 +93,7 @@ export default function ClientProfileScreen() {
           <View className="flex-row items-center">
             <View className="w-20 h-20 bg-accent rounded-full items-center justify-center overflow-hidden">
               {user?.avatar ? (
-                <Image
+                <RemoteImage
                   source={{ uri: user.avatar }}
                   style={{ width: 80, height: 80 }}
                   resizeMode="cover"
@@ -109,7 +110,7 @@ export default function ClientProfileScreen() {
                 </View>
               )}
             </View>
-            <Pressable
+            <Pressable accessibilityRole="button" accessibilityLabel="Change profile photo"
               className="absolute bottom-0 left-14 w-8 h-8 bg-brand rounded-full items-center justify-center"
               onPress={() => imageSheetRef.current?.expand()}
               disabled={uploadingAvatar}

@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
-import { View, Text, ScrollView, ActivityIndicator } from "react-native";
+import { View, Text, ScrollView } from "react-native";
+import { ScreenSkeleton } from "../../../../components/feedback/ScreenSkeleton";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter, useLocalSearchParams } from "expo-router";
 import ScreenHeader from "../../../../components/ui/ScreenHeader";
@@ -83,9 +84,7 @@ export default function RequestRescheduleScreen() {
     return (
       <SafeAreaView className="flex-1 bg-white">
         <ScreenHeader title="Request Reschedule" showBack />
-        <View className="flex-1 items-center justify-center">
-          <ActivityIndicator size="small" />
-        </View>
+        <ScreenSkeleton />
       </SafeAreaView>
     );
   }

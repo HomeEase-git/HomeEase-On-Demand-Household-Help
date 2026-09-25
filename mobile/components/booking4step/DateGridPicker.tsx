@@ -119,7 +119,7 @@ export default function DateGridPicker({
   return (
     <View className="bg-card rounded-2xl p-4">
       <View className="flex-row items-center justify-between mb-4">
-        <Pressable
+        <Pressable accessibilityRole="button" accessibilityLabel="Previous month"
           onPress={goToPrevMonth}
           disabled={isPrevDisabled}
           hitSlop={8}
@@ -132,7 +132,7 @@ export default function DateGridPicker({
         <Text className="text-text-primary font-bold text-base">
           {MONTHS[viewMonth]} {viewYear}
         </Text>
-        <Pressable
+        <Pressable accessibilityRole="button" accessibilityLabel="Next month"
           onPress={goToNextMonth}
           disabled={isNextDisabled}
           hitSlop={8}

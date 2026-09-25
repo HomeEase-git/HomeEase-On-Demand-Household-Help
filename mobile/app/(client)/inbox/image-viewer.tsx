@@ -1,5 +1,6 @@
 import React from "react";
-import { View, Text, Pressable, Image, Linking } from "react-native";
+import { View, Text, Pressable, Linking } from "react-native";
+import { RemoteImage } from "../../../components/ui/RemoteImage";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { AppIcon as Ionicons } from "../../../components/icons/AppIcon";
 import { useRouter, useLocalSearchParams } from "expo-router";
@@ -21,18 +22,18 @@ export default function ImageViewerScreen() {
   return (
     <View className="flex-1 bg-black">
       <SafeAreaView className="absolute top-0 left-0 right-0 z-10 flex-row justify-between px-4 py-2">
-        <Pressable onPress={() => router.back()}>
+        <Pressable accessibilityRole="button" accessibilityLabel="Go back" onPress={() => router.back()}>
           <Ionicons name="arrow-back" size={24} color={colors.white} />
         </Pressable>
         {imageUrl && (
-          <Pressable onPress={handleOpenExternally}>
+          <Pressable accessibilityRole="button" accessibilityLabel="Open image in browser" onPress={handleOpenExternally}>
             <Ionicons name="open-outline" size={24} color={colors.white} />
           </Pressable>
         )}
       </SafeAreaView>
       <View className="flex-1 items-center justify-center">
         {imageUrl ? (
-          <Image
+          <RemoteImage
             source={{ uri: imageUrl }}
             className="w-full h-full"
             resizeMode="contain"

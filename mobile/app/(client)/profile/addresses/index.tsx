@@ -122,7 +122,7 @@ export default function AddressesScreen() {
           )}
         />
       )}
-      <Pressable
+      <Pressable accessibilityRole="button" accessibilityLabel="Add address"
         className="absolute bottom-6 right-6 w-14 h-14 bg-accent rounded-full items-center justify-center"
         style={cardShadow}
         onPress={() => router.push("/(client)/profile/addresses/new")}

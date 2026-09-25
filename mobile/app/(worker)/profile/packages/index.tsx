@@ -165,7 +165,7 @@ export default function PackagesScreen() {
           />
         )}
       />
-      <Pressable
+      <Pressable accessibilityRole="button" accessibilityLabel="Add package"
         className="absolute bottom-6 right-6 w-14 h-14 bg-accent rounded-full items-center justify-center"
         style={cardShadow}
         onPress={openCreateModal}
@@ -182,7 +182,7 @@ export default function PackagesScreen() {
                 <Text className="text-text-primary text-xl font-bold">
                   {editingId ? "Edit Package" : "Add Package"}
                 </Text>
-                <Pressable onPress={() => setShowModal(false)}>
+                <Pressable accessibilityRole="button" accessibilityLabel="Close" onPress={() => setShowModal(false)}>
                   <Ionicons name="close" size={24} color={colors.text.primary} />
                 </Pressable>
               </View>

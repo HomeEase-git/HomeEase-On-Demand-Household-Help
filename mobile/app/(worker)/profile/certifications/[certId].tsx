@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
-import { View, Text, Image, Switch } from "react-native";
+import { View, Text, Switch } from "react-native";
+import { RemoteImage } from "../../../../components/ui/RemoteImage";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { AppIcon as Ionicons } from "../../../../components/icons/AppIcon";
 import { useRouter, useLocalSearchParams } from "expo-router";
@@ -102,7 +103,7 @@ export default function CertificationDetailScreen() {
       <View className="px-4 py-6">
         <View className="w-full h-48 bg-card-dark rounded-2xl items-center justify-center mb-4 overflow-hidden" style={cardShadow}>
           {cert.documentUrl ? (
-            <Image
+            <RemoteImage
               source={{ uri: cert.documentUrl }}
               className="w-full h-full"
               resizeMode="cover"

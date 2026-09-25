@@ -103,6 +103,7 @@ export default function CategoryDetailScreen() {
         title={title}
         showBack
         rightIcon={hasActiveFilters ? "options" : "options-outline"}
+        rightLabel="Filter and sort"
         onRightPress={() => filterRef.current?.expand()}
       />
       <View className="px-4 pb-2">

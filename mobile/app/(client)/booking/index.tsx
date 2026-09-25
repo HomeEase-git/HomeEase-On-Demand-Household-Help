@@ -137,7 +137,7 @@ export default function MyBookingsScreen() {
       )}
 
       {activeTab === "Pending" && (
-        <Pressable
+        <Pressable accessibilityRole="button" accessibilityLabel="New booking"
           className="absolute bottom-6 right-6 w-14 h-14 bg-accent rounded-full items-center justify-center"
           onPress={() => {
             clearDraft();

@@ -73,10 +73,10 @@ export const CertificationCard: React.FC<Props> = ({
         />
       </View>
       <View className="flex-row mt-2">
-        <Pressable onPress={onEdit} className="p-2">
+        <Pressable accessibilityRole="button" accessibilityLabel="Edit certification" onPress={onEdit} className="p-2">
           <Ionicons name="pencil-outline" size={18} color={colors.text.muted} />
         </Pressable>
-        <Pressable onPress={handleDelete} className="p-2">
+        <Pressable accessibilityRole="button" accessibilityLabel="Delete certification" onPress={handleDelete} className="p-2">
           <Ionicons name="trash-outline" size={18} color={colors.error} />
         </Pressable>
       </View>

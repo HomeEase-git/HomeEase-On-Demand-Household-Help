@@ -1,5 +1,6 @@
 import React from "react";
-import { View, Text, Pressable, Image } from "react-native";
+import { View, Text, Pressable } from "react-native";
+import { RemoteImage } from "../ui/RemoteImage";
 import { AppIcon as Ionicons } from "../icons/AppIcon";
 import StarRating from "../ui/StarRating";
 import { colors } from "../../constants";
@@ -33,7 +34,7 @@ export default function DiscoveredWorkerCard({ worker, selected, onSelect, unitL
     >
       <View className="flex-row items-start">
         {worker.avatar ? (
-          <Image source={{ uri: worker.avatar }} className="w-14 h-14 rounded-full mr-3" />
+          <RemoteImage source={{ uri: worker.avatar }} className="w-14 h-14 rounded-full mr-3" />
         ) : (
           <View className="w-14 h-14 bg-brand rounded-full items-center justify-center mr-3">
             <Ionicons name="person" size={28} color={colors.white} />

@@ -30,10 +30,10 @@ export const PackageCard: React.FC<Props> = ({ pkg, onEdit, onDelete }) => {
           <Text className="text-text-muted text-xs mt-1">Inactive — hidden from clients</Text>
         )}
       </View>
-      <Pressable onPress={onEdit} className="p-2">
+      <Pressable accessibilityRole="button" accessibilityLabel="Edit package" onPress={onEdit} className="p-2">
         <Ionicons name="pencil-outline" size={20} color={colors.text.muted} />
       </Pressable>
-      <Pressable onPress={onDelete} className="p-2">
+      <Pressable accessibilityRole="button" accessibilityLabel="Delete package" onPress={onDelete} className="p-2">
         <Ionicons name="trash-outline" size={20} color={colors.error} />
       </Pressable>
     </View>

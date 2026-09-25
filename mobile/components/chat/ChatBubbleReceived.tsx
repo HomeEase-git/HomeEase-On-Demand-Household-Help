@@ -1,5 +1,6 @@
 import React from "react";
-import { View, Text, Image, Pressable } from "react-native";
+import { View, Text, Pressable } from "react-native";
+import { RemoteImage } from "../ui/RemoteImage";
 
 type Props = {
   message: string;
@@ -14,7 +15,7 @@ export const ChatBubbleReceived: React.FC<Props> = ({ message, imageUrl, timesta
       <View className="bg-card rounded-2xl rounded-bl-sm px-4 py-2 max-w-[75%]">
         {imageUrl && (
           <Pressable onPress={() => onImagePress?.(imageUrl)}>
-            <Image
+            <RemoteImage
               source={{ uri: imageUrl }}
               className="w-48 h-48 rounded-xl mb-1"
               resizeMode="cover"

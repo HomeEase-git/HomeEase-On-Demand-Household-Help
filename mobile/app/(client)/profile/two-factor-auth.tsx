@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
-import { View, Text, Image, ActivityIndicator } from "react-native";
+import { View, Text, Image } from "react-native";
+import { ScreenSkeleton } from "../../../components/feedback/ScreenSkeleton";
 import { KeyboardAwareScrollView } from "../../../components/ui/KeyboardAwareScrollView";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
@@ -119,9 +120,7 @@ export default function TwoFactorAuthScreen() {
     return (
       <SafeAreaView className="flex-1 bg-white">
         <ScreenHeader title="Two-Factor Authentication" showBack />
-        <View className="flex-1 items-center justify-center">
-          <ActivityIndicator color={colors.accent.DEFAULT} />
-        </View>
+        <ScreenSkeleton />
       </SafeAreaView>
     );
   }
