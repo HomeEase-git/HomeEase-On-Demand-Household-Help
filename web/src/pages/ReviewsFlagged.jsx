@@ -101,7 +101,7 @@ export default function ReviewsFlagged() {
               <tbody>
                 {flagged.length === 0 ? (
                   <tr>
-                    <td colSpan={6} style={{ textAlign: 'center', color: 'var(--text-muted)' }}>
+                    <td colSpan={6} className="table-empty">
                       No flagged reviews found.
                     </td>
                   </tr>

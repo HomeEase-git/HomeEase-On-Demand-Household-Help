@@ -114,7 +114,7 @@ export default function MfaSetup() {
     return (
       <>
         <PageHeader title="Two-Factor Authentication" subtitle="Required for admin accounts" />
-        <LoadingState message="Loading MFA status..." />
+        <LoadingState variant="block" message="Loading MFA status..." />
       </>
     )
   }

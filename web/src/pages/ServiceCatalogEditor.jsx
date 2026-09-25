@@ -268,7 +268,7 @@ export default function ServiceCatalogEditor() {
   }
 
   // --- render helpers ---------------------------------------------------------
-  if (loading) return <LoadingState message="Loading service..." />
+  if (loading) return <LoadingState variant="detail" message="Loading service..." />
   if (loadError) return <ErrorState message={loadError} onRetry={load} />
 
   const d = draft.details

@@ -71,7 +71,7 @@ export default function Workers() {
                 <tbody>
                   {workers.length === 0 ? (
                     <tr>
-                      <td colSpan={7} style={{ textAlign: 'center', color: 'var(--text-muted)' }}>
+                      <td colSpan={7} className="table-empty">
                         No workers found.
                       </td>
                     </tr>

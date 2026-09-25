@@ -214,7 +214,7 @@ export function SettingsFormPage({ title, subtitle, form, children }) {
     return (
       <>
         <PageHeader title={title} subtitle={subtitle} />
-        <LoadingState message="Loading settings..." />
+        <LoadingState variant="block" message="Loading settings..." />
       </>
     )
   }

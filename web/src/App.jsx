@@ -100,7 +100,7 @@ export default function App() {
           <Route
             key={path}
             path={path}
-            element={<Suspense fallback={<LoadingState message="Loading page..." />}>{element}</Suspense>}
+            element={<Suspense fallback={<LoadingState variant="block" message="Loading page..." />}>{element}</Suspense>}
           />
         ))}
         <Route path="*" element={<Navigate to="/dashboard" replace />} />

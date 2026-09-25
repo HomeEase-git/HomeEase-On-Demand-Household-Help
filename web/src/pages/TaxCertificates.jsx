@@ -80,7 +80,7 @@ export default function TaxCertificates() {
         title="Tax Certificates"
         subtitle="BIR Form 2307 withholding certificates generated per worker per reporting period"
       />
-      <p style={{ color: 'var(--text-muted)', fontSize: '0.875rem', margin: '0.5rem 0 1rem' }}>
+      <p className="form-hint">
         Generates one certificate per worker who has a TIN on file and at least one completed payment in the
         period. Workers without a TIN are skipped — they need to add one in the app first. The generated PDF
         contains the correct figures but has not been verified as identical to BIR's official template; confirm
@@ -88,7 +88,7 @@ export default function TaxCertificates() {
       </p>
       <SectionCard title="Generate Certificates for a Period">
         <div className="toolbar" style={{ alignItems: 'center' }}>
-          <label style={{ fontSize: '0.8125rem', color: 'var(--text-muted)' }}>From</label>
+          <label className="text-muted text-small">From</label>
           <input
             type="date"
             className="form-input"
@@ -96,7 +96,7 @@ export default function TaxCertificates() {
             onChange={(e) => setPeriod((p) => ({ ...p, periodStart: e.target.value }))}
             style={{ maxWidth: '160px' }}
           />
-          <label style={{ fontSize: '0.8125rem', color: 'var(--text-muted)' }}>To</label>
+          <label className="text-muted text-small">To</label>
           <input
             type="date"
             className="form-input"
@@ -124,7 +124,7 @@ export default function TaxCertificates() {
                 <tbody>
                   {certificates.length === 0 ? (
                     <tr>
-                      <td colSpan={7} style={{ textAlign: 'center', color: 'var(--text-muted)' }}>
+                      <td colSpan={7} className="table-empty">
                         No certificates generated yet.
                       </td>
                     </tr>

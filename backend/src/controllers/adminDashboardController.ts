@@ -17,6 +17,17 @@ const ACTIVE_BOOKING_STATUSES = [
 
 const PAYMENT_OVERDUE_HOURS = 72;
 
+// Ranges the dashboard's period picker offers; anything else falls back to 7.
+const ALLOWED_RANGE_DAYS = [7, 30, 90] as const;
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+function parseRangeDays(raw: unknown): number {
+  const days = Number(raw);
+  return (ALLOWED_RANGE_DAYS as readonly number[]).includes(days) ? days : 7;
+}
+
+type PeriodTrend = { current: number; previous: number };
+
 const CATEGORY_LABEL: Record<string, string> = {
   ADMIN_ACTION: 'Admin Actions',
   LOGIN: 'Login History',
@@ -24,8 +35,17 @@ const CATEGORY_LABEL: Record<string, string> = {
   STATUS_CHANGE: 'Status Changes',
 };
 
-export const getDashboardStats = async (_req: Request, res: Response) => {
+export const getDashboardStats = async (req: Request, res: Response) => {
   try {
+    // "This period" is the last N days; "previous" is the N days before that,
+    // so the stat cards can say e.g. "+12 in the last 7 days, up 20%".
+    const days = parseRangeDays(req.query.days);
+    const now = Date.now();
+    const periodStart = new Date(now - days * DAY_MS);
+    const previousStart = new Date(now - 2 * days * DAY_MS);
+    const inPeriod = { gte: periodStart };
+    const inPrevious = { gte: previousStart, lt: periodStart };
+
     const [
       totalUsers,
       totalClients,
@@ -59,7 +79,7 @@ export const getDashboardStats = async (_req: Request, res: Response) => {
           serviceCategories: { where: { status: 'VERIFIED' }, select: { serviceType: { select: { name: true } } } },
         },
       }),
-      getBookingsOverTime(7),
+      getBookingsOverTime(days),
       // Total commission/tax owed by workers from cash jobs.
       prisma.workerProfile.aggregate({
         where: { commissionOwed: { gt: 0 } },
@@ -75,6 +95,39 @@ export const getDashboardStats = async (_req: Request, res: Response) => {
         },
       }),
     ]);
+
+    const [
+      newClients,
+      newClientsPrevious,
+      newWorkers,
+      newWorkersPrevious,
+      bookingsCount,
+      bookingsCountPrevious,
+      revenuePeriod,
+      revenuePrevious,
+      payoutsPeriod,
+      payoutsPrevious,
+    ] = await Promise.all([
+      prisma.user.count({ where: { role: 'CLIENT', isDeleted: false, createdAt: inPeriod } }),
+      prisma.user.count({ where: { role: 'CLIENT', isDeleted: false, createdAt: inPrevious } }),
+      prisma.user.count({ where: { role: 'WORKER', isDeleted: false, createdAt: inPeriod } }),
+      prisma.user.count({ where: { role: 'WORKER', isDeleted: false, createdAt: inPrevious } }),
+      prisma.booking.count({ where: { createdAt: inPeriod } }),
+      prisma.booking.count({ where: { createdAt: inPrevious } }),
+      prisma.payment.aggregate({ where: { status: 'COMPLETED', createdAt: inPeriod }, _sum: { totalAmount: true } }),
+      prisma.payment.aggregate({ where: { status: 'COMPLETED', createdAt: inPrevious }, _sum: { totalAmount: true } }),
+      prisma.payment.aggregate({ where: { escrowStatus: 'RELEASED', releasedAt: inPeriod }, _sum: { workerPayout: true } }),
+      prisma.payment.aggregate({ where: { escrowStatus: 'RELEASED', releasedAt: inPrevious }, _sum: { workerPayout: true } }),
+    ]);
+
+    const trend = (current: number, previous: number): PeriodTrend => ({ current, previous });
+    const trends = {
+      clients: trend(newClients, newClientsPrevious),
+      workers: trend(newWorkers, newWorkersPrevious),
+      bookings: trend(bookingsCount, bookingsCountPrevious),
+      revenue: trend(revenuePeriod._sum.totalAmount ?? 0, revenuePrevious._sum.totalAmount ?? 0),
+      payouts: trend(payoutsPeriod._sum.workerPayout ?? 0, payoutsPrevious._sum.workerPayout ?? 0),
+    };
 
     return res.json({
       success: true,
@@ -112,6 +165,8 @@ export const getDashboardStats = async (_req: Request, res: Response) => {
           reviews: worker.totalReviews,
         })),
         bookingsTrend,
+        rangeDays: days,
+        trends,
       },
     });
   } catch (error) {

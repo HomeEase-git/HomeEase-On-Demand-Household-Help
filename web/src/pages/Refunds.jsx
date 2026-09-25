@@ -74,7 +74,7 @@ export default function Refunds() {
               <tbody>
                 {refunds.length === 0 ? (
                   <tr>
-                    <td colSpan={7} style={{ textAlign: 'center', color: 'var(--text-muted)' }}>
+                    <td colSpan={7} className="table-empty">
                       No refunds issued yet.
                     </td>
                   </tr>

@@ -50,7 +50,7 @@ export default function ReviewDetail() {
   }
 
   if (loading) {
-    return <LoadingState message="Loading review details..." />
+    return <LoadingState variant="detail" message="Loading review details..." />
   }
 
   if (error) {
@@ -60,7 +60,7 @@ export default function ReviewDetail() {
   if (!review) {
     return (
       <SectionCard>
-        <p style={{ color: 'var(--text-muted)' }}>Review not found.</p>
+        <p className="text-muted">Review not found.</p>
       </SectionCard>
     )
   }

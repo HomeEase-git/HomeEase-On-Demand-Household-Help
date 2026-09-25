@@ -71,7 +71,7 @@ export default function IconPicker({ value, onChange }) {
 
             <div className="icon-picker-groups">
               {filteredGroups.length === 0 && (
-                <p className="value" style={{ color: 'var(--text-muted)' }}>No icons match &ldquo;{search}&rdquo;.</p>
+                <p className="value text-muted">No icons match &ldquo;{search}&rdquo;.</p>
               )}
               {filteredGroups.map((group) => (
                 <div key={group.group} className="icon-picker-group">

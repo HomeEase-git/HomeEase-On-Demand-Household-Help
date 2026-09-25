@@ -6,7 +6,7 @@ export default function CopyableId({ value, title }) {
   const [copied, setCopied] = useState(false)
 
   if (!value) {
-    return <span style={{ color: 'var(--text-muted)' }}>—</span>
+    return <span className="text-muted">—</span>
   }
 
   const handleCopy = async () => {

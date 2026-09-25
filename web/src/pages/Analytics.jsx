@@ -13,7 +13,7 @@ export default function Analytics() {
   // a single analytics snapshot, so a constant key just gives it a cache slot.
   const { data: analytics, loading, error, reload } = useDetailQuery(fetchAnalytics, 'snapshot')
 
-  if (loading) return <LoadingState message="Loading analytics..." />
+  if (loading) return <LoadingState variant="dashboard" message="Loading analytics..." />
   if (error) return <ErrorState message={error} onRetry={reload} />
 
   const stats = [

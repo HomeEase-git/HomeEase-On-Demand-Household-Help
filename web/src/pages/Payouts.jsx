@@ -101,7 +101,7 @@ export default function Payouts() {
         )}
       />
       <SubNav items={SUB_NAV} />
-      <p style={{ color: 'var(--text-muted)', fontSize: '0.875rem', margin: '0.5rem 0 1rem' }}>
+      <p className="form-hint">
         Payouts are sent to the worker&apos;s configured GCash/Maya account via Xendit once a booking&apos;s held
         payment is released. Failed sends can be retried below.
       </p>
@@ -115,9 +115,9 @@ export default function Payouts() {
         <SearchBar placeholder="Search by worker name..." value={params.search || ''} onChange={setSearch} />
       </div>
       <div className="toolbar" style={{ alignItems: 'center' }}>
-        <label style={{ fontSize: '0.8125rem', color: 'var(--text-muted)' }}>From</label>
+        <label className="text-muted text-small">From</label>
         <input type="date" className="form-input" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} style={{ maxWidth: '160px' }} />
-        <label style={{ fontSize: '0.8125rem', color: 'var(--text-muted)' }}>To</label>
+        <label className="text-muted text-small">To</label>
         <input type="date" className="form-input" value={dateTo} onChange={(e) => setDateTo(e.target.value)} style={{ maxWidth: '160px' }} />
         <button type="button" className="btn btn-outline" onClick={applyDateRange}>Apply</button>
         {(params.dateFrom || params.dateTo) && (
@@ -151,7 +151,7 @@ export default function Payouts() {
                 <tbody>
                   {payouts.length === 0 ? (
                     <tr>
-                      <td colSpan={11} style={{ textAlign: 'center', color: 'var(--text-muted)' }}>No payouts found.</td>
+                      <td colSpan={11} className="table-empty">No payouts found.</td>
                     </tr>
                   ) : (
                     payouts.map((p) => (

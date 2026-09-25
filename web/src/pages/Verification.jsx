@@ -78,7 +78,7 @@ export default function Verification() {
               <tbody>
                 {records.length === 0 ? (
                   <tr>
-                    <td colSpan={6} style={{ textAlign: 'center', color: 'var(--text-muted)' }}>
+                    <td colSpan={6} className="table-empty">
                       No pending verifications found.
                     </td>
                   </tr>

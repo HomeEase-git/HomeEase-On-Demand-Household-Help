@@ -281,7 +281,7 @@ export default function BookingDispute() {
               <tbody>
                 {disputes.length === 0 ? (
                   <tr>
-                    <td colSpan={8} style={{ textAlign: 'center', color: 'var(--text-muted)' }}>
+                    <td colSpan={8} className="table-empty">
                       No {params.statusTab.toLowerCase()} disputes found.
                     </td>
                   </tr>
@@ -452,12 +452,11 @@ export default function BookingDispute() {
                 </label>
                 <textarea
                   id="dispute-note"
-                  className="form-input"
+                  className="form-input field-full field-textarea"
                   rows={3}
                   value={note}
                   onChange={(e) => setNote(e.target.value)}
                   placeholder="Explain why you're resolving this dispute this way..."
-                  style={{ width: '100%', resize: 'vertical' }}
                 />
                 <div className="modal-actions" style={{ justifyContent: 'flex-end', marginTop: '1rem' }}>
                   <button type="button" className="btn btn-outline" onClick={() => setPendingAction(null)} disabled={submitting}>
