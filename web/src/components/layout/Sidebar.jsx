@@ -68,32 +68,30 @@ function groupIsActive(group, pathname) {
   return group.children.some((child) => pathname.startsWith(child.to))
 }
 
+// Key of the group containing the current page, or null.
+function activeGroupKey(pathname) {
+  return NAV_STRUCTURE.find((item) => item.type === 'group' && groupIsActive(item, pathname))?.key ?? null
+}
+
 export default function Sidebar({ isOpen, onClose }) {
   const navigate = useNavigate()
   const { logout } = useAuth()
   const { pathname } = useLocation()
   const [showLogoutModal, setShowLogoutModal] = useState(false)
-  const [openGroups, setOpenGroups] = useState(() => {
-    const initial = {}
-    NAV_STRUCTURE.forEach((item) => {
-      if (item.type === 'group' && groupIsActive(item, pathname)) {
-        initial[item.key] = true
-      }
-    })
-    return initial
-  })
+  // Accordion: at most one group is open, so the sidebar never fills up with
+  // expanded dropdowns and has to scroll. Starts on the group holding the
+  // current page, if any.
+  const [openGroup, setOpenGroup] = useState(() => activeGroupKey(pathname))
 
-  // Keep the group containing the active route expanded when navigating directly to it.
+  // Navigating into a group's page opens that group (and closes any other).
+  // Pages outside every group leave the sidebar as the admin left it.
   useEffect(() => {
-    NAV_STRUCTURE.forEach((item) => {
-      if (item.type === 'group' && groupIsActive(item, pathname)) {
-        setOpenGroups((prev) => (prev[item.key] ? prev : { ...prev, [item.key]: true }))
-      }
-    })
+    const key = activeGroupKey(pathname)
+    if (key) setOpenGroup(key)
   }, [pathname])
 
   const toggleGroup = (key) => {
-    setOpenGroups((prev) => ({ ...prev, [key]: !prev[key] }))
+    setOpenGroup((current) => (current === key ? null : key))
   }
 
   const handleLogoutClick = () => {
@@ -149,7 +147,7 @@ export default function Sidebar({ isOpen, onClose }) {
               )
             }
 
-            const expanded = !!openGroups[item.key]
+            const expanded = openGroup === item.key
             const active = groupIsActive(item, pathname)
             return (
               <div key={item.key} className="nav-group">
