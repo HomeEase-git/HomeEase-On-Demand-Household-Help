@@ -50,7 +50,7 @@ type CatalogFieldInput = ScopeFieldInput & {
   taskRefs?: string[];
 };
 
-type CatalogBody = {
+export type CatalogBody = {
   name?: string;
   description?: string | null;
   basePrice?: number;
@@ -62,7 +62,7 @@ type CatalogBody = {
 
 const refOf = (item: { id?: string; key?: string }) => item.id ?? item.key ?? '';
 
-function validateCatalog(
+export function validateCatalog(
   body: CatalogBody,
   existingTaskIds: Set<string>,
   existingFieldIds: Set<string>
@@ -191,6 +191,103 @@ function taskData(task: CatalogTaskInput, sortOrder: number) {
   };
 }
 
+/**
+ * Writes a validated catalog save inside the caller's transaction and returns
+ * the category id plus the real ids of every job/question (by ref). Shared
+ * by the admin endpoint and scripts/applyJobMatrix.ts, so a scripted rollout
+ * writes exactly what the editor would.
+ */
+export async function writeCatalog(
+  tx: Prisma.TransactionClient,
+  existing: { id: string; tasks: { id: string; pricingModel: TaskPricingModel }[] } | null,
+  body: CatalogBody
+): Promise<{ categoryId: string; taskIdByRef: Map<string, string>; fieldIdByRef: Map<string, string> }> {
+  const tasks = body.tasks!;
+  const fields = body.scopeFields!;
+  const categoryData = {
+    name: body.name!.trim(),
+    description: body.description?.trim() || null,
+    basePrice: body.basePrice!,
+    icon: body.icon || null,
+    requiresCertification: body.requiresCertification ?? false,
+  };
+
+  const category = existing
+    ? await tx.serviceType.update({ where: { id: existing.id }, data: categoryData })
+    : await tx.serviceType.create({ data: categoryData });
+
+  // 1. Jobs, minus their count question (it may not exist yet).
+  const taskIdByRef = new Map<string, string>();
+  const previousModel = new Map(existing?.tasks.map((t) => [t.id, t.pricingModel]) ?? []);
+  for (const [index, task] of tasks.entries()) {
+    if (task.id) {
+      await carryWorkerPricesAcrossModelChange(tx, task.id, previousModel.get(task.id)!, task.pricingModel!);
+      await tx.serviceTask.update({
+        where: { id: task.id },
+        data: { ...taskData(task, index), ...(task.isActive !== undefined && { isActive: task.isActive }) },
+      });
+      taskIdByRef.set(task.id, task.id);
+    } else {
+      const created = await tx.serviceTask.create({
+        data: { serviceTypeId: category.id, ...taskData(task, index), isActive: task.isActive ?? true },
+      });
+      taskIdByRef.set(task.key!, created.id);
+    }
+  }
+
+  // 2. Questions, matched strictly by id: several jobs can have a question
+  // with the same text, so the older match-by-label fallback would guess.
+  const current = await tx.serviceScopeField.findMany({
+    where: { serviceTypeId: category.id },
+    include: { options: true },
+  });
+  const currentById = new Map(current.map((f) => [f.id, f]));
+  const fieldIdByRef = new Map<string, string>();
+  for (const [index, field] of fields.entries()) {
+    const taskIds = (field.taskRefs ?? []).map((r) => taskIdByRef.get(r)!);
+    const optionLabels = cleanOptionLabels(field);
+    const data = { ...scopeFieldData(field, index), helpText: field.helpText?.trim() || null };
+    const match = field.id ? currentById.get(field.id) : undefined;
+    if (match) {
+      currentById.delete(match.id);
+      await tx.serviceScopeField.update({ where: { id: match.id }, data });
+      await syncFieldOptions(tx, match.id, match.options, optionLabels);
+      await tx.serviceScopeFieldTask.deleteMany({ where: { fieldId: match.id } });
+      if (taskIds.length) {
+        await tx.serviceScopeFieldTask.createMany({
+          data: taskIds.map((serviceTaskId) => ({ fieldId: match.id, serviceTaskId })),
+          skipDuplicates: true,
+        });
+      }
+      fieldIdByRef.set(match.id, match.id);
+    } else {
+      const created = await tx.serviceScopeField.create({
+        data: {
+          serviceTypeId: category.id,
+          ...data,
+          options: { create: optionLabels.map((label, optIndex) => ({ label, sortOrder: optIndex })) },
+          taskLinks: { create: [...new Set(taskIds)].map((serviceTaskId) => ({ serviceTaskId })) },
+        },
+      });
+      fieldIdByRef.set(field.key!, created.id);
+    }
+  }
+  if (currentById.size) {
+    await tx.serviceScopeField.deleteMany({ where: { id: { in: [...currentById.keys()] } } });
+  }
+
+  // 3. Now every question has a real id, point per-unit jobs at their count.
+  for (const task of tasks) {
+    const hasQuantity = task.pricingModel === 'PER_UNIT' || task.pricingModel === 'TIERED';
+    await tx.serviceTask.update({
+      where: { id: taskIdByRef.get(refOf(task))! },
+      data: { quantityScopeFieldId: hasQuantity ? fieldIdByRef.get(task.quantityFieldRef!)! : null },
+    });
+  }
+
+  return { categoryId: category.id, taskIdByRef, fieldIdByRef };
+}
+
 async function saveCatalog(req: AuthRequest, res: Response, serviceTypeId: string | null) {
   const body = req.body as CatalogBody;
 
@@ -227,90 +324,10 @@ async function saveCatalog(req: AuthRequest, res: Response, serviceTypeId: strin
     if (check.note) doleNotes.push(`${task.name!.trim()}: ${check.note}`);
   }
 
-  const categoryData = {
-    name: body.name!.trim(),
-    description: body.description?.trim() || null,
-    basePrice: body.basePrice!,
-    icon: body.icon || null,
-    requiresCertification: body.requiresCertification ?? false,
-  };
-
   const record = await prisma.$transaction(
     async (tx) => {
-      const category = existing
-        ? await tx.serviceType.update({ where: { id: existing.id }, data: categoryData })
-        : await tx.serviceType.create({ data: categoryData });
-
-      // 1. Jobs, minus their count question (it may not exist yet).
-      const taskIdByRef = new Map<string, string>();
-      const previousModel = new Map(existing?.tasks.map((t) => [t.id, t.pricingModel]) ?? []);
-      for (const [index, task] of tasks.entries()) {
-        if (task.id) {
-          await carryWorkerPricesAcrossModelChange(tx, task.id, previousModel.get(task.id)!, task.pricingModel!);
-          await tx.serviceTask.update({
-            where: { id: task.id },
-            data: { ...taskData(task, index), ...(task.isActive !== undefined && { isActive: task.isActive }) },
-          });
-          taskIdByRef.set(task.id, task.id);
-        } else {
-          const created = await tx.serviceTask.create({
-            data: { serviceTypeId: category.id, ...taskData(task, index), isActive: task.isActive ?? true },
-          });
-          taskIdByRef.set(task.key!, created.id);
-        }
-      }
-
-      // 2. Questions, matched strictly by id: several jobs can have a question
-      // with the same text, so the older match-by-label fallback would guess.
-      const current = await tx.serviceScopeField.findMany({
-        where: { serviceTypeId: category.id },
-        include: { options: true },
-      });
-      const currentById = new Map(current.map((f) => [f.id, f]));
-      const fieldIdByRef = new Map<string, string>();
-      for (const [index, field] of fields.entries()) {
-        const taskIds = (field.taskRefs ?? []).map((r) => taskIdByRef.get(r)!);
-        const optionLabels = cleanOptionLabels(field);
-        const data = { ...scopeFieldData(field, index), helpText: field.helpText?.trim() || null };
-        const match = field.id ? currentById.get(field.id) : undefined;
-        if (match) {
-          currentById.delete(match.id);
-          await tx.serviceScopeField.update({ where: { id: match.id }, data });
-          await syncFieldOptions(tx, match.id, match.options, optionLabels);
-          await tx.serviceScopeFieldTask.deleteMany({ where: { fieldId: match.id } });
-          if (taskIds.length) {
-            await tx.serviceScopeFieldTask.createMany({
-              data: taskIds.map((serviceTaskId) => ({ fieldId: match.id, serviceTaskId })),
-              skipDuplicates: true,
-            });
-          }
-          fieldIdByRef.set(match.id, match.id);
-        } else {
-          const created = await tx.serviceScopeField.create({
-            data: {
-              serviceTypeId: category.id,
-              ...data,
-              options: { create: optionLabels.map((label, optIndex) => ({ label, sortOrder: optIndex })) },
-              taskLinks: { create: [...new Set(taskIds)].map((serviceTaskId) => ({ serviceTaskId })) },
-            },
-          });
-          fieldIdByRef.set(field.key!, created.id);
-        }
-      }
-      if (currentById.size) {
-        await tx.serviceScopeField.deleteMany({ where: { id: { in: [...currentById.keys()] } } });
-      }
-
-      // 3. Now every question has a real id, point per-unit jobs at their count.
-      for (const task of tasks) {
-        const hasQuantity = task.pricingModel === 'PER_UNIT' || task.pricingModel === 'TIERED';
-        await tx.serviceTask.update({
-          where: { id: taskIdByRef.get(refOf(task))! },
-          data: { quantityScopeFieldId: hasQuantity ? fieldIdByRef.get(task.quantityFieldRef!)! : null },
-        });
-      }
-
-      return tx.serviceType.findUniqueOrThrow({ where: { id: category.id }, include: serviceTypeInclude });
+      const { categoryId } = await writeCatalog(tx, existing, body);
+      return tx.serviceType.findUniqueOrThrow({ where: { id: categoryId }, include: serviceTypeInclude });
     },
     // A full category is a few hundred small writes; the 5s default is too
     // tight for a remote database.
