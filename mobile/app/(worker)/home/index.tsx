@@ -15,6 +15,11 @@ import { getWorkerNetAmount } from "../../../utils/pricing";
 import { useTabRefresh } from "../../../hooks/useTabRefresh";
 import { usePullToRefresh } from "../../../hooks/usePullToRefresh";
 import { usePushNotificationPrompt } from "../../../hooks/usePushNotificationPrompt";
+import { isAxiosError } from "axios";
+import { AvailabilityToggle } from "../../../components/worker-home/AvailabilityToggle";
+import { NextJobCard } from "../../../components/worker-home/NextJobCard";
+import { pickNextJob } from "../../../utils/workerHome";
+import { useAlertModal } from "../../../contexts/AlertModalContext";
 
 const todayStr = () => new Date().toISOString().slice(0, 10);
 
@@ -28,17 +33,22 @@ export default function WorkerHomeScreen() {
   const [capacity, setCapacity] = React.useState<{ activeJobCount: number; maxConcurrentJobs: number } | null>(null);
   const [declineCooldownUntil, setDeclineCooldownUntil] = React.useState<string | null>(null);
   const [accountHold, setAccountHold] = React.useState<{ since: string; amountOwed: number } | null>(null);
+  const [isAvailable, setIsAvailable] = React.useState<boolean | null>(null);
+  const [savingAvailability, setSavingAvailability] = React.useState(false);
+  const alertModal = useAlertModal();
 
   const firstName = user?.name?.split(" ")[0] ?? "Worker";
   const pending = jobs.filter((j) => j.status === "Pending");
   const today = todayStr();
   const todayJobs = jobs.filter((j) => j.scheduledDate?.slice(0, 10) === today);
+  const nextJob = pickNextJob(jobs);
   const todayEarnings = jobs
     .filter((j) => j.status === "Completed" && j.scheduledDate?.slice(0, 10) === today)
     .reduce((sum, j) => sum + getWorkerNetAmount(j), 0);
 
+  const userId = user?.id;
   const load = useCallback(async () => {
-    if (!user?.id) return;
+    if (!userId) return;
     try {
       const [bookings, capacityData, profile] = await Promise.all([
         api.getBookings(),
@@ -52,7 +62,35 @@ export default function WorkerHomeScreen() {
     } catch (error) {
       console.error("Load worker home error:", error);
     }
-  }, [user?.id, setJobs]);
+    // Separate so a failure here doesn't blank the rest of the screen.
+    try {
+      const detail = await api.getWorkerDetail(userId);
+      if (detail) setIsAvailable(Boolean(detail.isAvailable));
+    } catch (error) {
+      console.error("Load availability error:", error);
+    }
+  }, [userId, setJobs]);
+
+  const changeAvailability = async (value: boolean) => {
+    const previous = isAvailable;
+    setIsAvailable(value);
+    setSavingAvailability(true);
+    try {
+      await api.updateAvailability(value, undefined);
+    } catch (error) {
+      setIsAvailable(previous);
+      if (isAxiosError(error) && error.response?.status === 402) {
+        alertModal.error(
+          "Account on hold",
+          "Your account is on hold because of outstanding platform dues. Settle them to go online again.",
+        );
+      } else {
+        alertModal.error("Couldn't update", "Please check your connection and try again.");
+      }
+    } finally {
+      setSavingAvailability(false);
+    }
+  };
 
   useFocusEffect(
     useCallback(() => {
@@ -95,6 +133,12 @@ export default function WorkerHomeScreen() {
           </Text>
         </View>
 
+        <AvailabilityToggle
+          isAvailable={isAvailable}
+          saving={savingAvailability}
+          onChange={changeAvailability}
+        />
+
         <View className="flex-row mx-4 mt-3 gap-2">
           <View className="flex-1 bg-card rounded-xl p-3 items-center">
             <Text className="text-accent font-bold text-2xl">{todayJobs.length}</Text>
@@ -115,6 +159,10 @@ export default function WorkerHomeScreen() {
             <Text className="text-text-secondary text-xs">Earned Today</Text>
           </View>
         </View>
+
+        {nextJob && (
+          <NextJobCard job={nextJob} onOpen={() => router.push(`/(worker)/requests/job/${nextJob.id}`)} />
+        )}
 
         {accountHold && (
           <View className="bg-error/10 rounded-xl p-4 mx-4 mt-3">

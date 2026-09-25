@@ -8,6 +8,8 @@ import * as api from "../../../services/api";
 import { colors } from "../../../constants";
 import { useTabRefresh } from "../../../hooks/useTabRefresh";
 import { usePullToRefresh } from "../../../hooks/usePullToRefresh";
+import { WeeklyEarningsChart } from "../../../components/worker-home/WeeklyEarningsChart";
+import { weeklyEarnings } from "../../../utils/workerHome";
 
 type TransactionListItem = {
   id: string;
@@ -103,6 +105,8 @@ export default function EarningsScreen() {
               </View>
             </View>
           </View>
+
+          <WeeklyEarningsChart days={weeklyEarnings(transactions)} />
 
           <View className="px-4 mt-4">
             <Text className="text-text-primary font-bold mb-2">Recent</Text>
