@@ -5,18 +5,16 @@ import { useFocusEffect, useRouter, useLocalSearchParams } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import ScreenHeader from "../../../../components/ui/ScreenHeader";
 import StatusBadge from "../../../../components/ui/StatusBadge";
-import StepperVertical from "../../../../components/steppers/StepperVertical";
+import { BookingStatusHero } from "../../../../components/booking-detail/BookingStatusHero";
+import { BookingWorkerCard } from "../../../../components/booking-detail/BookingWorkerCard";
+import { getBookingTimeline } from "../../../../utils/bookingTimeline";
 import PrimaryButton from "../../../../components/ui/PrimaryButton";
 import OutlinedButton from "../../../../components/ui/OutlinedButton";
 import DangerButton from "../../../../components/ui/DangerButton";
 import PriceBreakdownCard from "../../../../components/ui/PriceBreakdown";
 import { LoadingSkeleton } from "../../../../components/feedback/LoadingSkeleton";
 import XenditCheckoutModal from "../../../../components/payment/XenditCheckoutModal";
-import {
-  useBookingStore,
-  API_STATUS_MAP,
-  type Booking,
-} from "../../../../store/bookingStore";
+import { useBookingStore, type Booking } from "../../../../store/bookingStore";
 import {
   getBookingDetail,
   confirmBookingCompletion,
@@ -29,142 +27,15 @@ import {
 } from "../../../../services/api";
 import { colors } from "../../../../constants";
 import { useAlertModal } from "../../../../contexts/AlertModalContext";
-import type { ConditionType, RoomType, TimeSlot } from "../../../../types/booking4step.types";
+import { mapApiBookingDetail, type ApiBookingDetail } from "../../../../utils/mapBookingDetail";
 
-type ApiBookingDetail = {
-  id: string;
-  worker: { id: string; fullName: string; phone?: string | null; avatar?: string | null; verified?: boolean } | null;
-  service: string;
-  category?: string;
-  status: string;
-  description?: string | null;
-  location: string;
-  city?: string | null;
-  clientLat?: number | null;
-  clientLng?: number | null;
-  timeSlot?: TimeSlot | null;
-  condition?: ConditionType | null;
-  // Reschedule-on-conflict (see backend bookingController.extendBooking) —
-  // rescheduleAcknowledgedAt null means this is still an open episode
-  // awaiting the client's explicit response.
-  rescheduledAt?: string | null;
-  previousScheduledDate?: string | null;
-  previousTimeSlot?: TimeSlot | null;
-  // The true original date, surviving multiple reschedule hops — differs
-  // from previousScheduledDate only after a second+ hop (see backend
-  // Booking.originalScheduledDate).
-  originalScheduledDate?: string | null;
-  rescheduleAcknowledgedAt?: string | null;
-  // Set once the worker never checks in past the grace period (see backend
-  // bookingWorker.flagWorkerNoShows) — lets the client cancel penalty-free
-  // even though the booking is past PENDING.
-  workerNoShowFlaggedAt?: string | null;
-  // Reschedule-on-REQUEST (see backend requestReschedule) — distinct from
-  // the fields above (this booking's spillover moving a DIFFERENT booking).
-  // rescheduleRequestRespondedAt null means still awaiting the worker.
-  rescheduleRequestedAt?: string | null;
-  requestedScheduledDate?: string | null;
-  requestedTimeSlot?: TimeSlot | null;
-  rescheduleRequestRespondedAt?: string | null;
-  rescheduleRequestAccepted?: boolean | null;
-  rooms?: RoomType[];
-  scopeAnswers?: Record<string, string | string[]> | null;
-  scheduledDate: string;
-  scheduledTime: string | null;
-  estimatedPrice: number;
-  finalPrice: number | null;
-  vatApplicable?: boolean;
-  vatRate?: number | null;
-  priceBreakdown?: {
-    basePrice: number | null;
-    distanceFee: number;
-    tierFee: number;
-    addOns: { name: string; price: number }[];
-    subtotal: number;
-    vatApplicable: boolean;
-    vatRate: number | null;
-    vatAmount: number;
-    tip: number;
-    total: number;
-  };
-  completionPhotoUrl?: string | null;
-  // Settled at booking time — used to auto-process payment after completion
-  // is confirmed, without asking the client to pick a method again.
-  paymentMethodType?: string | null;
-  paymentAccountIdentifier?: string | null;
-  payment: {
-    methodType: string;
-    accountIdentifier: string | null;
-    status: string;
-    totalAmount: number;
-    subtotal?: number;
-    tip?: number;
-  } | null;
-  addOns?: { id: string; name: string; price: number; clientApprovedAt: string | null; clientRejectedAt: string | null }[];
-  // Multi-day upfront booking (see backend createMultiDayBooking) — null for
-  // an ordinary single-day booking. Sibling list is date-ordered.
-  groupId?: string | null;
-  group?: { totalDays: number; bookings: { id: string; scheduledDate: string; status: string }[] } | null;
-  quote: {
-    laborCost: number;
-    materialsCost: number;
-    notes: string | null;
-    quotedAt: string | null;
-  } | null;
-  review: { rating: number; comment: string | null } | null;
-};
-
-function mapApiBookingDetail(d: ApiBookingDetail): Booking {
-  return {
-    id: d.id,
-    service: d.service,
-    category: d.category ?? undefined,
-    worker: d.worker?.fullName ?? "Unassigned",
-    workerId: d.worker?.id,
-    workerPhone: d.worker?.phone ?? undefined,
-    workerAvatar: d.worker?.avatar ?? undefined,
-    workerVerified: d.worker?.verified ?? undefined,
-    date: d.scheduledDate,
-    time: d.scheduledTime ?? undefined,
-    address: d.location,
-    status: API_STATUS_MAP[d.status] ?? "Pending",
-    amount: d.finalPrice ?? d.estimatedPrice,
-    priceBreakdown: d.priceBreakdown ?? null,
-    completionPhotoUrl: d.completionPhotoUrl ?? undefined,
-    payment: d.payment
-      ? {
-          methodType: d.payment.methodType,
-          accountIdentifier: d.payment.accountIdentifier ?? undefined,
-          status: d.payment.status,
-          totalAmount: d.payment.totalAmount,
-        }
-      : d.paymentMethodType
-        ? {
-            methodType: d.paymentMethodType,
-            accountIdentifier: d.paymentAccountIdentifier ?? undefined,
-          }
-        : undefined,
-    quote: d.quote
-      ? {
-          laborCost: d.quote.laborCost,
-          materialsCost: d.quote.materialsCost,
-          totalAmount: d.finalPrice ?? 0,
-          notes: d.quote.notes ?? "",
-          submittedAt: d.quote.quotedAt ?? d.scheduledDate,
-        }
-      : undefined,
-    rating: d.review?.rating,
-    reviewText: d.review?.comment ?? undefined,
-    rescheduledAt: d.rescheduledAt,
-    previousScheduledDate: d.previousScheduledDate,
-    previousTimeSlot: d.previousTimeSlot,
-    originalScheduledDate: d.originalScheduledDate,
-    rescheduleAcknowledgedAt: d.rescheduleAcknowledgedAt,
-    workerNoShowFlaggedAt: d.workerNoShowFlaggedAt,
-    groupId: d.groupId ?? undefined,
-    groupTotalDays: d.group?.totalDays ?? undefined,
-    groupDayIndex: d.group ? d.group.bookings.findIndex((b) => b.id === d.id) + 1 : undefined,
-  };
+function formatScheduledDate(date: string): string {
+  return new Date(date).toLocaleDateString("en-PH", {
+    weekday: "long",
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+  });
 }
 
 export default function BookingDetailScreen() {
@@ -282,13 +153,6 @@ export default function BookingDetailScreen() {
     } finally {
       setRespondingAddonId(null);
     }
-  };
-
-  const statusCaption: Partial<Record<Booking["status"], string>> = {
-    QuoteSubmitted: "Action required",
-    Disputed: "Under review",
-    PendingCompletion: "Action required",
-    AwaitingPayment: "Payment required",
   };
 
   // Same free-cancel carve-out as a forced reschedule (see
@@ -582,36 +446,6 @@ export default function BookingDetailScreen() {
     }
   };
 
-  const steps = [
-    { label: "Requested", timestamp: booking.date, status: "done" as const },
-    {
-      label: "Accepted",
-      timestamp: "",
-      status:
-        booking.status === "Pending" ? ("pending" as const) : ("done" as const),
-    },
-    {
-      label: "In Progress",
-      timestamp: "",
-      status:
-        booking.status === "InProgress"
-          ? ("active" as const)
-          : booking.status === "QuoteSubmitted" ||
-              booking.status === "QuoteApproved" ||
-              booking.status === "Completed"
-            ? ("done" as const)
-            : ("pending" as const),
-    },
-    {
-      label: "Completed",
-      timestamp: "",
-      status:
-        booking.status === "Completed"
-          ? ("done" as const)
-          : ("pending" as const),
-    },
-  ];
-
   const workerName = booking.worker;
 
   return (
@@ -624,11 +458,6 @@ export default function BookingDetailScreen() {
         {/* Status Row */}
         <View className="flex-row items-center gap-2 mb-4">
           <StatusBadge status={booking.status} />
-          {statusCaption[booking.status] ? (
-            <Text className="text-text-secondary text-xs font-semibold">
-              {statusCaption[booking.status]}
-            </Text>
-          ) : null}
           {!!booking.groupTotalDays && (
             <View className="bg-accent/10 rounded-full px-2 py-0.5">
               <Text className="text-accent text-[11px] font-bold">
@@ -644,6 +473,14 @@ export default function BookingDetailScreen() {
             ID: {booking.id}
           </Text>
         </View>
+
+        {/* Where the booking is, in one glance */}
+        <BookingStatusHero
+          timeline={getBookingTimeline(booking.status, {
+            scheduledDate: formatScheduledDate(booking.date),
+            workerName,
+          })}
+        />
 
         {/* Reschedule banner — placed first, most time-sensitive */}
         {hasPendingReschedule && (
@@ -814,6 +651,29 @@ export default function BookingDetailScreen() {
           </View>
         )}
 
+        {/* Worker — Message/Call right on the card, high on the screen */}
+        <BookingWorkerCard
+          name={workerName}
+          avatarUrl={booking.workerAvatar}
+          verified={booking.workerVerified}
+          onMessage={() => {
+            if (!booking.workerId) {
+              alertModal.info("Unavailable", "This worker cannot be messaged yet.");
+              return;
+            }
+            router.push(`/(client)/inbox/chat/${booking.workerId}`);
+          }}
+          onCall={() => {
+            if (!booking.workerPhone) {
+              alertModal.info("No phone number", "This worker has no phone number on file.");
+              return;
+            }
+            Linking.openURL(`tel:${booking.workerPhone}`).catch(() =>
+              alertModal.error("Error", "Could not open the phone dialer."),
+            );
+          }}
+        />
+
         {/* Service Info */}
         <View className="bg-card rounded-2xl p-4 mb-3">
           <Text className="text-text-secondary text-xs mb-1">Service</Text>
@@ -822,87 +682,12 @@ export default function BookingDetailScreen() {
           </Text>
         </View>
 
-        {/* Worker Info */}
-        <View className="bg-card rounded-2xl p-4 mb-3">
-          <Text className="text-text-secondary text-xs mb-2">
-            Assigned Worker
-          </Text>
-          <View className="flex-row items-center">
-            <View className="w-12 h-12 rounded-full bg-accent/20 items-center justify-center overflow-hidden">
-              {booking.workerAvatar ? (
-                <Image
-                  source={{ uri: booking.workerAvatar }}
-                  style={{ width: 48, height: 48 }}
-                  resizeMode="cover"
-                />
-              ) : (
-                <Ionicons name="person" size={24} color={colors.accent.DEFAULT} />
-              )}
-            </View>
-            <View className="ml-3 flex-1">
-              <View className="flex-row items-center">
-                <Text className="text-text-primary font-semibold">{workerName}</Text>
-                {booking.workerVerified && (
-                  <Ionicons
-                    name="checkmark-circle"
-                    size={14}
-                    color={colors.success}
-                    style={{ marginLeft: 4 }}
-                  />
-                )}
-              </View>
-              <Text className="text-text-secondary text-xs">
-                {booking.workerVerified ? "Verified Professional" : "Professional"}
-              </Text>
-            </View>
-            <Pressable
-              onPress={() => {
-                if (!booking.workerId) {
-                  alertModal.info("Unavailable", "This worker cannot be messaged yet.");
-                  return;
-                }
-                router.push(`/(client)/inbox/chat/${booking.workerId}`);
-              }}
-              className="p-2 mr-1"
-            >
-              <Ionicons
-                name="chatbubble-outline"
-                size={22}
-                color={colors.accent.DEFAULT}
-              />
-            </Pressable>
-            <Pressable
-              onPress={() => {
-                if (!booking.workerPhone) {
-                  alertModal.info("No phone number", "This worker has no phone number on file.");
-                  return;
-                }
-                Linking.openURL(`tel:${booking.workerPhone}`).catch(() =>
-                  alertModal.error("Error", "Could not open the phone dialer."),
-                );
-              }}
-              className="p-2"
-            >
-              <Ionicons
-                name="call-outline"
-                size={22}
-                color={colors.accent.DEFAULT}
-              />
-            </Pressable>
-          </View>
-        </View>
-
         {/* Date & Address */}
         <View className="bg-card rounded-2xl p-4 mb-3">
           <View className="flex-row items-center mb-2">
             <Ionicons name="calendar" size={16} color={colors.accent.DEFAULT} />
             <Text className="text-text-primary font-semibold ml-2">
-              {new Date(booking.date).toLocaleDateString("en-PH", {
-                weekday: "long",
-                year: "numeric",
-                month: "long",
-                day: "numeric",
-              })}
+              {formatScheduledDate(booking.date)}
             </Text>
           </View>
           {booking.time && (
@@ -1021,12 +806,6 @@ export default function BookingDetailScreen() {
             )}
           </View>
         )}
-
-        {/* Progress Stepper */}
-        <View className="bg-card rounded-2xl p-4 mb-3">
-          <Text className="text-text-primary font-bold mb-3">Booking Progress</Text>
-          <StepperVertical steps={steps} />
-        </View>
 
         {/* Rating (if completed) */}
         {isCompleted && (
