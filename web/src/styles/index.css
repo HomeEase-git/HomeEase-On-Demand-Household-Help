@@ -230,13 +230,60 @@ body {
   transform: rotate(180deg);
 }
 
+/* Expands by animating the grid row from 0fr to 1fr, which works for any
+   number of children without measuring heights in JS. */
+.nav-group__panel {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 0.28s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.nav-group__panel.is-open {
+  grid-template-rows: 1fr;
+}
+
 .nav-group__children {
+  min-height: 0;
+  overflow: hidden;
   display: flex;
   flex-direction: column;
   gap: 2px;
   padding-left: 0.75rem;
-  margin: 2px 0 4px;
+  margin-left: 0;
   border-left: 1px solid var(--sidebar-border);
+  transition: margin 0.28s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.nav-group__panel.is-open .nav-group__children {
+  margin: 2px 0 4px;
+}
+
+/* Links fade and slide in one after another as the group opens. */
+.nav-group__panel .nav-item--child {
+  opacity: 0;
+  transform: translateX(-6px);
+  transition: opacity 0.18s ease, transform 0.18s ease, background var(--transition), color var(--transition);
+}
+
+.nav-group__panel.is-open .nav-item--child {
+  opacity: 1;
+  transform: none;
+  transition-delay: calc(0.06s + var(--i, 0) * 0.035s), calc(0.06s + var(--i, 0) * 0.035s), 0s, 0s;
+}
+
+/* The white "current page" pill eases in as you move between pages. */
+.nav-item.active {
+  transition: background 0.22s ease, color 0.22s ease, box-shadow 0.22s ease;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .nav-group__panel,
+  .nav-group__children,
+  .nav-group__panel .nav-item--child,
+  .nav-group__chevron,
+  .nav-item {
+    transition: none !important;
+  }
 }
 
 .nav-item--child {
