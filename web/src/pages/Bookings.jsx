@@ -111,7 +111,7 @@ export default function Bookings() {
         />
       </div>
       <div className="toolbar" style={{ alignItems: 'center' }}>
-        <label style={{ fontSize: '0.8125rem', color: 'var(--text-muted)' }}>From</label>
+        <label className="text-muted text-small">From</label>
         <input
           type="date"
           className="form-input"
@@ -119,7 +119,7 @@ export default function Bookings() {
           onChange={(e) => setDateFrom(e.target.value)}
           style={{ maxWidth: '160px' }}
         />
-        <label style={{ fontSize: '0.8125rem', color: 'var(--text-muted)' }}>To</label>
+        <label className="text-muted text-small">To</label>
         <input
           type="date"
           className="form-input"
@@ -151,7 +151,7 @@ export default function Bookings() {
                 <tbody>
                   {bookings.length === 0 ? (
                     <tr>
-                      <td colSpan={8} style={{ textAlign: 'center', color: 'var(--text-muted)' }}>No bookings found.</td>
+                      <td colSpan={8} className="table-empty">No bookings found.</td>
                     </tr>
                   ) : (
                     bookings.map((b) => (
@@ -226,17 +226,16 @@ export default function Bookings() {
           <div className="modal" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true">
             <h2 className="modal-title">Force cancel booking {cancelTarget.displayId}?</h2>
             <p className="modal-body">This releases/refunds any held payment. This can&apos;t be undone.</p>
-            <label htmlFor="cancel-reason" style={{ display: 'block', margin: '0.75rem 0 0.35rem', fontWeight: 600 }}>
+            <label htmlFor="cancel-reason" className="form-label form-label--spaced">
               Reason
             </label>
             <textarea
               id="cancel-reason"
-              className="form-input"
+              className="form-input field-full field-textarea"
               rows={3}
               value={reason}
               onChange={(e) => setReason(e.target.value)}
               placeholder="Why is this booking being force-cancelled?"
-              style={{ width: '100%', resize: 'vertical' }}
             />
             <div className="modal-actions">
               <button type="button" className="btn btn-outline" onClick={closeCancelModal} disabled={submitting}>

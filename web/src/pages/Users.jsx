@@ -76,7 +76,7 @@ export default function Users() {
                 <tbody>
                   {clients.length === 0 ? (
                     <tr>
-                      <td colSpan={8} style={{ textAlign: 'center', color: 'var(--text-muted)' }}>
+                      <td colSpan={8} className="table-empty">
                         No clients found.
                       </td>
                     </tr>

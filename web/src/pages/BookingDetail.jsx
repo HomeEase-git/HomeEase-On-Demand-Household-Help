@@ -26,12 +26,12 @@ export default function BookingDetail() {
   const [reason, setReason] = useState('')
   const [submitting, setSubmitting] = useState(false)
 
-  if (loading) return <LoadingState message="Loading booking..." />
+  if (loading) return <LoadingState variant="detail" message="Loading booking..." />
   if (error) return <ErrorState message={error} onRetry={reload} />
   if (!booking) {
     return (
       <SectionCard>
-        <p style={{ color: 'var(--text-muted)' }}>Booking not found. <Link to="/bookings">Back to Bookings</Link></p>
+        <p className="text-muted">Booking not found. <Link to="/bookings">Back to Bookings</Link></p>
       </SectionCard>
     )
   }
@@ -123,17 +123,16 @@ export default function BookingDetail() {
               This immediately cancels booking {booking.displayId} and releases/refunds any held payment. This
               can&apos;t be undone.
             </p>
-            <label htmlFor="cancel-reason" style={{ display: 'block', margin: '0.75rem 0 0.35rem', fontWeight: 600 }}>
+            <label htmlFor="cancel-reason" className="form-label form-label--spaced">
               Reason
             </label>
             <textarea
               id="cancel-reason"
-              className="form-input"
+              className="form-input field-full field-textarea"
               rows={3}
               value={reason}
               onChange={(e) => setReason(e.target.value)}
               placeholder="Why is this booking being force-cancelled?"
-              style={{ width: '100%', resize: 'vertical' }}
             />
             <div className="modal-actions">
               <button type="button" className="btn btn-outline" onClick={() => setCancelModalOpen(false)} disabled={submitting}>

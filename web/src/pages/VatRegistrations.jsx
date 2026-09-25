@@ -117,7 +117,7 @@ export default function VatRegistrations() {
         title="VAT Registrations"
         subtitle="Review worker-submitted proof of VAT registration before it affects any booking's pricing"
       />
-      <p style={{ color: 'var(--text-muted)', fontSize: '0.875rem', margin: '0.5rem 0 1rem' }}>
+      <p className="form-hint">
         Approving here is the only thing that makes VAT apply to a worker's future bookings — submitting a document
         alone does nothing. None of this platform's trades are BIR-licensed professions, so one ATC code covers
         every worker regardless of VAT status (see Settings for the code on file).
@@ -149,7 +149,7 @@ export default function VatRegistrations() {
               <tbody>
                 {registrations.length === 0 ? (
                   <tr>
-                    <td colSpan={5} style={{ textAlign: 'center', color: 'var(--text-muted)' }}>
+                    <td colSpan={5} className="table-empty">
                       No {statusFilter !== 'ALL' ? statusFilter.toLowerCase() : ''} registrations.
                     </td>
                   </tr>
@@ -220,7 +220,7 @@ export default function VatRegistrations() {
       />
       <SectionCard title="Generate Summary for a Period">
         <div className="toolbar" style={{ alignItems: 'center' }}>
-          <label style={{ fontSize: '0.8125rem', color: 'var(--text-muted)' }}>From</label>
+          <label className="text-muted text-small">From</label>
           <input
             type="date"
             className="form-input"
@@ -228,7 +228,7 @@ export default function VatRegistrations() {
             onChange={(e) => setPeriod((p) => ({ ...p, periodStart: e.target.value }))}
             style={{ maxWidth: '160px' }}
           />
-          <label style={{ fontSize: '0.8125rem', color: 'var(--text-muted)' }}>To</label>
+          <label className="text-muted text-small">To</label>
           <input
             type="date"
             className="form-input"
@@ -256,7 +256,7 @@ export default function VatRegistrations() {
                 <tbody>
                   {summaries.length === 0 ? (
                     <tr>
-                      <td colSpan={4} style={{ textAlign: 'center', color: 'var(--text-muted)' }}>
+                      <td colSpan={4} className="table-empty">
                         No summaries generated yet.
                       </td>
                     </tr>
@@ -270,7 +270,7 @@ export default function VatRegistrations() {
                           {s.needsReview ? (
                             <Badge variant="flagged">Needs Review</Badge>
                           ) : (
-                            <span style={{ color: 'var(--text-muted)' }}>—</span>
+                            <span className="text-muted">—</span>
                           )}
                         </td>
                       </tr>
@@ -305,7 +305,7 @@ export default function VatRegistrations() {
                 value={rejectReason}
                 onChange={(e) => setRejectReason(e.target.value)}
                 placeholder="e.g. Document is illegible, please re-upload"
-                style={{ width: '100%', padding: '0.5rem 0.75rem', border: '1px solid var(--border)', borderRadius: 8 }}
+                className="field-full field-plain"
               />
             </div>
             <div className="modal-actions">

@@ -88,7 +88,7 @@ export default function VerificationDetail() {
   }
 
   if (loading) {
-    return <LoadingState message="Loading verification details..." />
+    return <LoadingState variant="detail" message="Loading verification details..." />
   }
 
   if (error) {
@@ -98,7 +98,7 @@ export default function VerificationDetail() {
   if (!verification) {
     return (
       <SectionCard>
-        <p style={{ color: 'var(--text-muted)' }}>Verification not found. <Link to="/verification">Back to Verification</Link></p>
+        <p className="text-muted">Verification not found. <Link to="/verification">Back to Verification</Link></p>
       </SectionCard>
     )
   }

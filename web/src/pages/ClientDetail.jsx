@@ -44,12 +44,12 @@ export default function ClientDetail() {
     }
   }
 
-  if (loading) return <LoadingState message="Loading client..." />
+  if (loading) return <LoadingState variant="detail" message="Loading client..." />
   if (error) return <ErrorState message={error} onRetry={reload} />
   if (!client) {
     return (
       <SectionCard>
-        <p style={{ color: 'var(--text-muted)' }}>Client not found. <Link to="/users">Back to Clients</Link></p>
+        <p className="text-muted">Client not found. <Link to="/users">Back to Clients</Link></p>
       </SectionCard>
     )
   }
@@ -175,7 +175,7 @@ export default function ClientDetail() {
             <tbody>
               {(client.recentBookings || []).length === 0 ? (
                 <tr>
-                  <td colSpan={6} style={{ textAlign: 'center', color: 'var(--text-muted)' }}>No bookings yet.</td>
+                  <td colSpan={6} className="table-empty">No bookings yet.</td>
                 </tr>
               ) : (
                 client.recentBookings.map((b) => (
@@ -211,17 +211,16 @@ export default function ClientDetail() {
         <div className="modal-backdrop" onClick={() => setStatusModalOpen(false)} role="presentation">
           <div className="modal" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true">
             <h2 className="modal-title">{isSuspended ? 'Reinstate' : 'Suspend'} {client.name}?</h2>
-            <label htmlFor="status-reason" style={{ display: 'block', margin: '0.5rem 0 0.35rem', fontWeight: 600 }}>
+            <label htmlFor="status-reason" className="form-label">
               Reason
             </label>
             <textarea
               id="status-reason"
-              className="form-input"
+              className="form-input field-full field-textarea"
               rows={3}
               value={reason}
               onChange={(e) => setReason(e.target.value)}
               placeholder={isSuspended ? 'Why is this account being reinstated?' : 'Why is this account being suspended?'}
-              style={{ width: '100%', resize: 'vertical' }}
             />
             <div className="modal-actions">
               <button type="button" className="btn btn-outline" onClick={() => setStatusModalOpen(false)} disabled={submitting}>
@@ -245,17 +244,16 @@ export default function ClientDetail() {
           <div className="modal" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true">
             <h2 className="modal-title">Refund booking {refundTarget.id}?</h2>
             <p className="modal-body">This cancels the booking and releases its held payment back to the client.</p>
-            <label htmlFor="refund-reason" style={{ display: 'block', margin: '0.5rem 0 0.35rem', fontWeight: 600 }}>
+            <label htmlFor="refund-reason" className="form-label">
               Reason
             </label>
             <textarea
               id="refund-reason"
-              className="form-input"
+              className="form-input field-full field-textarea"
               rows={3}
               value={reason}
               onChange={(e) => setReason(e.target.value)}
               placeholder="Why is this refund being issued?"
-              style={{ width: '100%', resize: 'vertical' }}
             />
             <div className="modal-actions">
               <button type="button" className="btn btn-outline" onClick={() => setRefundTarget(null)} disabled={submitting}>

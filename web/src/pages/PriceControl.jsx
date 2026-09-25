@@ -269,7 +269,7 @@ export default function PriceControl() {
                   placeholder="e.g. Malolos"
                 />
                 {formatDoleReference(form.city) && (
-                  <small style={{ color: 'var(--text-muted)' }}>
+                  <small className="text-muted">
                     DOLE wage floor for reference: {formatDoleReference(form.city)}
                   </small>
                 )}
@@ -295,7 +295,7 @@ export default function PriceControl() {
                     min="0"
                     value={form.minPrice}
                     onChange={(e) => setForm((p) => ({ ...p, minPrice: e.target.value }))}
-                    style={{ width: '100%', padding: '0.5rem 0.75rem', border: '1px solid var(--border)', borderRadius: 8 }}
+                    className="field-full field-plain"
                   />
                 </div>
                 <div className="detail-block">
@@ -306,7 +306,7 @@ export default function PriceControl() {
                     min="0"
                     value={form.maxPrice}
                     onChange={(e) => setForm((p) => ({ ...p, maxPrice: e.target.value }))}
-                    style={{ width: '100%', padding: '0.5rem 0.75rem', border: '1px solid var(--border)', borderRadius: 8 }}
+                    className="field-full field-plain"
                   />
                 </div>
               </div>
@@ -323,7 +323,7 @@ export default function PriceControl() {
                     value={form.overrideReason}
                     onChange={(e) => setForm((p) => ({ ...p, overrideReason: e.target.value }))}
                     placeholder="Why this price is intentionally below the DOLE reference"
-                    style={{ width: '100%', padding: '0.5rem 0.75rem', border: '1px solid var(--border)', borderRadius: 8 }}
+                    className="field-full field-plain"
                   />
                 </div>
               )}

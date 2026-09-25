@@ -102,7 +102,7 @@ export default function TaxRemittance() {
         title="Tax Remittance"
         subtitle="Quarterly withholding tax due to BIR, and a record of what's actually been filed and paid"
       />
-      <p style={{ color: 'var(--text-muted)', fontSize: '0.875rem', margin: '0.5rem 0 1rem' }}>
+      <p className="form-hint">
         There is no public BIR e-filing API — actual filing and payment happen outside this app (eFPS or an
         authorized bank). This page is a bookkeeping record: it shows what's due per quarter and lets you record
         the OR/reference number once you've filed it.

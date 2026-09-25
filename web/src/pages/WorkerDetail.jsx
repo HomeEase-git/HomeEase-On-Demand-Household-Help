@@ -142,12 +142,12 @@ export default function WorkerDetail() {
     }
   }
 
-  if (loading) return <LoadingState message="Loading worker..." />
+  if (loading) return <LoadingState variant="detail" message="Loading worker..." />
   if (error) return <ErrorState message={error} onRetry={reload} />
   if (!worker) {
     return (
       <SectionCard>
-        <p style={{ color: 'var(--text-muted)' }}>Worker not found. <Link to="/workers">Back to Workers</Link></p>
+        <p className="text-muted">Worker not found. <Link to="/workers">Back to Workers</Link></p>
       </SectionCard>
     )
   }
@@ -257,7 +257,7 @@ export default function WorkerDetail() {
             <tbody>
               {(worker.recentBookings || []).length === 0 ? (
                 <tr>
-                  <td colSpan={5} style={{ textAlign: 'center', color: 'var(--text-muted)' }}>No bookings yet.</td>
+                  <td colSpan={5} className="table-empty">No bookings yet.</td>
                 </tr>
               ) : (
                 worker.recentBookings.map((b) => (
@@ -286,7 +286,7 @@ export default function WorkerDetail() {
             <tbody>
               {(worker.certifications || []).length === 0 ? (
                 <tr>
-                  <td colSpan={5} style={{ textAlign: 'center', color: 'var(--text-muted)' }}>No certifications uploaded.</td>
+                  <td colSpan={5} className="table-empty">No certifications uploaded.</td>
                 </tr>
               ) : (
                 worker.certifications.map((c) => (
@@ -352,7 +352,7 @@ export default function WorkerDetail() {
                 value={certRejectReason}
                 onChange={(e) => setCertRejectReason(e.target.value)}
                 rows={3}
-                style={{ width: '100%', padding: '0.5rem 0.75rem', border: '1px solid var(--border)', borderRadius: 8 }}
+                className="field-full field-plain"
               />
             </div>
             <div className="modal-actions">
@@ -367,7 +367,7 @@ export default function WorkerDetail() {
 
       <SectionCard title="Platform Dues">
         {debtLoading ? (
-          <LoadingState message="Loading platform dues..." />
+          <LoadingState variant="block" message="Loading platform dues..." />
         ) : (
           <>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
@@ -410,7 +410,7 @@ export default function WorkerDetail() {
                 <tbody>
                   {(debt?.entries || []).length === 0 ? (
                     <tr>
-                      <td colSpan={5} style={{ textAlign: 'center', color: 'var(--text-muted)' }}>
+                      <td colSpan={5} className="table-empty">
                         No ledger activity yet.
                       </td>
                     </tr>
@@ -443,7 +443,7 @@ export default function WorkerDetail() {
               Positive amounts reduce what the worker owes, negative amounts increase it. Use this for support
               cases like waiving a debt or correcting a bad accrual.
             </p>
-            <label htmlFor="adjust-amount" style={{ display: 'block', margin: '0.5rem 0 0.35rem', fontWeight: 600 }}>
+            <label htmlFor="adjust-amount" className="form-label">
               Amount (₱)
             </label>
             <input
@@ -456,17 +456,16 @@ export default function WorkerDetail() {
               placeholder="e.g. 50 or -20"
               style={{ width: '100%' }}
             />
-            <label htmlFor="adjust-reason" style={{ display: 'block', margin: '0.75rem 0 0.35rem', fontWeight: 600 }}>
+            <label htmlFor="adjust-reason" className="form-label form-label--spaced">
               Reason
             </label>
             <textarea
               id="adjust-reason"
-              className="form-input"
+              className="form-input field-full field-textarea"
               rows={3}
               value={adjustReason}
               onChange={(e) => setAdjustReason(e.target.value)}
               placeholder="Why is this adjustment being made?"
-              style={{ width: '100%', resize: 'vertical' }}
             />
             <div className="modal-actions">
               <button
@@ -498,17 +497,16 @@ export default function WorkerDetail() {
               This lets {worker.name} accept new jobs again. It does not forgive their outstanding dues — use
               "Adjust Dues" separately if you're waiving any of it.
             </p>
-            <label htmlFor="release-note" style={{ display: 'block', margin: '0.5rem 0 0.35rem', fontWeight: 600 }}>
+            <label htmlFor="release-note" className="form-label">
               Note (optional)
             </label>
             <textarea
               id="release-note"
-              className="form-input"
+              className="form-input field-full field-textarea"
               rows={3}
               value={releaseNote}
               onChange={(e) => setReleaseNote(e.target.value)}
               placeholder="What was agreed with the worker?"
-              style={{ width: '100%', resize: 'vertical' }}
             />
             <div className="modal-actions">
               <button
@@ -542,17 +540,16 @@ export default function WorkerDetail() {
                 reinstated.
               </p>
             )}
-            <label htmlFor="status-reason" style={{ display: 'block', margin: '0.5rem 0 0.35rem', fontWeight: 600 }}>
+            <label htmlFor="status-reason" className="form-label">
               Reason
             </label>
             <textarea
               id="status-reason"
-              className="form-input"
+              className="form-input field-full field-textarea"
               rows={3}
               value={reason}
               onChange={(e) => setReason(e.target.value)}
               placeholder={isSuspended ? 'Why is this account being reinstated?' : 'Why is this account being suspended?'}
-              style={{ width: '100%', resize: 'vertical' }}
             />
             <div className="modal-actions">
               <button type="button" className="btn btn-outline" onClick={() => setStatusModalOpen(false)} disabled={submitting}>

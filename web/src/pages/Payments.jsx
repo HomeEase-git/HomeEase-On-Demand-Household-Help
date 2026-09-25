@@ -131,7 +131,7 @@ export default function Payments() {
                 <tbody>
                   {transactions.length === 0 ? (
                     <tr>
-                      <td colSpan={11} style={{ textAlign: 'center', color: 'var(--text-muted)' }}>
+                      <td colSpan={11} className="table-empty">
                         No payments found.
                       </td>
                     </tr>

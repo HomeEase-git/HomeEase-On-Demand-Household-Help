@@ -75,7 +75,7 @@ export default function Reviews() {
                 <tbody>
                   {filteredReviews.length === 0 ? (
                     <tr>
-                      <td colSpan={8} style={{ textAlign: 'center', color: 'var(--text-muted)' }}>
+                      <td colSpan={8} className="table-empty">
                         No reviews found.
                       </td>
                     </tr>

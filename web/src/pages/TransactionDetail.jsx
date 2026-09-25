@@ -20,7 +20,7 @@ export default function TransactionDetail() {
   const { data: tx, loading, error, reload } = useDetailQuery(fetchPaymentById, id)
 
   if (loading) {
-    return <LoadingState message="Loading transaction details..." />
+    return <LoadingState variant="detail" message="Loading transaction details..." />
   }
 
   if (error) {
@@ -30,7 +30,7 @@ export default function TransactionDetail() {
   if (!tx) {
     return (
       <SectionCard>
-        <p style={{ color: 'var(--text-muted)' }}>Transaction not found. <Link to="/payments">Back to Transactions</Link></p>
+        <p className="text-muted">Transaction not found. <Link to="/payments">Back to Transactions</Link></p>
       </SectionCard>
     )
   }
