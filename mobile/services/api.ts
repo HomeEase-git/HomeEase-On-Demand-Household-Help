@@ -1778,6 +1778,8 @@ export async function getMyWorkerProfileDetails(): Promise<MyWorkerProfileDetail
 }
 
 export async function updateWorkerProfileDetails(data: {
+  // YYYY-MM-DD; the backend rejects anyone under 18.
+  birthDate?: string;
   bio?: string;
   serviceAreaRadius?: number;
   address?: string;

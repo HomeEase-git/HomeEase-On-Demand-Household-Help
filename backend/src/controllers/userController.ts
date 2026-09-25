@@ -4,6 +4,7 @@ import * as bcrypt from 'bcryptjs';
 import prisma from '@config/database';
 import { errorResponse } from '@utils/errorResponse';
 import { toOwnedStoredUrl } from '@utils/storageUrls';
+import { ageInYears, MIN_WORKER_AGE } from '@utils/age';
 import { eraseAccount, findDeletionBlockers } from '@services/accountDeletionService';
 import { JWT_EXPIRY } from '@utils/jwt';
 import { mimeTypeFromUrl, storagePathFromUrl } from '@utils/kycFileMeta';
@@ -833,6 +834,17 @@ export const acceptContract = async (req: AuthRequest, res: Response) => {
               `Please upload the following before submitting for review: ${missingTypes.join(', ')}.`
             )
           );
+        }
+
+        const profile = await prisma.workerProfile.findUnique({
+          where: { userId: req.user.userId },
+          select: { birthDate: true },
+        });
+        if (!profile?.birthDate) {
+          return res.status(400).json(errorResponse(400, 'Please enter your date of birth on the ID step before submitting.'));
+        }
+        if (ageInYears(profile.birthDate) < MIN_WORKER_AGE) {
+          return res.status(400).json(errorResponse(400, `You must be at least ${MIN_WORKER_AGE} years old to work on HomeEase.`));
         }
 
         await prisma.$transaction([

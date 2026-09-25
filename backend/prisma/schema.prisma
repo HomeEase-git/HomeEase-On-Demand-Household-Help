@@ -528,6 +528,10 @@ model WorkerProfile {
   // differently each time, so uniqueness is enforced on tinHash instead.
   tin           String?
   tinHash       String?   @unique
+
+  // Workers must be 18+ (utils/age.ts). Entered by the worker at the ID
+  // step and checked by the admin against the ID itself at approval.
+  birthDate DateTime? @db.Date
   tinVerifiedAt DateTime?
 
   // VAT registration — self-declared then admin-verified (mirrors the
