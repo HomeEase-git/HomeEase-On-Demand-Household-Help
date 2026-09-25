@@ -1,5 +1,6 @@
 import React from "react";
-import { View, Text, Pressable } from "react-native";
+import { View, Text } from "react-native";
+import { PressableScale } from "../ui/PressableScale";
 import Avatar from "../ui/Avatar";
 import StarRating from "../ui/StarRating";
 import { useWorkerCapacity } from "../../hooks/useWorkerCapacity";
@@ -34,7 +35,7 @@ export const WorkerCard: React.FC<Props> = ({ worker, onPress }) => {
     worker.status === "unavailable" || worker.status === "busy" || isAtCapacity;
 
   return (
-    <Pressable
+    <PressableScale
       className="bg-card rounded-2xl p-4 mb-3 flex-row items-center"
       style={cardShadow}
       onPress={onPress}
@@ -93,7 +94,7 @@ export const WorkerCard: React.FC<Props> = ({ worker, onPress }) => {
           </Text>
         </View>
       </View>
-    </Pressable>
+    </PressableScale>
   );
 };
 

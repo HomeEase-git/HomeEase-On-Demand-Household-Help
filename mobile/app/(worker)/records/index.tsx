@@ -9,6 +9,7 @@ import { mapApiJob, type ApiWorkerBooking, type WorkerJob } from "../../../store
 import * as api from "../../../services/api";
 import { getWorkerNetAmount } from "../../../utils/pricing";
 import { useTabRefresh } from "../../../hooks/useTabRefresh";
+import { usePullToRefresh } from "../../../hooks/usePullToRefresh";
 
 type RecordTab = "Completed" | "Cancelled" | "Ongoing";
 
@@ -43,6 +44,7 @@ export default function RecordsScreen() {
   );
 
   useTabRefresh("worker:records", load);
+  const refreshControl = usePullToRefresh(load);
 
   const filtered = jobs.filter((j) => tabForJob(j) === tab);
 
@@ -130,6 +132,7 @@ export default function RecordsScreen() {
       ) : (
         <FlatList
           data={filtered}
+          refreshControl={refreshControl}
           keyExtractor={(item) => item.id}
           contentContainerStyle={{ padding: 16 }}
           renderItem={renderItem}

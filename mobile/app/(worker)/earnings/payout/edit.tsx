@@ -112,7 +112,7 @@ export default function PayoutEditScreen() {
             <View className="w-10 h-10 bg-card-light rounded-full items-center justify-center mr-3">
               <Text className="text-text-primary font-bold">{m.icon}</Text>
             </View>
-            <Text className="text-primary font-semibold">{m.label}</Text>
+            <Text className="text-text-primary font-semibold">{m.label}</Text>
           </Pressable>
         ))}
         <View className="mt-2">

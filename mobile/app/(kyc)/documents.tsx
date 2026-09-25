@@ -191,7 +191,7 @@ export default function DocumentsScreen() {
         </Text>
 
         <View className="mb-4">
-          <Text className="text-primary font-semibold mb-2">Clearances</Text>
+          <Text className="text-text-primary font-semibold mb-2">Clearances</Text>
           {renderUploadCard("nbiClearance")}
           {renderUploadCard("barangayClearance")}
           {renderUploadCard("policeClearance")}
@@ -199,7 +199,7 @@ export default function DocumentsScreen() {
         </View>
 
         <View className="mb-4">
-          <Text className="text-primary font-semibold mb-2">Optional</Text>
+          <Text className="text-text-primary font-semibold mb-2">Optional</Text>
           {renderUploadCard("certification")}
         </View>
 

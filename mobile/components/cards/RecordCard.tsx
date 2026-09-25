@@ -1,5 +1,6 @@
 import React from "react";
-import { View, Text, Pressable } from "react-native";
+import { View, Text } from "react-native";
+import { PressableScale } from "../ui/PressableScale";
 import Avatar from "../ui/Avatar";
 import StatusBadge from "../ui/StatusBadge";
 import type { StatusType } from "../ui/StatusBadge";
@@ -25,7 +26,7 @@ export const RecordCard: React.FC<Props> = ({ record, onPress }) => {
   const isOngoing = record.status === "Ongoing";
 
   return (
-    <Pressable
+    <PressableScale
       className="bg-card rounded-2xl p-4 mb-3 flex-row items-center"
       style={cardShadow}
       onPress={onPress}
@@ -56,7 +57,7 @@ export const RecordCard: React.FC<Props> = ({ record, onPress }) => {
         </Text>
         <StatusBadge status={record.status as StatusType} />
       </View>
-    </Pressable>
+    </PressableScale>
   );
 };
 

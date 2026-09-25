@@ -216,7 +216,7 @@ export default function AvailabilityScreen() {
                   <Text className="text-text-primary font-semibold text-sm">{dayLabel}</Text>
                   {isToday && (
                     <View className="bg-accent/10 rounded-full px-2 py-0.5">
-                      <Text className="text-accent text-[10px] font-bold">Today</Text>
+                      <Text className="text-accent text-xs font-bold">Today</Text>
                     </View>
                   )}
                 </View>

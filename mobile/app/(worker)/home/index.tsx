@@ -13,6 +13,7 @@ import * as api from "../../../services/api";
 import { colors } from "../../../constants";
 import { getWorkerNetAmount } from "../../../utils/pricing";
 import { useTabRefresh } from "../../../hooks/useTabRefresh";
+import { usePullToRefresh } from "../../../hooks/usePullToRefresh";
 import { usePushNotificationPrompt } from "../../../hooks/usePushNotificationPrompt";
 
 const todayStr = () => new Date().toISOString().slice(0, 10);
@@ -60,10 +61,12 @@ export default function WorkerHomeScreen() {
   );
 
   useTabRefresh("worker:home", load);
+  const refreshControl = usePullToRefresh(load);
 
   return (
     <SafeAreaView className="flex-1 bg-white" edges={["top"]}>
       <ScrollView
+        refreshControl={refreshControl}
         className="flex-1"
         contentContainerStyle={{ paddingBottom: 24 }}
         stickyHeaderIndices={[0]}

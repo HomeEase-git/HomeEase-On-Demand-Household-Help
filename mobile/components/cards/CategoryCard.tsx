@@ -1,5 +1,6 @@
 import React from "react";
-import { View, Text, Pressable } from "react-native";
+import { View, Text } from "react-native";
+import { PressableScale } from "../ui/PressableScale";
 import { AppIcon as Ionicons } from "../icons/AppIcon";
 import { colors, cardShadow } from "../../constants";
 import { getCategoryIcon } from "../../utils/categoryIcons";
@@ -15,7 +16,8 @@ export const CategoryCard: React.FC<Props> = ({ category, onPress }) => {
   const isEmpty = category.count <= 0;
 
   return (
-    <Pressable
+    <PressableScale
+      inert={isEmpty}
       className="bg-card rounded-2xl p-4 items-center mb-3 mx-1 flex-1 min-w-[140]"
       style={[cardShadow, isEmpty && { opacity: 0.5 }]}
       onPress={isEmpty ? undefined : onPress}
@@ -39,7 +41,7 @@ export const CategoryCard: React.FC<Props> = ({ category, onPress }) => {
           ? "No workers available"
           : `${category.count} worker${category.count === 1 ? "" : "s"} available`}
       </Text>
-    </Pressable>
+    </PressableScale>
   );
 };
 

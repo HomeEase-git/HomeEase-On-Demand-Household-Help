@@ -158,7 +158,7 @@ export default function WorkerChatScreen() {
           <Ionicons name="attach-outline" size={24} color={colors.text.muted} />
         </Pressable>
         <TextInput
-          className="flex-1 bg-card rounded-full px-4 py-2 text-primary max-h-24"
+          className="flex-1 bg-card rounded-full px-4 py-2 text-text-primary max-h-24"
           style={{ includeFontPadding: false }}
           placeholder="Message..."
           placeholderTextColor={colors.text.muted}

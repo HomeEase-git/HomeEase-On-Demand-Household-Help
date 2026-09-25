@@ -43,7 +43,7 @@ export default function PasswordResetSentScreen() {
         <Text className="text-text-secondary text-center text-lg mb-2">
           We&apos;ve sent a 6-digit reset code to
         </Text>
-        <Text className="text-primary text-center font-semibold text-lg mb-6">
+        <Text className="text-text-primary text-center font-semibold text-lg mb-6">
           {maskEmail(email)}
         </Text>
 

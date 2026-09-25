@@ -16,6 +16,7 @@ import { getBookings } from "../../../services/api";
 import { colors } from "../../../constants";
 import { useAlertModal } from "../../../contexts/AlertModalContext";
 import { useTabRefresh } from "../../../hooks/useTabRefresh";
+import { usePullToRefresh } from "../../../hooks/usePullToRefresh";
 
 const TABS = ["Pending", "Active", "Completed", "Cancelled"] as const;
 
@@ -69,6 +70,7 @@ export default function MyBookingsScreen() {
   );
 
   useTabRefresh("client:booking", loadBookings);
+  const refreshControl = usePullToRefresh(loadBookings);
 
   const filtered = bookings.filter((b) => tabForStatus(b.status) === activeTab);
 
@@ -122,6 +124,7 @@ export default function MyBookingsScreen() {
       ) : (
         <FlatList
           data={filtered}
+          refreshControl={refreshControl}
           keyExtractor={(item) => item.id}
           contentContainerStyle={{ padding: 16, paddingBottom: 80 }}
           renderItem={({ item }) => (

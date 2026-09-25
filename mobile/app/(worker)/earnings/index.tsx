@@ -7,6 +7,7 @@ import TransactionItem from "../../../components/list-items/TransactionItem";
 import * as api from "../../../services/api";
 import { colors } from "../../../constants";
 import { useTabRefresh } from "../../../hooks/useTabRefresh";
+import { usePullToRefresh } from "../../../hooks/usePullToRefresh";
 
 type TransactionListItem = {
   id: string;
@@ -41,6 +42,7 @@ export default function EarningsScreen() {
   );
 
   useTabRefresh("worker:earnings", load);
+  const refreshControl = usePullToRefresh(load);
 
   const completed = transactions.filter((t) => t.status === "Completed");
   const pending = transactions.filter((t) => t.status === "Pending");
@@ -60,6 +62,7 @@ export default function EarningsScreen() {
         </View>
       ) : (
         <ScrollView
+          refreshControl={refreshControl}
           className="flex-1"
           contentContainerStyle={{ paddingBottom: 24 }}
         >

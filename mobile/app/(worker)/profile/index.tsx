@@ -13,6 +13,7 @@ import type { WorkerDetail } from "../../../types/api.types";
 import { colors, cardShadow } from "../../../constants";
 import { useAlertModal } from "../../../contexts/AlertModalContext";
 import { useTabRefresh } from "../../../hooks/useTabRefresh";
+import { usePullToRefresh } from "../../../hooks/usePullToRefresh";
 
 const MENU_GROUPS = [
   {
@@ -111,6 +112,7 @@ export default function WorkerProfileScreen() {
   );
 
   useTabRefresh("worker:profile", load);
+  const refreshControl = usePullToRefresh(load);
 
   const displayName = user?.name ?? "Worker";
   const displayEmail = user?.email ?? "—";
@@ -118,7 +120,10 @@ export default function WorkerProfileScreen() {
 
   return (
     <SafeAreaView className="flex-1 bg-white">
-      <ScrollView contentContainerStyle={{ paddingBottom: 24 }}>
+      <ScrollView
+        contentContainerStyle={{ paddingBottom: 24 }}
+        refreshControl={refreshControl}
+      >
         <View
           className="bg-card rounded-2xl p-5 mx-4 mt-4 flex-row items-center"
           style={cardShadow}

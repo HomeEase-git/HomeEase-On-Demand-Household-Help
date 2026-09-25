@@ -1,5 +1,6 @@
 import React from "react";
-import { View, Text, Pressable } from "react-native";
+import { View, Text } from "react-native";
+import { PressableScale } from "../ui/PressableScale";
 import { AppIcon as Ionicons } from "../icons/AppIcon";
 import StatusBadge from "../ui/StatusBadge";
 import type { StatusType } from "../ui/StatusBadge";
@@ -27,7 +28,7 @@ type Props = {
 
 export const BookingCard: React.FC<Props> = ({ booking, onPress }) => {
   return (
-    <Pressable
+    <PressableScale
       className="bg-card rounded-2xl p-4 mb-3 flex-row items-center"
       style={cardShadow}
       onPress={onPress}
@@ -44,7 +45,7 @@ export const BookingCard: React.FC<Props> = ({ booking, onPress }) => {
           <Text className="text-text-primary font-bold">{booking.service}</Text>
           {!!booking.groupTotalDays && (
             <View className="bg-accent/10 rounded-full px-2 py-0.5 ml-2">
-              <Text className="text-accent text-[10px] font-bold">
+              <Text className="text-accent text-xs font-bold">
                 Day {booking.groupDayIndex ?? "?"} of {booking.groupTotalDays}
               </Text>
             </View>
@@ -65,7 +66,7 @@ export const BookingCard: React.FC<Props> = ({ booking, onPress }) => {
         </Text>
       </View>
       <Ionicons name="chevron-forward" size={20} color={colors.text.muted} />
-    </Pressable>
+    </PressableScale>
   );
 };
 

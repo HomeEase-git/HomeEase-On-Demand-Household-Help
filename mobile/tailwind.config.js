@@ -47,7 +47,7 @@ module.exports = {
         // undertone; `black` stays available for the rare case true black is
         // wanted.
         text: {
-          primary: "#4169E1",
+          primary: "#1E3A8A",
           secondary: "#6B7280",
           muted: "#9CA3AF",
           black: "#000000",

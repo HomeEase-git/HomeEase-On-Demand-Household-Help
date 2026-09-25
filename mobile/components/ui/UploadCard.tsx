@@ -35,13 +35,13 @@ export const UploadCard: React.FC<Props> = ({
             </Text>
             {required ? (
               <View className="ml-2 rounded-full bg-error/10 px-2 py-1">
-                <Text className="text-error text-[10px] font-semibold">
+                <Text className="text-error text-xs font-semibold">
                   Required
                 </Text>
               </View>
             ) : (
               <View className="ml-2 rounded-full bg-accent/10 px-2 py-1">
-                <Text className="text-accent text-[10px] font-semibold">
+                <Text className="text-accent text-xs font-semibold">
                   Optional
                 </Text>
               </View>

@@ -1,5 +1,6 @@
 import React from "react";
-import { View, Text, Pressable } from "react-native";
+import { View, Text } from "react-native";
+import { PressableScale } from "../ui/PressableScale";
 import { AppIcon as Ionicons } from "../icons/AppIcon";
 import Avatar from "../ui/Avatar";
 import StatusBadge from "../ui/StatusBadge";
@@ -33,7 +34,7 @@ export const RequestCard: React.FC<Props> = ({ request, onPress }) => {
   const hasDetailRow = !!request.roomsSummary || request.distanceKm != null || request.payoutEstimate != null;
 
   return (
-    <Pressable
+    <PressableScale
       className="bg-card rounded-2xl p-4 mb-3"
       style={cardShadow}
       onPress={onPress}
@@ -49,7 +50,7 @@ export const RequestCard: React.FC<Props> = ({ request, onPress }) => {
             </Text>
             {!!request.groupTotalDays && (
               <View className="bg-accent/10 rounded-full px-2 py-0.5 ml-2">
-                <Text className="text-accent text-[10px] font-bold">
+                <Text className="text-accent text-xs font-bold">
                   Day {request.groupDayIndex ?? "?"} of {request.groupTotalDays}
                 </Text>
               </View>
@@ -64,8 +65,8 @@ export const RequestCard: React.FC<Props> = ({ request, onPress }) => {
           <Text className="text-accent font-bold">₱{request.amount}</Text>
           {!!request.tip && request.tip > 0 && (
             <View className="bg-gold/20 rounded-full px-2 py-0.5 mt-1 flex-row items-center">
-              <Text className="text-[10px]">🎉</Text>
-              <Text className="text-accent text-[10px] font-bold ml-1">+₱{request.tip} tip</Text>
+              <Text className="text-xs">🎉</Text>
+              <Text className="text-accent text-xs font-bold ml-1">+₱{request.tip} tip</Text>
             </View>
           )}
           <View className="mt-1">
@@ -100,7 +101,7 @@ export const RequestCard: React.FC<Props> = ({ request, onPress }) => {
           )}
         </View>
       )}
-    </Pressable>
+    </PressableScale>
   );
 };
 

@@ -8,6 +8,7 @@ import { useNotificationStore } from "../../store/notificationStore";
 import { useAuthStore } from "../../store/authStore";
 import { useTabRefreshStore } from "../../store/tabRefreshStore";
 import { colors } from "../../constants";
+import { feedback } from "../../utils/feedback";
 
 export default function ClientLayout() {
   const unreadCount = useNotificationStore((s) => s.unreadCount);
@@ -25,6 +26,7 @@ export default function ClientLayout() {
   // and triggers a refresh, instead of doing nothing (the default behavior).
   const refreshOnRepeatTap = ({ navigation, route }: any) => ({
     tabPress: (e: any) => {
+      feedback.tap();
       if (navigation.isFocused()) {
         e.preventDefault();
         navigation.navigate(route.name, { screen: "index" });

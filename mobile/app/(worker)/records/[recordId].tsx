@@ -117,25 +117,25 @@ export default function RecordDetailScreen() {
 
           <View className="flex-row justify-between mb-2">
             <Text className="text-text-muted text-xs">Client</Text>
-            <Text className="text-primary text-sm">{record.client.fullName}</Text>
+            <Text className="text-text-primary text-sm">{record.client.fullName}</Text>
           </View>
           <View className="flex-row justify-between mb-2">
             <Text className="text-text-muted text-xs">Address</Text>
-            <Text className="text-primary text-sm text-right flex-1 ml-4">
+            <Text className="text-text-primary text-sm text-right flex-1 ml-4">
               {record.location || "—"}
             </Text>
           </View>
           {record.payment ? (
             <View className="flex-row justify-between mb-2">
               <Text className="text-text-muted text-xs">Payment</Text>
-              <Text className="text-primary text-sm">{record.payment.methodType}</Text>
+              <Text className="text-text-primary text-sm">{record.payment.methodType}</Text>
             </View>
           ) : null}
           <View className="flex-row justify-between">
             <Text className="text-text-muted text-xs">
               {isCompleted ? "Earnings" : "Amount"}
             </Text>
-            <Text className="text-primary text-sm">₱{amount.toFixed(2)}</Text>
+            <Text className="text-text-primary text-sm">₱{amount.toFixed(2)}</Text>
           </View>
           {isCompleted && (
             <Text className="text-text-muted text-xs mt-1 text-right">

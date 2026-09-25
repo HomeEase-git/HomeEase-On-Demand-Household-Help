@@ -1,5 +1,6 @@
 import React from "react";
-import { ActivityIndicator, Pressable, Text } from "react-native";
+import { ActivityIndicator, Text } from "react-native";
+import { PressableScale } from "./PressableScale";
 import { colors } from "../../constants";
 
 type Props = {
@@ -18,7 +19,8 @@ export const PrimaryButton: React.FC<Props> = ({
   fullWidth,
 }) => {
   return (
-    <Pressable
+    <PressableScale
+      inert={!!(disabled || loading)}
       className={`bg-brand border-2 border-transparent rounded-xl py-4 px-6 items-center justify-center ${
         fullWidth ? "w-full" : ""
       } ${disabled ? "opacity-50" : ""}`}
@@ -49,7 +51,7 @@ export const PrimaryButton: React.FC<Props> = ({
           {label}
         </Text>
       )}
-    </Pressable>
+    </PressableScale>
   );
 };
 

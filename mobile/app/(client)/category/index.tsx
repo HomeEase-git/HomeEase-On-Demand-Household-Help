@@ -12,6 +12,7 @@ import SearchBar from "../../../components/ui/SearchBar";
 import CategoryCard from "../../../components/cards/CategoryCard";
 import { getServiceTypes } from "../../../services/api";
 import { useTabRefresh } from "../../../hooks/useTabRefresh";
+import { usePullToRefresh } from "../../../hooks/usePullToRefresh";
 
 type ServiceCategory = {
   id: string;
@@ -55,6 +56,7 @@ export default function CategoryIndexScreen() {
   }, [loadCategories]);
 
   useTabRefresh("client:category", loadCategories);
+  const refreshControl = usePullToRefresh(loadCategories);
 
   return (
     <SafeAreaView className="flex-1 bg-white">
@@ -80,6 +82,7 @@ export default function CategoryIndexScreen() {
       ) : (
         <FlatList
           data={serviceCategories}
+          refreshControl={refreshControl}
           numColumns={2}
           keyExtractor={(item) => item.id}
           contentContainerStyle={{ padding: 16, paddingBottom: 24 }}

@@ -3,6 +3,7 @@ import AlertModal, {
   AlertModalButton,
   AlertModalVariant,
 } from "../components/modals/AlertModal";
+import { feedback } from "../utils/feedback";
 
 export type { AlertModalButton, AlertModalVariant };
 
@@ -68,25 +69,34 @@ export const AlertModalProvider: React.FC<{ children: React.ReactNode }> = ({
   );
 
   const success = useCallback(
-    (title: string, message?: string, buttons?: AlertModalButton[]) =>
-      showAlert({ variant: "success", title, message, buttons }),
+    (title: string, message?: string, buttons?: AlertModalButton[]) => {
+      feedback.success();
+      showAlert({ variant: "success", title, message, buttons });
+    },
     [showAlert],
   );
 
   const warning = useCallback(
-    (title: string, message?: string, buttons?: AlertModalButton[]) =>
-      showAlert({ variant: "warning", title, message, buttons }),
+    (title: string, message?: string, buttons?: AlertModalButton[]) => {
+      feedback.warning();
+      showAlert({ variant: "warning", title, message, buttons });
+    },
     [showAlert],
   );
 
   const error = useCallback(
-    (title: string, message?: string, buttons?: AlertModalButton[]) =>
-      showAlert({ variant: "error", title, message, buttons }),
+    (title: string, message?: string, buttons?: AlertModalButton[]) => {
+      feedback.error();
+      showAlert({ variant: "error", title, message, buttons });
+    },
     [showAlert],
   );
 
   const confirm = useCallback(
-    (title: string, message?: string, opts?: ConfirmOptions) =>
+    (title: string, message?: string, opts?: ConfirmOptions) => {
+      // Destructive questions (cancel, decline, delete) get a warning buzz;
+      // ordinary confirmations stay silent.
+      if (opts?.destructive) feedback.warning();
       showAlert({
         variant: opts?.destructive ? "error" : "warning",
         title,
@@ -103,7 +113,8 @@ export const AlertModalProvider: React.FC<{ children: React.ReactNode }> = ({
             onPress: opts?.onConfirm,
           },
         ],
-      }),
+      });
+    },
     [showAlert],
   );
 

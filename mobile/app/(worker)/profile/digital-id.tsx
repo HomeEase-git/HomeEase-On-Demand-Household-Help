@@ -344,7 +344,7 @@ export default function DigitalIdScreen() {
             </View>
 
             <Text
-              className="mt-5 text-[10px] leading-4"
+              className="mt-5 text-xs leading-4"
               style={{ color: colors.neutral[400], letterSpacing: 0.3 }}
             >
               HOMEEASE PLATFORM ID · NOT A GOVERNMENT ID · UNMARKED FIELDS ARE
