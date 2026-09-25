@@ -197,7 +197,7 @@ export const WORKER_AGREEMENT: LegalDocument = {
       heading: "3. Verification",
       bullets: [
         "You must be at least 18 years old.",
-        "You submit a government ID, a selfie, a clearance (NBI, police or barangay) and any certifications. An automated service checks the documents first to help the reviewer; a HomeEase admin makes the decision.",
+        "You must submit a government ID (front and back), a selfie, an NBI clearance and your resume. A barangay or police clearance, cedula and certifications are optional. An automated service checks your ID, selfie and clearances first to help the reviewer (it doesn't see your resume); a HomeEase admin makes the decision.",
         "Clearances expire (an NBI clearance after 1 year). When one expires you'll be asked to upload a new one.",
         verifiedMeaning,
       ],

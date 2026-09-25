@@ -6,7 +6,6 @@ import * as DocumentPicker from "expo-document-picker";
 import ScreenHeader from "../../components/ui/ScreenHeader";
 import StepperHorizontal from "../../components/steppers/StepperHorizontal";
 import PrimaryButton from "../../components/ui/PrimaryButton";
-import OutlinedButton from "../../components/ui/OutlinedButton";
 import UploadCard from "../../components/ui/UploadCard";
 import { useAuthStore } from "../../store/authStore";
 import { submitKycDocument, uploadKycFile } from "../../services/api";
@@ -102,7 +101,7 @@ export default function ResumeScreen() {
           currentStep={3}
         />
         <Text className="text-text-secondary text-sm mb-4">
-          Your resume is recommended and must be a PDF.
+          A resume is required and must be a PDF.
         </Text>
 
         <View className="bg-card rounded-xl p-4 mb-6">
@@ -110,7 +109,8 @@ export default function ResumeScreen() {
             Why we ask
           </Text>
           <Text className="text-text-secondary text-sm">
-            It helps clients see your experience and helps us verify you.
+            HomeEase reviews it as part of your application, and the skills
+            and experience in it are shown to clients on your profile.
           </Text>
         </View>
 
@@ -131,10 +131,6 @@ export default function ResumeScreen() {
             label="Continue"
             fullWidth
             disabled={!resumeFile.uri || uploading || submitting}
-            onPress={() => router.push("/(kyc)/contract")}
-          />
-          <OutlinedButton
-            label="Skip for Now"
             onPress={() => router.push("/(kyc)/contract")}
           />
         </View>
