@@ -258,7 +258,7 @@ export default function SignUpScreen() {
             I agree to the{" "}
             <Text
               className="text-accent underline"
-              onPress={() => router.push("/(auth)/terms-conditions")}
+              onPress={() => router.push({ pathname: "/(auth)/terms-conditions", params: { role } })}
             >
               Terms and Conditions
             </Text>

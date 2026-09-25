@@ -1,4 +1,5 @@
 import React, { useEffect, useRef } from "react";
+import { COMPANY } from "../../constants/legalDocuments";
 import { View, Text, BackHandler, Linking } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
@@ -76,7 +77,7 @@ export default function KycPendingScreen() {
         Taking longer than expected?{" "}
         <Text
           className="text-accent underline"
-          onPress={() => Linking.openURL("mailto:support@homeease.com")}
+          onPress={() => Linking.openURL(`mailto:${COMPANY.supportEmail}`)}
         >
           Contact Support
         </Text>
