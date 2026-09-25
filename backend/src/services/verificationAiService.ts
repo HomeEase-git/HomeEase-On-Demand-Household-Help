@@ -21,7 +21,14 @@ const REVIEW_BASE64_BUDGET = 14 * 1024 * 1024;
 // with many large files can't spike the worker's memory.
 const REVIEW_FETCH_CONCURRENCY = 4;
 
+// Data minimization (Data Privacy Act §11): only documents that actually bear
+// on identity/background verification go to the external AI reviewer. A
+// resume (parsed separately, on the worker's own request) and a VAT
+// registration (reviewed on its own admin screen) add nothing here.
+const NOT_SENT_FOR_REVIEW = new Set(['RESUME', 'VAT_REGISTRATION']);
+
 function isReviewable(doc: VerificationJobDocument): boolean {
+  if (NOT_SENT_FOR_REVIEW.has(doc.documentType)) return false;
   const mime = doc.mimeType ?? '';
   return mime.startsWith('image/') || mime === 'application/pdf';
 }
@@ -211,7 +218,7 @@ async function runClaudeReview(
     hasSelfie && hasIdFront
       ? ' The submission includes both a SELFIE and a GOVERNMENT_ID_FRONT — explicitly compare the face in the selfie against the photo on the ID and state in your summary whether they appear to be the same person, noting your certainty.'
       : '';
-  const prompt = `Review these verification documents for a ${requestType} submission. Documents included: ${reviewedTypeList}. Assess whether the documents look legitimate, extract the key facts, and provide a short admin summary (2-3 sentences), noting any concerns.${faceMatchInstruction} End your reply on its own final line with exactly "CONFIDENCE: 0.NN" — your own certainty (0.00-1.00) in your legitimacy assessment.`;
+  const prompt = `Review these verification documents for a ${requestType} submission. Documents included: ${reviewedTypeList}. Assess whether the documents look legitimate, extract the key facts, and provide a short admin summary (2-3 sentences), noting any concerns. Never repeat a full ID, TIN, clearance or account number in your reply — refer to at most its last 4 digits.${faceMatchInstruction} End your reply on its own final line with exactly "CONFIDENCE: 0.NN" — your own certainty (0.00-1.00) in your legitimacy assessment.`;
 
   const response = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',

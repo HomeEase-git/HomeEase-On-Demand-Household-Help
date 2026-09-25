@@ -1482,9 +1482,16 @@ export const getBookingDetail = async (req: AuthRequest, res: Response) => {
               // updateWorkerLiveLocation) — only meaningful for an ACCEPTED
               // booking; gives the client's tracking map a starting marker
               // before the first live socket push arrives.
-              currentLat: booking.worker.workerProfile?.currentLat ?? null,
-              currentLng: booking.worker.workerProfile?.currentLng ?? null,
-              lastLocationUpdate: booking.worker.workerProfile?.lastLocationUpdate ?? null,
+              // WorkerProfile holds ONE position for the worker, whichever
+              // job they're heading to — so only reveal it on the booking
+              // they're currently travelling to, never to a past client.
+              ...(booking.status === 'ACCEPTED' && !booking.workerArrivedAt
+                ? {
+                    currentLat: booking.worker.workerProfile?.currentLat ?? null,
+                    currentLng: booking.worker.workerProfile?.currentLng ?? null,
+                    lastLocationUpdate: booking.worker.workerProfile?.lastLocationUpdate ?? null,
+                  }
+                : { currentLat: null, currentLng: null, lastLocationUpdate: null }),
             }
           : null,
         service: booking.serviceTask?.name ?? booking.serviceType,
@@ -2017,6 +2024,11 @@ export const arriveBooking = async (req: AuthRequest, res: Response) => {
       prisma.booking.update({
         where: { id },
         data: { workerArrivedAt: arrivedAt, workerLat: lat, workerLng: lng },
+      }),
+      // Tracking ends at check-in — don't keep the live position around.
+      prisma.workerProfile.update({
+        where: { userId: req.user.userId },
+        data: { currentLat: null, currentLng: null, lastLocationUpdate: null },
       }),
     ]);
 
