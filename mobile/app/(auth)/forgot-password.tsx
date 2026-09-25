@@ -1,5 +1,6 @@
 import React, { useState } from "react";
-import { Text, ScrollView } from "react-native";
+import { Text } from "react-native";
+import { KeyboardAwareScrollView } from "../../components/ui/KeyboardAwareScrollView";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import ScreenHeader from "../../components/ui/ScreenHeader";
@@ -53,7 +54,7 @@ export default function ForgotPasswordScreen() {
   return (
     <SafeAreaView className="flex-1 bg-white">
       <ScreenHeader title="Forgot Password" showBack />
-      <ScrollView
+      <KeyboardAwareScrollView
         className="flex-1"
         contentContainerStyle={{ paddingHorizontal: 24, paddingTop: 16 }}
         keyboardShouldPersistTaps="handled"
@@ -84,7 +85,7 @@ export default function ForgotPasswordScreen() {
           onPress={handleSend}
           loading={loading}
         />
-      </ScrollView>
+      </KeyboardAwareScrollView>
     </SafeAreaView>
   );
 }

@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
-import { View, Text, ScrollView, Pressable, ActivityIndicator } from "react-native";
+import { View, Text, Pressable, ActivityIndicator } from "react-native";
+import { KeyboardAwareScrollView } from "../../../../components/ui/KeyboardAwareScrollView";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { AppIcon as Ionicons } from "../../../../components/icons/AppIcon";
 import { useRouter, useLocalSearchParams } from "expo-router";
@@ -268,7 +269,7 @@ export default function AddressEditScreen() {
   return (
     <SafeAreaView className="flex-1 bg-white">
       <ScreenHeader title={isNew ? "Add Address" : "Edit Address"} showBack />
-      <ScrollView contentContainerStyle={{ padding: 24 }} keyboardShouldPersistTaps="handled">
+      <KeyboardAwareScrollView contentContainerStyle={{ padding: 24 }} keyboardShouldPersistTaps="handled">
         <View className="items-center mb-5">
           <View className="w-16 h-16 rounded-full bg-accent/10 items-center justify-center">
             <Ionicons name="location-outline" size={30} color={colors.accent.DEFAULT} />
@@ -299,6 +300,7 @@ export default function AddressEditScreen() {
             </View>
 
             <InputField
+              returnKeyType="next"
               label="Search Address"
               value={searchQuery}
               onChangeText={handleSearchChange}
@@ -370,6 +372,7 @@ export default function AddressEditScreen() {
             </View>
 
             <InputField
+              returnKeyType="next"
               label="House / Unit / Bldg. No. (optional)"
               value={houseNumber}
               onChangeText={(text) => {
@@ -380,6 +383,7 @@ export default function AddressEditScreen() {
             />
 
             <InputField
+              returnKeyType="next"
               label="Street Name"
               value={street}
               onChangeText={(text) => {
@@ -390,6 +394,7 @@ export default function AddressEditScreen() {
             />
 
             <InputField
+              returnKeyType="next"
               label="Barangay"
               value={barangay}
               onChangeText={(text) => {
@@ -400,6 +405,7 @@ export default function AddressEditScreen() {
             />
 
             <InputField
+              returnKeyType="next"
               label="City"
               value={city}
               onChangeText={(text) => {
@@ -410,6 +416,7 @@ export default function AddressEditScreen() {
             />
 
             <InputField
+              returnKeyType="next"
               label="State/Province"
               value={state}
               onChangeText={(text) => {
@@ -420,6 +427,7 @@ export default function AddressEditScreen() {
             />
 
             <InputField
+              returnKeyType="next"
               label="ZIP Code"
               value={zipCode}
               onChangeText={(text) => {
@@ -449,7 +457,7 @@ export default function AddressEditScreen() {
           />
           <OutlinedButton label="Cancel" onPress={() => router.back()} />
         </View>
-      </ScrollView>
+      </KeyboardAwareScrollView>
     </SafeAreaView>
   );
 }

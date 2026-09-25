@@ -1,13 +1,6 @@
 import React, { useState, useRef } from "react";
-import {
-  View,
-  Text,
-  ScrollView,
-  Pressable,
-  TextInput,
-  Image,
-  Keyboard,
-} from "react-native";
+import { View, Text, Pressable, TextInput, Image, Keyboard } from "react-native";
+import { KeyboardAwareScrollView } from "../../components/ui/KeyboardAwareScrollView";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { InputField } from "../../components/ui/InputField";
@@ -157,7 +150,7 @@ export default function SignInScreen() {
   if (challengeToken) {
     return (
       <SafeAreaView className="flex-1 bg-white">
-        <ScrollView
+        <KeyboardAwareScrollView
           className="flex-1"
           contentContainerStyle={{ paddingHorizontal: 24, paddingBottom: 40 }}
           keyboardShouldPersistTaps="handled"
@@ -201,14 +194,14 @@ export default function SignInScreen() {
           <View className="mt-3">
             <OutlinedButton label="Back to login" onPress={backToLogin} disabled={verifyingMfa} />
           </View>
-        </ScrollView>
+        </KeyboardAwareScrollView>
       </SafeAreaView>
     );
   }
 
   return (
     <SafeAreaView className="flex-1 bg-white">
-      <ScrollView
+      <KeyboardAwareScrollView
         className="flex-1"
         contentContainerStyle={{ paddingHorizontal: 24, paddingBottom: 40 }}
         keyboardShouldPersistTaps="handled"
@@ -278,7 +271,7 @@ export default function SignInScreen() {
           onPress={() => router.push("/role-selection")}
           disabled={loading}
         />
-      </ScrollView>
+      </KeyboardAwareScrollView>
     </SafeAreaView>
   );
 }

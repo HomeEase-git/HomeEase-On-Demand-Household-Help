@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
-import { View, Text, ScrollView, Pressable } from "react-native";
+import { View, Text, Pressable } from "react-native";
+import { KeyboardAwareScrollView } from "../../components/ui/KeyboardAwareScrollView";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter, useLocalSearchParams } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
@@ -139,7 +140,7 @@ export default function ResetPasswordScreen() {
   return (
     <SafeAreaView className="flex-1 bg-white">
       <ScreenHeader title="Reset Password" showBack />
-      <ScrollView
+      <KeyboardAwareScrollView
         className="flex-1"
         contentContainerStyle={{ paddingHorizontal: 24, paddingTop: 16 }}
         keyboardShouldPersistTaps="handled"
@@ -169,6 +170,7 @@ export default function ResetPasswordScreen() {
         </View>
 
         <InputField
+          returnKeyType="next"
           label="New Password"
           value={newPassword}
           onChangeText={handleNewPasswordChange}
@@ -242,7 +244,7 @@ export default function ResetPasswordScreen() {
           loading={loading}
           disabled={!isValidPassword || loading}
         />
-      </ScrollView>
+      </KeyboardAwareScrollView>
     </SafeAreaView>
   );
 }

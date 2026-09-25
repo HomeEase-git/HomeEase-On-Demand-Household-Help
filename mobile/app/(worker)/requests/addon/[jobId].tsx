@@ -1,5 +1,6 @@
 import React, { useState } from "react";
-import { View, Text, ScrollView } from "react-native";
+import { View, Text } from "react-native";
+import { KeyboardAwareScrollView } from "../../../../components/ui/KeyboardAwareScrollView";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter, useLocalSearchParams } from "expo-router";
@@ -46,7 +47,7 @@ export default function AddBookingAddOnScreen() {
   return (
     <SafeAreaView className="flex-1 bg-white">
       <ScreenHeader title="Add Item" showBack />
-      <ScrollView contentContainerStyle={{ padding: 24, paddingBottom: 40 }}>
+      <KeyboardAwareScrollView contentContainerStyle={{ padding: 24, paddingBottom: 40 }}>
         <View className="bg-accent/10 border border-accent/30 rounded-xl p-4 flex-row items-start mb-6">
           <Ionicons
             name="information-circle-outline"
@@ -60,6 +61,7 @@ export default function AddBookingAddOnScreen() {
         </View>
 
         <InputField
+          returnKeyType="next"
           label="Item name"
           value={name}
           onChangeText={setName}
@@ -93,7 +95,7 @@ export default function AddBookingAddOnScreen() {
           />
           <OutlinedButton label="Cancel" onPress={() => router.back()} />
         </View>
-      </ScrollView>
+      </KeyboardAwareScrollView>
     </SafeAreaView>
   );
 }

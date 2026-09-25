@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from "react";
-import { View, Text, Pressable, ScrollView } from "react-native";
+import { View, Text, Pressable } from "react-native";
+import { KeyboardAwareScrollView } from "../../components/ui/KeyboardAwareScrollView";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter, useLocalSearchParams } from "expo-router";
 import { AppIcon as Ionicons } from "../../components/icons/AppIcon";
@@ -97,7 +98,7 @@ export default function OtpVerificationScreen() {
 
   return (
     <SafeAreaView className="flex-1 bg-white">
-      <ScrollView
+      <KeyboardAwareScrollView
         className="flex-1"
         contentContainerStyle={{ paddingHorizontal: 24, paddingTop: 16 }}
         keyboardShouldPersistTaps="handled"
@@ -156,7 +157,7 @@ export default function OtpVerificationScreen() {
             </Text>
           </View>
         </View>
-      </ScrollView>
+      </KeyboardAwareScrollView>
     </SafeAreaView>
   );
 }

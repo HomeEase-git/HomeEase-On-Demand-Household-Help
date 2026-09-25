@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
-import { View, Text, ScrollView, Pressable, ActivityIndicator, Image } from "react-native";
+import { View, Text, Pressable, ActivityIndicator, Image } from "react-native";
+import { KeyboardAwareScrollView } from "../../../../components/ui/KeyboardAwareScrollView";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { AppIcon as Ionicons } from "../../../../components/icons/AppIcon";
 import { useRouter, useLocalSearchParams } from "expo-router";
@@ -192,7 +193,7 @@ export default function QuoteReviewScreen() {
   return (
     <SafeAreaView className="flex-1 bg-white">
       <ScreenHeader title="Review Quote" showBack />
-      <ScrollView contentContainerStyle={{ padding: 24, paddingBottom: 40 }}>
+      <KeyboardAwareScrollView contentContainerStyle={{ padding: 24, paddingBottom: 40 }}>
         {/* Booking summary */}
         <View className="bg-card rounded-2xl p-4 mb-4">
           <Text className="text-text-secondary text-xs mb-1">Booking</Text>
@@ -396,7 +397,7 @@ export default function QuoteReviewScreen() {
         {isAlreadyActedOn && (
           <OutlinedButton label="Go Back" onPress={() => router.back()} />
         )}
-      </ScrollView>
+      </KeyboardAwareScrollView>
       <ImageSourcePickerBottomSheet innerRef={photoSheetRef} onSelect={handlePickEvidencePhoto} />
     </SafeAreaView>
   );

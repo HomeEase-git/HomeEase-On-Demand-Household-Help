@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect } from "react";
 import { View, Text, FlatList, TextInput, Pressable, Linking } from "react-native";
+import { KeyboardAvoidingView } from "react-native-keyboard-controller";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter, useLocalSearchParams } from "expo-router";
@@ -28,6 +29,10 @@ export default function ChatScreen() {
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
   const imageSheetRef = useRef<BottomSheetHandle | null>(null);
+  const listRef = useRef<FlatList>(null);
+  // Keep the newest message in view: on first load, when a message arrives,
+  // and when the keyboard opening makes the list shorter.
+  const scrollToLatest = () => listRef.current?.scrollToEnd({ animated: false });
   const currentUserId = useAuthStore((s) => s.user?.id);
 
   const messages = useMessageStore((s) =>
@@ -138,63 +143,68 @@ export default function ChatScreen() {
         </Pressable>
       </View>
 
-      <FlatList
-        data={messages}
-        keyExtractor={(item) => item.id}
-        contentContainerStyle={{ padding: 16, paddingBottom: 8 }}
-        renderItem={({ item }) =>
-          item.senderId === currentUserId ? (
-            <ChatBubbleSent
-              message={item.content}
-              imageUrl={item.imageUrl}
-              timestamp={formatTime(item.createdAt)}
-              onImagePress={(url) =>
-                router.push({
-                  pathname: "/(client)/inbox/image-viewer",
-                  params: { imageUrl: url },
-                })
-              }
-            />
-          ) : (
-            <ChatBubbleReceived
-              message={item.content}
-              imageUrl={item.imageUrl}
-              timestamp={formatTime(item.createdAt)}
-              onImagePress={(url) =>
-                router.push({
-                  pathname: "/(client)/inbox/image-viewer",
-                  params: { imageUrl: url },
-                })
-              }
-            />
-          )
-        }
-      />
-
-      <View className="flex-row items-center p-3 border-t border-divider">
-        <Pressable
-          className="p-2 mr-2"
-          onPress={() => imageSheetRef.current?.expand()}
-        >
-          <Ionicons name="attach-outline" size={24} color={colors.text.muted} />
-        </Pressable>
-        <TextInput
-          className="flex-1 bg-card rounded-full px-4 py-2 text-text-primary max-h-24"
-          style={{ includeFontPadding: false }}
-          placeholder="Message..."
-          placeholderTextColor={colors.text.muted}
-          value={input}
-          onChangeText={setInput}
-          multiline
+      <KeyboardAvoidingView behavior="padding" style={{ flex: 1 }}>
+        <FlatList
+          ref={listRef}
+          data={messages}
+          onContentSizeChange={scrollToLatest}
+          onLayout={scrollToLatest}
+          keyExtractor={(item) => item.id}
+          contentContainerStyle={{ padding: 16, paddingBottom: 8 }}
+          renderItem={({ item }) =>
+            item.senderId === currentUserId ? (
+              <ChatBubbleSent
+                message={item.content}
+                imageUrl={item.imageUrl}
+                timestamp={formatTime(item.createdAt)}
+                onImagePress={(url) =>
+                  router.push({
+                    pathname: "/(client)/inbox/image-viewer",
+                    params: { imageUrl: url },
+                  })
+                }
+              />
+            ) : (
+              <ChatBubbleReceived
+                message={item.content}
+                imageUrl={item.imageUrl}
+                timestamp={formatTime(item.createdAt)}
+                onImagePress={(url) =>
+                  router.push({
+                    pathname: "/(client)/inbox/image-viewer",
+                    params: { imageUrl: url },
+                  })
+                }
+              />
+            )
+          }
         />
-        <Pressable
-          className={`bg-accent rounded-full p-2 ml-2 ${sending ? "opacity-50" : ""}`}
-          onPress={send}
-          disabled={sending}
-        >
-          <Ionicons name="send" size={20} color={colors.white} />
-        </Pressable>
-      </View>
+
+        <View className="flex-row items-center p-3 border-t border-divider">
+          <Pressable
+            className="p-2 mr-2"
+            onPress={() => imageSheetRef.current?.expand()}
+          >
+            <Ionicons name="attach-outline" size={24} color={colors.text.muted} />
+          </Pressable>
+          <TextInput
+            className="flex-1 bg-card rounded-full px-4 py-2 text-text-primary max-h-24"
+            style={{ includeFontPadding: false }}
+            placeholder="Message..."
+            placeholderTextColor={colors.text.muted}
+            value={input}
+            onChangeText={setInput}
+            multiline
+          />
+          <Pressable
+            className={`bg-accent rounded-full p-2 ml-2 ${sending ? "opacity-50" : ""}`}
+            onPress={send}
+            disabled={sending}
+          >
+            <Ionicons name="send" size={20} color={colors.white} />
+          </Pressable>
+        </View>
+      </KeyboardAvoidingView>
       <ImageSourcePickerBottomSheet
         innerRef={imageSheetRef}
         onSelect={sendImage}

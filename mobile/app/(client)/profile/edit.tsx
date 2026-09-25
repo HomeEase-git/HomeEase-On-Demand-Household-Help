@@ -1,5 +1,6 @@
 import React, { useState, useRef } from "react";
-import { View, ScrollView, TextInput } from "react-native";
+import { View, TextInput } from "react-native";
+import { KeyboardAwareScrollView } from "../../../components/ui/KeyboardAwareScrollView";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
@@ -68,7 +69,7 @@ export default function EditProfileScreen() {
   return (
     <SafeAreaView className="flex-1 bg-white">
       <ScreenHeader title="Edit Profile" showBack />
-      <ScrollView contentContainerStyle={{ padding: 24 }}>
+      <KeyboardAwareScrollView contentContainerStyle={{ padding: 24 }}>
         <View className="items-center mb-5">
           <View className="w-16 h-16 rounded-full bg-accent/10 items-center justify-center">
             <Ionicons name="person-outline" size={30} color={colors.accent.DEFAULT} />
@@ -108,7 +109,7 @@ export default function EditProfileScreen() {
           onPress={handleSave}
           loading={loading}
         />
-      </ScrollView>
+      </KeyboardAwareScrollView>
     </SafeAreaView>
   );
 }

@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
-import { View, Text, ScrollView, Image, ActivityIndicator } from "react-native";
+import { View, Text, Image, ActivityIndicator } from "react-native";
+import { KeyboardAwareScrollView } from "../../../components/ui/KeyboardAwareScrollView";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
@@ -132,7 +133,7 @@ export default function TwoFactorAuthScreen() {
     return (
       <SafeAreaView className="flex-1 bg-white">
         <ScreenHeader title="Save Your Backup Codes" showBack={false} />
-        <ScrollView contentContainerStyle={{ padding: 24 }}>
+        <KeyboardAwareScrollView contentContainerStyle={{ padding: 24 }}>
           <Text className="text-error text-sm mb-4">
             Save these backup codes now. Each works once if you lose your authenticator app, and
             they won&apos;t be shown again.
@@ -153,7 +154,7 @@ export default function TwoFactorAuthScreen() {
             fullWidth
             onPress={() => router.back()}
           />
-        </ScrollView>
+        </KeyboardAwareScrollView>
       </SafeAreaView>
     );
   }
@@ -162,7 +163,7 @@ export default function TwoFactorAuthScreen() {
     return (
       <SafeAreaView className="flex-1 bg-white">
         <ScreenHeader title="Two-Factor Authentication" showBack />
-        <ScrollView contentContainerStyle={{ padding: 24 }}>
+        <KeyboardAwareScrollView contentContainerStyle={{ padding: 24 }}>
           <View className="items-center mb-5">
             <View className="w-16 h-16 rounded-full bg-accent/10 items-center justify-center">
               <Ionicons name="shield-checkmark-outline" size={30} color={colors.accent.DEFAULT} />
@@ -216,7 +217,7 @@ export default function TwoFactorAuthScreen() {
               />
             </>
           )}
-        </ScrollView>
+        </KeyboardAwareScrollView>
       </SafeAreaView>
     );
   }
@@ -224,7 +225,7 @@ export default function TwoFactorAuthScreen() {
   return (
     <SafeAreaView className="flex-1 bg-white">
       <ScreenHeader title="Two-Factor Authentication" showBack />
-      <ScrollView contentContainerStyle={{ padding: 24 }}>
+      <KeyboardAwareScrollView contentContainerStyle={{ padding: 24 }}>
         <View className="items-center mb-5">
           <View className="w-16 h-16 rounded-full bg-success/10 items-center justify-center">
             <Ionicons name="shield-checkmark" size={30} color={colors.success} />
@@ -261,7 +262,7 @@ export default function TwoFactorAuthScreen() {
             onPress={handleDisable}
           />
         </View>
-      </ScrollView>
+      </KeyboardAwareScrollView>
     </SafeAreaView>
   );
 }

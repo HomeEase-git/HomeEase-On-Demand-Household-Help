@@ -1,5 +1,6 @@
 import React, { useState } from "react";
-import { View, ScrollView } from "react-native";
+import { View } from "react-native";
+import { KeyboardAwareScrollView } from "../../../components/ui/KeyboardAwareScrollView";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { isAxiosError } from "axios";
@@ -58,13 +59,14 @@ export default function ChangePasswordScreen() {
   return (
     <SafeAreaView className="flex-1 bg-white">
       <ScreenHeader title="Change Password" showBack />
-      <ScrollView contentContainerStyle={{ padding: 24 }}>
+      <KeyboardAwareScrollView contentContainerStyle={{ padding: 24 }}>
         <View className="items-center mb-5">
           <View className="w-16 h-16 rounded-full bg-accent/10 items-center justify-center">
             <Ionicons name="lock-closed-outline" size={30} color={colors.accent.DEFAULT} />
           </View>
         </View>
         <InputField
+          returnKeyType="next"
           label="Current Password"
           value={current}
           onChangeText={(text) => {
@@ -75,6 +77,7 @@ export default function ChangePasswordScreen() {
           error={currentError}
         />
         <InputField
+          returnKeyType="next"
           label="New Password"
           value={newPass}
           onChangeText={(text) => {
@@ -101,7 +104,7 @@ export default function ChangePasswordScreen() {
           loading={saving}
           disabled={saving}
         />
-      </ScrollView>
+      </KeyboardAwareScrollView>
     </SafeAreaView>
   );
 }

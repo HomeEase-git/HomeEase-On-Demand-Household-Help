@@ -1,11 +1,6 @@
 import React, { useState, useRef } from "react";
-import {
-  TextInput,
-  ScrollView,
-  View,
-  Text,
-  Pressable,
-} from "react-native";
+import { TextInput, View, Text, Pressable } from "react-native";
+import { KeyboardAwareScrollView } from "../../../../components/ui/KeyboardAwareScrollView";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import ScreenHeader from "../../../../components/ui/ScreenHeader";
@@ -60,7 +55,7 @@ export default function AddPaymentMethodScreen() {
   return (
     <SafeAreaView className="flex-1 bg-white">
       <ScreenHeader title="Add Payment Method" showBack />
-      <ScrollView contentContainerStyle={{ padding: 24 }}>
+      <KeyboardAwareScrollView contentContainerStyle={{ padding: 24 }}>
         <View className="bg-card rounded-2xl p-4 mb-4" style={cardShadow}>
           <Text className="text-text-primary text-sm mb-2 font-semibold">
             Payment Type
@@ -115,7 +110,7 @@ export default function AddPaymentMethodScreen() {
           loading={loading}
           disabled={loading}
         />
-      </ScrollView>
+      </KeyboardAwareScrollView>
     </SafeAreaView>
   );
 }

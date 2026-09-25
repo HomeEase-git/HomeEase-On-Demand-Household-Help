@@ -1,5 +1,6 @@
 import React, { useState } from "react";
-import { View, Text, ScrollView } from "react-native";
+import { View, Text } from "react-native";
+import { KeyboardAwareScrollView } from "../../../components/ui/KeyboardAwareScrollView";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { AppIcon as Ionicons } from "../../../components/icons/AppIcon";
 import { useRouter } from "expo-router";
@@ -47,7 +48,7 @@ export default function WorkerDeleteAccountScreen() {
   return (
     <SafeAreaView className="flex-1 bg-white">
       <ScreenHeader title="Delete Account" showBack />
-      <ScrollView contentContainerStyle={{ padding: 24 }}>
+      <KeyboardAwareScrollView contentContainerStyle={{ padding: 24 }}>
         <View className="items-center mb-6">
           <View className="w-20 h-20 bg-error/10 rounded-full items-center justify-center">
             <Ionicons name="warning" size={40} color={colors.error} />
@@ -66,6 +67,7 @@ export default function WorkerDeleteAccountScreen() {
           Type DELETE to confirm
         </Text>
         <InputField
+          returnKeyType="next"
           value={confirmText}
           onChangeText={setConfirmText}
           placeholder="DELETE"
@@ -87,7 +89,7 @@ export default function WorkerDeleteAccountScreen() {
           />
           <OutlinedButton label="Cancel" onPress={() => router.back()} />
         </View>
-      </ScrollView>
+      </KeyboardAwareScrollView>
     </SafeAreaView>
   );
 }

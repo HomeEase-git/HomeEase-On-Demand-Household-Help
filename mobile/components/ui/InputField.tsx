@@ -1,5 +1,6 @@
 import React, { useState, forwardRef } from "react";
 import { Text, TextInput, Pressable, TextInputProps, View } from "react-native";
+import { KeyboardController } from "react-native-keyboard-controller";
 import { AppIcon as Ionicons } from "../icons/AppIcon";
 import { colors } from "../../constants";
 import FieldError from "./FieldError";
@@ -80,7 +81,13 @@ export const InputField = forwardRef<TextInput, Props>(
             keyboardType={keyboardType}
             autoCapitalize={autoCapitalize}
             returnKeyType={returnKeyType}
-            onSubmitEditing={onSubmitEditing}
+            // "Next" jumps to the following field on screen by default, and
+            // keeps the keyboard up while it does so it doesn't flicker.
+            onSubmitEditing={
+              onSubmitEditing ??
+              (returnKeyType === "next" ? () => KeyboardController.setFocusTo("next") : undefined)
+            }
+            submitBehavior={returnKeyType === "next" ? "submit" : undefined}
             // Android's Autofill framework can hold a reference to this
             // EditText and touch it (e.g. for a "Save password?" prompt)
             // at the same moment Fabric tears the view down on navigation,

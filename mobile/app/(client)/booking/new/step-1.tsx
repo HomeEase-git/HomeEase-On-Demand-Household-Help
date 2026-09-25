@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { View, Text, ScrollView, ActivityIndicator, Image, Pressable } from "react-native";
+import { View, Text, ActivityIndicator, Image, Pressable } from "react-native";
+import { KeyboardAwareScrollView } from "../../../../components/ui/KeyboardAwareScrollView";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import ScreenHeader from "../../../../components/ui/ScreenHeader";
@@ -266,7 +267,7 @@ export default function BookingStep1Screen() {
   return (
     <SafeAreaView className="flex-1 bg-white">
       <ScreenHeader title="What do you need?" showBack />
-      <ScrollView className="flex-1" contentContainerStyle={{ padding: 24, paddingBottom: 40 }}>
+      <KeyboardAwareScrollView className="flex-1" contentContainerStyle={{ padding: 24, paddingBottom: 40 }}>
         <StepperHorizontal steps={BOOKING_STEPS} currentStep={0} />
         <InvalidationBanner />
 
@@ -375,7 +376,7 @@ export default function BookingStep1Screen() {
         <View className="mt-8">
           <PrimaryButton label="Next" fullWidth disabled={loadingCategories} onPress={handleNext} />
         </View>
-      </ScrollView>
+      </KeyboardAwareScrollView>
       <ImageSourcePickerBottomSheet innerRef={photoSheetRef} onSelect={handlePickIssuePhoto} />
     </SafeAreaView>
   );

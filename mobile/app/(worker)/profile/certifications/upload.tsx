@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
-import { View, ScrollView, Text, Pressable } from "react-native";
+import { View, Text, Pressable } from "react-native";
+import { KeyboardAwareScrollView } from "../../../../components/ui/KeyboardAwareScrollView";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter, useLocalSearchParams } from "expo-router";
 import ScreenHeader from "../../../../components/ui/ScreenHeader";
@@ -169,8 +170,9 @@ export default function UploadCertificationScreen() {
         title={isEditMode ? "Edit Certification" : isCategoryGateMode ? "Verify New Category" : "Upload Certification"}
         showBack
       />
-      <ScrollView contentContainerStyle={{ padding: 24 }}>
+      <KeyboardAwareScrollView contentContainerStyle={{ padding: 24 }}>
         <InputField
+          returnKeyType="next"
           label="Certificate Name"
           value={name}
           onChangeText={setName}
@@ -178,6 +180,7 @@ export default function UploadCertificationScreen() {
           editable={!loading}
         />
         <InputField
+          returnKeyType="next"
           label="Issuing Organization"
           value={issuer}
           onChangeText={setIssuer}
@@ -185,6 +188,7 @@ export default function UploadCertificationScreen() {
           editable={!loading}
         />
         <InputField
+          returnKeyType="next"
           label="Issue Date"
           value={issueDate}
           onChangeText={(text) => setIssueDate(maskDateInput(text))}
@@ -262,7 +266,7 @@ export default function UploadCertificationScreen() {
             loading={saving}
           />
         </View>
-      </ScrollView>
+      </KeyboardAwareScrollView>
       <ImageSourcePickerBottomSheet
         innerRef={sheetRef}
         onSelect={handleSelect}

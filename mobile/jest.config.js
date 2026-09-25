@@ -27,6 +27,6 @@ module.exports = {
   testMatch: ["**/__tests__/**/*.[jt]s?(x)", "**/?(*.)+(spec|test).[jt]s?(x)"],
   moduleFileExtensions: ["ts", "tsx", "js", "jsx", "json", "node"],
   transformIgnorePatterns: [
-    "node_modules/(?!(expo|expo-router|react-native|@react-navigation|@react-native|nativewind|clsx|tailwind-merge)/)",
+    "node_modules/(?!(expo|expo-router|react-native|react-native-keyboard-controller|@react-navigation|@react-native|nativewind|clsx|tailwind-merge)/)",
   ],
 };

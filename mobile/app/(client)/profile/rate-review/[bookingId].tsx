@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
-import { View, Text, ScrollView, ActivityIndicator, Image, Pressable } from "react-native";
+import { View, Text, ActivityIndicator, Image, Pressable } from "react-native";
+import { KeyboardAwareScrollView } from "../../../../components/ui/KeyboardAwareScrollView";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter, useLocalSearchParams } from "expo-router";
 import ScreenHeader from "../../../../components/ui/ScreenHeader";
@@ -162,7 +163,7 @@ export default function RateBookingScreen() {
   return (
     <SafeAreaView className="flex-1 bg-white">
       <ScreenHeader title="Rate & Review" showBack />
-      <ScrollView contentContainerStyle={{ padding: 24 }}>
+      <KeyboardAwareScrollView contentContainerStyle={{ padding: 24 }}>
         <View className="bg-card rounded-2xl p-4 mb-4 flex-row items-center" style={cardShadow}>
           <View className="w-12 h-12 bg-card-light rounded-full items-center justify-center mr-3">
             <Text className="text-text-primary text-lg">👤</Text>
@@ -240,7 +241,7 @@ export default function RateBookingScreen() {
           />
           <OutlinedButton label="Book Again" onPress={handleBookAgain} />
         </View>
-      </ScrollView>
+      </KeyboardAwareScrollView>
       <ImageSourcePickerBottomSheet innerRef={photoSheetRef} onSelect={handlePickPhoto} />
       <GenericSuccessModal
         visible={successVisible}

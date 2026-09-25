@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { View, Text, FlatList } from "react-native";
+import { KeyboardAwareScrollView } from "../../../components/ui/KeyboardAwareScrollView";
 import { SafeAreaView } from "react-native-safe-area-context";
 import ScreenHeader from "../../../components/ui/ScreenHeader";
 import ReviewCard from "../../../components/cards/ReviewCard";
@@ -115,6 +116,8 @@ export default function WorkerReviewsScreen() {
           </View>
         }
         renderItem={({ item }) => <ReviewCard review={item} onRespond={handleRespond} />}
+        // Keeps a review's reply box above the keyboard while typing.
+        renderScrollComponent={(props) => <KeyboardAwareScrollView {...props} />}
       />
     </SafeAreaView>
   );
