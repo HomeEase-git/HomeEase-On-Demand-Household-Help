@@ -36,7 +36,7 @@ import promoBannerRoutes from '@routes/promoBanners';
 import internalCronRoutes from '@routes/internalCron';
 import internalDiagRoutes from '@routes/internalDiag';
 import { errorHandler } from '@middleware/errorHandler';
-import { signStorageUrlsInResponse } from '@middleware/signStorageUrls';
+import { protectResponseData } from '@middleware/protectResponseData';
 
 const app = express();
 const jsonBodyLimit = process.env.JSON_BODY_LIMIT || '1mb';
@@ -131,9 +131,9 @@ app.use('/internal/diag', internalDiagRoutes);
 // second, stricter limiter inside routes/auth.ts).
 app.use('/api', apiLimiter);
 
-// KYC documents, resumes and chat images live in private buckets — swap their
-// stored object URLs for short-lived signed URLs in every API response.
-app.use('/api', signStorageUrlsInResponse);
+// Sign private-bucket file URLs (KYC, resumes, chat images) and mask
+// encrypted payout/TIN values in every API response.
+app.use('/api', protectResponseData);
 
 // Routes
 app.use('/api/auth', authRoutes);

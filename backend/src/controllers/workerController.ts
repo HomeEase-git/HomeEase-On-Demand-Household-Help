@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import prisma from '@config/database';
 import { errorResponse } from '@utils/errorResponse';
 import { toOwnedStoredUrl } from '@utils/storageUrls';
+import { decryptField, decryptOptionalField, encryptField, encryptOptionalField, hashTin, maskLastFour } from '@utils/fieldEncryption';
 import { toDayStart, materializeTemplateForWorker, setUnavailableRange } from '@services/workerAvailabilityService';
 import { getAppSettings } from '@services/appSettingsService';
 import { parseWorkerResume } from '@services/resumeParseService';
@@ -2802,7 +2803,8 @@ export const getPayoutMethod = async (req: AuthRequest, res: Response) => {
     return res.status(200).json({
       success: true,
       message: 'Payout method retrieved successfully',
-      data: worker,
+      // The worker's own number, shown in full so they can check it.
+      data: { ...worker, payoutAccountNumber: decryptOptionalField(worker.payoutAccountNumber) ?? null },
     });
   } catch (error) {
     console.error('Error fetching payout method:', error);
@@ -2854,7 +2856,7 @@ export const updatePayoutMethod = async (req: AuthRequest, res: Response) => {
       data: {
         payoutMethod,
         payoutAccountName: payoutAccountName ?? undefined,
-        payoutAccountNumber: payoutAccountNumber ?? undefined,
+        payoutAccountNumber: encryptOptionalField(payoutAccountNumber) ?? undefined,
       },
       select: {
         payoutMethod: true,
@@ -2867,7 +2869,7 @@ export const updatePayoutMethod = async (req: AuthRequest, res: Response) => {
       userId: user.id,
       type: 'PAYOUT_METHOD_CHANGED',
       title: 'Payout details changed',
-      message: `Your payout method was updated to ${updated.payoutMethod} (${updated.payoutAccountNumber ?? 'no account number on file'}). If this wasn't you, contact support immediately.`,
+      message: `Your payout method was updated to ${updated.payoutMethod} (${updated.payoutAccountNumber ? maskLastFour(decryptField(updated.payoutAccountNumber)) : 'no account number on file'}). If this wasn't you, contact support immediately.`,
     });
 
     if (updated.payoutAccountName && nameSimilarity(updated.payoutAccountName, user.fullName) < PAYOUT_NAME_MISMATCH_THRESHOLD) {
@@ -2897,7 +2899,7 @@ export const updatePayoutMethod = async (req: AuthRequest, res: Response) => {
     return res.status(200).json({
       success: true,
       message: 'Payout method updated successfully',
-      data: updated,
+      data: { ...updated, payoutAccountNumber: decryptOptionalField(updated.payoutAccountNumber) ?? null },
     });
   } catch (error) {
     console.error('Error updating payout method:', error);
@@ -2931,7 +2933,7 @@ export const getTaxInfo = async (req: AuthRequest, res: Response) => {
       message: 'Tax info retrieved successfully',
       data: {
         tinOnFile: !!worker.tin,
-        maskedTin: worker.tin ? maskTin(worker.tin) : null,
+        maskedTin: worker.tin ? maskTin(decryptField(worker.tin)) : null,
         tinVerifiedAt: worker.tinVerifiedAt,
       },
     });
@@ -2959,14 +2961,14 @@ export const updateTaxInfo = async (req: AuthRequest, res: Response) => {
 
     const updated = await prisma.workerProfile.update({
       where: { userId: req.user.userId },
-      data: { tin: normalized, tinVerifiedAt: null },
+      data: { tin: encryptField(normalized), tinHash: hashTin(normalized), tinVerifiedAt: null },
       select: { tin: true, tinVerifiedAt: true },
     });
 
     return res.status(200).json({
       success: true,
       message: 'Tax info updated successfully',
-      data: { tinOnFile: true, maskedTin: maskTin(updated.tin!), tinVerifiedAt: updated.tinVerifiedAt },
+      data: { tinOnFile: true, maskedTin: maskTin(normalized), tinVerifiedAt: updated.tinVerifiedAt },
     });
   } catch (error: any) {
     if (error?.code === 'P2002') {

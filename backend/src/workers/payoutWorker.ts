@@ -1,5 +1,6 @@
 import { Worker, type Job } from 'bullmq';
 import prisma from '@config/database';
+import { decryptField } from '@utils/fieldEncryption';
 import { workerConnection as connection } from '@config/redis';
 import { notifyUser } from '@utils/notify';
 import { sendSmsToUser } from '@utils/smsService';
@@ -46,7 +47,7 @@ export async function processSendPayout(job: Job, data: SendPayoutJobData): Prom
       referenceId: payout.id,
       amountPesos: payout.amount,
       channelCode,
-      accountNumber: payout.accountNumber,
+      accountNumber: decryptField(payout.accountNumber),
       accountHolderName: payout.accountName || 'HomeEase Worker',
       description: `HomeEase payout for booking ${payout.bookingId}`,
     });

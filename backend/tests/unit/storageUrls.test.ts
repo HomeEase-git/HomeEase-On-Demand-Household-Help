@@ -29,7 +29,7 @@ import {
   downloadStorageObject,
   SIGNED_URL_TTL_SECONDS,
 } from '@utils/storageUrls';
-import { signStorageUrlsInResponse } from '@middleware/signStorageUrls';
+import { protectResponseData } from '@middleware/protectResponseData';
 
 const BASE = 'https://proj.supabase.co/storage/v1/object';
 const KYC = `${BASE}/public/kyc-documents/user-1/id.jpg`;
@@ -137,10 +137,10 @@ describe('downloadStorageObject', () => {
   });
 });
 
-describe('signStorageUrlsInResponse middleware', () => {
+describe('protectResponseData middleware', () => {
   it('signs URLs in JSON responses', async () => {
     const app = express();
-    app.use(signStorageUrlsInResponse);
+    app.use(protectResponseData);
     app.get('/doc', (_req, res) => res.status(201).json({ success: true, data: { fileUrl: KYC } }));
 
     const res = await request(app).get('/doc');

@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import prisma from '@config/database';
+import { decryptField } from '@utils/fieldEncryption';
 import { errorResponse } from '@utils/errorResponse';
 import { formatPeso } from '@utils/formatters';
 import { maskTin } from '@utils/taxId';
@@ -90,7 +91,7 @@ export const listCertificates = async (req: Request, res: Response) => {
         id: r.id,
         workerId: r.workerId,
         workerName: r.workerName,
-        maskedTin: maskTin(r.workerTin),
+        maskedTin: maskTin(decryptField(r.workerTin)),
         periodStart: r.periodStart,
         periodEnd: r.periodEnd,
         totalIncomePayments: r.totalIncomePayments,

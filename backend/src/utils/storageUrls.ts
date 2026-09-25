@@ -8,7 +8,7 @@ import { supabase, KYC_DOCUMENT_BUCKET, RESUME_BUCKET, CHAT_IMAGE_BUCKET } from 
 // Rows in the DB keep storing the bucket's canonical object URL
 // (`.../storage/v1/object/public/<bucket>/<path>`) purely as an identifier —
 // that's what every existing row already holds, so nothing needs migrating.
-// signStorageUrlsInResponse (middleware) swaps those identifiers for signed
+// protectResponseData (middleware) swaps those identifiers for signed
 // URLs on the way out.
 export const PRIVATE_BUCKETS: ReadonlySet<string> = new Set([KYC_DOCUMENT_BUCKET, RESUME_BUCKET, CHAT_IMAGE_BUCKET]);
 
