@@ -23,6 +23,9 @@ export default function SignInScreen() {
   // Set once the backend responds with `mfaRequired: true` — while this is
   // set, the form below renders the code-entry step instead of email/password.
   const [challengeToken, setChallengeToken] = useState<string | null>(null);
+  // Set when login is refused because the account is suspended/banned —
+  // offers the way to ask for a human review.
+  const [accountBlocked, setAccountBlocked] = useState(false);
   const [mfaCode, setMfaCode] = useState("");
   const [mfaError, setMfaError] = useState("");
   const [verifyingMfa, setVerifyingMfa] = useState(false);
@@ -100,6 +103,7 @@ export default function SignInScreen() {
 
     try {
       clearError();
+      setAccountBlocked(false);
       const result = await login(email, password);
 
       if (result.data && "mfaRequired" in result.data && result.data.mfaRequired) {
@@ -113,6 +117,9 @@ export default function SignInScreen() {
       // this email" and "wrong password" (prevents attackers from using this
       // form to discover which emails are registered), so show one combined,
       // human message here rather than whatever reason it gives.
+      if (err?.code === "ACCOUNT_SUSPENDED" || err?.code === "ACCOUNT_BANNED") {
+        setAccountBlocked(true);
+      }
       const errorMsg =
         err?.statusCode === 401
           ? "Incorrect Email or Password"
@@ -259,6 +266,17 @@ export default function SignInScreen() {
           onPress={handleSignIn}
           loading={loading}
         />
+
+        {accountBlocked && (
+          <View className="mt-3">
+            <OutlinedButton
+              label="Request a review"
+              onPress={() =>
+                router.push({ pathname: "/(auth)/request-review", params: { email } })
+              }
+            />
+          </View>
+        )}
 
         <View className="flex-row items-center my-6">
           <View className="flex-1 h-px bg-divider" />

@@ -2521,6 +2521,12 @@ export async function acceptContract(contractType: LegalDocumentType) {
   }
 }
 
+// Unauthenticated: a suspended/banned user can't log in, so they prove it's
+// their account with email + password instead (see authController).
+export async function requestSuspensionReview(email: string, password: string, message: string) {
+  return api.post('/auth/suspension-review', { email, password, message });
+}
+
 export async function changePassword(currentPassword: string, newPassword: string) {
   try {
     const response = await api.post('/users/me/change-password', {

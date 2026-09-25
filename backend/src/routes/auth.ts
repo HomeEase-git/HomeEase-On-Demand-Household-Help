@@ -9,6 +9,7 @@ import {
   forgotPassword,
   resetPassword,
   refreshToken,
+  requestSuspensionReview,
   logout,
   mfaSetup,
   mfaVerifySetup,
@@ -31,6 +32,7 @@ router.post('/resend-otp', authLimiter, resendOtp);
 router.post('/forgot-password', authLimiter, forgotPassword);
 router.post('/reset-password', authLimiter, resetPassword);
 router.post('/refresh', authLimiter, refreshToken);
+router.post('/suspension-review', authLimiter, requestSuspensionReview);
 
 router.get('/me', authMiddleware, getMe);
 router.post('/logout', authMiddleware, logout);
