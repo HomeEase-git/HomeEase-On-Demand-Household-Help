@@ -47,6 +47,7 @@ export default function WorkerProfileScreen() {
 
   const [worker, setWorker] = useState<WorkerDetail | null>(null);
   const [reviews, setReviews] = useState<WorkerReview[]>([]);
+  const [jobPhotos, setJobPhotos] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -58,11 +59,15 @@ export default function WorkerProfileScreen() {
       try {
         const [detail, reviewsResult] = await Promise.all([
           api.getWorkerDetail(workerId),
-          api.getWorkerReviews(workerId, 3),
+          // More than the 3 shown below, so there are photos to collect.
+          api.getWorkerReviews(workerId, 20),
         ]);
         if (!active) return;
         setWorker(detail);
-        setReviews(reviewsResult.reviews);
+        setReviews(reviewsResult.reviews.slice(0, 3));
+        setJobPhotos(
+          Array.from(new Set<string>(reviewsResult.reviews.flatMap((r: WorkerReview) => r.photoUrls ?? []))).slice(0, 12),
+        );
       } catch (error) {
         console.error("Load worker profile error:", error);
         if (active) setWorker(null);
@@ -283,6 +288,26 @@ export default function WorkerProfileScreen() {
             ))}
           </View>
         </View>
+
+        {jobPhotos.length > 0 && (
+          <View className="bg-card rounded-2xl p-4 mx-4 mt-3" style={cardShadow}>
+            <SectionTitle icon="images-outline" label="Photos from past jobs" />
+            <Text className="text-text-muted text-xs mb-3">Shared by clients in their reviews</Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
+              {jobPhotos.map((url) => (
+                <Pressable
+                  key={url}
+                  onPress={() => router.push({ pathname: "/(client)/inbox/image-viewer", params: { imageUrl: url } })}
+                  accessibilityRole="imagebutton"
+                  accessibilityLabel="Open photo from a past job"
+                  className="active:opacity-[0.85]"
+                >
+                  <Image source={{ uri: url }} className="w-24 h-24 rounded-xl bg-card-dark" resizeMode="cover" />
+                </Pressable>
+              ))}
+            </ScrollView>
+          </View>
+        )}
 
         <View className="bg-card rounded-2xl p-4 mx-4 mt-3" style={cardShadow}>
           <View className="flex-row justify-between items-center mb-2">
