@@ -57,6 +57,20 @@ function getNotificationsModule(): Promise<typeof Notifications | null> {
  * No-ops when running in Expo Go — use a development build to test push
  * notifications and other native-only behavior.
  */
+/**
+ * Android notification channels, each with its own sound. The backend picks
+ * the channel per notification type (CHANNEL_FOR_TYPE in
+ * backend/src/services/pushNotificationService.ts) — keep the ids in sync.
+ * Android fixes a channel's sound when the channel is first created, so to
+ * change a sound later, give the channel a new id rather than editing it.
+ * The sound files are bundled by the expo-notifications plugin in app.json.
+ */
+export const NOTIFICATION_CHANNELS = [
+  { id: 'new-job', name: 'New job requests', sound: 'new_job.wav' },
+  { id: 'messages', name: 'Messages', sound: 'message.wav' },
+  { id: 'bookings', name: 'Booking updates', sound: 'booking_confirmed.wav' },
+] as const;
+
 class NotificationService {
   private token: PushNotificationToken | null = null;
   private listeners: Array<{
@@ -79,6 +93,8 @@ class NotificationService {
 
       // Configure notification handler
       this.setupNotificationHandlers(Notifications);
+
+      await this.setupAndroidChannels(Notifications);
 
       // Check permissions
       const { granted } = await Notifications.getPermissionsAsync();
@@ -228,6 +244,26 @@ class NotificationService {
   }
 
   /**
+   * Create the Android channels that give pushes their custom sounds.
+   * Idempotent — safe to call on every launch.
+   */
+  private async setupAndroidChannels(Notifications: typeof import('expo-notifications')): Promise<void> {
+    if (Platform.OS !== 'android') return;
+    try {
+      for (const channel of NOTIFICATION_CHANNELS) {
+        await Notifications.setNotificationChannelAsync(channel.id, {
+          name: channel.name,
+          importance: Notifications.AndroidImportance.HIGH,
+          sound: channel.sound,
+          vibrationPattern: [0, 250, 150, 250],
+        });
+      }
+    } catch (error) {
+      console.error('[Notifications] Failed to create Android channels:', error);
+    }
+  }
+
+  /**
    * Setup notification handlers
    *
    * Configures default notification behavior
@@ -245,7 +281,10 @@ class NotificationService {
           shouldShowAlert: true,
           shouldShowBanner: true,
           shouldShowList: true,
-          shouldPlaySound: true,
+          // Silent while the app is open: utils/sounds.ts plays the in-app
+          // sound instead (and can skip e.g. the chat already on screen), so
+          // this avoids hearing two sounds for one notification.
+          shouldPlaySound: false,
           shouldSetBadge: true,
         };
       },
