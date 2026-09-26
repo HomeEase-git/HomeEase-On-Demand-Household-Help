@@ -74,6 +74,23 @@ describe('Worker search & detail — KYC visibility gate', () => {
       expect(res.body.data.id).toBe(workerUserId);
     });
 
+    it("never exposes the worker's email, phone or street address on the public profile", async () => {
+      await prisma.user.update({ where: { id: workerUserId }, data: { phone: '09171234567' } });
+      await prisma.workerProfile.update({
+        where: { userId: workerUserId },
+        data: { address: '12 Private St', zipCode: '3000', city: 'Malolos', state: 'Bulacan' },
+      });
+
+      const res = await request(app).get(`/api/workers/${workerUserId}`);
+
+      expect(res.status).toBe(200);
+      const body = JSON.stringify(res.body);
+      expect(body).not.toContain('09171234567');
+      expect(body).not.toContain('12 Private St');
+      expect(body).not.toContain('@homeease.invalid');
+      expect(res.body.data.city).toBe('Malolos');
+    });
+
     it('returns worker reviews successfully', async () => {
       const res = await request(app).get(`/api/workers/${workerUserId}/reviews`);
       expect(res.status).toBe(200);

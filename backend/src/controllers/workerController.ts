@@ -505,10 +505,12 @@ export const getWorkerDetail = async (req: AuthRequest, res: Response) => {
         serviceAreaRadius: true,
         activeJobCount: true,
         availableDays: true,
-        address: true,
+        // Public, unauthenticated endpoint: never select contact details or
+        // the street address. Clients get the worker's phone only through a
+        // booking (see bookingController), and city/province is enough to
+        // show where they work.
         city: true,
         state: true,
-        zipCode: true,
         kycStatus: true,
         kycSubmittedAt: true,
         kycApprovedAt: true,
@@ -517,8 +519,6 @@ export const getWorkerDetail = async (req: AuthRequest, res: Response) => {
           select: {
             id: true,
             fullName: true,
-            email: true,
-            phone: true,
             avatar: true,
           },
         },
@@ -641,17 +641,13 @@ export const getWorkerDetail = async (req: AuthRequest, res: Response) => {
       data: {
         id: worker.userId,
         name: worker.user.fullName,
-        email: worker.user.email,
-        phone: worker.user.phone,
         avatar: worker.user.avatar,
         bio: worker.bio,
         rating: worker.rating,
         tier,
         serviceAreaRadius: worker.serviceAreaRadius,
-        address: worker.address,
         city: worker.city,
         state: worker.state,
-        zipCode: worker.zipCode,
         isAvailable: worker.isAvailable,
         availableDays: worker.availableDays,
         kycStatus: worker.kycStatus,
