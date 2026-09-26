@@ -3,6 +3,7 @@ import { KycDocumentType } from '@prisma/client';
 import * as bcrypt from 'bcryptjs';
 import prisma from '@config/database';
 import { errorResponse } from '@utils/errorResponse';
+import { toOwnedStoredUrl } from '@utils/storageUrls';
 import { mimeTypeFromUrl, storagePathFromUrl } from '@utils/kycFileMeta';
 import { verificationQueue, VERIFICATION_JOB_OPTIONS } from '@queues/verificationQueue';
 import { checkResubmissionCooldown } from '@utils/kycResubmissionCooldown';
@@ -668,12 +669,16 @@ export const submitKYCDocument = async (req: AuthRequest, res: Response) => {
     
     // validateSubmitKYCDocument has already checked documentType is one of
     // KYC_DOCUMENT_TYPES and documentUrl is a non-empty string.
-    const { documentType, documentUrl, originalName, fileSize } = req.body as {
+    const { documentType, originalName, fileSize } = req.body as {
       documentType: KycDocumentType;
       documentUrl: string;
       originalName?: string;
       fileSize?: number;
     };
+    const documentUrl = toOwnedStoredUrl(req.body.documentUrl as string, req.user.userId);
+    if (!documentUrl) {
+      return res.status(400).json(errorResponse(400, 'That file does not belong to your account. Please upload it again.'));
+    }
 
     // KycDocument has no userId field — it must belong to a VerificationRequest.
     // Reuse the user's open request if one exists, otherwise start a new one.

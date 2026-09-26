@@ -1,6 +1,7 @@
 import { randomUUID } from 'crypto';
 import PDFDocument from 'pdfkit';
 import prisma from '@config/database';
+import { decryptField } from '@utils/fieldEncryption';
 import { supabase, TAX_CERTIFICATE_BUCKET } from '@config/supabase';
 import { getAppSettings } from '@services/appSettingsService';
 
@@ -80,7 +81,7 @@ export async function generateQuarterlyCertificates(
 
     const pdfBuffer = await renderCertificatePdf({
       workerName: profile.user.fullName,
-      workerTin: profile.tin,
+      workerTin: decryptField(profile.tin),
       periodStart,
       periodEnd,
       totalIncomePayments: agg.income,

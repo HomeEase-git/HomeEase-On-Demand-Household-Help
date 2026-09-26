@@ -36,6 +36,7 @@ import promoBannerRoutes from '@routes/promoBanners';
 import internalCronRoutes from '@routes/internalCron';
 import internalDiagRoutes from '@routes/internalDiag';
 import { errorHandler } from '@middleware/errorHandler';
+import { protectResponseData } from '@middleware/protectResponseData';
 
 const app = express();
 const jsonBodyLimit = process.env.JSON_BODY_LIMIT || '1mb';
@@ -129,6 +130,10 @@ app.use('/internal/diag', internalDiagRoutes);
 // Broad rate limit across the whole API surface (credential endpoints get a
 // second, stricter limiter inside routes/auth.ts).
 app.use('/api', apiLimiter);
+
+// Sign private-bucket file URLs (KYC, resumes, chat images) and mask
+// encrypted payout/TIN values in every API response.
+app.use('/api', protectResponseData);
 
 // Routes
 app.use('/api/auth', authRoutes);

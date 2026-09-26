@@ -97,7 +97,7 @@ describe('verificationAiService.analyzeVerificationDocuments', () => {
 
     const result = await analyzeVerificationDocuments('v1', 'WORKER_ONBOARDING', [
       doc({ documentType: 'GOVERNMENT_ID_FRONT', mimeType: 'image/jpeg' }),
-      doc({ documentType: 'RESUME', mimeType: 'application/pdf', fileUrl: 'https://storage.test/cv.pdf' }),
+      doc({ documentType: 'NBI_CLEARANCE', mimeType: 'application/pdf', fileUrl: 'https://storage.test/nbi.pdf' }),
     ]);
 
     expect(result.aiStatus).toBe('AI_REVIEWED');
@@ -110,6 +110,24 @@ describe('verificationAiService.analyzeVerificationDocuments', () => {
     expect(blockTypes).toEqual(['image', 'document']);
     const pdfBlock = content.find((b) => b.type === 'document') as Record<string, any>;
     expect(pdfBlock.source.media_type).toBe('application/pdf');
+  });
+
+  it('never sends the resume or VAT document to the AI reviewer', async () => {
+    process.env.ANTHROPIC_API_KEY = 'test-key';
+    const fetchMock = stubFetch();
+    jest.spyOn(globalThis, 'fetch').mockImplementation(fetchMock as unknown as typeof fetch);
+
+    await analyzeVerificationDocuments('v1', 'WORKER_ONBOARDING', [
+      doc({ documentType: 'GOVERNMENT_ID_FRONT' }),
+      doc({ documentType: 'RESUME', mimeType: 'application/pdf', fileUrl: 'https://storage.test/cv.pdf' }),
+      doc({ documentType: 'VAT_REGISTRATION', fileUrl: 'https://storage.test/vat.jpg' }),
+    ]);
+
+    expect(fetchMock).not.toHaveBeenCalledWith('https://storage.test/cv.pdf');
+    expect(fetchMock).not.toHaveBeenCalledWith('https://storage.test/vat.jpg');
+    const body = lastAnthropicBody(fetchMock);
+    expect(body.messages[0].content.length).toBe(2); // prompt + the ID only
+    expect(JSON.stringify(body)).toMatch(/last 4 digits/);
   });
 
   it('caps the number of documents sent and notes the rest in aiError', async () => {

@@ -1,6 +1,8 @@
 import { Request, Response } from 'express';
 import prisma from '@config/database';
 import { errorResponse } from '@utils/errorResponse';
+import { toOwnedStoredUrl } from '@utils/storageUrls';
+import { decryptField, decryptOptionalField, encryptField, encryptOptionalField, hashTin, maskLastFour } from '@utils/fieldEncryption';
 import { toDayStart, materializeTemplateForWorker, setUnavailableRange } from '@services/workerAvailabilityService';
 import { getAppSettings } from '@services/appSettingsService';
 import { parseWorkerResume } from '@services/resumeParseService';
@@ -1134,7 +1136,13 @@ export const updateWorkerProfile = async (req: AuthRequest, res: Response) => {
     // time (see bookingController.createBooking). Not matching/search input.
     if (addressLat !== undefined) updateData.addressLat = addressLat;
     if (addressLng !== undefined) updateData.addressLng = addressLng;
-    if (resumeUrl !== undefined) updateData.resumeUrl = resumeUrl;
+    if (resumeUrl !== undefined) {
+      const storedResumeUrl = resumeUrl ? toOwnedStoredUrl(resumeUrl, req.user.userId) : resumeUrl;
+      if (storedResumeUrl === null) {
+        return res.status(400).json(errorResponse(400, 'That file does not belong to your account. Please upload it again.'));
+      }
+      updateData.resumeUrl = storedResumeUrl;
+    }
     if (digitalIdTrade !== undefined) updateData.digitalIdTrade = digitalIdTrade;
     if (digitalIdServiceArea !== undefined) updateData.digitalIdServiceArea = digitalIdServiceArea;
     if (licenseNumber !== undefined) updateData.licenseNumber = licenseNumber;
@@ -1276,6 +1284,12 @@ async function runCategoryGate(
     if (!title || !issuer || !issueDate || !documentUrl) {
       return { error: 'certification requires title, issuer, issueDate, and documentUrl', status: 400 };
     }
+    const owner = await prisma.workerProfile.findUnique({ where: { id: workerProfileId }, select: { userId: true } });
+    const storedDocumentUrl = owner ? toOwnedStoredUrl(documentUrl, owner.userId) : null;
+    if (!storedDocumentUrl) {
+      return { error: 'That file does not belong to your account. Please upload it again.', status: 400 };
+    }
+    input.certification!.documentUrl = storedDocumentUrl;
   }
 
   // Certification create (if needed) + category upsert happen atomically so
@@ -2568,6 +2582,11 @@ export const createCertification = async (req: AuthRequest, res: Response) => {
       }
     }
 
+    const storedDocumentUrl = toOwnedStoredUrl(documentUrl, req.user.userId);
+    if (!storedDocumentUrl) {
+      return res.status(400).json(errorResponse(400, 'That file does not belong to your account. Please upload it again.'));
+    }
+
     const certification = await prisma.certification.create({
       data: {
         workerProfileId: workerProfile.id,
@@ -2575,7 +2594,7 @@ export const createCertification = async (req: AuthRequest, res: Response) => {
         issuer: issuer.trim(),
         issueDate: new Date(issueDate),
         expiryDate: expiryDate ? new Date(expiryDate) : null,
-        documentUrl,
+        documentUrl: storedDocumentUrl,
         serviceTypeId: serviceTypeId || null,
         ...(visibleToClients !== undefined ? { visibleToClients } : {}),
       },
@@ -2636,6 +2655,11 @@ export const updateCertification = async (req: AuthRequest, res: Response) => {
       }
     }
 
+    const storedDocumentUrl = documentUrl ? toOwnedStoredUrl(documentUrl, req.user.userId) : undefined;
+    if (storedDocumentUrl === null) {
+      return res.status(400).json(errorResponse(400, 'That file does not belong to your account. Please upload it again.'));
+    }
+
     const certification = await prisma.certification.update({
       where: { id: certId },
       data: {
@@ -2643,7 +2667,7 @@ export const updateCertification = async (req: AuthRequest, res: Response) => {
         issuer: issuer.trim(),
         issueDate: new Date(issueDate),
         expiryDate: expiryDate ? new Date(expiryDate) : null,
-        documentUrl: documentUrl ?? existing.documentUrl,
+        documentUrl: storedDocumentUrl ?? existing.documentUrl,
         serviceTypeId: serviceTypeId !== undefined ? serviceTypeId || null : existing.serviceTypeId,
         visibleToClients: visibleToClients !== undefined ? visibleToClients : existing.visibleToClients,
         verificationStatus: 'PENDING',
@@ -2775,7 +2799,8 @@ export const getPayoutMethod = async (req: AuthRequest, res: Response) => {
     return res.status(200).json({
       success: true,
       message: 'Payout method retrieved successfully',
-      data: worker,
+      // The worker's own number, shown in full so they can check it.
+      data: { ...worker, payoutAccountNumber: decryptOptionalField(worker.payoutAccountNumber) ?? null },
     });
   } catch (error) {
     console.error('Error fetching payout method:', error);
@@ -2827,7 +2852,7 @@ export const updatePayoutMethod = async (req: AuthRequest, res: Response) => {
       data: {
         payoutMethod,
         payoutAccountName: payoutAccountName ?? undefined,
-        payoutAccountNumber: payoutAccountNumber ?? undefined,
+        payoutAccountNumber: encryptOptionalField(payoutAccountNumber) ?? undefined,
       },
       select: {
         payoutMethod: true,
@@ -2840,7 +2865,7 @@ export const updatePayoutMethod = async (req: AuthRequest, res: Response) => {
       userId: user.id,
       type: 'PAYOUT_METHOD_CHANGED',
       title: 'Payout details changed',
-      message: `Your payout method was updated to ${updated.payoutMethod} (${updated.payoutAccountNumber ?? 'no account number on file'}). If this wasn't you, contact support immediately.`,
+      message: `Your payout method was updated to ${updated.payoutMethod} (${updated.payoutAccountNumber ? maskLastFour(decryptField(updated.payoutAccountNumber)) : 'no account number on file'}). If this wasn't you, contact support immediately.`,
     });
 
     if (updated.payoutAccountName && nameSimilarity(updated.payoutAccountName, user.fullName) < PAYOUT_NAME_MISMATCH_THRESHOLD) {
@@ -2870,7 +2895,7 @@ export const updatePayoutMethod = async (req: AuthRequest, res: Response) => {
     return res.status(200).json({
       success: true,
       message: 'Payout method updated successfully',
-      data: updated,
+      data: { ...updated, payoutAccountNumber: decryptOptionalField(updated.payoutAccountNumber) ?? null },
     });
   } catch (error) {
     console.error('Error updating payout method:', error);
@@ -2904,7 +2929,7 @@ export const getTaxInfo = async (req: AuthRequest, res: Response) => {
       message: 'Tax info retrieved successfully',
       data: {
         tinOnFile: !!worker.tin,
-        maskedTin: worker.tin ? maskTin(worker.tin) : null,
+        maskedTin: worker.tin ? maskTin(decryptField(worker.tin)) : null,
         tinVerifiedAt: worker.tinVerifiedAt,
       },
     });
@@ -2932,14 +2957,14 @@ export const updateTaxInfo = async (req: AuthRequest, res: Response) => {
 
     const updated = await prisma.workerProfile.update({
       where: { userId: req.user.userId },
-      data: { tin: normalized, tinVerifiedAt: null },
+      data: { tin: encryptField(normalized), tinHash: hashTin(normalized), tinVerifiedAt: null },
       select: { tin: true, tinVerifiedAt: true },
     });
 
     return res.status(200).json({
       success: true,
       message: 'Tax info updated successfully',
-      data: { tinOnFile: true, maskedTin: maskTin(updated.tin!), tinVerifiedAt: updated.tinVerifiedAt },
+      data: { tinOnFile: true, maskedTin: maskTin(normalized), tinVerifiedAt: updated.tinVerifiedAt },
     });
   } catch (error: any) {
     if (error?.code === 'P2002') {
@@ -3009,10 +3034,15 @@ export const submitVatRegistration = async (req: AuthRequest, res: Response) => 
       return res.status(400).json(errorResponse(400, 'documentUrl is required'));
     }
 
+    const storedDocumentUrl = toOwnedStoredUrl(documentUrl, req.user.userId);
+    if (!storedDocumentUrl) {
+      return res.status(400).json(errorResponse(400, 'That file does not belong to your account. Please upload it again.'));
+    }
+
     const updated = await prisma.workerProfile.update({
       where: { userId: req.user.userId },
       data: {
-        vatDocumentUrl: documentUrl,
+        vatDocumentUrl: storedDocumentUrl,
         vatVerificationStatus: 'PENDING',
         vatRejectionReason: null,
         vatSubmittedAt: new Date(),

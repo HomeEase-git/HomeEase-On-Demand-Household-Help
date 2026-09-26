@@ -68,6 +68,8 @@ services:
         value: "604800" # seconds — 7 days. Must be a number, not "7d"/"1h".
       - key: MFA_ENCRYPTION_KEY
         generateValue: true # encrypts admin TOTP secrets at rest — no human needs to know this value
+      - key: DATA_ENCRYPTION_KEY
+        sync: false # encrypts payout account numbers + TINs; set by hand and keep a copy — the backfill script needs the same value
 
       # --- Email (Gmail SMTP) ---
       - key: SMTP_USER

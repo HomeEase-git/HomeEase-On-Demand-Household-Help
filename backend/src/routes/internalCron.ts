@@ -13,6 +13,7 @@ import {
   materializeAvailabilityTemplates,
   flagExpiredKycDocuments,
   autoSuspendUnderperformingWorkers,
+  clearStaleWorkerLocations,
 } from '@workers/bookingWorker';
 import { expireOverduePendingBookings } from '@services/pendingExpirySweep';
 import { flagWorkersOverVatThreshold } from '@services/vatSummaryService';
@@ -33,6 +34,7 @@ const TASKS = {
   'flag-vat-threshold': flagWorkersOverVatThreshold,
   'flag-expired-kyc': flagExpiredKycDocuments,
   'auto-suspend-workers': autoSuspendUnderperformingWorkers,
+  'clear-stale-locations': clearStaleWorkerLocations,
 } satisfies Record<string, () => Promise<unknown>>;
 
 type TaskName = keyof typeof TASKS;

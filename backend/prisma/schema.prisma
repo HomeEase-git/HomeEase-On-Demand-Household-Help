@@ -520,7 +520,10 @@ model WorkerProfile {
   // BIR Tax Identification Number — required before a Form 2307 withholding
   // certificate can be generated for this worker (see taxCertificateService).
   // Format: 000-000-000 or 000-000-000-000 with branch code (see utils/taxId.ts).
-  tin           String?   @unique
+  // Stored encrypted (utils/fieldEncryption.ts) — the same TIN encrypts
+  // differently each time, so uniqueness is enforced on tinHash instead.
+  tin           String?
+  tinHash       String?   @unique
   tinVerifiedAt DateTime?
 
   // VAT registration — self-declared then admin-verified (mirrors the
