@@ -1,9 +1,12 @@
 import { Request, Response } from 'express';
-import { KycDocumentType } from '@prisma/client';
+import { ContractType, KycDocumentType } from '@prisma/client';
 import * as bcrypt from 'bcryptjs';
 import prisma from '@config/database';
 import { errorResponse } from '@utils/errorResponse';
 import { toOwnedStoredUrl } from '@utils/storageUrls';
+import { ageInYears, MIN_WORKER_AGE } from '@utils/age';
+import { eraseAccount, findDeletionBlockers } from '@services/accountDeletionService';
+import { JWT_EXPIRY } from '@utils/jwt';
 import { mimeTypeFromUrl, storagePathFromUrl } from '@utils/kycFileMeta';
 import { verificationQueue, VERIFICATION_JOB_OPTIONS } from '@queues/verificationQueue';
 import { checkResubmissionCooldown } from '@utils/kycResubmissionCooldown';
@@ -776,13 +779,29 @@ export const acceptContract = async (req: AuthRequest, res: Response) => {
       return res.status(401).json(errorResponse(401, 'Not authenticated'));
     }
     
-    const { contractType, acceptedAt } = req.body;
+    const { contractType, contractVersion } = req.body as { contractType: ContractType; contractVersion?: string };
 
+    // Workers accept the Service Agreement and the KYC consent; clients the
+    // User Agreement. Either may acknowledge the Privacy Notice.
+    const allowedForRole: Record<string, ContractType[]> = {
+      CLIENT: ['CLIENT_USER_AGREEMENT', 'PRIVACY_NOTICE'],
+      WORKER: ['WORKER_SERVICE_AGREEMENT', 'KYC_CONSENT', 'PRIVACY_NOTICE'],
+    };
+    if (!allowedForRole[req.user.role]?.includes(contractType)) {
+      return res.status(400).json(errorResponse(400, `${contractType} does not apply to this account`));
+    }
+
+    // Evidence of acceptance (E-Commerce Act, RA 8792): the server's own
+    // timestamp, the exact document version shown, and where it came from.
+    // Requires TRUST_PROXY behind Render so req.ip is the client, not the proxy.
     const acceptance = await prisma.contractAcceptance.create({
       data: {
         userId: req.user.userId,
         contractType,
-        acceptedAt: acceptedAt ? new Date(acceptedAt) : new Date(),
+        contractVersion: contractVersion ?? '1.0',
+        acceptedAt: new Date(),
+        ipAddress: req.ip ?? null,
+        userAgent: req.get('user-agent')?.slice(0, 512) ?? null,
       },
     });
 
@@ -790,7 +809,7 @@ export const acceptContract = async (req: AuthRequest, res: Response) => {
     // open verification request (and the denormalized WorkerProfile status)
     // to SUBMITTED so it surfaces for admin review and the app can gate the
     // worker into the waiting screen instead of the tabs.
-    if (req.user.role === 'WORKER') {
+    if (req.user.role === 'WORKER' && contractType === 'WORKER_SERVICE_AGREEMENT') {
       const verificationRequest = await prisma.verificationRequest.findFirst({
         where: { userId: req.user.userId, status: 'PENDING' },
         orderBy: { submittedAt: 'desc' },
@@ -815,6 +834,17 @@ export const acceptContract = async (req: AuthRequest, res: Response) => {
               `Please upload the following before submitting for review: ${missingTypes.join(', ')}.`
             )
           );
+        }
+
+        const profile = await prisma.workerProfile.findUnique({
+          where: { userId: req.user.userId },
+          select: { birthDate: true },
+        });
+        if (!profile?.birthDate) {
+          return res.status(400).json(errorResponse(400, 'Please enter your date of birth on the ID step before submitting.'));
+        }
+        if (ageInYears(profile.birthDate) < MIN_WORKER_AGE) {
+          return res.status(400).json(errorResponse(400, `You must be at least ${MIN_WORKER_AGE} years old to work on HomeEase.`));
         }
 
         await prisma.$transaction([
@@ -870,18 +900,18 @@ export const deleteAccount = async (req: AuthRequest, res: Response) => {
       return res.status(401).json(errorResponse(401, 'Password is incorrect'));
     }
     
-    await prisma.user.update({
-      where: { id: req.user.userId },
-      data: {
-        isDeleted: true,
-        deletedAt: new Date(),
-        status: 'DELETED',
-      },
-    });
-    
+    const blockers = await findDeletionBlockers(req.user.userId);
+    if (blockers.length > 0) {
+      return res.status(409).json({ ...errorResponse(409, blockers.join(' ')), blockers });
+    }
+
+    // Anonymizes the account and removes personal data and files; keeps
+    // bookings, payments and tax records (see accountDeletionService).
+    await eraseAccount(req.user.userId, JWT_EXPIRY);
+
     return res.status(200).json({
       success: true,
-      message: 'Account deleted successfully',
+      message: 'Your account and personal data have been deleted. Booking, payment and tax records are kept as required by law.',
     });
   } catch (error) {
     console.error('Error deleting account:', error);

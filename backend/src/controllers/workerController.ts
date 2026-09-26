@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import prisma from '@config/database';
 import { errorResponse } from '@utils/errorResponse';
 import { toOwnedStoredUrl } from '@utils/storageUrls';
+import { parseWorkerBirthDate } from '@utils/age';
 import { decryptField, decryptOptionalField, encryptField, encryptOptionalField, hashTin, maskLastFour } from '@utils/fieldEncryption';
 import { toDayStart, materializeTemplateForWorker, setUnavailableRange } from '@services/workerAvailabilityService';
 import { getAppSettings } from '@services/appSettingsService';
@@ -1117,6 +1118,7 @@ export const updateWorkerProfile = async (req: AuthRequest, res: Response) => {
       digitalIdTrade,
       digitalIdServiceArea,
       licenseNumber,
+      birthDate,
       // kycStatus/kycSubmittedAt/kycApprovedAt are deliberately NOT accepted
       // here — this is a worker self-service endpoint, and those fields
       // must only ever be set by admin review (adminVerificationController)
@@ -1125,6 +1127,13 @@ export const updateWorkerProfile = async (req: AuthRequest, res: Response) => {
     } = req.body;
 
     const updateData: any = {};
+    if (birthDate !== undefined) {
+      const parsed = parseWorkerBirthDate(birthDate);
+      if ('error' in parsed) {
+        return res.status(400).json(errorResponse(400, parsed.error));
+      }
+      updateData.birthDate = parsed.date;
+    }
     if (bio !== undefined) updateData.bio = bio;
     if (serviceAreaRadius !== undefined) updateData.serviceAreaRadius = serviceAreaRadius;
     if (address !== undefined) updateData.address = address;

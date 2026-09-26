@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import { COMPANY } from "../../../constants/legalDocuments";
 import { View, Text, Linking } from "react-native";
 import { KeyboardAwareScrollView } from "../../../components/ui/KeyboardAwareScrollView";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -10,7 +11,7 @@ import PrimaryButton from "../../../components/ui/PrimaryButton";
 import { colors, cardShadow } from "../../../constants";
 import { useToastContext } from "../../../contexts/ToastContext";
 
-const SUPPORT_EMAIL = "support@homeease.com";
+const SUPPORT_EMAIL = COMPANY.supportEmail;
 
 export default function ContactUsScreen() {
   const router = useRouter();

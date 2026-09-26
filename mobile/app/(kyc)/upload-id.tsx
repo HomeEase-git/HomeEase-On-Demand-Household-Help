@@ -8,8 +8,9 @@ import ScreenHeader from "../../components/ui/ScreenHeader";
 import StepperHorizontal from "../../components/steppers/StepperHorizontal";
 import UploadCard from "../../components/ui/UploadCard";
 import PrimaryButton from "../../components/ui/PrimaryButton";
+import InputField from "../../components/ui/InputField";
 import { useAuthStore } from "../../store/authStore";
-import { submitKycDocument, uploadKycFile } from "../../services/api";
+import { submitKycDocument, updateWorkerProfileDetails, uploadKycFile } from "../../services/api";
 import { compressImage } from "../../utils/imageCompressor";
 import {
   documentRequirements,
@@ -34,6 +35,29 @@ const initialDocuments: Partial<Record<KycDocumentKey, UploadedDocument>> = {
   governmentIdBack: { uri: null, mimeType: null, name: null },
 };
 
+// Workers must be 18+. The backend enforces this; checking here too just
+// gives an immediate message instead of a round trip.
+const MIN_WORKER_AGE = 18;
+
+function birthDateError(value: string): string | null {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return "Use the format YYYY-MM-DD";
+  const date = new Date(`${value}T00:00:00Z`);
+  if (Number.isNaN(date.getTime()) || date.toISOString().slice(0, 10) !== value) {
+    return "That isn't a valid date";
+  }
+  const now = new Date();
+  let age = now.getUTCFullYear() - date.getUTCFullYear();
+  if (
+    now.getUTCMonth() < date.getUTCMonth() ||
+    (now.getUTCMonth() === date.getUTCMonth() && now.getUTCDate() < date.getUTCDate())
+  ) {
+    age--;
+  }
+  if (age < MIN_WORKER_AGE) return `You must be at least ${MIN_WORKER_AGE} years old to work on HomeEase`;
+  if (age > 100) return "Please check your date of birth";
+  return null;
+}
+
 const emptyDocument: UploadedDocument = {
   uri: null,
   mimeType: null,
@@ -47,6 +71,28 @@ export default function UploadIdScreen() {
   const isWorker = user?.role === "worker";
   const [documents, setDocuments] = useState(initialDocuments);
   const [uploadingKey, setUploadingKey] = useState<KycDocumentKey | null>(null);
+  const [birthDate, setBirthDate] = useState("");
+  const [savingBirthDate, setSavingBirthDate] = useState(false);
+  const birthDateInvalid = isWorker ? birthDateError(birthDate.trim()) : null;
+
+  const handleContinue = async () => {
+    if (!isWorker) {
+      router.push("/(kyc)/selfie");
+      return;
+    }
+    setSavingBirthDate(true);
+    try {
+      await updateWorkerProfileDetails({ birthDate: birthDate.trim() });
+      router.push("/(kyc)/selfie");
+    } catch (error: any) {
+      alertModal.error(
+        "Couldn't save your date of birth",
+        error?.response?.data?.message || "Please try again.",
+      );
+    } finally {
+      setSavingBirthDate(false);
+    }
+  };
 
   const missingRequired = useMemo(
     () => ID_KEYS.filter((key) => !documents[key]?.uri),
@@ -268,13 +314,29 @@ export default function UploadIdScreen() {
           {renderUploadCard("governmentIdBack")}
         </View>
 
+        {isWorker && (
+          <InputField
+            label="Date of birth (as shown on your ID)"
+            value={birthDate}
+            onChangeText={setBirthDate}
+            placeholder="YYYY-MM-DD"
+            keyboardType="numbers-and-punctuation"
+            error={birthDate.length >= 10 ? birthDateInvalid : null}
+          />
+        )}
+
         <View className="mt-4">
           <PrimaryButton
             label="Continue"
             fullWidth
-            disabled={missingRequired.length > 0 || uploadingKey !== null}
-            loading={uploadingKey !== null}
-            onPress={() => router.push("/(kyc)/selfie")}
+            disabled={
+              missingRequired.length > 0 ||
+              uploadingKey !== null ||
+              birthDateInvalid !== null ||
+              savingBirthDate
+            }
+            loading={uploadingKey !== null || savingBirthDate}
+            onPress={handleContinue}
           />
         </View>
       </ScrollView>

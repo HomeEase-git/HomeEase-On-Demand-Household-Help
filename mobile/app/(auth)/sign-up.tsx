@@ -28,6 +28,7 @@ export default function SignUpScreen() {
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [acceptedTerms, setAcceptedTerms] = useState(false);
+  const [acceptedPrivacy, setAcceptedPrivacy] = useState(false);
 
   const [nameError, setNameError] = useState("");
   const [emailError, setEmailError] = useState("");
@@ -120,6 +121,11 @@ export default function SignUpScreen() {
 
     if (!acceptedTerms) {
       toast.warning("Please accept the Terms and Conditions");
+      return;
+    }
+
+    if (!acceptedPrivacy) {
+      toast.warning("Please confirm you have read the Privacy Policy");
       return;
     }
 
@@ -235,7 +241,7 @@ export default function SignUpScreen() {
 
         {/* Terms Checkbox */}
         <Pressable
-          className="flex-row items-center mb-6"
+          className="flex-row items-center mb-3"
           onPress={() => setAcceptedTerms(!acceptedTerms)}
           disabled={loading}
         >
@@ -252,10 +258,38 @@ export default function SignUpScreen() {
             I agree to the{" "}
             <Text
               className="text-accent underline"
-              onPress={() => router.push("/(auth)/terms-conditions")}
+              onPress={() => router.push({ pathname: "/(auth)/terms-conditions", params: { role } })}
             >
               Terms and Conditions
             </Text>
+          </Text>
+        </Pressable>
+
+        {/* Privacy consent — a separate checkbox, not bundled into the
+            Terms (Data Privacy Act; NPC consent guidance). */}
+        <Pressable
+          className="flex-row items-center mb-6"
+          onPress={() => setAcceptedPrivacy(!acceptedPrivacy)}
+          disabled={loading}
+        >
+          <View
+            className={`w-5 h-5 rounded border-2 mr-2 items-center justify-center ${
+              acceptedPrivacy ? "bg-accent border-accent" : "border-divider"
+            }`}
+          >
+            {acceptedPrivacy && (
+              <Text className="text-text-primary text-xs font-bold">✓</Text>
+            )}
+          </View>
+          <Text className="text-text-secondary text-sm flex-1">
+            I have read the{" "}
+            <Text
+              className="text-accent underline"
+              onPress={() => router.push("/(auth)/privacy-policy")}
+            >
+              Privacy Policy
+            </Text>{" "}
+            and agree to HomeEase processing my personal data as it describes
           </Text>
         </Pressable>
 

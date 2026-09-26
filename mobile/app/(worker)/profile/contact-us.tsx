@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import { COMPANY } from "../../../constants/legalDocuments";
 import { View, Text, Linking } from "react-native";
 import { KeyboardAwareScrollView } from "../../../components/ui/KeyboardAwareScrollView";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -10,7 +11,7 @@ import PrimaryButton from "../../../components/ui/PrimaryButton";
 import { colors, cardShadow } from "../../../constants";
 import { useAlertModal } from "../../../contexts/AlertModalContext";
 
-const SUPPORT_EMAIL = "support@homeease.com";
+const SUPPORT_EMAIL = COMPANY.supportEmail;
 
 export default function WorkerContactUsScreen() {
   const router = useRouter();
@@ -49,7 +50,7 @@ export default function WorkerContactUsScreen() {
             <View className="w-9 h-9 rounded-full bg-accent/10 items-center justify-center mr-3">
               <Ionicons name="mail-outline" size={18} color={colors.accent.DEFAULT} />
             </View>
-            <Text className="text-text-primary flex-1">support@homeease.com</Text>
+            <Text className="text-text-primary flex-1">{COMPANY.supportEmail}</Text>
           </View>
           <View className="flex-row items-center py-3.5 px-4 border-b border-divider">
             <View className="w-9 h-9 rounded-full bg-accent/10 items-center justify-center mr-3">

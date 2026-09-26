@@ -5,6 +5,7 @@ import { authStorage } from '../utils/storage';
 import { AbortableRequest } from '../utils/apiErrorHandling';
 import { KycDocumentKey } from '../utils/kycDocumentConfig';
 import { mapKycDocumentType } from '../utils/kycDocumentTypeMap';
+import { LEGAL_VERSIONS, type LegalDocumentType } from '../constants/legalDocuments';
 import type { WorkerDetail, WorkerDigitalId, ParsedResume } from "../types/api.types";
 import type {
   CreateBookingPayload,
@@ -195,6 +196,8 @@ export async function postSignUp(userData: {
       phone: userData.phone,
       password: userData.password,
       role: userData.role.toUpperCase(),
+      // Sign-up can't be submitted without the Privacy Policy checkbox.
+      privacyNoticeVersion: LEGAL_VERSIONS.PRIVACY_NOTICE,
     });
     return {
       id: response.id,
@@ -1775,6 +1778,8 @@ export async function getMyWorkerProfileDetails(): Promise<MyWorkerProfileDetail
 }
 
 export async function updateWorkerProfileDetails(data: {
+  // YYYY-MM-DD; the backend rejects anyone under 18.
+  birthDate?: string;
   bio?: string;
   serviceAreaRadius?: number;
   address?: string;
@@ -2501,19 +2506,25 @@ export async function getKycDocuments(): Promise<KycDocumentRecord[]> {
   }
 }
 
-export async function acceptContract(
-  contractType: 'WORKER_SERVICE_AGREEMENT' | 'CLIENT_USER_AGREEMENT',
-) {
+export async function acceptContract(contractType: LegalDocumentType) {
   try {
+    // The server records its own timestamp, IP and device; the app only
+    // says which document and which version was shown.
     const response = await api.post('/users/me/contract-acceptance', {
       contractType,
-      acceptedAt: new Date().toISOString(),
+      contractVersion: LEGAL_VERSIONS[contractType],
     });
     return response;
   } catch (error) {
     console.error('Accept contract error:', error);
     throw error;
   }
+}
+
+// Unauthenticated: a suspended/banned user can't log in, so they prove it's
+// their account with email + password instead (see authController).
+export async function requestSuspensionReview(email: string, password: string, message: string) {
+  return api.post('/auth/suspension-review', { email, password, message });
 }
 
 export async function changePassword(currentPassword: string, newPassword: string) {

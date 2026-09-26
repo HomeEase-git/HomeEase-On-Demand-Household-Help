@@ -39,7 +39,14 @@ describe('Admin verification approve/reject', () => {
     // tripping that gate incidentally.
     await prisma.workerProfile.update({
       where: { userId: worker.id },
-      data: { address: '123 Test St', city: 'Manila', addressLat: 14.5995, addressLng: 120.9842 },
+      data: {
+        address: '123 Test St',
+        city: 'Manila',
+        addressLat: 14.5995,
+        addressLng: 120.9842,
+        // Workers must be 18+ (utils/age.ts).
+        birthDate: new Date('1990-05-15T00:00:00Z'),
+      },
     });
 
     const verification = await prisma.verificationRequest.create({
@@ -48,7 +55,7 @@ describe('Admin verification approve/reject', () => {
         type: 'WORKER_ONBOARDING',
         status,
         documents: {
-          // All 4 Tier 1 required types (see documents.MD / adminVerificationController's
+          // All Tier 1 required types (see documents.MD / adminVerificationController's
           // approval completeness gate) so approval tests reflect a realistic, complete
           // submission — the incomplete-submission path is covered separately in kycUpload.test.ts.
           create: [
@@ -56,6 +63,7 @@ describe('Admin verification approve/reject', () => {
             { documentType: 'GOVERNMENT_ID_BACK', fileUrl: 'https://example.invalid/id-back.jpg' },
             { documentType: 'SELFIE', fileUrl: 'https://example.invalid/selfie.jpg' },
             { documentType: 'NBI_CLEARANCE', fileUrl: 'https://example.invalid/nbi.jpg' },
+            { documentType: 'RESUME', fileUrl: 'https://example.invalid/resume.pdf' },
           ],
         },
       },
@@ -63,6 +71,34 @@ describe('Admin verification approve/reject', () => {
 
     return { worker, verification };
   }
+
+  it('refuses to approve a worker under 18, even with an override reason', async () => {
+    const { worker, verification } = await seedPendingVerification('underage');
+    const seventeen = new Date();
+    seventeen.setUTCFullYear(seventeen.getUTCFullYear() - 17);
+    await prisma.workerProfile.update({ where: { userId: worker.id }, data: { birthDate: seventeen } });
+
+    const res = await request(app)
+      .patch(`/api/admin/verifications/${verification.id}/approve`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ adminOverrideReason: 'Looks fine to me on the documents' });
+
+    expect(res.status).toBe(400);
+    expect(res.body.message).toMatch(/under 18/);
+  });
+
+  it('requires an override to approve a worker with no date of birth on file', async () => {
+    const { worker, verification } = await seedPendingVerification('no-dob');
+    await prisma.workerProfile.update({ where: { userId: worker.id }, data: { birthDate: null } });
+
+    const res = await request(app)
+      .patch(`/api/admin/verifications/${verification.id}/approve`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({});
+
+    expect(res.status).toBe(400);
+    expect(res.body.message).toMatch(/date of birth/);
+  });
 
   it('lists the seeded pending verification', async () => {
     const { worker, verification } = await seedPendingVerification('list');

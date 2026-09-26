@@ -5,10 +5,14 @@ import {
 } from "../kycDocumentConfig";
 
 describe("kyc document configuration", () => {
-  it("marks identity and clearance documents as required", () => {
+  // Must match backend TIER_1_REQUIRED_DOCUMENT_TYPES.
+  it("requires ID, selfie, NBI clearance and resume; other clearances are optional", () => {
     expect(getDocumentRequirement("governmentIdFront").required).toBe(true);
+    expect(getDocumentRequirement("governmentIdBack").required).toBe(true);
+    expect(getDocumentRequirement("selfie").required).toBe(true);
     expect(getDocumentRequirement("nbiClearance").required).toBe(true);
-    expect(getDocumentRequirement("barangayClearance").required).toBe(true);
+    expect(getDocumentRequirement("resume").required).toBe(true);
+    expect(getDocumentRequirement("barangayClearance").required).toBe(false);
     expect(getDocumentRequirement("policeClearance").required).toBe(false);
     expect(getDocumentRequirement("cedula").required).toBe(false);
   });
@@ -31,7 +35,7 @@ describe("kyc document configuration", () => {
       governmentIdBack: { uri: null },
       selfie: { uri: "file://selfie.jpg" },
       nbiClearance: { uri: "file://nbi.pdf" },
-      barangayClearance: { uri: "file://barangay.pdf" },
+      barangayClearance: { uri: null },
       resume: { uri: null },
     });
 
