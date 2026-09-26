@@ -5,6 +5,7 @@ import { authStorage } from '../utils/storage';
 import { AbortableRequest } from '../utils/apiErrorHandling';
 import { KycDocumentKey } from '../utils/kycDocumentConfig';
 import { mapKycDocumentType } from '../utils/kycDocumentTypeMap';
+import { LEGAL_VERSIONS, type LegalDocumentType } from '../constants/legalDocuments';
 import type { WorkerDetail, WorkerDigitalId, ParsedResume } from "../types/api.types";
 import type {
   CreateBookingPayload,
@@ -195,6 +196,8 @@ export async function postSignUp(userData: {
       phone: userData.phone,
       password: userData.password,
       role: userData.role.toUpperCase(),
+      // Sign-up can't be submitted without the Privacy Policy checkbox.
+      privacyNoticeVersion: LEGAL_VERSIONS.PRIVACY_NOTICE,
     });
     return {
       id: response.id,
@@ -936,12 +939,12 @@ export type GoogleGeocodeResult = {
   };
 };
 
-// Backend-proxied Google Geocoding — the server-side API key never ships to
-// the mobile bundle. Resolves to `null` (never throws) whenever Google isn't
-// configured server-side, the address genuinely doesn't resolve, or the
-// request fails — callers (utils/geo.ts) treat all three the same way, since
-// there is no other geocoding provider to fall back to (OpenStreetMap/
-// Nominatim has been fully removed).
+// Backend-proxied Google Places API (New) — the server-side API key never
+// ships to the mobile bundle. Resolves to `null`/`[]` (never throws) whenever
+// Google isn't configured server-side, the address genuinely doesn't resolve,
+// or the request fails — callers (utils/geo.ts) treat all three the same way.
+// Reverse geocoding ("use my current location") is NOT proxied: it runs
+// on-device via expo-location, see utils/geo.ts reverseGeocodeDetailed.
 export async function geocodeAddressGoogle(address: string): Promise<GoogleGeocodeResult | null> {
   try {
     return await api.post('/geo/geocode', { address });
@@ -951,28 +954,32 @@ export async function geocodeAddressGoogle(address: string): Promise<GoogleGeoco
   }
 }
 
-export async function reverseGeocodeGoogle(lat: number, lng: number): Promise<GoogleGeocodeResult | null> {
+export type GoogleAutocompleteSuggestion = {
+  placeId: string;
+  text: string;
+  mainText: string;
+  secondaryText: string;
+};
+
+export async function autocompleteAddressesGoogle(
+  input: string,
+  sessionToken: string,
+  near?: { lat: number; lng: number },
+): Promise<GoogleAutocompleteSuggestion[]> {
   try {
-    return await api.post('/geo/reverse-geocode', { lat, lng });
+    return await api.post('/geo/autocomplete', { input, sessionToken, near });
   } catch (error) {
-    console.error('Google reverse geocode proxy error:', error);
-    return null;
+    console.error('Google autocomplete proxy error:', error);
+    return [];
   }
 }
 
-export type GoogleAddressSuggestion = {
-  formattedAddress: string;
-  lat: number;
-  lng: number;
-  components: GoogleGeocodeResult['components'];
-};
-
-export async function searchAddressesGoogle(query: string, limit = 5): Promise<GoogleAddressSuggestion[]> {
+export async function getPlaceDetailsGoogle(placeId: string, sessionToken?: string): Promise<GoogleGeocodeResult | null> {
   try {
-    return await api.post('/geo/search', { query, limit });
+    return await api.post('/geo/place-details', { placeId, sessionToken });
   } catch (error) {
-    console.error('Google address search proxy error:', error);
-    return [];
+    console.error('Google place details proxy error:', error);
+    return null;
   }
 }
 
@@ -1775,6 +1782,8 @@ export async function getMyWorkerProfileDetails(): Promise<MyWorkerProfileDetail
 }
 
 export async function updateWorkerProfileDetails(data: {
+  // YYYY-MM-DD; the backend rejects anyone under 18.
+  birthDate?: string;
   bio?: string;
   serviceAreaRadius?: number;
   address?: string;
@@ -2447,19 +2456,25 @@ export async function getKycDocuments(): Promise<KycDocumentRecord[]> {
   }
 }
 
-export async function acceptContract(
-  contractType: 'WORKER_SERVICE_AGREEMENT' | 'CLIENT_USER_AGREEMENT',
-) {
+export async function acceptContract(contractType: LegalDocumentType) {
   try {
+    // The server records its own timestamp, IP and device; the app only
+    // says which document and which version was shown.
     const response = await api.post('/users/me/contract-acceptance', {
       contractType,
-      acceptedAt: new Date().toISOString(),
+      contractVersion: LEGAL_VERSIONS[contractType],
     });
     return response;
   } catch (error) {
     console.error('Accept contract error:', error);
     throw error;
   }
+}
+
+// Unauthenticated: a suspended/banned user can't log in, so they prove it's
+// their account with email + password instead (see authController).
+export async function requestSuspensionReview(email: string, password: string, message: string) {
+  return api.post('/auth/suspension-review', { email, password, message });
 }
 
 export async function changePassword(currentPassword: string, newPassword: string) {

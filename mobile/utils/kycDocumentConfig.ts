@@ -41,11 +41,13 @@ export const documentRequirements: Record<KycDocumentKey, DocumentRequirement> =
     accepts: ["application/pdf", "image/jpeg", "image/jpg", "image/png"],
     description: "Upload a PDF or photo of your NBI clearance.",
   },
+  // Optional: the required NBI clearance already covers the background check.
+  // Must match backend TIER_1_REQUIRED_DOCUMENT_TYPES (constants/kycRequirements.ts).
   barangayClearance: {
     label: "Barangay Clearance",
-    required: true,
+    required: false,
     accepts: ["application/pdf", "image/jpeg", "image/jpg", "image/png"],
-    description: "Upload a PDF or photo of your barangay clearance.",
+    description: "Optional. Upload a PDF or photo of your barangay clearance.",
   },
   policeClearance: {
     label: "Police Clearance",

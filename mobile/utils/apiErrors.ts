@@ -6,6 +6,9 @@ export type ApiErrorShape = {
   type: ApiErrorType;
   message: string;
   statusCode?: number;
+  // Machine-readable reason from the backend, when it sends one
+  // (e.g. "ACCOUNT_SUSPENDED" on login).
+  code?: string;
 };
 
 export function normalizeError(err: unknown): ApiErrorShape {
@@ -52,7 +55,13 @@ export function normalizeError(err: unknown): ApiErrorShape {
     if (status && status >= 500) {
       return { type: "server", message, statusCode: status };
     }
-    return { type: "validation", message, statusCode: status };
+    const code = (err.response.data as { code?: unknown } | undefined)?.code;
+    return {
+      type: "validation",
+      message,
+      statusCode: status,
+      ...(typeof code === "string" ? { code } : {}),
+    };
   }
 
   if (err instanceof Error) {

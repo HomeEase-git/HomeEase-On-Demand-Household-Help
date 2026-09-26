@@ -14,13 +14,12 @@ import {
  * already exist, so a fresh environment doesn't need a manual dashboard
  * setup step.
  *
- * kyc-documents is created public (not signed-URL private, unlike
- * tax-certificates) to match how the app actually reads it —
- * uploadController.ts and verificationController.ts both call
- * .getPublicUrl() on it, never .createSignedUrl(). That's a pre-existing
- * design choice (worth reconsidering separately, since it means a leaked
- * URL exposes a government ID with no expiry) — not something to silently
- * change here, since doing so would break every existing KYC document URL.
+ * kyc-documents, resumes and chat-images are private: they hold government
+ * IDs, NBI clearances, selfies, resumes and in-home photos, so objects are
+ * only ever served as short-lived signed URLs (see utils/storageUrls.ts and
+ * middleware/signStorageUrls.ts). This only affects newly created buckets —
+ * an existing public bucket must be switched to private in the Supabase
+ * dashboard, AFTER the backend that signs URLs is deployed.
  */
 export const ensureStorageBuckets = async () => {
   const { data: buckets, error: listError } = await supabase.storage.listBuckets();
@@ -31,35 +30,31 @@ export const ensureStorageBuckets = async () => {
   }
 
   const existingNames = new Set((buckets ?? []).map((bucket) => bucket.name));
-  const publicBuckets = [AVATAR_BUCKET, RESUME_BUCKET, BOOKING_PHOTO_BUCKET, CHAT_IMAGE_BUCKET, KYC_DOCUMENT_BUCKET, PROMO_BANNER_BUCKET];
+  // Private buckets (tax certificates carry TINs and income figures) are
+  // served only via short-lived signed URLs.
+  const bucketVisibility: Array<[string, boolean]> = [
+    [AVATAR_BUCKET, true],
+    [BOOKING_PHOTO_BUCKET, true],
+    [PROMO_BANNER_BUCKET, true],
+    [KYC_DOCUMENT_BUCKET, false],
+    [RESUME_BUCKET, false],
+    [CHAT_IMAGE_BUCKET, false],
+    [TAX_CERTIFICATE_BUCKET, false],
+  ];
 
-  for (const bucketName of publicBuckets) {
+  for (const [bucketName, isPublic] of bucketVisibility) {
     if (existingNames.has(bucketName)) {
       continue;
     }
 
     const { error: createError } = await supabase.storage.createBucket(bucketName, {
-      public: true,
+      public: isPublic,
     });
 
     if (createError) {
       console.error(`Failed to create Supabase storage bucket "${bucketName}":`, createError);
     } else {
       console.log(`Created Supabase storage bucket "${bucketName}"`);
-    }
-  }
-
-  if (!existingNames.has(TAX_CERTIFICATE_BUCKET)) {
-    // Private — contains worker TINs and income figures, served only via
-    // short-lived signed URLs (see taxCertificateService).
-    const { error: createError } = await supabase.storage.createBucket(TAX_CERTIFICATE_BUCKET, {
-      public: false,
-    });
-
-    if (createError) {
-      console.error(`Failed to create Supabase storage bucket "${TAX_CERTIFICATE_BUCKET}":`, createError);
-    } else {
-      console.log(`Created Supabase storage bucket "${TAX_CERTIFICATE_BUCKET}"`);
     }
   }
 };

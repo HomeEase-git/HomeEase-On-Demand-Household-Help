@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import { COMPANY } from "../../../constants/legalDocuments";
 import { View, Text, ScrollView, Switch, Pressable, Linking } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter, useFocusEffect } from "expo-router";
@@ -137,7 +138,7 @@ export default function WorkerPrivacySettingsScreen() {
           style={cardShadow}
           onPress={() =>
             Linking.openURL(
-              "mailto:support@homeease.com?subject=" +
+              `mailto:${COMPANY.privacyEmail}?subject=` +
                 encodeURIComponent("Data export request"),
             ).catch(() => {})
           }

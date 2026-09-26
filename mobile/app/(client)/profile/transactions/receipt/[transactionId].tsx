@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import { COMPANY } from "../../../../../constants/legalDocuments";
 import { View, Text, ScrollView, Share } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter, useLocalSearchParams } from "expo-router";
@@ -170,7 +171,7 @@ export default function ReceiptScreen() {
               Thank you for using HomeEase!
             </Text>
             <Text className="text-accent text-xs text-center mt-1">
-              support@homeease.com
+              {COMPANY.supportEmail}
             </Text>
           </View>
         </View>

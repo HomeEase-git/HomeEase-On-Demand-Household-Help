@@ -6,27 +6,28 @@
     "development": {
       "developmentClient": true,
       "distribution": "internal",
+      "environment": "development",
       "env": {
         "EXPO_PUBLIC_API_URL": "http://10.0.2.2:3000"
       }
     },
     "preview": {
       "distribution": "internal",
+      "environment": "preview",
       "android": {
         "buildType": "apk"
       },
       "env": {
-        "EXPO_PUBLIC_API_URL": "https://homeease-on-demand-household-help.onrender.com",
-        "EXPO_PUBLIC_GOOGLE_MAPS_API_KEY": "AIzaSyBvOCCh-ki3RtI2cbv_UQpcEDWpJ4SIIdU"
+        "EXPO_PUBLIC_API_URL": "https://homeease-on-demand-household-help.onrender.com"
       }
     },
     "production": {
+      "environment": "production",
       "android": {
         "buildType": "apk"
       },
       "env": {
-        "EXPO_PUBLIC_API_URL": "https://homeease-on-demand-household-help.onrender.com",
-        "EXPO_PUBLIC_GOOGLE_MAPS_API_KEY": "AIzaSyBvOCCh-ki3RtI2cbv_UQpcEDWpJ4SIIdU"
+        "EXPO_PUBLIC_API_URL": "https://homeease-on-demand-household-help.onrender.com"
       }
     }
   },

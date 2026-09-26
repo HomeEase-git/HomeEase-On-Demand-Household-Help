@@ -1,3 +1,4 @@
+import { downloadStorageObject } from '@utils/storageUrls';
 import prisma from '@config/database';
 
 const ANTHROPIC_MODEL = process.env.ANTHROPIC_MODEL || 'claude-sonnet-5';
@@ -22,11 +23,10 @@ export async function parseWorkerResume(workerProfileId: string, resumeUrl: stri
     throw new Error('Resume parsing is not configured (ANTHROPIC_API_KEY missing)');
   }
 
-  const fileResponse = await fetch(resumeUrl);
-  if (!fileResponse.ok) {
-    throw new Error(`Failed to fetch resume file (status ${fileResponse.status})`);
-  }
-  const buffer = Buffer.from(await fileResponse.arrayBuffer());
+  // Service-key download: the resumes bucket is private.
+  const buffer = await downloadStorageObject(resumeUrl).catch((error: unknown) => {
+    throw new Error(`Failed to fetch resume file (${error instanceof Error ? error.message : 'unknown error'})`);
+  });
 
   const prompt = `Extract structured information from this worker's resume/CV for a Philippines household-services marketplace (trades like plumbing, electrical, aircon repair, cleaning, carpentry, painting, gardening, appliance repair). Respond with ONLY a JSON object — no markdown code fences, no commentary — matching exactly this shape:
 {
