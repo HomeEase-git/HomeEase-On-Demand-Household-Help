@@ -126,11 +126,10 @@ export const TASK_PRICING_MODELS = ['FIXED', 'PER_UNIT', 'TIERED', 'CUSTOM_QUOTE
 export type TaskPricingModel = (typeof TASK_PRICING_MODELS)[number];
 
 // A specific bookable job within a category (e.g. "Toilet Repair" under
-// "Plumbing Repair") — a worker prices these individually (see
-// WorkerTaskPrice), rather than every worker charging the category's one
-// flat basePrice. minPrice/maxPrice are the admin-allowed bound a worker's
-// own price must fall inside; both null for CUSTOM_QUOTE (worker quotes
-// on-site, no upfront price at all).
+// "Plumbing Repair"), priced by the admin — basePrice is the same at every
+// pro (before their tier surcharge and distance fee). minPrice/maxPrice both
+// carry that price for the estimate preview; both null for CUSTOM_QUOTE
+// (worker quotes on-site, no upfront price at all).
 export type ServiceTaskOption = {
   id: string;
   name: string;

@@ -7,24 +7,31 @@ type Props = {
   isAvailable: boolean | null;
   saving: boolean;
   onChange: (value: boolean) => void;
+  /** Account setup isn't finished, so requests can't reach them even when online. */
+  setupIncomplete?: boolean;
 };
 
 /** The worker's Online/Offline switch — whether new job requests can reach them. */
-export const AvailabilityToggle: React.FC<Props> = ({ isAvailable, saving, onChange }) => {
+export const AvailabilityToggle: React.FC<Props> = ({ isAvailable, saving, onChange, setupIncomplete }) => {
   const online = isAvailable === true;
+  const reachable = online && !setupIncomplete;
   return (
     <View
       className={`flex-row items-center rounded-2xl p-4 mx-4 mt-3 border ${
-        online ? "bg-success/10 border-success/30" : "bg-card border-divider"
+        reachable ? "bg-success/10 border-success/30" : "bg-card border-divider"
       }`}
     >
-      <View className={`w-3 h-3 rounded-full mr-3 ${online ? "bg-success" : "bg-neutral-400"}`} />
+      <View className={`w-3 h-3 rounded-full mr-3 ${reachable ? "bg-success" : "bg-neutral-400"}`} />
       <View className="flex-1 mr-3">
         <Text className="text-text-primary font-bold text-base">
           {isAvailable === null ? "Checking…" : online ? "You're online" : "You're offline"}
         </Text>
         <Text className="text-text-secondary text-xs mt-0.5">
-          {online ? "New job requests can reach you." : "You won't get new job requests until you go online."}
+          {!online
+            ? "You won't get new job requests until you go online."
+            : setupIncomplete
+              ? "Finish your account setup before job requests can reach you."
+              : "New job requests can reach you."}
         </Text>
       </View>
       {saving || isAvailable === null ? (

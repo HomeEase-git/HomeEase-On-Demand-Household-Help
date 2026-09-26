@@ -1,7 +1,7 @@
 import request from 'supertest';
 import app from '@/app';
 import prisma from '@config/database';
-import { createTestUser, deleteTestUser } from './helpers';
+import { createTestUser, deleteTestUser, completeWorkerSetup } from './helpers';
 
 // Manila coordinates, mirroring tests/bookingFlow.test.ts.
 const CLIENT_LOCATION = { lat: 14.5995, lng: 120.9842 };
@@ -50,6 +50,7 @@ describe('Multi-day upfront booking — POST /api/bookings/multi-day', () => {
       },
     });
     workerProfileId = workerProfile.id;
+    await completeWorkerSetup(workerId, { serviceTypeId, ...CLIENT_LOCATION });
   });
 
   afterAll(async () => {

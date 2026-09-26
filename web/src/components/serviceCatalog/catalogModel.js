@@ -15,23 +15,18 @@ export const QUESTION_TYPES = {
   YESNO: { label: 'Yes / No', hint: 'Quick toggle', example: 'e.g. Has pets?' },
 }
 
+// Prices are set here only; workers can't change them. (The old "worker
+// price steps" model is retired — a saved one opens as Price × count.)
 export const PRICING_MODELS = {
   FIXED: { label: 'Flat price', hint: 'One price for the whole job or visit.' },
   PER_UNIT: { label: 'Price × count', hint: 'Multiplied by a number question, e.g. How many units?' },
-  TIERED: { label: 'Worker price steps', hint: 'Each worker sets price steps against a number question, e.g. up to 10 sq.m.' },
   CUSTOM_QUOTE: { label: 'Custom quote', hint: 'The worker inspects, then sends a price for approval.' },
 }
 
 export const COMMON_UNITS = ['job', 'visit', 'unit', 'piece', 'item', 'room', 'door', 'basket', 'set', 'sq.m.', 'house', 'area', 'line', 'trip', 'kilo']
 
-export const usesCount = (model) => model === 'PER_UNIT' || model === 'TIERED'
+export const usesCount = (model) => model === 'PER_UNIT'
 export const isChoiceType = (type) => type === 'ONE' || type === 'ANY'
-
-// Default worker price range around the standard price (80%–150%).
-export const defaultBounds = (price) => ({
-  minPrice: Math.round(price * 0.8),
-  maxPrice: Math.round(price * 1.5),
-})
 
 export function formatPeso(amount) {
   const num = Number(amount)
@@ -90,9 +85,7 @@ export function serviceToDraft(service) {
     description: t.description || '',
     unit: t.unitLabel || '',
     price: t.basePrice,
-    minPrice: t.minPrice,
-    maxPrice: t.maxPrice,
-    model: t.pricingModel,
+    model: t.pricingModel === 'TIERED' ? 'PER_UNIT' : t.pricingModel,
     durationHours: t.durationHours ?? '',
     isActive: t.isActive,
     overrideReason: '',
@@ -180,8 +173,6 @@ export function draftToPayload(draft) {
         description: j.description.trim() || null,
         basePrice: quote ? 0 : Number(j.price),
         pricingModel: j.model,
-        minPrice: quote ? null : Number(j.minPrice),
-        maxPrice: quote ? null : Number(j.maxPrice),
         unitLabel: j.unit.trim() || null,
         quantityFieldRef: usesCount(j.model) ? j.quantityRef : null,
         durationHours: quote || j.durationHours === '' || j.durationHours == null ? null : Number(j.durationHours),
@@ -217,12 +208,9 @@ export function validateDraft(draft, doleFloor) {
     const name = j.name.trim() || 'Untitled job'
     if (!j.name.trim()) return 'A job has no name.'
     if (j.model !== 'CUSTOM_QUOTE') {
-      if (!(Number(j.price) > 0)) return `“${name}” needs a standard price above ₱0.`
-      if (!(Number(j.minPrice) >= 0) || !(Number(j.maxPrice) >= Number(j.minPrice))) {
-        return `“${name}”: the lowest worker price must be at or below the highest.`
-      }
-      if (doleFloor && Number(j.minPrice) < doleFloor && !j.overrideReason.trim()) {
-        return `“${name}”: the lowest worker price is under the DOLE hourly wage reference (₱${doleFloor.toFixed(2)}). Edit the job and give a reason to keep it.`
+      if (!(Number(j.price) > 0)) return `“${name}” needs a price above ₱0.`
+      if (doleFloor && Number(j.price) < doleFloor && !j.overrideReason.trim()) {
+        return `“${name}”: the price is under the DOLE hourly wage reference (₱${doleFloor.toFixed(2)}). Edit the job and give a reason to keep it.`
       }
     }
     if (usesCount(j.model)) {

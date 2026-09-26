@@ -179,6 +179,8 @@ enum NotificationType {
   // document status, so it's a separate, additional notification.
   SERVICE_CATEGORY_VERIFIED
   SERVICE_CATEGORY_REJECTED
+  PACKAGE_APPROVED
+  PACKAGE_REJECTED
 }
 
 enum TimeSlot {
@@ -218,19 +220,17 @@ enum ScopeFieldType {
   NUMBER
 }
 
-// FIXED: one admin-bounded price, worker sets a single number.
-// PER_UNIT: worker sets a rate; final price = rate x the answer to
+// Prices are admin-set only (ServiceTask.basePrice) — see taskPriceService.
+// FIXED: basePrice is the flat price.
+// PER_UNIT: basePrice is the rate; final price = rate x the answer to
 // ServiceTask.quantityScopeField (e.g. per-kilo laundry, per-sqm painting).
 // CUSTOM_QUOTE: no upfront price at all — worker quotes after inspecting,
 // via the existing submitQuote flow (see bookingController.submitQuote).
 enum TaskPricingModel {
   FIXED
   PER_UNIT
-  // Worker-defined price steps against the same quantity field PER_UNIT
-  // uses (e.g. "up to 10 sqm -> P1000, up to 20 sqm -> P2100") — see
-  // WorkerTaskTierPrice. Admin config is identical to PER_UNIT (one
-  // quantityScopeFieldId + one minPrice/maxPrice bound); only the worker's
-  // own WorkerTaskTierPrice rows differ from a PER_UNIT worker's single rate.
+  // Retired: was worker-defined price steps (WorkerTaskTierPrice). Can no
+  // longer be picked; a leftover task is charged like PER_UNIT.
   TIERED
   CUSTOM_QUOTE
 }
@@ -996,11 +996,20 @@ model WorkerPackage {
   price       Float
   isActive    Boolean @default(true)
 
+  // Admin approval — a worker proposes the package (name, details, price)
+  // and clients only see/book it once APPROVED (see adminPackageController).
+  // Any content edit sends it back to PENDING; pausing (isActive) doesn't.
+  status          KycDocumentStatus @default(PENDING)
+  rejectionReason String?
+  reviewedAt      DateTime?
+  reviewedById    String? // soft reference — User.id of the admin who reviewed it
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@index([workerProfileId])
   @@index([serviceTypeId])
+  @@index([status])
 }
 
 model ServiceTask {
@@ -1014,19 +1023,16 @@ model ServiceTask {
   // ties fall back to name.
   sortOrder   Int     @default(0)
 
-  // "Typical/suggested" price — shown as the category-level range preview
-  // before a client picks a worker (Booking Steps 1-2). Since WorkerTaskPrice
-  // was introduced, this is NOT what a client is actually charged; see that
-  // model + bookingController.createBooking for the authoritative per-worker
-  // price. Kept as the seed anchor for minPrice/maxPrice below.
+  // The admin-set price every client pays and every worker earns for this
+  // job (the flat price for FIXED, the per-unit rate for PER_UNIT), before
+  // the worker's expertise-tier surcharge and the distance fee. 0 for
+  // CUSTOM_QUOTE. Workers can't change it (see taskPriceService).
   basePrice Float
 
   pricingModel TaskPricingModel @default(FIXED)
 
-  // Admin-allowed bound on what a worker may set via WorkerTaskPrice. FIXED:
-  // bounds the flat price. PER_UNIT: bounds the per-unit rate. TIERED: bounds
-  // every row of a worker's WorkerTaskTierPrice table. Both null for
-  // CUSTOM_QUOTE (nothing to bound — worker prices on-site).
+  // Retired: the old range a worker could set their own price within.
+  // No longer read or written; kept so old rows/backups still load.
   minPrice Float?
   maxPrice Float?
 
@@ -1056,7 +1062,9 @@ model ServiceTask {
   @@index([quantityScopeFieldId])
 }
 
-// A worker's own price for one ServiceTask, within that task's admin-set
+// RETIRED — workers no longer set prices (see taskPriceService); nothing
+// reads or writes this table any more. Kept for history.
+// Was: a worker's own price for one ServiceTask, within that task's admin-set
 // minPrice/maxPrice bound — mirrors WorkerPackage's shape and trust model
 // exactly (ownership-gated CRUD in workerController, never trusted from the
 // client at booking time: bookingController.createBooking re-fetches this
@@ -1082,7 +1090,8 @@ model WorkerTaskPrice {
   @@index([serviceTaskId])
 }
 
-// A worker's own price *step* for a TIERED task — a worker has several of
+// RETIRED along with TIERED pricing — nothing reads or writes it any more.
+// Was: a worker's own price *step* for a TIERED task — a worker has several of
 // these per task (not unique per worker+task like WorkerTaskPrice, since a
 // price table is many rows), each row valid for quantities up to `upToQty`.
 // Resolution (see taskPriceService.resolveTierPrice) walks a worker's rows in

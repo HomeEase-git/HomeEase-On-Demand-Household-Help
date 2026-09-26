@@ -103,6 +103,7 @@ export default function PackagesScreen() {
         setPackages((prev) => [...prev, created]);
       }
       setShowModal(false);
+      alertModal.success("Submitted for review", "Clients will see this package once an admin approves it.");
     } catch (error) {
       console.error("Save package error:", error);
       alertModal.error("Error", "Failed to save package. Please try again.");
@@ -140,8 +141,10 @@ export default function PackagesScreen() {
         contentContainerStyle={{ padding: 16, paddingBottom: 80 }}
         ListHeaderComponent={
           <Text className="text-text-muted text-sm mb-4">
-            Offer priced bundles for your services, like &quot;Deep Clean —
-            ₱1500&quot;. Clients can add them when booking you.
+            Propose bundles for your services, like &quot;Deep Clean —
+            ₱1500&quot;. An admin reviews each package and its price before
+            clients can add it when booking you. Editing a package sends it
+            back for review.
           </Text>
         }
         ListEmptyComponent={
@@ -166,7 +169,8 @@ export default function PackagesScreen() {
         )}
       />
       <Pressable accessibilityRole="button" accessibilityLabel="Add package"
-        className="absolute bottom-6 right-6 w-14 h-14 bg-accent rounded-full items-center justify-center"
+        // Sits above the setup reminder bar when that's showing.
+        className="absolute bottom-16 right-6 w-14 h-14 bg-accent rounded-full items-center justify-center"
         style={cardShadow}
         onPress={openCreateModal}
       >
@@ -236,7 +240,7 @@ export default function PackagesScreen() {
                 multiline
               />
               <InputField
-                label="Price (₱)"
+                label="Proposed price (₱)"
                 value={price}
                 onChangeText={setPrice}
                 placeholder="e.g. 1500"
@@ -245,7 +249,7 @@ export default function PackagesScreen() {
 
               <View className="gap-3 mt-2">
                 <PrimaryButton
-                  label={editingId ? "Save Changes" : "Add Package"}
+                  label={editingId ? "Save & Resubmit" : "Submit for Review"}
                   fullWidth
                   onPress={handleSave}
                   disabled={saving || myServiceTypes.length === 0}
