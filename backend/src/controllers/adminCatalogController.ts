@@ -5,7 +5,6 @@ import { errorResponse } from '@utils/errorResponse';
 import { writeAuditLog } from '@utils/auditLog';
 import { VALID_SERVICE_ICONS } from '@/constants/serviceIcons';
 import { checkDoleFloor } from '@services/pricingRuleService';
-import { carryWorkerPricesAcrossModelChange } from '@services/taskPriceService';
 import { getHighestDoleWageReference } from '@/constants/doleWageReference';
 import {
   VALID_FIELD_TYPES,
@@ -40,7 +39,7 @@ interface AuthRequest extends Request {
 type CatalogTaskInput = TaskInputBody & {
   id?: string;
   key?: string;
-  // id or key of the NUMBER question that supplies a PER_UNIT/TIERED job's quantity.
+  // id or key of the NUMBER question that supplies a PER_UNIT job's quantity.
   quantityFieldRef?: string | null;
 };
 
@@ -183,8 +182,9 @@ function taskData(task: CatalogTaskInput, sortOrder: number) {
     sortOrder,
     basePrice: task.basePrice!,
     pricingModel: task.pricingModel as TaskPricingModel,
-    minPrice: isCustomQuote ? null : task.minPrice!,
-    maxPrice: isCustomQuote ? null : task.maxPrice!,
+    // Retired worker price range — see ServiceTask.minPrice.
+    minPrice: null,
+    maxPrice: null,
     // Display-only for FIXED/CUSTOM_QUOTE (the matrix's "per visit").
     unitLabel: task.unitLabel?.trim() || null,
     durationHours: isCustomQuote ? null : task.durationHours ?? null,
@@ -218,10 +218,8 @@ export async function writeCatalog(
 
   // 1. Jobs, minus their count question (it may not exist yet).
   const taskIdByRef = new Map<string, string>();
-  const previousModel = new Map(existing?.tasks.map((t) => [t.id, t.pricingModel]) ?? []);
   for (const [index, task] of tasks.entries()) {
     if (task.id) {
-      await carryWorkerPricesAcrossModelChange(tx, task.id, previousModel.get(task.id)!, task.pricingModel!);
       await tx.serviceTask.update({
         where: { id: task.id },
         data: { ...taskData(task, index), ...(task.isActive !== undefined && { isActive: task.isActive }) },
@@ -278,7 +276,7 @@ export async function writeCatalog(
 
   // 3. Now every question has a real id, point per-unit jobs at their count.
   for (const task of tasks) {
-    const hasQuantity = task.pricingModel === 'PER_UNIT' || task.pricingModel === 'TIERED';
+    const hasQuantity = task.pricingModel === 'PER_UNIT';
     await tx.serviceTask.update({
       where: { id: taskIdByRef.get(refOf(task))! },
       data: { quantityScopeFieldId: hasQuantity ? fieldIdByRef.get(task.quantityFieldRef!)! : null },
@@ -317,7 +315,7 @@ async function saveCatalog(req: AuthRequest, res: Response, serviceTypeId: strin
   const doleNotes: string[] = [];
   for (const task of tasks) {
     if (task.pricingModel === 'CUSTOM_QUOTE') continue;
-    const check = checkDoleFloor(getHighestDoleWageReference(), task.minPrice!, task.overrideReason);
+    const check = checkDoleFloor(getHighestDoleWageReference(), task.basePrice!, task.overrideReason);
     if (check.blocked) {
       return res.status(400).json(errorResponse(400, `Job "${task.name!.trim()}": ${check.message}`));
     }

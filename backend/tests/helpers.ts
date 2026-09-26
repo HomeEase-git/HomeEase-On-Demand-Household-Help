@@ -87,3 +87,48 @@ export async function deleteTestBooking(bookingId: string) {
     // Already removed (e.g. cascaded from a user delete) — fine.
   });
 }
+// Fills in everything a worker must set up before they can be found,
+// booked or accept a request (see services/workerSetupService.ts): photo,
+// payout method, geocoded address, a weekly availability pattern and one
+// ticked task under a VERIFIED service. Pass serviceTypeId to register the
+// worker for an existing service; otherwise a throwaway one is created and
+// its id returned so the test can delete it (tasks/selections cascade).
+export async function completeWorkerSetup(
+  workerUserId: string,
+  options: { serviceTypeId?: string; lat?: number; lng?: number } = {}
+): Promise<{ createdServiceTypeId: string | null; serviceTaskId: string }> {
+  const createdServiceType = options.serviceTypeId
+    ? null
+    : await prisma.serviceType.create({ data: { name: `e2e setup ${randomUUID().slice(0, 8)}`, basePrice: 500 } });
+  const serviceTypeId = options.serviceTypeId ?? createdServiceType!.id;
+
+  await prisma.user.update({ where: { id: workerUserId }, data: { avatar: 'https://example.invalid/avatar.png' } });
+  const profile = await prisma.workerProfile.update({
+    where: { userId: workerUserId },
+    data: {
+      payoutMethod: 'GCASH',
+      payoutAccountName: 'Test Worker',
+      payoutAccountNumber: '09171234567',
+      address: '123 Test St',
+      city: 'Manila',
+      addressLat: options.lat ?? 14.5995,
+      addressLng: options.lng ?? 120.9842,
+    },
+  });
+  await prisma.workerAvailabilityTemplate.upsert({
+    where: { workerProfileId_dayOfWeek_timeSlot: { workerProfileId: profile.id, dayOfWeek: 1, timeSlot: 'MORNING' } },
+    create: { workerProfileId: profile.id, dayOfWeek: 1, timeSlot: 'MORNING' },
+    update: {},
+  });
+  await prisma.workerServiceCategory.upsert({
+    where: { workerProfileId_serviceTypeId: { workerProfileId: profile.id, serviceTypeId } },
+    create: { workerProfileId: profile.id, serviceTypeId, status: 'VERIFIED', verifiedAt: new Date() },
+    update: { status: 'VERIFIED' },
+  });
+  const task = await prisma.serviceTask.create({
+    data: { serviceTypeId, name: `e2e setup task ${randomUUID().slice(0, 8)}`, basePrice: 500 },
+  });
+  await prisma.workerTaskSelection.create({ data: { workerProfileId: profile.id, serviceTaskId: task.id } });
+
+  return { createdServiceTypeId: createdServiceType?.id ?? null, serviceTaskId: task.id };
+}

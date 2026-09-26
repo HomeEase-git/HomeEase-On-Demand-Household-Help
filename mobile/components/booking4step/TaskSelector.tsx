@@ -15,15 +15,14 @@ function taskPriceLabel(task: ServiceTaskOption): string {
   const suffix = task.pricingModel === "PER_UNIT" || task.pricingModel === "TIERED" ? `/${task.unitLabel}` : "";
   if (task.minPrice == null || task.maxPrice == null) return "";
   return task.minPrice === task.maxPrice
-    ? `~₱${task.minPrice}${suffix}`
+    ? `₱${task.minPrice.toLocaleString("en-PH")}${suffix}`
     : `₱${task.minPrice} – ₱${task.maxPrice}${suffix}`;
 }
 
 /**
  * List-style task picker shown once a category is selected (Step 1) —
  * lets the client pick the specific job (e.g. "Toilet Repair" under
- * "Plumbing Repair") a worker prices individually, instead of booking the
- * whole category at one flat admin price.
+ * "Plumbing Repair"), each with its own admin-set price.
  */
 export default function TaskSelector({ tasks, selectedId, onSelect }: Props) {
   return (

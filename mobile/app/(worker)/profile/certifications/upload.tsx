@@ -28,19 +28,8 @@ function maskDateInput(raw: string): string {
 export default function UploadCertificationScreen() {
   const router = useRouter();
   const alertModal = useAlertModal();
-  const { certId, serviceTypeId: gateServiceTypeId, taskId: gateTaskId, purpose } = useLocalSearchParams<{
-    certId?: string;
-    serviceTypeId?: string;
-    taskId?: string;
-    purpose?: string;
-  }>();
+  const { certId } = useLocalSearchParams<{ certId?: string }>();
   const isEditMode = !!certId;
-  // Reached from the Skills & Services screen when checking the first task
-  // under a 2nd+ (or previously-declined) category — a single document here
-  // both creates the Certification AND submits that category for review
-  // (see selectTask on save below), instead of just tagging an
-  // independently-uploaded one.
-  const isCategoryGateMode = purpose === "category-gate" && !!gateServiceTypeId && !!gateTaskId;
   const sheetRef = React.useRef<BottomSheetHandle | null>(null);
   const [name, setName] = useState("");
   const [issuer, setIssuer] = useState("");
@@ -51,7 +40,7 @@ export default function UploadCertificationScreen() {
   const [loading, setLoading] = useState(isEditMode);
   const [saving, setSaving] = useState(false);
   const [serviceTypes, setServiceTypes] = useState<ServiceTypeOption[]>([]);
-  const [serviceTypeId, setServiceTypeId] = useState<string | null>(isCategoryGateMode ? gateServiceTypeId! : null);
+  const [serviceTypeId, setServiceTypeId] = useState<string | null>(null);
 
   useEffect(() => {
     api
@@ -127,17 +116,6 @@ export default function UploadCertificationScreen() {
           serviceTypeId,
         });
         alertModal.success("Success", "Certification updated successfully.");
-      } else if (isCategoryGateMode) {
-        const created = await api.addCertification({
-          name: name.trim(),
-          issuer: issuer.trim(),
-          issueDate: issueDate.trim(),
-          expiryDate: expiryDate.trim() || null,
-          documentUrl: documentUrl as string,
-          serviceTypeId,
-        });
-        await api.selectTask(gateTaskId!, { certificationId: created.id });
-        alertModal.success("Submitted", "Pending admin review. You'll be notified once it's approved.");
       } else {
         await api.addCertification({
           name: name.trim(),
@@ -167,7 +145,7 @@ export default function UploadCertificationScreen() {
   return (
     <SafeAreaView className="flex-1 bg-white">
       <ScreenHeader
-        title={isEditMode ? "Edit Certification" : isCategoryGateMode ? "Verify New Category" : "Upload Certification"}
+        title={isEditMode ? "Edit Certification" : "Upload Certification"}
         showBack
       />
       <KeyboardAwareScrollView contentContainerStyle={{ padding: 24 }}>
@@ -204,47 +182,34 @@ export default function UploadCertificationScreen() {
           keyboardType="number-pad"
           editable={!loading}
         />
-        {isCategoryGateMode ? (
-          <View className="mb-4 bg-card rounded-xl p-4">
-            <Text className="text-text-secondary font-semibold text-sm mb-1">Category</Text>
-            <Text className="text-text-primary font-bold text-sm mb-2">
-              {serviceTypes.find((s) => s.id === gateServiceTypeId)?.name ?? "This service"}
+        {serviceTypes.length > 0 && (
+          <View className="mb-4">
+            <Text className="text-text-secondary font-semibold text-sm mb-2">
+              Related Category (optional)
             </Text>
-            <Text className="text-text-muted text-xs">
-              Extra services need one supporting document for admin review. This service isn&apos;t
-              bookable until it&apos;s approved.
+            <Text className="text-text-muted text-xs mb-2">
+              Tag a licensed trade if this certificate covers its requirement. An admin still has to
+              approve it.
             </Text>
-          </View>
-        ) : (
-          serviceTypes.length > 0 && (
-            <View className="mb-4">
-              <Text className="text-text-secondary font-semibold text-sm mb-2">
-                Related Category (optional)
-              </Text>
-              <Text className="text-text-muted text-xs mb-2">
-                Tag a licensed trade if this certificate covers its requirement. An admin still has to
-                approve it.
-              </Text>
-              <View className="flex-row flex-wrap gap-2">
-                {serviceTypes.map((s) => {
-                  const isSelected = serviceTypeId === s.id;
-                  return (
-                    <Pressable
-                      key={s.id}
-                      onPress={() => setServiceTypeId(isSelected ? null : s.id)}
-                      className={`rounded-xl px-3.5 py-2.5 border-2 ${
-                        isSelected ? "bg-accent/10 border-accent" : "bg-card border-transparent"
-                      }`}
-                    >
-                      <Text className={`text-sm font-medium ${isSelected ? "text-accent" : "text-text-secondary"}`}>
-                        {s.name}
-                      </Text>
-                    </Pressable>
-                  );
-                })}
-              </View>
+            <View className="flex-row flex-wrap gap-2">
+              {serviceTypes.map((s) => {
+                const isSelected = serviceTypeId === s.id;
+                return (
+                  <Pressable
+                    key={s.id}
+                    onPress={() => setServiceTypeId(isSelected ? null : s.id)}
+                    className={`rounded-xl px-3.5 py-2.5 border-2 ${
+                      isSelected ? "bg-accent/10 border-accent" : "bg-card border-transparent"
+                    }`}
+                  >
+                    <Text className={`text-sm font-medium ${isSelected ? "text-accent" : "text-text-secondary"}`}>
+                      {s.name}
+                    </Text>
+                  </Pressable>
+                );
+              })}
             </View>
-          )
+          </View>
         )}
         <UploadCard
           label="Tap to upload document photo"
@@ -259,7 +224,7 @@ export default function UploadCertificationScreen() {
         />
         <View className="mt-4">
           <PrimaryButton
-            label={isEditMode ? "Save Changes" : isCategoryGateMode ? "Submit for Review" : "Save Certification"}
+            label={isEditMode ? "Save Changes" : "Save Certification"}
             fullWidth
             onPress={handleSave}
             disabled={saving || loading}

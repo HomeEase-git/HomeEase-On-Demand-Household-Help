@@ -1887,16 +1887,13 @@ export type CertificationGateInput = {
 };
 
 /**
- * Add one service category. certificationId/certification are only consulted
- * when this is the worker's 2nd+ category and they don't already have an
- * approved certification for it — the resulting category may come back
- * PENDING_VERIFICATION rather than immediately usable. Also called
- * internally by selectTask below the first time a task under a not-yet-
- * connected category is picked.
+ * Request a service. The documents are what the admin reviews; the request
+ * usually comes back PENDING_VERIFICATION (a worker's very first service is
+ * approved straight away unless it requires a certification).
  */
 export async function addServiceCategory(
   serviceTypeId: string,
-  gate?: { certificationId?: string; certification?: CertificationGateInput }
+  gate?: { certificationId?: string; certifications?: CertificationGateInput[] }
 ): Promise<WorkerServiceCategory> {
   try {
     const response = await api.post('/workers/me/service-types', { serviceTypeId, ...gate });
@@ -1923,26 +1920,25 @@ export type TaskCatalogEntry = {
   serviceType: WorkerServiceType;
   categoryStatus: WorkerServiceCategoryStatus | null;
   gatingCertificationId: string | null;
+  rejectionReason: string | null;
+  requestedAt: string | null;
   tasks: Array<{
     task: {
       id: string;
       name: string;
       description?: string | null;
       pricingModel: TaskPricingModel;
-      minPrice: number | null;
-      maxPrice: number | null;
+      // The admin's price (read-only for workers); null for custom-quote jobs.
+      price: number | null;
       unitLabel: string | null;
     };
     mySelection: WorkerTaskSelection | null;
-    myPrice: WorkerTaskPrice | null;
-    myTiers: WorkerTaskTierPrice[];
   }>;
 };
 
 /**
- * One consolidated read for the task-first "Skills & Services" screen —
- * replaces separately calling getServiceTypes + getMyServiceTypes +
- * getMyTaskPrices.
+ * One consolidated read for the "Skills & Services" screen: every service
+ * with the worker's registration status and ticked tasks.
  */
 export async function getMyTaskCatalog(): Promise<TaskCatalogEntry[]> {
   try {
@@ -1954,17 +1950,12 @@ export async function getMyTaskCatalog(): Promise<TaskCatalogEntry[]> {
   }
 }
 
-/**
- * The primary "I offer this task" action. If the task's parent category
- * isn't connected yet (or was REJECTED), the backend runs the same category
- * gate addServiceCategory uses, passing through certificationId/certification.
- */
+/** "I do this task" — only under a service the worker is approved for. */
 export async function selectTask(
-  serviceTaskId: string,
-  gate?: { certificationId?: string; certification?: CertificationGateInput }
+  serviceTaskId: string
 ): Promise<{ taskSelection: WorkerTaskSelection; category: WorkerServiceCategory }> {
   try {
-    const response = await api.put(`/workers/me/task-selections/${serviceTaskId}`, gate ?? {});
+    const response = await api.put(`/workers/me/task-selections/${serviceTaskId}`, {});
     return response;
   } catch (error) {
     console.error('Select task error:', error);
@@ -1982,6 +1973,8 @@ export async function deselectTask(serviceTaskId: string) {
   }
 }
 
+export type PackageReviewStatus = 'PENDING' | 'APPROVED' | 'REJECTED';
+
 export type WorkerPackage = {
   id: string;
   serviceTypeId: string;
@@ -1990,7 +1983,29 @@ export type WorkerPackage = {
   description?: string | null;
   price: number;
   isActive: boolean;
+  // Clients only see APPROVED packages. Editing one sends it back to PENDING.
+  status: PackageReviewStatus;
+  rejectionReason?: string | null;
 };
+
+export type WorkerSetupItemKey = 'PROFILE_PHOTO' | 'PAYOUT_METHOD' | 'ADDRESS' | 'AVAILABILITY' | 'SERVICES';
+
+export type WorkerSetupStatus = {
+  complete: boolean;
+  items: { key: WorkerSetupItemKey; label: string; done: boolean }[];
+  missing: WorkerSetupItemKey[];
+};
+
+/** Until complete, the worker is hidden from clients and can't accept requests. */
+export async function getMySetupStatus(): Promise<WorkerSetupStatus> {
+  try {
+    const response = await api.get('/workers/me/setup-status');
+    return response;
+  } catch (error) {
+    console.error('Get setup status error:', error);
+    throw error;
+  }
+}
 
 export async function getMyPackages(): Promise<WorkerPackage[]> {
   try {
@@ -2040,7 +2055,7 @@ export async function deletePackage(packageId: string) {
   }
 }
 
-/** Public — a client viewing/booking a worker fetches that worker's active packages, optionally scoped to a service type. */
+/** Public — a client viewing/booking a worker fetches that worker's active, admin-approved packages, optionally scoped to a service type. */
 export async function getWorkerPackages(workerId: string, serviceTypeId?: string): Promise<WorkerPackage[]> {
   try {
     const query = serviceTypeId ? `?serviceTypeId=${encodeURIComponent(serviceTypeId)}` : '';
@@ -2053,65 +2068,6 @@ export async function getWorkerPackages(workerId: string, serviceTypeId?: string
 }
 
 export type TaskPricingModel = 'FIXED' | 'PER_UNIT' | 'TIERED' | 'CUSTOM_QUOTE';
-
-export type WorkerTaskPrice = {
-  id: string;
-  workerProfileId: string;
-  serviceTaskId: string;
-  price: number | null;
-  unitPrice: number | null;
-  isActive: boolean;
-};
-
-// One row of a worker's own TIERED price table — a worker has several of
-// these per task (not one), each valid for quantities up to `upToQty`; null
-// only on the last (highest) row means "this price and above." See backend
-// WorkerTaskTierPrice's docblock.
-export type WorkerTaskTierPrice = {
-  id: string;
-  workerProfileId: string;
-  serviceTaskId: string;
-  upToQty: number | null;
-  price: number;
-  isActive: boolean;
-};
-
-export type MyTaskPriceEntry = {
-  task: {
-    id: string;
-    name: string;
-    serviceTypeName: string;
-    pricingModel: TaskPricingModel;
-    minPrice: number | null;
-    maxPrice: number | null;
-    unitLabel: string | null;
-  };
-  myPrice: WorkerTaskPrice | null;
-  myTiers: WorkerTaskTierPrice[];
-};
-
-export async function getMyTaskPrices(): Promise<MyTaskPriceEntry[]> {
-  try {
-    const response = await api.get('/workers/me/task-prices');
-    return response.taskPrices ?? [];
-  } catch (error) {
-    console.error('Get task prices error:', error);
-    throw error;
-  }
-}
-
-export async function setMyTaskPrice(
-  serviceTaskId: string,
-  data: { price?: number; unitPrice?: number; tiers?: Array<{ upToQty: number | null; price: number }> },
-): Promise<WorkerTaskPrice | { tiers: WorkerTaskTierPrice[] }> {
-  try {
-    const response = await api.put(`/workers/me/task-prices/${serviceTaskId}`, data);
-    return response;
-  } catch (error) {
-    console.error('Set task price error:', error);
-    throw error;
-  }
-}
 
 export type VatSummary = {
   id: string;
@@ -2128,16 +2084,6 @@ export async function getMyVatSummary(): Promise<VatSummary[]> {
     return Array.isArray(response) ? response : [];
   } catch (error) {
     console.error('Get VAT summary error:', error);
-    throw error;
-  }
-}
-
-export async function deleteMyTaskPrice(serviceTaskId: string) {
-  try {
-    await api.delete(`/workers/me/task-prices/${serviceTaskId}`);
-    return true;
-  } catch (error) {
-    console.error('Delete task price error:', error);
     throw error;
   }
 }

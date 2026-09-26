@@ -122,7 +122,7 @@ export const validateAddServiceCategory = (
   res: Response,
   next: NextFunction
 ) => {
-  const { serviceTypeId, certificationId, certification } = req.body;
+  const { serviceTypeId, certificationId, certification, certifications } = req.body;
 
   if (typeof serviceTypeId !== 'string' || !serviceTypeId) {
     return res.status(400).json(errorResponse(400, 'serviceTypeId is required'));
@@ -134,6 +134,13 @@ export const validateAddServiceCategory = (
 
   if (certification !== undefined && (typeof certification !== 'object' || certification === null || Array.isArray(certification))) {
     return res.status(400).json(errorResponse(400, 'certification must be an object'));
+  }
+
+  if (
+    certifications !== undefined &&
+    (!Array.isArray(certifications) || certifications.some((c: unknown) => typeof c !== 'object' || c === null || Array.isArray(c)))
+  ) {
+    return res.status(400).json(errorResponse(400, 'certifications must be a list of objects'));
   }
 
   return next();

@@ -18,6 +18,8 @@ const KEYWORDS = {
   '/tax/certificates': 'bir 2307',
   '/reports/logs': 'audit logs export csv',
   '/promo-banners': 'carousel home ads',
+  '/service-requests': 'add category skills certification approve',
+  '/worker-packages': 'bundles approve price',
 }
 
 export const OPEN_COMMAND_PALETTE_EVENT = 'homeease:open-command-palette'

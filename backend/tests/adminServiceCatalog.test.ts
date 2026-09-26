@@ -30,8 +30,6 @@ describe('Admin service catalog save', () => {
     name,
     basePrice: 800,
     pricingModel: 'FIXED',
-    minPrice: 640,
-    maxPrice: 1200,
     ...extra,
   });
 
@@ -40,11 +38,9 @@ describe('Admin service catalog save', () => {
     description: 'Aircon cleaning and repair',
     basePrice: 350,
     tasks: [
-      job('t-diag', 'Diagnosis Fee', { basePrice: 350, minPrice: 280, maxPrice: 525 }),
+      job('t-diag', 'Diagnosis Fee', { basePrice: 350 }),
       job('t-split', 'Aircon Cleaning – Split Type', {
         basePrice: 1500,
-        minPrice: 1200,
-        maxPrice: 2250,
         pricingModel: 'PER_UNIT',
         unitLabel: 'unit',
         quantityFieldRef: 'f-units',
@@ -123,14 +119,12 @@ describe('Admin service catalog save', () => {
       name: created.name,
       basePrice: 350,
       tasks: [
-        { id: diag.id, name: diag.name, basePrice: 350, pricingModel: 'FIXED', minPrice: 280, maxPrice: 525, isActive: false },
+        { id: diag.id, name: diag.name, basePrice: 350, pricingModel: 'FIXED', isActive: false },
         {
           id: split.id,
           name: split.name,
           basePrice: 1500,
           pricingModel: 'PER_UNIT',
-          minPrice: 1200,
-          maxPrice: 2250,
           unitLabel: 'unit',
           quantityFieldRef: splitUnits.id,
         },
@@ -139,12 +133,10 @@ describe('Admin service catalog save', () => {
           name: window.name,
           basePrice: 800,
           pricingModel: 'PER_UNIT',
-          minPrice: 640,
-          maxPrice: 1200,
           unitLabel: 'unit',
           quantityFieldRef: windowUnits.id,
         },
-        job('t-new', 'Freon Recharge', { basePrice: 1800, minPrice: 1440, maxPrice: 2700 }),
+        job('t-new', 'Freon Recharge', { basePrice: 1800 }),
       ],
       scopeFields: [
         // Symptom dropped; HP now asked for both cleaning jobs, text reworded.
@@ -222,46 +214,21 @@ describe('Admin service catalog save', () => {
     expect(await buildCapabilityFilters(cat.name, answers, cat.tasks[2].id)).toHaveLength(0);
   });
 
-  it("carries workers' prices across when a job switches between flat and per-unit pricing", async () => {
+  it("stores one admin price per job and no worker price range", async () => {
     const cat = (await create(newCatalog())).body.data;
     createdServiceTypeIds.push(cat.id);
-    const diag = cat.tasks[0];
-    const { user } = await createTestUser('catalog-worker', { role: 'WORKER' });
-    createdUserIds.push(user.id);
-    const profile = await prisma.workerProfile.findUniqueOrThrow({ where: { userId: user.id } });
-    await prisma.workerTaskPrice.create({ data: { workerProfileId: profile.id, serviceTaskId: diag.id, price: 400 } });
+    const diag = cat.tasks.find((t: { name: string }) => t.name === 'Diagnosis Fee');
+    expect(diag.basePrice).toBe(350);
+    expect(diag.minPrice).toBeNull();
+    expect(diag.maxPrice).toBeNull();
+  });
 
-    const body = {
-      name: cat.name,
-      basePrice: 350,
-      tasks: cat.tasks.map((t: Record<string, unknown>) => ({
-        id: t.id,
-        name: t.name,
-        basePrice: t.basePrice,
-        pricingModel: t.pricingModel,
-        minPrice: t.minPrice,
-        maxPrice: t.maxPrice,
-        unitLabel: t.unitLabel,
-        quantityFieldRef: t.quantityScopeFieldId,
-      })),
-      scopeFields: cat.scopeFields.map((f: Record<string, any>) => ({
-        id: f.id,
-        label: f.label,
-        fieldType: f.fieldType,
-        required: f.required,
-        options: f.options.map((o: { label: string }) => o.label),
-        minValue: f.minValue,
-        maxValue: f.maxValue,
-        taskRefs: f.taskLinks.map((l: { serviceTaskId: string }) => l.serviceTaskId),
-      })),
-    };
-    // Diagnosis becomes "per unit", counted by a new question.
-    body.tasks[0] = { ...body.tasks[0], pricingModel: 'PER_UNIT', unitLabel: 'unit', quantityFieldRef: 'f-diag-units' };
-    body.scopeFields.push({ key: 'f-diag-units', label: 'Units to check', fieldType: 'NUMBER', minValue: 1, maxValue: 5, taskRefs: [diag.id] } as never);
-
-    expect((await update(cat.id, body)).status).toBe(200);
-    const price = await prisma.workerTaskPrice.findFirstOrThrow({ where: { workerProfileId: profile.id, serviceTaskId: diag.id } });
-    expect(price.unitPrice).toBe(400);
+  it('rejects the retired worker-price-steps model', async () => {
+    const body = newCatalog();
+    body.tasks[1] = { ...body.tasks[1], pricingModel: 'TIERED' };
+    const res = await create(body);
+    expect(res.status).toBe(400);
+    expect(res.body.message).toMatch(/pricingModel/);
   });
 });
 

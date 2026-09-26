@@ -26,6 +26,21 @@ export const PackageCard: React.FC<Props> = ({ pkg, onEdit, onDelete }) => {
           </Text>
         ) : null}
         <Text className="text-accent font-semibold mt-2">₱{pkg.price}</Text>
+        {pkg.status === "PENDING" && (
+          <View className="bg-warning/10 rounded-full px-2 py-0.5 self-start mt-1.5">
+            <Text className="text-warning text-xs font-semibold">Waiting for admin approval</Text>
+          </View>
+        )}
+        {pkg.status === "REJECTED" && (
+          <View className="mt-1.5">
+            <View className="bg-error/10 rounded-full px-2 py-0.5 self-start">
+              <Text className="text-error text-xs font-semibold">Declined</Text>
+            </View>
+            {!!pkg.rejectionReason && (
+              <Text className="text-text-muted text-xs mt-1">{pkg.rejectionReason} Edit it to submit again.</Text>
+            )}
+          </View>
+        )}
         {!pkg.isActive && (
           <Text className="text-text-muted text-xs mt-1">Inactive — hidden from clients</Text>
         )}

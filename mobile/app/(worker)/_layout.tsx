@@ -4,6 +4,7 @@ import { AppIcon as Ionicons } from "../../components/icons/AppIcon";
 import { View } from "react-native";
 import NotificationBadge from "../../components/ui/NotificationBadge";
 import { TabRefreshOverlay } from "../../components/ui/TabRefreshOverlay";
+import WorkerSetupReminder from "../../components/worker/WorkerSetupReminder";
 import { useNotificationStore } from "../../store/notificationStore";
 import { useAuthStore } from "../../store/authStore";
 import { useTabRefreshStore } from "../../store/tabRefreshStore";
@@ -144,6 +145,7 @@ export default function WorkerLayout() {
           listeners={refreshOnRepeatTap}
         />
       </Tabs>
+      <WorkerSetupReminder />
       <TabRefreshOverlay />
     </View>
   );
