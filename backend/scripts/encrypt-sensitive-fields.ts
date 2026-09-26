@@ -9,6 +9,9 @@
 // Usage (from backend/):
 //   npx tsx scripts/encrypt-sensitive-fields.ts --dry     # report only, no writes
 //   npx tsx scripts/encrypt-sensitive-fields.ts           # apply
+//   add --neon-websocket  to connect through Neon's WebSocket proxy (port 443)
+//     when the network blocks raw Postgres connections to Neon; needs
+//     `npm i --no-save @prisma/adapter-neon @neondatabase/serverless ws`.
 //
 // DATA_ENCRYPTION_KEY must be set to the SAME value the deployed backend
 // uses — values encrypted with a different key can't be read by the app.
@@ -21,15 +24,24 @@ import { encryptField, hashTin, isEncryptedField } from '../src/utils/fieldEncry
 import { normalizeTin } from '../src/utils/taxId';
 
 const DRY_RUN = process.argv.includes('--dry');
+const NEON_WEBSOCKET = process.argv.includes('--neon-websocket');
 
 if (!process.env.DATA_ENCRYPTION_KEY?.trim()) {
   console.error('DATA_ENCRYPTION_KEY is not set — refusing to run (it must match the deployed backend).');
   process.exit(1);
 }
 
-const pool = new Pool({ connectionString: process.env.DATABASE_URL });
-const adapter = new PrismaPg(pool);
-const prisma = new PrismaClient({ adapter });
+const pool = NEON_WEBSOCKET ? null : new Pool({ connectionString: process.env.DATABASE_URL });
+const prisma = pool ? new PrismaClient({ adapter: new PrismaPg(pool) }) : makeNeonWebsocketClient();
+
+function makeNeonWebsocketClient(): PrismaClient {
+  /* eslint-disable @typescript-eslint/no-require-imports */
+  const { PrismaNeon } = require('@prisma/adapter-neon');
+  const { neonConfig } = require('@neondatabase/serverless');
+  neonConfig.webSocketConstructor = require('ws');
+  /* eslint-enable @typescript-eslint/no-require-imports */
+  return new PrismaClient({ adapter: new PrismaNeon({ connectionString: process.env.DATABASE_URL }) });
+}
 
 async function main() {
   const profiles = await prisma.workerProfile.findMany({
@@ -91,5 +103,5 @@ main()
   })
   .finally(async () => {
     await prisma.$disconnect();
-    await pool.end();
+    await pool?.end();
   });
