@@ -1109,12 +1109,17 @@ async function runCategoryGate(
     if (isNaN(new Date(doc.issueDate).getTime()) || (doc.expiryDate && isNaN(new Date(doc.expiryDate).getTime()))) {
       return { error: 'Document dates must be valid dates.', status: 400 };
     }
+  }
+  // Every file must be one this worker uploaded (see utils/storageUrls).
+  if (newDocs.length > 0) {
     const owner = await prisma.workerProfile.findUnique({ where: { id: workerProfileId }, select: { userId: true } });
-    const storedDocumentUrl = owner ? toOwnedStoredUrl(documentUrl, owner.userId) : null;
-    if (!storedDocumentUrl) {
-      return { error: 'That file does not belong to your account. Please upload it again.', status: 400 };
+    for (const doc of newDocs) {
+      const storedDocumentUrl = owner ? toOwnedStoredUrl(doc.documentUrl!, owner.userId) : null;
+      if (!storedDocumentUrl) {
+        return { error: 'That file does not belong to your account. Please upload it again.', status: 400 };
+      }
+      doc.documentUrl = storedDocumentUrl;
     }
-    input.certification!.documentUrl = storedDocumentUrl;
   }
 
   // An existing, still-pending document the worker already uploaded for this
