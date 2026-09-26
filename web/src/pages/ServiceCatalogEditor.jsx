@@ -25,7 +25,7 @@ import {
 } from '../components/serviceCatalog/catalogModel'
 import '../components/serviceCatalog/serviceCatalogEditor.css'
 
-// ServiceTask.minPrice applies platform-wide (no city), so it's checked
+// A job's price applies platform-wide (no city), so it's checked
 // against the single highest regional DOLE floor, same as the backend.
 const DOLE_REF = getHighestDoleWageReference()
 
@@ -335,7 +335,7 @@ export default function ServiceCatalogEditor() {
       return (
         <div className="sce-priceline">
           <i className="fas fa-calculator" />
-          <span>Flat price <b>{formatPeso(job.price)}</b>{job.unit ? ` per ${job.unit}` : ''}. Workers charge {formatPeso(job.minPrice)}–{formatPeso(job.maxPrice)}.</span>
+          <span>Flat price <b>{formatPeso(job.price)}</b>{job.unit ? ` per ${job.unit}` : ''}, the same for every worker.</span>
         </div>
       )
     }
@@ -353,8 +353,7 @@ export default function ServiceCatalogEditor() {
         <i className="fas fa-calculator" />
         <span>
           Price = <b>{formatPeso(job.price)}</b> × the answer to <b>“{count.label}”</b>
-          {draft.common.includes(count) ? ' (a common question)' : ''}. Workers charge {formatPeso(job.minPrice)}–{formatPeso(job.maxPrice)} per {job.unit}.
-          {job.model === 'TIERED' ? ' Each worker sets their own price steps.' : ''}
+          {draft.common.includes(count) ? ' (a common question)' : ''}, the same for every worker.
         </span>
       </div>
     )

@@ -89,8 +89,10 @@ export default function BookingStep1Screen() {
                   description: task.description ?? null,
                   basePrice: task.basePrice,
                   pricingModel: task.pricingModel,
-                  minPrice: task.minPrice ?? null,
-                  maxPrice: task.maxPrice ?? null,
+                  // Prices are admin-set: one price per job, the same at
+                  // every pro (before their tier surcharge and distance fee).
+                  minPrice: task.pricingModel === "CUSTOM_QUOTE" ? null : task.basePrice,
+                  maxPrice: task.pricingModel === "CUSTOM_QUOTE" ? null : task.basePrice,
                   unitLabel: task.unitLabel ?? null,
                   quantityScopeFieldId: task.quantityScopeFieldId ?? null,
                   isActive: task.isActive,
@@ -164,9 +166,8 @@ export default function BookingStep1Screen() {
   const requiresTaskSelection = activeTasks.length > 0;
   const isCustomQuoteTask = selectedTask?.pricingModel === "CUSTOM_QUOTE";
 
-  // A selected task's own admin-set range replaces the category's
-  // marketplace-wide range once picked — a specific task's real price bound
-  // is more useful than the category's widest possible spread. Custom-quote
+  // A selected task's own admin price replaces the category's
+  // marketplace-wide range once picked. Custom-quote
   // has no upfront range at all (worker quotes after inspecting), so it's
   // fed 0/0 here and the preview is skipped entirely in the JSX below instead.
   const priceEstimate = useBookingPriceEstimate({

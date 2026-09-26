@@ -4,7 +4,6 @@ import prisma from '@config/database';
 import { errorResponse } from '@utils/errorResponse';
 import { writeAuditLog } from '@utils/auditLog';
 import { checkDoleFloor } from '@services/pricingRuleService';
-import { carryWorkerPricesAcrossModelChange } from '@services/taskPriceService';
 import { getHighestDoleWageReference } from '@/constants/doleWageReference';
 import type { JwtPayload } from '@/types/index';
 
@@ -12,7 +11,8 @@ interface AuthRequest extends Request {
   user?: JwtPayload;
 }
 
-const VALID_PRICING_MODELS: TaskPricingModel[] = ['FIXED', 'PER_UNIT', 'TIERED', 'CUSTOM_QUOTE'];
+// TIERED (worker-defined price steps) is retired — prices are admin-set only.
+const VALID_PRICING_MODELS: TaskPricingModel[] = ['FIXED', 'PER_UNIT', 'CUSTOM_QUOTE'];
 
 const taskInclude = {
   quantityScopeField: { select: { id: true, label: true } },
@@ -23,8 +23,6 @@ export type TaskInputBody = {
   description?: string | null;
   basePrice?: number;
   pricingModel?: string;
-  minPrice?: number | null;
-  maxPrice?: number | null;
   unitLabel?: string | null;
   quantityScopeFieldId?: string | null;
   durationHours?: number | null;
@@ -33,9 +31,10 @@ export type TaskInputBody = {
 };
 
 /**
- * FIXED/PER_UNIT both need an admin-bounded range a worker's WorkerTaskPrice
- * must fall inside; CUSTOM_QUOTE has no upfront price at all (worker quotes
- * on-site via submitQuote), so it must NOT carry a range/unit/quantity field.
+ * The admin's price (basePrice) is what every client pays and every worker
+ * earns — FIXED: the flat price, PER_UNIT: the rate per unit. CUSTOM_QUOTE
+ * has no upfront price at all (worker quotes on-site via submitQuote), so it
+ * must NOT carry a unit/quantity field.
  */
 export function validateTaskInput(body: TaskInputBody, existingNumberFieldIds: Set<string>): string | null {
   if (!body.name?.trim()) {
@@ -52,35 +51,25 @@ export function validateTaskInput(body: TaskInputBody, existingNumberFieldIds: S
   }
 
   if (body.pricingModel === 'CUSTOM_QUOTE') {
-    if (body.minPrice != null || body.maxPrice != null) {
-      return 'Custom-quote tasks cannot have a price range — the worker quotes on-site.';
-    }
     if (body.quantityScopeFieldId) {
       return 'Custom-quote tasks cannot have a quantity field.';
     }
     return null;
   }
 
-  if (
-    typeof body.minPrice !== 'number' ||
-    typeof body.maxPrice !== 'number' ||
-    Number.isNaN(body.minPrice) ||
-    Number.isNaN(body.maxPrice) ||
-    body.minPrice < 0 ||
-    body.minPrice > body.maxPrice
-  ) {
-    return 'minPrice and maxPrice are required and minPrice must be <= maxPrice.';
+  if (body.basePrice <= 0) {
+    return 'Price must be above ₱0.';
   }
 
-  if (body.pricingModel === 'PER_UNIT' || body.pricingModel === 'TIERED') {
+  if (body.pricingModel === 'PER_UNIT') {
     if (!body.unitLabel?.trim()) {
-      return 'unitLabel is required for a per-unit or tiered task (e.g. "kilo", "sq.m.").';
+      return 'unitLabel is required for a per-unit task (e.g. "kilo", "sq.m.").';
     }
     if (!body.quantityScopeFieldId || !existingNumberFieldIds.has(body.quantityScopeFieldId)) {
       return 'quantityScopeFieldId must reference a NUMBER-type field on this service category.';
     }
   } else if (body.quantityScopeFieldId) {
-    return 'quantityScopeFieldId only applies to per-unit or tiered tasks.';
+    return 'quantityScopeFieldId only applies to per-unit tasks.';
   }
 
   return null;
@@ -127,16 +116,12 @@ export const createTask = async (req: AuthRequest, res: Response) => {
 
     const isCustomQuote = body.pricingModel === 'CUSTOM_QUOTE';
 
-    // ServiceTask.minPrice/maxPrice is the bound a worker's own
-    // WorkerTaskPrice must fall inside (see taskPriceService) — unlike
-    // PricingRule, it applies platform-wide with no per-city variant, so
-    // this was the actual race-to-the-bottom guard the DOLE-floor check was
-    // built for, just never wired to it (only the separate city/service
-    // PricingRule admin screen had it). Checked against the highest
-    // region-wide floor since there's no city here to look up.
+    // Minimum-wage guardrail on the admin price — applies platform-wide (no
+    // per-city variant), so it's checked against the highest region-wide
+    // DOLE floor since there's no city here to look up.
     const doleCheck = isCustomQuote
       ? ({ blocked: false, note: null } as const)
-      : checkDoleFloor(getHighestDoleWageReference(), body.minPrice!, body.overrideReason);
+      : checkDoleFloor(getHighestDoleWageReference(), body.basePrice!, body.overrideReason);
     if (doleCheck.blocked) {
       return res.status(400).json(errorResponse(400, doleCheck.message));
     }
@@ -148,12 +133,12 @@ export const createTask = async (req: AuthRequest, res: Response) => {
         description: body.description?.trim() || null,
         basePrice: body.basePrice!,
         pricingModel: body.pricingModel as TaskPricingModel,
-        minPrice: isCustomQuote ? null : body.minPrice!,
-        maxPrice: isCustomQuote ? null : body.maxPrice!,
+        minPrice: null,
+        maxPrice: null,
         // Display-only for FIXED/CUSTOM_QUOTE (the matrix's "per visit").
         unitLabel: body.unitLabel?.trim() || null,
         quantityScopeFieldId:
-          body.pricingModel === 'PER_UNIT' || body.pricingModel === 'TIERED' ? body.quantityScopeFieldId! : null,
+          body.pricingModel === 'PER_UNIT' ? body.quantityScopeFieldId! : null,
         durationHours: isCustomQuote ? null : body.durationHours ?? null,
       },
       include: taskInclude,
@@ -167,7 +152,7 @@ export const createTask = async (req: AuthRequest, res: Response) => {
       category: 'ADMIN_ACTION',
       level: doleCheck.note ? 'WARN' : 'INFO',
       message: doleCheck.note ?? `Task created: ${task.name} (${serviceType.name})`,
-      metadata: { taskId: task.id, serviceTypeId, minPrice: task.minPrice, maxPrice: task.maxPrice },
+      metadata: { taskId: task.id, serviceTypeId, price: task.basePrice },
     });
 
     return res.status(201).json({ success: true, data: task });
@@ -203,15 +188,12 @@ export const updateTask = async (req: AuthRequest, res: Response) => {
 
     const doleCheck = isCustomQuote
       ? ({ blocked: false, note: null } as const)
-      : checkDoleFloor(getHighestDoleWageReference(), body.minPrice!, body.overrideReason);
+      : checkDoleFloor(getHighestDoleWageReference(), body.basePrice!, body.overrideReason);
     if (doleCheck.blocked) {
       return res.status(400).json(errorResponse(400, doleCheck.message));
     }
 
-    // Price change + model change together, so a FIXED<->PER_UNIT switch
-    // never leaves workers with only the value the new model doesn't read.
     const task = await prisma.$transaction(async (tx) => {
-      await carryWorkerPricesAcrossModelChange(tx, taskId, existing.pricingModel, body.pricingModel!);
       return tx.serviceTask.update({
         where: { id: taskId },
         data: {
@@ -219,12 +201,12 @@ export const updateTask = async (req: AuthRequest, res: Response) => {
           description: body.description?.trim() || null,
           basePrice: body.basePrice!,
           pricingModel: body.pricingModel as TaskPricingModel,
-          minPrice: isCustomQuote ? null : body.minPrice!,
-          maxPrice: isCustomQuote ? null : body.maxPrice!,
+          minPrice: null,
+          maxPrice: null,
           // Display-only for FIXED/CUSTOM_QUOTE (the matrix's "per visit").
           unitLabel: body.unitLabel?.trim() || null,
           quantityScopeFieldId:
-            body.pricingModel === 'PER_UNIT' || body.pricingModel === 'TIERED' ? body.quantityScopeFieldId! : null,
+            body.pricingModel === 'PER_UNIT' ? body.quantityScopeFieldId! : null,
           durationHours: isCustomQuote ? null : body.durationHours ?? null,
           isActive: body.isActive ?? existing.isActive,
         },
@@ -240,7 +222,7 @@ export const updateTask = async (req: AuthRequest, res: Response) => {
       category: 'ADMIN_ACTION',
       level: doleCheck.note ? 'WARN' : 'INFO',
       message: doleCheck.note ?? `Task updated: ${task.name}`,
-      metadata: { taskId: task.id, serviceTypeId, minPrice: task.minPrice, maxPrice: task.maxPrice },
+      metadata: { taskId: task.id, serviceTypeId, price: task.basePrice },
     });
 
     return res.json({ success: true, data: task });

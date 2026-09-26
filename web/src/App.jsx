@@ -26,6 +26,8 @@ const Payouts = lazy(() => import('./pages/Payouts'))
 const TaxCertificates = lazy(() => import('./pages/TaxCertificates'))
 const TaxRemittance = lazy(() => import('./pages/TaxRemittance'))
 const VatRegistrations = lazy(() => import('./pages/VatRegistrations'))
+const ServiceRequests = lazy(() => import('./pages/ServiceRequests'))
+const WorkerPackages = lazy(() => import('./pages/WorkerPackages'))
 const TaxSettings = lazy(() => import('./pages/TaxSettings'))
 const PricingRules = lazy(() => import('./pages/PricingRules'))
 const Reviews = lazy(() => import('./pages/Reviews'))
@@ -65,6 +67,7 @@ export default function App() {
           { path: 'workers', element: <Workers /> },
           { path: 'workers/:id', element: <WorkerDetail /> },
           { path: 'verification', element: <Verification /> },
+          { path: 'service-requests', element: <ServiceRequests /> },
           { path: 'verification/detail/:id', element: <VerificationDetail /> },
           { path: 'bookings', element: <Bookings /> },
           { path: 'bookings/detail/:id', element: <BookingDetail /> },
@@ -96,6 +99,7 @@ export default function App() {
           { path: 'service-catalog/new', element: <ServiceCatalogEditor /> },
           { path: 'service-catalog/:id', element: <ServiceCatalogEditor /> },
           { path: 'promo-banners', element: <PromoBanners /> },
+          { path: 'worker-packages', element: <WorkerPackages /> },
           { path: 'settings', element: <Settings /> },
           { path: 'mfa-setup', element: <MfaSetup /> },
         ].map(({ path, element }) => (

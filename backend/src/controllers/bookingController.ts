@@ -8,7 +8,8 @@ import { writeAuditLog } from '@utils/auditLog';
 import { formatDisplayId } from '@utils/formatters';
 import { distanceMeters, isWithinRadiusMeters } from '@utils/geo';
 import { resolveDrivingDistanceKm } from '@services/googleDistanceService';
-import { resolveTierPrice, storedWorkerPrice } from '@services/taskPriceService';
+import { taskBasePrice } from '@services/taskPriceService';
+import { getWorkerSetupStatus, WORKER_SETUP_INCOMPLETE_MESSAGE } from '@services/workerSetupService';
 import { findAutoMatchWorker, LATE_CANCEL_THRESHOLD_HOURS } from '@services/matchingService';
 import { validatePriceWithinPricingRule } from '@services/pricingRuleService';
 import {
@@ -401,6 +402,13 @@ export const createBooking = async (req: AuthRequest, res: Response) => {
       return res.status(403).json(errorResponse(403, 'Worker is not verified yet'));
     }
 
+    // A worker who hasn't finished account setup can't take requests (see
+    // workerSetupService). Auto-match already filters them out.
+    if (!(await getWorkerSetupStatus(workerProfile.userId))?.complete) {
+      if (await tryNextAutoMatchCandidate()) continue;
+      return res.status(409).json(errorResponse(409, "This pro isn't taking bookings yet"));
+    }
+
     if (!workerProfile.isAvailable) {
       return res.status(409).json(errorResponse(409, 'Worker is not currently available'));
     }
@@ -430,80 +438,29 @@ export const createBooking = async (req: AuthRequest, res: Response) => {
       return res.status(409).json(errorResponse(409, 'Selected slot is no longer available'));
     }
 
-    // basePrice depends on which worker got picked — FIXED/PER_UNIT read
-    // that worker's own WorkerTaskPrice (findAutoMatchWorker already filters
-    // auto-match candidates down to workers who've priced this task, but an
-    // explicitly-picked worker isn't filtered, hence the 409 fallback below).
+    // Every task is priced by the admin (see taskPriceService), so the only
+    // per-worker question is whether this worker offers the task at all.
+    // findAutoMatchWorker already filters auto-match candidates on that; an
+    // explicitly-picked worker isn't filtered, hence the 409 fallback here.
     // CUSTOM_QUOTE has no upfront price; the client is never shown one until
     // the worker submits a quote, so basePrice is 0 and the VAT snapshot
     // below is deliberately deferred to that moment instead of now.
     let basePrice: number;
     if (serviceTask) {
-      if (isCustomQuoteTask) {
-        // No WorkerTaskPrice exists for a CUSTOM_QUOTE task (priced on-site),
-        // so eligibility is checked against WorkerTaskSelection instead —
-        // findAutoMatchWorker already filters auto-match candidates down to
-        // workers who've selected this task, but an explicitly-picked worker
-        // isn't filtered, hence the fallback here (same pattern as the
-        // FIXED/PER_UNIT price check just below).
-        const selection = await prisma.workerTaskSelection.findUnique({
-          where: {
-            workerProfileId_serviceTaskId: { workerProfileId: workerProfile.id, serviceTaskId: serviceTask.id },
-          },
-        });
-        if (!selection?.isActive) {
-          if (await tryNextAutoMatchCandidate()) continue;
-          return res.status(409).json(errorResponse(409, 'This pro does not offer this specific service'));
-        }
-        basePrice = 0;
-      } else if (serviceTask.pricingModel === 'TIERED') {
-        // No WorkerTaskPrice row for TIERED — a worker's price table lives
-        // in WorkerTaskTierPrice (many rows per worker+task, one per price
-        // step they defined themselves — see that model's docblock).
-        const field = serviceTask.quantityScopeField;
-        const quantity = field ? Number(effectiveScopeAnswers?.[field.label]) : NaN;
-        if (!field || Number.isNaN(quantity)) {
-          return res
-            .status(400)
-            .json(errorResponse(400, `"${field?.label ?? 'quantity'}" is required for this service`));
-        }
-        const tierRows = await prisma.workerTaskTierPrice.findMany({
-          where: { workerProfileId: workerProfile.id, serviceTaskId: serviceTask.id, isActive: true },
-        });
-        const resolvedPrice = resolveTierPrice(tierRows, quantity);
-        if (resolvedPrice == null) {
-          // Either the worker hasn't priced this task at all, or their price
-          // steps simply don't cover this quantity — both are the worker
-          // not being a valid candidate for this specific job, not an error
-          // to recover from (see WorkerTaskTierPrice's docblock).
-          if (await tryNextAutoMatchCandidate()) continue;
-          return res.status(409).json(errorResponse(409, 'This pro has not priced this service for this quantity'));
-        }
-        basePrice = resolvedPrice;
-      } else {
-        const workerPrice = await prisma.workerTaskPrice.findUnique({
-          where: {
-            workerProfileId_serviceTaskId: { workerProfileId: workerProfile.id, serviceTaskId: serviceTask.id },
-          },
-        });
-        const storedPrice = storedWorkerPrice(serviceTask.pricingModel, workerPrice);
-        if (storedPrice == null) {
-          if (await tryNextAutoMatchCandidate()) continue;
-          return res.status(409).json(errorResponse(409, 'This pro has not priced this service yet'));
-        }
-        if (serviceTask.pricingModel === 'FIXED') {
-          basePrice = storedPrice;
-        } else {
-          const field = serviceTask.quantityScopeField;
-          const quantity = field ? Number(effectiveScopeAnswers?.[field.label]) : NaN;
-          if (!field || Number.isNaN(quantity)) {
-            return res
-              .status(400)
-              .json(errorResponse(400, `"${field?.label ?? 'quantity'}" is required for this service`));
-          }
-          basePrice = round2(storedPrice * quantity);
-        }
+      const selection = await prisma.workerTaskSelection.findUnique({
+        where: {
+          workerProfileId_serviceTaskId: { workerProfileId: workerProfile.id, serviceTaskId: serviceTask.id },
+        },
+      });
+      if (!selection?.isActive) {
+        if (await tryNextAutoMatchCandidate()) continue;
+        return res.status(409).json(errorResponse(409, 'This pro does not offer this specific service'));
       }
+      const priced = taskBasePrice(serviceTask, effectiveScopeAnswers);
+      if (!priced.ok) {
+        return res.status(400).json(errorResponse(400, `"${priced.missingLabel}" is required for this service`));
+      }
+      basePrice = priced.basePrice;
     } else {
       basePrice = serviceTypeConfig!.basePrice;
     }
@@ -546,7 +503,7 @@ export const createBooking = async (req: AuthRequest, res: Response) => {
     let resolvedPackages: { name: string; price: number }[] = [];
     if (Array.isArray(packageIds) && packageIds.length > 0) {
       const found = await prisma.workerPackage.findMany({
-        where: { id: { in: packageIds }, workerProfileId: workerProfile.id, isActive: true },
+        where: { id: { in: packageIds }, workerProfileId: workerProfile.id, isActive: true, status: 'APPROVED' },
       });
       if (found.length !== packageIds.length) {
         return res.status(400).json(errorResponse(400, 'One or more selected packages are unavailable'));
@@ -981,6 +938,9 @@ export const createMultiDayBooking = async (req: AuthRequest, res: Response) => 
     if (workerProfile.kycStatus !== 'APPROVED') {
       return res.status(403).json(errorResponse(403, 'Worker is not verified yet'));
     }
+    if (!(await getWorkerSetupStatus(workerProfile.userId))?.complete) {
+      return res.status(409).json(errorResponse(409, "This pro isn't taking bookings yet"));
+    }
     if (!workerProfile.isAvailable) {
       return res.status(409).json(errorResponse(409, 'Worker is not currently available'));
     }
@@ -1009,39 +969,17 @@ export const createMultiDayBooking = async (req: AuthRequest, res: Response) => 
     // re-derived per day.
     let basePrice: number;
     if (serviceTask) {
-      if (serviceTask.pricingModel === 'TIERED') {
-        const field = serviceTask.quantityScopeField;
-        const quantity = field ? Number(effectiveScopeAnswers?.[field.label]) : NaN;
-        if (!field || Number.isNaN(quantity)) {
-          return res.status(400).json(errorResponse(400, `"${field?.label ?? 'quantity'}" is required for this service`));
-        }
-        const tierRows = await prisma.workerTaskTierPrice.findMany({
-          where: { workerProfileId: workerProfile.id, serviceTaskId: serviceTask.id, isActive: true },
-        });
-        const resolvedPrice = resolveTierPrice(tierRows, quantity);
-        if (resolvedPrice == null) {
-          return res.status(409).json(errorResponse(409, 'This pro has not priced this service for this quantity'));
-        }
-        basePrice = resolvedPrice;
-      } else {
-        const workerPrice = await prisma.workerTaskPrice.findUnique({
-          where: { workerProfileId_serviceTaskId: { workerProfileId: workerProfile.id, serviceTaskId: serviceTask.id } },
-        });
-        const storedPrice = storedWorkerPrice(serviceTask.pricingModel, workerPrice);
-        if (storedPrice == null) {
-          return res.status(409).json(errorResponse(409, 'This pro has not priced this service yet'));
-        }
-        if (serviceTask.pricingModel === 'FIXED') {
-          basePrice = storedPrice;
-        } else {
-          const field = serviceTask.quantityScopeField;
-          const quantity = field ? Number(effectiveScopeAnswers?.[field.label]) : NaN;
-          if (!field || Number.isNaN(quantity)) {
-            return res.status(400).json(errorResponse(400, `"${field?.label ?? 'quantity'}" is required for this service`));
-          }
-          basePrice = round2(storedPrice * quantity);
-        }
+      const selection = await prisma.workerTaskSelection.findUnique({
+        where: { workerProfileId_serviceTaskId: { workerProfileId: workerProfile.id, serviceTaskId: serviceTask.id } },
+      });
+      if (!selection?.isActive) {
+        return res.status(409).json(errorResponse(409, 'This pro does not offer this specific service'));
       }
+      const priced = taskBasePrice(serviceTask, effectiveScopeAnswers);
+      if (!priced.ok) {
+        return res.status(400).json(errorResponse(400, `"${priced.missingLabel}" is required for this service`));
+      }
+      basePrice = priced.basePrice;
     } else {
       basePrice = serviceTypeConfig!.basePrice;
     }
@@ -1645,6 +1583,11 @@ export const acceptBooking = async (req: AuthRequest, res: Response) => {
     }
 
     const currentUserId = req.user.userId;
+
+    // Setup must be complete to accept a request (see workerSetupService).
+    if (!(await getWorkerSetupStatus(currentUserId))?.complete) {
+      return res.status(403).json({ ...errorResponse(403, WORKER_SETUP_INCOMPLETE_MESSAGE), code: 'WORKER_SETUP_INCOMPLETE' });
+    }
 
     // Wrap in transaction to prevent double-counting
     try {

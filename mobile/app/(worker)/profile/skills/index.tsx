@@ -1,14 +1,11 @@
-import React, { useCallback, useMemo, useState } from "react";
-import { View, Text, Pressable, Modal, ActivityIndicator, ScrollView } from "react-native";
-import { KeyboardAvoidingView } from "react-native-keyboard-controller";
-import { KeyboardAwareScrollView } from "../../../../components/ui/KeyboardAwareScrollView";
+import React, { useCallback, useMemo, useRef, useState } from "react";
+import { View, Text, Pressable, ActivityIndicator, ScrollView } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter, useFocusEffect } from "expo-router";
 import { AppIcon as Ionicons } from "../../../../components/icons/AppIcon";
 import ScreenHeader from "../../../../components/ui/ScreenHeader";
 import PrimaryButton from "../../../../components/ui/PrimaryButton";
 import OutlinedButton from "../../../../components/ui/OutlinedButton";
-import InputField from "../../../../components/ui/InputField";
 import { colors } from "../../../../constants";
 import * as api from "../../../../services/api";
 import type { WorkerServiceType, TaskCatalogEntry } from "../../../../services/api";
@@ -29,6 +26,8 @@ type ScopeServiceType = WorkerServiceType & {
   tasks?: { id: string; name: string }[];
 };
 
+type CatalogTask = TaskCatalogEntry["tasks"][number]["task"];
+
 // "for Aircon Cleaning, Freon Recharge" under a question limited to certain
 // jobs, so two jobs' questions with the same text can be told apart.
 function jobsCaption(field: CatalogField, category: ScopeServiceType): string | null {
@@ -38,13 +37,18 @@ function jobsCaption(field: CatalogField, category: ScopeServiceType): string | 
   return names.length ? `for ${names.join(", ")}` : null;
 }
 
-type PriceableTask = TaskCatalogEntry["tasks"][number] & { serviceTypeName: string };
+// The admin's price, read-only for the worker.
+function priceLabel(task: CatalogTask): string {
+  if (task.pricingModel === "CUSTOM_QUOTE" || task.price == null) return "Quoted on-site";
+  const amount = `₱${task.price.toLocaleString("en-PH")}`;
+  const perUnit = task.pricingModel === "PER_UNIT" || task.pricingModel === "TIERED";
+  return perUnit && task.unitLabel ? `${amount} / ${task.unitLabel}` : amount;
+}
 
-// Matches backend taskPriceService.MAX_TIER_ROWS — keeps the "Add step"
-// button from producing a table the server would just reject.
-const MAX_TIER_ROWS = 5;
-
-type TierRowInput = { upToQty: string; price: string };
+function formatDate(iso: string | null): string {
+  if (!iso) return "";
+  return new Date(iso).toLocaleDateString("en-PH", { month: "short", day: "numeric", year: "numeric" });
+}
 
 export default function SkillsScreen() {
   const router = useRouter();
@@ -55,15 +59,13 @@ export default function SkillsScreen() {
   const [selectedOptionIds, setSelectedOptionIds] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [busyTaskId, setBusyTaskId] = useState<string | null>(null);
+  const [withdrawingId, setWithdrawingId] = useState<string | null>(null);
+  // Tasks with a save in flight — a second tap waits for the first to land.
+  const inFlight = useRef<Set<string>>(new Set());
 
-  const [priceModalEntry, setPriceModalEntry] = useState<PriceableTask | null>(null);
-  const [priceInput, setPriceInput] = useState("");
-  const [tierRows, setTierRows] = useState<TierRowInput[]>([]);
-  const [savingPrice, setSavingPrice] = useState(false);
-
+  // Only the first load shows a spinner; returning to the screen (e.g. from
+  // the request form) refreshes quietly in place.
   const load = useCallback(async () => {
-    setLoading(true);
     try {
       const [taskCatalog, scopeTypes, capabilities] = await Promise.all([
         api.getMyTaskCatalog(),
@@ -80,19 +82,23 @@ export default function SkillsScreen() {
     }
   }, []);
 
-  // Refreshes on every return to this screen — including coming back from
-  // the certification-upload flow after submitting a new category for
-  // review, so the "Pending Admin Review" badge shows up immediately.
   useFocusEffect(
     useCallback(() => {
       load();
     }, [load]),
   );
 
-  const verifiedCategoryIds = useMemo(
-    () => new Set(catalog.filter((c) => c.categoryStatus === "VERIFIED").map((c) => c.serviceType.id)),
+  const registered = useMemo(() => catalog.filter((c) => c.categoryStatus === "VERIFIED"), [catalog]);
+  const requests = useMemo(
+    () => catalog.filter((c) => c.categoryStatus === "PENDING_VERIFICATION" || c.categoryStatus === "REJECTED"),
     [catalog],
   );
+  const canRequestMore = useMemo(
+    () => catalog.some((c) => c.categoryStatus == null || c.categoryStatus === "REJECTED"),
+    [catalog],
+  );
+
+  const verifiedCategoryIds = useMemo(() => new Set(registered.map((c) => c.serviceType.id)), [registered]);
 
   // Only the worker's own VERIFIED categories that actually have a field the
   // admin flagged "use to match workers" — most categories won't (e.g.
@@ -105,20 +111,46 @@ export default function SkillsScreen() {
     [scopeCatalog, verifiedCategoryIds],
   );
 
-  // Every selected, non-quote task under a VERIFIED category — the only
-  // ones that can actually be priced/booked right now.
-  const priceableTasks = useMemo<PriceableTask[]>(() => {
-    const list: PriceableTask[] = [];
-    for (const cat of catalog) {
-      if (cat.categoryStatus !== "VERIFIED") continue;
-      for (const t of cat.tasks) {
-        if (!t.mySelection?.isActive) continue;
-        if (t.task.pricingModel === "CUSTOM_QUOTE") continue;
-        list.push({ ...t, serviceTypeName: cat.serviceType.name });
-      }
+  const setTaskSelected = (taskId: string, selected: boolean) => {
+    setCatalog((prev) =>
+      prev.map((cat) => ({
+        ...cat,
+        tasks: cat.tasks.map((t) =>
+          t.task.id === taskId
+            ? {
+                ...t,
+                mySelection: selected
+                  ? { id: t.mySelection?.id ?? `local-${taskId}`, serviceTaskId: taskId, isActive: true }
+                  : t.mySelection
+                    ? { ...t.mySelection, isActive: false }
+                    : null,
+              }
+            : t,
+        ),
+      })),
+    );
+  };
+
+  // Updates the checkbox immediately and saves in the background; the page
+  // never reloads. Rolls back (with a message) only if the save fails.
+  const handleToggleTask = async (taskEntry: TaskCatalogEntry["tasks"][number]) => {
+    const taskId = taskEntry.task.id;
+    if (inFlight.current.has(taskId)) return;
+    const wasSelected = !!taskEntry.mySelection?.isActive;
+
+    inFlight.current.add(taskId);
+    setTaskSelected(taskId, !wasSelected);
+    try {
+      if (wasSelected) await api.deselectTask(taskId);
+      else await api.selectTask(taskId);
+    } catch (error: any) {
+      console.error("Toggle task error:", error);
+      setTaskSelected(taskId, wasSelected);
+      alertModal.error("Error", error?.message || "Couldn't save that change. Please try again.");
+    } finally {
+      inFlight.current.delete(taskId);
     }
-    return list;
-  }, [catalog]);
+  };
 
   const toggleOption = (optionId: string) => {
     setSelectedOptionIds((prev) => {
@@ -143,193 +175,45 @@ export default function SkillsScreen() {
     }
   };
 
-  const handleToggleTask = async (category: TaskCatalogEntry, taskEntry: TaskCatalogEntry["tasks"][number]) => {
-    const taskId = taskEntry.task.id;
-    const isSelected = !!taskEntry.mySelection?.isActive;
-
-    if (isSelected) {
-      setBusyTaskId(taskId);
-      try {
-        await api.deselectTask(taskId);
-        await load();
-      } catch (error) {
-        console.error("Deselect task error:", error);
-        alertModal.error("Error", "Failed to update. Please try again.");
-      } finally {
-        setBusyTaskId(null);
-      }
-      return;
-    }
-
-    // A brand-new (or previously declined) category always needs a
-    // supporting document UNLESS this would be the worker's very first
-    // category ever — matches the backend's runCategoryGate exactly (see
-    // workerController.ts): the first category is only gated when the
-    // admin flagged it requiresCertification, and that case still requires
-    // an already-APPROVED certification (uploading one here wouldn't help —
-    // it would only create a PENDING one), so it's left to fail with the
-    // backend's own explanatory message rather than routed anywhere.
-    const isNewConnection = category.categoryStatus == null || category.categoryStatus === "REJECTED";
-    const hasAnyOtherCategory = catalog.some(
-      (c) => c.categoryStatus === "VERIFIED" || c.categoryStatus === "PENDING_VERIFICATION",
+  const handleWithdraw = (category: TaskCatalogEntry) => {
+    alertModal.confirm(
+      "Withdraw request",
+      `Withdraw your request to offer ${category.serviceType.name}? Your uploaded documents stay in My Documents.`,
+      {
+        confirmText: "Withdraw",
+        destructive: true,
+        onConfirm: async () => {
+          setWithdrawingId(category.serviceType.id);
+          try {
+            await api.removeServiceType(category.serviceType.id);
+            setCatalog((prev) =>
+              prev.map((c) =>
+                c.serviceType.id === category.serviceType.id
+                  ? { ...c, categoryStatus: null, rejectionReason: null, requestedAt: null }
+                  : c,
+              ),
+            );
+          } catch (error) {
+            console.error("Withdraw request error:", error);
+            alertModal.error("Error", "Failed to withdraw the request. Please try again.");
+          } finally {
+            setWithdrawingId(null);
+          }
+        },
+      },
     );
-
-    if (isNewConnection && hasAnyOtherCategory) {
-      router.push({
-        pathname: "/(worker)/profile/certifications/upload",
-        params: { serviceTypeId: category.serviceType.id, taskId, purpose: "category-gate" },
-      });
-      return;
-    }
-
-    setBusyTaskId(taskId);
-    try {
-      await api.selectTask(taskId);
-      await load();
-    } catch (error: any) {
-      console.error("Select task error:", error);
-      alertModal.error("Error", error?.message || "Failed to select this task. Please try again.");
-    } finally {
-      setBusyTaskId(null);
-    }
   };
 
-  const openPriceModal = (entry: PriceableTask) => {
-    setPriceModalEntry(entry);
-    if (entry.task.pricingModel === "TIERED") {
-      const rows = entry.myTiers.length
-        ? entry.myTiers.map((t) => ({ upToQty: t.upToQty != null ? String(t.upToQty) : "", price: String(t.price) }))
-        : [{ upToQty: "", price: "" }];
-      setTierRows(rows);
-      setPriceInput("");
-      return;
-    }
-    const current = entry.task.pricingModel === "PER_UNIT" ? entry.myPrice?.unitPrice : entry.myPrice?.price;
-    setPriceInput(current != null ? String(current) : "");
-  };
-
-  const closePriceModal = () => {
-    setPriceModalEntry(null);
-    setPriceInput("");
-    setTierRows([]);
-  };
-
-  const addTierRow = () => {
-    setTierRows((prev) => (prev.length >= MAX_TIER_ROWS ? prev : [...prev, { upToQty: "", price: "" }]));
-  };
-
-  const removeTierRow = (index: number) => {
-    setTierRows((prev) => (prev.length <= 1 ? prev : prev.filter((_, i) => i !== index)));
-  };
-
-  const updateTierRow = (index: number, field: keyof TierRowInput, value: string) => {
-    setTierRows((prev) => prev.map((row, i) => (i === index ? { ...row, [field]: value } : row)));
-  };
-
-  // Client-side mirror of the backend's taskPriceService.validateTierRows —
-  // catches obvious mistakes before a round trip, but the server always
-  // re-validates (never trusts this).
-  const validateTierRows = (task: PriceableTask["task"]): string | null => {
-    if (tierRows.length === 0) return "At least one price step is required.";
-    const parsed = tierRows.map((r) => ({ upToQty: r.upToQty.trim() === "" ? null : Number(r.upToQty), price: Number(r.price) }));
-    for (let i = 0; i < parsed.length; i++) {
-      const row = parsed[i];
-      if (Number.isNaN(row.price)) return "Every step needs a valid price.";
-      if (task.minPrice != null && task.maxPrice != null && (row.price < task.minPrice || row.price > task.maxPrice)) {
-        return `Every step's price must be between ₱${task.minPrice} and ₱${task.maxPrice}.`;
-      }
-      if (row.upToQty == null) {
-        if (i !== parsed.length - 1) return "Only the last step may be left blank (open-ended).";
-        continue;
-      }
-      if (Number.isNaN(row.upToQty) || row.upToQty <= 0) return "Every step's quantity limit must be a positive number.";
-      if (i > 0) {
-        const prev = parsed[i - 1].upToQty;
-        if (prev == null || row.upToQty <= prev) return "Quantity limits must strictly increase from one step to the next.";
-      }
-    }
-    return null;
-  };
-
-  const handleSavePrice = async () => {
-    if (!priceModalEntry) return;
-    const { task } = priceModalEntry;
-
-    if (task.pricingModel === "TIERED") {
-      const validationError = validateTierRows(task);
-      if (validationError) {
-        alertModal.error("Error", validationError);
-        return;
-      }
-      setSavingPrice(true);
-      try {
-        const tiers = tierRows.map((r) => ({
-          upToQty: r.upToQty.trim() === "" ? null : Number(r.upToQty),
-          price: Number(r.price),
-        }));
-        await api.setMyTaskPrice(task.id, { tiers });
-        closePriceModal();
-        await load();
-      } catch (error) {
-        console.error("Set task price error:", error);
-        alertModal.error("Error", "Failed to save prices. Please try again.");
-      } finally {
-        setSavingPrice(false);
-      }
-      return;
-    }
-
-    const value = parseFloat(priceInput);
-
-    if (Number.isNaN(value)) {
-      alertModal.error("Error", "Please enter a valid amount.");
-      return;
-    }
-    if (task.minPrice != null && task.maxPrice != null && (value < task.minPrice || value > task.maxPrice)) {
-      alertModal.error("Error", `Must be between ₱${task.minPrice} and ₱${task.maxPrice}.`);
-      return;
-    }
-
-    setSavingPrice(true);
-    try {
-      const data = task.pricingModel === "PER_UNIT" ? { unitPrice: value } : { price: value };
-      await api.setMyTaskPrice(task.id, data);
-      closePriceModal();
-      await load();
-    } catch (error) {
-      console.error("Set task price error:", error);
-      alertModal.error("Error", "Failed to save price. Please try again.");
-    } finally {
-      setSavingPrice(false);
-    }
-  };
-
-  const categoryBadge = (status: TaskCatalogEntry["categoryStatus"]) => {
-    if (status === "PENDING_VERIFICATION") {
-      return (
-        <View className="bg-warning/10 rounded-full px-2.5 py-1">
-          <Text className="text-warning text-xs font-semibold">Pending Admin Review</Text>
-        </View>
-      );
-    }
-    if (status === "REJECTED") {
-      return (
-        <View className="bg-error/10 rounded-full px-2.5 py-1">
-          <Text className="text-error text-xs font-semibold">Declined</Text>
-        </View>
-      );
-    }
-    return null;
-  };
+  const openRequestForm = (serviceTypeId?: string) =>
+    router.push({ pathname: "/(worker)/profile/skills/request" as any, params: serviceTypeId ? { serviceTypeId } : {} });
 
   return (
     <SafeAreaView className="flex-1 bg-white">
       <ScreenHeader title="Skills & Services" showBack />
-      <KeyboardAwareScrollView contentContainerStyle={{ padding: 16, paddingBottom: 80 }}>
+      <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 120 }}>
         <Text className="text-text-primary font-bold mb-1">Services You Offer</Text>
         <Text className="text-text-muted text-sm mb-4">
-          Check off the tasks you actually do. A new category beyond your first needs one supporting
-          document and shows as &quot;Pending Admin Review&quot; until it&apos;s approved.
+          Tick the tasks you do. Prices are set by HomeEase and are the same for every pro.
         </Text>
 
         {loading && (
@@ -338,273 +222,162 @@ export default function SkillsScreen() {
           </View>
         )}
 
-        {!loading && catalog.length === 0 && (
-          <View className="bg-card rounded-2xl p-4">
-            <Text className="text-text-secondary text-sm">No services have been set up yet.</Text>
-          </View>
-        )}
-
-        {!loading &&
-          catalog.map((category) => {
-            const badge = categoryBadge(category.categoryStatus);
-            const isDim = category.categoryStatus === "PENDING_VERIFICATION" || category.categoryStatus === "REJECTED";
-            return (
-              <View key={category.serviceType.id} className="bg-card rounded-2xl p-4 mb-3">
-                <View className="flex-row items-center justify-between mb-3">
-                  <Text className={`font-bold text-sm ${isDim ? "text-text-muted" : "text-text-primary"}`}>
-                    {category.serviceType.name}
-                  </Text>
-                  {badge}
-                </View>
-                {category.tasks.length === 0 ? (
-                  <Text className="text-text-muted text-sm">No tasks listed for this category yet.</Text>
-                ) : (
-                  category.tasks.map((t) => {
-                    const isSelected = !!t.mySelection?.isActive;
-                    const isBusy = busyTaskId === t.task.id;
-                    return (
-                      <Pressable
-                        key={t.task.id}
-                        disabled={isBusy}
-                        onPress={() => handleToggleTask(category, t)}
-                        accessibilityRole="checkbox"
-                        accessibilityState={{ checked: isSelected }}
-                        className="flex-row items-center py-2"
-                      >
-                        <Ionicons
-                          name={isSelected ? "checkbox" : "square-outline"}
-                          size={20}
-                          color={isSelected ? colors.accent.DEFAULT : colors.text.muted}
-                        />
-                        <Text
-                          className={`ml-2.5 text-sm flex-1 ${
-                            isSelected ? "text-text-primary font-medium" : "text-text-secondary"
-                          }`}
-                        >
-                          {t.task.name}
-                        </Text>
-                        {isBusy && <ActivityIndicator size="small" />}
-                      </Pressable>
-                    );
-                  })
-                )}
-              </View>
-            );
-          })}
-
-        <Text className="text-text-primary font-bold mb-1 mt-6">Your Specialization</Text>
-        <Text className="text-text-muted text-sm mb-3">
-          Check off exactly what you handle. Clients who ask for something specific only see pros
-          who&apos;ve checked it.
-        </Text>
-
-        {!loading && matchingCategories.length === 0 && (
-          <View className="bg-card rounded-2xl p-4">
+        {!loading && registered.length === 0 && (
+          <View className="bg-card rounded-2xl p-4 mb-3">
             <Text className="text-text-secondary text-sm">
-              None of your categories have specializations yet.
+              You aren&apos;t registered for any service yet. Request one below to start getting bookings.
             </Text>
           </View>
         )}
 
         {!loading &&
-          matchingCategories.map((category) => (
-            <View key={category.id} className="bg-card rounded-2xl p-4 mb-4">
-              <Text className="text-text-primary font-bold text-sm mb-3">{category.name}</Text>
-              {(category.scopeFields ?? [])
-                .filter((f) => f.usedForMatching)
-                .map((field) => (
-                  <View key={field.id} className="mb-3 last:mb-0">
-                    <Text className="text-text-secondary font-semibold text-xs mb-2">
-                      {field.label}
-                      {jobsCaption(field, category) && (
-                        <Text className="text-text-muted font-normal"> · {jobsCaption(field, category)}</Text>
-                      )}
-                    </Text>
-                    <View className="flex-row flex-wrap gap-2">
-                      {(field.options ?? []).map((option) => {
-                        const isSelected = selectedOptionIds.has(option.id);
-                        return (
-                          <Pressable
-                            key={option.id}
-                            accessibilityRole="checkbox"
-                            accessibilityState={{ checked: isSelected }}
-                            onPress={() => toggleOption(option.id)}
-                            className={`rounded-full px-4 py-2.5 border ${
-                              isSelected ? "bg-accent border-accent" : "bg-white border-divider"
-                            }`}
-                          >
-                            <Text
-                              className={`font-medium text-sm ${isSelected ? "text-white" : "text-text-secondary"}`}
-                            >
-                              {option.label}
-                            </Text>
-                          </Pressable>
-                        );
-                      })}
-                    </View>
-                  </View>
-                ))}
+          registered.map((category) => (
+            <View key={category.serviceType.id} className="bg-card rounded-2xl p-4 mb-3">
+              <Text className="text-text-primary font-bold text-sm mb-2">{category.serviceType.name}</Text>
+              {category.tasks.length === 0 ? (
+                <Text className="text-text-muted text-sm">No tasks listed for this service yet.</Text>
+              ) : (
+                category.tasks.map((t) => {
+                  const isSelected = !!t.mySelection?.isActive;
+                  return (
+                    <Pressable
+                      key={t.task.id}
+                      onPress={() => handleToggleTask(t)}
+                      accessibilityRole="checkbox"
+                      accessibilityState={{ checked: isSelected }}
+                      accessibilityLabel={`${t.task.name}, ${priceLabel(t.task)}`}
+                      className="flex-row items-center py-2"
+                    >
+                      <Ionicons
+                        name={isSelected ? "checkbox" : "square-outline"}
+                        size={20}
+                        color={isSelected ? colors.accent.DEFAULT : colors.text.muted}
+                      />
+                      <Text
+                        className={`ml-2.5 text-sm flex-1 ${
+                          isSelected ? "text-text-primary font-medium" : "text-text-secondary"
+                        }`}
+                      >
+                        {t.task.name}
+                      </Text>
+                      <Text className="text-text-muted text-xs ml-2">{priceLabel(t.task)}</Text>
+                    </Pressable>
+                  );
+                })
+              )}
             </View>
           ))}
 
-        {!loading && matchingCategories.length > 0 && (
-          <PrimaryButton
-            label="Save Specialization"
-            fullWidth
-            onPress={handleSaveCapabilities}
-            disabled={saving}
-            loading={saving}
-          />
+        {!loading && requests.length > 0 && (
+          <>
+            <Text className="text-text-primary font-bold mb-1 mt-4">Your Requests</Text>
+            <Text className="text-text-muted text-sm mb-3">
+              You can pick tasks in a service once an admin approves your documents.
+            </Text>
+            {requests.map((category) => {
+              const pending = category.categoryStatus === "PENDING_VERIFICATION";
+              return (
+                <View key={category.serviceType.id} className="bg-card rounded-2xl p-4 mb-3">
+                  <View className="flex-row items-center justify-between">
+                    <Text className="text-text-primary font-bold text-sm flex-1 mr-2">
+                      {category.serviceType.name}
+                    </Text>
+                    <View className={`${pending ? "bg-warning/10" : "bg-error/10"} rounded-full px-2.5 py-1`}>
+                      <Text className={`${pending ? "text-warning" : "text-error"} text-xs font-semibold`}>
+                        {pending ? "Pending Admin Review" : "Declined"}
+                      </Text>
+                    </View>
+                  </View>
+                  {pending && !!category.requestedAt && (
+                    <Text className="text-text-muted text-xs mt-1">Requested {formatDate(category.requestedAt)}</Text>
+                  )}
+                  {!pending && !!category.rejectionReason && (
+                    <Text className="text-text-secondary text-xs mt-2">{category.rejectionReason}</Text>
+                  )}
+                  <View className="flex-row mt-3">
+                    {pending ? (
+                      <OutlinedButton
+                        label="Withdraw Request"
+                        disabled={withdrawingId === category.serviceType.id}
+                        onPress={() => handleWithdraw(category)}
+                      />
+                    ) : (
+                      <OutlinedButton label="Request Again" onPress={() => openRequestForm(category.serviceType.id)} />
+                    )}
+                  </View>
+                </View>
+              );
+            })}
+          </>
         )}
 
-        <Text className="text-text-primary font-bold mb-1 mt-6">Your Prices</Text>
-        <Text className="text-text-muted text-sm mb-3">
-          Set your price for each selected task, within the allowed range.
-        </Text>
-
-        {!loading && priceableTasks.length === 0 && (
-          <View className="bg-card rounded-2xl p-4">
-            <Text className="text-text-secondary text-sm">
-              Check off a task above to price it here.
+        {!loading && canRequestMore && (
+          <View className="mt-2">
+            <PrimaryButton label="Request a New Service" fullWidth onPress={() => openRequestForm()} />
+            <Text className="text-text-muted text-xs mt-2 text-center">
+              Upload certifications or documents that prove your skills. An admin reviews them first.
             </Text>
           </View>
         )}
 
-        {!loading &&
-          priceableTasks.map((entry) => {
-            const { task, myPrice, myTiers } = entry;
-            const isPerUnit = task.pricingModel === "PER_UNIT";
-            const isTiered = task.pricingModel === "TIERED";
-            const currentValue = isPerUnit ? myPrice?.unitPrice : myPrice?.price;
-            const activeTierCount = myTiers.filter((t) => t.isActive).length;
-            const isPriced = isTiered ? activeTierCount > 0 : myPrice?.isActive && currentValue != null;
+        {!loading && matchingCategories.length > 0 && (
+          <>
+            <Text className="text-text-primary font-bold mb-1 mt-8">Your Specialization</Text>
+            <Text className="text-text-muted text-sm mb-3">
+              Check off exactly what you handle. Clients who ask for something specific only see pros
+              who&apos;ve checked it.
+            </Text>
 
-            return (
-              <Pressable
-                key={task.id}
-                onPress={() => openPriceModal(entry)}
-                className="bg-card rounded-2xl p-4 mb-3 flex-row items-center justify-between"
-              >
-                <View className="flex-1 pr-3">
-                  <Text className="text-text-primary font-semibold text-sm">{task.name}</Text>
-                  <Text className="text-text-muted text-xs mt-1">
-                    Admin allows ₱{task.minPrice}–₱{task.maxPrice}
-                    {isPerUnit || isTiered ? `/${task.unitLabel}` : ""}
-                  </Text>
-                </View>
-                <View className="flex-row items-center">
-                  {!isPriced && <View className="w-2 h-2 rounded-full bg-warning mr-2" />}
-                  <Text className={`text-sm font-bold ${isPriced ? "text-accent" : "text-warning"}`}>
-                    {isTiered
-                      ? isPriced
-                        ? `${activeTierCount} price step${activeTierCount === 1 ? "" : "s"} set`
-                        : "Set your prices"
-                      : isPriced
-                        ? `₱${currentValue}${isPerUnit ? `/${task.unitLabel}` : ""}`
-                        : "Set your price"}
-                  </Text>
-                </View>
-              </Pressable>
-            );
-          })}
-      </KeyboardAwareScrollView>
-
-      <Modal visible={!!priceModalEntry} transparent animationType="slide">
-        {/* Keeps the sheet's fields above the keyboard. */}
-        <KeyboardAvoidingView behavior="padding" style={{ flex: 1 }}>
-          <View className="flex-1 bg-black/40 justify-end">
-            <View className="bg-white rounded-t-3xl p-6 pb-8">
-              <View className="flex-row justify-between items-center mb-6">
-                <Text className="text-text-primary text-xl font-bold">{priceModalEntry?.task.name}</Text>
-                <Pressable accessibilityRole="button" accessibilityLabel="Close" onPress={closePriceModal}>
-                  <Ionicons name="close" size={24} color={colors.text.primary} />
-                </Pressable>
-              </View>
-
-              {priceModalEntry && priceModalEntry.task.pricingModel === "TIERED" && (
-                <>
-                  <Text className="text-text-muted text-sm mb-1">
-                    Admin allows ₱{priceModalEntry.task.minPrice}–₱{priceModalEntry.task.maxPrice}/
-                    {priceModalEntry.task.unitLabel} per step.
-                  </Text>
-                  {!!priceModalEntry.task.description && (
-                    <Text className="text-text-muted text-xs mb-4">{priceModalEntry.task.description}</Text>
-                  )}
-                  <ScrollView style={{ maxHeight: 320 }} contentContainerStyle={{ paddingBottom: 4 }}>
-                    {tierRows.map((row, index) => {
-                      const isLast = index === tierRows.length - 1;
-                      return (
-                        <View key={index} className="flex-row items-end gap-2 mb-3">
-                          <View className="flex-1">
-                            <InputField
-                              label={isLast ? `Up to (${priceModalEntry.task.unitLabel}, blank = no limit)` : `Up to (${priceModalEntry.task.unitLabel})`}
-                              value={row.upToQty}
-                              onChangeText={(v) => updateTierRow(index, "upToQty", v)}
-                              placeholder={isLast ? "e.g. 20 or blank" : "e.g. 20"}
-                              keyboardType="number-pad"
-                            />
-                          </View>
-                          <View className="flex-1">
-                            <InputField
-                              label="Price (₱)"
-                              value={row.price}
-                              onChangeText={(v) => updateTierRow(index, "price", v)}
-                              placeholder="e.g. 1000"
-                              keyboardType="number-pad"
-                            />
-                          </View>
-                          {tierRows.length > 1 && (
-                            <Pressable accessibilityRole="button" accessibilityLabel="Remove price step" onPress={() => removeTierRow(index)} className="mb-3 p-2">
-                              <Ionicons name="trash-outline" size={18} color={colors.error} />
+            {matchingCategories.map((category) => (
+              <View key={category.id} className="bg-card rounded-2xl p-4 mb-4">
+                <Text className="text-text-primary font-bold text-sm mb-3">{category.name}</Text>
+                {(category.scopeFields ?? [])
+                  .filter((f) => f.usedForMatching)
+                  .map((field) => (
+                    <View key={field.id} className="mb-3 last:mb-0">
+                      <Text className="text-text-secondary font-semibold text-xs mb-2">
+                        {field.label}
+                        {jobsCaption(field, category) && (
+                          <Text className="text-text-muted font-normal"> · {jobsCaption(field, category)}</Text>
+                        )}
+                      </Text>
+                      <View className="flex-row flex-wrap gap-2">
+                        {(field.options ?? []).map((option) => {
+                          const isSelected = selectedOptionIds.has(option.id);
+                          return (
+                            <Pressable
+                              key={option.id}
+                              accessibilityRole="checkbox"
+                              accessibilityState={{ checked: isSelected }}
+                              onPress={() => toggleOption(option.id)}
+                              className={`rounded-full px-4 py-2.5 border ${
+                                isSelected ? "bg-accent border-accent" : "bg-white border-divider"
+                              }`}
+                            >
+                              <Text
+                                className={`font-medium text-sm ${isSelected ? "text-white" : "text-text-secondary"}`}
+                              >
+                                {option.label}
+                              </Text>
                             </Pressable>
-                          )}
-                        </View>
-                      );
-                    })}
-                  </ScrollView>
-                  {tierRows.length < MAX_TIER_ROWS && (
-                    <Pressable onPress={addTierRow} className="flex-row items-center mb-2">
-                      <Ionicons name="add-circle-outline" size={18} color={colors.accent.DEFAULT} />
-                      <Text className="text-accent text-sm font-semibold ml-1.5">Add a price step</Text>
-                    </Pressable>
-                  )}
-                </>
-              )}
-
-              {priceModalEntry && priceModalEntry.task.pricingModel !== "TIERED" && (
-                <>
-                  <Text className="text-text-muted text-sm mb-4">
-                    Admin allows ₱{priceModalEntry.task.minPrice}–₱{priceModalEntry.task.maxPrice}
-                    {priceModalEntry.task.pricingModel === "PER_UNIT" ? `/${priceModalEntry.task.unitLabel}` : ""}
-                  </Text>
-                  <InputField
-                    label={
-                      priceModalEntry.task.pricingModel === "PER_UNIT"
-                        ? `Your rate (₱/${priceModalEntry.task.unitLabel})`
-                        : "Your price (₱)"
-                    }
-                    value={priceInput}
-                    onChangeText={setPriceInput}
-                    placeholder="e.g. 800"
-                    keyboardType="number-pad"
-                  />
-                </>
-              )}
-
-              <View className="gap-3 mt-2">
-                <PrimaryButton
-                  label="Save Price"
-                  fullWidth
-                  onPress={handleSavePrice}
-                  disabled={savingPrice}
-                  loading={savingPrice}
-                />
-                <OutlinedButton label="Cancel" onPress={closePriceModal} />
+                          );
+                        })}
+                      </View>
+                    </View>
+                  ))}
               </View>
-            </View>
-          </View>
-        </KeyboardAvoidingView>
-      </Modal>
+            ))}
+
+            <PrimaryButton
+              label="Save Specialization"
+              fullWidth
+              onPress={handleSaveCapabilities}
+              disabled={saving}
+              loading={saving}
+            />
+          </>
+        )}
+      </ScrollView>
     </SafeAreaView>
   );
 }

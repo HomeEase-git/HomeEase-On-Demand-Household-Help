@@ -17,6 +17,7 @@ import { usePullToRefresh } from "../../../hooks/usePullToRefresh";
 import { usePushNotificationPrompt } from "../../../hooks/usePushNotificationPrompt";
 import { isAxiosError } from "axios";
 import { AvailabilityToggle } from "../../../components/worker-home/AvailabilityToggle";
+import { useWorkerSetupStatus } from "../../../hooks/useWorkerSetupStatus";
 import { NextJobCard } from "../../../components/worker-home/NextJobCard";
 import { pickNextJob } from "../../../utils/workerHome";
 import { useAlertModal } from "../../../contexts/AlertModalContext";
@@ -36,6 +37,7 @@ export default function WorkerHomeScreen() {
   const [isAvailable, setIsAvailable] = React.useState<boolean | null>(null);
   const [savingAvailability, setSavingAvailability] = React.useState(false);
   const alertModal = useAlertModal();
+  const { status: setupStatus } = useWorkerSetupStatus();
 
   const firstName = user?.name?.split(" ")[0] ?? "Worker";
   const pending = jobs.filter((j) => j.status === "Pending");
@@ -137,6 +139,7 @@ export default function WorkerHomeScreen() {
           isAvailable={isAvailable}
           saving={savingAvailability}
           onChange={changeAvailability}
+          setupIncomplete={setupStatus ? !setupStatus.complete : false}
         />
 
         <View className="flex-row mx-4 mt-3 gap-2">

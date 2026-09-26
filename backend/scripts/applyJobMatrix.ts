@@ -118,7 +118,7 @@ async function applyCategory(tx: Prisma.TransactionClient, matrix: MatrixCategor
   if (invalid) throw new Error(`Matrix fails the editor's validation: ${invalid}`);
   for (const t of tasks) {
     if (t.pricingModel === 'CUSTOM_QUOTE' || t.isActive === false) continue;
-    const dole = checkDoleFloor(getHighestDoleWageReference(), t.minPrice!, undefined);
+    const dole = checkDoleFloor(getHighestDoleWageReference(), t.basePrice!, undefined);
     if (dole.blocked) throw new Error(`Job "${t.name}": ${dole.message}`);
   }
 

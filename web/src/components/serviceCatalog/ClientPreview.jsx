@@ -195,7 +195,7 @@ export default function ClientPreview({ draft, jobRef, onJobChange }) {
         </div>
       </div>
       <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', margin: '0.6rem 0.25rem 0' }}>
-        Shows the standard price. Each worker sets their own within the job's range.
+        Shows the job's price, the same at every worker. The expertise-tier surcharge and distance fee are added at booking.
       </p>
     </aside>
   )
