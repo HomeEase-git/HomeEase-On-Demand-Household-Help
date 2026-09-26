@@ -519,7 +519,7 @@ export const createBooking = async (req: AuthRequest, res: Response) => {
     // wherever the worker happens to be right now, so this is a static
     // "shipping fee" style distance rather than real-time proximity (see
     // WorkerProfile.addressLat/addressLng comment). Real driving-route
-    // distance (Google Distance Matrix) when configured, falling back to
+    // distance (Google Routes API) when configured, falling back to
     // straight-line distance otherwise — see googleDistanceService.
     const workerDistanceKm =
       workerProfile.addressLat != null && workerProfile.addressLng != null

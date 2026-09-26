@@ -252,7 +252,7 @@ export const searchWorkers = async (req: AuthRequest, res: Response) => {
     const hasClientLocation = !isNaN(clientLat) && !isNaN(clientLng);
 
     // Distance-eligible candidates on this page — resolved as one batched
-    // Distance Matrix call (real driving distance, falling back to
+    // Routes API matrix call (real driving distance, falling back to
     // straight-line per-worker) rather than one request per card.
     const workersWithAddress = hasClientLocation
       ? page_.filter((w) => w.addressLat != null && w.addressLng != null)
