@@ -16,7 +16,7 @@ import { acceptContract } from "../../services/api";
 const KYC_NOTICE = [
   {
     title: "What we collect",
-    body: "Your government ID (front and back), a selfie, clearances (NBI, barangay or police), and any certifications you upload.",
+    body: "Your government ID (front and back), a selfie, an NBI clearance and your resume. Optionally, a barangay or police clearance, cedula and certifications.",
   },
   {
     title: "Why",
@@ -24,7 +24,7 @@ const KYC_NOTICE = [
   },
   {
     title: "Who sees it",
-    body: "HomeEase admins who review your application. An automated AI service (Anthropic, USA) checks the documents first to help the reviewer; a person always makes the final decision. Clients only see certifications you choose to show.",
+    body: "HomeEase admins who review your application. An automated AI service (Anthropic, USA) checks your ID, selfie and clearances first to help the reviewer; a person always makes the final decision. Clients see the skills and experience from your resume and only the certifications you choose to show.",
   },
   {
     title: "How long we keep it",
@@ -71,9 +71,10 @@ export default function KycLandingScreen() {
         </View>
         <View className="mt-6">
           {[
-            "Valid government-issued ID",
+            "Valid government-issued ID (front and back)",
             "A clear selfie photo",
-            "Certifications (workers only)",
+            "NBI clearance",
+            "Your resume (PDF)",
           ].map((item, i) => (
             <View key={i} className="flex-row items-center mb-3">
               <Ionicons

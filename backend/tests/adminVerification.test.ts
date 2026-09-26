@@ -55,7 +55,7 @@ describe('Admin verification approve/reject', () => {
         type: 'WORKER_ONBOARDING',
         status,
         documents: {
-          // All 4 Tier 1 required types (see documents.MD / adminVerificationController's
+          // All Tier 1 required types (see documents.MD / adminVerificationController's
           // approval completeness gate) so approval tests reflect a realistic, complete
           // submission — the incomplete-submission path is covered separately in kycUpload.test.ts.
           create: [
@@ -63,6 +63,7 @@ describe('Admin verification approve/reject', () => {
             { documentType: 'GOVERNMENT_ID_BACK', fileUrl: 'https://example.invalid/id-back.jpg' },
             { documentType: 'SELFIE', fileUrl: 'https://example.invalid/selfie.jpg' },
             { documentType: 'NBI_CLEARANCE', fileUrl: 'https://example.invalid/nbi.jpg' },
+            { documentType: 'RESUME', fileUrl: 'https://example.invalid/resume.pdf' },
           ],
         },
       },

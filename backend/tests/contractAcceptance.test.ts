@@ -62,6 +62,35 @@ describe('POST /api/users/me/contract-acceptance', () => {
     expect((await prisma.verificationRequest.findUnique({ where: { id: request_.id } }))?.status).toBe('PENDING');
   });
 
+  it('will not submit a worker for review without a resume', async () => {
+    const { user, token } = await loginAs('WORKER', 'accept-no-resume');
+    await prisma.workerProfile.update({ where: { userId: user.id }, data: { birthDate: new Date('1990-01-01T00:00:00Z') } });
+    const verification = await prisma.verificationRequest.create({
+      data: {
+        userId: user.id,
+        type: 'WORKER_ONBOARDING',
+        status: 'PENDING',
+        documents: {
+          create: [
+            { documentType: 'GOVERNMENT_ID_FRONT', fileUrl: 'https://example.invalid/front.jpg' },
+            { documentType: 'GOVERNMENT_ID_BACK', fileUrl: 'https://example.invalid/back.jpg' },
+            { documentType: 'SELFIE', fileUrl: 'https://example.invalid/selfie.jpg' },
+            { documentType: 'NBI_CLEARANCE', fileUrl: 'https://example.invalid/nbi.jpg' },
+          ],
+        },
+      },
+    });
+
+    const res = await request(app)
+      .post('/api/users/me/contract-acceptance')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ contractType: 'WORKER_SERVICE_AGREEMENT', contractVersion: '2026-09-25' });
+
+    expect(res.status).toBe(400);
+    expect(res.body.message).toMatch(/RESUME/);
+    expect((await prisma.verificationRequest.findUnique({ where: { id: verification.id } }))?.status).toBe('PENDING');
+  });
+
   it("rejects a contract type that doesn't apply to the account's role, or an unknown one", async () => {
     const { token } = await loginAs('CLIENT', 'accept-wrong-role');
 
