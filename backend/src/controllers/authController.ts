@@ -6,6 +6,7 @@ import { generateToken, verifyToken } from '@utils/jwt';
 import { validateEmail, validatePassword, validatePhone, validateOtp } from '@utils/validators';
 import { errorResponse } from '@utils/errorResponse';
 import { writeAuditLog } from '@utils/auditLog';
+import { notifyUser } from '@utils/notify';
 import {
   sendOtpEmail,
   sendPasswordResetEmail,
@@ -134,6 +135,21 @@ export const signup = async (req: Request, res: Response) => {
         await tx.clientProfile.create({ data: { userId: createdUser.id } });
       }
 
+      // Sign-up's separate "I have read the Privacy Policy" checkbox. Optional
+      // so older app builds (which don't send it) can still sign up.
+      const privacyNoticeVersion = getTrimmedString(req.body.privacyNoticeVersion);
+      if (privacyNoticeVersion && /^[\w.-]{1,32}$/.test(privacyNoticeVersion)) {
+        await tx.contractAcceptance.create({
+          data: {
+            userId: createdUser.id,
+            contractType: 'PRIVACY_NOTICE',
+            contractVersion: privacyNoticeVersion,
+            ipAddress: req.ip ?? null,
+            userAgent: req.get('user-agent')?.slice(0, 512) ?? null,
+          },
+        });
+      }
+
       return createdUser;
     });
 
@@ -227,7 +243,10 @@ export const login = async (req: Request, res: Response) => {
           : user.status === 'BANNED'
             ? 'This account has been banned.'
             : 'This account no longer exists.';
-      return res.status(403).json(errorResponse(403, message));
+      // `code` lets the app offer "Request a review" (see
+      // requestSuspensionReview) without parsing the message text.
+      const code = user.status === 'SUSPENDED' || user.status === 'BANNED' ? `ACCOUNT_${user.status}` : undefined;
+      return res.status(403).json({ ...errorResponse(403, message), ...(code ? { code } : {}) });
     }
 
     // MFA — mandatory for admins (closes the "no MFA on admin accounts"
@@ -921,6 +940,84 @@ export const refreshToken = async (req: Request, res: Response) => {
 // ============================================================================
 // LOGOUT
 // ============================================================================
+
+const SUSPENSION_REVIEW_COOLDOWN_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * POST /api/auth/suspension-review
+ * Lets a suspended or banned user ask for a human review. They can't log
+ * in, so this is unauthenticated and proves identity with the account's
+ * email + password instead. Admins are notified and it's audit-logged; an
+ * admin reinstates through the normal status change. One request per 24h.
+ * (Due process before/after deactivation; Data Privacy Act §16 right to
+ * contest automated decisions such as auto-suspension.)
+ */
+export const requestSuspensionReview = async (req: Request, res: Response) => {
+  try {
+    const email = normalizeEmail(req.body.email);
+    const password = getPasswordString(req.body.password);
+    const message = getTrimmedString(req.body.message);
+
+    if (!email || !password) {
+      return res.status(400).json(errorResponse(400, 'Email and password are required'));
+    }
+    if (message.length < 10 || message.length > 1000) {
+      return res.status(400).json(errorResponse(400, 'Please explain your request in 10 to 1000 characters'));
+    }
+
+    const user = await prisma.user.findUnique({ where: { email } });
+    if (!user || !(await comparePassword(password, user.password))) {
+      return res.status(401).json(errorResponse(401, 'Invalid credentials'));
+    }
+    if (user.status !== 'SUSPENDED' && user.status !== 'BANNED') {
+      return res.status(400).json(errorResponse(400, 'Only suspended or banned accounts can request a review'));
+    }
+
+    const recent = await prisma.auditLog.findFirst({
+      where: {
+        actorId: user.id,
+        action: 'SUSPENSION_REVIEW_REQUESTED',
+        createdAt: { gte: new Date(Date.now() - SUSPENSION_REVIEW_COOLDOWN_MS) },
+      },
+      select: { id: true },
+    });
+    if (recent) {
+      return res.status(429).json(errorResponse(429, 'You already requested a review in the last 24 hours. An admin will look at it.'));
+    }
+
+    await writeAuditLog({
+      actorId: user.id,
+      actorName: user.fullName,
+      actorRole: user.role,
+      action: 'SUSPENSION_REVIEW_REQUESTED',
+      category: 'STATUS_CHANGE',
+      level: 'WARN',
+      message: `${user.fullName} (${user.status.toLowerCase()}) requested a review: ${message}`,
+      metadata: { userId: user.id, status: user.status, message },
+    });
+
+    const admins = await prisma.user.findMany({ where: { role: 'ADMIN', isDeleted: false }, select: { id: true } });
+    await Promise.all(
+      admins.map((admin) =>
+        notifyUser({
+          userId: admin.id,
+          type: 'SUSPENSION_REVIEW_REQUESTED',
+          title: 'Suspension review requested',
+          message: `${user.fullName} asked for their ${user.status.toLowerCase()} account to be reviewed: "${message.slice(0, 200)}"`,
+          relatedId: user.id,
+        })
+      )
+    );
+
+    return res.status(201).json({
+      success: true,
+      message: 'Your request was sent. An admin will review it, and if your account is reinstated you will be able to log in again.',
+    });
+  } catch (error) {
+    console.error('Suspension review request error:', error);
+    return res.status(500).json(errorResponse(500, 'Failed to send your request'));
+  }
+};
 
 export const logout = async (req: Request, res: Response) => {
   try {

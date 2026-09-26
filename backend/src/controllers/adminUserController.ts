@@ -18,10 +18,14 @@ interface AuthRequest extends Request {
 }
 
 function buildClientSearchWhere(search: string, status?: string): Prisma.UserWhereInput {
+  // isDeleted marks only accounts the user deleted themselves; suspension
+  // and bans are carried by `status` alone.
   const where: Prisma.UserWhereInput = { role: 'CLIENT', isDeleted: false };
 
-  if (status && status !== 'all') {
-    where.isDeleted = status.toLowerCase() === 'suspended';
+  if (status?.toLowerCase() === 'active') {
+    where.status = 'ACTIVE';
+  } else if (status?.toLowerCase() === 'suspended') {
+    where.status = { in: ['SUSPENDED', 'BANNED'] };
   }
 
   if (search) {
@@ -469,14 +473,18 @@ async function setUserStatus(
   if (!user) {
     return res.status(404).json(errorResponse(404, 'User not found'));
   }
+  // A self-deleted account has been anonymized — there's nothing left to
+  // suspend or reinstate.
+  if (user.status === 'DELETED') {
+    return res.status(409).json(errorResponse(409, 'This account was deleted by its owner and cannot be changed'));
+  }
 
   const updatedUser = await prisma.user.update({
     where: { id },
-    data: {
-      isDeleted: targetStatus !== 'ACTIVE',
-      deletedAt: targetStatus === 'ACTIVE' ? null : new Date(),
-      status: targetStatus,
-    },
+    // Suspension/ban is `status` only — isDeleted/deletedAt mean "deleted by
+    // the user" (userController.deleteAccount). Cleared here too so rows
+    // suspended under the old behaviour are fixed on their next change.
+    data: { status: targetStatus, isDeleted: false, deletedAt: null },
   });
 
   // A banned/suspended user previously kept full API access on their

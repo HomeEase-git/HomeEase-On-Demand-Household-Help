@@ -116,6 +116,10 @@ enum KycDocumentStatus {
 enum ContractType {
   WORKER_SERVICE_AGREEMENT
   CLIENT_USER_AGREEMENT
+  // Separate, specific consents (Data Privacy Act §12–13 / NPC guidance: not
+  // bundled into the Terms checkbox).
+  PRIVACY_NOTICE
+  KYC_CONSENT
 }
 
 enum NotificationType {
@@ -165,6 +169,7 @@ enum NotificationType {
   DISPUTE_STALE_REMINDER
   KYC_REVERIFICATION_REQUIRED
   ACCOUNT_AUTO_SUSPENDED
+  SUSPENSION_REVIEW_REQUESTED
   REVIEW_RESPONSE_ADDED
   CERTIFICATION_APPROVED
   CERTIFICATION_REJECTED
@@ -524,6 +529,10 @@ model WorkerProfile {
   // differently each time, so uniqueness is enforced on tinHash instead.
   tin           String?
   tinHash       String?   @unique
+
+  // Workers must be 18+ (utils/age.ts). Entered by the worker at the ID
+  // step and checked by the admin against the ID itself at approval.
+  birthDate DateTime? @db.Date
   tinVerifiedAt DateTime?
 
   // VAT registration — self-declared then admin-verified (mirrors the

@@ -113,6 +113,15 @@ export default function VerificationDetail() {
   const details = [
     { label: 'Applicant', value: verification.name },
     { label: 'Email', value: verification.email },
+    verification.type === 'WORKER_ONBOARDING'
+      ? {
+          // Workers must be 18+. Compare with the date of birth on the ID.
+          label: 'Date of Birth',
+          value: verification.birthDate
+            ? `${verification.birthDate} (age ${verification.age}) — check it matches the ID`
+            : 'Not provided — confirm age 18+ from the ID',
+        }
+      : null,
     { label: 'Type', value: humanizeEnum(verification.type) },
     { label: 'Submitted', value: verification.submitted },
     verification.serviceCategories?.length

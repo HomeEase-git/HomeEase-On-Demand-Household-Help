@@ -39,7 +39,14 @@ describe('Admin verification approve/reject', () => {
     // tripping that gate incidentally.
     await prisma.workerProfile.update({
       where: { userId: worker.id },
-      data: { address: '123 Test St', city: 'Manila', addressLat: 14.5995, addressLng: 120.9842 },
+      data: {
+        address: '123 Test St',
+        city: 'Manila',
+        addressLat: 14.5995,
+        addressLng: 120.9842,
+        // Workers must be 18+ (utils/age.ts).
+        birthDate: new Date('1990-05-15T00:00:00Z'),
+      },
     });
 
     const verification = await prisma.verificationRequest.create({
@@ -63,6 +70,34 @@ describe('Admin verification approve/reject', () => {
 
     return { worker, verification };
   }
+
+  it('refuses to approve a worker under 18, even with an override reason', async () => {
+    const { worker, verification } = await seedPendingVerification('underage');
+    const seventeen = new Date();
+    seventeen.setUTCFullYear(seventeen.getUTCFullYear() - 17);
+    await prisma.workerProfile.update({ where: { userId: worker.id }, data: { birthDate: seventeen } });
+
+    const res = await request(app)
+      .patch(`/api/admin/verifications/${verification.id}/approve`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ adminOverrideReason: 'Looks fine to me on the documents' });
+
+    expect(res.status).toBe(400);
+    expect(res.body.message).toMatch(/under 18/);
+  });
+
+  it('requires an override to approve a worker with no date of birth on file', async () => {
+    const { worker, verification } = await seedPendingVerification('no-dob');
+    await prisma.workerProfile.update({ where: { userId: worker.id }, data: { birthDate: null } });
+
+    const res = await request(app)
+      .patch(`/api/admin/verifications/${verification.id}/approve`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({});
+
+    expect(res.status).toBe(400);
+    expect(res.body.message).toMatch(/date of birth/);
+  });
 
   it('lists the seeded pending verification', async () => {
     const { worker, verification } = await seedPendingVerification('list');
