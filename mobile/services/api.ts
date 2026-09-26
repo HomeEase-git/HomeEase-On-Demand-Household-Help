@@ -939,12 +939,12 @@ export type GoogleGeocodeResult = {
   };
 };
 
-// Backend-proxied Google Geocoding — the server-side API key never ships to
-// the mobile bundle. Resolves to `null` (never throws) whenever Google isn't
-// configured server-side, the address genuinely doesn't resolve, or the
-// request fails — callers (utils/geo.ts) treat all three the same way, since
-// there is no other geocoding provider to fall back to (OpenStreetMap/
-// Nominatim has been fully removed).
+// Backend-proxied Google Places API (New) — the server-side API key never
+// ships to the mobile bundle. Resolves to `null`/`[]` (never throws) whenever
+// Google isn't configured server-side, the address genuinely doesn't resolve,
+// or the request fails — callers (utils/geo.ts) treat all three the same way.
+// Reverse geocoding ("use my current location") is NOT proxied: it runs
+// on-device via expo-location, see utils/geo.ts reverseGeocodeDetailed.
 export async function geocodeAddressGoogle(address: string): Promise<GoogleGeocodeResult | null> {
   try {
     return await api.post('/geo/geocode', { address });
@@ -954,28 +954,32 @@ export async function geocodeAddressGoogle(address: string): Promise<GoogleGeoco
   }
 }
 
-export async function reverseGeocodeGoogle(lat: number, lng: number): Promise<GoogleGeocodeResult | null> {
+export type GoogleAutocompleteSuggestion = {
+  placeId: string;
+  text: string;
+  mainText: string;
+  secondaryText: string;
+};
+
+export async function autocompleteAddressesGoogle(
+  input: string,
+  sessionToken: string,
+  near?: { lat: number; lng: number },
+): Promise<GoogleAutocompleteSuggestion[]> {
   try {
-    return await api.post('/geo/reverse-geocode', { lat, lng });
+    return await api.post('/geo/autocomplete', { input, sessionToken, near });
   } catch (error) {
-    console.error('Google reverse geocode proxy error:', error);
-    return null;
+    console.error('Google autocomplete proxy error:', error);
+    return [];
   }
 }
 
-export type GoogleAddressSuggestion = {
-  formattedAddress: string;
-  lat: number;
-  lng: number;
-  components: GoogleGeocodeResult['components'];
-};
-
-export async function searchAddressesGoogle(query: string, limit = 5): Promise<GoogleAddressSuggestion[]> {
+export async function getPlaceDetailsGoogle(placeId: string, sessionToken?: string): Promise<GoogleGeocodeResult | null> {
   try {
-    return await api.post('/geo/search', { query, limit });
+    return await api.post('/geo/place-details', { placeId, sessionToken });
   } catch (error) {
-    console.error('Google address search proxy error:', error);
-    return [];
+    console.error('Google place details proxy error:', error);
+    return null;
   }
 }
 
