@@ -559,7 +559,7 @@ export default function JobDetailScreen() {
           </Text>
           <Text className="text-success font-bold text-2xl">₱{payoutEstimate.toFixed(2)}</Text>
           <Text className="text-text-muted text-xs mt-1">
-            Labor ₱{(job.payment?.subtotal ?? amount).toFixed(2)} − commission ₱{commissionEstimate.toFixed(2)}
+            Service ₱{(job.payment?.subtotal ?? amount).toFixed(2)} − commission ₱{commissionEstimate.toFixed(2)}
             {taxEstimate > 0 ? ` − tax ₱${taxEstimate.toFixed(2)}` : ""}
           </Text>
           {tip > 0 && (

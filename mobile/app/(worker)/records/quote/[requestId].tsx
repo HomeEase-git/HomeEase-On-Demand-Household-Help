@@ -265,7 +265,7 @@ export default function SubmitQuoteScreen() {
           </Text>
           <View className="mt-2">
             <View className="flex-row justify-between">
-              <Text className="text-text-muted text-xs">{isCustomQuote ? "Your price" : "Service (settled)"}</Text>
+              <Text className="text-text-muted text-xs">{isCustomQuote ? "Your price" : "Service Cost (settled)"}</Text>
               <Text className="text-text-secondary text-xs">
                 ₱{labor.toFixed(2)}
               </Text>
