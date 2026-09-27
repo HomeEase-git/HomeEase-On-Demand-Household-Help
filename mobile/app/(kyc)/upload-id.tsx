@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { View, Text, ScrollView } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
@@ -10,7 +10,13 @@ import UploadCard from "../../components/ui/UploadCard";
 import PrimaryButton from "../../components/ui/PrimaryButton";
 import InputField from "../../components/ui/InputField";
 import { useAuthStore } from "../../store/authStore";
-import { submitKycDocument, updateWorkerProfileDetails, uploadKycFile } from "../../services/api";
+import {
+  getMyWorkerProfileDetails,
+  submitKycDocument,
+  updateWorkerProfileDetails,
+  uploadKycFile,
+} from "../../services/api";
+import { validateWorkerBirthDate } from "../../utils/validators";
 import { compressImage } from "../../utils/imageCompressor";
 import {
   documentRequirements,
@@ -35,27 +41,10 @@ const initialDocuments: Partial<Record<KycDocumentKey, UploadedDocument>> = {
   governmentIdBack: { uri: null, mimeType: null, name: null },
 };
 
-// Workers must be 18+. The backend enforces this; checking here too just
-// gives an immediate message instead of a round trip.
-const MIN_WORKER_AGE = 18;
-
+// Given at sign-up; shown here again so the worker can check it matches
+// the ID (the admin compares the two at approval).
 function birthDateError(value: string): string | null {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return "Use the format YYYY-MM-DD";
-  const date = new Date(`${value}T00:00:00Z`);
-  if (Number.isNaN(date.getTime()) || date.toISOString().slice(0, 10) !== value) {
-    return "That isn't a valid date";
-  }
-  const now = new Date();
-  let age = now.getUTCFullYear() - date.getUTCFullYear();
-  if (
-    now.getUTCMonth() < date.getUTCMonth() ||
-    (now.getUTCMonth() === date.getUTCMonth() && now.getUTCDate() < date.getUTCDate())
-  ) {
-    age--;
-  }
-  if (age < MIN_WORKER_AGE) return `You must be at least ${MIN_WORKER_AGE} years old to work on HomeEase`;
-  if (age > 100) return "Please check your date of birth";
-  return null;
+  return validateWorkerBirthDate(value).error ?? null;
 }
 
 const emptyDocument: UploadedDocument = {
@@ -74,6 +63,20 @@ export default function UploadIdScreen() {
   const [birthDate, setBirthDate] = useState("");
   const [savingBirthDate, setSavingBirthDate] = useState(false);
   const birthDateInvalid = isWorker ? birthDateError(birthDate.trim()) : null;
+
+  // Pre-fill the date given at sign-up.
+  useEffect(() => {
+    if (!isWorker) return;
+    let active = true;
+    getMyWorkerProfileDetails()
+      .then((profile) => {
+        if (active && profile.birthDate) setBirthDate(profile.birthDate.slice(0, 10));
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, [isWorker]);
 
   const handleContinue = async () => {
     if (!isWorker) {

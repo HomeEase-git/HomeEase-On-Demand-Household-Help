@@ -12,6 +12,7 @@ import {
   validateName,
   validatePhone,
   validatePasswordMatch,
+  validateWorkerBirthDate,
 } from "../../utils/validators";
 import { useToastContext } from "../../contexts/ToastContext";
 
@@ -27,6 +28,9 @@ export default function SignUpScreen() {
   const [phone, setPhone] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
+  // Workers only: must be 18-60, checked against their ID at KYC.
+  const [birthDate, setBirthDate] = useState("");
+  const [birthDateError, setBirthDateError] = useState("");
   const [acceptedTerms, setAcceptedTerms] = useState(false);
   const [acceptedPrivacy, setAcceptedPrivacy] = useState(false);
 
@@ -107,8 +111,12 @@ export default function SignUpScreen() {
     setPhoneError(phoneValidation.error || "");
     setPasswordError(passwordValidation.error || "");
     setConfirmPasswordError(confirmPasswordValidation.error || "");
+    const birthDateValidation =
+      role === "worker" ? validateWorkerBirthDate(birthDate.trim()) : { valid: true as const, error: undefined };
+    setBirthDateError(birthDateValidation.error || "");
 
     if (
+      !birthDateValidation.valid ||
       !nameValidation.valid ||
       !emailValidation.valid ||
       !phoneValidation.valid ||
@@ -137,6 +145,7 @@ export default function SignUpScreen() {
         phone,
         password,
         role: role as "client" | "worker",
+        ...(role === "worker" ? { birthDate: birthDate.trim() } : {}),
       });
 
       toast.success("Account created successfully");
@@ -210,6 +219,25 @@ export default function SignUpScreen() {
           editable={!loading}
           error={phoneError}
         />
+
+        {role === "worker" && (
+          <InputField
+            label="Date of birth"
+            value={birthDate}
+            onChangeText={(text) => {
+              setBirthDate(text);
+              if (text.trim().length >= 10) {
+                setBirthDateError(validateWorkerBirthDate(text.trim()).error || "");
+              } else {
+                setBirthDateError("");
+              }
+            }}
+            placeholder="YYYY-MM-DD"
+            keyboardType="numbers-and-punctuation"
+            editable={!loading}
+            error={birthDateError}
+          />
+        )}
 
         {/* Password */}
         <InputField

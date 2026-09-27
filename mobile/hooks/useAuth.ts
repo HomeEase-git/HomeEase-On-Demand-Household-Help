@@ -3,6 +3,7 @@ import { useAuthStore } from '../store/authStore';
 import {
   postLogin,
   postMfaChallenge,
+  postLoginCode,
   postSignUp,
   sendPasswordResetEmail,
   verifyOtp,
@@ -23,6 +24,11 @@ export function useAuth() {
       // MFA-enabled account — no session yet; caller renders a code-entry
       // step and calls completeMfaChallenge below instead of routing in.
       if ('mfaRequired' in response && response.mfaRequired) {
+        return { success: true, data: response };
+      }
+      // Two-step sign-in (email/SMS code) — same idea; the caller calls
+      // completeLoginCode with the code.
+      if ('twoFactorRequired' in response && response.twoFactorRequired) {
         return { success: true, data: response };
       }
 
@@ -75,12 +81,41 @@ export function useAuth() {
     }
   }, [store]);
 
+  // Second step of an email/SMS two-step sign-in.
+  const completeLoginCode = useCallback(async (challengeToken: string, code: string) => {
+    store.setLoading(true);
+    store.setError(null);
+
+    try {
+      const response = await postLoginCode(challengeToken, code);
+
+      store.setUser({
+        id: response.id,
+        name: response.name,
+        email: response.email,
+        role: response.role,
+        kycStatus: response.kycStatus,
+        hasAcceptedTerms: response.hasAcceptedTerms,
+      });
+      store.setToken(response.token);
+
+      return { success: true, data: response };
+    } catch (err) {
+      const error = normalizeError(err);
+      store.setError(error.message);
+      throw error;
+    } finally {
+      store.setLoading(false);
+    }
+  }, [store]);
+
   const signup = useCallback(async (userData: {
     fullName: string;
     email: string;
     phone: string;
     password: string;
     role: 'client' | 'worker';
+    birthDate?: string;
   }) => {
     store.setLoading(true);
     store.setError(null);
@@ -187,6 +222,7 @@ export function useAuth() {
     // Methods
     login,
     completeMfaChallenge,
+    completeLoginCode,
     signup,
     forgotPassword,
     verifyEmailOtp,

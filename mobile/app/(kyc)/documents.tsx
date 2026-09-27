@@ -18,7 +18,8 @@ import {
 } from "../../utils/kycDocumentConfig";
 import { useAlertModal } from "../../contexts/AlertModalContext";
 
-// Worker-only screen: clearances + optional certification.
+// Worker-only screen: clearances + the health certificate. (Certifications
+// are added later, when registering for a service.)
 // Clients never reach this screen (selfie.tsx sends them straight
 // to the contract), but we guard against direct navigation anyway.
 const DOCUMENT_KEYS: KycDocumentKey[] = [
@@ -26,7 +27,7 @@ const DOCUMENT_KEYS: KycDocumentKey[] = [
   "barangayClearance",
   "policeClearance",
   "cedula",
-  "certification",
+  "healthCertificate",
 ];
 
 type UploadedDocument = {
@@ -40,7 +41,7 @@ const initialDocuments: Partial<Record<KycDocumentKey, UploadedDocument>> = {
   barangayClearance: { uri: null, mimeType: null, name: null },
   policeClearance: { uri: null, mimeType: null, name: null },
   cedula: { uri: null, mimeType: null, name: null },
-  certification: { uri: null, mimeType: null, name: null },
+  healthCertificate: { uri: null, mimeType: null, name: null },
 };
 
 const emptyDocument: UploadedDocument = {
@@ -187,20 +188,21 @@ export default function DocumentsScreen() {
           currentStep={2}
         />
         <Text className="text-text-secondary text-sm mb-4">
-          Upload your clearances below. Certification is optional.
+          Upload your NBI clearance and a health certificate. The other clearances are optional. You&apos;ll add
+          any certifications later, when you register for a service.
         </Text>
 
         <View className="mb-4">
-          <Text className="text-text-primary font-semibold mb-2">Clearances</Text>
+          <Text className="text-text-primary font-semibold mb-2">Required</Text>
           {renderUploadCard("nbiClearance")}
-          {renderUploadCard("barangayClearance")}
-          {renderUploadCard("policeClearance")}
-          {renderUploadCard("cedula")}
+          {renderUploadCard("healthCertificate")}
         </View>
 
         <View className="mb-4">
           <Text className="text-text-primary font-semibold mb-2">Optional</Text>
-          {renderUploadCard("certification")}
+          {renderUploadCard("barangayClearance")}
+          {renderUploadCard("policeClearance")}
+          {renderUploadCard("cedula")}
         </View>
 
         <View className="mt-4">

@@ -149,3 +149,29 @@ export function validatePasswordMatch(
   }
   return { valid: true };
 }
+
+// Workers must be 18-60 (the admin can adjust the range; the backend is the
+// authority — this only gives an immediate message instead of a round trip).
+export const WORKER_MIN_AGE = 18;
+export const WORKER_MAX_AGE = 60;
+
+export function validateWorkerBirthDate(value: string): { valid: boolean; error?: string } {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return { valid: false, error: "Use the format YYYY-MM-DD" };
+  const date = new Date(`${value}T00:00:00Z`);
+  if (Number.isNaN(date.getTime()) || date.toISOString().slice(0, 10) !== value) {
+    return { valid: false, error: "That isn't a valid date" };
+  }
+  const now = new Date();
+  let age = now.getUTCFullYear() - date.getUTCFullYear();
+  if (
+    now.getUTCMonth() < date.getUTCMonth() ||
+    (now.getUTCMonth() === date.getUTCMonth() && now.getUTCDate() < date.getUTCDate())
+  ) {
+    age--;
+  }
+  if (age > 100) return { valid: false, error: "Please check your date of birth" };
+  if (age < WORKER_MIN_AGE || age > WORKER_MAX_AGE) {
+    return { valid: false, error: `Workers must be ${WORKER_MIN_AGE} to ${WORKER_MAX_AGE} years old` };
+  }
+  return { valid: true };
+}

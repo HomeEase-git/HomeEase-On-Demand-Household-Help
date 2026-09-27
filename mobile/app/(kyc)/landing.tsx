@@ -16,7 +16,7 @@ import { acceptContract } from "../../services/api";
 const KYC_NOTICE = [
   {
     title: "What we collect",
-    body: "Your government ID (front and back), a selfie, an NBI clearance and your resume. Optionally, a barangay or police clearance, cedula and certifications.",
+    body: "Your government ID (front and back), a selfie, an NBI clearance, a health certificate, your resume and your years of experience. Optionally, a barangay or police clearance or cedula. Certifications come later, when you register for a service.",
   },
   {
     title: "Why",

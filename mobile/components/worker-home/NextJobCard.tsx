@@ -4,7 +4,7 @@ import { AppIcon as Ionicons } from "../icons/AppIcon";
 import { StatusBadge } from "../ui/StatusBadge";
 import { colors } from "../../constants";
 import type { WorkerJob } from "../../store/workerStore";
-import { TIME_SLOT_LABELS } from "../../types/booking4step.types";
+import { formatTime12h } from "../../utils/bookingTime";
 import { directionsUrl } from "../../utils/workerHome";
 
 type Props = {
@@ -27,7 +27,8 @@ export const NextJobCard: React.FC<Props> = ({ job, onOpen }) => {
       </Text>
       <Text className="text-white/90 text-sm" numberOfLines={1}>
         {job.clientName} · {when}
-        {job.timeSlot ? ` · ${TIME_SLOT_LABELS[job.timeSlot]}` : ""}
+        {job.time ? ` · ${formatTime12h(job.time)}` : ""}
+        {job.isRush ? " · Same-day" : ""}
       </Text>
       {!!address && (
         <View className="flex-row items-start mt-2">

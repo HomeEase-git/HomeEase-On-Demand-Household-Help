@@ -11,6 +11,7 @@ import type { CalendarDay } from "../../../services/api";
 import { colors, cardShadow } from "../../../constants";
 import { useAlertModal } from "../../../contexts/AlertModalContext";
 import { formatTime12h, phTodayIso } from "../../../utils/bookingTime";
+import { dayTint } from "../../../utils/calendarLoad";
 
 const WEEKDAY_LABELS = ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"];
 const DAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
@@ -23,17 +24,6 @@ const MONTHS_AHEAD = 2;
 
 function iso(year: number, month: number, day: number): string {
   return `${year}-${String(month + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
-}
-
-// Low-opacity day tints so a busy month doesn't turn into a wall of color:
-// 1 job green, 2-3 yellow, 4+ red, a day off gray.
-function dayTint(day: CalendarDay | undefined): string {
-  if (!day) return "bg-transparent";
-  if (day.jobCount >= 4) return "bg-error/20";
-  if (day.jobCount >= 2) return "bg-warning/20";
-  if (day.jobCount === 1) return "bg-success/20";
-  if (!day.available) return "bg-neutral-300/50";
-  return "bg-transparent";
 }
 
 /**
