@@ -3,13 +3,13 @@ import { Prisma } from '@prisma/client';
 import prisma from '@config/database';
 import { parseListSort } from '@utils/listSort';
 import { errorResponse } from '@utils/errorResponse';
+import { bookingStartTime, formatTime12h } from '@services/workerAvailabilityService';
 import { formatDisplayId, formatPeso } from '@utils/formatters';
 import { buildPaginationMeta, getPaginationParams } from '@utils/pagination';
 import { writeAuditLog } from '@utils/auditLog';
 import { notifyUser } from '@utils/notify';
 import { sendSmsToUser } from '@utils/smsService';
 import { refundOrVoidPayment } from '@services/paymentLifecycleService';
-import { freeSlot } from '@services/workerAvailabilityService';
 import { cancelPendingExpiryJob } from '@queues/bookingQueue';
 import type { JwtPayload } from '@/types/index';
 
@@ -140,12 +140,16 @@ export const getBookingById = async (req: Request, res: Response) => {
         client: { select: { id: true, fullName: true, email: true } },
         worker: { select: { id: true, fullName: true, email: true } },
         serviceTask: { select: { name: true } },
+        cancellation: true,
+        visits: { orderBy: [{ scheduledDate: 'asc' }, { scheduledTime: 'asc' }] },
+        pricingLogs: { orderBy: { createdAt: 'asc' }, take: 1 },
       },
     });
 
     if (!booking) {
       return res.status(404).json(errorResponse(404, 'Booking not found'));
     }
+    const bookingLog = booking.pricingLogs[0] ?? null;
 
     return res.json({
       success: true,
@@ -158,27 +162,52 @@ export const getBookingById = async (req: Request, res: Response) => {
         workerId: booking.worker?.id ?? null,
         service: booking.serviceTask?.name ?? '—',
         urgencyLevel: booking.urgencyLevel,
-        date: booking.scheduledDate
-          ? booking.scheduledDate.toLocaleString('en-US', {
-              month: 'short',
-              day: 'numeric',
-              year: 'numeric',
-              hour: 'numeric',
-              minute: '2-digit',
-            })
-          : booking.createdAt.toLocaleString('en-US', {
-              month: 'short',
-              day: 'numeric',
-              year: 'numeric',
-              hour: 'numeric',
-              minute: '2-digit',
-            }),
+        // PH calendar date + exact start time.
+        date: `${booking.scheduledDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' })}, ${formatTime12h(bookingStartTime(booking))}`,
         status: booking.status.charAt(0) + booking.status.slice(1).toLowerCase(),
         amount:
           (booking.finalPrice ?? booking.estimatedPrice) != null
             ? formatPeso(booking.finalPrice ?? booking.estimatedPrice)
             : '—',
         selfDealingFlag: booking.selfDealingFlag,
+        // Exact PH start time (bookings before exact times show their old slot's start).
+        startTime: bookingStartTime(booking),
+        isRush: booking.isRush,
+        rushFee: bookingLog?.rushFee ?? 0,
+        parentBookingId: booking.parentBookingId,
+        workerArrivedAt: booking.workerArrivedAt,
+        visits: booking.visits.map((v) => ({
+          id: v.id,
+          date: v.scheduledDate.toISOString().slice(0, 10),
+          time: v.scheduledTime,
+          status: v.status,
+          notes: v.notes,
+        })),
+        quote:
+          booking.laborCost != null || booking.quoteStatus
+            ? {
+                status: booking.quoteStatus,
+                laborCost: booking.laborCost,
+                materialsCost: booking.materialsCost,
+                notes: booking.quoteNotes,
+                receiptUrls: booking.quoteReceiptUrls,
+                proofOfUseUrls: booking.quoteProofOfUseUrls,
+                rejectionReason: booking.quoteRejectionReason,
+                revision: booking.quoteRevision,
+              }
+            : null,
+        cancellation: booking.cancellation
+          ? {
+              cancelledBy: booking.cancellation.cancelledBy,
+              reason: booking.cancellation.reason,
+              fault: booking.cancellation.fault,
+              proofUrls: booking.cancellation.proofUrls,
+              penaltyAmount: booking.cancellation.penaltyAmount,
+              compensationAmount: booking.cancellation.compensationAmount,
+              compensationStatus: booking.cancellation.compensationStatus,
+              reviewNote: booking.cancellation.reviewNote,
+            }
+          : null,
       },
     });
   } catch (error) {
@@ -212,23 +241,12 @@ export const cancelBookingAdmin = async (req: AuthRequest, res: Response) => {
 
     await prisma.$transaction(async (tx) => {
       if (['ACCEPTED', 'IN_PROGRESS', 'QUOTE_SUBMITTED', 'QUOTE_APPROVED', 'DISPUTED'].includes(booking.status) && booking.workerId) {
-        const workerProfile = await tx.workerProfile.update({
+        await tx.workerProfile.update({
           where: { userId: booking.workerId },
           data: { activeJobCount: { decrement: 1 } },
         });
-        if (booking.timeSlot) {
-          await freeSlot(tx, workerProfile.id, booking.scheduledDate, booking.timeSlot, booking.estimatedDurationHours);
-        }
-
-        // Same cleanup bookingController.cancelBooking/completeBooking do —
-        // an admin cancel is a third path that can end a booking, and
-        // without this its /extend-reserved future calendar block (see
-        // bookingController.extendBooking) would survive it.
-        await tx.workerAvailability.updateMany({
-          where: { workerProfileId: workerProfile.id, blockedByBookingId: booking.id, isBooked: false },
-          data: { isBlocked: false, blockedByBookingId: null },
-        });
       }
+      await tx.bookingVisit.updateMany({ where: { bookingId: id, status: 'SCHEDULED' }, data: { status: 'CANCELLED' } });
 
       // Same as bookingController.cancelBooking — an open dispute on a
       // booking cancelled from here has nothing left to resolve.

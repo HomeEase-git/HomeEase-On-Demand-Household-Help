@@ -1,6 +1,6 @@
 import { Request, Response } from 'express';
 import prisma from '@config/database';
-import { TokenType } from '@prisma/client';
+import { TokenType, type Role, type TwoFactorMethod } from '@prisma/client';
 import { hashPassword, comparePassword } from '@utils/passwordHash';
 import { generateToken, verifyToken } from '@utils/jwt';
 import { validateEmail, validatePassword, validatePhone, validateOtp } from '@utils/validators';
@@ -16,7 +16,6 @@ import {
   generateOtp,
   storeOtp,
   verifyOtp,
-  storeRefreshToken,
   verifyRefreshToken,
   revokeRefreshToken,
   revokeAllRefreshTokens,
@@ -31,7 +30,11 @@ import {
   generateBackupCodes,
   verifyMfaCode,
 } from '@utils/mfaService';
-import crypto from 'crypto';
+import { sendOtpSms } from '@utils/smsService';
+import { parseWorkerBirthDate } from '@utils/age';
+import { clearUserSessionRevocation } from '@utils/tokenRevocation';
+import { getAppSettings } from '@services/appSettingsService';
+import { issueSession } from '@services/sessionService';
 import type { JwtPayload } from '../types';
 
 // Short-lived challenge token issued mid-login to an MFA-enabled user (see
@@ -93,6 +96,18 @@ export const signup = async (req: Request, res: Response) => {
       return res.status(400).json(errorResponse(400, 'Invalid phone number'));
     }
 
+    // Workers give their date of birth up front: the platform only accepts
+    // workers within AppSettings.workerMinAge..workerMaxAge. The admin
+    // checks it against the ID at KYC approval.
+    let workerBirthDate: Date | null = null;
+    if (role === 'WORKER') {
+      const parsed = parseWorkerBirthDate(req.body.birthDate, await getAppSettings());
+      if ('error' in parsed) {
+        return res.status(400).json(errorResponse(400, parsed.error));
+      }
+      workerBirthDate = parsed.date;
+    }
+
     const existingUser = await prisma.user.findUnique({ where: { email } });
 
     if (existingUser) {
@@ -130,7 +145,7 @@ export const signup = async (req: Request, res: Response) => {
       });
 
       if (role === 'WORKER') {
-        await tx.workerProfile.create({ data: { userId: createdUser.id } });
+        await tx.workerProfile.create({ data: { userId: createdUser.id, birthDate: workerBirthDate } });
       } else {
         await tx.clientProfile.create({ data: { userId: createdUser.id } });
       }
@@ -163,9 +178,7 @@ export const signup = async (req: Request, res: Response) => {
       console.error('Failed to send OTP email during signup:', emailError);
     }
 
-    const token = generateToken({ userId: user.id, email: user.email, role: user.role });
-    const refreshToken = crypto.randomBytes(40).toString('hex');
-    await storeRefreshToken(user.id, refreshToken);
+    const { token, refreshToken } = await issueSession(user);
 
     return res.status(201).json({
       success: true,
@@ -236,6 +249,15 @@ export const login = async (req: Request, res: Response) => {
       return res.status(401).json(errorResponse(401, 'Invalid credentials'));
     }
 
+    // A worker who deactivated their own account can turn it back on (see
+    // reactivateAccount) — `code` lets the app offer that.
+    if (user.status === 'DEACTIVATED') {
+      return res.status(403).json({
+        ...errorResponse(403, 'This account is deactivated. Reactivate it to sign in.'),
+        code: 'ACCOUNT_DEACTIVATED',
+      });
+    }
+
     if (user.status !== 'ACTIVE') {
       const message =
         user.status === 'SUSPENDED'
@@ -269,9 +291,20 @@ export const login = async (req: Request, res: Response) => {
       });
     }
 
-    const token = generateToken({ userId: user.id, email: user.email, role: user.role });
-    const refreshToken = crypto.randomBytes(40).toString('hex');
-    await storeRefreshToken(user.id, refreshToken);
+    // Two-step sign-in (email/SMS code) for clients and workers who turned
+    // it on — no session until the code is entered (see verifyLoginCode).
+    if (user.role !== 'ADMIN' && user.twoFactorMethod) {
+      const sent = await deliverCode(user, user.twoFactorMethod, TokenType.LOGIN_2FA);
+      const challengeToken = generateToken(
+        { userId: user.id, email: user.email, role: user.role, type: 'otp_pending' },
+        OTP_CHALLENGE_TOKEN_TTL_SECONDS,
+      );
+      return res.json({
+        success: true,
+        message: 'Enter the code we sent you',
+        data: { twoFactorRequired: true, challengeToken, method: sent.method, destination: sent.destination },
+      });
+    }
 
     await writeAuditLog({
       actorId: user.id,
@@ -282,44 +315,7 @@ export const login = async (req: Request, res: Response) => {
       message: `${user.fullName} logged in`,
     });
 
-    // Gates the client-agreement screen — undefined for workers, who have
-    // their own contract flow tied to KYC instead.
-    const hasAcceptedTerms =
-      user.role === 'CLIENT'
-        ? Boolean(
-            await prisma.contractAcceptance.findFirst({
-              where: { userId: user.id, contractType: 'CLIENT_USER_AGREEMENT' },
-              select: { id: true },
-            }),
-          )
-        : undefined;
-
-    // An admin who hasn't set up MFA yet still gets a normal session (see
-    // the block above for the alternative — hard-blocking login until setup
-    // was rejected as a first-admin lockout risk) but the flag tells the
-    // admin web app to force-route into the setup screen once, immediately
-    // after login, so the gap doesn't just sit open indefinitely.
-    const mfaSetupRequired = user.role === 'ADMIN' && !user.mfaEnabled ? true : undefined;
-
-    return res.json({
-      success: true,
-      message: 'Login successful',
-      data: {
-        id: user.id,
-        name: user.fullName,
-        email: user.email,
-        phone: user.phone,
-        role: user.role,
-        isVerified: user.isVerified,
-        // Lets the app gate worker access until admin approval — client
-        // accounts don't have a workerProfile so this stays undefined.
-        kycStatus: user.role === 'WORKER' ? (user.workerProfile?.kycStatus ?? 'PENDING') : undefined,
-        hasAcceptedTerms,
-        mfaSetupRequired,
-        token,
-        refreshToken,
-      },
-    });
+    return res.json({ success: true, message: 'Login successful', data: await loginPayload(user) });
   } catch (error) {
     console.error('Login error:', error);
     return res.status(500).json(errorResponse(500, 'Internal server error'));
@@ -498,10 +494,6 @@ export const mfaChallenge = async (req: Request, res: Response) => {
       return res.status(401).json(errorResponse(401, 'Invalid MFA code'));
     }
 
-    const token = generateToken({ userId: user.id, email: user.email, role: user.role });
-    const refreshToken = crypto.randomBytes(40).toString('hex');
-    await storeRefreshToken(user.id, refreshToken);
-
     await writeAuditLog({
       actorId: user.id,
       actorName: user.fullName,
@@ -519,35 +511,8 @@ export const mfaChallenge = async (req: Request, res: Response) => {
       message: `${user.fullName} logged in`,
     });
 
-    // Same shape login() returns on the non-MFA path — a client/worker
-    // completing an MFA challenge needs kycStatus/hasAcceptedTerms too, to
-    // route into the right screen post-login same as any other sign-in.
-    const hasAcceptedTerms =
-      user.role === 'CLIENT'
-        ? Boolean(
-            await prisma.contractAcceptance.findFirst({
-              where: { userId: user.id, contractType: 'CLIENT_USER_AGREEMENT' },
-              select: { id: true },
-            }),
-          )
-        : undefined;
-
-    return res.json({
-      success: true,
-      message: 'Login successful',
-      data: {
-        id: user.id,
-        name: user.fullName,
-        email: user.email,
-        phone: user.phone,
-        role: user.role,
-        isVerified: user.isVerified,
-        kycStatus: user.role === 'WORKER' ? (user.workerProfile?.kycStatus ?? 'PENDING') : undefined,
-        hasAcceptedTerms,
-        token,
-        refreshToken,
-      },
-    });
+    // Same shape login() returns on the non-MFA path.
+    return res.json({ success: true, message: 'Login successful', data: await loginPayload(user) });
   } catch (error) {
     console.error('MFA challenge error:', error);
     return res.status(500).json(errorResponse(500, 'Internal server error'));
@@ -663,10 +628,11 @@ export const getMe = async (req: Request, res: Response) => {
         role: user.role,
         isVerified: user.isVerified,
         kycStatus: user.role === 'WORKER' ? (user.workerProfile?.kycStatus ?? 'PENDING') : undefined,
-        // Lets the client/mobile app show a "set up MFA" or "disable MFA"
-        // toggle on its Security screen — opt-in for CLIENT/WORKER, but the
-        // flag itself is meaningful for every role now.
+        // Admin authenticator-app MFA (also set on a few older client/worker
+        // accounts, which can still turn it off).
         mfaEnabled: user.mfaEnabled,
+        // Client/worker two-step sign-in by email or SMS code (null = off).
+        twoFactorMethod: user.twoFactorMethod,
       },
     });
   } catch (error) {
@@ -749,7 +715,19 @@ export const verifyOtpHandler = async (req: Request, res: Response) => {
       console.error('Failed to send welcome email after OTP verification:', emailError);
     }
 
-    const token = generateToken({ userId: user.id, email: user.email, role: user.role });
+    // The app already signed in at signup; keep this token on that device's
+    // session so "log out other devices" can still tell devices apart.
+    const latestSession = await prisma.authToken.findFirst({
+      where: { userId: user.id, type: TokenType.REFRESH, sessionId: { not: null } },
+      orderBy: { createdAt: 'desc' },
+      select: { sessionId: true },
+    });
+    const token = generateToken({
+      userId: user.id,
+      email: user.email,
+      role: user.role,
+      ...(latestSession?.sessionId ? { sid: latestSession.sessionId } : {}),
+    });
 
     return res.json({
       success: true,
@@ -895,13 +873,13 @@ export const refreshToken = async (req: Request, res: Response) => {
       return res.status(400).json(errorResponse(400, 'Refresh token required'));
     }
 
-    const userId = await verifyRefreshToken(token);
+    const existing = await verifyRefreshToken(token);
 
-    if (!userId) {
+    if (!existing) {
       return res.status(401).json(errorResponse(401, 'Invalid or expired refresh token'));
     }
 
-    const user = await prisma.user.findUnique({ where: { id: userId } });
+    const user = await prisma.user.findUnique({ where: { id: existing.userId } });
 
     if (!user) {
       return res.status(401).json(errorResponse(401, 'User not found'));
@@ -916,12 +894,10 @@ export const refreshToken = async (req: Request, res: Response) => {
       return res.status(401).json(errorResponse(401, 'Account is not active'));
     }
 
-    // Rotate refresh token
+    // Rotate refresh token, keeping this device's session id (a sign-in from
+    // before session ids gets one now).
     await revokeRefreshToken(token);
-    const newRefreshToken = crypto.randomBytes(40).toString('hex');
-    await storeRefreshToken(user.id, newRefreshToken);
-
-    const newToken = generateToken({ userId: user.id, email: user.email, role: user.role });
+    const { token: newToken, refreshToken: newRefreshToken } = await issueSession(user, existing.sessionId ?? undefined);
 
     return res.json({
       success: true,
@@ -1037,6 +1013,309 @@ export const logout = async (req: Request, res: Response) => {
     return res.json({ success: true, message: 'Logged out successfully' });
   } catch (error) {
     console.error('Logout error:', error);
+    return res.status(500).json(errorResponse(500, 'Internal server error'));
+  }
+};
+
+// ============================================================================
+// TWO-STEP SIGN-IN (email / SMS code) — clients and workers
+// ============================================================================
+
+// Short-lived challenge token for the email/SMS login code — the same idea
+// as the admin TOTP challenge above.
+const OTP_CHALLENGE_TOKEN_TTL_SECONDS = 10 * 60;
+
+const maskEmail = (email: string): string => {
+  const [name, domain] = email.split('@');
+  return `${name.slice(0, 1)}${'*'.repeat(Math.max(1, Math.min(name.length - 1, 5)))}@${domain}`;
+};
+
+const maskPhone = (phone: string): string => `•••• ${phone.replace(/\D/g, '').slice(-4)}`;
+
+/**
+ * Sends a one-time code to the user by email or SMS. SMS falls back to email
+ * when there's no phone on file or the SMS gateway fails, so a user is never
+ * locked out by an SMS outage. Returns where it actually went.
+ */
+async function deliverCode(
+  user: { id: string; email: string; phone: string | null },
+  method: TwoFactorMethod,
+  type: TokenType
+): Promise<{ method: TwoFactorMethod; destination: string }> {
+  const code = generateOtp();
+  await storeOtp(user.id, code, type);
+  if (method === 'SMS' && user.phone) {
+    try {
+      await sendOtpSms(user.phone, code);
+      return { method: 'SMS', destination: maskPhone(user.phone) };
+    } catch (error) {
+      console.error('SMS code failed, falling back to email:', error);
+    }
+  }
+  await sendOtpEmail(user.email, code);
+  return { method: 'EMAIL', destination: maskEmail(user.email) };
+}
+
+/** The login response every successful sign-in path returns. */
+async function loginPayload(user: {
+  id: string;
+  fullName: string;
+  email: string;
+  phone: string | null;
+  role: Role;
+  isVerified: boolean;
+  mfaEnabled: boolean;
+  workerProfile?: { kycStatus: string } | null;
+}) {
+  const session = await issueSession(user);
+  // Gates the client-agreement screen — undefined for workers, who have
+  // their own contract flow tied to KYC instead.
+  const hasAcceptedTerms =
+    user.role === 'CLIENT'
+      ? Boolean(
+          await prisma.contractAcceptance.findFirst({
+            where: { userId: user.id, contractType: 'CLIENT_USER_AGREEMENT' },
+            select: { id: true },
+          }),
+        )
+      : undefined;
+  return {
+    id: user.id,
+    name: user.fullName,
+    email: user.email,
+    phone: user.phone,
+    role: user.role,
+    isVerified: user.isVerified,
+    kycStatus: user.role === 'WORKER' ? (user.workerProfile?.kycStatus ?? 'PENDING') : undefined,
+    hasAcceptedTerms,
+    // An admin who hasn't set up MFA yet still gets a normal session (hard-
+    // blocking login until setup was rejected as a first-admin lockout
+    // risk) but the flag tells the admin web app to force-route into the
+    // setup screen once, immediately after login.
+    mfaSetupRequired: user.role === 'ADMIN' && !user.mfaEnabled ? true : undefined,
+    token: session.token,
+    refreshToken: session.refreshToken,
+  };
+}
+
+function readChallenge(token: string): JwtPayload | null {
+  try {
+    const payload = verifyToken(token);
+    return payload.type === 'otp_pending' ? payload : null;
+  } catch {
+    return null;
+  }
+}
+
+// POST /api/auth/2fa/verify — exchanges the login challenge token plus the
+// emailed/texted code for a real session.
+export const verifyLoginCode = async (req: Request, res: Response) => {
+  try {
+    const payload = readChallenge(getTrimmedString(req.body.challengeToken));
+    const code = getTrimmedString(req.body.code);
+    if (!payload) {
+      return res.status(401).json(errorResponse(401, 'Your sign-in expired. Please sign in again.'));
+    }
+    if (!validateOtp(code)) {
+      return res.status(400).json(errorResponse(400, 'Enter the 6-digit code'));
+    }
+
+    const user = await prisma.user.findUnique({
+      where: { id: payload.userId },
+      include: { workerProfile: { select: { kycStatus: true } } },
+    });
+    if (!user || user.status !== 'ACTIVE') {
+      return res.status(401).json(errorResponse(401, 'Your sign-in expired. Please sign in again.'));
+    }
+
+    if (!(await verifyOtp(user.id, code, TokenType.LOGIN_2FA))) {
+      await writeAuditLog({
+        actorId: user.id,
+        actorName: user.fullName,
+        actorRole: user.role,
+        action: 'LOGIN_CODE_FAILED',
+        category: 'LOGIN',
+        level: 'WARN',
+        message: `Wrong sign-in code for ${user.email}`,
+      });
+      return res.status(401).json(errorResponse(401, 'That code is wrong or has expired'));
+    }
+
+    await writeAuditLog({
+      actorId: user.id,
+      actorName: user.fullName,
+      actorRole: user.role,
+      action: 'USER_LOGIN_SUCCESS',
+      category: 'LOGIN',
+      message: `${user.fullName} logged in (two-step code)`,
+    });
+
+    return res.json({ success: true, message: 'Login successful', data: await loginPayload(user) });
+  } catch (error) {
+    console.error('Verify login code error:', error);
+    return res.status(500).json(errorResponse(500, 'Internal server error'));
+  }
+};
+
+// POST /api/auth/2fa/resend — sends a fresh login code for a live challenge.
+export const resendLoginCode = async (req: Request, res: Response) => {
+  try {
+    const payload = readChallenge(getTrimmedString(req.body.challengeToken));
+    if (!payload) {
+      return res.status(401).json(errorResponse(401, 'Your sign-in expired. Please sign in again.'));
+    }
+    const user = await prisma.user.findUnique({ where: { id: payload.userId } });
+    if (!user || user.status !== 'ACTIVE' || !user.twoFactorMethod) {
+      return res.status(401).json(errorResponse(401, 'Your sign-in expired. Please sign in again.'));
+    }
+    const sent = await deliverCode(user, user.twoFactorMethod, TokenType.LOGIN_2FA);
+    return res.json({ success: true, message: 'Code sent', data: sent });
+  } catch (error) {
+    console.error('Resend login code error:', error);
+    return res.status(500).json(errorResponse(500, 'Failed to send the code'));
+  }
+};
+
+// POST /api/auth/2fa/code — (signed in) sends a confirmation code: to the
+// chosen channel when turning two-step sign-in on (proving the phone/email
+// works), or to the current channel when turning it off.
+export const sendTwoFactorCode = async (req: Request, res: Response) => {
+  try {
+    if (!req.user) {
+      return res.status(401).json(errorResponse(401, 'Not authenticated'));
+    }
+    const requested = getTrimmedString(req.body.method).toUpperCase();
+    const user = await prisma.user.findUnique({ where: { id: req.user.userId } });
+    if (!user) {
+      return res.status(404).json(errorResponse(404, 'User not found'));
+    }
+    const method = (requested === 'SMS' || requested === 'EMAIL' ? requested : user.twoFactorMethod ?? 'EMAIL') as TwoFactorMethod;
+    if (method === 'SMS' && !user.phone) {
+      return res.status(400).json(errorResponse(400, 'Add a mobile number to your profile first'));
+    }
+    const code = generateOtp();
+    await storeOtp(user.id, code, TokenType.ACCOUNT_ACTION);
+    if (method === 'SMS') {
+      try {
+        await sendOtpSms(user.phone!, code);
+      } catch {
+        return res.status(502).json(errorResponse(502, "We couldn't send a text right now. Try email instead."));
+      }
+      return res.json({ success: true, message: 'Code sent', data: { method, destination: maskPhone(user.phone!) } });
+    }
+    await sendOtpEmail(user.email, code);
+    return res.json({ success: true, message: 'Code sent', data: { method, destination: maskEmail(user.email) } });
+  } catch (error) {
+    console.error('Send two-factor code error:', error);
+    return res.status(500).json(errorResponse(500, 'Failed to send the code'));
+  }
+};
+
+// POST /api/auth/2fa/enable — { method, code } from sendTwoFactorCode.
+export const enableTwoFactor = async (req: Request, res: Response) => {
+  try {
+    if (!req.user) {
+      return res.status(401).json(errorResponse(401, 'Not authenticated'));
+    }
+    const method = getTrimmedString(req.body.method).toUpperCase();
+    const code = getTrimmedString(req.body.code);
+    if (method !== 'EMAIL' && method !== 'SMS') {
+      return res.status(400).json(errorResponse(400, 'method must be EMAIL or SMS'));
+    }
+    if (!validateOtp(code) || !(await verifyOtp(req.user.userId, code, TokenType.ACCOUNT_ACTION))) {
+      return res.status(400).json(errorResponse(400, 'That code is wrong or has expired'));
+    }
+    const user = await prisma.user.update({
+      where: { id: req.user.userId },
+      data: { twoFactorMethod: method },
+    });
+    await writeAuditLog({
+      actorId: user.id,
+      actorName: user.fullName,
+      actorRole: user.role,
+      action: 'TWO_FACTOR_ENABLED',
+      category: 'LOGIN',
+      message: `${user.fullName} turned on two-step sign-in (${method})`,
+    });
+    return res.json({ success: true, message: 'Two-step sign-in is on', data: { twoFactorMethod: method } });
+  } catch (error) {
+    console.error('Enable two-factor error:', error);
+    return res.status(500).json(errorResponse(500, 'Internal server error'));
+  }
+};
+
+// POST /api/auth/2fa/disable — { password, code }: both, so a stolen
+// unlocked phone alone can't switch it off.
+export const disableTwoFactor = async (req: Request, res: Response) => {
+  try {
+    if (!req.user) {
+      return res.status(401).json(errorResponse(401, 'Not authenticated'));
+    }
+    const password = getPasswordString(req.body.password);
+    const code = getTrimmedString(req.body.code);
+    const user = await prisma.user.findUnique({ where: { id: req.user.userId } });
+    if (!user) {
+      return res.status(404).json(errorResponse(404, 'User not found'));
+    }
+    if (!password || !(await comparePassword(password, user.password))) {
+      return res.status(401).json(errorResponse(401, 'Password is incorrect'));
+    }
+    if (!validateOtp(code) || !(await verifyOtp(user.id, code, TokenType.ACCOUNT_ACTION))) {
+      return res.status(400).json(errorResponse(400, 'That code is wrong or has expired'));
+    }
+    await prisma.user.update({ where: { id: user.id }, data: { twoFactorMethod: null } });
+    await writeAuditLog({
+      actorId: user.id,
+      actorName: user.fullName,
+      actorRole: user.role,
+      action: 'TWO_FACTOR_DISABLED',
+      category: 'LOGIN',
+      level: 'WARN',
+      message: `${user.fullName} turned off two-step sign-in`,
+    });
+    return res.json({ success: true, message: 'Two-step sign-in is off', data: { twoFactorMethod: null } });
+  } catch (error) {
+    console.error('Disable two-factor error:', error);
+    return res.status(500).json(errorResponse(500, 'Internal server error'));
+  }
+};
+
+// ============================================================================
+// REACTIVATION (worker self-deactivation — see userController.deactivateAccount)
+// ============================================================================
+
+// POST /api/auth/reactivate — { email, password }. A deactivated worker
+// turns their account back on; they then sign in as usual.
+export const reactivateAccount = async (req: Request, res: Response) => {
+  try {
+    const email = normalizeEmail(req.body.email);
+    const password = getPasswordString(req.body.password);
+    const user = email ? await prisma.user.findUnique({ where: { email } }) : null;
+    if (!user || !password || !(await comparePassword(password, user.password))) {
+      return res.status(401).json(errorResponse(401, 'Invalid credentials'));
+    }
+    if (user.status !== 'DEACTIVATED') {
+      return res.status(409).json(errorResponse(409, 'This account is not deactivated'));
+    }
+
+    await prisma.$transaction([
+      prisma.user.update({ where: { id: user.id }, data: { status: 'ACTIVE', deactivatedAt: null } }),
+      prisma.workerProfile.updateMany({ where: { userId: user.id }, data: { isAvailable: true } }),
+    ]);
+    await clearUserSessionRevocation(user.id);
+
+    await writeAuditLog({
+      actorId: user.id,
+      actorName: user.fullName,
+      actorRole: user.role,
+      action: 'ACCOUNT_REACTIVATED',
+      category: 'LOGIN',
+      message: `${user.fullName} reactivated their account`,
+    });
+
+    return res.json({ success: true, message: 'Your account is active again. Please sign in.' });
+  } catch (error) {
+    console.error('Reactivate account error:', error);
     return res.status(500).json(errorResponse(500, 'Internal server error'));
   }
 };

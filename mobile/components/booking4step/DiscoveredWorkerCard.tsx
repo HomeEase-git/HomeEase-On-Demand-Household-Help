@@ -4,7 +4,7 @@ import { RemoteImage } from "../ui/RemoteImage";
 import { AppIcon as Ionicons } from "../icons/AppIcon";
 import StarRating from "../ui/StarRating";
 import { colors } from "../../constants";
-import { TIME_SLOT_LABELS, type WorkerCard } from "../../types/booking4step.types";
+import type { WorkerCard } from "../../types/booking4step.types";
 
 const BADGE_STYLES: Record<string, { bg: string; text: string; label: string }> = {
   VERIFIED: { bg: "bg-success/10", text: "text-success", label: "Verified" },
@@ -79,12 +79,14 @@ export default function DiscoveredWorkerCard({ worker, selected, onSelect, unitL
                 : "—"}
           </Text>
         </View>
-        <View className="items-end">
-          <Text className="text-text-muted text-xs">Also open</Text>
-          <Text className="text-text-secondary font-medium text-xs" numberOfLines={1}>
-            {worker.openSlots.length > 0 ? worker.openSlots.map((s) => TIME_SLOT_LABELS[s]).join(", ") : "—"}
-          </Text>
-        </View>
+        {worker.yearsExperience != null && (
+          <View className="items-end">
+            <Text className="text-text-muted text-xs">Experience</Text>
+            <Text className="text-text-secondary font-medium text-xs" numberOfLines={1}>
+              {worker.yearsExperience} yr{worker.yearsExperience === 1 ? "" : "s"}
+            </Text>
+          </View>
+        )}
       </View>
     </Pressable>
   );

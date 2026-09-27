@@ -11,10 +11,8 @@ export const JOB_NAMES = {
   ADDON_TIMEOUT_SWEEP: 'addon-timeout-sweep',
   NO_SHOW_SWEEP: 'worker-no-show-sweep',
   DISPUTE_SLA_SWEEP: 'dispute-sla-sweep',
-  RESET_AVAILABILITY: 'reset-expired-availability-slots',
   RESCHEDULE_TIMEOUT_SWEEP: 'reschedule-timeout-sweep',
   RESCHEDULE_REQUEST_TIMEOUT_SWEEP: 'reschedule-request-timeout-sweep',
-  MATERIALIZE_AVAILABILITY_TEMPLATES: 'materialize-availability-templates',
   KYC_EXPIRY_SWEEP: 'kyc-expiry-sweep',
   AUTO_SUSPEND_SWEEP: 'auto-suspend-sweep',
   LOCATION_CLEANUP_SWEEP: 'worker-location-cleanup-sweep',
@@ -28,10 +26,8 @@ export const REPEATABLE_JOB_IDS = {
   ADDON_TIMEOUT_SWEEP: 'addon-timeout-sweep-hourly',
   NO_SHOW_SWEEP: 'worker-no-show-sweep-hourly',
   DISPUTE_SLA_SWEEP: 'dispute-sla-sweep-hourly',
-  RESET_AVAILABILITY: 'reset-expired-availability-slots-daily',
   RESCHEDULE_TIMEOUT_SWEEP: 'reschedule-timeout-sweep-hourly',
   RESCHEDULE_REQUEST_TIMEOUT_SWEEP: 'reschedule-request-timeout-sweep-hourly',
-  MATERIALIZE_AVAILABILITY_TEMPLATES: 'materialize-availability-templates-daily',
   KYC_EXPIRY_SWEEP: 'kyc-expiry-sweep-hourly',
   AUTO_SUSPEND_SWEEP: 'auto-suspend-sweep-hourly',
   LOCATION_CLEANUP_SWEEP: 'worker-location-cleanup-sweep-hourly',
@@ -92,8 +88,8 @@ export async function cancelPendingExpiryJob(bookingId: string): Promise<void> {
 }
 
 /**
- * Registers the repeatable ticks (hourly settle, hourly quote sweep, daily
- * availability reset) via BullMQ v6's Job Scheduler API. Idempotent —
+ * Registers the repeatable ticks (hourly settle, hourly quote sweep, the
+ * 10-minute no-show sweep, ...) via BullMQ v6's Job Scheduler API. Idempotent —
  * upsertJobScheduler upserts by jobSchedulerId (REPEATABLE_JOB_IDS.*), so
  * calling this on every server boot is safe and keeps the schedule in sync
  * with the pattern defined here.
@@ -102,7 +98,15 @@ export async function cancelPendingExpiryJob(bookingId: string): Promise<void> {
  * `repeat` is no longer a valid JobsOptions field; repeatable/scheduled jobs
  * now go through this dedicated scheduler API instead.
  */
+// Schedulers for sweeps that no longer exist (time slots were removed) —
+// deleted on boot so an old deployment's registrations don't keep firing.
+const RETIRED_JOB_SCHEDULER_IDS = ['reset-expired-availability-slots-daily', 'materialize-availability-templates-daily'];
+
 export async function registerRepeatableBookingJobs(): Promise<void> {
+  for (const id of RETIRED_JOB_SCHEDULER_IDS) {
+    await bookingQueue.removeJobScheduler(id).catch(() => undefined);
+  }
+
   await bookingQueue.upsertJobScheduler(
     REPEATABLE_JOB_IDS.AUTO_SETTLE_COMPLETED,
     { pattern: '0 * * * *' }, // every hour, on the hour
@@ -135,7 +139,9 @@ export async function registerRepeatableBookingJobs(): Promise<void> {
 
   await bookingQueue.upsertJobScheduler(
     REPEATABLE_JOB_IDS.NO_SHOW_SWEEP,
-    { pattern: '0 * * * *' }, // every hour, on the hour
+    // Every 10 minutes — a no-show is cancelled AppSettings.noShowGraceMinutes
+    // after the start time, so an hourly tick could be up to an hour late.
+    { pattern: '*/10 * * * *' },
     {
       name: JOB_NAMES.NO_SHOW_SWEEP,
       data: {},
@@ -148,16 +154,6 @@ export async function registerRepeatableBookingJobs(): Promise<void> {
     { pattern: '0 * * * *' }, // every hour, on the hour
     {
       name: JOB_NAMES.DISPUTE_SLA_SWEEP,
-      data: {},
-      opts: { removeOnComplete: true, removeOnFail: true },
-    }
-  );
-
-  await bookingQueue.upsertJobScheduler(
-    REPEATABLE_JOB_IDS.RESET_AVAILABILITY,
-    { pattern: '0 0 * * *' }, // daily at midnight
-    {
-      name: JOB_NAMES.RESET_AVAILABILITY,
       data: {},
       opts: { removeOnComplete: true, removeOnFail: true },
     }
@@ -178,16 +174,6 @@ export async function registerRepeatableBookingJobs(): Promise<void> {
     { pattern: '0 * * * *' }, // every hour, on the hour
     {
       name: JOB_NAMES.RESCHEDULE_REQUEST_TIMEOUT_SWEEP,
-      data: {},
-      opts: { removeOnComplete: true, removeOnFail: true },
-    }
-  );
-
-  await bookingQueue.upsertJobScheduler(
-    REPEATABLE_JOB_IDS.MATERIALIZE_AVAILABILITY_TEMPLATES,
-    { pattern: '0 0 * * *' }, // daily at midnight
-    {
-      name: JOB_NAMES.MATERIALIZE_AVAILABILITY_TEMPLATES,
       data: {},
       opts: { removeOnComplete: true, removeOnFail: true },
     }

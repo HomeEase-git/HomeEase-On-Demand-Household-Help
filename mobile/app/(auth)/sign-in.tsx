@@ -9,10 +9,11 @@ import { OutlinedButton } from "../../components/ui/OutlinedButton";
 import { useAuth } from "../../hooks/useAuth";
 import { validateEmail } from "../../utils/validators";
 import { useToastContext } from "../../contexts/ToastContext";
+import { resendLoginCode, reactivateAccount } from "../../services/api";
 
 export default function SignInScreen() {
   const router = useRouter();
-  const { login, completeMfaChallenge, loading, clearError } = useAuth();
+  const { login, completeMfaChallenge, completeLoginCode, loading, clearError } = useAuth();
   const toast = useToastContext();
 
   const [email, setEmail] = useState("");
@@ -26,6 +27,13 @@ export default function SignInScreen() {
   // Set when login is refused because the account is suspended/banned —
   // offers the way to ask for a human review.
   const [accountBlocked, setAccountBlocked] = useState(false);
+  // Set when a worker who deactivated their account tries to sign in.
+  const [accountDeactivated, setAccountDeactivated] = useState(false);
+  const [reactivating, setReactivating] = useState(false);
+  // Email/SMS two-step sign-in: where the code went. Unset for an
+  // authenticator-app challenge.
+  const [codeSentTo, setCodeSentTo] = useState<{ method: "EMAIL" | "SMS"; destination: string } | null>(null);
+  const [resending, setResending] = useState(false);
   const [mfaCode, setMfaCode] = useState("");
   const [mfaError, setMfaError] = useState("");
   const [verifyingMfa, setVerifyingMfa] = useState(false);
@@ -104,10 +112,17 @@ export default function SignInScreen() {
     try {
       clearError();
       setAccountBlocked(false);
+      setAccountDeactivated(false);
       const result = await login(email, password);
 
       if (result.data && "mfaRequired" in result.data && result.data.mfaRequired) {
+        setCodeSentTo(null);
         setChallengeToken(result.data.challengeToken as string);
+        return;
+      }
+      if (result.data && "twoFactorRequired" in result.data && result.data.twoFactorRequired) {
+        setCodeSentTo({ method: result.data.method, destination: result.data.destination });
+        setChallengeToken(result.data.challengeToken);
         return;
       }
 
@@ -119,6 +134,9 @@ export default function SignInScreen() {
       // human message here rather than whatever reason it gives.
       if (err?.code === "ACCOUNT_SUSPENDED" || err?.code === "ACCOUNT_BANNED") {
         setAccountBlocked(true);
+      }
+      if (err?.code === "ACCOUNT_DEACTIVATED") {
+        setAccountDeactivated(true);
       }
       const errorMsg =
         err?.statusCode === 401
@@ -132,14 +150,20 @@ export default function SignInScreen() {
   const handleMfaSubmit = async () => {
     const trimmedCode = mfaCode.trim();
     if (!trimmedCode) {
-      setMfaError("Enter the 6-digit code from your authenticator app, or a backup code.");
+      setMfaError(
+        codeSentTo
+          ? "Enter the 6-digit code we sent you."
+          : "Enter the 6-digit code from your authenticator app, or a backup code.",
+      );
       return;
     }
 
     setVerifyingMfa(true);
     setMfaError("");
     try {
-      const result = await completeMfaChallenge(challengeToken as string, trimmedCode);
+      const result = codeSentTo
+        ? await completeLoginCode(challengeToken as string, trimmedCode)
+        : await completeMfaChallenge(challengeToken as string, trimmedCode);
       routeAfterLogin(result.data);
     } catch (err: any) {
       setMfaError(err?.message || "Invalid code");
@@ -148,8 +172,38 @@ export default function SignInScreen() {
     }
   };
 
+  const handleResendCode = async () => {
+    if (!challengeToken) return;
+    setResending(true);
+    try {
+      const sent = await resendLoginCode(challengeToken);
+      setCodeSentTo(sent);
+      toast.success(`New code sent to ${sent.destination}`);
+    } catch (err: any) {
+      toast.error(err?.message || "Couldn't send a new code. Sign in again.");
+    } finally {
+      setResending(false);
+    }
+  };
+
+  const handleReactivate = async () => {
+    setReactivating(true);
+    try {
+      await reactivateAccount(email, password);
+      setAccountDeactivated(false);
+      setPasswordError("");
+      toast.success("Your account is active again");
+      await handleSignIn();
+    } catch (err: any) {
+      toast.error(err?.message || "Couldn't reactivate your account.");
+    } finally {
+      setReactivating(false);
+    }
+  };
+
   const backToLogin = () => {
     setChallengeToken(null);
+    setCodeSentTo(null);
     setMfaCode("");
     setMfaError("");
   };
@@ -173,17 +227,20 @@ export default function SignInScreen() {
             Verify it&apos;s you
           </Text>
           <Text className="text-text-secondary mb-6">
-            Enter the 6-digit code from your authenticator app, or one of your backup codes.
+            {codeSentTo
+              ? `We ${codeSentTo.method === "SMS" ? "texted" : "emailed"} a 6-digit code to ${codeSentTo.destination}.`
+              : "Enter the 6-digit code from your authenticator app, or one of your backup codes."}
           </Text>
 
           <InputField
-            label="Authentication code"
+            label={codeSentTo ? "Sign-in code" : "Authentication code"}
             value={mfaCode}
             onChangeText={(text) => {
               setMfaCode(text);
               if (mfaError) setMfaError("");
             }}
-            placeholder="123456 or XXXX-XXXX"
+            placeholder={codeSentTo ? "123456" : "123456 or XXXX-XXXX"}
+            keyboardType={codeSentTo ? "number-pad" : "default"}
             autoCapitalize="characters"
             returnKeyType="done"
             onSubmitEditing={handleMfaSubmit}
@@ -197,6 +254,18 @@ export default function SignInScreen() {
             onPress={handleMfaSubmit}
             loading={verifyingMfa}
           />
+
+          {codeSentTo && (
+            <Pressable
+              className="self-center mt-4"
+              disabled={resending || verifyingMfa}
+              onPress={handleResendCode}
+            >
+              <Text className="text-accent font-semibold">
+                {resending ? "Sending..." : "Send a new code"}
+              </Text>
+            </Pressable>
+          )}
 
           <View className="mt-3">
             <OutlinedButton label="Back to login" onPress={backToLogin} disabled={verifyingMfa} />
@@ -274,6 +343,20 @@ export default function SignInScreen() {
               onPress={() =>
                 router.push({ pathname: "/(auth)/request-review", params: { email } })
               }
+            />
+          </View>
+        )}
+
+        {accountDeactivated && (
+          <View className="mt-3 bg-accent/10 rounded-xl p-4">
+            <Text className="text-text-secondary text-sm mb-3">
+              You deactivated this account. Reactivate it to start getting bookings again.
+            </Text>
+            <PrimaryButton
+              label="Reactivate My Account"
+              fullWidth
+              onPress={handleReactivate}
+              loading={reactivating}
             />
           </View>
         )}

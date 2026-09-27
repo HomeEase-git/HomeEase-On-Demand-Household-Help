@@ -4,7 +4,16 @@ import { errorResponse } from '@utils/errorResponse';
 import { toOwnedStoredUrl } from '@utils/storageUrls';
 import { parseWorkerBirthDate } from '@utils/age';
 import { decryptField, decryptOptionalField, encryptField, encryptOptionalField, hashTin, maskLastFour } from '@utils/fieldEncryption';
-import { toDayStart, materializeTemplateForWorker, setUnavailableRange } from '@services/workerAvailabilityService';
+import {
+  toDayStart,
+  isoDay,
+  addDays,
+  phTodayStart,
+  isRushDate,
+  availableOnDateWhere,
+  getWorkerCalendar,
+  MAX_BOOKING_DAYS_AHEAD,
+} from '@services/workerAvailabilityService';
 import { getAppSettings } from '@services/appSettingsService';
 import { parseWorkerResume } from '@services/resumeParseService';
 import { computeWorkerTier, tierMultiplier } from '@utils/workerTier';
@@ -15,13 +24,11 @@ import { normalizeTin, maskTin } from '@utils/taxId';
 import { getCertificateDownloadUrl } from '@services/taxCertificateService';
 import { isPerUnitModel, offersTaskFilter } from '@services/taskPriceService';
 import { getWorkerSetupStatus, workerSetupCompleteWhere } from '@services/workerSetupService';
-import { validatePriceWithinPricingRule } from '@services/pricingRuleService';
 import { comparePassword } from '@utils/passwordHash';
 import { notifyUser } from '@utils/notify';
 import { writeAuditLog } from '@utils/auditLog';
 import { nameSimilarity } from '@utils/nameSimilarity';
-import { VALID_TIME_SLOTS } from '@/constants/bookingEnums';
-import type { TimeSlot, Prisma } from '@prisma/client';
+import type { Prisma } from '@prisma/client';
 import type { JwtPayload } from '@/types/index';
 
 interface AuthRequest extends Request {
@@ -31,13 +38,13 @@ interface AuthRequest extends Request {
 /**
  * GET /api/workers
  * Worker discovery search (public). Query params:
- *   serviceType, date (YYYY-MM-DD), timeSlot, hasPets, scopeAnswers (JSON
+ *   serviceType, date (YYYY-MM-DD), hasPets, scopeAnswers (JSON
  *   object string, keyed by ServiceScopeField.label), serviceTaskId,
  *   lat, lng, page, limit
  *   — plus legacy category/minRating/maxPrice, kept for existing callers.
  *
- * Filters to isAvailable + kycStatus APPROVED workers under capacity, with an
- * open (date, timeSlot) slot when both are given, offering serviceType, and
+ * Filters to isAvailable + kycStatus APPROVED workers, available on `date`
+ * when given (weekly schedule + date overrides), offering serviceType, and
  * — via buildCapabilityFilters — matching whatever the client answered for
  * any usedForMatching scope field (see matchingService.ts's docblock on that
  * function; it's the same filter findAutoMatchWorker uses, so Step 3's list
@@ -51,7 +58,6 @@ export const searchWorkers = async (req: AuthRequest, res: Response) => {
       serviceType,
       category,
       date,
-      timeSlot,
       hasPets,
       scopeAnswers,
       serviceTaskId,
@@ -67,9 +73,6 @@ export const searchWorkers = async (req: AuthRequest, res: Response) => {
     const pageNum = Math.max(1, parseInt(page as string) || 1);
     const limitNum = Math.min(100, Math.max(1, parseInt(limit as string) || 10));
 
-    if (timeSlot !== undefined && !VALID_TIME_SLOTS.includes(timeSlot as TimeSlot)) {
-      return res.status(400).json(errorResponse(400, `timeSlot must be one of ${VALID_TIME_SLOTS.join(', ')}`));
-    }
     if (date !== undefined && (typeof date !== 'string' || isNaN(new Date(date).getTime()))) {
       return res.status(400).json(errorResponse(400, 'date must be a valid YYYY-MM-DD date'));
     }
@@ -116,9 +119,8 @@ export const searchWorkers = async (req: AuthRequest, res: Response) => {
     };
 
     // Scopes discovery to a single already-known worker — used by the client
-    // app to check a specific (e.g. profile-locked) worker's real open slots
-    // for a date, via the same authoritative WorkerAvailability filtering
-    // below, rather than a separate bespoke endpoint.
+    // app to check whether a specific (e.g. profile-locked) worker is
+    // available on a date, via the same filtering as everyone else.
     if (typeof workerId === 'string' && workerId) {
       whereClause.userId = workerId;
     }
@@ -153,21 +155,13 @@ export const searchWorkers = async (req: AuthRequest, res: Response) => {
       whereClause.acceptsPets = true;
     }
 
-    let dayStart: Date | null = null;
+    // Workers take any number of jobs a day; the date only has to be one
+    // they work (see workerAvailabilityService.availableOnDateWhere).
+    const isRush = typeof date === 'string' && isRushDate(date);
     if (typeof date === 'string') {
-      dayStart = toDayStart(date);
-      whereClause.availability = {
-        some: {
-          date: dayStart,
-          isBlocked: false,
-          isBooked: false,
-          ...(timeSlot !== undefined ? { timeSlot: timeSlot as TimeSlot } : {}),
-        },
-      };
+      (whereClause.AND as Prisma.WorkerProfileWhereInput[]).push(availableOnDateWhere(date));
     }
 
-    // capacity: activeJobCount < maxConcurrentJobs — expressed as a raw
-    // filter since Prisma can't compare two columns of the same row directly.
     const candidates = await prisma.workerProfile.findMany({
       where: whereClause,
       include: {
@@ -182,7 +176,6 @@ export const searchWorkers = async (req: AuthRequest, res: Response) => {
             },
           },
         },
-        availability: dayStart ? { where: { date: dayStart, isBlocked: false, isBooked: false } } : false,
       },
       // Bounded candidate pool — the rating sort below runs in memory (see
       // file header comment), so this caps how much a single request can
@@ -190,7 +183,7 @@ export const searchWorkers = async (req: AuthRequest, res: Response) => {
       take: 500,
     });
 
-    const filtered = candidates.filter((w) => w.activeJobCount < w.maxConcurrentJobs);
+    const filtered = candidates;
 
     filtered.sort((a, b) => {
       if (b.rating !== a.rating) return b.rating - a.rating;
@@ -272,7 +265,10 @@ export const searchWorkers = async (req: AuthRequest, res: Response) => {
       if (worker.totalReviews === 0) badges.push('NEW');
 
       const completedJobs = completedByWorkerId.get(worker.userId) ?? 0;
-      const tier = computeWorkerTier(worker.rating, completedJobs, tierSettings);
+      const tier = computeWorkerTier(
+        { rating: worker.rating, completedJobs, yearsExperience: worker.yearsExperience },
+        tierSettings
+      );
       if (tier === 'PRO') badges.push('PRO_TIER');
       if (tier === 'EXPERT') badges.push('EXPERT_TIER');
 
@@ -286,6 +282,8 @@ export const searchWorkers = async (req: AuthRequest, res: Response) => {
           ? computeJobPricing({
               basePrice,
               tierMultiplier: multiplier,
+              // Same-day search: preview the rush fee the booking will carry.
+              rushFeeRate: isRush ? tierSettings.rushFeeRate : 0,
               distanceKm: workerDistanceKm,
               freeDistanceKm: tierSettings.freeDistanceKm,
               perKmFee: tierSettings.perKmFee,
@@ -317,13 +315,27 @@ export const searchWorkers = async (req: AuthRequest, res: Response) => {
         // of one lumped number, before a booking even exists. Null under the
         // same conditions estimatedTotal is (PER_UNIT task, or no base price).
         priceBreakdown: jobPricing
-          ? { basePrice: jobPricing.basePrice, distanceFee: jobPricing.distanceFee, tierFee: jobPricing.tierFee }
+          ? {
+              basePrice: jobPricing.basePrice,
+              distanceFee: jobPricing.distanceFee,
+              tierFee: jobPricing.tierFee,
+              rushFee: jobPricing.rushFee,
+            }
           : null,
         // Only populated for a PER_UNIT task search — the tier-adjusted
         // per-unit rate, for mobile to multiply by quantity once the client
         // enters one (see bookingPriceEstimate.ts / Stage 4 of the task-
         // pricing plan). Null for every other pricing model.
-        unitPrice: unitPriceForTask != null ? Math.round(unitPriceForTask * multiplier * 100) / 100 : null,
+        // Includes the same-day rush share, so rate x quantity is the whole
+        // job price before the distance fee.
+        unitPrice:
+          unitPriceForTask != null
+            ? Math.round(unitPriceForTask * (multiplier + (isRush ? tierSettings.rushFeeRate : 0)) * 100) / 100
+            : null,
+        // Same-day booking: the rush fee is this share of the service price
+        // (for mobile's per-unit estimate). 0 otherwise.
+        rushFeeRate: isRush ? tierSettings.rushFeeRate : 0,
+        yearsExperience: worker.yearsExperience,
         priceRangeMin,
         priceRangeMax,
         tier,
@@ -332,13 +344,8 @@ export const searchWorkers = async (req: AuthRequest, res: Response) => {
         matchedServiceTypeId: matchedServiceType?.id ?? null,
         service: matchedServiceType?.name ?? 'General service',
         serviceTypeNames: categories.map((st) => st.name),
-        // At-capacity workers are already filtered out above — these are
-        // exposed so a still-available worker's current load can be shown
-        // (e.g. "1 active job"), not to signal fullness.
         activeJobCount: worker.activeJobCount,
-        maxConcurrentJobs: worker.maxConcurrentJobs,
         badges,
-        openSlots: dayStart ? worker.availability.map((a) => a.timeSlot) : [],
       };
     });
 
@@ -390,7 +397,7 @@ export const getWorkerDetail = async (req: AuthRequest, res: Response) => {
         kycStatus: true,
         kycSubmittedAt: true,
         kycApprovedAt: true,
-        maxConcurrentJobs: true,
+        yearsExperience: true,
         user: {
           select: {
             id: true,
@@ -452,7 +459,10 @@ export const getWorkerDetail = async (req: AuthRequest, res: Response) => {
       getAppSettings(),
       prisma.booking.count({ where: { workerId: worker.userId, status: 'COMPLETED' } }),
     ]);
-    const tier = computeWorkerTier(worker.rating, completedJobs, tierSettings);
+    const tier = computeWorkerTier(
+      { rating: worker.rating, completedJobs, yearsExperience: worker.yearsExperience },
+      tierSettings
+    );
     const multiplier = tierMultiplier(tier, tierSettings);
 
     const categories = worker.serviceCategories.map((c) => c.serviceType);
@@ -491,6 +501,8 @@ export const getWorkerDetail = async (req: AuthRequest, res: Response) => {
         bio: worker.bio,
         rating: worker.rating,
         tier,
+        yearsExperience: worker.yearsExperience,
+        completedJobs,
         serviceAreaRadius: worker.serviceAreaRadius,
         city: worker.city,
         state: worker.state,
@@ -511,7 +523,6 @@ export const getWorkerDetail = async (req: AuthRequest, res: Response) => {
         verificationStatus: worker.kycStatus === 'APPROVED' ? 'VERIFIED' : 'PENDING',
         reviewCount: worker._count.reviews,
         activeJobCount: worker.activeJobCount,
-        maxConcurrentJobs: worker.maxConcurrentJobs,
       },
     });
   } catch (error) {
@@ -741,47 +752,37 @@ export const respondToReview = async (req: AuthRequest, res: Response) => {
 
 /**
  * GET /api/workers/:workerId/availability?date=YYYY-MM-DD
- * Returns the booked time slots for a worker on a specific date, so the
- * client's booking calendar can disable them.
+ * Whether the worker works that date, and the start times of the jobs they
+ * already have on it (shown to the client as a hint; overlapping is allowed).
  */
 export const getWorkerAvailability = async (req: AuthRequest, res: Response) => {
   try {
     const workerId = req.params.workerId as string;
     const { date } = req.query;
 
-    if (!date || typeof date !== 'string') {
+    if (!date || typeof date !== 'string' || isNaN(new Date(date).getTime())) {
       return res.status(400).json(errorResponse(400, 'date query parameter is required'));
     }
 
     const workerProfile = await prisma.workerProfile.findUnique({
       where: { userId: workerId },
-      select: { kycStatus: true },
+      select: { id: true, userId: true, kycStatus: true, availableDays: true },
     });
 
     if (!workerProfile || workerProfile.kycStatus !== 'APPROVED') {
       return res.status(404).json(errorResponse(404, 'Worker not found'));
     }
 
-    const dayStart = new Date(`${date}T00:00:00.000Z`);
-    const dayEnd = new Date(`${date}T23:59:59.999Z`);
-
-    const bookings = await prisma.booking.findMany({
-      where: {
-        workerId,
-        scheduledDate: { gte: dayStart, lte: dayEnd },
-        status: { notIn: ['CANCELLED', 'REJECTED'] },
-      },
-      select: { scheduledTime: true },
-    });
-
-    const occupied = bookings
-      .map((b) => b.scheduledTime)
-      .filter((t): t is string => !!t);
+    const day = toDayStart(date);
+    const [calendarDay] = await getWorkerCalendar(prisma, workerProfile, day, day);
 
     return res.status(200).json({
       success: true,
       message: 'Worker availability retrieved successfully',
-      data: { occupied },
+      data: {
+        available: calendarDay.available,
+        occupied: calendarDay.jobs.map((j) => j.time),
+      },
     });
   } catch (error) {
     console.error('Error fetching worker availability:', error);
@@ -791,8 +792,8 @@ export const getWorkerAvailability = async (req: AuthRequest, res: Response) => 
 
 /**
  * GET /api/workers/:workerId/blocked-dates
- * Returns dates (within the next 90 days, matching the client calendar's
- * booking window) where the worker already has at least one active booking.
+ * Dates within the client booking window the worker doesn't work (their
+ * weekly schedule plus date overrides) — the client calendar disables them.
  */
 export const getWorkerBlockedDates = async (req: AuthRequest, res: Response) => {
   try {
@@ -800,35 +801,20 @@ export const getWorkerBlockedDates = async (req: AuthRequest, res: Response) => 
 
     const workerProfile = await prisma.workerProfile.findUnique({
       where: { userId: workerId },
-      select: { kycStatus: true },
+      select: { id: true, userId: true, kycStatus: true, availableDays: true },
     });
 
     if (!workerProfile || workerProfile.kycStatus !== 'APPROVED') {
       return res.status(404).json(errorResponse(404, 'Worker not found'));
     }
 
-    const today = new Date();
-    today.setUTCHours(0, 0, 0, 0);
-    const horizon = new Date(today);
-    horizon.setUTCDate(horizon.getUTCDate() + 90);
-
-    const bookings = await prisma.booking.findMany({
-      where: {
-        workerId,
-        scheduledDate: { gte: today, lte: horizon },
-        status: { notIn: ['CANCELLED', 'REJECTED'] },
-      },
-      select: { scheduledDate: true },
-    });
-
-    const dates = Array.from(
-      new Set(bookings.map((b) => b.scheduledDate.toISOString().slice(0, 10)))
-    );
+    const today = phTodayStart();
+    const days = await getWorkerCalendar(prisma, workerProfile, today, addDays(today, MAX_BOOKING_DAYS_AHEAD));
 
     return res.status(200).json({
       success: true,
       message: 'Worker blocked dates retrieved successfully',
-      data: { dates },
+      data: { dates: days.filter((d) => !d.available).map((d) => d.date) },
     });
   } catch (error) {
     console.error('Error fetching worker blocked dates:', error);
@@ -917,6 +903,9 @@ export const getMyWorkerProfile = async (req: AuthRequest, res: Response) => {
         digitalIdTrade: true,
         digitalIdServiceArea: true,
         licenseNumber: true,
+        birthDate: true,
+        yearsExperience: true,
+        availableDays: true,
         kycStatus: true,
         kycSubmittedAt: true,
         kycApprovedAt: true,
@@ -962,6 +951,7 @@ export const updateWorkerProfile = async (req: AuthRequest, res: Response) => {
       digitalIdServiceArea,
       licenseNumber,
       birthDate,
+      yearsExperience,
       // kycStatus/kycSubmittedAt/kycApprovedAt are deliberately NOT accepted
       // here — this is a worker self-service endpoint, and those fields
       // must only ever be set by admin review (adminVerificationController)
@@ -970,12 +960,31 @@ export const updateWorkerProfile = async (req: AuthRequest, res: Response) => {
     } = req.body;
 
     const updateData: any = {};
+    // Age and experience are checked by the admin against the worker's ID
+    // and resume at KYC approval, so they're locked once approved.
+    if (birthDate !== undefined || yearsExperience !== undefined) {
+      const current = await prisma.workerProfile.findUnique({
+        where: { userId: req.user.userId },
+        select: { kycStatus: true },
+      });
+      if (current?.kycStatus === 'APPROVED') {
+        return res
+          .status(409)
+          .json(errorResponse(409, 'Your date of birth and experience were verified — contact support to change them'));
+      }
+    }
     if (birthDate !== undefined) {
-      const parsed = parseWorkerBirthDate(birthDate);
+      const parsed = parseWorkerBirthDate(birthDate, await getAppSettings());
       if ('error' in parsed) {
         return res.status(400).json(errorResponse(400, parsed.error));
       }
       updateData.birthDate = parsed.date;
+    }
+    if (yearsExperience !== undefined) {
+      if (!Number.isInteger(yearsExperience) || yearsExperience < 0 || yearsExperience > 60) {
+        return res.status(400).json(errorResponse(400, 'Years of experience must be a whole number from 0 to 60'));
+      }
+      updateData.yearsExperience = yearsExperience;
     }
     if (bio !== undefined) updateData.bio = bio;
     if (serviceAreaRadius !== undefined) updateData.serviceAreaRadius = serviceAreaRadius;
@@ -1023,6 +1032,7 @@ export const updateWorkerProfile = async (req: AuthRequest, res: Response) => {
         digitalIdTrade: updated.digitalIdTrade,
         digitalIdServiceArea: updated.digitalIdServiceArea,
         licenseNumber: updated.licenseNumber,
+        yearsExperience: updated.yearsExperience,
       },
     });
   } catch (error) {
@@ -1047,14 +1057,19 @@ const MAX_REQUEST_DOCUMENTS = 5;
 
 /**
  * Connects a worker to a service category (the "request a new service"
- * action, see addServiceCategory). See WorkerServiceCategory's schema
- * docblock for the rule: a worker's FIRST category is VERIFIED immediately
- * unless the admin flagged it requiresCertification. Every other request
- * (2nd+ category, a certification-gated one, or retrying a REJECTED one)
- * needs supporting documents and starts PENDING_VERIFICATION until an admin
- * approves it (adminServiceRequestController, or approving one of its
- * documents in adminCertificationController). An already-APPROVED
- * certification tagged to the category unlocks it straight away.
+ * action, see addServiceCategory). A worker's FIRST category is VERIFIED
+ * immediately unless the admin flagged it requiresCertification. Every other
+ * request (2nd+ category, a certification-gated one, or retrying a REJECTED
+ * one) starts PENDING_VERIFICATION until an admin approves it
+ * (adminServiceRequestController, or approving one of its documents in
+ * adminCertificationController). An already-APPROVED certification tagged to
+ * the category unlocks it straight away.
+ *
+ * Certificates are where they belong: here, per service — not in KYC. They're
+ * required only for a service the admin flagged requiresCertification (e.g.
+ * electrical); for everything else (e.g. laundry, where no common
+ * certificate exists) they're optional but encouraged, since an approved
+ * certificate shows on the worker's profile.
  */
 async function runCategoryGate(
   workerProfileId: string,
@@ -1135,9 +1150,9 @@ async function runCategoryGate(
         })
       : null;
 
-  if (!pendingCert && newDocs.length === 0) {
+  if (!pendingCert && newDocs.length === 0 && targetServiceType.requiresCertification) {
     return {
-      error: `Requesting "${targetServiceType.name}" needs at least one certification or document that proves your skills.`,
+      error: `"${targetServiceType.name}" requires a certificate or license. Attach at least one.`,
       status: 400,
     };
   }
@@ -1162,12 +1177,13 @@ async function runCategoryGate(
         })
       );
     }
-    const gating = pendingCert ?? created[0];
+    // Null when the worker attached nothing (optional for this service).
+    const gatingId = (pendingCert ?? created[0])?.id ?? null;
 
     return tx.workerServiceCategory.upsert({
       where: { workerProfileId_serviceTypeId: { workerProfileId, serviceTypeId } },
-      create: { workerProfileId, serviceTypeId, status: 'PENDING_VERIFICATION', gatingCertificationId: gating.id },
-      update: { status: 'PENDING_VERIFICATION', gatingCertificationId: gating.id, verifiedAt: null, rejectedAt: null },
+      create: { workerProfileId, serviceTypeId, status: 'PENDING_VERIFICATION', gatingCertificationId: gatingId },
+      update: { status: 'PENDING_VERIFICATION', gatingCertificationId: gatingId, verifiedAt: null, rejectedAt: null },
     });
   });
 
@@ -1640,23 +1656,6 @@ export const createPackage = async (req: AuthRequest, res: Response) => {
       );
     }
 
-    // Same optional (city, category) admin-set ceiling/floor PricingRule
-    // already enforces for task and per-unit prices elsewhere — a package
-    // is still "this category's services, bundled," so it shouldn't be
-    // exempt from the one price guardrail the platform actually has.
-    if (workerProfile.city) {
-      const ruleCheck = await validatePriceWithinPricingRule(
-        workerProfile.city,
-        workerProfile.serviceCategories[0].serviceType.name,
-        price
-      );
-      if (!ruleCheck.ok) {
-        return res.status(400).json(
-          errorResponse(400, `Price must be between ₱${ruleCheck.bounds.minPrice} and ₱${ruleCheck.bounds.maxPrice} for this city/category`)
-        );
-      }
-    }
-
     // Starts PENDING — clients only see a package once an admin approves it
     // (see adminPackageController).
     const created = await prisma.workerPackage.create({
@@ -1734,20 +1733,6 @@ export const updatePackage = async (req: AuthRequest, res: Response) => {
       return res.status(400).json(
         errorResponse(400, 'Add this service category to your profile before assigning a package to it')
       );
-    }
-
-    // Same optional (city, category) PricingRule ceiling/floor createPackage
-    // enforces — re-checked here against whichever category applies after
-    // this update (the newly-assigned one, or the package's current one).
-    if (price !== undefined && workerProfile.city) {
-      const effectiveServiceTypeName =
-        serviceTypeId !== undefined ? targetCategory!.serviceType.name : existing.serviceType.name;
-      const ruleCheck = await validatePriceWithinPricingRule(workerProfile.city, effectiveServiceTypeName, price);
-      if (!ruleCheck.ok) {
-        return res.status(400).json(
-          errorResponse(400, `Price must be between ₱${ruleCheck.bounds.minPrice} and ₱${ruleCheck.bounds.maxPrice} for this city/category`)
-        );
-      }
     }
 
     const updateData: any = {};
@@ -1867,46 +1852,6 @@ export const getWorkerPackages = async (req: Request, res: Response) => {
   } catch (error) {
     console.error('Error fetching worker packages:', error);
     return res.status(500).json(errorResponse(500, 'Failed to fetch packages'));
-  }
-};
-
-/**
- * GET /api/workers/me/capacity
- * Get worker capacity info (worker only)
- */
-export const getWorkerCapacity = async (req: AuthRequest, res: Response) => {
-  try {
-    if (!req.user) {
-      return res.status(401).json(errorResponse(401, 'Not authenticated'));
-    }
-
-    const worker = await prisma.workerProfile.findUnique({
-      where: { userId: req.user.userId },
-      select: {
-        activeJobCount: true,
-        maxConcurrentJobs: true,
-      },
-    });
-
-    if (!worker) {
-      return res.status(404).json(errorResponse(404, 'Worker profile not found'));
-    }
-
-    const availableSlots = worker.maxConcurrentJobs - worker.activeJobCount;
-
-    return res.status(200).json({
-      success: true,
-      message: 'Capacity retrieved successfully',
-      data: {
-        activeJobCount: worker.activeJobCount,
-        maxConcurrentJobs: worker.maxConcurrentJobs,
-        availableSlots: Math.max(0, availableSlots),
-        isAtCapacity: availableSlots <= 0,
-      },
-    });
-  } catch (error) {
-    console.error('Error fetching worker capacity:', error);
-    return res.status(500).json(errorResponse(500, 'Failed to fetch capacity'));
   }
 };
 
@@ -2723,330 +2668,177 @@ export const getMyVatSummary = async (req: AuthRequest, res: Response) => {
   }
 };
 
-/**
- * GET /api/workers/me/availability-slots?date=YYYY-MM-DD&timeSlot=MORNING
- * Fine-grained per-date/per-timeSlot availability (worker only). Distinct
- * from PATCH /me/availability (coarse isAvailable + weekly availableDays
- * toggle) and from the public GET /:workerId/availability (booked-time
- * lookup for the client calendar) — this manages the WorkerAvailability
- * table directly.
- */
-export const getMyAvailabilitySlots = async (req: AuthRequest, res: Response) => {
-  try {
-    if (!req.user) {
-      return res.status(401).json(errorResponse(401, 'Not authenticated'));
-    }
+// Longest range one calendar request may cover (about three months).
+const MAX_CALENDAR_RANGE_DAYS = 93;
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
-    const { date, timeSlot } = req.query;
-
-    const workerProfile = await prisma.workerProfile.findUnique({
-      where: { userId: req.user.userId },
-      select: { id: true },
-    });
-
-    if (!workerProfile) {
-      return res.status(404).json(errorResponse(404, 'Worker profile not found'));
-    }
-
-    const where: { workerProfileId: string; date?: Date; timeSlot?: TimeSlot } = {
-      workerProfileId: workerProfile.id,
-    };
-
-    if (date !== undefined) {
-      if (typeof date !== 'string' || isNaN(new Date(date).getTime())) {
-        return res.status(400).json(errorResponse(400, 'date must be a valid YYYY-MM-DD date'));
-      }
-      where.date = toDayStart(date);
-    }
-
-    if (timeSlot !== undefined) {
-      if (typeof timeSlot !== 'string' || !VALID_TIME_SLOTS.includes(timeSlot as TimeSlot)) {
-        return res.status(400).json(errorResponse(400, `timeSlot must be one of ${VALID_TIME_SLOTS.join(', ')}`));
-      }
-      where.timeSlot = timeSlot as TimeSlot;
-    }
-
-    const slots = await prisma.workerAvailability.findMany({
-      where,
-      orderBy: [{ date: 'asc' }, { timeSlot: 'asc' }],
-    });
-
-    // Included so mobile never hardcodes this admin-configurable cap
-    // separately (see AppSettings.maxSlotsPerDay) — it's enforced for real in
-    // updateAvailabilitySlots below regardless, this is just so the client
-    // can match the server's actual limit instead of guessing at it.
-    const { maxSlotsPerDay } = await getAppSettings();
-
-    return res.status(200).json({
-      success: true,
-      message: 'Availability slots retrieved successfully',
-      data: { slots, maxSlotsPerDay },
-    });
-  } catch (error) {
-    console.error('Error fetching availability slots:', error);
-    return res.status(500).json(errorResponse(500, 'Failed to fetch availability slots'));
-  }
-};
-
-/**
- * PATCH /api/workers/me/availability-slots
- * Body: { slots: [{ date, timeSlot }] }
- *
- * Replaces the worker's open slots for every date present in the request:
- * requested (date, timeSlot) pairs are opened (created or un-blocked), and
- * any existing open slot on those same dates that isn't in the new list is
- * closed (isBlocked = true) — unless it's currently isBooked, in which case
- * the whole request is rejected with a 409 (a worker can't close a slot out
- * from under an active booking). Dates not mentioned in the request are left
- * untouched. Max 2 slots per day.
- */
-export const updateAvailabilitySlots = async (req: AuthRequest, res: Response) => {
-  try {
-    if (!req.user) {
-      return res.status(401).json(errorResponse(401, 'Not authenticated'));
-    }
-
-    const { slots, dates } = req.body as {
-      slots: Array<{ date: string; timeSlot: TimeSlot }>;
-      // Optional — full set of dates being managed in this request. A date
-      // listed here with no matching entries in `slots` has ALL of its open
-      // slots closed (this is how a worker clears an entire day down to
-      // zero slots, which `slots` alone can't express since an empty day
-      // just wouldn't appear in it).
-      dates?: string[];
-    };
-
-    const workerProfile = await prisma.workerProfile.findUnique({
-      where: { userId: req.user.userId },
-      select: { id: true },
-    });
-
-    if (!workerProfile) {
-      return res.status(404).json(errorResponse(404, 'Worker profile not found'));
-    }
-
-    const byDay = new Map<string, Set<TimeSlot>>();
-    for (const slot of slots) {
-      const dayIso = toDayStart(slot.date).toISOString();
-      if (!byDay.has(dayIso)) byDay.set(dayIso, new Set());
-      byDay.get(dayIso)!.add(slot.timeSlot);
-    }
-    // Register fully-cleared days (present in `dates`, absent from `slots`)
-    // with an empty set so the close-loop below still runs for them.
-    for (const date of dates ?? []) {
-      const dayIso = toDayStart(date).toISOString();
-      if (!byDay.has(dayIso)) byDay.set(dayIso, new Set());
-    }
-
-    const { maxSlotsPerDay } = await getAppSettings();
-    for (const [dayIso, timeSlots] of byDay) {
-      if (timeSlots.size > maxSlotsPerDay) {
-        return res.status(400).json(
-          errorResponse(400, `Cannot set more than ${maxSlotsPerDay} slots for ${dayIso.slice(0, 10)}`)
-        );
-      }
-    }
-
-    const updatedSlots = await prisma.$transaction(async (tx) => {
-      const opened: Array<{ id: string; date: Date; timeSlot: TimeSlot }> = [];
-
-      for (const [dayIso, timeSlots] of byDay) {
-        const day = new Date(dayIso);
-
-        const existing = await tx.workerAvailability.findMany({
-          where: { workerProfileId: workerProfile.id, date: day },
-        });
-
-        for (const row of existing) {
-          if (!timeSlots.has(row.timeSlot)) {
-            if (row.isBooked) {
-              throw new ActiveBookingConflictError(row.timeSlot, dayIso.slice(0, 10));
-            }
-            await tx.workerAvailability.update({ where: { id: row.id }, data: { isBlocked: true } });
-          }
-        }
-
-        for (const timeSlot of timeSlots) {
-          const row = await tx.workerAvailability.upsert({
-            where: { workerProfileId_date_timeSlot: { workerProfileId: workerProfile.id, date: day, timeSlot } },
-            create: { workerProfileId: workerProfile.id, date: day, timeSlot, isBlocked: false },
-            update: { isBlocked: false },
-          });
-          opened.push(row);
-        }
-      }
-
-      return opened;
-    });
-
-    return res.status(200).json({
-      success: true,
-      message: 'Availability slots updated successfully',
-      data: { slots: updatedSlots },
-    });
-  } catch (error) {
-    if (error instanceof ActiveBookingConflictError) {
-      return res.status(409).json(
-        errorResponse(409, `Cannot close ${error.timeSlot} on ${error.date} — it has an active booking`)
-      );
-    }
-    console.error('Error updating availability slots:', error);
-    return res.status(500).json(errorResponse(500, 'Failed to update availability slots'));
-  }
-};
-
-class ActiveBookingConflictError extends Error {
-  constructor(public timeSlot: string, public date: string) {
-    super(`Slot ${timeSlot} on ${date} has an active booking`);
-  }
+function parseDay(value: unknown): Date | null {
+  if (typeof value !== 'string' || !DATE_RE.test(value) || isNaN(new Date(value).getTime())) return null;
+  return toDayStart(value);
 }
 
 /**
- * GET /api/workers/me/availability-template
- * A worker's recurring weekly pattern (see B8) — distinct from the concrete,
- * per-date WorkerAvailability rows above. Materialized forward into those
- * rows by materializeTemplateForWorker (called here on save, and again daily
- * by the sweep — see bookingWorker.materializeAvailabilityTemplates).
+ * GET /api/workers/me/calendar?from=YYYY-MM-DD&to=YYYY-MM-DD
+ * The worker's availability calendar: their weekly schedule, and for each
+ * day whether they're available and which accepted jobs / follow-up visits
+ * fall on it. Defaults to today through the next 6 weeks.
  */
-export const getMyAvailabilityTemplate = async (req: AuthRequest, res: Response) => {
+export const getMyCalendar = async (req: AuthRequest, res: Response) => {
   try {
     if (!req.user) {
       return res.status(401).json(errorResponse(401, 'Not authenticated'));
     }
 
+    const from = req.query.from !== undefined ? parseDay(req.query.from) : phTodayStart();
+    const to = req.query.to !== undefined ? parseDay(req.query.to) : from ? addDays(from, 41) : null;
+    if (!from || !to) {
+      return res.status(400).json(errorResponse(400, 'from and to must be YYYY-MM-DD dates'));
+    }
+    if (to.getTime() < from.getTime() || addDays(from, MAX_CALENDAR_RANGE_DAYS).getTime() < to.getTime()) {
+      return res.status(400).json(errorResponse(400, `The range must run forward and cover at most ${MAX_CALENDAR_RANGE_DAYS} days`));
+    }
+
     const workerProfile = await prisma.workerProfile.findUnique({
       where: { userId: req.user.userId },
-      select: { id: true },
+      select: { id: true, userId: true, availableDays: true, isAvailable: true },
     });
     if (!workerProfile) {
       return res.status(404).json(errorResponse(404, 'Worker profile not found'));
     }
 
-    const template = await prisma.workerAvailabilityTemplate.findMany({
-      where: { workerProfileId: workerProfile.id },
-      orderBy: [{ dayOfWeek: 'asc' }, { timeSlot: 'asc' }],
-    });
+    const days = await getWorkerCalendar(prisma, workerProfile, from, to);
 
     return res.status(200).json({
       success: true,
-      message: 'Availability template retrieved successfully',
-      data: { template: template.map((t) => ({ dayOfWeek: t.dayOfWeek, timeSlot: t.timeSlot })) },
+      message: 'Calendar retrieved successfully',
+      data: {
+        availableDays: workerProfile.availableDays,
+        isAvailable: workerProfile.isAvailable,
+        today: isoDay(phTodayStart()),
+        days,
+      },
     });
   } catch (error) {
-    console.error('Error fetching availability template:', error);
-    return res.status(500).json(errorResponse(500, 'Failed to fetch availability template'));
+    console.error('Error fetching worker calendar:', error);
+    return res.status(500).json(errorResponse(500, 'Failed to fetch your calendar'));
   }
 };
 
 /**
- * PUT /api/workers/me/availability-template
- * Body: { days: [{ dayOfWeek, timeSlot }] } — dayOfWeek is 0=Sun..6=Sat.
- * Fully replaces the worker's template, then immediately materializes it
- * forward so the effect is visible right away rather than waiting for
- * tomorrow's sweep.
+ * PUT /api/workers/me/weekly-schedule
+ * Body: { availableDays: number[] } — the weekdays the worker normally works
+ * (0=Sun ... 6=Sat), e.g. Monday to Friday = [1,2,3,4,5]. Dates the worker
+ * changed by hand on the calendar keep their override.
  */
-export const updateMyAvailabilityTemplate = async (req: AuthRequest, res: Response) => {
+export const updateWeeklySchedule = async (req: AuthRequest, res: Response) => {
   try {
     if (!req.user) {
       return res.status(401).json(errorResponse(401, 'Not authenticated'));
     }
 
-    const { days } = req.body as { days: Array<{ dayOfWeek: number; timeSlot: TimeSlot }> };
-    if (!Array.isArray(days)) {
-      return res.status(400).json(errorResponse(400, 'days must be an array of { dayOfWeek, timeSlot }'));
+    const { availableDays } = req.body as { availableDays?: unknown };
+    if (
+      !Array.isArray(availableDays) ||
+      !availableDays.every((d) => Number.isInteger(d) && (d as number) >= 0 && (d as number) <= 6)
+    ) {
+      return res.status(400).json(errorResponse(400, 'availableDays must be a list of weekdays 0 (Sun) to 6 (Sat)'));
     }
-    for (const d of days) {
-      if (
-        typeof d.dayOfWeek !== 'number' ||
-        d.dayOfWeek < 0 ||
-        d.dayOfWeek > 6 ||
-        !VALID_TIME_SLOTS.includes(d.timeSlot)
-      ) {
-        return res.status(400).json(errorResponse(400, 'Each day must have dayOfWeek 0-6 and a valid timeSlot'));
+    const days = Array.from(new Set(availableDays as number[])).sort((a, b) => a - b);
+
+    const updated = await prisma.workerProfile.update({
+      where: { userId: req.user.userId },
+      data: { availableDays: days },
+      select: { availableDays: true },
+    });
+
+    return res.status(200).json({ success: true, message: 'Weekly schedule saved', data: updated });
+  } catch (error) {
+    console.error('Error updating weekly schedule:', error);
+    return res.status(500).json(errorResponse(500, 'Failed to save your weekly schedule'));
+  }
+};
+
+/**
+ * PUT /api/workers/me/date-overrides
+ * Body: { dates: string[], isAvailable: boolean | null } — open or close
+ * specific dates regardless of the weekly schedule; null puts the dates back
+ * on the weekly schedule. A date with an accepted job can't be closed (the
+ * worker reschedules or cancels that job first).
+ */
+export const updateDateOverrides = async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      return res.status(401).json(errorResponse(401, 'Not authenticated'));
+    }
+
+    const { dates, isAvailable } = req.body as { dates?: unknown; isAvailable?: unknown };
+    if (!Array.isArray(dates) || dates.length === 0 || dates.length > MAX_CALENDAR_RANGE_DAYS) {
+      return res.status(400).json(errorResponse(400, `dates must list 1 to ${MAX_CALENDAR_RANGE_DAYS} dates`));
+    }
+    if (isAvailable !== null && typeof isAvailable !== 'boolean') {
+      return res.status(400).json(errorResponse(400, 'isAvailable must be true, false or null'));
+    }
+    const days: Date[] = [];
+    for (const d of dates) {
+      const day = parseDay(d);
+      if (!day) return res.status(400).json(errorResponse(400, 'Every date must be YYYY-MM-DD'));
+      days.push(day);
+    }
+    const today = phTodayStart();
+    if (days.some((d) => d.getTime() < today.getTime())) {
+      return res.status(400).json(errorResponse(400, "Past dates can't be changed"));
+    }
+
+    const workerProfile = await prisma.workerProfile.findUnique({
+      where: { userId: req.user.userId },
+      select: { id: true, userId: true, availableDays: true },
+    });
+    if (!workerProfile) {
+      return res.status(404).json(errorResponse(404, 'Worker profile not found'));
+    }
+
+    // Closing a day (explicitly, or by returning it to a weekly schedule
+    // that has it off) must not strand an accepted job.
+    const closing = days.filter((d) =>
+      isAvailable === false ? true : isAvailable === null ? !workerProfile.availableDays.includes(d.getUTCDay()) : false
+    );
+    if (closing.length > 0) {
+      const conflicts = await prisma.booking.findMany({
+        where: {
+          workerId: workerProfile.userId,
+          scheduledDate: { in: closing },
+          status: { in: ['ACCEPTED', 'IN_PROGRESS', 'QUOTE_SUBMITTED', 'QUOTE_APPROVED'] },
+        },
+        select: { id: true, scheduledDate: true },
+      });
+      if (conflicts.length > 0) {
+        const list = Array.from(new Set(conflicts.map((c) => isoDay(c.scheduledDate)))).join(', ');
+        return res.status(409).json({
+          ...errorResponse(409, `You have accepted jobs on ${list}. Reschedule or cancel them before closing ${conflicts.length === 1 ? 'that day' : 'those days'}.`),
+          conflicts: conflicts.map((c) => ({ bookingId: c.id, date: isoDay(c.scheduledDate) })),
+        });
       }
     }
 
-    const workerProfile = await prisma.workerProfile.findUnique({
-      where: { userId: req.user.userId },
-      select: { id: true },
-    });
-    if (!workerProfile) {
-      return res.status(404).json(errorResponse(404, 'Worker profile not found'));
-    }
-
-    await prisma.$transaction([
-      prisma.workerAvailabilityTemplate.deleteMany({ where: { workerProfileId: workerProfile.id } }),
-      prisma.workerAvailabilityTemplate.createMany({
-        data: days.map((d) => ({ workerProfileId: workerProfile.id, dayOfWeek: d.dayOfWeek, timeSlot: d.timeSlot })),
-      }),
-    ]);
-
-    await materializeTemplateForWorker(prisma, workerProfile.id);
+    await prisma.$transaction(
+      days.map((date) =>
+        isAvailable === null
+          ? prisma.workerDateOverride.deleteMany({ where: { workerProfileId: workerProfile.id, date } })
+          : prisma.workerDateOverride.upsert({
+              where: { workerProfileId_date: { workerProfileId: workerProfile.id, date } },
+              create: { workerProfileId: workerProfile.id, date, isAvailable },
+              update: { isAvailable },
+            })
+      )
+    );
 
     return res.status(200).json({
       success: true,
-      message: 'Availability template updated successfully',
-      data: { days },
+      message: isAvailable === null ? 'Dates set back to your weekly schedule' : isAvailable ? 'Dates opened' : 'Dates closed',
+      data: { dates: days.map(isoDay), isAvailable },
     });
   } catch (error) {
-    console.error('Error updating availability template:', error);
-    return res.status(500).json(errorResponse(500, 'Failed to update availability template'));
-  }
-};
-
-/**
- * POST /api/workers/me/availability/unavailable-range
- * Body: { startDate, endDate } (YYYY-MM-DD, inclusive) — bulk "mark
- * unavailable" for a vacation/leave stretch (see B8), covering every
- * TimeSlot across the range in one call. All-or-nothing: if any date/slot in
- * range already has an active booking, nothing is changed and every
- * conflict is reported at once (409), mirroring updateAvailabilitySlots'
- * existing rule that a worker can't close a slot out from under a booking.
- */
-export const bulkSetUnavailable = async (req: AuthRequest, res: Response) => {
-  try {
-    if (!req.user) {
-      return res.status(401).json(errorResponse(401, 'Not authenticated'));
-    }
-
-    const { startDate, endDate } = req.body as { startDate: string; endDate: string };
-    if (
-      typeof startDate !== 'string' ||
-      typeof endDate !== 'string' ||
-      isNaN(new Date(startDate).getTime()) ||
-      isNaN(new Date(endDate).getTime())
-    ) {
-      return res.status(400).json(errorResponse(400, 'startDate and endDate must be valid YYYY-MM-DD dates'));
-    }
-    const start = toDayStart(startDate);
-    const end = toDayStart(endDate);
-    if (start.getTime() > end.getTime()) {
-      return res.status(400).json(errorResponse(400, 'startDate must not be after endDate'));
-    }
-
-    const workerProfile = await prisma.workerProfile.findUnique({
-      where: { userId: req.user.userId },
-      select: { id: true },
-    });
-    if (!workerProfile) {
-      return res.status(404).json(errorResponse(404, 'Worker profile not found'));
-    }
-
-    const result = await setUnavailableRange(prisma, workerProfile.id, start, end, VALID_TIME_SLOTS);
-    if (result.conflicts.length > 0) {
-      return res.status(409).json({
-        ...errorResponse(409, `${result.conflicts.length} slot(s) in this range have an active booking and can't be closed`),
-        conflicts: result.conflicts,
-      });
-    }
-
-    return res.status(200).json({
-      success: true,
-      message: 'Marked unavailable for the selected range',
-      data: { blocked: result.blocked },
-    });
-  } catch (error) {
-    console.error('Error setting unavailable range:', error);
-    return res.status(500).json(errorResponse(500, 'Failed to mark this range unavailable'));
+    console.error('Error updating date overrides:', error);
+    return res.status(500).json(errorResponse(500, 'Failed to update your calendar'));
   }
 };

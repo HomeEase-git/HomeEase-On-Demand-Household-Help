@@ -17,7 +17,7 @@ export type ApiBookingDetail = {
   clientLng?: number | null;
   timeSlot?: TimeSlot | null;
   condition?: ConditionType | null;
-  // Reschedule-on-conflict (see backend bookingController.extendBooking) —
+  // Reschedule-on-conflict (from the retired "Continue Tomorrow") —
   // rescheduleAcknowledgedAt null means this is still an open episode
   // awaiting the client's explicit response.
   rescheduledAt?: string | null;
@@ -28,15 +28,17 @@ export type ApiBookingDetail = {
   // Booking.originalScheduledDate).
   originalScheduledDate?: string | null;
   rescheduleAcknowledgedAt?: string | null;
-  // Set once the worker never checks in past the grace period (see backend
-  // bookingWorker.flagWorkerNoShows) — lets the client cancel penalty-free
-  // even though the booking is past PENDING.
+  // Set when the worker never checked in (backend
+  // bookingWorker.cancelWorkerNoShows cancels the booking at the same time).
   workerNoShowFlaggedAt?: string | null;
-  // Reschedule-on-REQUEST (see backend requestReschedule) — distinct from
-  // the fields above (this booking's spillover moving a DIFFERENT booking).
-  // rescheduleRequestRespondedAt null means still awaiting the worker.
+  isRush?: boolean;
+  // Reschedule-on-REQUEST (see backend requestReschedule) — either side
+  // asks (rescheduleRequestedBy), the other answers. Null
+  // rescheduleRequestRespondedAt means still waiting.
   rescheduleRequestedAt?: string | null;
+  rescheduleRequestedBy?: "CLIENT" | "WORKER" | null;
   requestedScheduledDate?: string | null;
+  requestedScheduledTime?: string | null;
   requestedTimeSlot?: TimeSlot | null;
   rescheduleRequestRespondedAt?: string | null;
   rescheduleRequestAccepted?: boolean | null;
@@ -52,6 +54,7 @@ export type ApiBookingDetail = {
     basePrice: number | null;
     distanceFee: number;
     tierFee: number;
+    rushFee?: number;
     addOns: { name: string; price: number }[];
     subtotal: number;
     vatApplicable: boolean;
@@ -83,8 +86,26 @@ export type ApiBookingDetail = {
     materialsCost: number;
     notes: string | null;
     quotedAt: string | null;
+    status?: string | null;
+    receiptUrls?: string[];
+    proofOfUseUrls?: string[];
+    rejectionReason?: string | null;
+    revision?: number;
   } | null;
   review: { rating: number; comment: string | null } | null;
+  // Follow-up jobs: this booking's inspection (parent), and follow-up jobs
+  // requested after it. allowsFollowUp = this is an inspection/diagnosis job.
+  parentBooking?: { id: string; scheduledDate: string; service: string } | null;
+  followUps?: { id: string; status: string; scheduledDate: string; service: string }[];
+  allowsFollowUp?: boolean;
+  // "Follow Up Date" visits the worker scheduled for this job.
+  visits?: { id: string; scheduledDate: string; scheduledTime: string; notes: string | null; status: string }[];
+  cancellation?: {
+    fault?: "CLIENT" | "WORKER" | null;
+    reason?: string | null;
+    compensationStatus?: string;
+    compensationAmount?: number | null;
+  } | null;
 };
 
 export function mapApiBookingDetail(d: ApiBookingDetail): Booking {
@@ -134,6 +155,7 @@ export function mapApiBookingDetail(d: ApiBookingDetail): Booking {
     originalScheduledDate: d.originalScheduledDate,
     rescheduleAcknowledgedAt: d.rescheduleAcknowledgedAt,
     workerNoShowFlaggedAt: d.workerNoShowFlaggedAt,
+    isRush: d.isRush ?? false,
     groupId: d.groupId ?? undefined,
     groupTotalDays: d.group?.totalDays ?? undefined,
     groupDayIndex: d.group ? d.group.bookings.findIndex((b) => b.id === d.id) + 1 : undefined,

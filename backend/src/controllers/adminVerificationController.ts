@@ -3,7 +3,8 @@ import { KYCStatus, Prisma } from '@prisma/client';
 import prisma from '@config/database';
 import { errorResponse } from '@utils/errorResponse';
 import { formatVerification } from '@utils/formatters';
-import { ageInYears, MIN_WORKER_AGE } from '@utils/age';
+import { ageInYears, workerAgeError } from '@utils/age';
+import { getAppSettings } from '@services/appSettingsService';
 import { verificationQueue, VERIFICATION_JOB_OPTIONS } from '@queues/verificationQueue';
 import { writeAuditLog } from '@utils/auditLog';
 import { notifyUser } from '@utils/notify';
@@ -144,9 +145,12 @@ export const getVerificationById = async (req: Request, res: Response) => {
       success: true,
       data: {
         ...formatVerification(record),
-        // For the admin to compare against the ID (18+ requirement).
+        // For the admin to compare against the ID (accepted age range).
         birthDate: record.user.workerProfile?.birthDate?.toISOString().slice(0, 10) ?? null,
         age: record.user.workerProfile?.birthDate ? ageInYears(record.user.workerProfile.birthDate) : null,
+        // Declared by the worker; the admin confirms or corrects it against
+        // the resume when approving (it's an expertise-tier requirement).
+        yearsExperience: record.user.workerProfile?.yearsExperience ?? null,
         // Only VERIFIED categories — a still-PENDING_VERIFICATION 2nd+
         // category isn't live yet and has nothing to do with this
         // (onboarding) verification request anyway.
@@ -165,7 +169,14 @@ export const getVerificationById = async (req: Request, res: Response) => {
 export const approveVerification = async (req: AuthRequest, res: Response) => {
   try {
     const id = req.params.id as string;
-    const { adminOverrideReason } = req.body as { adminOverrideReason?: string };
+    const { adminOverrideReason, yearsExperience } = req.body as { adminOverrideReason?: string; yearsExperience?: unknown };
+    if (
+      yearsExperience !== undefined &&
+      yearsExperience !== null &&
+      (!Number.isInteger(yearsExperience) || (yearsExperience as number) < 0 || (yearsExperience as number) > 60)
+    ) {
+      return res.status(400).json(errorResponse(400, 'yearsExperience must be a whole number from 0 to 60'));
+    }
 
     const record = await prisma.verificationRequest.findUnique({
       where: { id },
@@ -209,23 +220,30 @@ export const approveVerification = async (req: AuthRequest, res: Response) => {
       const workerProfile = record.user.role === 'WORKER'
         ? await prisma.workerProfile.findUnique({
             where: { userId: record.userId },
-            select: { addressLat: true, addressLng: true, birthDate: true },
+            select: { addressLat: true, addressLng: true, birthDate: true, yearsExperience: true },
           })
         : null;
       const missingAddress = record.user.role === 'WORKER' && (workerProfile?.addressLat == null || workerProfile?.addressLng == null);
 
-      // Under-18 is a hard stop — no override. A missing date of birth (older
+      // Outside the accepted age range (AppSettings.workerMinAge/MaxAge) is a
+      // hard stop — no override. A missing date of birth (older
       // applications, before it was collected) can be overridden once the
       // admin has confirmed the age from the ID itself.
-      if (workerProfile?.birthDate && ageInYears(workerProfile.birthDate) < MIN_WORKER_AGE) {
-        return res.status(400).json(errorResponse(400, `Worker is under ${MIN_WORKER_AGE} and cannot be approved.`));
+      const ageError = workerProfile?.birthDate
+        ? workerAgeError(ageInYears(workerProfile.birthDate), await getAppSettings())
+        : null;
+      if (ageError) {
+        return res.status(400).json(errorResponse(400, `Can't approve: ${ageError.toLowerCase()}.`));
       }
       const missingBirthDate = record.user.role === 'WORKER' && !workerProfile?.birthDate;
+      const missingExperience =
+        record.user.role === 'WORKER' && workerProfile?.yearsExperience == null && yearsExperience == null;
 
       const missingRequirements = [
         ...missingTypes,
         ...(missingAddress ? ['geocoded address'] : []),
-        ...(missingBirthDate ? ['date of birth (confirm age 18+ from the ID)'] : []),
+        ...(missingBirthDate ? ['date of birth (confirm the age from the ID)'] : []),
+        ...(missingExperience ? ['years of experience'] : []),
       ];
       if (missingRequirements.length > 0 && !adminOverrideReason?.trim()) {
         return res.status(400).json(
@@ -275,7 +293,11 @@ export const approveVerification = async (req: AuthRequest, res: Response) => {
       if (record.user.role === 'WORKER') {
         await tx.workerProfile.updateMany({
           where: { userId: record.userId },
-          data: { kycStatus: 'APPROVED', kycApprovedAt: new Date() },
+          data: {
+            kycStatus: 'APPROVED',
+            kycApprovedAt: new Date(),
+            ...(yearsExperience != null ? { yearsExperience: yearsExperience as number } : {}),
+          },
         });
         backfilledCertifications = await backfillCertificationsFromKycDocuments(tx, record.userId, record.documents);
       }

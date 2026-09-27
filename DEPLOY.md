@@ -103,7 +103,7 @@ payment reminders) down with it. Two pieces close that gap:
    pending-booking-expiry sweep (`expireOverduePendingBookings`,
    `backend/src/services/pendingExpirySweep.ts`) standing in for the
    per-booking delayed job BullMQ would otherwise handle. Tasks:
-   `settle-completions`, `approve-quotes`, `reset-availability`,
+   `settle-completions`, `approve-quotes`, `flag-no-shows`,
    `expire-pending`, or `all`. Authenticated by an `x-cron-secret` header
    checked against `CRON_SECRET` (`crypto.timingSafeEqual`, fails closed if
    unset) — set `CRON_SECRET` on the Render service (a long random value,

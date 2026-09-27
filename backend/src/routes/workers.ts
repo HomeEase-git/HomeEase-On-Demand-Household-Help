@@ -17,7 +17,6 @@ import {
   deselectTask,
   getMyTaskCatalog,
   getMySetupStatus,
-  getWorkerCapacity,
   listMyCapabilities,
   replaceMyCapabilities,
   listMyCertifications,
@@ -34,11 +33,9 @@ import {
   submitVatRegistration,
   getMyVatSummary,
   getMyTaxCertificates,
-  getMyAvailabilitySlots,
-  updateAvailabilitySlots,
-  getMyAvailabilityTemplate,
-  updateMyAvailabilityTemplate,
-  bulkSetUnavailable,
+  getMyCalendar,
+  updateWeeklySchedule,
+  updateDateOverrides,
   parseMyResume,
   listMyPackages,
   createPackage,
@@ -57,7 +54,6 @@ import {
   validateUpdateCertificationVisibility,
   validateUpdatePayoutMethod,
   validateUpdateTaxInfo,
-  validateUpdateAvailabilitySlots,
   validateCreatePackage,
   validateUpdatePackage,
 } from '../middleware/validation';
@@ -123,13 +119,6 @@ router.delete('/me/packages/:packageId', authMiddleware, restrictTo('WORKER'), d
 // public-routes block.
 router.get('/:workerId/packages', getWorkerPackages);
 
-router.get(
-  '/me/capacity',
-  authMiddleware,
-  restrictTo('WORKER'),
-  getWorkerCapacity
-);
-
 router.post('/me/reviews/:reviewId/response', authMiddleware, restrictTo('WORKER'), respondToReview);
 
 router.get('/me/capabilities', authMiddleware, restrictTo('WORKER'), listMyCapabilities);
@@ -176,17 +165,10 @@ router.post('/me/vat-registration', authMiddleware, restrictTo('WORKER'), submit
 router.get('/me/vat-summary', authMiddleware, restrictTo('WORKER'), getMyVatSummary);
 router.get('/me/tax-certificates', authMiddleware, restrictTo('WORKER'), getMyTaxCertificates);
 
-router.get('/me/availability-slots', authMiddleware, restrictTo('WORKER'), getMyAvailabilitySlots);
-router.patch(
-  '/me/availability-slots',
-  authMiddleware,
-  restrictTo('WORKER'),
-  validateUpdateAvailabilitySlots,
-  updateAvailabilitySlots
-);
-
-router.get('/me/availability-template', authMiddleware, restrictTo('WORKER'), getMyAvailabilityTemplate);
-router.put('/me/availability-template', authMiddleware, restrictTo('WORKER'), updateMyAvailabilityTemplate);
-router.post('/me/availability/unavailable-range', authMiddleware, restrictTo('WORKER'), bulkSetUnavailable);
+// Availability calendar: weekly schedule + per-date overrides, with the
+// worker's accepted jobs and follow-up visits on each day.
+router.get('/me/calendar', authMiddleware, restrictTo('WORKER'), getMyCalendar);
+router.put('/me/weekly-schedule', authMiddleware, restrictTo('WORKER'), updateWeeklySchedule);
+router.put('/me/date-overrides', authMiddleware, restrictTo('WORKER'), updateDateOverrides);
 
 export default router;

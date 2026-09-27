@@ -5,7 +5,8 @@ import { notifyUser } from '@utils/notify';
 import { sendSmsToUser } from '@utils/smsService';
 import { writeAuditLog } from '@utils/auditLog';
 import { BOOKING_QUEUE_NAME, JOB_NAMES, type ExpirePendingBookingJobData } from '@queues/bookingQueue';
-import { freeSlot, materializeTemplateForWorker, getSlotStartInstant } from '@services/workerAvailabilityService';
+import { bookingStartInstant } from '@services/workerAvailabilityService';
+import { chargePenaltyTx } from '@services/debtLedgerService';
 import { getAppSettings } from '@services/appSettingsService';
 import {
   refundOrVoidPayment,
@@ -60,8 +61,8 @@ const RESCHEDULE_REQUEST_AUTO_DECLINE_HOURS = 48;
 
 /**
  * A PENDING booking that no worker responded to within an hour is
- * auto-cancelled: escrow is voided/refunded, the assigned worker's slot (if
- * any) is freed, and a Cancellation record captures why.
+ * auto-cancelled: escrow is voided/refunded and a Cancellation record
+ * captures why.
  */
 export async function expirePendingBooking(data: ExpirePendingBookingJobData): Promise<void> {
   const booking = await prisma.booking.findUnique({ where: { id: data.bookingId } });
@@ -81,16 +82,6 @@ export async function expirePendingBooking(data: ExpirePendingBookingJobData): P
         reason: 'WORKER_NO_RESPONSE',
       },
     });
-
-    if (booking.workerId && booking.timeSlot) {
-      const workerProfile = await tx.workerProfile.findUnique({
-        where: { userId: booking.workerId },
-        select: { id: true },
-      });
-      if (workerProfile) {
-        await freeSlot(tx, workerProfile.id, booking.scheduledDate, booking.timeSlot, booking.estimatedDurationHours);
-      }
-    }
   });
 
   await refundOrVoidPayment(booking.id, 'WORKER_NO_RESPONSE').catch((error) => {
@@ -550,70 +541,112 @@ export async function remindAndAutoApproveAddons(): Promise<void> {
 }
 
 /**
- * There was previously no concept of a worker no-show at all — an ACCEPTED
- * booking whose worker simply never opened the app again left the client
- * with no way out (cancelBooking hard-blocks a client past PENDING by
- * design). Flags a booking once its scheduled slot start +
- * AppSettings.noShowGraceHours has passed with no workerArrivedAt, which
- * lets cancelBooking's carve-out apply and attributes the eventual
- * cancellation's auto-match penalty to the worker (see
- * Cancellation.penalizedWorkerId).
+ * Worker no-show: an ACCEPTED booking whose start time passed
+ * AppSettings.noShowGraceMinutes ago with no check-in is cancelled, and the
+ * worker is charged AppSettings.noShowPenaltyAmount (added to their platform
+ * dues, recovered from later payouts) plus the auto-match late-cancel
+ * penalty (Cancellation.penalizedWorkerId). The client is free to book again
+ * straight away. A worker who can't make it should reschedule with the
+ * client beforehand (bookingController.requestReschedule).
  */
-export async function flagWorkerNoShows(): Promise<void> {
-  const { noShowGraceHours } = await getAppSettings();
+export async function cancelWorkerNoShows(): Promise<void> {
+  const { noShowGraceMinutes, noShowPenaltyAmount } = await getAppSettings();
   const now = new Date();
 
   const candidates = await prisma.booking.findMany({
     where: {
       status: 'ACCEPTED',
       workerArrivedAt: null,
-      workerNoShowFlaggedAt: null,
-      timeSlot: { not: null },
       // Cheap DB-side pre-filter — a booking scheduled for a future day
-      // can't possibly be a no-show yet. The precise, PH-timezone-aware
-      // slot-start check (getSlotStartInstant) happens per-candidate below.
+      // can't be a no-show yet. The precise start-time check is below.
       scheduledDate: { lte: now },
     },
   });
 
   for (const booking of candidates) {
-    const slotStart = getSlotStartInstant(booking.scheduledDate, booking.timeSlot!);
-    const graceDeadline = new Date(slotStart.getTime() + noShowGraceHours * HOUR_MS);
-    if (now < graceDeadline) continue;
+    const deadline = new Date(bookingStartInstant(booking).getTime() + noShowGraceMinutes * 60 * 1000);
+    if (now < deadline || !booking.workerId) continue;
 
     try {
-      await prisma.booking.update({
-        where: { id: booking.id },
-        data: { workerNoShowFlaggedAt: now },
+      const cancelled = await prisma.$transaction(async (tx) => {
+        // Status-guarded: a check-in or cancel that raced this sweep wins.
+        const claim = await tx.booking.updateMany({
+          where: { id: booking.id, status: 'ACCEPTED', workerArrivedAt: null },
+          data: { status: 'CANCELLED', workerNoShowFlaggedAt: now },
+        });
+        if (claim.count === 0) return false;
+
+        const workerProfile = await tx.workerProfile.update({
+          where: { userId: booking.workerId! },
+          data: { activeJobCount: { decrement: 1 } },
+          select: { id: true },
+        });
+
+        await tx.bookingVisit.updateMany({
+          where: { bookingId: booking.id, status: 'SCHEDULED' },
+          data: { status: 'CANCELLED' },
+        });
+
+        await tx.cancellation.create({
+          data: {
+            bookingId: booking.id,
+            cancelledBy: 'ADMIN',
+            cancelledById: 'system',
+            reason: 'WORKER_NO_SHOW',
+            cancelledWithinHours: 0,
+            workerCancellationReason: 'WORKER_FAULT',
+            penalizedWorkerId: booking.workerId,
+            fault: 'WORKER',
+            penaltyAmount: noShowPenaltyAmount > 0 ? noShowPenaltyAmount : null,
+          },
+        });
+
+        if (noShowPenaltyAmount > 0) {
+          await chargePenaltyTx(tx, workerProfile.id, noShowPenaltyAmount, {
+            bookingId: booking.id,
+            note: `No-show: didn't check in within ${noShowGraceMinutes} minutes of the start time`,
+          });
+        }
+        return true;
+      });
+      if (!cancelled) continue;
+
+      await refundOrVoidPayment(booking.id, 'WORKER_NO_SHOW').catch((error) => {
+        console.error(`Failed to void payment for no-show booking ${booking.id}:`, error);
       });
 
       await notifyUser({
         userId: booking.clientId,
-        type: 'WORKER_NO_SHOW_FLAGGED',
-        title: "Your worker hasn't checked in",
-        message: `Your worker hasn't checked in, ${noShowGraceHours}h past the scheduled start time. You can now cancel this booking free of charge if you'd like.`,
+        type: 'BOOKING_CANCELLED',
+        title: "Your worker didn't show up",
+        message: `Your worker didn't check in within ${noShowGraceMinutes} minutes of the start time, so the booking was cancelled. You won't be charged — you can book another pro right away.`,
+        relatedId: booking.id,
+      });
+      void sendSmsToUser({
+        userId: booking.clientId,
+        message: `HomeEase: Your worker didn't arrive for booking ${formatDisplayId(booking.id)}, so it was cancelled. You won't be charged.`,
+      });
+
+      await notifyUser({
+        userId: booking.workerId,
+        type: 'CANCELLATION_PENALTY',
+        title: 'Booking cancelled: no-show',
+        message:
+          noShowPenaltyAmount > 0
+            ? `You didn't check in within ${noShowGraceMinutes} minutes of the start time, so the booking was cancelled and a ₱${noShowPenaltyAmount.toFixed(2)} penalty was added to your platform dues.`
+            : `You didn't check in within ${noShowGraceMinutes} minutes of the start time, so the booking was cancelled.`,
         relatedId: booking.id,
       });
 
-      if (booking.workerId) {
-        await notifyUser({
-          userId: booking.workerId,
-          type: 'WORKER_NO_SHOW_FLAGGED',
-          title: 'Marked as a possible no-show',
-          message: `You haven't checked in for a booking that started ${noShowGraceHours}h ago. Please arrive and check in, or contact support — the client can now cancel this booking free of charge.`,
-          relatedId: booking.id,
-        });
-      }
-
       await writeAuditLog({
-        action: 'WORKER_NO_SHOW_FLAGGED',
+        action: 'WORKER_NO_SHOW_CANCELLED',
         category: 'STATUS_CHANGE',
         level: 'WARN',
-        message: `Booking ${booking.id} flagged as a worker no-show (${noShowGraceHours}h past scheduled start, no check-in)`,
-        metadata: { bookingId: booking.id, workerId: booking.workerId },
+        message: `Booking ${booking.id} cancelled as a worker no-show (${noShowGraceMinutes} min past start, no check-in)`,
+        metadata: { bookingId: booking.id, workerId: booking.workerId, penalty: noShowPenaltyAmount },
       });
     } catch (error) {
-      console.error(`Failed to flag worker no-show for booking ${booking.id}:`, error);
+      console.error(`Failed to cancel worker no-show booking ${booking.id}:`, error);
     }
   }
 }
@@ -753,15 +786,21 @@ export async function remindAndAutoConfirmReschedules(): Promise<void> {
 }
 
 /**
- * Worker-response safety net for a client-initiated reschedule REQUEST (see
- * bookingController.requestReschedule/respondToRescheduleRequest) — a 24h
- * reminder, then an unresponsive worker's request auto-declines at 48h
- * (releasing the held slot) rather than sitting open forever.
+ * Safety net for a reschedule REQUEST (see bookingController.
+ * requestReschedule/respondToRescheduleRequest): a 24h reminder to whoever
+ * has to answer, then an unanswered request auto-declines at 48h — the
+ * booking keeps its original date.
  */
 export async function remindAndAutoDeclineRescheduleRequests(): Promise<void> {
   const now = Date.now();
   const reminderCutoff = new Date(now - RESCHEDULE_REQUEST_REMINDER_HOURS * HOUR_MS);
   const autoDeclineCutoff = new Date(now - RESCHEDULE_REQUEST_AUTO_DECLINE_HOURS * HOUR_MS);
+
+  // A request from before rescheduleRequestedBy existed came from the client.
+  const responderOf = (b: { rescheduleRequestedBy: string | null; clientId: string; workerId: string | null }) =>
+    b.rescheduleRequestedBy === 'WORKER' ? b.clientId : b.workerId;
+  const requesterOf = (b: { rescheduleRequestedBy: string | null; clientId: string; workerId: string | null }) =>
+    b.rescheduleRequestedBy === 'WORKER' ? b.workerId : b.clientId;
 
   const needsReminder = await prisma.booking.findMany({
     where: {
@@ -772,12 +811,16 @@ export async function remindAndAutoDeclineRescheduleRequests(): Promise<void> {
   });
 
   for (const booking of needsReminder) {
-    if (!booking.workerId) continue;
+    const responderId = responderOf(booking);
+    if (!responderId) continue;
     await notifyUser({
-      userId: booking.workerId,
+      userId: responderId,
       type: 'BOOKING_RESCHEDULE_REQUESTED',
       title: 'Reschedule request waiting',
-      message: 'Your client is still waiting on your response to their reschedule request.',
+      message:
+        booking.rescheduleRequestedBy === 'WORKER'
+          ? 'Your pro is still waiting on your response to their reschedule request.'
+          : 'Your client is still waiting on your response to their reschedule request.',
       relatedId: booking.id,
     });
     await prisma.booking.update({
@@ -795,45 +838,29 @@ export async function remindAndAutoDeclineRescheduleRequests(): Promise<void> {
 
   for (const booking of staleRequests) {
     try {
-      await prisma.$transaction(async (tx) => {
-        if (booking.workerId && booking.requestedScheduledDate && booking.requestedTimeSlot) {
-          const workerProfile = await tx.workerProfile.findUnique({
-            where: { userId: booking.workerId },
-            select: { id: true },
-          });
-          if (workerProfile) {
-            await tx.workerAvailability.updateMany({
-              where: {
-                workerProfileId: workerProfile.id,
-                date: booking.requestedScheduledDate,
-                timeSlot: booking.requestedTimeSlot,
-                blockedByBookingId: booking.id,
-                isBooked: false,
-              },
-              data: { isBlocked: false, blockedByBookingId: null },
-            });
-          }
-        }
-
-        await tx.booking.update({
-          where: { id: booking.id },
-          data: { rescheduleRequestRespondedAt: new Date(), rescheduleRequestAccepted: false },
-        });
+      const claim = await prisma.booking.updateMany({
+        where: { id: booking.id, rescheduleRequestRespondedAt: null },
+        data: { rescheduleRequestRespondedAt: new Date(), rescheduleRequestAccepted: false },
       });
+      if (claim.count === 0) continue;
 
-      await notifyUser({
-        userId: booking.clientId,
-        type: 'BOOKING_RESCHEDULE_REQUEST_DECLINED',
-        title: 'Reschedule Declined',
-        message: "Your pro didn't respond in time, so your reschedule request was automatically declined. Your booking stays as originally scheduled.",
-        relatedId: booking.id,
-      });
-      if (booking.workerId) {
+      const requesterId = requesterOf(booking);
+      if (requesterId) {
         await notifyUser({
-          userId: booking.workerId,
+          userId: requesterId,
+          type: 'BOOKING_RESCHEDULE_REQUEST_DECLINED',
+          title: 'Reschedule Declined',
+          message: 'Your reschedule request got no answer in time, so it was automatically declined. The booking stays as originally scheduled.',
+          relatedId: booking.id,
+        });
+      }
+      const responderId = responderOf(booking);
+      if (responderId) {
+        await notifyUser({
+          userId: responderId,
           type: 'BOOKING_RESCHEDULE_REQUEST_DECLINED',
           title: 'Reschedule Request Auto-Declined',
-          message: "You didn't respond in time, so the client's reschedule request was automatically declined.",
+          message: "You didn't respond in time, so the reschedule request was automatically declined.",
           relatedId: booking.id,
         });
       }
@@ -841,98 +868,12 @@ export async function remindAndAutoDeclineRescheduleRequests(): Promise<void> {
       await writeAuditLog({
         action: 'BOOKING_RESCHEDULE_REQUEST_AUTO_DECLINED',
         category: 'STATUS_CHANGE',
-        message: `Booking ${booking.id}'s reschedule request auto-declined after 48h without worker response`,
+        message: `Booking ${booking.id}'s reschedule request auto-declined after 48h without a response`,
         metadata: { bookingId: booking.id },
       });
     } catch (error) {
       console.error(`Failed to auto-decline reschedule request for booking ${booking.id}:`, error);
     }
-  }
-}
-
-/**
- * Clears stale isBooked flags on past-dated WorkerAvailability rows. A slot
- * can be left marked isBooked if a booking concluded through a path that
- * didn't explicitly free it (defense-in-depth self-heal, not the primary
- * mechanism — accept/complete/cancel free their own slot inline).
- */
-export async function resetExpiredAvailabilitySlots(): Promise<void> {
-  const ACTIVE_STATUSES = ['PENDING', 'ACCEPTED', 'IN_PROGRESS', 'QUOTE_SUBMITTED', 'QUOTE_APPROVED', 'DISPUTED'] as const;
-
-  // Not date-bounded — an isBooked slot with no matching active booking is
-  // stale whether that date is in the past or still upcoming (e.g. a booking
-  // that was cancelled/completed through a path that missed freeSlot). Only
-  // checking past dates left an orphaned future slot stuck as "booked" until
-  // its date happened to lapse.
-  const staleBookedSlots = await prisma.workerAvailability.findMany({
-    where: { isBooked: true },
-    include: { workerProfile: { select: { userId: true } } },
-  });
-
-  for (const slot of staleBookedSlots) {
-    const stillActive = await prisma.booking.findFirst({
-      where: {
-        workerId: slot.workerProfile.userId,
-        scheduledDate: slot.date,
-        timeSlot: slot.timeSlot,
-        status: { in: [...ACTIVE_STATUSES] },
-      },
-      select: { id: true },
-    });
-
-    if (!stillActive) {
-      await prisma.workerAvailability.update({
-        where: { id: slot.id },
-        data: { isBooked: false },
-      });
-    }
-  }
-
-  // Same idea for the soft "isBlocked" hold reschedule-on-conflict and
-  // reschedule-on-request use while a booking is mid-flight (see
-  // bookingController.extendBooking / requestReschedule). Both flows clear
-  // the hold themselves when the episode resolves (accept/decline/withdraw,
-  // or the owning booking is cancelled/completed) — this is only a backstop
-  // for a hold left dangling by a crash or a path that missed that cleanup.
-  const staleBlockedSlots = await prisma.workerAvailability.findMany({
-    where: { isBlocked: true, blockedByBookingId: { not: null } },
-  });
-
-  for (const slot of staleBlockedSlots) {
-    const holdingBooking = await prisma.booking.findUnique({
-      where: { id: slot.blockedByBookingId! },
-      select: { status: true, rescheduleRequestRespondedAt: true },
-    });
-
-    const stale =
-      !holdingBooking ||
-      holdingBooking.status === 'COMPLETED' ||
-      holdingBooking.status === 'CANCELLED' ||
-      holdingBooking.rescheduleRequestRespondedAt != null;
-
-    if (stale) {
-      await prisma.workerAvailability.update({
-        where: { id: slot.id },
-        data: { isBlocked: false, blockedByBookingId: null },
-      });
-    }
-  }
-}
-
-/**
- * Daily sweep (see B8) that rolls every worker's recurring weekly template
- * (see WorkerAvailabilityTemplate / workerController.updateMyAvailabilityTemplate)
- * forward into real WorkerAvailability rows, so the open booking horizon
- * keeps advancing instead of only covering the day the template was saved.
- */
-export async function materializeAvailabilityTemplates(): Promise<void> {
-  const workerProfileIds = await prisma.workerAvailabilityTemplate.findMany({
-    distinct: ['workerProfileId'],
-    select: { workerProfileId: true },
-  });
-
-  for (const { workerProfileId } of workerProfileIds) {
-    await materializeTemplateForWorker(prisma, workerProfileId);
   }
 }
 
@@ -1143,22 +1084,16 @@ export async function startBookingWorker() {
           await remindAndAutoApproveAddons();
           break;
         case JOB_NAMES.NO_SHOW_SWEEP:
-          await flagWorkerNoShows();
+          await cancelWorkerNoShows();
           break;
         case JOB_NAMES.DISPUTE_SLA_SWEEP:
           await escalateStaleDisputes();
-          break;
-        case JOB_NAMES.RESET_AVAILABILITY:
-          await resetExpiredAvailabilitySlots();
           break;
         case JOB_NAMES.RESCHEDULE_TIMEOUT_SWEEP:
           await remindAndAutoConfirmReschedules();
           break;
         case JOB_NAMES.RESCHEDULE_REQUEST_TIMEOUT_SWEEP:
           await remindAndAutoDeclineRescheduleRequests();
-          break;
-        case JOB_NAMES.MATERIALIZE_AVAILABILITY_TEMPLATES:
-          await materializeAvailabilityTemplates();
           break;
         case JOB_NAMES.KYC_EXPIRY_SWEEP:
           await flagExpiredKycDocuments();

@@ -12,12 +12,14 @@ const NUMBER_FIELD_BOUNDS = {
   perKmFee: [0, 500],
   tierProMinRating: [0, 5],
   tierProMinJobs: [0, null],
+  tierProMinYears: [0, 60],
   tierProMultiplier: [1, 5],
   tierExpertMinRating: [0, 5],
   tierExpertMinJobs: [0, null],
+  tierExpertMinYears: [0, 60],
   tierExpertMultiplier: [1, 5],
 }
-const PERCENT_FIELDS = ['commissionRate']
+const PERCENT_FIELDS = ['commissionRate', 'rushFeeRate']
 const FIELDS = [...Object.keys(NUMBER_FIELD_BOUNDS), ...PERCENT_FIELDS]
 
 export default function PricingRules() {
@@ -27,7 +29,7 @@ export default function PricingRules() {
   return (
     <SettingsFormPage
       title="Pricing Rules"
-      subtitle="Platform-wide rules that shape every booking's price, alongside the per-city limits in Price Control"
+      subtitle="Service prices are fixed in the Service Catalog. These rules are what can change a booking's price: add-ons, distance, expertise tier, units and the same-day fee."
       form={form}
     >
       {current && (
@@ -59,6 +61,27 @@ export default function PricingRules() {
                 value={current.workerDebtHoldLimit}
                 onChange={updateNumberField('workerDebtHoldLimit')}
                 error={fieldErrors.workerDebtHoldLimit}
+              />
+            </div>
+          </SettingsSection>
+
+          <SettingsSection
+            icon="fa-bolt"
+            title="Same-Day Fee"
+            description="Added to the service price when a client books for today. The minimum notice for same-day bookings is in Settings."
+          >
+            <div className="detail-grid" style={{ marginBottom: 0 }}>
+              <AdornedNumberField
+                id="settings-rush-fee-rate"
+                label="Same-Day Fee"
+                suffix="%"
+                min={0}
+                max={100}
+                step={1}
+                value={toPercentDisplay(current.rushFeeRate)}
+                onChange={updatePercentField('rushFeeRate')}
+                error={fieldErrors.rushFeeRate}
+                hint="Percent of the service price (not add-ons, materials or distance)."
               />
             </div>
           </SettingsSection>
@@ -97,7 +120,7 @@ export default function PricingRules() {
           <SettingsSection
             icon="fa-ranking-star"
             title="Expertise Tiers"
-            description="Rates scale up for higher tiers, computed live from a worker's rating and completed-job count — not manually assigned."
+            description="Rates scale up for higher tiers, computed live from a worker's rating, completed jobs and years of experience (declared at KYC, confirmed by the admin) — not manually assigned. A worker needs all three."
           >
             <p className="settings-group__label" style={{ marginTop: 0 }}>Pro Tier</p>
             <div className="detail-grid" style={{ marginBottom: 0 }}>
@@ -118,6 +141,16 @@ export default function PricingRules() {
                 value={current.tierProMinJobs}
                 onChange={updateNumberField('tierProMinJobs')}
                 error={fieldErrors.tierProMinJobs}
+              />
+              <AdornedNumberField
+                id="settings-pro-min-years"
+                label="Min Years of Experience"
+                suffix="yrs"
+                min={0}
+                max={60}
+                value={current.tierProMinYears}
+                onChange={updateNumberField('tierProMinYears')}
+                error={fieldErrors.tierProMinYears}
               />
               <AdornedNumberField
                 id="settings-pro-multiplier"
@@ -152,6 +185,16 @@ export default function PricingRules() {
                   value={current.tierExpertMinJobs}
                   onChange={updateNumberField('tierExpertMinJobs')}
                   error={fieldErrors.tierExpertMinJobs}
+                />
+                <AdornedNumberField
+                  id="settings-expert-min-years"
+                  label="Min Years of Experience"
+                  suffix="yrs"
+                  min={0}
+                  max={60}
+                  value={current.tierExpertMinYears}
+                  onChange={updateNumberField('tierExpertMinYears')}
+                  error={fieldErrors.tierExpertMinYears}
                 />
                 <AdornedNumberField
                   id="settings-expert-multiplier"

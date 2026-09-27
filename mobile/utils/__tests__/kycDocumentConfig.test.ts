@@ -37,8 +37,10 @@ describe("kyc document configuration", () => {
       nbiClearance: { uri: "file://nbi.pdf" },
       barangayClearance: { uri: null },
       resume: { uri: null },
+      healthCertificate: { uri: null },
     });
 
-    expect(missing).toEqual(["governmentIdBack", "resume"]);
+    // Certifications are optional and not part of KYC any more.
+    expect(missing).toEqual(["governmentIdBack", "resume", "healthCertificate"]);
   });
 });

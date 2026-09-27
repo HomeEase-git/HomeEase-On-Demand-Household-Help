@@ -10,7 +10,7 @@ import { colors } from "../../../constants";
 import { useBookingStore } from "../../../store/bookingStore";
 import { useAlertModal } from "../../../contexts/AlertModalContext";
 import * as api from "../../../services/api";
-import { TIME_SLOT_LABELS, type TimeSlot } from "../../../types/booking4step.types";
+import { formatTime12h } from "../../../utils/bookingTime";
 
 const POLL_INTERVAL_MS = 5000;
 const CANCEL_WINDOW_MS = 2 * 60 * 60 * 1000; // 2 hours
@@ -21,7 +21,7 @@ type BookingDetail = {
   status: string;
   createdAt: string;
   scheduledDate?: string;
-  timeSlot?: TimeSlot | null;
+  scheduledTime?: string | null;
   location?: string;
   worker?: { id: string; fullName: string } | null;
 };
@@ -183,9 +183,11 @@ export default function BookingSuccessScreen() {
             <InfoRow icon="checkmark" label={detail ? statusLabel(detail.status) : "Request submitted"} />
             <InfoRow
               icon="calendar"
-              label={`${selectedBooking?.date ?? "—"}${
-                detail?.timeSlot ? ` · ${TIME_SLOT_LABELS[detail.timeSlot]}` : ""
-              }`}
+              label={`${selectedBooking?.date ? String(selectedBooking.date).slice(0, 10) : "—"}${
+                (detail?.scheduledTime ?? selectedBooking?.time)
+                  ? ` · ${formatTime12h(detail?.scheduledTime ?? selectedBooking?.time)}`
+                  : ""
+              }${selectedBooking?.isRush ? " · Same-day" : ""}`}
             />
             <InfoRow icon="location" label={selectedBooking?.address || "Location set"} last />
           </View>
@@ -211,6 +213,7 @@ export default function BookingSuccessScreen() {
                 basePrice={selectedBooking.priceBreakdown.basePrice}
                 distanceFee={selectedBooking.priceBreakdown.distanceFee}
                 tierFee={selectedBooking.priceBreakdown.tierFee}
+                rushFee={selectedBooking.priceBreakdown.rushFee}
                 addOns={selectedBooking.priceBreakdown.addOns}
                 vatApplicable={selectedBooking.priceBreakdown.vatApplicable}
                 vatRate={selectedBooking.priceBreakdown.vatRate}

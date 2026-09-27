@@ -2,14 +2,13 @@ import React, { useMemo, useState } from "react";
 import { View, Text, Pressable } from "react-native";
 import { AppIcon as Ionicons } from "../icons/AppIcon";
 import { colors } from "../../constants";
+import { MAX_BOOKING_DAYS_AHEAD } from "../../utils/bookingTime";
 
-const DAYS_AHEAD = 21;
-// Clients can't book today or tomorrow — gives a worker advance notice to
-// prepare instead of a same-day/next-day job landing on them with no
-// warning. Mirrored on the backend in validation.ts's MIN_BOOKING_LEAD_DAYS,
-// which rejects an earlier date even if a tampered/direct request bypasses
-// this calendar's disabling.
-const MIN_LEAD_DAYS = 2;
+// Today through MAX_BOOKING_DAYS_AHEAD days out (mirrors the backend's
+// workerAvailabilityService.checkBookingStart). Same-day booking is allowed
+// (with a rush fee), so there's no minimum lead in days.
+const DAYS_AHEAD = MAX_BOOKING_DAYS_AHEAD + 1;
+const MIN_LEAD_DAYS = 0;
 const DAY_LABELS = ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"];
 const MONTHS = [
   "January", "February", "March", "April", "May", "June",
@@ -48,6 +47,8 @@ type Props = {
   selectedDate: string | null;
   onSelect: (isoDate: string) => void;
   unavailableDates?: string[];
+  // Tiny label under a date, e.g. { "2026-09-27": "Rush" }.
+  dateBadges?: Record<string, string>;
   // Overrides for non-client-booking reuse (e.g. a worker's own vacation-range
   // picker, which has no minimum lead time and wants a longer horizon).
   // Default to the booking-flow constants above when omitted.
@@ -59,13 +60,13 @@ type Props = {
  * Month-grid date picker, capped to the next DAYS_AHEAD days to match the
  * booking flow's near-term-only scheduling window (dates outside that
  * window render dimmed/disabled rather than being hidden, so the calendar
- * shape stays intact). The nearest MIN_LEAD_DAYS days (today included) are
- * disabled the same way — not bookable at all, regardless of price.
+ * shape stays intact).
  */
 export default function DateGridPicker({
   selectedDate,
   onSelect,
   unavailableDates = [],
+  dateBadges,
   minLeadDays = MIN_LEAD_DAYS,
   daysAhead = DAYS_AHEAD,
 }: Props) {
@@ -164,6 +165,7 @@ export default function DateGridPicker({
             const isSelected = selectedDate === iso;
             const isOutOfRange = date < minSelectableDate || date > maxDate;
             const isUnavailable = isOutOfRange || unavailableDates.includes(iso);
+            const badge = !isUnavailable ? dateBadges?.[iso] : undefined;
 
             return (
               <View key={colIndex} className="flex-1 items-center">
@@ -184,6 +186,7 @@ export default function DateGridPicker({
                     {day}
                   </Text>
                 </Pressable>
+                {badge ? <Text className="text-warning text-[9px] font-bold -mt-0.5">{badge}</Text> : null}
               </View>
             );
           })}

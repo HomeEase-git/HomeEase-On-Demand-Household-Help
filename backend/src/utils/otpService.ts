@@ -73,7 +73,7 @@ export const verifyOtp = async (
   return true;
 };
 
-export const storeRefreshToken = async (userId: string, token: string): Promise<void> => {
+export const storeRefreshToken = async (userId: string, token: string, sessionId?: string): Promise<void> => {
   const expiresAt = new Date();
   expiresAt.setDate(expiresAt.getDate() + 30);
 
@@ -83,11 +83,13 @@ export const storeRefreshToken = async (userId: string, token: string): Promise<
       token,
       type: TokenType.REFRESH,
       expiresAt,
+      sessionId: sessionId ?? null,
     },
   });
 };
 
-export const verifyRefreshToken = async (token: string): Promise<string | null> => {
+/** The owner and device of a live refresh token, or null. */
+export const verifyRefreshToken = async (token: string): Promise<{ userId: string; sessionId: string | null } | null> => {
   const record = await prisma.authToken.findFirst({
     where: {
       token,
@@ -100,7 +102,7 @@ export const verifyRefreshToken = async (token: string): Promise<string | null> 
 
   if (!record) return null;
 
-  return record.userId;
+  return { userId: record.userId, sessionId: record.sessionId };
 };
 
 export const revokeRefreshToken = async (token: string): Promise<void> => {

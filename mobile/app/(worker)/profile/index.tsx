@@ -20,7 +20,6 @@ const MENU_GROUPS = [
   {
     title: "Professional Profile",
     items: [
-      { label: "Account Setup", path: "/(worker)/profile/setup", icon: "checkmark-done-outline" },
       { label: "Edit Profile", path: "/(worker)/profile/edit", icon: "person-outline" },
       { label: "Digital ID", path: "/(worker)/profile/digital-id", icon: "card-outline" },
       { label: "My Skills & Services", path: "/(worker)/profile/skills", icon: "construct-outline" },
@@ -47,7 +46,7 @@ const MENU_GROUPS = [
         icon: "notifications-outline",
       },
       { label: "Privacy Settings", path: "/(worker)/profile/privacy-settings", icon: "shield-checkmark-outline" },
-      { label: "Two-Factor Authentication", path: "/(worker)/profile/two-factor-auth", icon: "lock-closed-outline" },
+      { label: "Two-Step Sign-In", path: "/(worker)/profile/two-factor-auth", icon: "lock-closed-outline" },
     ],
   },
   {

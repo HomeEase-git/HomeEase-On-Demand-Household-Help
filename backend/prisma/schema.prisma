@@ -29,6 +29,19 @@ enum TokenType {
   REFRESH
   EMAIL_VERIFICATION
   PASSWORD_RESET
+  // One-time email/SMS code for a client/worker login when two-step
+  // sign-in is on (see User.twoFactorMethod / authController.login).
+  LOGIN_2FA
+  // One-time code confirming a sensitive account action from inside the app
+  // (turning two-step sign-in on/off, deleting the account).
+  ACCOUNT_ACTION
+}
+
+// Client/worker two-step sign-in channel. Admins use TOTP instead (see
+// MfaSecret / User.mfaEnabled).
+enum TwoFactorMethod {
+  EMAIL
+  SMS
 }
 
 enum BookingStatus {
@@ -54,6 +67,9 @@ enum QuoteStatus {
   SUBMITTED
   APPROVED
   DISPUTED
+  // Client refused the quote (e.g. the price doesn't match the receipt).
+  // The booking goes back to IN_PROGRESS for the worker to revise and resubmit.
+  REJECTED
 }
 
 enum PaymentStatus {
@@ -105,6 +121,8 @@ enum KycDocumentType {
   BARANGAY_CLEARANCE
   POLICE_CLEARANCE
   CEDULA
+  // Medical certificate stating the worker is fit to work. Required in KYC.
+  HEALTH_CERTIFICATE
 }
 
 enum KycDocumentStatus {
@@ -186,6 +204,10 @@ enum NotificationType {
   SERVICE_CATEGORY_REJECTED
   PACKAGE_APPROVED
   PACKAGE_REJECTED
+  QUOTE_REJECTED
+  FOLLOW_UP_VISIT_SCHEDULED
+  CANCELLATION_PENALTY
+  CANCELLATION_COMPENSATION
 }
 
 enum TimeSlot {
@@ -266,6 +288,14 @@ model User {
   // half-finished setup never flips this true. Irrelevant for CLIENT/WORKER.
   mfaEnabled Boolean @default(false)
 
+  // Client/worker two-step sign-in: null = off. When set, every login sends
+  // a one-time code by this channel (see authController.login).
+  twoFactorMethod TwoFactorMethod?
+
+  // Set when a worker deactivates their own account (status DEACTIVATED).
+  // Reversible: signing in again and choosing to reactivate clears it.
+  deactivatedAt DateTime?
+
   // Soft delete — isDeleted/deletedAt is the single gate used everywhere to
   // exclude a user from active queries. `status` records *why* — self-deleted,
   // admin-suspended, or admin-banned — so those cases stay distinguishable.
@@ -276,22 +306,22 @@ model User {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  clientProfile        ClientProfile?
-  workerProfile        WorkerProfile?
-  addresses            UserAddress[]
-  sentMessages         Message[]             @relation("sender")
-  receivedMessages     Message[]             @relation("receiver")
-  bookingsAsClient     Booking[]             @relation("client")
-  bookingsAsWorker     Booking[]             @relation("worker")
-  bookingGroupsAsClient BookingGroup[]       @relation("bookingGroupClient")
-  bookingGroupsAsWorker BookingGroup[]       @relation("bookingGroupWorker")
-  reviews              Review[]
-  notifications        Notification[]
-  authTokens           AuthToken[]
-  verificationRequests VerificationRequest[]
-  contractAcceptances  ContractAcceptance[]
-  mfaSecret            MfaSecret?
-  mfaBackupCodes       MfaBackupCode[]
+  clientProfile         ClientProfile?
+  workerProfile         WorkerProfile?
+  addresses             UserAddress[]
+  sentMessages          Message[]             @relation("sender")
+  receivedMessages      Message[]             @relation("receiver")
+  bookingsAsClient      Booking[]             @relation("client")
+  bookingsAsWorker      Booking[]             @relation("worker")
+  bookingGroupsAsClient BookingGroup[]        @relation("bookingGroupClient")
+  bookingGroupsAsWorker BookingGroup[]        @relation("bookingGroupWorker")
+  reviews               Review[]
+  notifications         Notification[]
+  authTokens            AuthToken[]
+  verificationRequests  VerificationRequest[]
+  contractAcceptances   ContractAcceptance[]
+  mfaSecret             MfaSecret?
+  mfaBackupCodes        MfaBackupCode[]
 
   @@index([email])
   @@index([role])
@@ -307,6 +337,9 @@ enum UserStatus {
   SUSPENDED
   BANNED
   DELETED
+  // Self-deactivated worker: hidden from search and can't take jobs, but
+  // nothing is erased; they can reactivate by signing in again.
+  DEACTIVATED
 }
 
 model UserAddress {
@@ -314,7 +347,7 @@ model UserAddress {
   userId String
   user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  label   String?
+  label       String?
   // House/unit/building number and barangay are split out from `street` so
   // the geocoder can be given a structured query (street+barangay+city vs. one
   // free-text blob) — Nominatim resolves PH addresses far more precisely with
@@ -328,8 +361,8 @@ model UserAddress {
   zipCode     String?
   // Free-text landmark ("beside Mercury Drug") — not geocoded itself, but
   // shown to the worker so they can confirm they're at the right gate/unit.
-  landmark  String?
-  isDefault Boolean @default(false)
+  landmark    String?
+  isDefault   Boolean @default(false)
 
   // Resolved coordinates, persisted server-side (previously cached only in
   // on-device AsyncStorage, which meant a reinstall or new device silently
@@ -361,8 +394,15 @@ model AuthToken {
   expiresAt DateTime
   createdAt DateTime  @default(now())
 
+  // REFRESH rows only: one id per signed-in device, carried across refresh-
+  // token rotation and embedded in that device's access tokens as `sid`, so
+  // "log out other devices" can revoke exactly the other sessions (see
+  // userController.logoutOtherSessions / middleware/auth.ts).
+  sessionId String?
+
   @@index([userId])
   @@index([token])
+  @@index([sessionId])
 }
 
 // One row per user (currently only ever created for ADMIN accounts, but not
@@ -463,10 +503,27 @@ model WorkerProfile {
 
   // Availability & Capacity
   isAvailable       Boolean @default(true)
+  // Retired: workers are no longer capped at a number of jobs. Kept so old
+  // rows load; nothing enforces it.
   maxConcurrentJobs Int     @default(2)
   activeJobCount    Int     @default(0)
-  availableDays     Int[]   @default([1, 2, 3, 4, 5]) // 0=Sun, 1=Mon ... 6=Sat
+  // The worker's weekly schedule (0=Sun, 1=Mon ... 6=Sat). A date is
+  // available when its weekday is listed here, unless a WorkerDateOverride
+  // for that date says otherwise (see workerDayAvailability.ts).
+  availableDays     Int[]   @default([1, 2, 3, 4, 5])
   serviceAreaRadius Int     @default(30) // in kilometers
+
+  // Years of experience in their trade, including work done outside the
+  // platform. Declared by the worker during KYC, confirmed or corrected by
+  // the admin at approval, and one of the expertise-tier requirements (see
+  // utils/workerTier.ts). Workers can't change it after approval.
+  yearsExperience Int?
+
+  // Money the platform owes the worker from an admin-approved client-fault
+  // cancellation (see Cancellation.compensationStatus) that was more than
+  // they owed. Added to their next online payout by
+  // paymentLifecycleService.settleWorkerEarnings.
+  compensationCredit Float @default(0)
 
   // Set when the worker hits AppSettings.maxDeclinesBeforeCooldown declines
   // within the rolling declineWindowHours — excluded from auto-match
@@ -527,12 +584,12 @@ model WorkerProfile {
   // Format: 000-000-000 or 000-000-000-000 with branch code (see utils/taxId.ts).
   // Stored encrypted (utils/fieldEncryption.ts) — the same TIN encrypts
   // differently each time, so uniqueness is enforced on tinHash instead.
-  tin           String?
-  tinHash       String?   @unique
+  tin     String?
+  tinHash String? @unique
 
   // Workers must be 18+ (utils/age.ts). Entered by the worker at the ID
   // step and checked by the admin against the ID itself at approval.
-  birthDate DateTime? @db.Date
+  birthDate     DateTime? @db.Date
   tinVerifiedAt DateTime?
 
   // VAT registration — self-declared then admin-verified (mirrors the
@@ -582,18 +639,19 @@ model WorkerProfile {
   updatedAt DateTime @updatedAt
 
   // Relations
-  serviceCategories  WorkerServiceCategory[]
-  taskSelections     WorkerTaskSelection[]
-  certifications     Certification[]
-  scopeCapabilities  WorkerScopeFieldCapability[]
-  reviews            Review[]
-  resumeParseResult  ResumeParseResult?
-  availability       WorkerAvailability[]
+  serviceCategories    WorkerServiceCategory[]
+  taskSelections       WorkerTaskSelection[]
+  certifications       Certification[]
+  scopeCapabilities    WorkerScopeFieldCapability[]
+  reviews              Review[]
+  resumeParseResult    ResumeParseResult?
+  availability         WorkerAvailability[]
   availabilityTemplate WorkerAvailabilityTemplate[]
-  packages           WorkerPackage[]
-  taskPrices         WorkerTaskPrice[]
-  tierPrices         WorkerTaskTierPrice[]
-  debtLedger         DebtLedgerEntry[]
+  dateOverrides        WorkerDateOverride[]
+  packages             WorkerPackage[]
+  taskPrices           WorkerTaskPrice[]
+  tierPrices           WorkerTaskTierPrice[]
+  debtLedger           DebtLedgerEntry[]
 
   @@index([userId])
   @@index([kycStatus])
@@ -605,7 +663,29 @@ model WorkerProfile {
   @@index([debtHoldAt])
 }
 
-// Per-date/slot availability record used by auto-matching to find candidate
+// A worker's per-date exception to their weekly schedule
+// (WorkerProfile.availableDays): isAvailable false closes a normally-open
+// weekday (a day off, a vacation), true opens a normally-closed one. Set from
+// the worker's availability calendar.
+model WorkerDateOverride {
+  id              String        @id @default(cuid())
+  workerProfileId String
+  workerProfile   WorkerProfile @relation(fields: [workerProfileId], references: [id], onDelete: Cascade)
+
+  date        DateTime // UTC midnight of the PH calendar date, same as Booking.scheduledDate
+  isAvailable Boolean
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([workerProfileId, date])
+  @@index([date])
+}
+
+// RETIRED with time slots (workers now set a weekly schedule plus
+// WorkerDateOverride). Nothing reads or writes this any more; kept so old
+// rows load.
+// Was: per-date/slot availability record used by auto-matching to find candidate
 // workers for a given (date, timeSlot) — a normalized companion to the
 // coarse-grained WorkerProfile.availableDays weekly pattern.
 model WorkerAvailability {
@@ -634,7 +714,8 @@ model WorkerAvailability {
   @@index([workerProfileId, date])
 }
 
-// A worker's recurring weekly pattern (see B8) — materializeAvailabilityTemplates
+// RETIRED with time slots — see WorkerDateOverride. Kept for history.
+// Was: a worker's recurring weekly pattern (see B8) — materializeAvailabilityTemplates
 // uses this to auto-open matching WorkerAvailability rows on a rolling
 // forward window, so a worker with a stable schedule doesn't have to
 // manually re-open the same days every week. Only ever CREATES rows that
@@ -835,10 +916,10 @@ model ServiceType {
 
   // Relations
   workerCategories WorkerServiceCategory[]
-  tasks          ServiceTask[]
-  packages       WorkerPackage[]
-  scopeFields    ServiceScopeField[]
-  certifications Certification[]
+  tasks            ServiceTask[]
+  packages         WorkerPackage[]
+  scopeFields      ServiceScopeField[]
+  certifications   Certification[]
 
   @@unique([name])
 }
@@ -1063,9 +1144,14 @@ model ServiceTask {
   durationHours Float?
   isActive      Boolean @default(true)
 
+  // An inspection/diagnosis-type job: once it's done, the client can ask the
+  // same worker for a follow-up job (e.g. the repair) — see
+  // Booking.parentBookingId.
+  allowsFollowUp Boolean @default(false)
+
   // Relations
-  bookings   Booking[]
-  workerPrices WorkerTaskPrice[]
+  bookings         Booking[]
+  workerPrices     WorkerTaskPrice[]
   workerSelections WorkerTaskSelection[]
   workerTierPrices WorkerTaskTierPrice[]
   scopeFieldLinks  ServiceScopeFieldTask[]
@@ -1211,6 +1297,13 @@ model Booking {
   groupId String?
   group   BookingGroup? @relation(fields: [groupId], references: [id], onDelete: SetNull)
 
+  // Follow-up job: set when the client asked the same worker for more work
+  // after an inspection/diagnosis job (ServiceTask.allowsFollowUp). Ordinary
+  // booking otherwise; the worker still accepts or declines it.
+  parentBookingId String?
+  parentBooking   Booking?  @relation("FollowUps", fields: [parentBookingId], references: [id], onDelete: SetNull)
+  followUps       Booking[] @relation("FollowUps")
+
   // Service
   serviceType            String
   serviceTaskId          String?
@@ -1224,10 +1317,15 @@ model Booking {
   scopeAnswers           Json? // { [ServiceScopeField.label]: string | string[] } snapshot of this booking's scope-step answers
   issuePhotoUrls         String[]       @default([]) // client-attached photos of the issue, uploaded at Step 1 before the booking exists (see POST /bookings/issue-photo/upload)
 
-  // Scheduling
+  // Scheduling. scheduledDate is UTC midnight of the PH calendar date;
+  // scheduledTime is the PH-local start time "HH:mm". timeSlot is RETIRED
+  // (null on new bookings); kept for bookings made before exact times.
   scheduledDate  DateTime
   scheduledTime  String?
   timeSlot       TimeSlot?
+  // Same-day ("rush") booking: carries AppSettings.rushFeeRate on top of
+  // the service price (see PricingLog.rushFee).
+  isRush         Boolean      @default(false)
   urgencyLevel   UrgencyLevel @default(STANDARD)
   completionDate DateTime?
 
@@ -1273,6 +1371,16 @@ model Booking {
   approvedAt    DateTime?
   disputeReason String?
 
+  // Required with any materials cost: photos of the receipt(s) and of the
+  // materials installed/used on site. The client can refuse a quote whose
+  // price doesn't match the receipt (see bookingController.rejectQuote).
+  quoteReceiptUrls     String[]  @default([])
+  quoteProofOfUseUrls  String[]  @default([])
+  quoteRejectedAt      DateTime?
+  quoteRejectionReason String?
+  // How many times the worker has resubmitted after a refusal.
+  quoteRevision        Int       @default(0)
+
   // Stamped once, in acceptBooking, when a worker accepts a PENDING request.
   // Distinct from updatedAt, which moves on every later write to this row
   // (a quote, an add-on, a photo) and so can't be trusted as "when accepted"
@@ -1292,23 +1400,23 @@ model Booking {
   // writes workerArrivedAt without transitioning status). Overwritten (not
   // appended) on a second hop if the spillover runs into a third+ day —
   // always reflects the latest move.
-  rescheduledAt              DateTime?
-  previousScheduledDate      DateTime?
-  previousTimeSlot           TimeSlot?
-  rescheduledFromBookingId   String? // soft reference — the original spilling-over booking's id, same convention as Cancellation.cancelledById
-  rescheduleReminderSentAt   DateTime?
+  rescheduledAt            DateTime?
+  previousScheduledDate    DateTime?
+  previousTimeSlot         TimeSlot?
+  rescheduledFromBookingId String? // soft reference — the original spilling-over booking's id, same convention as Cancellation.cancelledById
+  rescheduleReminderSentAt DateTime?
   // Non-null = this reschedule episode is resolved (client explicitly kept
   // the date, or the 24h auto-confirm fired) — doubles as the gate that lets
   // cancelBooking's post-PENDING carve-out apply.
-  rescheduleAcknowledgedAt   DateTime?
+  rescheduleAcknowledgedAt DateTime?
   // The TRUE original date/slot, written once (only if still null) on the
   // FIRST hop and never touched again — previousScheduledDate/
   // previousTimeSlot above are overwritten on every hop and only ever
   // reflect the most recent move, so a client bounced twice
   // (Sept 20 -> Sept 22 -> Sept 25) would otherwise see "previously
   // Sept 22" with no way to learn they started at Sept 20 at all.
-  originalScheduledDate DateTime?
-  originalTimeSlot      TimeSlot?
+  originalScheduledDate    DateTime?
+  originalTimeSlot         TimeSlot?
 
   // Reschedule-ON-REQUEST — distinct from the reschedule-ON-CONFLICT fields
   // above (that's the worker's OTHER job spilling over onto THIS one; this
@@ -1320,8 +1428,12 @@ model Booking {
   // (null) — three outcomes sharing one "resolved" timestamp rather than a
   // separate status field per outcome.
   rescheduleRequestedAt           DateTime?
+  // Who asked: the client, or the worker (e.g. an overlapping job). The
+  // other party accepts or declines.
+  rescheduleRequestedBy           Role?
   requestedScheduledDate          DateTime?
-  requestedTimeSlot                TimeSlot?
+  requestedScheduledTime          String?
+  requestedTimeSlot               TimeSlot?
   rescheduleRequestReminderSentAt DateTime?
   rescheduleRequestRespondedAt    DateTime?
   rescheduleRequestAccepted       Boolean?
@@ -1406,6 +1518,7 @@ model Booking {
   cancellation        Cancellation?
   pricingLogs         PricingLog[]
   disputes            Dispute[]
+  visits              BookingVisit[]
 
   // Slot occupancy is enforced by a Postgres PARTIAL unique index
   // ("worker_live_slot_unique" on (workerId, scheduledDate, timeSlot) WHERE
@@ -1439,7 +1552,29 @@ model Booking {
   @@index([groupId])
 }
 
-// A client-picked worker's multi-day upfront booking (see B/sequence-5
+// A later visit on the same job, scheduled by the worker when the work needs
+// more than one day ("Follow Up Date"). The job stays one Booking; each
+// visit puts the date on both calendars.
+model BookingVisit {
+  id        String  @id @default(cuid())
+  bookingId String
+  booking   Booking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+
+  scheduledDate DateTime // UTC midnight of the PH date
+  scheduledTime String // PH-local "HH:mm"
+  notes         String?
+  status        String   @default("SCHEDULED") // 'SCHEDULED' | 'DONE' | 'CANCELLED'
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([bookingId])
+  @@index([scheduledDate])
+}
+
+// RETIRED: clients no longer book multi-day jobs up front; the worker adds
+// follow-up visits instead (see BookingVisit). Kept for existing groups.
+// Was: a client-picked worker's multi-day upfront booking (see B/sequence-5
 // "multi-day booking" — created via bookingController.createMultiDayBooking).
 // Purely a grouping label over N ordinary single-day Booking rows: no
 // scheduling, pricing, or status logic of its own lives here, so every
@@ -1497,12 +1632,12 @@ model BookingAddOn {
   clientRejectedAt DateTime?
   // Needed for the reminder/auto-approve sweep to know how long an addon
   // has been pending — nothing else on this model was ever timestamped.
-  createdAt DateTime @default(now())
+  createdAt        DateTime  @default(now())
   // Set once the 2h "please approve/reject this addon" reminder fires (see
   // bookingWorker.remindAndAutoApproveAddons) — prevents re-sending it on
   // every hourly sweep tick, same convention as
   // Booking.quoteReminderSentAt.
-  reminderSentAt DateTime?
+  reminderSentAt   DateTime?
 
   @@index([bookingId])
 }
@@ -1537,10 +1672,10 @@ model ArrivalVerification {
   bookingId String  @unique
   booking   Booking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
 
-  workerLat      Float
-  workerLng      Float
-  distanceMeters Float
-  isVerified     Boolean @default(false) // within the accepted geofence radius
+  workerLat             Float
+  workerLng             Float
+  distanceMeters        Float
+  isVerified            Boolean @default(false) // within the accepted geofence radius
   // Flag-only (see C9) — true when the check-in fell outside the booking's
   // scheduled date/timeSlot window. Never blocks arrival, just surfaces it
   // for admin dispute review.
@@ -1549,7 +1684,7 @@ model ArrivalVerification {
   // fix came from a mock-location provider. A true value hard-blocks the
   // check-in itself (see arriveBooking) so this only records false/unknown
   // on the row that actually got created — kept for audit completeness.
-  mockedLocation Boolean @default(false)
+  mockedLocation        Boolean @default(false)
 
   createdAt DateTime @default(now())
 }
@@ -1559,9 +1694,9 @@ model Cancellation {
   bookingId String  @unique
   booking   Booking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
 
-  cancelledBy   Role // CLIENT, WORKER, or ADMIN
-  cancelledById String // soft reference to the user who cancelled
-  reason        String?
+  cancelledBy          Role // CLIENT, WORKER, or ADMIN
+  cancelledById        String // soft reference to the user who cancelled
+  reason               String?
   // Hours of notice between this cancellation and the booking's scheduled
   // slot start — only recorded for WORKER cancellations (see B6), since
   // those are the ones that leave a client stranded on short notice. 0 means
@@ -1589,7 +1724,27 @@ model Cancellation {
   // which could never account for case (2).
   penalizedWorkerId String?
 
+  // Whose fault a cancellation after the worker arrived was, with the
+  // worker's photo proof. WORKER fault charges the penalty right away;
+  // CLIENT fault asks an admin to check the proof before the client is
+  // charged and the worker compensated (compensationStatus).
+  fault              CancellationFault?
+  proofUrls          String[]           @default([])
+  penaltyAmount      Float?
+  compensationAmount Float?
+  compensationStatus String             @default("NOT_APPLICABLE") // 'NOT_APPLICABLE' | 'PENDING_REVIEW' | 'APPROVED' | 'REJECTED'
+  reviewedById       String? // soft reference — admin
+  reviewedAt         DateTime?
+  reviewNote         String?
+
   createdAt DateTime @default(now())
+
+  @@index([compensationStatus])
+}
+
+enum CancellationFault {
+  CLIENT
+  WORKER
 }
 
 enum WorkerCancellationReason {
@@ -1609,6 +1764,7 @@ model PricingLog {
   conditionFee  Float? @default(0)
   distanceFee   Float? @default(0)
   urgencyFee    Float? @default(0)
+  rushFee       Float? @default(0)
   tierFee       Float? @default(0)
   addOnsTotal   Float? @default(0)
   finalEstimate Float
@@ -1812,6 +1968,11 @@ enum DebtLedgerEntryType {
   // Withheld from an online job's payout to pay down outstanding
   // commissionOwed before the remainder is disbursed. Decreases commissionOwed.
   DEBT_RECOVERY
+  // Worker no-show / worker-fault cancellation penalty. Increases commissionOwed.
+  PENALTY
+  // Admin-approved client-fault cancellation compensation applied against
+  // what the worker owes. Decreases commissionOwed.
+  COMPENSATION
   // Admin manual correction (either direction), always requires a note.
   ADMIN_ADJUSTMENT
   // A previously-accrued COMMISSION_DEBIT reversed because the underlying
@@ -1978,6 +2139,8 @@ model AuditLog {
   @@index([actorId])
 }
 
+// RETIRED (2026-09-27): per-city price bounds did nothing once prices became
+// admin-fixed; nothing reads or writes this any more. Kept for history.
 model PricingRule {
   id          String @id @default(cuid())
   city        String
@@ -1999,9 +2162,28 @@ model AppSettings {
 
   // Platform configuration — live business rules read at runtime by the
   // booking/payment/worker-availability flows (see appSettingsService).
-  commissionRate       Float @default(0.10)
-  withholdingTaxRate   Float @default(0.02)
-  maxSlotsPerDay       Int   @default(2)
+  commissionRate     Float @default(0.10)
+  withholdingTaxRate Float @default(0.02)
+  // Retired with time slots; nothing reads it.
+  maxSlotsPerDay     Int   @default(2)
+
+  // Worker age range, checked at signup against the date of birth.
+  workerMinAge Int @default(18)
+  workerMaxAge Int @default(60)
+
+  // Same-day ("rush") booking: surcharge as a fraction of the service price,
+  // and how soon from now its start time may be.
+  rushFeeRate      Float @default(0.25)
+  rushMinLeadHours Int   @default(2)
+
+  // Worker no-show: an ACCEPTED booking with no check-in this many minutes
+  // after its start time is cancelled and the worker charged the penalty
+  // (see bookingWorker.cancelWorkerNoShows). The compensation is what a
+  // client pays when a worker's proof shows the client caused a
+  // cancellation after arrival.
+  noShowGraceMinutes            Int   @default(60)
+  noShowPenaltyAmount           Float @default(200)
+  clientFaultCompensationAmount Float @default(200)
 
   // BIR Alphanumeric Tax Code for the withholding tax certificate (Form
   // 2307) — see taxCertificateService. Data, not a hardcoded constant: kept
@@ -2012,9 +2194,9 @@ model AppSettings {
   // is goods-suppliers-at-1%, not this. One code covers every worker
   // regardless of VAT registration: none of this platform's trades are
   // PRC-licensed professions, so the VAT-status-split article never applied.
-  atcCode String?
-  pendingExpiryMinutes Int   @default(60)
-  geofenceRadiusMeters Int   @default(100)
+  atcCode              String?
+  pendingExpiryMinutes Int     @default(60)
+  geofenceRadiusMeters Int     @default(100)
 
   // Worker decline-limit cooldown (see bookingController.declineBooking) —
   // hit maxDeclinesBeforeCooldown declines within declineWindowHours and the
@@ -2028,9 +2210,11 @@ model AppSettings {
   // these thresholds/multipliers are the only admin-configurable part.
   tierProMinRating     Float @default(4.5)
   tierProMinJobs       Int   @default(20)
+  tierProMinYears      Int   @default(2)
   tierProMultiplier    Float @default(1.15)
   tierExpertMinRating  Float @default(4.8)
   tierExpertMinJobs    Int   @default(50)
+  tierExpertMinYears   Int   @default(5)
   tierExpertMultiplier Float @default(1.3)
 
   // Distance fee (see utils/pricing.computeJobPricing) — km within
@@ -2045,9 +2229,7 @@ model AppSettings {
   // crossing this puts the worker's account on hold until an admin clears it.
   workerDebtHoldLimit Float @default(500)
 
-  // Grace period past an ACCEPTED booking's scheduled slot start before the
-  // worker-no-show sweep (bookingWorker.flagWorkerNoShows) flags it —
-  // see Booking.workerNoShowFlaggedAt.
+  // Retired: replaced by noShowGraceMinutes.
   noShowGraceHours Int @default(2)
 
   // How long a dispute can sit OPEN/UNDER_REVIEW before the SLA sweep
@@ -2193,21 +2375,21 @@ model TaxRemittance {
 // admin dashboard (Catalog & Pricing → Promo Banners). The client app shows
 // active banners whose schedule window (if any) includes now, by sortOrder.
 model PromoBanner {
-  id       String  @id @default(cuid())
-  title    String
-  subtitle String?
+  id                String    @id @default(cuid())
+  title             String
+  subtitle          String?
   // Public URL in the promo-banners storage bucket.
-  imageUrl String
+  imageUrl          String
   // Optional: tapping the banner opens this service category in the app.
   // Plain id rather than a relation so deleting a category never blocks on
   // (or cascades into) banners; the app ignores an id it can't find.
   linkServiceTypeId String?
-  sortOrder Int       @default(0)
-  isActive  Boolean   @default(true)
-  startsAt  DateTime?
-  endsAt    DateTime?
-  createdAt DateTime  @default(now())
-  updatedAt DateTime  @updatedAt
+  sortOrder         Int       @default(0)
+  isActive          Boolean   @default(true)
+  startsAt          DateTime?
+  endsAt            DateTime?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
 
   @@index([isActive, sortOrder])
 }

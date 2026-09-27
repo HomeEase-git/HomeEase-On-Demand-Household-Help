@@ -78,13 +78,26 @@ describe('Worker services, packages and setup', () => {
       expect(res.body.data.serviceCategory.status).toBe('VERIFIED');
     });
 
-    it('needs documents to request a second service', async () => {
+    it('needs a certificate only for a service that requires one', async () => {
+      await prisma.serviceType.update({ where: { id: secondServiceId }, data: { requiresCertification: true } });
       const res = await request(app)
         .post('/api/workers/me/service-types')
         .set('Authorization', `Bearer ${workerToken}`)
         .send({ serviceTypeId: secondServiceId });
       expect(res.status).toBe(400);
-      expect(res.body.message).toMatch(/certification or document/);
+      expect(res.body.message).toMatch(/requires a certificate/);
+    });
+
+    it('files a request without documents for a service with no certificate requirement', async () => {
+      const laundry = await newService('laundry');
+      const res = await request(app)
+        .post('/api/workers/me/service-types')
+        .set('Authorization', `Bearer ${workerToken}`)
+        .send({ serviceTypeId: laundry.id });
+      expect(res.status).toBe(201);
+      // Still reviewed by an admin, just with no documents.
+      expect(res.body.data.serviceCategory.status).toBe('PENDING_VERIFICATION');
+      expect(res.body.data.serviceCategory.gatingCertificationId).toBeNull();
     });
 
     it('files the request with every attached document for admin review', async () => {
@@ -213,7 +226,7 @@ describe('Worker services, packages and setup', () => {
       expect(res.status).toBe(200);
       expect(res.body.data.complete).toBe(false);
       expect(res.body.data.missing).toEqual(
-        expect.arrayContaining(['PROFILE_PHOTO', 'PAYOUT_METHOD', 'ADDRESS', 'AVAILABILITY', 'SERVICES'])
+        expect.arrayContaining(['PROFILE_PHOTO', 'PAYOUT_METHOD', 'ADDRESS', 'SERVICES'])
       );
     });
 
@@ -227,7 +240,7 @@ describe('Worker services, packages and setup', () => {
           location: '123 Test St',
           city: 'Manila',
           scheduledDate: new Date(Date.now() + 5 * 86_400_000),
-          timeSlot: 'MORNING',
+          scheduledTime: '09:00',
           estimatedPrice: 800,
           status: 'PENDING',
         },
@@ -250,7 +263,6 @@ describe('Worker services, packages and setup', () => {
 
       const date = new Date(Date.now() + 6 * 86_400_000);
       date.setUTCHours(0, 0, 0, 0);
-      await prisma.workerAvailability.create({ data: { workerProfileId, date, timeSlot: 'AFTERNOON', isBlocked: false } });
 
       const serviceType = await prisma.serviceType.findUniqueOrThrow({ where: { id: firstServiceId } });
       const res = await request(app)
@@ -265,7 +277,7 @@ describe('Worker services, packages and setup', () => {
           lat: 14.5995,
           lng: 120.9842,
           date: date.toISOString().slice(0, 10),
-          timeSlot: 'AFTERNOON',
+          time: '14:00',
           paymentMethodType: 'CASH',
         });
       expect(res.status).toBe(201);

@@ -7,7 +7,6 @@ import { writeAuditLog } from '@utils/auditLog';
 import { formatDisplayId, formatPeso } from '@utils/formatters';
 import { buildPaginationMeta, getPaginationParams } from '@utils/pagination';
 import { refundOrVoidPayment, createCompletionInvoice, settlePlatformFundedPayment } from '@services/paymentLifecycleService';
-import { freeSlot } from '@services/workerAvailabilityService';
 import type { JwtPayload } from '@/types/index';
 
 interface AuthRequest extends Request {
@@ -509,27 +508,19 @@ export const resolveDispute = async (req: AuthRequest, res: Response) => {
         });
       } else {
         // A dispute raised pre-completion (QUOTE_SUBMITTED -> DISPUTED) still
-        // holds the worker's capacity slot and calendar slot — completeBooking
-        // never ran for this booking, so nothing has freed them yet. A dispute
-        // raised post-completion (AWAITING_PAYMENT -> DISPUTED, e.g. payment
-        // overdue) already had both freed there (workerCompletedAt is set), so
-        // skip here to avoid double-freeing capacity that isn't actually held.
+        // counts as one of the worker's active jobs — completeBooking never
+        // ran for it. One raised post-completion (AWAITING_PAYMENT ->
+        // DISPUTED) was already counted down there (workerCompletedAt is set).
         if (!cancelKeepsStatus && booking.workerId && !booking.workerCompletedAt) {
-          const workerProfile = await tx.workerProfile.update({
+          await tx.workerProfile.update({
             where: { userId: booking.workerId },
             data: { activeJobCount: { decrement: 1 } },
           });
-          if (booking.timeSlot) {
-            await freeSlot(tx, workerProfile.id, booking.scheduledDate, booking.timeSlot, booking.estimatedDurationHours);
-          }
-
-          // Same cleanup bookingController.cancelBooking/completeBooking do —
-          // a dispute resolved into CANCELLED is another path that can end a
-          // booking, and without this its /extend-reserved future calendar
-          // block (see bookingController.extendBooking) would survive it.
-          await tx.workerAvailability.updateMany({
-            where: { workerProfileId: workerProfile.id, blockedByBookingId: booking.id, isBooked: false },
-            data: { isBlocked: false, blockedByBookingId: null },
+        }
+        if (!cancelKeepsStatus) {
+          await tx.bookingVisit.updateMany({
+            where: { bookingId: booking.id, status: 'SCHEDULED' },
+            data: { status: 'CANCELLED' },
           });
         }
 

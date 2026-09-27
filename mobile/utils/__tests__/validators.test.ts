@@ -162,3 +162,29 @@ describe('Validators', () => {
     });
   });
 });
+
+describe("validateWorkerBirthDate", () => {
+  const { validateWorkerBirthDate } = require("../validators");
+  const yearsAgo = (years: number, dayOffset = 0) => {
+    const d = new Date();
+    d.setUTCFullYear(d.getUTCFullYear() - years);
+    d.setUTCDate(d.getUTCDate() + dayOffset);
+    return d.toISOString().slice(0, 10);
+  };
+
+  it("accepts ages 18 to 60", () => {
+    expect(validateWorkerBirthDate(yearsAgo(18)).valid).toBe(true);
+    expect(validateWorkerBirthDate(yearsAgo(35)).valid).toBe(true);
+    expect(validateWorkerBirthDate(yearsAgo(60)).valid).toBe(true);
+  });
+
+  it("rejects under 18 and over 60", () => {
+    expect(validateWorkerBirthDate(yearsAgo(18, 1)).valid).toBe(false);
+    expect(validateWorkerBirthDate(yearsAgo(61)).valid).toBe(false);
+  });
+
+  it("rejects bad formats and impossible dates", () => {
+    expect(validateWorkerBirthDate("1990/01/01").valid).toBe(false);
+    expect(validateWorkerBirthDate("1990-02-30").valid).toBe(false);
+  });
+});

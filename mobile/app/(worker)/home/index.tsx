@@ -18,11 +18,14 @@ import { usePushNotificationPrompt } from "../../../hooks/usePushNotificationPro
 import { isAxiosError } from "axios";
 import { AvailabilityToggle } from "../../../components/worker-home/AvailabilityToggle";
 import { useWorkerSetupStatus } from "../../../hooks/useWorkerSetupStatus";
+import { phTodayIso } from "../../../utils/bookingTime";
+import { addDaysIso, dayTint } from "../../../utils/calendarLoad";
 import { NextJobCard } from "../../../components/worker-home/NextJobCard";
 import { pickNextJob } from "../../../utils/workerHome";
 import { useAlertModal } from "../../../contexts/AlertModalContext";
 
-const todayStr = () => new Date().toISOString().slice(0, 10);
+const todayStr = () => phTodayIso();
+const WEEKDAY_SHORT = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
 export default function WorkerHomeScreen() {
   const router = useRouter();
@@ -31,7 +34,8 @@ export default function WorkerHomeScreen() {
   const setJobs = useWorkerStore((s) => s.setJobs);
   const user = useAuthStore((s) => s.user);
   const unreadCount = useNotificationStore((s) => s.unreadCount);
-  const [capacity, setCapacity] = React.useState<{ activeJobCount: number; maxConcurrentJobs: number } | null>(null);
+  // The next 7 days from the calendar — tinted by how many jobs fall on each.
+  const [week, setWeek] = React.useState<api.CalendarDay[] | null>(null);
   const [declineCooldownUntil, setDeclineCooldownUntil] = React.useState<string | null>(null);
   const [accountHold, setAccountHold] = React.useState<{ since: string; amountOwed: number } | null>(null);
   const [isAvailable, setIsAvailable] = React.useState<boolean | null>(null);
@@ -52,13 +56,14 @@ export default function WorkerHomeScreen() {
   const load = useCallback(async () => {
     if (!userId) return;
     try {
-      const [bookings, capacityData, profile] = await Promise.all([
+      const from = phTodayIso();
+      const [bookings, calendar, profile] = await Promise.all([
         api.getBookings(),
-        api.getWorkerCapacity(),
+        api.getMyCalendar(from, addDaysIso(from, 6)),
         api.getUserProfile(),
       ]);
       setJobs((bookings as ApiWorkerBooking[]).map(mapApiJob));
-      setCapacity(capacityData);
+      setWeek(calendar.days);
       setDeclineCooldownUntil(profile.declineCooldownUntil ?? null);
       setAccountHold(profile.accountHold ?? null);
     } catch (error) {
@@ -164,7 +169,7 @@ export default function WorkerHomeScreen() {
         </View>
 
         {nextJob && (
-          <NextJobCard job={nextJob} onOpen={() => router.push(`/(worker)/requests/job/${nextJob.id}`)} />
+          <NextJobCard job={nextJob} onOpen={() => router.push(`/(worker)/records/job/${nextJob.id}`)} />
         )}
 
         {accountHold && (
@@ -188,26 +193,42 @@ export default function WorkerHomeScreen() {
           </View>
         )}
 
-        {capacity && (
+        {week && week.length > 0 && (
           <Pressable
-            className="flex-row items-center justify-between bg-card rounded-xl p-3 mx-4 mt-3"
+            className="bg-card rounded-xl p-3 mx-4 mt-3"
             onPress={() => router.push("/(worker)/profile/availability")}
+            accessibilityRole="button"
+            accessibilityLabel="This week's schedule. Open your calendar."
           >
-            <View className="flex-row items-center">
-              <Ionicons
-                name="briefcase-outline"
-                size={18}
-                color={capacity.activeJobCount >= capacity.maxConcurrentJobs ? colors.error : colors.text.secondary}
-              />
-              <Text className="text-text-secondary text-sm ml-2">Active slot load</Text>
+            <View className="flex-row items-center justify-between mb-2">
+              <View className="flex-row items-center">
+                <Ionicons name="calendar-outline" size={18} color={colors.text.secondary} />
+                <Text className="text-text-secondary text-sm ml-2">This week</Text>
+              </View>
+              <Ionicons name="chevron-forward" size={16} color={colors.text.muted} />
             </View>
-            <Text
-              className={`font-bold text-sm ${
-                capacity.activeJobCount >= capacity.maxConcurrentJobs ? "text-error" : "text-text-primary"
-              }`}
-            >
-              {capacity.activeJobCount}/{capacity.maxConcurrentJobs} slots filled
-            </Text>
+            <View className="flex-row justify-between">
+              {week.map((day) => (
+                <View
+                  key={day.date}
+                  className={`items-center justify-center rounded-lg w-10 py-1.5 ${dayTint(day)}`}
+                >
+                  <Text className="text-text-muted text-[10px]">
+                    {WEEKDAY_SHORT[new Date(`${day.date}T00:00:00Z`).getUTCDay()]}
+                  </Text>
+                  <Text
+                    className={`text-sm font-semibold ${
+                      !day.available && day.jobCount === 0 ? "text-text-muted" : "text-text-primary"
+                    }`}
+                  >
+                    {Number(day.date.slice(8, 10))}
+                  </Text>
+                  <Text className="text-text-secondary text-[9px]">
+                    {day.jobCount > 0 ? `${day.jobCount} job${day.jobCount === 1 ? "" : "s"}` : day.available ? " " : "off"}
+                  </Text>
+                </View>
+              ))}
+            </View>
           </Pressable>
         )}
 

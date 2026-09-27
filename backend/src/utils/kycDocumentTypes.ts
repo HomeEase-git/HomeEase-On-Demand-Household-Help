@@ -8,6 +8,7 @@ export const KYC_DOCUMENT_TYPES = [
   'BARANGAY_CLEARANCE',
   'POLICE_CLEARANCE',
   'CEDULA',
+  'HEALTH_CERTIFICATE',
   // Not part of onboarding (uploaded any time post-onboarding via the tax-info
   // screen) — reuses this same upload endpoint/bucket rather than a
   // dedicated one. See workerController.submitVatRegistration.

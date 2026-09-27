@@ -28,7 +28,8 @@ export const VALID_TRANSITIONS: Record<string, string[]> = {
   // is what actually charges/refunds the accept-time admin fee correctly.
   ACCEPTED: ['IN_PROGRESS', 'CANCELLED'],
   IN_PROGRESS: ['QUOTE_SUBMITTED', 'CANCELLED'],
-  QUOTE_SUBMITTED: ['QUOTE_APPROVED', 'DISPUTED', 'CANCELLED'],
+  // IN_PROGRESS: the client refused the quote and the worker revises it.
+  QUOTE_SUBMITTED: ['QUOTE_APPROVED', 'DISPUTED', 'IN_PROGRESS', 'CANCELLED'],
   QUOTE_APPROVED: ['PENDING_COMPLETION', 'CANCELLED'],
   // IN_PROGRESS (not QUOTE_SUBMITTED) is the restart point for a dispute
   // resolved via REQUEST_NEW_QUOTE — the worker resubmits through the normal

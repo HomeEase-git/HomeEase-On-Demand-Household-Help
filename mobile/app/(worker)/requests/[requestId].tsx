@@ -19,6 +19,7 @@ import StatusBadge from "../../../components/ui/StatusBadge";
 import { useAlertModal } from "../../../contexts/AlertModalContext";
 import { summarizeFlatRoomTypes } from "../../../utils/bookingPriceEstimate";
 import { ROOM_TYPE_LABELS, CONDITION_LABELS, type RoomType, type ConditionType } from "../../../types/booking4step.types";
+import { bookingStartTime, formatTime12h } from "../../../utils/bookingTime";
 
 type BookingDetail = {
   id: string;
@@ -29,6 +30,13 @@ type BookingDetail = {
   clientLat?: number | null;
   clientLng?: number | null;
   scheduledDate: string;
+  scheduledTime?: string | null;
+  timeSlot?: string | null;
+  isRush?: boolean;
+  // Follow-up job after this worker's own inspection.
+  parentBooking?: { id: string; scheduledDate: string; service: string } | null;
+  // This worker's other jobs starting close to this one (overlap warning).
+  nearbyJobs?: { bookingId: string; time: string; service: string }[];
   estimatedPrice: number;
   rooms?: RoomType[];
   condition?: ConditionType | null;
@@ -46,7 +54,6 @@ export default function RequestDetailScreen() {
   const { requestId } = useLocalSearchParams<{ requestId: string }>();
   const updateJobStatus = useWorkerStore((s) => s.updateJobStatus);
   const [booking, setBooking] = useState<BookingDetail | null>(null);
-  const [capacity, setCapacity] = useState<{ activeJobCount: number; maxConcurrentJobs: number } | null>(null);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [declineVisible, setDeclineVisible] = useState(false);
@@ -56,12 +63,7 @@ export default function RequestDetailScreen() {
     if (!requestId) return;
     setLoading(true);
     try {
-      const [detail, cap] = await Promise.all([
-        api.getBookingDetail(requestId),
-        api.getWorkerCapacity(),
-      ]);
-      setBooking(detail);
-      setCapacity(cap);
+      setBooking(await api.getBookingDetail(requestId));
     } catch (error) {
       console.error("Load request detail error:", error);
     } finally {
@@ -113,13 +115,21 @@ export default function RequestDetailScreen() {
   }
 
   const status = API_STATUS_MAP[booking.status] ?? "Pending";
-  const activeJobs = capacity?.activeJobCount ?? 0;
+  const startTime = bookingStartTime(booking);
+  const nearbyJobs = booking.nearbyJobs ?? [];
+  const isFollowUp = !!booking.parentBooking;
+  const scheduledLabel = new Date(booking.scheduledDate).toLocaleDateString("en-PH", {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+    timeZone: "UTC",
+  });
 
-  const handleAccept = async () => {
+  const acceptNow = async () => {
     if (submitting) return;
     setSubmitting(true);
     try {
-      const result = await api.acceptBooking(booking.id);
+      const result = await api.acceptBooking(booking.id, isFollowUp ? { confirmFollowUp: true } : undefined);
       updateJobStatus(booking.id, "Accepted");
       alertModal.success(
         "Job Accepted!",
@@ -129,7 +139,7 @@ export default function RequestDetailScreen() {
         [
           {
             text: "View",
-            onPress: () => router.replace(`/(worker)/requests/job/${booking.id}`),
+            onPress: () => router.replace(`/(worker)/records/job/${booking.id}`),
           },
           { text: "Back", onPress: () => router.back() },
         ],
@@ -156,6 +166,30 @@ export default function RequestDetailScreen() {
     } finally {
       setSubmitting(false);
     }
+  };
+
+  // A follow-up job asks twice: once to accept, then to confirm it's a new,
+  // separately paid job at this date and time.
+  const handleAccept = () => {
+    if (!isFollowUp) {
+      acceptNow();
+      return;
+    }
+    alertModal.confirm(
+      "Accept follow-up job?",
+      `${booking.client.fullName} is asking you for more work after your inspection: ${booking.service}.`,
+      {
+        confirmText: "Continue",
+        onConfirm: () =>
+          alertModal.confirm(
+            "Confirm the follow-up job",
+            `This is a new job with its own price (₱${booking.estimatedPrice}) on ${scheduledLabel}${
+              startTime ? ` at ${formatTime12h(startTime)}` : ""
+            }. Once accepted, not showing up is cancelled with a penalty.`,
+            { confirmText: "Accept Job", onConfirm: acceptNow },
+          ),
+      },
+    );
   };
 
   const handleDeclineConfirm = async (reason: string) => {
@@ -199,8 +233,15 @@ export default function RequestDetailScreen() {
           <Text className="text-text-primary font-bold mb-2">Service</Text>
           <Text className="text-text-secondary text-sm">{booking.service}</Text>
           <Text className="text-text-muted text-xs mt-2">
-            Date: {booking.scheduledDate}
+            {scheduledLabel}
+            {startTime ? ` · starts ${formatTime12h(startTime)}` : ""}
           </Text>
+          {booking.isRush && (
+            <View className="flex-row items-center mt-1.5">
+              <Ionicons name="flash-outline" size={14} color={colors.warning} />
+              <Text className="text-warning text-xs ml-1.5 font-semibold">Same-day job (rush fee included)</Text>
+            </View>
+          )}
           {!!booking.rooms?.length && (
             <View className="flex-row items-center mt-2">
               <Ionicons name="home-outline" size={14} color={colors.text.muted} />
@@ -239,25 +280,29 @@ export default function RequestDetailScreen() {
           )}
         </View>
 
-        {/* Workload warning */}
-        {capacity && (
-          <View className="bg-card rounded-2xl p-4 mb-3">
-            <Text className="text-text-primary font-bold mb-2">
-              Your Current Workload
+        {isFollowUp && (
+          <View className="bg-accent/10 rounded-2xl p-4 mb-3">
+            <Text className="text-accent font-bold text-sm">Follow-up job</Text>
+            <Text className="text-text-secondary text-xs mt-1">
+              After your {booking.parentBooking!.service} on{" "}
+              {new Date(booking.parentBooking!.scheduledDate).toLocaleDateString("en-PH", { month: "short", day: "numeric", timeZone: "UTC" })}.
+              It&apos;s a separate job — you can accept or decline it.
             </Text>
-            {activeJobs === 0 ? (
-              <Text className="text-success text-sm">
-                You have no active jobs. You are free to accept.
+          </View>
+        )}
+
+        {/* Other jobs close to this one — a heads-up, not a block */}
+        {status === "Pending" && nearbyJobs.length > 0 && (
+          <View className="bg-warning/10 border border-warning/30 rounded-2xl p-4 mb-3">
+            <Text className="text-warning font-bold text-sm">You have other jobs around this time</Text>
+            {nearbyJobs.map((job) => (
+              <Text key={`${job.bookingId}-${job.time}`} className="text-text-secondary text-xs mt-1">
+                {formatTime12h(job.time)} · {job.service}
               </Text>
-            ) : activeJobs >= capacity.maxConcurrentJobs ? (
-              <Text className="text-error text-sm">
-                You have {activeJobs} active jobs and are at capacity.
-              </Text>
-            ) : (
-              <Text className="text-warning text-sm">
-                You have {activeJobs} active job{activeJobs > 1 ? "s" : ""} currently.
-              </Text>
-            )}
+            ))}
+            <Text className="text-text-muted text-xs mt-2">
+              Only accept if you can make it on time. Not showing up is cancelled with a penalty.
+            </Text>
           </View>
         )}
 
@@ -352,7 +397,7 @@ export default function RequestDetailScreen() {
               <PrimaryButton
                 label="View Job"
                 fullWidth
-                onPress={() => router.push(`/(worker)/requests/job/${booking.id}`)}
+                onPress={() => router.push(`/(worker)/records/job/${booking.id}`)}
               />
             )}
           </View>

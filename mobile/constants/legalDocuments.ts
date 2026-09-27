@@ -13,9 +13,9 @@
 //   terms until a Philippine lawyer reviews them. Don't reword them casually.
 
 export const LEGAL_VERSIONS = {
-  CLIENT_USER_AGREEMENT: "2026-09-25",
-  WORKER_SERVICE_AGREEMENT: "2026-09-25",
-  PRIVACY_NOTICE: "2026-09-25",
+  CLIENT_USER_AGREEMENT: "2026-09-27",
+  WORKER_SERVICE_AGREEMENT: "2026-09-27",
+  PRIVACY_NOTICE: "2026-09-27",
   KYC_CONSENT: "2026-09-25",
 } as const;
 
@@ -75,9 +75,11 @@ export const CLIENT_TERMS: LegalDocument = {
     {
       heading: "4. Booking",
       bullets: [
-        "Bookings must be made at least 2 days ahead.",
+        "You pick an exact start time between 7:00 AM and 6:00 PM.",
+        "Same-day bookings are allowed at least 2 hours ahead, with a same-day fee of 25% of the service price.",
         "A booking request expires if no worker accepts it in time. Nothing is charged for an expired request.",
-        "Some jobs need a quote. If you don't approve or reject a quote within 24 hours, it is approved automatically.",
+        "Some jobs need a quote. Materials in a quote come with photos of the receipt and of the materials used. You can approve the quote, refuse it so the worker revises it, or open a dispute. If you don't respond within 24 hours, it is approved automatically.",
+        "After an inspection or diagnosis, the worker may propose a follow-up job or a follow-up visit date. A follow-up job is only booked once you confirm it.",
         "If a worker proposes an add-on during the job and you don't respond within 6 hours, it is approved automatically.",
         "If a worker needs to move your booking because of a scheduling conflict and you don't respond within 24 hours, the new date is confirmed automatically. You can instead cancel free of charge.",
         "If you ask to reschedule and the worker doesn't respond within 48 hours, your request is declined and the original date stays.",
@@ -89,8 +91,9 @@ export const CLIENT_TERMS: LegalDocument = {
         "The total is shown before you confirm a booking. It can include:",
       ],
       bullets: [
-        "The worker's price for the job, plus any add-ons or approved quote.",
-        "A tier fee for Pro or Expert workers (based on their rating and number of completed jobs).",
+        "The price for the job, which is fixed by HomeEase, times the number of units where the job is priced per unit, plus any add-ons or approved quote.",
+        "A tier fee for Pro or Expert workers (based on their rating, completed jobs and years of experience).",
+        "A same-day fee of 25% of the service price, for same-day bookings.",
         "A distance fee for travel beyond the free distance, calculated from the worker's address to yours.",
         "An optional tip, which goes in full to the worker.",
         "12% VAT, only if the worker is VAT-registered.",
@@ -109,9 +112,9 @@ export const CLIENT_TERMS: LegalDocument = {
       heading: "7. Cancelling",
       bullets: [
         "You can cancel free of charge until a worker accepts your booking.",
-        "After a worker accepts, you can't cancel in the app, except: if the worker hasn't checked in 2 hours after the scheduled start, or if the worker moved your booking and you don't want the new date. Both are free of charge.",
-        "Otherwise, message the worker or contact HomeEase support.",
-        "There are no cancellation fees.",
+        "After a worker accepts, you can't cancel in the app, except if the worker moved your booking and you don't want the new date. That is free of charge. Otherwise, message the worker or contact HomeEase support.",
+        "If the worker hasn't checked in 1 hour after the start time, the booking is cancelled automatically at no charge to you.",
+        "If a worker arrives and can't do the job because of you (for example, no one lets them in), they can cancel with photo proof. If HomeEase agrees after reviewing it, you pay ₱200 to compensate the worker, and you can't make new bookings until it's paid. Otherwise there are no cancellation fees.",
       ],
     },
     {
@@ -197,7 +200,7 @@ export const WORKER_AGREEMENT: LegalDocument = {
       heading: "3. Verification",
       bullets: [
         "You must be at least 18 years old.",
-        "You must submit a government ID (front and back), a selfie, an NBI clearance and your resume. A barangay or police clearance, cedula and certifications are optional. An automated service checks your ID, selfie and clearances first to help the reviewer (it doesn't see your resume); a HomeEase admin makes the decision.",
+        "You must submit a government ID (front and back), a selfie, an NBI clearance, a health certificate and your resume. A barangay or police clearance and cedula are optional; certifications are added when you register for a service, and some services require one. An automated service checks your ID, selfie and clearances first to help the reviewer (it doesn't see your resume); a HomeEase admin makes the decision.",
         "Clearances expire (an NBI clearance after 1 year). When one expires you'll be asked to upload a new one.",
         verifiedMeaning,
       ],
@@ -211,10 +214,12 @@ export const WORKER_AGREEMENT: LegalDocument = {
     {
       heading: "5. Jobs and your prices",
       bullets: [
-        "You set your prices for each job, within the price range HomeEase sets for each city.",
+        "HomeEase sets the price of each job. It changes only with add-ons, distance, your expertise tier, the number of units and the same-day fee.",
+        "You choose the days you work (your weekly schedule) and can change single dates on your calendar. Clients book an exact start time on your working days, and there is no limit on jobs per day — you're responsible for not overbooking yourself.",
         "You're free to accept or decline requests. If you decline 3 requests within 7 days, new requests pause for 24 hours.",
         "Late cancellations and no-shows lower your position when clients are matched with workers.",
-        "Pro and Expert tiers are based on your rating and completed jobs, and add a tier fee to your price.",
+        "Pro and Expert tiers are based on your rating, completed jobs and years of experience (confirmed by HomeEase at verification), and add a tier fee to the price.",
+        "When you add materials to a quote, attach photos of the receipt and of the materials used. The client can refuse a quote that doesn't match, and you revise it.",
       ],
     },
     {
@@ -237,7 +242,9 @@ export const WORKER_AGREEMENT: LegalDocument = {
     {
       heading: "8. Cancellations and no-shows",
       paragraphs: [
-        "You can cancel an accepted booking, giving a reason. If you haven't checked in 2 hours after the scheduled start, the booking is marked as a possible no-show and the client can cancel free of charge. Cancellations that are your fault and no-shows are recorded.",
+        "Before you arrive, you can cancel an accepted booking, giving a reason. If you haven't checked in 1 hour after the start time, the booking is cancelled automatically as a no-show and a ₱200 penalty is added to the amount you owe HomeEase.",
+        "After you've checked in, you can only cancel with photo proof and by saying whose fault it is. If it's your fault, the ₱200 penalty applies. If it's the client's, HomeEase reviews the proof: if approved, you receive ₱200 compensation; if not, the penalty applies to you.",
+        "If two of your jobs overlap, ask the client to reschedule. Missing a job counts as a no-show. Cancellations that are your fault and no-shows are recorded.",
       ],
     },
     {
@@ -295,7 +302,7 @@ export const PRIVACY_POLICY: LegalDocument = {
       bullets: [
         "Everyone: name, email, phone number, password (stored hashed), profile photo, notification settings, device push token, and the IP address and device used when you sign up or accept our terms.",
         "Clients: service addresses and their map location, booking details and photos you attach.",
-        "Workers: government ID, selfie, police/NBI/barangay clearance, certifications, resume, date of birth, home address, TIN, GCash or Maya payout account, and VAT registration documents.",
+        "Workers: government ID, selfie, police/NBI/barangay clearance, health certificate, certifications, resume, date of birth, years of experience, home address, TIN, GCash or Maya payout account, and VAT registration documents.",
         "Location: a worker's live GPS location while travelling to an accepted booking, and their check-in location, including whether a fake-GPS app was detected.",
         "Chat messages and photos, ratings, reviews, disputes, and payment records (amounts, method and status).",
       ],
@@ -336,7 +343,7 @@ export const PRIVACY_POLICY: LegalDocument = {
       heading: "6. How long we keep it",
       bullets: [
         "Account and profile data: while your account is active.",
-        "ID, selfie, clearance, certification and resume files: while your account is active; erased when you delete it.",
+        "ID, selfie, clearance, health certificate, certification and resume files: while your account is active; erased when you delete it.",
         "Live location: only while travelling to a job; cleared at check-in, and never kept more than 2 hours after the last update.",
         "Booking, payment, payout and tax records: for the period required by tax and accounting law, even after you delete your account (with your name removed).",
         "Chat messages you sent stay visible to the person you sent them to.",

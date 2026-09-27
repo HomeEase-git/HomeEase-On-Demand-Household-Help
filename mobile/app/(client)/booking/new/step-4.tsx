@@ -22,11 +22,10 @@ import { validateDraftForSubmit } from "../../../../utils/bookingValidation";
 import { PAYMENT_METHOD_TYPE_MAP } from "../../../../utils/paymentMethodMap";
 import {
   ADD_ON_TOGGLE_LABELS,
-  TIME_SLOT_LABELS,
   PET_FRIENDLY_PRIORITY,
   type AddOnToggleKey,
-  type CreateMultiDayBookingResponse,
 } from "../../../../types/booking4step.types";
+import { formatTime12h, isRushDate } from "../../../../utils/bookingTime";
 import { generateIdempotencyKey } from "../../../../utils/idempotencyKey";
 import { feedback } from "../../../../utils/feedback";
 import * as api from "../../../../services/api";
@@ -69,11 +68,8 @@ export default function BookingStep4Screen() {
   const [confirmVisible, setConfirmVisible] = useState(false);
   const [loading, setLoading] = useState(false);
 
-  // Multi-day upfront booking (see step-2.tsx's day-count stepper, only
-  // offered once a specific worker is locked in) — >1 means this submits
-  // via POST /bookings/multi-day instead of the ordinary POST /bookings.
-  const dayCount = draft.dayCount ?? 1;
-  const isMultiDay = dayCount > 1;
+  const isRush = isRushDate(draft.date);
+  const isFollowUp = !!draft.parentBookingId;
 
   // Unlike Steps 1-3 (which each commit their fields to the draft store the
   // moment the user taps "Next"), Step 4 is the last screen before submit —
@@ -126,13 +122,15 @@ export default function BookingStep4Screen() {
     .map(([label, value]) => `${label}: ${Array.isArray(value) ? value.join(", ") : value}`)
     .join(" · ");
 
-  // Re-verify the held worker/slot is still actually open right before the
+  // Re-verify the held worker is still available that day right before the
   // user commits — the HoldTimerBadge in Step 3 is a UX countdown only, not
   // a real server-side reservation, so the first sign it died could
   // otherwise be a 409 at submit, after filling in packages/payment/tip.
   // Scoped to this specific worker (workerId filter) when one was picked or
   // locked in; unscoped (any pro) for an auto-matched booking.
-  const readyToCheckAvailability = !!draft.serviceType && !!draft.date && !!draft.timeSlot;
+  // A follow-up job goes to the same pro regardless of their schedule (they
+  // accept or decline it), so there's nothing to re-check.
+  const readyToCheckAvailability = !!draft.serviceType && !!draft.date && !!draft.time && !isFollowUp;
   const {
     workers: availabilityCheck,
     loading: checkingAvailability,
@@ -143,7 +141,6 @@ export default function BookingStep4Screen() {
       serviceType: draft.serviceType ?? undefined,
       serviceTaskId: draft.serviceTaskId ?? undefined,
       date: draft.date ?? undefined,
-      timeSlot: draft.timeSlot ?? undefined,
       scopeAnswers: draft.scopeAnswers,
       workerId: draft.isAutoMatched ? undefined : (draft.workerId ?? undefined),
       limit: 1,
@@ -160,7 +157,7 @@ export default function BookingStep4Screen() {
     useCallback(() => {
       recheckAvailability();
       // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [draft.serviceType, draft.date, draft.timeSlot, draft.workerId, draft.isAutoMatched])
+    }, [draft.serviceType, draft.date, draft.workerId, draft.isAutoMatched])
   );
 
   const requiresAccountValue = paymentMethod === "gcash" || paymentMethod === "maya";
@@ -171,10 +168,10 @@ export default function BookingStep4Screen() {
   const handleSubmit = () => {
     if (slotNoLongerAvailable) {
       alertModal.warning(
-        "Slot no longer available",
+        "No longer available",
         draft.isAutoMatched
-          ? "No pro is available for this date/time anymore. Please pick a different time."
-          : `${draft.workerName ?? "This pro"} is no longer available for this date/time. Please pick a different time or pro.`
+          ? "No pro is available on this date anymore. Please pick a different date."
+          : `${draft.workerName ?? "This pro"} is no longer available on this date. Please pick a different date or pro.`
       );
       return;
     }
@@ -221,105 +218,65 @@ export default function BookingStep4Screen() {
         idempotencyKey,
       });
 
-      let createdBooking: Booking;
+      const addOns = addOnToggles.map((key) => ({
+        id: key,
+        name: ADD_ON_TOGGLE_LABELS[key as AddOnToggleKey],
+        price: 0,
+      }));
 
-      if (isMultiDay) {
-        // No addOns/packageIds/tip — not supported by /bookings/multi-day
-        // yet (see backend createMultiDayBooking's docblock for why).
-        const response: CreateMultiDayBookingResponse = await api.createMultiDayBooking({
-          workerId: draft.workerId!,
-          serviceType: draft.serviceType || draft.category || "",
-          serviceTaskId: draft.serviceTaskId ?? undefined,
-          description: draft.description || undefined,
-          address: draft.address || "",
-          city: draft.city,
-          lat: draft.lat!,
-          lng: draft.lng!,
-          startDate: draft.date!,
-          dayCount,
-          timeSlot: draft.timeSlot!,
-          priorities,
-          paymentMethodType: PAYMENT_METHOD_TYPE_MAP[paymentMethod!],
-          paymentAccountIdentifier: accountValue.trim() || undefined,
-          scopeAnswers: draft.scopeAnswers,
-          issuePhotoUrls: draft.issuePhotoUrls,
-          idempotencyKey,
-        });
+      const response = await api.createBooking({
+        workerId: draft.isAutoMatched ? null : draft.workerId,
+        serviceType: draft.serviceType || draft.category || "",
+        serviceTaskId: draft.serviceTaskId ?? undefined,
+        description: draft.description || undefined,
+        address: draft.address || "",
+        city: draft.city,
+        lat: draft.lat!,
+        lng: draft.lng!,
+        date: draft.date!,
+        time: draft.time!,
+        parentBookingId: draft.parentBookingId ?? undefined,
+        addOns,
+        packageIds: selectedPackageIds,
+        priorities,
+        tip,
+        paymentMethodType: PAYMENT_METHOD_TYPE_MAP[paymentMethod!],
+        paymentAccountIdentifier: accountValue.trim() || undefined,
+        scopeAnswers: draft.scopeAnswers,
+        issuePhotoUrls: draft.issuePhotoUrls,
+        idempotencyKey,
+      });
 
-        const firstDay = response.bookings[0];
-        createdBooking = {
-          id: firstDay.id,
-          service: draft.category || draft.serviceType || "Service",
-          worker: draft.workerName || "Assigned pro",
-          workerId: draft.workerId ?? undefined,
-          date: firstDay.scheduledDate,
-          time: firstDay.timeSlot ? TIME_SLOT_LABELS[firstDay.timeSlot] : undefined,
-          address: draft.address || undefined,
-          status: "Pending",
-          amount: response.totalEstimatedPrice,
-          category: draft.category ?? undefined,
-          groupId: response.groupId,
-          groupTotalDays: response.totalDays,
-          groupDayIndex: 1,
-        };
-      } else {
-        const addOns = addOnToggles.map((key) => ({
-          id: key,
-          name: ADD_ON_TOGGLE_LABELS[key as AddOnToggleKey],
-          price: 0,
-        }));
-
-        const response = await api.createBooking({
-          workerId: draft.isAutoMatched ? null : draft.workerId,
-          serviceType: draft.serviceType || draft.category || "",
-          serviceTaskId: draft.serviceTaskId ?? undefined,
-          description: draft.description || undefined,
-          address: draft.address || "",
-          city: draft.city,
-          lat: draft.lat!,
-          lng: draft.lng!,
-          date: draft.date!,
-          timeSlot: draft.timeSlot!,
-          addOns,
-          packageIds: selectedPackageIds,
-          priorities,
-          tip,
-          paymentMethodType: PAYMENT_METHOD_TYPE_MAP[paymentMethod!],
-          paymentAccountIdentifier: accountValue.trim() || undefined,
-          scopeAnswers: draft.scopeAnswers,
-          issuePhotoUrls: draft.issuePhotoUrls,
-          idempotencyKey,
-        });
-
-        createdBooking = {
-          id: response.id,
-          service: draft.category || draft.serviceType || "Service",
-          worker: response.workerName ?? "To be assigned",
-          workerId: response.workerName ? (draft.workerId ?? undefined) : undefined,
-          date: response.scheduledDate,
-          time: response.timeSlot ? TIME_SLOT_LABELS[response.timeSlot] : undefined,
-          address: draft.address || undefined,
-          status: "Pending",
-          amount: response.pricing?.finalEstimate ?? response.estimatedPrice ?? draft.estimatedPrice ?? 0,
-          category: draft.category ?? undefined,
-          priceBreakdown: response.pricing
-            ? {
-                basePrice: response.pricing.basePrice,
-                distanceFee: response.pricing.distanceFee,
-                tierFee: response.pricing.tierFee,
-                addOns: response.pricing.addOns,
-                subtotal: response.pricing.finalEstimate,
-                // VAT isn't known until settlement (see backend
-                // Booking.vatAmount schema comment) — nothing to show yet.
-                vatApplicable: false,
-                vatRate: null,
-                vatAmount: 0,
-                tip,
-                total: Math.round((response.pricing.finalEstimate + tip) * 100) / 100,
-              }
-            : null,
-        };
-      }
+      const createdBooking: Booking = {
+        id: response.id,
+        service: draft.category || draft.serviceType || "Service",
+        worker: response.workerName ?? "To be assigned",
+        workerId: response.workerName ? (draft.workerId ?? undefined) : undefined,
+        date: response.scheduledDate,
+        time: response.scheduledTime,
+        isRush: response.isRush,
+        address: draft.address || undefined,
+        status: "Pending",
+        amount: response.pricing?.finalEstimate ?? response.estimatedPrice ?? draft.estimatedPrice ?? 0,
+        category: draft.category ?? undefined,
+        priceBreakdown: response.pricing
+          ? {
+              basePrice: response.pricing.basePrice,
+              distanceFee: response.pricing.distanceFee,
+              tierFee: response.pricing.tierFee,
+              rushFee: response.pricing.rushFee,
+              addOns: response.pricing.addOns,
+              subtotal: response.pricing.finalEstimate,
+              // VAT isn't known until settlement (see backend
+              // Booking.vatAmount schema comment) — nothing to show yet.
+              vatApplicable: false,
+              vatRate: null,
+              vatAmount: 0,
+              tip,
+              total: Math.round((response.pricing.finalEstimate + tip) * 100) / 100,
+            }
+          : null,
+      };
 
       setBookingCreated(createdBooking);
       feedback.success();
@@ -356,19 +313,29 @@ export default function BookingStep4Screen() {
           <View className="bg-error/10 border border-error rounded-2xl p-3.5 mb-4 flex-row items-start">
             <Ionicons name="alert-circle" size={18} color={colors.error} style={{ marginTop: 1 }} />
             <View className="flex-1 ml-2.5">
-              <Text className="text-error font-bold text-sm">This slot is no longer available</Text>
+              <Text className="text-error font-bold text-sm">This date is no longer available</Text>
               <Text className="text-error text-xs mt-0.5">
                 {draft.isAutoMatched
-                  ? "No pro is available for this date/time anymore."
-                  : `${draft.workerName ?? "This pro"} is no longer available for this date/time.`}
+                  ? "No pro is available on this date anymore."
+                  : `${draft.workerName ?? "This pro"} is no longer available on this date.`}
               </Text>
               <View className="mt-2.5">
                 <OutlinedButton
-                  label="Change date/time"
+                  label="Change date"
                   onPress={() => router.push("/(client)/booking/new/step-2")}
                 />
               </View>
             </View>
+          </View>
+        )}
+
+        {isFollowUp && (
+          <View className="bg-accent/10 rounded-2xl p-3.5 mb-4 flex-row items-start">
+            <Ionicons name="git-branch-outline" size={18} color={colors.accent.DEFAULT} style={{ marginTop: 1 }} />
+            <Text className="text-text-secondary text-xs ml-2.5 flex-1">
+              Follow-up job for your inspection with {draft.workerName ?? "your pro"}. It&apos;s a separate job with its
+              own price, and your pro can accept or decline it.
+            </Text>
           </View>
         )}
 
@@ -379,10 +346,8 @@ export default function BookingStep4Screen() {
           <SummaryRow label="Service" value={draft.category || "—"} />
           <SummaryRow label="Details" value={scopeAnswersSummary || "—"} />
           <SummaryRow
-            label={isMultiDay ? "Starts" : "Date & Time"}
-            value={`${draft.date ?? "—"} · ${draft.timeSlot ? TIME_SLOT_LABELS[draft.timeSlot] : "—"}${
-              isMultiDay ? ` · ${dayCount} days` : ""
-            }`}
+            label="Date & start time"
+            value={`${draft.date ?? "—"} · ${draft.time ? formatTime12h(draft.time) : "—"}${isRush ? " · Same-day (rush)" : ""}`}
           />
           <SummaryRow label="Address" value={draft.address || "—"} last />
         </View>
@@ -390,18 +355,6 @@ export default function BookingStep4Screen() {
         <View className="mt-4">
           <PricingRangePreview estimate={priceEstimate} />
         </View>
-
-        {isMultiDay && (
-          <View className="bg-card rounded-xl p-3.5 mt-3">
-            <Text className="text-text-secondary text-xs">
-              The estimate above is per day. {dayCount} days come to about{" "}
-              {priceEstimate.mode === "point"
-                ? `₱${Math.round(priceEstimate.point.total * dayCount)}`
-                : `₱${Math.round(priceEstimate.range.min * dayCount)} – ₱${Math.round(priceEstimate.range.max * dayCount)}`}
-              . Packages, job preferences and tips aren&apos;t available for multi-day bookings.
-            </Text>
-          </View>
-        )}
 
         <Text className="text-text-primary font-bold text-sm mb-2 mt-6">Pets</Text>
         <View className="bg-card rounded-xl p-3.5 flex-row items-center">
@@ -419,21 +372,17 @@ export default function BookingStep4Screen() {
           />
         </View>
 
-        {!isMultiDay && (
-          <>
-            <Text className="text-text-primary font-bold text-sm mb-2 mt-6">Packages</Text>
-            <PackageSelector
-              workerId={draft.isAutoMatched ? null : draft.workerId}
-              serviceTypeId={draft.serviceTypeId}
-              selected={selectedPackageIds}
-              onChange={updateSelectedPackageIds}
-              onSelectedTotalChange={setPackagesTotal}
-            />
+        <Text className="text-text-primary font-bold text-sm mb-2 mt-6">Packages</Text>
+        <PackageSelector
+          workerId={draft.isAutoMatched ? null : draft.workerId}
+          serviceTypeId={draft.serviceTypeId}
+          selected={selectedPackageIds}
+          onChange={updateSelectedPackageIds}
+          onSelectedTotalChange={setPackagesTotal}
+        />
 
-            <Text className="text-text-primary font-bold text-sm mb-2 mt-6">Job Preferences</Text>
-            <AddOnsToggleGroup selected={addOnToggles} onChange={updateAddOnToggles} />
-          </>
-        )}
+        <Text className="text-text-primary font-bold text-sm mb-2 mt-6">Job Preferences</Text>
+        <AddOnsToggleGroup selected={addOnToggles} onChange={updateAddOnToggles} />
 
         <Text className="text-text-primary font-bold text-sm mb-2 mt-6">Payment Method</Text>
         <PaymentMethodSelector value={paymentMethod} onChange={updatePaymentMethod} />
@@ -455,18 +404,13 @@ export default function BookingStep4Screen() {
           </View>
         )}
 
-        {!isMultiDay && (
-          <>
-            <Text className="text-text-primary font-bold text-sm mb-2 mt-6">Add a Tip</Text>
-            <TipSlider value={tip} onChange={updateTip} />
-          </>
-        )}
+        <Text className="text-text-primary font-bold text-sm mb-2 mt-6">Add a Tip</Text>
+        <TipSlider value={tip} onChange={updateTip} />
 
       </KeyboardAwareScrollView>
       <BookingFooterBar
         estimate={draft.selectedTaskPricingModel === "CUSTOM_QUOTE" ? null : priceEstimate}
         noPriceText="Quote after inspection"
-        label={isMultiDay ? `Per day · ${dayCount} days` : undefined}
         buttonLabel="Submit request"
         disabled={
           !paymentMethod ||
@@ -481,8 +425,14 @@ export default function BookingStep4Screen() {
 
       <GenericConfirmationModal
         visible={confirmVisible}
-        title="Submit booking request"
-        message="No charge now. You'll pay after the job is done and you've confirmed it."
+        title={isFollowUp ? "Request this follow-up job?" : "Submit booking request"}
+        message={
+          isFollowUp
+            ? `This asks ${draft.workerName ?? "your pro"} for a new, separately priced job${
+                draft.date ? ` on ${draft.date}${draft.time ? ` at ${formatTime12h(draft.time)}` : ""}` : ""
+              }. No charge now — you'll pay after it's done and you've confirmed it.`
+            : "No charge now. You'll pay after the job is done and you've confirmed it."
+        }
         confirmLabel="Submit"
         cancelLabel="Cancel"
         onConfirm={onConfirm}

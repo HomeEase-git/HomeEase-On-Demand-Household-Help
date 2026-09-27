@@ -19,6 +19,7 @@ const VerificationDetail = lazy(() => import('./pages/VerificationDetail'))
 const Bookings = lazy(() => import('./pages/Bookings'))
 const BookingDetail = lazy(() => import('./pages/BookingDetail'))
 const BookingDispute = lazy(() => import('./pages/BookingDispute'))
+const CancellationReviews = lazy(() => import('./pages/CancellationReviews'))
 const Payments = lazy(() => import('./pages/Payments'))
 const TransactionDetail = lazy(() => import('./pages/TransactionDetail'))
 const Refunds = lazy(() => import('./pages/Refunds'))
@@ -36,7 +37,6 @@ const ReviewDetail = lazy(() => import('./pages/ReviewDetail'))
 const Reports = lazy(() => import('./pages/Reports'))
 const Settings = lazy(() => import('./pages/Settings'))
 const MfaSetup = lazy(() => import('./pages/MfaSetup'))
-const PriceControl = lazy(() => import('./pages/PriceControl'))
 const ServiceCatalog = lazy(() => import('./pages/ServiceCatalog'))
 const PromoBanners = lazy(() => import('./pages/PromoBanners'))
 const ServiceCatalogEditor = lazy(() => import('./pages/ServiceCatalogEditor'))
@@ -72,6 +72,7 @@ export default function App() {
           { path: 'bookings', element: <Bookings /> },
           { path: 'bookings/detail/:id', element: <BookingDetail /> },
           { path: 'bookings/dispute', element: <BookingDispute /> },
+          { path: 'bookings/cancellations', element: <CancellationReviews /> },
           { path: 'payments', element: <Payments /> },
           { path: 'payments/transaction/:id', element: <TransactionDetail /> },
           { path: 'payments/refunds', element: <Refunds /> },
@@ -93,7 +94,6 @@ export default function App() {
           { path: 'reports/service', element: <Reports /> },
           { path: 'reports/activity', element: <Reports /> },
           { path: 'reports/export', element: <Reports /> },
-          { path: 'price-control', element: <PriceControl /> },
           { path: 'pricing-rules', element: <PricingRules /> },
           { path: 'service-catalog', element: <ServiceCatalog /> },
           { path: 'service-catalog/new', element: <ServiceCatalogEditor /> },

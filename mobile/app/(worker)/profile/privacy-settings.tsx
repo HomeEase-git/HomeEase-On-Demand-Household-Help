@@ -10,7 +10,7 @@ import PrimaryButton from "../../../components/ui/PrimaryButton";
 import { colors, cardShadow } from "../../../constants";
 import { useAlertModal } from "../../../contexts/AlertModalContext";
 import { useAuthStore } from "../../../store/authStore";
-import { logoutAllSessions } from "../../../services/api";
+import { logoutAllSessions, getActiveSessionCount } from "../../../services/api";
 import { privacySettingsStorage } from "../../../utils/storage";
 
 export default function WorkerPrivacySettingsScreen() {
@@ -34,9 +34,15 @@ export default function WorkerPrivacySettingsScreen() {
     setLocationEnabled(status === "granted");
   };
 
+  // "Log out of other devices" only makes sense with more than one.
+  const [sessionCount, setSessionCount] = useState(1);
+
   useFocusEffect(
     React.useCallback(() => {
       checkLocationPermission();
+      getActiveSessionCount()
+        .then(setSessionCount)
+        .catch(() => setSessionCount(1));
     }, []),
   );
 
@@ -57,25 +63,27 @@ export default function WorkerPrivacySettingsScreen() {
   };
 
   const handleLogoutAllDevices = () => {
+    const others = sessionCount - 1;
     alertModal.confirm(
-      "Log out of all devices?",
-      "This will sign you out everywhere, including this device. You'll need to sign in again.",
+      "Log out of your other devices?",
+      `This signs you out on ${others} other device${others === 1 ? "" : "s"}. This device stays signed in.`,
       {
-        confirmText: "Log Out All",
+        confirmText: "Log Out Others",
         destructive: true,
         onConfirm: async () => {
           try {
-            await logoutAllSessions();
+            const result = await logoutAllSessions();
+            if (result.signedOutCurrent) {
+              await logout();
+              router.replace("/landing");
+              return;
+            }
+            setSessionCount(1);
+            alertModal.success("Done", result.message);
           } catch (error) {
-            console.error("Logout all devices error:", error);
-            alertModal.error(
-              "Error",
-              "Unable to log out of all devices right now. Please try again.",
-            );
-            return;
+            console.error("Logout other devices error:", error);
+            alertModal.error("Error", "Unable to log out your other devices right now. Please try again.");
           }
-          await logout();
-          router.replace("/landing");
         },
       },
     );
@@ -158,24 +166,36 @@ export default function WorkerPrivacySettingsScreen() {
           Danger Zone
         </Text>
         <View className="bg-error/10 rounded-2xl overflow-hidden">
+          {sessionCount > 1 && (
+            <Pressable
+              className="flex-row items-center py-3.5 px-4"
+              onPress={handleLogoutAllDevices}
+            >
+              <View className="w-9 h-9 rounded-full bg-error/10 items-center justify-center mr-3">
+                <Ionicons name="phone-portrait-outline" size={18} color={colors.error} />
+              </View>
+              <Text className="text-error font-semibold flex-1">Log Out of Other Devices</Text>
+              <Ionicons name="chevron-forward" size={20} color={colors.error} />
+            </Pressable>
+          )}
           <Pressable
-            className="flex-row items-center py-3.5 px-4"
-            onPress={handleLogoutAllDevices}
-          >
-            <View className="w-9 h-9 rounded-full bg-error/10 items-center justify-center mr-3">
-              <Ionicons name="phone-portrait-outline" size={18} color={colors.error} />
-            </View>
-            <Text className="text-error font-semibold flex-1">Log Out of All Devices</Text>
-            <Ionicons name="chevron-forward" size={20} color={colors.error} />
-          </Pressable>
-          <Pressable
-            className="flex-row items-center py-3.5 px-4 border-t border-divider"
+            className={`flex-row items-center py-3.5 px-4 ${sessionCount > 1 ? "border-t border-divider" : ""}`}
             onPress={() => router.push("/(worker)/profile/delete-account")}
           >
             <View className="w-9 h-9 rounded-full bg-error/10 items-center justify-center mr-3">
               <Ionicons name="trash-outline" size={18} color={colors.error} />
             </View>
             <Text className="text-error font-semibold flex-1">Delete Account</Text>
+            <Ionicons name="chevron-forward" size={20} color={colors.error} />
+          </Pressable>
+          <Pressable
+            className="flex-row items-center py-3.5 px-4 border-t border-divider"
+            onPress={() => router.push("/(worker)/profile/deactivate-account")}
+          >
+            <View className="w-9 h-9 rounded-full bg-error/10 items-center justify-center mr-3">
+              <Ionicons name="pause-circle-outline" size={18} color={colors.error} />
+            </View>
+            <Text className="text-error font-semibold flex-1">Deactivate Account</Text>
             <Ionicons name="chevron-forward" size={20} color={colors.error} />
           </Pressable>
         </View>

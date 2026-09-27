@@ -153,6 +153,9 @@ export default function WorkerDetail() {
   }
 
   const isSuspended = worker.accountStatus !== 'active'
+  // The worker took themselves off HomeEase; only they can reactivate (by
+  // signing in), so there's nothing to suspend or reinstate here.
+  const isDeactivated = worker.accountStatus === 'deactivated'
 
   const handleToggleStatus = async () => {
     setSubmitting(true)
@@ -184,6 +187,7 @@ export default function WorkerDetail() {
       label: 'Expertise Tier',
       value: worker.tier && worker.tier !== 'STANDARD' ? <Badge variant="approved">{worker.tier}</Badge> : 'Standard',
     },
+    { label: 'Years of Experience', value: worker.yearsExperience ?? '—' },
     { label: 'Total Earnings', value: worker.earnings },
     {
       label: 'Verification',
@@ -195,7 +199,11 @@ export default function WorkerDetail() {
     },
     {
       label: 'Account Status',
-      value: <Badge variant={worker.accountStatus === 'active' ? 'active' : 'suspended'}>{worker.accountStatus}</Badge>,
+      value: (
+        <span title={isDeactivated ? 'Deactivated by the worker. They can reactivate by signing in.' : undefined}>
+          <Badge variant={worker.accountStatus === 'active' ? 'active' : 'suspended'}>{worker.accountStatus}</Badge>
+        </span>
+      ),
     },
     { label: 'Joined', value: worker.joined },
     {
@@ -228,13 +236,15 @@ export default function WorkerDetail() {
         actions={(
           <>
             <Link to="/workers" className="btn btn-outline">Back to Workers</Link>
-            <button
-              type="button"
-              className={isSuspended ? 'btn btn-success' : 'btn btn-danger'}
-              onClick={() => setStatusModalOpen(true)}
-            >
-              {isSuspended ? 'Reinstate Account' : 'Suspend Account'}
-            </button>
+            {!isDeactivated && (
+              <button
+                type="button"
+                className={isSuspended ? 'btn btn-success' : 'btn btn-danger'}
+                onClick={() => setStatusModalOpen(true)}
+              >
+                {isSuspended ? 'Reinstate Account' : 'Suspend Account'}
+              </button>
+            )}
           </>
         )}
       />

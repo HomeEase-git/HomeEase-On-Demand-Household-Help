@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { discoverWorkers, type DiscoverWorkersFilters } from '../services/api';
-import type { TimeSlot, WorkerCard } from '../types/booking4step.types';
-import { TIME_SLOTS } from '../types/booking4step.types';
+import type { WorkerCard } from '../types/booking4step.types';
 
 const DEBOUNCE_MS = 350;
 
@@ -19,8 +18,8 @@ function filtersKey(filters: DiscoverWorkersFilters): string {
 
 /**
  * Debounced GET /workers — used by Step 3 (WHO) for the full worker-card
- * list. Only fires once `serviceType`, `date`, and `timeSlot` are all set
- * (the backend needs all three to filter to genuinely available workers).
+ * list. Only fires once `serviceType` and `date` are set (the backend needs
+ * both to filter to workers who work that day).
  */
 export function useWorkerDiscovery(filters: DiscoverWorkersFilters, enabled: boolean): UseWorkerDiscoveryResult {
   const [workers, setWorkers] = useState<WorkerCard[]>([]);
@@ -72,18 +71,16 @@ export function useWorkerDiscovery(filters: DiscoverWorkersFilters, enabled: boo
   };
 }
 
-export type SlotCounts = Partial<Record<TimeSlot, number>>;
-
 /**
- * Fires one lightweight (limit=1, we only need pagination.total) discovery
- * call per TimeSlot so Step 2 can show "3 pros available" badges on each
- * slot button before the user commits to one.
+ * One lightweight (limit=1, we only need pagination.total) discovery call so
+ * Step 2 can show "3 pros available" for the picked date. Workers take any
+ * number of jobs a day, so the start time doesn't change the count.
  */
-export function useSlotAvailabilityCounts(
-  baseFilters: Omit<DiscoverWorkersFilters, 'timeSlot' | 'limit'>,
+export function useDateAvailabilityCount(
+  baseFilters: Omit<DiscoverWorkersFilters, 'limit'>,
   enabled: boolean
-): { counts: SlotCounts; loading: boolean } {
-  const [counts, setCounts] = useState<SlotCounts>({});
+): { count: number | null; loading: boolean } {
+  const [count, setCount] = useState<number | null>(null);
   const [loading, setLoading] = useState(false);
   const key = filtersKey(baseFilters);
   const requestId = useRef(0);
@@ -97,18 +94,11 @@ export function useSlotAvailabilityCounts(
     const timer = setTimeout(async () => {
       setLoading(true);
       try {
-        const results = await Promise.all(
-          TIME_SLOTS.map(async (slot) => {
-            try {
-              const result = await discoverWorkers({ ...baseFilters, timeSlot: slot, limit: 1 });
-              return [slot, result.pagination.total] as const;
-            } catch {
-              return [slot, 0] as const;
-            }
-          })
-        );
+        const result = await discoverWorkers({ ...baseFilters, limit: 1 });
         if (cancelled || requestId.current !== thisRequest) return;
-        setCounts(Object.fromEntries(results));
+        setCount(result.pagination.total);
+      } catch {
+        if (!cancelled && requestId.current === thisRequest) setCount(0);
       } finally {
         if (!cancelled && requestId.current === thisRequest) setLoading(false);
       }
@@ -121,5 +111,5 @@ export function useSlotAvailabilityCounts(
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key, enabled]);
 
-  return { counts: enabled ? counts : {}, loading: enabled && loading };
+  return { count: enabled ? count : null, loading: enabled && loading };
 }

@@ -4,6 +4,19 @@ import prisma from '@config/database';
 import { encryptField } from '@utils/fieldEncryption';
 import { createTestBooking, createTestUser, deleteTestUser } from './helpers';
 
+jest.mock('@utils/emailService', () => ({
+  ...jest.requireActual('@utils/emailService'),
+  sendOtpEmail: jest.fn().mockResolvedValue(undefined),
+}));
+
+/** Steps 2-3 of the delete flow: ask for the emailed code and read it back. */
+async function requestDeletionCode(token: string, userId: string): Promise<string> {
+  const res = await request(app).post('/api/users/me/delete-code').set('Authorization', `Bearer ${token}`);
+  expect(res.status).toBe(200);
+  const row = await prisma.authToken.findFirstOrThrow({ where: { userId, type: 'ACCOUNT_ACTION' } });
+  return row.token;
+}
+
 describe('DELETE /api/users/me', () => {
   const createdUserIds: string[] = [];
 
@@ -37,10 +50,19 @@ describe('DELETE /api/users/me', () => {
     const booking = await createTestBooking({ clientId: client.id, workerId: worker.id, status: 'COMPLETED' });
 
     const token = await login(worker.email, plainPassword);
+    const code = await requestDeletionCode(token, worker.id);
+
+    // The confirmation phrase must be typed out.
+    const unconfirmed = await request(app)
+      .delete('/api/users/me')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ password: plainPassword, code, confirmText: 'delete' });
+    expect(unconfirmed.status).toBe(400);
+
     const res = await request(app)
       .delete('/api/users/me')
       .set('Authorization', `Bearer ${token}`)
-      .send({ password: plainPassword });
+      .send({ password: plainPassword, code, confirmText: 'DELETE MY ACCOUNT', reason: 'Moving abroad' });
 
     expect(res.status).toBe(200);
 
@@ -75,10 +97,8 @@ describe('DELETE /api/users/me', () => {
     await createTestBooking({ clientId: client.id, status: 'PENDING' });
 
     const token = await login(client.email, plainPassword);
-    const res = await request(app)
-      .delete('/api/users/me')
-      .set('Authorization', `Bearer ${token}`)
-      .send({ password: plainPassword });
+    // Blockers are reported before a code is even sent.
+    const res = await request(app).post('/api/users/me/delete-code').set('Authorization', `Bearer ${token}`);
 
     expect(res.status).toBe(409);
     expect(res.body.blockers[0]).toMatch(/still in progress/);
@@ -90,11 +110,13 @@ describe('DELETE /api/users/me', () => {
     createdUserIds.push(client.id);
 
     const token = await login(client.email, plainPassword);
+    const code = await requestDeletionCode(token, client.id);
     const res = await request(app)
       .delete('/api/users/me')
       .set('Authorization', `Bearer ${token}`)
-      .send({ password: 'not-my-password' });
+      .send({ password: 'not-my-password', code, confirmText: 'DELETE MY ACCOUNT' });
 
     expect(res.status).toBe(401);
+    expect((await prisma.user.findUnique({ where: { id: client.id } }))?.status).toBe('ACTIVE');
   });
 });

@@ -1,4 +1,5 @@
 import { Request, Response } from 'express';
+import type { AppSettings } from '@prisma/client';
 import prisma from '@config/database';
 import { errorResponse } from '@utils/errorResponse';
 import { writeAuditLog } from '@utils/auditLog';
@@ -9,62 +10,58 @@ interface AuthRequest extends Request {
   user?: JwtPayload;
 }
 
-function formatSettings(record: {
-  siteName: string;
-  supportEmail: string;
-  notificationsEnabled: boolean;
-  commissionRate: number;
-  withholdingTaxRate: number;
-  maxSlotsPerDay: number;
-  pendingExpiryMinutes: number;
-  geofenceRadiusMeters: number;
-  maxDeclinesBeforeCooldown: number;
-  declineWindowHours: number;
-  declineCooldownHours: number;
-  tierProMinRating: number;
-  tierProMinJobs: number;
-  tierProMultiplier: number;
-  tierExpertMinRating: number;
-  tierExpertMinJobs: number;
-  tierExpertMultiplier: number;
-  freeDistanceKm: number;
-  perKmFee: number;
-  workerDebtHoldLimit: number;
-  atcCode: string | null;
-  noShowGraceHours: number;
-  disputeEscalationHours: number;
-  autoSuspendRatingThreshold: number | null;
-  autoSuspendDisputeCountThreshold: number | null;
-  autoSuspendDisputeCountWindowDays: number | null;
-}) {
-  return {
+// Every admin-editable number, with its allowed range. Every field is
+// optional on update so each admin page (Settings, Pricing Rules, Tax
+// Settings) can save just its own slice of this singleton.
+const NUMERIC_FIELDS = {
+  commissionRate: [0, 1],
+  withholdingTaxRate: [0, 1],
+  pendingExpiryMinutes: [5, 10080],
+  geofenceRadiusMeters: [10, 5000],
+  maxDeclinesBeforeCooldown: [1, 20],
+  declineWindowHours: [1, 720],
+  declineCooldownHours: [1, 720],
+  tierProMinRating: [0, 5],
+  tierProMinJobs: [0, 10000],
+  tierProMinYears: [0, 60],
+  tierProMultiplier: [1, 5],
+  tierExpertMinRating: [0, 5],
+  tierExpertMinJobs: [0, 10000],
+  tierExpertMinYears: [0, 60],
+  tierExpertMultiplier: [1, 5],
+  freeDistanceKm: [0, 50],
+  perKmFee: [0, 500],
+  workerDebtHoldLimit: [0, 100000],
+  workerMinAge: [18, 100],
+  workerMaxAge: [18, 100],
+  rushFeeRate: [0, 2],
+  rushMinLeadHours: [0, 24],
+  noShowGraceMinutes: [15, 480],
+  noShowPenaltyAmount: [0, 100000],
+  clientFaultCompensationAmount: [0, 100000],
+  disputeEscalationHours: [1, 720],
+} as const satisfies Partial<Record<keyof AppSettings, readonly [number, number]>>;
+
+// Nullable "off by default" thresholds — null means disabled.
+const NULLABLE_NUMERIC_FIELDS = {
+  autoSuspendRatingThreshold: [0, 5],
+  autoSuspendDisputeCountThreshold: [1, 1000],
+  autoSuspendDisputeCountWindowDays: [1, 3650],
+} as const satisfies Partial<Record<keyof AppSettings, readonly [number, number]>>;
+
+type NumericField = keyof typeof NUMERIC_FIELDS;
+type NullableNumericField = keyof typeof NULLABLE_NUMERIC_FIELDS;
+
+function formatSettings(record: AppSettings) {
+  const out: Record<string, unknown> = {
     siteName: record.siteName,
     supportEmail: record.supportEmail,
     notificationsEnabled: record.notificationsEnabled,
-    commissionRate: record.commissionRate,
-    withholdingTaxRate: record.withholdingTaxRate,
-    maxSlotsPerDay: record.maxSlotsPerDay,
-    pendingExpiryMinutes: record.pendingExpiryMinutes,
-    geofenceRadiusMeters: record.geofenceRadiusMeters,
-    maxDeclinesBeforeCooldown: record.maxDeclinesBeforeCooldown,
-    declineWindowHours: record.declineWindowHours,
-    declineCooldownHours: record.declineCooldownHours,
-    tierProMinRating: record.tierProMinRating,
-    tierProMinJobs: record.tierProMinJobs,
-    tierProMultiplier: record.tierProMultiplier,
-    tierExpertMinRating: record.tierExpertMinRating,
-    tierExpertMinJobs: record.tierExpertMinJobs,
-    tierExpertMultiplier: record.tierExpertMultiplier,
-    freeDistanceKm: record.freeDistanceKm,
-    perKmFee: record.perKmFee,
-    workerDebtHoldLimit: record.workerDebtHoldLimit,
     atcCode: record.atcCode,
-    noShowGraceHours: record.noShowGraceHours,
-    disputeEscalationHours: record.disputeEscalationHours,
-    autoSuspendRatingThreshold: record.autoSuspendRatingThreshold,
-    autoSuspendDisputeCountThreshold: record.autoSuspendDisputeCountThreshold,
-    autoSuspendDisputeCountWindowDays: record.autoSuspendDisputeCountWindowDays,
   };
+  for (const field of Object.keys(NUMERIC_FIELDS) as NumericField[]) out[field] = record[field];
+  for (const field of Object.keys(NULLABLE_NUMERIC_FIELDS) as NullableNumericField[]) out[field] = record[field];
+  return out;
 }
 
 export const getSettings = async (_req: Request, res: Response) => {
@@ -84,114 +81,47 @@ export const getSettings = async (_req: Request, res: Response) => {
 
 export const updateSettings = async (req: AuthRequest, res: Response) => {
   try {
-    const {
-      siteName,
-      supportEmail,
-      notificationsEnabled,
-      commissionRate,
-      withholdingTaxRate,
-      maxSlotsPerDay,
-      pendingExpiryMinutes,
-      geofenceRadiusMeters,
-      maxDeclinesBeforeCooldown,
-      declineWindowHours,
-      declineCooldownHours,
-      tierProMinRating,
-      tierProMinJobs,
-      tierProMultiplier,
-      tierExpertMinRating,
-      tierExpertMinJobs,
-      tierExpertMultiplier,
-      freeDistanceKm,
-      perKmFee,
-      workerDebtHoldLimit,
-      atcCode,
-      noShowGraceHours,
-      disputeEscalationHours,
-      autoSuspendRatingThreshold,
-      autoSuspendDisputeCountThreshold,
-      autoSuspendDisputeCountWindowDays,
-    } = req.body as {
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const { siteName, supportEmail, notificationsEnabled, atcCode } = body as {
       siteName?: string;
       supportEmail?: string;
       notificationsEnabled?: boolean;
-      commissionRate?: number;
-      withholdingTaxRate?: number;
-      maxSlotsPerDay?: number;
-      pendingExpiryMinutes?: number;
-      geofenceRadiusMeters?: number;
-      maxDeclinesBeforeCooldown?: number;
-      declineWindowHours?: number;
-      declineCooldownHours?: number;
-      tierProMinRating?: number;
-      tierProMinJobs?: number;
-      tierProMultiplier?: number;
-      tierExpertMinRating?: number;
-      tierExpertMinJobs?: number;
-      tierExpertMultiplier?: number;
-      freeDistanceKm?: number;
-      perKmFee?: number;
-      workerDebtHoldLimit?: number;
       atcCode?: string | null;
-      noShowGraceHours?: number;
-      disputeEscalationHours?: number;
-      autoSuspendRatingThreshold?: number | null;
-      autoSuspendDisputeCountThreshold?: number | null;
-      autoSuspendDisputeCountWindowDays?: number | null;
     };
 
     if (atcCode !== undefined && atcCode !== null && typeof atcCode !== 'string') {
       return res.status(400).json(errorResponse(400, 'atcCode must be a string or null'));
     }
 
-    // Nullable "off by default" thresholds — null/undefined means disabled,
-    // so they're validated separately from the required numericFields sweep
-    // below (which treats a present value as mandatory-range-checked but
-    // has no concept of "null is a valid, meaningful value").
-    const nullableNumericFields: Array<[string, number | null | undefined, number, number]> = [
-      ['autoSuspendRatingThreshold', autoSuspendRatingThreshold, 0, 5],
-      ['autoSuspendDisputeCountThreshold', autoSuspendDisputeCountThreshold, 1, 1000],
-      ['autoSuspendDisputeCountWindowDays', autoSuspendDisputeCountWindowDays, 1, 3650],
-    ];
-    for (const [field, value, min, max] of nullableNumericFields) {
-      if (value != null && (typeof value !== 'number' || Number.isNaN(value) || value < min || value > max)) {
-        return res.status(400).json(errorResponse(400, `${field} must be null or a number between ${min} and ${max}`));
-      }
-    }
-
-    // Every field is optional so each admin page (Settings, Pricing Rules,
-    // Tax Settings) can save just its own slice of this singleton — but a
-    // field that IS sent can't be blanked, since both are shown publicly.
+    // A field that IS sent can't be blanked, since both are shown publicly.
     if ((siteName !== undefined && !siteName?.trim()) || (supportEmail !== undefined && !supportEmail?.trim())) {
       return res.status(400).json(errorResponse(400, 'Site Name and Support Email are required.'));
     }
 
-    const numericFields: Array<[string, number | undefined, number, number]> = [
-      ['commissionRate', commissionRate, 0, 1],
-      ['withholdingTaxRate', withholdingTaxRate, 0, 1],
-      ['maxSlotsPerDay', maxSlotsPerDay, 1, 24],
-      ['pendingExpiryMinutes', pendingExpiryMinutes, 5, 10080],
-      ['geofenceRadiusMeters', geofenceRadiusMeters, 10, 5000],
-      ['maxDeclinesBeforeCooldown', maxDeclinesBeforeCooldown, 1, 20],
-      ['declineWindowHours', declineWindowHours, 1, 720],
-      ['declineCooldownHours', declineCooldownHours, 1, 720],
-      ['tierProMinRating', tierProMinRating, 0, 5],
-      ['tierProMinJobs', tierProMinJobs, 0, 10000],
-      ['tierProMultiplier', tierProMultiplier, 1, 5],
-      ['tierExpertMinRating', tierExpertMinRating, 0, 5],
-      ['tierExpertMinJobs', tierExpertMinJobs, 0, 10000],
-      ['tierExpertMultiplier', tierExpertMultiplier, 1, 5],
-      ['freeDistanceKm', freeDistanceKm, 0, 50],
-      ['perKmFee', perKmFee, 0, 500],
-      ['workerDebtHoldLimit', workerDebtHoldLimit, 0, 100000],
-      ['noShowGraceHours', noShowGraceHours, 0, 48],
-      ['disputeEscalationHours', disputeEscalationHours, 1, 720],
-    ];
-    for (const [field, value, min, max] of numericFields) {
-      if (value != null && (typeof value !== 'number' || Number.isNaN(value) || value < min || value > max)) {
+    const data: Record<string, unknown> = {};
+
+    for (const [field, [min, max]] of Object.entries(NUMERIC_FIELDS)) {
+      const value = body[field];
+      if (value == null) continue;
+      if (typeof value !== 'number' || Number.isNaN(value) || value < min || value > max) {
         return res.status(400).json(errorResponse(400, `${field} must be a number between ${min} and ${max}`));
       }
+      data[field] = value;
     }
+
+    for (const [field, [min, max]] of Object.entries(NULLABLE_NUMERIC_FIELDS)) {
+      if (!(field in body)) continue;
+      const value = body[field];
+      if (value != null && (typeof value !== 'number' || Number.isNaN(value) || value < min || value > max)) {
+        return res.status(400).json(errorResponse(400, `${field} must be null or a number between ${min} and ${max}`));
+      }
+      data[field] = value ?? null;
+    }
+
+    if (siteName !== undefined) data.siteName = siteName.trim();
+    if (supportEmail !== undefined) data.supportEmail = supportEmail.trim();
+    if (notificationsEnabled !== undefined) data.notificationsEnabled = notificationsEnabled;
+    if (atcCode !== undefined) data.atcCode = atcCode?.trim() || null;
 
     const current = await prisma.appSettings.upsert({
       where: { id: 'singleton' },
@@ -199,44 +129,13 @@ export const updateSettings = async (req: AuthRequest, res: Response) => {
       create: { id: 'singleton' },
     });
 
-    const record = await prisma.appSettings.update({
-      where: { id: 'singleton' },
-      data: {
-        siteName: siteName !== undefined ? siteName.trim() : current.siteName,
-        supportEmail: supportEmail !== undefined ? supportEmail.trim() : current.supportEmail,
-        notificationsEnabled: notificationsEnabled ?? current.notificationsEnabled,
-        commissionRate: commissionRate ?? current.commissionRate,
-        withholdingTaxRate: withholdingTaxRate ?? current.withholdingTaxRate,
-        maxSlotsPerDay: maxSlotsPerDay ?? current.maxSlotsPerDay,
-        pendingExpiryMinutes: pendingExpiryMinutes ?? current.pendingExpiryMinutes,
-        geofenceRadiusMeters: geofenceRadiusMeters ?? current.geofenceRadiusMeters,
-        maxDeclinesBeforeCooldown: maxDeclinesBeforeCooldown ?? current.maxDeclinesBeforeCooldown,
-        declineWindowHours: declineWindowHours ?? current.declineWindowHours,
-        declineCooldownHours: declineCooldownHours ?? current.declineCooldownHours,
-        tierProMinRating: tierProMinRating ?? current.tierProMinRating,
-        tierProMinJobs: tierProMinJobs ?? current.tierProMinJobs,
-        tierProMultiplier: tierProMultiplier ?? current.tierProMultiplier,
-        tierExpertMinRating: tierExpertMinRating ?? current.tierExpertMinRating,
-        tierExpertMinJobs: tierExpertMinJobs ?? current.tierExpertMinJobs,
-        tierExpertMultiplier: tierExpertMultiplier ?? current.tierExpertMultiplier,
-        freeDistanceKm: freeDistanceKm ?? current.freeDistanceKm,
-        perKmFee: perKmFee ?? current.perKmFee,
-        workerDebtHoldLimit: workerDebtHoldLimit ?? current.workerDebtHoldLimit,
-        atcCode: atcCode !== undefined ? (atcCode?.trim() || null) : current.atcCode,
-        noShowGraceHours: noShowGraceHours ?? current.noShowGraceHours,
-        disputeEscalationHours: disputeEscalationHours ?? current.disputeEscalationHours,
-        autoSuspendRatingThreshold:
-          autoSuspendRatingThreshold !== undefined ? autoSuspendRatingThreshold : current.autoSuspendRatingThreshold,
-        autoSuspendDisputeCountThreshold:
-          autoSuspendDisputeCountThreshold !== undefined
-            ? autoSuspendDisputeCountThreshold
-            : current.autoSuspendDisputeCountThreshold,
-        autoSuspendDisputeCountWindowDays:
-          autoSuspendDisputeCountWindowDays !== undefined
-            ? autoSuspendDisputeCountWindowDays
-            : current.autoSuspendDisputeCountWindowDays,
-      },
-    });
+    const minAge = (data.workerMinAge as number | undefined) ?? current.workerMinAge;
+    const maxAge = (data.workerMaxAge as number | undefined) ?? current.workerMaxAge;
+    if (minAge > maxAge) {
+      return res.status(400).json(errorResponse(400, 'The minimum worker age must not be above the maximum.'));
+    }
+
+    const record = await prisma.appSettings.update({ where: { id: 'singleton' }, data });
 
     invalidateAppSettingsCache();
 
@@ -247,6 +146,7 @@ export const updateSettings = async (req: AuthRequest, res: Response) => {
       action: 'SETTINGS_UPDATED',
       category: 'ADMIN_ACTION',
       message: 'Admin settings updated',
+      metadata: { fields: Object.keys(data) },
     });
 
     return res.json({ success: true, data: formatSettings(record) });

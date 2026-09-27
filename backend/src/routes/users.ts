@@ -3,7 +3,10 @@ import {
   getUserProfile,
   updateUserProfile,
   changePassword,
-  logoutAllSessions,
+  logoutOtherSessions,
+  getSessions,
+  deactivateAccount,
+  sendDeletionCode,
   getAddresses,
   createAddress,
   updateAddress,
@@ -44,13 +47,16 @@ router.use(authMiddleware);
 // Profile routes
 router.get('/me', getUserProfile);
 router.patch('/me', validateUpdateUserProfile, updateUserProfile);
+router.post('/me/delete-code', sendDeletionCode);
 router.delete('/me', deleteAccount);
+router.post('/me/deactivate', deactivateAccount);
 
 // Password route
 router.post('/me/change-password', validateChangePassword, changePassword);
 
-// Log out of all devices (revoke every refresh token for this user)
-router.post('/me/logout-all', logoutAllSessions);
+// Signed-in devices; log out every other device
+router.get('/me/sessions', getSessions);
+router.post('/me/logout-all', logoutOtherSessions);
 
 // Address routes
 router.get('/me/addresses', getAddresses);

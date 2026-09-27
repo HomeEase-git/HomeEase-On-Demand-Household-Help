@@ -194,7 +194,7 @@ export default function RecordDetailScreen() {
             <PrimaryButton
               label="Manage Job"
               fullWidth
-              onPress={() => router.push(`/(worker)/requests/job/${record.id}`)}
+              onPress={() => router.push(`/(worker)/records/job/${record.id}`)}
             />
           </View>
         )}

@@ -1,5 +1,5 @@
 import React, { useState, useCallback } from "react";
-import { View, Text, FlatList, Pressable } from "react-native";
+import { View, Text, FlatList } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useFocusEffect, useRouter } from "expo-router";
 import RequestCard from "../../../components/cards/RequestCard";
@@ -13,7 +13,6 @@ import { usePolling } from "../../../hooks/usePolling";
 import { useTabRefresh } from "../../../hooks/useTabRefresh";
 import { usePullToRefresh } from "../../../hooks/usePullToRefresh";
 
-const TABS = ["Pending", "Accepted"] as const;
 // A real-time socket layer already pushes updates here — this poll is a
 // belt-and-suspenders fallback, not the primary refresh path, so it doesn't
 // need to be this frequent.
@@ -23,7 +22,6 @@ export default function RequestsScreen() {
   const router = useRouter();
   const jobs = useWorkerStore((s) => s.jobs);
   const setJobs = useWorkerStore((s) => s.setJobs);
-  const [tab, setTab] = useState<(typeof TABS)[number]>("Pending");
   const [loading, setLoading] = useState(true);
   const [focused, setFocused] = useState(false);
 
@@ -60,7 +58,9 @@ export default function RequestsScreen() {
   // Pull refreshes silently so the list stays put under the spinner.
   const refreshControl = usePullToRefresh(useCallback(() => load(true), [load]));
 
-  const filtered = jobs.filter((j) => j.status === tab);
+  // Only new requests live here — once accepted, a job moves to Records
+  // (Ongoing), where the worker runs it.
+  const filtered = jobs.filter((j) => j.status === "Pending");
 
   const handleRequestPress = useCallback(
     (id: string) => {
@@ -97,30 +97,14 @@ export default function RequestsScreen() {
     <SafeAreaView className="flex-1 bg-white">
       <View className="px-4 pt-4 pb-2">
         <Text className="text-text-primary text-2xl font-bold">Job Requests</Text>
-        <View className="flex-row gap-2 mt-3">
-          {TABS.map((t) => (
-            <Pressable
-              key={t}
-              className={`px-3 py-2 rounded-xl ${tab === t ? "bg-accent" : "bg-card"}`}
-              onPress={() => setTab(t)}
-            >
-              <Text
-                className={
-                  tab === t
-                    ? "text-white font-semibold text-sm"
-                    : "text-text-secondary text-sm"
-                }
-              >
-                {t}
-              </Text>
-            </Pressable>
-          ))}
-        </View>
+        <Text className="text-text-muted text-xs mt-1">
+          New requests waiting for your answer. Accepted jobs are in Records.
+        </Text>
       </View>
       {loading ? (
         <LoadingSkeleton type="booking" count={4} />
       ) : filtered.length === 0 ? (
-        <EmptyState title="No requests yet" />
+        <EmptyState title="No new requests" />
       ) : (
         <FlatList
           data={filtered}

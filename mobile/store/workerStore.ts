@@ -2,6 +2,7 @@ import { create } from "zustand";
 import { API_STATUS_MAP, type BookingStatus } from "./bookingStore";
 import type { ConditionType, RoomType, TimeSlot } from "../types/booking4step.types";
 import { getBookings } from "../services/api";
+import { bookingStartTime } from "../utils/bookingTime";
 
 export type WorkerJob = {
   id: string;
@@ -15,7 +16,13 @@ export type WorkerJob = {
   estimatedPrice: number;
   finalPrice: number | null;
   rating: number | null;
-  timeSlot: TimeSlot | null;
+  // Exact start time "HH:mm" (older bookings: their old slot's start).
+  time: string | null;
+  isRush: boolean;
+  // Set on a follow-up job after this worker's own inspection.
+  parentBookingId: string | null;
+  // Scheduled follow-up visits still to come ("Follow Up Date").
+  upcomingVisits: { id: string; scheduledDate: string; scheduledTime: string }[];
   rooms: RoomType[];
   condition: ConditionType | null;
   location: string | null;
@@ -41,7 +48,11 @@ export type ApiWorkerBooking = {
   estimatedPrice: number;
   finalPrice: number | null;
   rating: number | null;
+  scheduledTime?: string | null;
   timeSlot?: TimeSlot | null;
+  isRush?: boolean;
+  parentBookingId?: string | null;
+  upcomingVisits?: { id: string; scheduledDate: string; scheduledTime: string }[];
   rooms?: RoomType[];
   condition?: ConditionType | null;
   location?: string | null;
@@ -67,7 +78,10 @@ export function mapApiJob(b: ApiWorkerBooking): WorkerJob {
     estimatedPrice: b.estimatedPrice,
     finalPrice: b.finalPrice ?? null,
     rating: b.rating ?? null,
-    timeSlot: b.timeSlot ?? null,
+    time: bookingStartTime(b),
+    isRush: b.isRush ?? false,
+    parentBookingId: b.parentBookingId ?? null,
+    upcomingVisits: b.upcomingVisits ?? [],
     rooms: b.rooms ?? [],
     condition: b.condition ?? null,
     location: b.location ?? null,

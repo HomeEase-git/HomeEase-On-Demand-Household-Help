@@ -49,6 +49,7 @@ client.on('connect', () => {
 });
 
 const REVOKED_KEY_PREFIX = 'revoked:user:';
+const REVOKED_SESSION_KEY_PREFIX = 'revoked:session:';
 
 // Circuit breaker. Without this, every authenticated request in an
 // environment with no reachable Redis (this backend's own test suite; CI's
@@ -128,6 +129,36 @@ export async function isUserSessionRevoked(userId: string): Promise<boolean> {
     return value === '1';
   } catch (error) {
     recordFailure('isUserSessionRevoked', error);
+    return false;
+  }
+}
+
+/**
+ * Revokes specific signed-in devices (see sessionService / the `sid` in each
+ * access token) rather than the whole account — "log out other devices".
+ * Same TTL reasoning as revokeUserSessions.
+ */
+export async function revokeSessionIds(sessionIds: string[], ttlSeconds: number): Promise<void> {
+  if (sessionIds.length === 0 || circuitIsOpen()) return;
+  try {
+    const pipeline = client.pipeline();
+    for (const sid of sessionIds) pipeline.set(`${REVOKED_SESSION_KEY_PREFIX}${sid}`, '1', 'EX', ttlSeconds);
+    await pipeline.exec();
+    recordSuccess();
+  } catch (error) {
+    recordFailure('revokeSessionIds', error);
+  }
+}
+
+/** See the fail-open note on `client` above. */
+export async function isSessionRevoked(sessionId: string): Promise<boolean> {
+  if (circuitIsOpen()) return false;
+  try {
+    const value = await client.get(`${REVOKED_SESSION_KEY_PREFIX}${sessionId}`);
+    recordSuccess();
+    return value === '1';
+  } catch (error) {
+    recordFailure('isSessionRevoked', error);
     return false;
   }
 }

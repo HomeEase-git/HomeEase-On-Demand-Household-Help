@@ -69,6 +69,11 @@ export default function PricingRangePreview({ estimate }: Props) {
                 Pro tier ₱{Math.round(priceBreakdown.tierFee)}
               </Text>
             )}
+            {(priceBreakdown.rushFee ?? 0) > 0 && (
+              <Text className="text-white/60 text-xs">
+                Rush ₱{Math.round(priceBreakdown.rushFee ?? 0)}
+              </Text>
+            )}
           </>
         ) : (
           <Text className="text-white/60 text-xs">

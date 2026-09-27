@@ -1,6 +1,7 @@
 import { useCallback, useMemo, useState } from 'react'
 import PageHeader from '../components/common/PageHeader'
 import SubNav from '../components/common/SubNav'
+import { BOOKINGS_SUB_NAV } from '../constants/bookingsSubNav'
 import SearchBar from '../components/common/SearchBar'
 import FilterTabs from '../components/common/FilterTabs'
 import SectionCard from '../components/common/SectionCard'
@@ -14,10 +15,6 @@ import { useListQuery } from '../hooks/useListQuery'
 
 const POLL_INTERVAL_MS = 5000
 
-const SUB_NAV = [
-  { to: '/bookings', label: 'All Bookings' },
-  { to: '/bookings/dispute', label: 'Booking Dispute' },
-]
 
 const STATUS_TABS = ['Open', 'Resolved', 'Refund Failed']
 
@@ -255,7 +252,7 @@ export default function BookingDispute() {
   return (
     <>
       <PageHeader title="Dispute Resolution Center" subtitle="Review and resolve disputed bookings" />
-      <SubNav items={SUB_NAV} />
+      <SubNav items={BOOKINGS_SUB_NAV} />
       <div className="toolbar">
         <SearchBar placeholder="Search disputes..." value={params.search || ''} onChange={setSearch} />
         <FilterTabs tabs={STATUS_TABS} activeTab={params.statusTab} onTabChange={(tab) => setFilter('statusTab', tab)} />

@@ -202,6 +202,9 @@ function buildWorkerSearchWhere(search: string, status?: string): Prisma.UserWhe
     where.workerProfile = { kycStatus: 'APPROVED' };
   } else if (status === 'pending') {
     where.workerProfile = { kycStatus: 'PENDING' };
+  } else if (status === 'deactivated') {
+    // Took themselves off the platform (userController.deactivateAccount).
+    where.status = 'DEACTIVATED';
   }
 
   if (search) {
@@ -226,6 +229,7 @@ type WorkerRow = {
     bio: string | null;
     rating: number;
     totalReviews: number;
+    yearsExperience?: number | null;
     kycStatus: string;
     serviceCategories: Array<{ status: string; serviceType: { name: string } }>;
     declineCooldownUntil?: Date | null;
@@ -263,7 +267,14 @@ async function formatWorkersBatch(users: WorkerRow[]) {
     const earnings = completedBookings.reduce((sum, b) => sum + ((b.finalPrice ?? b.estimatedPrice) ?? 0), 0);
 
     const tier = user.workerProfile
-      ? computeWorkerTier(user.workerProfile.rating, completedBookings.length, tierSettings)
+      ? computeWorkerTier(
+          {
+            rating: user.workerProfile.rating,
+            completedJobs: completedBookings.length,
+            yearsExperience: user.workerProfile.yearsExperience,
+          },
+          tierSettings
+        )
       : 'STANDARD';
 
     const verificationStatus = user.workerProfile?.kycStatus ?? 'PENDING';
@@ -291,9 +302,11 @@ async function formatWorkersBatch(users: WorkerRow[]) {
       rating: user.workerProfile?.rating.toFixed(1) ?? '0.0',
       reviews: user.workerProfile?.totalReviews ?? 0,
       tier,
+      // Confirmed by the admin at KYC approval — one of the tier requirements.
+      yearsExperience: user.workerProfile?.yearsExperience ?? null,
       status: statusLabel,
       verification: statusLabel,
-      // Real account status (ACTIVE/SUSPENDED/BANNED) — distinct from the KYC
+      // Real account status (ACTIVE/SUSPENDED/BANNED/DEACTIVATED) — distinct from the KYC
       // verification label above, which `status`/`verification` both carry.
       accountStatus: user.status.toLowerCase(),
       declineCooldownUntil: user.workerProfile?.declineCooldownUntil ?? null,

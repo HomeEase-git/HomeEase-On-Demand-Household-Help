@@ -194,16 +194,14 @@ export const formatPrice = (amount: number): string => {
  * Condition is deliberately not a factor here — it's an ordinary
  * admin-defined scope field now, not a platform-wide surcharge.
  *
- * Urgency (STANDARD/URGENT/EMERGENCY) used to add a 0/15/30% surcharge here
- * too, but was removed as a platform concept (2026-09-14) — it only ever
- * charged more for a "faster" booking without actually doing anything
- * differently (no matching priority, no different notification), and its
- * shorter auto-cancel window (see bookingQueue's old EXPIRY_MULTIPLIER)
- * actively worked against the client who paid for it. `urgencyFee` is kept
- * (always 0) in the result/log shape below for compatibility with existing
- * receipts, same as conditionFee. Same-day/next-day booking is now blocked
- * outright instead (see validation.ts's MIN_BOOKING_LEAD_DAYS), which was
- * the actual reason anyone reached for "urgent" in the first place.
+ * Urgency (STANDARD/URGENT/EMERGENCY) used to add a surcharge here too, but
+ * was removed as a platform concept (2026-09-14); `urgencyFee` stays (always
+ * 0) in the result/log shape for old receipts, same as conditionFee.
+ *
+ * rushFee is the same-day booking surcharge: AppSettings.rushFeeRate of the
+ * service price, charged only when the job is booked for today (see
+ * workerAvailabilityService.isRushDate). Like the tier fee it's on the base
+ * service price, never on the distance fee or add-ons.
  */
 // Fallback only — the live, admin-tunable values are AppSettings.freeDistanceKm
 // / perKmFee (see appSettingsService), passed in by every real caller.
@@ -215,6 +213,8 @@ const DEFAULT_PER_KM_FEE = 10;
 export interface JobPricingInput {
   basePrice: number;
   tierMultiplier: number;
+  // 0 (or omitted) unless this is a same-day booking.
+  rushFeeRate?: number;
   distanceKm?: number | null;
   freeDistanceKm?: number;
   perKmFee?: number;
@@ -224,6 +224,7 @@ export interface JobPricingResult {
   basePrice: number;
   distanceFee: number;
   urgencyFee: number;
+  rushFee: number;
   tierFee: number;
   estimatedPrice: number;
 }
@@ -235,7 +236,8 @@ export const computeJobPricing = (input: JobPricingInput): JobPricingResult => {
     input.distanceKm != null ? Math.max(0, input.distanceKm - freeDistanceKm) * perKmFee : 0
   );
   const urgencyFee = 0;
+  const rushFee = roundToCentavo(input.basePrice * Math.max(0, input.rushFeeRate ?? 0));
   const tierFee = roundToCentavo(input.basePrice * (input.tierMultiplier - 1));
-  const estimatedPrice = roundToCentavo(input.basePrice + distanceFee + urgencyFee + tierFee);
-  return { basePrice: input.basePrice, distanceFee, urgencyFee, tierFee, estimatedPrice };
+  const estimatedPrice = roundToCentavo(input.basePrice + distanceFee + urgencyFee + rushFee + tierFee);
+  return { basePrice: input.basePrice, distanceFee, urgencyFee, rushFee, tierFee, estimatedPrice };
 };

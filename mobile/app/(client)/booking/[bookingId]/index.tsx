@@ -23,9 +23,11 @@ import {
   getTransactionDetail,
   acknowledgeReschedule as acknowledgeRescheduleApi,
   withdrawRescheduleRequest as withdrawRescheduleRequestApi,
+  respondToRescheduleRequest,
   respondToBookingAddOn,
   cancelBooking as cancelBookingApi,
 } from "../../../../services/api";
+import { formatTime12h } from "../../../../utils/bookingTime";
 import { colors } from "../../../../constants";
 import { useAlertModal } from "../../../../contexts/AlertModalContext";
 import { mapApiBookingDetail, type ApiBookingDetail } from "../../../../utils/mapBookingDetail";
@@ -47,6 +49,7 @@ export default function BookingDetailScreen() {
   const [confirmingNewDate, setConfirmingNewDate] = useState(false);
   const [withdrawingReschedule, setWithdrawingReschedule] = useState(false);
   const [cancellingGroup, setCancellingGroup] = useState(false);
+  const [answeringReschedule, setAnsweringReschedule] = useState(false);
   const booking = bookings.find((b) => b.id === bookingId);
   // The shared store's Booking type only keeps payment.totalAmount (used by
   // many other screens) — the real subtotal/addOns/tip breakdown is kept
@@ -132,6 +135,7 @@ export default function BookingDetailScreen() {
     basePrice: null,
     distanceFee: 0,
     tierFee: 0,
+    rushFee: 0,
     subtotal: rawDetail?.payment?.subtotal ?? booking.amount,
     // Only approved add-ons count toward the total — a still-pending one
     // shown here would look like it's already been billed.
@@ -156,18 +160,31 @@ export default function BookingDetailScreen() {
     }
   };
 
-  // Same free-cancel carve-out as a forced reschedule (see
-  // hasPendingReschedule below) — the client didn't choose either
-  // situation, so backing out shouldn't be blocked past PENDING here.
+  // A worker no-show cancels the booking automatically now; an older
+  // booking flagged before that can still be cancelled free (the client
+  // didn't choose this, same as a forced reschedule below).
   const hasWorkerNoShow = !!booking.workerNoShowFlaggedAt;
-  const canCancel = booking.status === "Pending" || hasWorkerNoShow;
+  const canCancel = booking.status === "Pending" || (hasWorkerNoShow && booking.status !== "Cancelled");
   const canTrack =
     booking.status === "Accepted" || booking.status === "InProgress";
-  // Client-initiated reschedule request — only on an ACCEPTED booking
-  // (before the worker arrives/starts), and only one live request at a time.
-  const hasPendingRescheduleRequest =
+  // Reschedule requests — only on an ACCEPTED booking (before the worker
+  // arrives/starts), one live request at a time, from either side.
+  const hasOpenRescheduleRequest =
     !!rawDetail?.rescheduleRequestedAt && !rawDetail?.rescheduleRequestRespondedAt;
-  const canRequestReschedule = rawDetail?.status === "ACCEPTED" && !hasPendingRescheduleRequest;
+  const workerAskedToReschedule = hasOpenRescheduleRequest && rawDetail?.rescheduleRequestedBy === "WORKER";
+  const hasPendingRescheduleRequest = hasOpenRescheduleRequest && !workerAskedToReschedule;
+  const canRequestReschedule = rawDetail?.status === "ACCEPTED" && !hasOpenRescheduleRequest;
+  // Follow-up job after an inspection/diagnosis (same pro), once its work is done.
+  const canRequestFollowUp =
+    !!rawDetail?.allowsFollowUp &&
+    !!booking.workerId &&
+    ["PENDING_COMPLETION", "AWAITING_PAYMENT", "COMPLETED"].includes(rawDetail?.status ?? "");
+  const upcomingVisits = (rawDetail?.visits ?? []).filter((v) => v.status === "SCHEDULED");
+  const requestedWhen = rawDetail?.requestedScheduledDate
+    ? `${new Date(rawDetail.requestedScheduledDate).toLocaleDateString("en-PH", { month: "short", day: "numeric", timeZone: "UTC" })}${
+        rawDetail.requestedScheduledTime ? ` at ${formatTime12h(rawDetail.requestedScheduledTime)}` : ""
+      }`
+    : "the new date";
   const isCompleted = booking.status === "Completed";
   const isPendingCompletion = booking.status === "PendingCompletion";
   const isAwaitingPayment = booking.status === "AwaitingPayment";
@@ -224,6 +241,54 @@ export default function BookingDetailScreen() {
           } finally {
             setWithdrawingReschedule(false);
           }
+        },
+      },
+    );
+  };
+
+  const handleAnswerReschedule = (accept: boolean) => {
+    alertModal.confirm(
+      accept ? "Accept new time?" : "Keep the original time?",
+      accept
+        ? `Move this booking to ${requestedWhen}?`
+        : "Your booking stays at its original date and time, and your pro is expected to arrive then.",
+      {
+        confirmText: accept ? "Accept" : "Keep Original",
+        onConfirm: async () => {
+          setAnsweringReschedule(true);
+          try {
+            await respondToRescheduleRequest(bookingId, accept);
+            await refreshBookingDetail();
+          } catch (error: any) {
+            console.error("Respond to reschedule request error:", error);
+            alertModal.error("Error", error?.message || "Failed to answer the request. Please try again.");
+          } finally {
+            setAnsweringReschedule(false);
+          }
+        },
+      },
+    );
+  };
+
+  // Two confirmations: this one, then Step 4's own before the request is sent.
+  const handleRequestFollowUp = () => {
+    if (!rawDetail || !booking.workerId) return;
+    alertModal.confirm(
+      "Request a follow-up job?",
+      `Ask ${booking.worker} for a new job after this ${booking.service} — e.g. the repair they found. It's a separate job with its own price, and they can accept or decline it.`,
+      {
+        confirmText: "Continue",
+        onConfirm: () => {
+          prefillFromDeclinedBooking({ ...rawDetail, scheduledDate: null, scheduledTime: null, timeSlot: null, scopeAnswers: {} });
+          useBookingStore.getState().setDraft({
+            entrySource: "book_again",
+            parentBookingId: rawDetail.id,
+            workerId: booking.workerId ?? null,
+            workerName: booking.worker,
+            workerAvatar: booking.workerAvatar ?? null,
+            workerLocked: true,
+          });
+          router.push("/(client)/booking/new/step-1");
         },
       },
     );
@@ -534,6 +599,39 @@ export default function BookingDetailScreen() {
           </View>
         )}
 
+        {/* The pro asked to move this booking — the client answers */}
+        {workerAskedToReschedule && (
+          <View className="bg-warning/10 border border-warning/30 rounded-2xl p-4 mb-4">
+            <View className="flex-row items-center">
+              <Ionicons name="swap-horizontal" size={22} color={colors.warning} />
+              <Text className="font-bold text-sm text-text-primary ml-2 flex-1">Your pro asked to reschedule</Text>
+            </View>
+            <Text className="text-text-secondary text-xs mt-1.5">
+              {workerName} asked to move this booking to {requestedWhen}. If you keep the original time, they&apos;re
+              expected to arrive then.
+            </Text>
+            <View className="flex-row gap-2 mt-3">
+              <View className="flex-1">
+                <PrimaryButton
+                  label="Accept"
+                  fullWidth
+                  onPress={() => handleAnswerReschedule(true)}
+                  disabled={answeringReschedule}
+                  loading={answeringReschedule}
+                />
+              </View>
+              <View className="flex-1">
+                <OutlinedButton
+                  label="Keep Original"
+                  fullWidth
+                  onPress={() => handleAnswerReschedule(false)}
+                  disabled={answeringReschedule}
+                />
+              </View>
+            </View>
+          </View>
+        )}
+
         {/* Pending client-initiated reschedule request */}
         {hasPendingRescheduleRequest && (
           <View className="bg-accent/10 border border-accent/30 rounded-2xl p-4 mb-4">
@@ -544,11 +642,7 @@ export default function BookingDetailScreen() {
               </Text>
             </View>
             <Text className="text-text-secondary text-xs mt-1.5">
-              Waiting for your pro to respond to your request to move this booking to{" "}
-              {rawDetail?.requestedScheduledDate
-                ? new Date(rawDetail.requestedScheduledDate).toLocaleDateString("en-PH", { month: "short", day: "numeric" })
-                : "the new date"}
-              .
+              Waiting for your pro to respond to your request to move this booking to {requestedWhen}.
             </Text>
             <View className="mt-3">
               <OutlinedButton
@@ -608,13 +702,46 @@ export default function BookingDetailScreen() {
             <Ionicons name="alert-circle" size={24} color={colors.warning} />
             <View className="ml-3 flex-1">
               <Text className="text-warning font-bold text-sm">
-                Your worker hasn&apos;t checked in
+                Your worker didn&apos;t show up
               </Text>
               <Text className="text-text-secondary text-xs mt-0.5">
-                You can cancel this booking for free.
+                {booking.status === "Cancelled"
+                  ? "This booking was cancelled and you won't be charged. You can book another pro."
+                  : "You can cancel this booking for free."}
               </Text>
             </View>
           </View>
+        )}
+
+        {/* Cancelled on site, blaming the client — pending admin review */}
+        {rawDetail?.cancellation?.fault === "CLIENT" && (
+          <View className="bg-warning/10 border border-warning/30 rounded-2xl p-4 mb-4">
+            <Text className="text-warning font-bold text-sm">Cancelled on site</Text>
+            <Text className="text-text-secondary text-xs mt-1">
+              Your pro cancelled at your location and reported it was caused on your side
+              {rawDetail.cancellation.reason ? `: "${rawDetail.cancellation.reason}"` : ""}.{" "}
+              {rawDetail.cancellation.compensationStatus === "PENDING_REVIEW"
+                ? `HomeEase is reviewing their photo proof. A ₱${rawDetail.cancellation.compensationAmount ?? 0} cancellation fee applies only if it's confirmed.`
+                : rawDetail.cancellation.compensationStatus === "APPROVED"
+                  ? `HomeEase confirmed it, so a ₱${rawDetail.cancellation.compensationAmount ?? 0} cancellation fee applies.`
+                  : "HomeEase couldn't confirm it, so no fee applies."}
+            </Text>
+          </View>
+        )}
+
+        {/* This is a follow-up job after an inspection */}
+        {rawDetail?.parentBooking && (
+          <Pressable
+            className="bg-accent/10 rounded-2xl p-4 mb-4 flex-row items-center"
+            onPress={() => router.push(`/(client)/booking/${rawDetail.parentBooking!.id}`)}
+          >
+            <Ionicons name="git-branch-outline" size={20} color={colors.accent.DEFAULT} />
+            <Text className="text-text-secondary text-xs ml-2 flex-1">
+              Follow-up to your {rawDetail.parentBooking.service} ·{" "}
+              {new Date(rawDetail.parentBooking.scheduledDate).toLocaleDateString("en-PH", { month: "short", day: "numeric", timeZone: "UTC" })}
+            </Text>
+            <Ionicons name="chevron-forward" size={18} color={colors.text.muted} />
+          </Pressable>
         )}
 
         {/* Disputed banner */}
@@ -695,10 +822,22 @@ export default function BookingDetailScreen() {
             <View className="flex-row items-center mb-2">
               <Ionicons name="time" size={16} color={colors.accent.DEFAULT} />
               <Text className="text-text-primary font-semibold ml-2">
-                {booking.time}
+                Starts {formatTime12h(booking.time)}
+                {booking.isRush ? " · Same-day" : ""}
               </Text>
             </View>
           )}
+          {upcomingVisits.map((visit) => (
+            <View key={visit.id} className="flex-row items-start mb-2">
+              <Ionicons name="repeat" size={16} color={colors.accent.DEFAULT} />
+              <Text className="text-text-primary text-sm ml-2 flex-1">
+                Follow-up visit:{" "}
+                {new Date(visit.scheduledDate).toLocaleDateString("en-PH", { weekday: "short", month: "short", day: "numeric", timeZone: "UTC" })}{" "}
+                at {formatTime12h(visit.scheduledTime)}
+                {visit.notes ? ` — ${visit.notes}` : ""}
+              </Text>
+            </View>
+          ))}
           {booking.address && (
             <View className="flex-row items-start">
               <Ionicons
@@ -756,6 +895,7 @@ export default function BookingDetailScreen() {
             basePrice={priceBreakdown.basePrice}
             distanceFee={priceBreakdown.distanceFee}
             tierFee={priceBreakdown.tierFee}
+            rushFee={priceBreakdown.rushFee}
             addOns={priceBreakdown.addOns}
             vatApplicable={priceBreakdown.vatApplicable}
             vatRate={priceBreakdown.vatRate}
@@ -888,6 +1028,9 @@ export default function BookingDetailScreen() {
                 router.push(`/(client)/booking/${bookingId}/request-reschedule`)
               }
             />
+          )}
+          {canRequestFollowUp && (
+            <OutlinedButton label="Request Follow-up Job" onPress={handleRequestFollowUp} />
           )}
           {isCompleted && !booking.rating && (
             <PrimaryButton

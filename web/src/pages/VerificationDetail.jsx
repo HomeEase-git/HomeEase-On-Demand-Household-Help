@@ -25,6 +25,8 @@ export default function VerificationDetail() {
   const [mode, setMode] = useState(null)
   const [rejectReason, setRejectReason] = useState('')
   const [adminOverrideReason, setAdminOverrideReason] = useState('')
+  // Pre-filled with the worker's declared years when the approve modal opens.
+  const [yearsExperience, setYearsExperience] = useState('')
   const [rerunError, setRerunError] = useState(null)
   const [actionError, setActionError] = useState(null)
   const [submitting, setSubmitting] = useState(false)
@@ -34,14 +36,24 @@ export default function VerificationDetail() {
     setMode(null)
     setRejectReason('')
     setAdminOverrideReason('')
+    setYearsExperience('')
     setActionError(null)
+  }
+
+  const isWorkerOnboarding = verification?.type === 'WORKER_ONBOARDING'
+  const yearsValue = yearsExperience.trim()
+  const yearsInvalid = isWorkerOnboarding && (!/^\d{1,2}$/.test(yearsValue) || Number(yearsValue) > 60)
+
+  const openApprove = () => {
+    setYearsExperience(verification?.yearsExperience != null ? String(verification.yearsExperience) : '')
+    setMode('approve')
   }
 
   const handleApprove = async () => {
     setSubmitting(true)
     setActionError(null)
     try {
-      await approveVerification(id, adminOverrideReason)
+      await approveVerification(id, adminOverrideReason, isWorkerOnboarding ? Number(yearsValue) : undefined)
       setMode('success')
     } catch (err) {
       setActionError(err.message || 'Failed to approve verification')
@@ -119,7 +131,17 @@ export default function VerificationDetail() {
           label: 'Date of Birth',
           value: verification.birthDate
             ? `${verification.birthDate} (age ${verification.age}) — check it matches the ID`
-            : 'Not provided — confirm age 18+ from the ID',
+            : 'Not provided — confirm the age from the ID',
+        }
+      : null,
+    verification.type === 'WORKER_ONBOARDING'
+      ? {
+          // Declared at KYC; confirmed or corrected on approval (tier requirement).
+          label: 'Years of Experience',
+          value:
+            verification.yearsExperience != null
+              ? `${verification.yearsExperience} (declared) — check it against the resume`
+              : 'Not provided — set it when approving',
         }
       : null,
     { label: 'Type', value: humanizeEnum(verification.type) },
@@ -201,7 +223,7 @@ export default function VerificationDetail() {
       </SectionCard>
       {isPending && (
         <div className="cta-buttons">
-          <button type="button" className="btn btn-success" onClick={() => setMode('approve')}>
+          <button type="button" className="btn btn-success" onClick={openApprove}>
             Approve Verification
           </button>
           <button type="button" className="btn btn-danger" onClick={() => setMode('reject')}>
@@ -218,6 +240,21 @@ export default function VerificationDetail() {
               Are you sure you want to approve verification for <strong>{verification.name}</strong>?
             </p>
             <form>
+              {isWorkerOnboarding && (
+                <div className="form-field">
+                  <label htmlFor="years-experience">Years of experience (confirmed from the resume)</label>
+                  <input
+                    id="years-experience"
+                    type="number"
+                    min={0}
+                    max={60}
+                    value={yearsExperience}
+                    onChange={(e) => setYearsExperience(e.target.value)}
+                    className="input"
+                  />
+                  {yearsInvalid && <span className="field-error">Enter a whole number from 0 to 60.</span>}
+                </div>
+              )}
               <div className="form-field">
                 <label htmlFor="admin-override-reason">Admin Override Reason (optional)</label>
                 <textarea
@@ -234,7 +271,7 @@ export default function VerificationDetail() {
               <button type="button" className="btn btn-outline" onClick={closeModal} disabled={submitting}>
                 Cancel
               </button>
-              <button type="button" className="btn btn-success" onClick={handleApprove} disabled={submitting}>
+              <button type="button" className="btn btn-success" onClick={handleApprove} disabled={submitting || yearsInvalid}>
                 {submitting ? 'Approving...' : 'Approve'}
               </button>
             </div>

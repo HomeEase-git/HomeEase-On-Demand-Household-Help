@@ -31,7 +31,6 @@ tags:
   - name: Admin Bookings
   - name: Admin Users
   - name: Admin Payments
-  - name: Admin Pricing Rules
   - name: Admin Reviews
   - name: Admin Reports
   - name: Admin Analytics
@@ -120,78 +119,6 @@ paths:
               schema: { $ref: '#/components/schemas/SuccessEnvelope' }
         '404':
           description: 'Not found — includes workers that exist but aren''t KYC-approved (treated as nonexistent)'
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
-
-  /workers/me/availability-slots:
-    get:
-      tags: [Worker Availability]
-      summary: Get the authenticated worker's per-date/timeSlot availability records
-      parameters:
-        - name: date
-          in: query
-          schema: { type: string, format: date }
-        - name: timeSlot
-          in: query
-          schema: { $ref: '#/components/schemas/TimeSlot' }
-      responses:
-        '200':
-          description: OK
-          content:
-            application/json:
-              schema:
-                allOf:
-                  - $ref: '#/components/schemas/SuccessEnvelope'
-                  - type: object
-                    properties:
-                      data:
-                        type: object
-                        properties:
-                          slots:
-                            type: array
-                            items: { $ref: '#/components/schemas/WorkerAvailabilitySlot' }
-        '401': { $ref: '#/components/responses/Unauthorized' }
-        '404': { $ref: '#/components/responses/NotFound' }
-    patch:
-      tags: [Worker Availability]
-      summary: Open/close availability slots (max 2 per day; cannot close a booked slot)
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [slots]
-              properties:
-                slots:
-                  type: array
-                  items:
-                    type: object
-                    required: [date, timeSlot]
-                    properties:
-                      date: { type: string, format: date }
-                      timeSlot: { $ref: '#/components/schemas/TimeSlot' }
-      responses:
-        '200':
-          description: Slots updated
-          content:
-            application/json:
-              schema:
-                allOf:
-                  - $ref: '#/components/schemas/SuccessEnvelope'
-                  - type: object
-                    properties:
-                      data:
-                        type: object
-                        properties:
-                          slots:
-                            type: array
-                            items: { $ref: '#/components/schemas/WorkerAvailabilitySlot' }
-        '400': { $ref: '#/components/responses/BadRequest' }
-        '401': { $ref: '#/components/responses/Unauthorized' }
-        '409':
-          description: A requested slot has an active booking and cannot be closed
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorEnvelope' }
@@ -368,10 +295,61 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorEnvelope' }
 
+  /workers/me/calendar:
+    get:
+      tags: [Worker Availability]
+      summary: The worker's availability calendar (weekly schedule, date overrides, jobs per day)
+      parameters:
+        - { name: from, in: query, schema: { type: string, format: date } }
+        - { name: to, in: query, schema: { type: string, format: date } }
+      responses:
+        '200': { description: 'availableDays, isAvailable, today and one entry per day (available, overridden, jobCount, jobs)' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /workers/me/weekly-schedule:
+    put:
+      tags: [Worker Availability]
+      summary: Set the weekdays the worker normally works (0=Sun ... 6=Sat)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [availableDays]
+              properties:
+                availableDays: { type: array, items: { type: integer, minimum: 0, maximum: 6 } }
+      responses:
+        '200': { description: Saved }
+        '400': { $ref: '#/components/responses/BadRequest' }
+
+  /workers/me/date-overrides:
+    put:
+      tags: [Worker Availability]
+      summary: Open or close specific dates (null returns them to the weekly schedule)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [dates, isAvailable]
+              properties:
+                dates: { type: array, items: { type: string, format: date } }
+                isAvailable: { type: boolean, nullable: true }
+      responses:
+        '200': { description: Saved }
+        '409': { description: A date being closed has an accepted job }
+
   /bookings/{id}/quote:
     post:
       tags: [Bookings]
       summary: Worker submits materials cost on top of the pinned labor estimate
+      description: >-
+        Any materials cost needs receipt photos and photos of the materials in
+        use (booking photos the worker uploaded). A resubmission after the
+        client refused the quote increments its revision.
       parameters: [{ $ref: '#/components/parameters/BookingId' }]
       requestBody:
         required: true
@@ -382,7 +360,10 @@ paths:
               required: [materialsCost]
               properties:
                 materialsCost: { type: number, minimum: 0 }
+                laborCost: { type: number, minimum: 0, description: Custom-quote jobs only }
                 notes: { type: string }
+                receiptUrls: { type: array, items: { type: string } }
+                proofOfUseUrls: { type: array, items: { type: string } }
       responses:
         '201': { description: Quote submitted }
         '403': { $ref: '#/components/responses/Forbidden' }
@@ -403,6 +384,24 @@ paths:
               schema: { $ref: '#/components/schemas/ErrorEnvelope' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /bookings/{id}/quote/reject:
+    patch:
+      tags: [Bookings]
+      summary: Client refuses the quote (e.g. it doesn't match the receipt); the worker revises it
+      parameters: [{ $ref: '#/components/parameters/BookingId' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason: { type: string, minLength: 5 }
+      responses:
+        '200': { description: Refused — booking back to IN_PROGRESS }
         '409': { $ref: '#/components/responses/Conflict' }
 
   /bookings/{id}/quote/dispute:
@@ -1195,14 +1194,6 @@ paths:
       responses:
         '200': { description: Deselected }
         '404': { $ref: '#/components/responses/NotFound' }
-
-  /workers/me/capacity:
-    get:
-      tags: [Worker Profile]
-      summary: Get the authenticated worker's active job count vs. max concurrent jobs
-      responses:
-        '200': { description: OK }
-        '401': { $ref: '#/components/responses/Unauthorized' }
 
   /workers/me/capabilities:
     get:
@@ -2097,58 +2088,6 @@ paths:
             text/csv:
               schema: { type: string }
 
-  /admin/pricing-rules:
-    get:
-      tags: [Admin Pricing Rules]
-      summary: List city/service-type pricing bounds
-      parameters:
-        - name: search
-          in: query
-          schema: { type: string }
-      responses:
-        '200': { description: OK }
-    post:
-      tags: [Admin Pricing Rules]
-      summary: Create a pricing rule
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: { $ref: '#/components/schemas/PricingRuleInput' }
-      responses:
-        '201': { description: Created }
-        '400': { $ref: '#/components/responses/BadRequest' }
-
-  /admin/pricing-rules/{id}:
-    patch:
-      tags: [Admin Pricing Rules]
-      summary: Update a pricing rule
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema: { type: string }
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: { $ref: '#/components/schemas/PricingRuleInput' }
-      responses:
-        '200': { description: Updated }
-        '400': { $ref: '#/components/responses/BadRequest' }
-        '404': { $ref: '#/components/responses/NotFound' }
-    delete:
-      tags: [Admin Pricing Rules]
-      summary: Delete a pricing rule
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema: { type: string }
-      responses:
-        '200': { description: Deleted }
-        '404': { $ref: '#/components/responses/NotFound' }
-
   /admin/reviews:
     get:
       tags: [Admin Reviews]
@@ -2362,14 +2301,7 @@ components:
         - BARANGAY_CLEARANCE
         - POLICE_CLEARANCE
         - CEDULA
-    PricingRuleInput:
-      type: object
-      required: [city, serviceType, minPrice, maxPrice]
-      properties:
-        city: { type: string }
-        serviceType: { type: string }
-        minPrice: { type: number }
-        maxPrice: { type: number }
+        - HEALTH_CERTIFICATE
     ConditionType:
       type: string
       enum: [TIDY, NORMAL, HEAVY]
@@ -2412,16 +2344,6 @@ components:
         limit: { type: integer }
         total: { type: integer }
         pages: { type: integer }
-
-    WorkerAvailabilitySlot:
-      type: object
-      properties:
-        id: { type: string }
-        workerProfileId: { type: string }
-        date: { type: string, format: date }
-        timeSlot: { $ref: '#/components/schemas/TimeSlot' }
-        isBlocked: { type: boolean }
-        isBooked: { type: boolean }
 
     WorkerCard:
       type: object

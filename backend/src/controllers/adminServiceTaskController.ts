@@ -27,6 +27,8 @@ export type TaskInputBody = {
   quantityScopeFieldId?: string | null;
   durationHours?: number | null;
   isActive?: boolean;
+  // Inspection/diagnosis job — the client can ask for a follow-up job after it.
+  allowsFollowUp?: boolean;
   overrideReason?: string;
 };
 
@@ -48,6 +50,9 @@ export function validateTaskInput(body: TaskInputBody, existingNumberFieldIds: S
   }
   if (body.durationHours != null && (typeof body.durationHours !== 'number' || body.durationHours <= 0)) {
     return 'durationHours must be a positive number when provided.';
+  }
+  if (body.allowsFollowUp !== undefined && typeof body.allowsFollowUp !== 'boolean') {
+    return 'allowsFollowUp must be true or false.';
   }
 
   if (body.pricingModel === 'CUSTOM_QUOTE') {
@@ -140,6 +145,7 @@ export const createTask = async (req: AuthRequest, res: Response) => {
         quantityScopeFieldId:
           body.pricingModel === 'PER_UNIT' ? body.quantityScopeFieldId! : null,
         durationHours: isCustomQuote ? null : body.durationHours ?? null,
+        allowsFollowUp: body.allowsFollowUp ?? false,
       },
       include: taskInclude,
     });
@@ -209,6 +215,7 @@ export const updateTask = async (req: AuthRequest, res: Response) => {
             body.pricingModel === 'PER_UNIT' ? body.quantityScopeFieldId! : null,
           durationHours: isCustomQuote ? null : body.durationHours ?? null,
           isActive: body.isActive ?? existing.isActive,
+          ...(body.allowsFollowUp !== undefined ? { allowsFollowUp: body.allowsFollowUp } : {}),
         },
         include: taskInclude,
       });

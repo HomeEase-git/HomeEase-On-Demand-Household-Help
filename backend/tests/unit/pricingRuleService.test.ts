@@ -1,4 +1,4 @@
-import { isPriceWithinBounds, checkDoleFloor } from '@services/pricingRuleService';
+import { checkDoleFloor } from '@services/pricingRuleService';
 import { getDoleWageReference, getHighestDoleWageReference } from '@/constants/doleWageReference';
 
 // checkDoleFloor takes an already-resolved DoleWageReference (or null) —
@@ -7,39 +7,6 @@ import { getDoleWageReference, getHighestDoleWageReference } from '@/constants/d
 function checkDoleFloorForCity(city: string, minPrice: number, overrideReason: string | undefined) {
   return checkDoleFloor(getDoleWageReference(city), minPrice, overrideReason);
 }
-
-describe('pricingRuleService — boundary check (pure)', () => {
-  const bounds = { minPrice: 500, maxPrice: 2000 };
-
-  it('accepts a price within bounds', () => {
-    expect(isPriceWithinBounds(1000, bounds)).toBe(true);
-  });
-
-  it('accepts prices exactly at the boundaries (inclusive)', () => {
-    expect(isPriceWithinBounds(500, bounds)).toBe(true);
-    expect(isPriceWithinBounds(2000, bounds)).toBe(true);
-  });
-
-  it('rejects a price just below the minimum', () => {
-    expect(isPriceWithinBounds(499.99, bounds)).toBe(false);
-  });
-
-  it('rejects a price just above the maximum', () => {
-    expect(isPriceWithinBounds(2000.01, bounds)).toBe(false);
-  });
-
-  it('rejects prices far outside the range in either direction', () => {
-    expect(isPriceWithinBounds(0, bounds)).toBe(false);
-    expect(isPriceWithinBounds(1_000_000, bounds)).toBe(false);
-  });
-
-  it('handles a degenerate min === max range as a single accepted point', () => {
-    const pinned = { minPrice: 750, maxPrice: 750 };
-    expect(isPriceWithinBounds(750, pinned)).toBe(true);
-    expect(isPriceWithinBounds(749, pinned)).toBe(false);
-    expect(isPriceWithinBounds(751, pinned)).toBe(false);
-  });
-});
 
 describe('pricingRuleService — DOLE wage floor check (pure, soft guardrail)', () => {
   it('does not block a price at or above the regional hourly floor', () => {

@@ -7,8 +7,14 @@ import ScreenHeader from "../../components/ui/ScreenHeader";
 import StepperHorizontal from "../../components/steppers/StepperHorizontal";
 import PrimaryButton from "../../components/ui/PrimaryButton";
 import UploadCard from "../../components/ui/UploadCard";
+import InputField from "../../components/ui/InputField";
 import { useAuthStore } from "../../store/authStore";
-import { submitKycDocument, uploadKycFile } from "../../services/api";
+import {
+  getMyWorkerProfileDetails,
+  submitKycDocument,
+  updateWorkerProfileDetails,
+  uploadKycFile,
+} from "../../services/api";
 import { useAlertModal } from "../../contexts/AlertModalContext";
 
 // Worker-only screen — clients never reach this (selfie.tsx sends
@@ -27,12 +33,31 @@ export default function ResumeScreen() {
   });
   const [uploading, setUploading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  // Years of experience decide which expertise tiers the worker can reach;
+  // the admin checks it against the resume at approval.
+  const [years, setYears] = useState("");
+  const [savingYears, setSavingYears] = useState(false);
+  const yearsNumber = /^\d{1,2}$/.test(years.trim()) ? Number(years.trim()) : NaN;
+  const yearsValid = Number.isInteger(yearsNumber) && yearsNumber >= 0 && yearsNumber <= 60;
 
   useEffect(() => {
     if (!isWorker) {
       router.replace("/(kyc)/contract");
     }
   }, [isWorker, router]);
+
+  useEffect(() => {
+    if (!isWorker) return;
+    let active = true;
+    getMyWorkerProfileDetails()
+      .then((profile) => {
+        if (active && profile.yearsExperience != null) setYears(String(profile.yearsExperience));
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, [isWorker]);
 
   if (!isWorker) {
     return null;
@@ -89,6 +114,18 @@ export default function ResumeScreen() {
     }
   };
 
+  const handleContinue = async () => {
+    setSavingYears(true);
+    try {
+      await updateWorkerProfileDetails({ yearsExperience: yearsNumber });
+      router.push("/(kyc)/contract");
+    } catch (error: any) {
+      alertModal.error("Couldn't save your experience", error?.message || "Please try again.");
+    } finally {
+      setSavingYears(false);
+    }
+  };
+
   return (
     <SafeAreaView className="flex-1 bg-white">
       <ScreenHeader title="Upload Resume" showBack />
@@ -126,12 +163,25 @@ export default function ResumeScreen() {
           />
         </View>
 
+        <InputField
+          label="Years of experience in your trade"
+          value={years}
+          onChangeText={setYears}
+          placeholder="e.g. 5"
+          keyboardType="number-pad"
+          error={years.trim() && !yearsValid ? "Enter a whole number from 0 to 60" : null}
+        />
+        <Text className="text-text-muted text-xs -mt-2 mb-4">
+          Higher expertise tiers need more years of experience. HomeEase checks this against your resume.
+        </Text>
+
         <View className="gap-3 mt-2">
           <PrimaryButton
             label="Continue"
             fullWidth
-            disabled={!resumeFile.uri || uploading || submitting}
-            onPress={() => router.push("/(kyc)/contract")}
+            disabled={!resumeFile.uri || !yearsValid || uploading || submitting || savingYears}
+            loading={savingYears}
+            onPress={handleContinue}
           />
         </View>
       </ScrollView>

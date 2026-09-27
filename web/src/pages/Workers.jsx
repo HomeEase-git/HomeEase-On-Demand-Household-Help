@@ -12,7 +12,7 @@ import ErrorState from '../components/common/ErrorState'
 import { useListQuery } from '../hooks/useListQuery'
 import { fetchWorkers } from '../services/workers'
 
-const STATUS_MAP = { All: 'all', Verified: 'verified', Pending: 'pending' }
+const STATUS_MAP = { All: 'all', Verified: 'verified', Pending: 'pending', Deactivated: 'deactivated' }
 
 export default function Workers() {
   const fetchFn = useCallback(
@@ -49,7 +49,7 @@ export default function Workers() {
       <div className="toolbar">
         <SearchBar placeholder="Search workers..." value={params.search || ''} onChange={setSearch} />
         <FilterTabs
-          tabs={['All', 'Verified', 'Pending']}
+          tabs={Object.keys(STATUS_MAP)}
           activeTab={params.statusTab || 'All'}
           onTabChange={(tab) => setFilter('statusTab', tab)}
         />
@@ -90,6 +90,11 @@ export default function Workers() {
                           <Badge variant={worker.status === 'Verified' ? 'approved' : 'pending'}>
                             {worker.status}
                           </Badge>
+                          {worker.accountStatus === 'deactivated' && (
+                            <span style={{ marginLeft: '0.35rem' }} title="The worker took themselves off HomeEase. They can reactivate by signing in.">
+                              <Badge variant="suspended">Deactivated</Badge>
+                            </span>
+                          )}
                           {worker.debtHoldAt && (
                             <span style={{ marginLeft: '0.35rem' }}>
                               <Badge variant="suspended">On Hold</Badge>

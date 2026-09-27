@@ -42,6 +42,6 @@ export const SETUP_ITEM_ROUTES: Record<api.WorkerSetupItemKey, { path: string; h
   PROFILE_PHOTO: { path: "/(worker)/profile", hint: "Tap your photo on the Profile tab to add one." },
   PAYOUT_METHOD: { path: "/(worker)/earnings/payout", hint: "Add the GCash or Maya account your earnings go to." },
   ADDRESS: { path: "/(worker)/profile/edit", hint: "Your service base, used for distance fees." },
-  AVAILABILITY: { path: "/(worker)/profile/availability", hint: "Open the days and times you can work." },
+  AVAILABILITY: { path: "/(worker)/profile/availability", hint: "Pick the days of the week you work." },
   SERVICES: { path: "/(worker)/profile/skills", hint: "Tick at least one task you do in an approved service." },
 };
