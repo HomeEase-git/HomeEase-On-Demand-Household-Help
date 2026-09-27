@@ -326,7 +326,12 @@ export const searchWorkers = async (req: AuthRequest, res: Response) => {
         // per-unit rate, for mobile to multiply by quantity once the client
         // enters one (see bookingPriceEstimate.ts / Stage 4 of the task-
         // pricing plan). Null for every other pricing model.
-        unitPrice: unitPriceForTask != null ? Math.round(unitPriceForTask * multiplier * 100) / 100 : null,
+        // Includes the same-day rush share, so rate x quantity is the whole
+        // job price before the distance fee.
+        unitPrice:
+          unitPriceForTask != null
+            ? Math.round(unitPriceForTask * (multiplier + (isRush ? tierSettings.rushFeeRate : 0)) * 100) / 100
+            : null,
         // Same-day booking: the rush fee is this share of the service price
         // (for mobile's per-unit estimate). 0 otherwise.
         rushFeeRate: isRush ? tierSettings.rushFeeRate : 0,

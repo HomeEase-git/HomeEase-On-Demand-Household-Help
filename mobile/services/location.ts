@@ -145,7 +145,7 @@ export type LiveLocationUpdate = LatLng & { accuracy: number | null };
 
 // Continuous foreground tracking for a worker en route to a job — the caller
 // is responsible for stopping this once the worker checks in as arrived (see
-// mobile/app/(worker)/requests/job/[jobId].tsx). `distanceInterval`/`timeInterval`
+// mobile/app/(worker)/records/job/[jobId].tsx). `distanceInterval`/`timeInterval`
 // throttle both battery use and how often a POST goes out, independent of
 // however fast the OS itself reports fixes.
 export async function watchLiveLocation(

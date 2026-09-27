@@ -38,7 +38,7 @@ export interface PricePointEstimate {
   // worker's real basePrice/distanceFee/tierFee (see step-3's
   // draft.workerPriceBreakdown); null when only the lumped laborCost is known
   // (e.g. a PER_UNIT rate x quantity, which has no such split).
-  priceBreakdown: { basePrice: number; distanceFee: number; tierFee: number } | null;
+  priceBreakdown: { basePrice: number; distanceFee: number; tierFee: number; rushFee?: number } | null;
   addOnsTotal: number;
   tip: number;
   subtotal: number;
@@ -52,7 +52,7 @@ export interface PricePointEstimate {
  */
 export function estimatePricePoint(params: {
   laborCost: number;
-  priceBreakdown?: { basePrice: number; distanceFee: number; tierFee: number } | null;
+  priceBreakdown?: { basePrice: number; distanceFee: number; tierFee: number; rushFee?: number } | null;
   addOnsTotal?: number;
   tip?: number;
 }): PricePointEstimate {

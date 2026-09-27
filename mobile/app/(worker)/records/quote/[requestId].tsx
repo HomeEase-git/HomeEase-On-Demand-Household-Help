@@ -12,6 +12,7 @@ import { Skeleton } from "../../../../components/ui/Skeleton";
 import * as api from "../../../../services/api";
 import { colors } from "../../../../constants";
 import { useAlertModal } from "../../../../contexts/AlertModalContext";
+import ProofPhotosField from "../../../../components/booking/ProofPhotosField";
 
 type BookingSummary = {
   id: string;
@@ -19,6 +20,17 @@ type BookingSummary = {
   scheduledDate: string;
   estimatedPrice: number;
   addOns?: { id: string; name: string; price: number }[];
+  // A custom-quote job has no price until the worker quotes it.
+  serviceTaskPricingModel?: string | null;
+  quote?: {
+    status?: string | null;
+    rejectionReason?: string | null;
+    materialsCost?: number;
+    laborCost?: number;
+    notes?: string | null;
+    receiptUrls?: string[];
+    proofOfUseUrls?: string[];
+  } | null;
 };
 
 export default function SubmitQuoteScreen() {
@@ -35,7 +47,18 @@ export default function SubmitQuoteScreen() {
       setFetching(true);
       try {
         const detail = await api.getBookingDetail(requestId);
-        if (active) setBooking(detail);
+        if (!active) return;
+        setBooking(detail);
+        // Revising a refused quote starts from what was sent before.
+        if (detail?.quote?.status === "REJECTED") {
+          setMaterialsCost(detail.quote.materialsCost ? String(detail.quote.materialsCost) : "");
+          setNotes(detail.quote.notes ?? "");
+          setReceiptUrls(detail.quote.receiptUrls ?? []);
+          setProofOfUseUrls(detail.quote.proofOfUseUrls ?? []);
+          if (detail.serviceTaskPricingModel === "CUSTOM_QUOTE" && detail.quote.laborCost) {
+            setLaborInput(String(detail.quote.laborCost));
+          }
+        }
       } catch (error) {
         console.error("Load booking for quote error:", error);
       } finally {
@@ -50,13 +73,21 @@ export default function SubmitQuoteScreen() {
 
   const [materialsCost, setMaterialsCost] = useState("");
   const [notes, setNotes] = useState("");
+  const [laborInput, setLaborInput] = useState("");
+  const [receiptUrls, setReceiptUrls] = useState<string[]>([]);
+  const [proofOfUseUrls, setProofOfUseUrls] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
 
-  const labor = booking?.estimatedPrice ?? 0;
+  const isCustomQuote = booking?.serviceTaskPricingModel === "CUSTOM_QUOTE";
+  const labor = isCustomQuote ? parseFloat(laborInput) || 0 : (booking?.estimatedPrice ?? 0);
   const addOns = booking?.addOns ?? [];
   const addOnsTotal = addOns.reduce((sum, a) => sum + a.price, 0);
   const materials = parseFloat(materialsCost) || 0;
   const total = labor + addOnsTotal + materials;
+  // Materials must come with a receipt and a photo of them in use.
+  const needsProof = materials > 0;
+  const proofMissing = needsProof && (receiptUrls.length === 0 || proofOfUseUrls.length === 0);
+  const canSubmit = !proofMissing && (!isCustomQuote || labor > 0);
 
   if (fetching) {
     return (
@@ -93,17 +124,20 @@ export default function SubmitQuoteScreen() {
     try {
       await api.submitQuote(booking.id, {
         materialsCost: materials,
+        ...(isCustomQuote ? { laborCost: labor } : {}),
         notes: notes.trim(),
+        receiptUrls: needsProof ? receiptUrls : [],
+        proofOfUseUrls: needsProof ? proofOfUseUrls : [],
       });
 
       alertModal.success(
         "Quote Submitted",
-        "The client has been notified and will review your quote.",
+        "The client has been notified and will check it against your receipt.",
         [{ text: "OK", onPress: () => router.back() }],
       );
-    } catch (error) {
+    } catch (error: any) {
       console.error("Submit quote error:", error);
-      alertModal.error("Error", "Failed to submit your quote. Please try again.");
+      alertModal.error("Error", error?.message || "Failed to submit your quote. Please try again.");
     } finally {
       setLoading(false);
     }
@@ -122,6 +156,16 @@ export default function SubmitQuoteScreen() {
           </Text>
         </View>
 
+        {/* Refused quote — the client's reason */}
+        {booking.quote?.status === "REJECTED" && (
+          <View className="bg-error/10 border border-error/30 rounded-xl p-4 mb-4">
+            <Text className="text-error font-bold text-sm">The client refused your last quote</Text>
+            {!!booking.quote.rejectionReason && (
+              <Text className="text-text-secondary text-sm mt-1">&ldquo;{booking.quote.rejectionReason}&rdquo;</Text>
+            )}
+          </View>
+        )}
+
         {/* Info Banner */}
         <View className="bg-accent/10 border border-accent/30 rounded-xl p-4 flex-row items-start mb-6">
           <Ionicons
@@ -130,22 +174,35 @@ export default function SubmitQuoteScreen() {
             color={colors.accent.DEFAULT}
           />
           <Text className="text-text-secondary text-sm ml-2 flex-1">
-            Your labor is covered by the booking price. Add any materials or
-            extra costs below. The client will approve or dispute them.
+            {isCustomQuote
+              ? "This job is priced by your quote. Enter your price for the work and any materials."
+              : "Your service is covered by the booking price. Add any materials below."}{" "}
+            Materials need a photo of the receipt and a photo of them used on the job. The client can refuse a quote
+            that doesn&apos;t match the receipt.
           </Text>
         </View>
 
         {/* Cost Inputs */}
         <Text className="text-text-primary font-bold mb-4">Cost Breakdown</Text>
 
-        <View className="bg-card rounded-xl px-3 py-3 mb-4 flex-row justify-between items-center">
-          <Text className="text-text-secondary text-sm">
-            Labor Cost (settled at booking)
-          </Text>
-          <Text className="text-text-primary font-semibold">
-            ₱{labor.toFixed(2)}
-          </Text>
-        </View>
+        {isCustomQuote ? (
+          <InputField
+            label="Your price for the work (₱)"
+            value={laborInput}
+            onChangeText={setLaborInput}
+            placeholder="e.g. 3500"
+            keyboardType="numeric"
+          />
+        ) : (
+          <View className="bg-card rounded-xl px-3 py-3 mb-4 flex-row justify-between items-center">
+            <Text className="text-text-secondary text-sm">
+              Service Cost (settled at booking)
+            </Text>
+            <Text className="text-text-primary font-semibold">
+              ₱{labor.toFixed(2)}
+            </Text>
+          </View>
+        )}
 
         {addOns.length > 0 && (
           <View className="bg-card rounded-xl px-3 py-3 mb-4">
@@ -164,12 +221,33 @@ export default function SubmitQuoteScreen() {
         )}
 
         <InputField
-          label="Additional Costs (₱) — optional"
+          label="Materials (₱) — optional"
           value={materialsCost}
           onChangeText={setMaterialsCost}
-          placeholder="e.g. 200 for materials"
+          placeholder="Exactly what the receipt says"
           keyboardType="numeric"
         />
+
+        {needsProof && (
+          <>
+            <ProofPhotosField
+              bookingId={booking.id}
+              label="Receipt photos"
+              hint="The receipt(s) for these materials"
+              urls={receiptUrls}
+              onChange={setReceiptUrls}
+              required
+            />
+            <ProofPhotosField
+              bookingId={booking.id}
+              label="Materials in use"
+              hint="The materials installed or used on this job"
+              urls={proofOfUseUrls}
+              onChange={setProofOfUseUrls}
+              required
+            />
+          </>
+        )}
 
         <InputField
           label="Notes for client — optional"
@@ -187,7 +265,7 @@ export default function SubmitQuoteScreen() {
           </Text>
           <View className="mt-2">
             <View className="flex-row justify-between">
-              <Text className="text-text-muted text-xs">Labor (settled)</Text>
+              <Text className="text-text-muted text-xs">{isCustomQuote ? "Your price" : "Service (settled)"}</Text>
               <Text className="text-text-secondary text-xs">
                 ₱{labor.toFixed(2)}
               </Text>
@@ -202,7 +280,7 @@ export default function SubmitQuoteScreen() {
             )}
             {materials > 0 && (
               <View className="flex-row justify-between mt-1">
-                <Text className="text-text-muted text-xs">Additional Costs</Text>
+                <Text className="text-text-muted text-xs">Materials</Text>
                 <Text className="text-text-secondary text-xs">
                   ₱{materials.toFixed(2)}
                 </Text>
@@ -221,11 +299,14 @@ export default function SubmitQuoteScreen() {
           </View>
         </View>
 
+        {proofMissing && (
+          <Text className="text-error text-xs mb-3">Add a receipt photo and a photo of the materials in use.</Text>
+        )}
         <View className="gap-3">
           <PrimaryButton
-            label="Submit Quote to Client"
+            label={booking.quote?.status === "REJECTED" ? "Submit Revised Quote" : "Submit Quote to Client"}
             fullWidth
-            disabled={loading}
+            disabled={loading || !canSubmit}
             loading={loading}
             onPress={handleSubmit}
           />

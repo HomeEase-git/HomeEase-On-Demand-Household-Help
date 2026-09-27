@@ -11,9 +11,12 @@ import { getWorkerNetAmount } from "../../../utils/pricing";
 import { useTabRefresh } from "../../../hooks/useTabRefresh";
 import { usePullToRefresh } from "../../../hooks/usePullToRefresh";
 
-type RecordTab = "Completed" | "Cancelled" | "Ongoing";
+type RecordTab = "Ongoing" | "Completed" | "Cancelled";
+const TABS: RecordTab[] = ["Ongoing", "Completed", "Cancelled"];
 
-function tabForJob(job: WorkerJob): RecordTab {
+// New (PENDING) requests stay on the Requests tab until accepted.
+function tabForJob(job: WorkerJob): RecordTab | null {
+  if (job.status === "Pending") return null;
   if (job.status === "Completed") return "Completed";
   if (job.status === "Cancelled") return "Cancelled";
   return "Ongoing";
@@ -21,7 +24,8 @@ function tabForJob(job: WorkerJob): RecordTab {
 
 export default function RecordsScreen() {
   const router = useRouter();
-  const [tab, setTab] = useState<RecordTab>("Completed");
+  // Opens on the jobs in progress — that's what a worker comes here for.
+  const [tab, setTab] = useState<RecordTab>("Ongoing");
   const [jobs, setJobs] = useState<WorkerJob[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -48,9 +52,11 @@ export default function RecordsScreen() {
 
   const filtered = jobs.filter((j) => tabForJob(j) === tab);
 
+  // An ongoing job opens straight into the live job screen (arrive, start,
+  // quote, complete); a finished one opens its record.
   const handleRecordPress = useCallback(
-    (id: string) => {
-      router.push(`/(worker)/records/${id}`);
+    (job: WorkerJob) => {
+      router.push(tabForJob(job) === "Ongoing" ? `/(worker)/records/job/${job.id}` : `/(worker)/records/${job.id}`);
     },
     [router],
   );
@@ -68,9 +74,9 @@ export default function RecordsScreen() {
             tabForJob(item) === "Completed"
               ? getWorkerNetAmount(item)
               : item.finalPrice ?? item.estimatedPrice,
-          status: tabForJob(item),
+          status: tabForJob(item) ?? "Ongoing",
         }}
-        onPress={() => handleRecordPress(item.id)}
+        onPress={() => handleRecordPress(item)}
       />
     ),
     [handleRecordPress],
@@ -81,48 +87,17 @@ export default function RecordsScreen() {
       <View className="px-4 pt-4 pb-2">
         <Text className="text-text-primary text-2xl font-bold">Job Records</Text>
         <View className="flex-row gap-2 mt-3">
-          <Pressable
-            className={`px-3 py-2 rounded-xl ${tab === "Ongoing" ? "bg-accent" : "bg-card"}`}
-            onPress={() => setTab("Ongoing")}
-          >
-            <Text
-              className={
-                tab === "Ongoing"
-                  ? "text-white font-semibold text-sm"
-                  : "text-text-secondary text-sm"
-              }
+          {TABS.map((t) => (
+            <Pressable
+              key={t}
+              className={`px-3 py-2 rounded-xl ${tab === t ? "bg-accent" : "bg-card"}`}
+              onPress={() => setTab(t)}
             >
-              Ongoing
-            </Text>
-          </Pressable>
-          <Pressable
-            className={`px-3 py-2 rounded-xl ${tab === "Completed" ? "bg-accent" : "bg-card"}`}
-            onPress={() => setTab("Completed")}
-          >
-            <Text
-              className={
-                tab === "Completed"
-                  ? "text-white font-semibold text-sm"
-                  : "text-text-secondary text-sm"
-              }
-            >
-              Completed
-            </Text>
-          </Pressable>
-          <Pressable
-            className={`px-3 py-2 rounded-xl ${tab === "Cancelled" ? "bg-accent" : "bg-card"}`}
-            onPress={() => setTab("Cancelled")}
-          >
-            <Text
-              className={
-                tab === "Cancelled"
-                  ? "text-white font-semibold text-sm"
-                  : "text-text-secondary text-sm"
-              }
-            >
-              Cancelled
-            </Text>
-          </Pressable>
+              <Text className={tab === t ? "text-white font-semibold text-sm" : "text-text-secondary text-sm"}>
+                {t}
+              </Text>
+            </Pressable>
+          ))}
         </View>
       </View>
       {loading ? (

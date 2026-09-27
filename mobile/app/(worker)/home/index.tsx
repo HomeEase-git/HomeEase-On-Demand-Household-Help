@@ -164,7 +164,7 @@ export default function WorkerHomeScreen() {
         </View>
 
         {nextJob && (
-          <NextJobCard job={nextJob} onOpen={() => router.push(`/(worker)/requests/job/${nextJob.id}`)} />
+          <NextJobCard job={nextJob} onOpen={() => router.push(`/(worker)/records/job/${nextJob.id}`)} />
         )}
 
         {accountHold && (

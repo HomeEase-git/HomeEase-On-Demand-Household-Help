@@ -28,14 +28,13 @@ export default function BookingStep3Screen() {
   const draft = useBookingStore((s) => s.draft);
   const setDraft = useBookingStore((s) => s.setDraft);
 
-  const readyToSearch = !!draft.serviceType && !!draft.date && !!draft.timeSlot;
+  const readyToSearch = !!draft.serviceType && !!draft.date && !!draft.time;
 
   const { workers, loading, error } = useWorkerDiscovery(
     {
       serviceType: draft.serviceType ?? undefined,
       serviceTaskId: draft.serviceTaskId ?? undefined,
       date: draft.date ?? undefined,
-      timeSlot: draft.timeSlot ?? undefined,
       scopeAnswers: draft.scopeAnswers,
       lat: draft.lat,
       lng: draft.lng,
@@ -155,7 +154,7 @@ export default function BookingStep3Screen() {
           <View className="py-10 items-center">
             <Ionicons name="sad-outline" size={32} color={colors.text.muted} />
             <Text className="text-text-secondary text-sm mt-2 text-center">
-              No pros available at this time. Try another slot or tap Auto-Match Me.
+              No pros are available on this date. Try another date or tap Auto-Match Me.
             </Text>
           </View>
         )}

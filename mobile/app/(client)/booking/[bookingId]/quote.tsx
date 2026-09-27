@@ -17,6 +17,7 @@ import { useBookingStore, API_STATUS_MAP, type Booking } from "../../../../store
 import {
   approveQuote as apiApproveQuote,
   disputeQuote as apiDisputeQuote,
+  rejectQuote as apiRejectQuote,
   uploadIssuePhoto,
   getBookingDetail,
 } from "../../../../services/api";
@@ -59,6 +60,14 @@ export default function QuoteReviewScreen() {
   const quote = booking?.quote;
 
   const [showDisputeForm, setShowDisputeForm] = useState(false);
+  const [showRefuseForm, setShowRefuseForm] = useState(false);
+  const [refuseReason, setRefuseReason] = useState("");
+  // Receipts and materials-in-use photos the worker attached (not kept in the store).
+  const [proof, setProof] = useState<{ receiptUrls: string[]; proofOfUseUrls: string[]; revision: number }>({
+    receiptUrls: [],
+    proofOfUseUrls: [],
+    revision: 0,
+  });
   const [disputeReason, setDisputeReason] = useState("");
   const [evidencePhotos, setEvidencePhotos] = useState<string[]>([]);
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
@@ -68,12 +77,17 @@ export default function QuoteReviewScreen() {
   const [notFound, setNotFound] = useState(false);
 
   useEffect(() => {
-    if (booking || !bookingId) return;
+    if (!bookingId) return;
     let cancelled = false;
     (async () => {
       try {
         const detail = await getBookingDetail(bookingId);
         if (cancelled) return;
+        setProof({
+          receiptUrls: detail?.quote?.receiptUrls ?? [],
+          proofOfUseUrls: detail?.quote?.proofOfUseUrls ?? [],
+          revision: detail?.quote?.revision ?? 0,
+        });
         const mapped = mapDetailToBooking(detail);
         useBookingStore.setState((s) => ({
           bookings: [...s.bookings.filter((b) => b.id !== mapped.id), mapped],
@@ -88,7 +102,7 @@ export default function QuoteReviewScreen() {
     return () => {
       cancelled = true;
     };
-  }, [booking, bookingId]);
+  }, [bookingId]);
 
   if (checkingBooking) {
     return (
@@ -121,7 +135,9 @@ export default function QuoteReviewScreen() {
   const handleApprove = async () => {
     alertModal.confirm(
       "Approve Quote?",
-      `You are agreeing to pay ₱${quote.totalAmount.toFixed(2)} upon service completion.`,
+      `You are agreeing to pay ₱${quote.totalAmount.toFixed(2)} upon service completion.${
+        quote.materialsCost > 0 ? " Make sure the materials price matches the receipt." : ""
+      }`,
       {
         confirmText: "Approve",
         cancelText: "Cancel",
@@ -166,6 +182,30 @@ export default function QuoteReviewScreen() {
 
   const handleRemoveEvidencePhoto = (url: string) => {
     setEvidencePhotos((prev) => prev.filter((u) => u !== url));
+  };
+
+  // Refusing sends the quote back to the worker to fix (e.g. the price
+  // doesn't match the receipt). Disputing asks HomeEase to step in instead.
+  const handleRefuse = async () => {
+    if (refuseReason.trim().length < 5) {
+      alertModal.error("Error", "Tell your pro what's wrong with the quote.");
+      return;
+    }
+    setLoading(true);
+    try {
+      await apiRejectQuote(booking.id, refuseReason.trim());
+      useBookingStore.setState((s) => ({
+        bookings: s.bookings.map((b) => (b.id === booking.id ? { ...b, status: "InProgress" as const, quote: undefined } : b)),
+      }));
+      alertModal.success("Quote Refused", "Your pro will revise the quote and send it again.", [
+        { text: "OK", onPress: () => router.back() },
+      ]);
+    } catch (error: any) {
+      console.error("Refuse quote error:", error);
+      alertModal.error("Error", error?.message || "Failed to refuse the quote. Please try again.");
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleDispute = async () => {
@@ -257,7 +297,7 @@ export default function QuoteReviewScreen() {
 
           <View className="flex-row justify-between py-2 border-b border-divider">
             <Text className="text-text-secondary text-sm">
-              Labor (agreed at booking)
+              Service (agreed at booking)
             </Text>
             <Text className="text-text-primary font-semibold">
               ₱{quote.laborCost.toFixed(2)}
@@ -267,7 +307,7 @@ export default function QuoteReviewScreen() {
           {quote.materialsCost > 0 && (
             <View className="flex-row justify-between py-2 border-b border-divider">
               <Text className="text-text-secondary text-sm">
-                Additional Costs
+                Materials
               </Text>
               <Text className="text-text-primary font-semibold">
                 ₱{quote.materialsCost.toFixed(2)}
@@ -290,7 +330,42 @@ export default function QuoteReviewScreen() {
               <Text className="text-text-primary text-sm">{quote.notes}</Text>
             </View>
           ) : null}
+          {proof.revision > 0 && (
+            <Text className="text-text-muted text-xs mt-2">Revised quote (version {proof.revision + 1})</Text>
+          )}
         </View>
+
+        {/* Proof of purchase and use — check the materials price against the receipt */}
+        {(proof.receiptUrls.length > 0 || proof.proofOfUseUrls.length > 0) && (
+          <View className="bg-card rounded-2xl p-4 mb-4">
+            <Text className="text-text-primary font-bold text-base mb-1">Proof</Text>
+            <Text className="text-text-muted text-xs mb-3">
+              Check that the materials price matches the receipt. If it doesn&apos;t, refuse the quote.
+            </Text>
+            {[
+              { title: "Receipts", urls: proof.receiptUrls },
+              { title: "Materials in use", urls: proof.proofOfUseUrls },
+            ].map((group) =>
+              group.urls.length > 0 ? (
+                <View key={group.title} className="mb-3">
+                  <Text className="text-text-secondary text-xs font-semibold mb-1.5">{group.title}</Text>
+                  <View className="flex-row flex-wrap gap-2">
+                    {group.urls.map((url) => (
+                      <Pressable
+                        key={url}
+                        accessibilityRole="imagebutton"
+                        accessibilityLabel={`Open ${group.title.toLowerCase()} photo`}
+                        onPress={() => router.push({ pathname: "/(client)/inbox/image-viewer", params: { imageUrl: url } })}
+                      >
+                        <RemoteImage source={{ uri: url }} style={{ width: 88, height: 88, borderRadius: 12 }} resizeMode="cover" />
+                      </Pressable>
+                    ))}
+                  </View>
+                </View>
+              ) : null,
+            )}
+          </View>
+        )}
 
         {/* Info note */}
         {!isAlreadyActedOn && (
@@ -303,6 +378,19 @@ export default function QuoteReviewScreen() {
             <Text className="text-text-secondary text-xs ml-2 flex-1">
               You&apos;ll only be charged after the job is done.
             </Text>
+          </View>
+        )}
+
+        {/* Refuse form */}
+        {showRefuseForm && (
+          <View className="mb-4">
+            <InputField
+              label="What's wrong with the quote?"
+              value={refuseReason}
+              onChangeText={setRefuseReason}
+              placeholder="e.g. The receipt says ₱300 but the quote says ₱350"
+              multiline
+            />
           </View>
         )}
 
@@ -356,7 +444,24 @@ export default function QuoteReviewScreen() {
         {/* Action buttons */}
         {!isAlreadyActedOn && (
           <View className="gap-3">
-            {!showDisputeForm ? (
+            {showRefuseForm ? (
+              <>
+                <DangerButton
+                  label="Refuse Quote"
+                  fullWidth
+                  loading={loading}
+                  disabled={refuseReason.trim().length < 5 || loading}
+                  onPress={handleRefuse}
+                />
+                <OutlinedButton
+                  label="Cancel"
+                  onPress={() => {
+                    setShowRefuseForm(false);
+                    setRefuseReason("");
+                  }}
+                />
+              </>
+            ) : !showDisputeForm ? (
               <>
                 <PrimaryButton
                   label={`Approve ₱${quote.totalAmount.toFixed(2)}`}
@@ -364,6 +469,7 @@ export default function QuoteReviewScreen() {
                   loading={loading}
                   onPress={handleApprove}
                 />
+                <OutlinedButton label="Refuse & Ask for a Revision" onPress={() => setShowRefuseForm(true)} />
                 <Pressable
                   className="border-2 border-warning rounded-xl py-4 items-center"
                   onPress={() => setShowDisputeForm(true)}

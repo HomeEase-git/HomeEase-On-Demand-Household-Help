@@ -7,7 +7,7 @@ export function validateDraftForSubmit(draft: DraftBooking): { ok: boolean; erro
   if (!draft.address) errors.push('Please enter a service address.');
   if (draft.lat == null || draft.lng == null) errors.push('Please select an address with a valid location.');
   if (!draft.date) errors.push('Please select a date.');
-  if (!draft.timeSlot) errors.push('Please select a time slot.');
+  if (!draft.time) errors.push('Please select a start time.');
   if (!draft.workerId && !draft.isAutoMatched) errors.push('Please select a worker.');
   if (!draft.paymentMethod) errors.push('Please select a payment method.');
 

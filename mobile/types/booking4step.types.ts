@@ -1,23 +1,13 @@
 /**
  * Types for the 4-step booking flow (Scope -> Schedule -> Who -> Confirm),
- * matching the backend's Phase 1/2 schema+API additions (TimeSlot, RoomType,
- * ConditionType, worker discovery, auto-match booking creation).
+ * matching the backend's API (RoomType, ConditionType, worker discovery,
+ * auto-match booking creation). Bookings are scheduled by date plus an exact
+ * start time "HH:00" — see utils/bookingTime.ts.
  */
 
-export const TIME_SLOTS = ['MORNING', 'AFTERNOON', 'EVENING'] as const;
-export type TimeSlot = (typeof TIME_SLOTS)[number];
-
-export const TIME_SLOT_LABELS: Record<TimeSlot, string> = {
-  MORNING: 'Morning',
-  AFTERNOON: 'Afternoon',
-  EVENING: 'Evening',
-};
-
-export const TIME_SLOT_WINDOWS: Record<TimeSlot, string> = {
-  MORNING: '8am - 12pm',
-  AFTERNOON: '12pm - 4pm',
-  EVENING: '4pm - 8pm',
-};
+// Retired Morning/Afternoon/Evening slots — only read to show bookings made
+// before exact start times.
+export type TimeSlot = 'MORNING' | 'AFTERNOON' | 'EVENING';
 
 export const ROOM_TYPES = [
   'BEDROOM',
@@ -111,15 +101,18 @@ export type WorkerCard = {
   // Itemized version of estimatedTotal (same null conditions) — lets the
   // booking flow show Base rate / Distance fee / Tier surcharge as separate
   // lines instead of one lumped number.
-  priceBreakdown: { basePrice: number; distanceFee: number; tierFee: number } | null;
+  priceBreakdown: { basePrice: number; distanceFee: number; tierFee: number; rushFee?: number } | null;
   // Only populated when the search was scoped to a PER_UNIT task — this
   // worker's tier-adjusted rate, with no total (quantity isn't known to the
   // backend yet). estimatedTotal stays null in that case; use this instead.
   unitPrice: number | null;
   matchedServiceTypeId: string | null;
   badges: string[];
-  openSlots: TimeSlot[];
   tier?: WorkerTier;
+  // Same-day search: the share of the service price added as the rush fee
+  // (0 otherwise) — for the per-unit estimate.
+  rushFeeRate?: number;
+  yearsExperience?: number | null;
 };
 
 export const TASK_PRICING_MODELS = ['FIXED', 'PER_UNIT', 'TIERED', 'CUSTOM_QUOTE'] as const;
@@ -159,7 +152,9 @@ export type CreateBookingPayload = {
   lat: number;
   lng: number;
   date: string;
-  timeSlot: TimeSlot;
+  time: string; // "HH:00", PH local
+  // Follow-up job after an inspection/diagnosis booking (same worker).
+  parentBookingId?: string | null;
   addOns?: BookingAddOnInput[];
   packageIds?: string[];
   priorities?: string[];
@@ -179,7 +174,9 @@ export type CreateBookingResponse = {
   isAutoMatched: boolean;
   status: string;
   scheduledDate: string;
-  timeSlot: TimeSlot;
+  scheduledTime: string;
+  isRush: boolean;
+  parentBookingId?: string | null;
   estimatedPrice: number;
   estimatedDurationHours: number | null;
   expiresAt: string;
@@ -188,6 +185,7 @@ export type CreateBookingResponse = {
     conditionFee: number;
     distanceFee: number;
     urgencyFee: number;
+    rushFee: number;
     tierFee: number;
     addOnsTotal: number;
     finalEstimate: number;
@@ -203,46 +201,6 @@ export type CreateBookingResponse = {
 // (see bookingController `hasPets`). Step 4 collects this as a single
 // toggle and submits this constant when it's on.
 export const PET_FRIENDLY_PRIORITY = 'Pet-friendly';
-
-// Multi-day upfront booking (see backend bookingController.
-// createMultiDayBooking) — books the SAME worker for N consecutive days.
-// Only reachable when a worker is already locked in (draft.workerLocked),
-// since there's no auto-match here; no addOns/packageIds/tip for this first
-// version (see the backend docblock for why).
-export type CreateMultiDayBookingPayload = {
-  workerId: string;
-  serviceType: string;
-  serviceTaskId?: string | null;
-  description?: string;
-  address: string;
-  city?: string;
-  lat: number;
-  lng: number;
-  startDate: string;
-  dayCount: number;
-  timeSlot: TimeSlot;
-  priorities?: string[];
-  notes?: string;
-  paymentMethodType?: 'GCASH' | 'MAYA' | 'CASH';
-  paymentAccountIdentifier?: string;
-  scopeAnswers?: Record<string, string | string[]>;
-  issuePhotoUrls?: string[];
-  idempotencyKey?: string;
-};
-
-export type CreateMultiDayBookingResponse = {
-  groupId: string;
-  totalDays: number;
-  bookings: {
-    id: string;
-    scheduledDate: string;
-    timeSlot: TimeSlot;
-    status: string;
-    estimatedPrice: number;
-    expiresAt: string;
-  }[];
-  totalEstimatedPrice: number;
-};
 
 export type AddOnToggleKey = 'eco_friendly' | 'client_supplies' | 'call_before_arrival';
 

@@ -4,6 +4,7 @@ import { validateDraftForSubmit as validateDraftUtil } from '../utils/bookingVal
 import { mapServiceToCategory } from '../utils/categoryMapping';
 import { getBookings } from '../services/api';
 import type { TimeSlot, WorkerTier } from '../types/booking4step.types';
+import { bookingStartTime } from '../utils/bookingTime';
 
 export type BookingStatus =
   | 'Pending'
@@ -66,9 +67,8 @@ export type Booking = {
   workerVerified?: boolean;
   completionPhotoUrl?: string | null;
   category?: string;
-  // Reschedule-on-conflict (see backend bookingController.extendBooking) —
-  // set when a DIFFERENT worker job's spillover moved this booking to a new
-  // date. rescheduleAcknowledgedAt null = still awaiting the client's
+  // Reschedule-on-conflict (from the retired "Continue Tomorrow") — set when
+  // a DIFFERENT worker job's spillover moved this booking to a new date. rescheduleAcknowledgedAt null = still awaiting the client's
   // response (keep the date, or cancel via the existing free-cancel path).
   rescheduledAt?: string | null;
   previousScheduledDate?: string | null;
@@ -78,10 +78,11 @@ export type Booking = {
   // Booking.originalScheduledDate).
   originalScheduledDate?: string | null;
   rescheduleAcknowledgedAt?: string | null;
-  // Set once the worker never checks in past the grace period (see backend
-  // bookingWorker.flagWorkerNoShows) — lets the client cancel penalty-free
-  // even though the booking is past PENDING.
+  // Set when the worker never checked in (see backend
+  // bookingWorker.cancelWorkerNoShows, which also cancels the booking).
   workerNoShowFlaggedAt?: string | null;
+  // Same-day booking with the rush fee.
+  isRush?: boolean;
   // Itemized breakdown for the receipt-style price display — set right after
   // creation (see step-4.tsx) from POST /bookings' `pricing` block, or
   // refreshed from GET /bookings/:id's `priceBreakdown` (see
@@ -90,6 +91,7 @@ export type Booking = {
     basePrice: number | null;
     distanceFee: number;
     tierFee: number;
+    rushFee?: number;
     addOns: { name: string; price: number }[];
     subtotal: number;
     vatApplicable: boolean;
@@ -98,8 +100,7 @@ export type Booking = {
     tip: number;
     total: number;
   } | null;
-  // Multi-day upfront booking (see backend createMultiDayBooking) — null for
-  // the overwhelming majority of ordinary single-day bookings. groupDayIndex
+  // Multi-day upfront booking (retired; kept for old bookings) — groupDayIndex
   // is 1-based ("Day 2 of 3" = groupDayIndex 2, groupTotalDays 3).
   groupId?: string | null;
   groupTotalDays?: number | null;
@@ -171,7 +172,9 @@ export type DraftBooking = {
   selectedPackageIds: string[]; // WorkerPackage ids selected in Step 4 — resolved to priced add-ons server-side
   scopeAnswers?: Record<string, string | string[]>; // scope-step answers, keyed by ScopeField.label
   issuePhotoUrls?: string[]; // photos of the issue the client attached in Step 1, uploaded via POST /bookings/issue-photo/upload
-  timeSlot: TimeSlot | null;
+  time: string | null; // exact start time "HH:00" (PH), see utils/bookingTime.ts
+  // Set when this is a follow-up job after an inspection (same worker).
+  parentBookingId?: string | null;
   priorities: string[]; // Step 4 submits ['Pet-friendly'] when the "I have pets" toggle is on; empty otherwise
 
   addOnToggles: string[]; // AddOnToggleKey[] — free preference toggles, sent as zero-priced addOns
@@ -182,7 +185,7 @@ export type DraftBooking = {
   workerEstimatedTotal?: number | null;
   // Itemized version of workerEstimatedTotal — lets the live pricing preview
   // show Base rate / Distance fee / Tier surcharge as separate lines.
-  workerPriceBreakdown?: { basePrice: number; distanceFee: number; tierFee: number } | null;
+  workerPriceBreakdown?: { basePrice: number; distanceFee: number; tierFee: number; rushFee?: number } | null;
   // Only set when the selected task is PER_UNIT — this worker's tier-adjusted
   // rate, for the live rate x quantity preview (see useBookingPriceEstimate).
   workerUnitPrice?: number | null;
@@ -201,12 +204,6 @@ export type DraftBooking = {
   // key instead of letting the backend create a duplicate booking. Cleared
   // whenever the draft resets (successful create, or a fresh "New Booking").
   idempotencyKey?: string | null;
-
-  // Multi-day upfront booking — set only when entering via a locked worker
-  // (see step-2.tsx's day-count stepper). 1 (or undefined) means an ordinary
-  // single-day booking and step-4 submits via the existing POST /bookings;
-  // >1 submits via POST /bookings/multi-day instead (see step-4.tsx).
-  dayCount?: number;
 };
 
 export type ApiBookingListItem = {
@@ -220,6 +217,9 @@ export type ApiBookingListItem = {
   category?: string;
   status: string;
   scheduledDate: string;
+  scheduledTime?: string | null;
+  timeSlot?: string | null;
+  isRush?: boolean;
   estimatedPrice: number;
   finalPrice: number | null;
   rating: number | null;
@@ -241,6 +241,8 @@ export function mapApiBooking(b: ApiBookingListItem): Booking {
     workerAvatar: b.workerAvatar ?? undefined,
     workerVerified: b.workerVerified ?? undefined,
     date: b.scheduledDate,
+    time: bookingStartTime(b) ?? undefined,
+    isRush: b.isRush ?? false,
     status: API_STATUS_MAP[b.status] ?? 'Pending',
     amount: b.finalPrice ?? b.estimatedPrice,
     rating: b.rating ?? undefined,
@@ -264,6 +266,7 @@ export type DeclinedBookingDetail = {
   clientLat?: number | null;
   clientLng?: number | null;
   scheduledDate?: string | null;
+  scheduledTime?: string | null;
   timeSlot?: TimeSlot | null;
   scopeAnswers?: Record<string, string | string[]> | null;
 };
@@ -292,8 +295,8 @@ export type BookingState = {
   submitQuote: (bookingId: string, quote: Quote) => void;
   approveQuote: (bookingId: string) => void;
   disputeQuote: (bookingId: string, reason: string) => void;
-  // Client keeps the new date for a booking a worker's spillover moved (see
-  // backend extendBooking) — status-preserving, mirrors approveQuote's shape.
+  // Client keeps the new date for a booking the old "Continue Tomorrow"
+  // spillover moved — status-preserving, mirrors approveQuote's shape.
   acknowledgeReschedule: (bookingId: string) => void;
 };
 
@@ -335,7 +338,8 @@ const initialDraft: DraftBooking = {
   selectedPackageIds: [],
   scopeAnswers: {},
   issuePhotoUrls: [],
-  timeSlot: null,
+  time: null,
+  parentBookingId: null,
   priorities: [],
   addOnToggles: [],
   workerEstimatedTotal: null,
@@ -387,14 +391,14 @@ export const useBookingStore: UseBoundStore<StoreApi<BookingState>> = create<Boo
       const cityChanged = draft.city && draft.city !== prev.city;
       const clearingSchedule =
         (categoryChanged || addressChanged || cityChanged) &&
-        (prev.date || prev.timeSlot || prev.workerId) &&
+        (prev.date || prev.time || prev.workerId) &&
         draft.date === undefined &&
-        draft.timeSlot === undefined &&
+        draft.time === undefined &&
         draft.workerId === undefined;
 
       if (clearingSchedule) {
         updatedDraft.date = null;
-        updatedDraft.timeSlot = null;
+        updatedDraft.time = null;
         if (!updatedDraft.workerLocked) {
           updatedDraft.workerId = null;
           updatedDraft.workerEstimatedTotal = null;
@@ -406,13 +410,15 @@ export const useBookingStore: UseBoundStore<StoreApi<BookingState>> = create<Boo
         updatedDraft.lastInvalidationReason = 'Your service or address changed, so we cleared your date/time.';
       }
 
-      // Changing the date/time slot after a specific worker was picked (Step 3)
+      // Changing the date after a specific worker was picked (Step 3)
       // invalidates that pick — the worker's availability was matched
-      // against the previous slot, not the new one.
+      // against the previous date. A new start time on the same day keeps
+      // them (availability is per day), but a same-day/other-day switch
+      // changes the rush fee, so the date alone decides.
       const dateChanged = draft.date !== undefined && draft.date !== prev.date;
-      const slotChanged = draft.timeSlot !== undefined && draft.timeSlot !== prev.timeSlot;
+      const slotChanged = draft.time !== undefined && draft.time !== prev.time;
       const clearingWorkerForNewSlot =
-        (dateChanged || slotChanged) &&
+        dateChanged &&
         !updatedDraft.workerLocked &&
         prev.workerId != null &&
         draft.workerId === undefined;
@@ -620,7 +626,7 @@ export const useBookingStore: UseBoundStore<StoreApi<BookingState>> = create<Boo
         // server-side (see backend toDayStart) — the leading 10 chars are
         // its YYYY-MM-DD, matching what DateGridPicker/step-2 expect.
         date: detail.scheduledDate ? detail.scheduledDate.slice(0, 10) : null,
-        timeSlot: detail.timeSlot ?? null,
+        time: bookingStartTime(detail),
         scopeAnswers: detail.scopeAnswers ?? {},
         entrySource: 're_offer',
         workerLocked: false,

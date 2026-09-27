@@ -10,10 +10,7 @@ import type { WorkerDetail, WorkerDigitalId, ParsedResume } from "../types/api.t
 import type {
   CreateBookingPayload,
   CreateBookingResponse,
-  CreateMultiDayBookingPayload,
-  CreateMultiDayBookingResponse,
   WorkerCard,
-  TimeSlot,
 } from "../types/booking4step.types";
 
 type NormalizedWorkerListItem = {
@@ -188,6 +185,8 @@ export async function postSignUp(userData: {
   phone: string;
   password: string;
   role: 'client' | 'worker';
+  // YYYY-MM-DD, workers only — the backend checks the accepted age range.
+  birthDate?: string;
 }) {
   try {
     const response = await api.post('/auth/signup', {
@@ -196,6 +195,7 @@ export async function postSignUp(userData: {
       phone: userData.phone,
       password: userData.password,
       role: userData.role.toUpperCase(),
+      birthDate: userData.birthDate,
       // Sign-up can't be submitted without the Privacy Policy checkbox.
       privacyNoticeVersion: LEGAL_VERSIONS.PRIVACY_NOTICE,
     });
@@ -226,6 +226,17 @@ export async function postLogin(email: string, password: string) {
     // step and exchanges this challengeToken via postMfaChallenge below.
     if (response.mfaRequired) {
       return { mfaRequired: true as const, challengeToken: response.challengeToken as string };
+    }
+
+    // Two-step sign-in by email/SMS code — same idea: exchange the
+    // challengeToken via postLoginCode below.
+    if (response.twoFactorRequired) {
+      return {
+        twoFactorRequired: true as const,
+        challengeToken: response.challengeToken as string,
+        method: response.method as 'EMAIL' | 'SMS',
+        destination: response.destination as string,
+      };
     }
 
     return {
@@ -266,31 +277,67 @@ export async function postMfaChallenge(challengeToken: string, code: string) {
   }
 }
 
-// ============================================================================
-// MFA (TOTP) — opt-in for client/worker accounts, reached from a Security
-// settings screen; mandatory admin MFA is set up on the web admin panel
-// instead. Same three backend routes as admin (backend/src/routes/auth.ts).
-// ============================================================================
-
-export async function startMfaSetup(): Promise<{ provisioningUri: string; qrCodeDataUrl: string; secret: string }> {
-  return api.post('/auth/mfa/setup');
+// POST /auth/2fa/verify — exchanges postLogin's twoFactorRequired
+// challengeToken plus the emailed/texted code for a real session.
+export async function postLoginCode(challengeToken: string, code: string) {
+  const response = await api.post('/auth/2fa/verify', { challengeToken, code });
+  return {
+    id: response.id,
+    name: response.fullName || response.name,
+    email: response.email,
+    phone: response.phone,
+    role: response.role.toLowerCase(),
+    kycStatus: response.kycStatus,
+    hasAcceptedTerms: response.hasAcceptedTerms,
+    token: response.token,
+  };
 }
 
-export async function confirmMfaSetup(code: string): Promise<{ backupCodes: string[] }> {
-  return api.post('/auth/mfa/verify-setup', { code });
+export async function resendLoginCode(challengeToken: string): Promise<{ method: 'EMAIL' | 'SMS'; destination: string }> {
+  return api.post('/auth/2fa/resend', { challengeToken });
+}
+
+// ============================================================================
+// TWO-STEP SIGN-IN (email/SMS code) — opt-in for client/worker accounts from
+// Profile > Two-Step Sign-In. Admins use an authenticator app on the web
+// panel instead. A few older accounts still have an authenticator set up;
+// they can sign in with it (postMfaChallenge) and turn it off (disableMfa).
+// ============================================================================
+
+export type TwoFactorMethod = 'EMAIL' | 'SMS';
+
+/** Sends a confirmation code: to `method` when turning it on, to the current channel when turning it off. */
+export async function sendTwoFactorCode(method?: TwoFactorMethod): Promise<{ method: TwoFactorMethod; destination: string }> {
+  return api.post('/auth/2fa/code', method ? { method } : {});
+}
+
+export async function enableTwoFactor(method: TwoFactorMethod, code: string): Promise<{ twoFactorMethod: TwoFactorMethod }> {
+  return api.post('/auth/2fa/enable', { method, code });
+}
+
+export async function disableTwoFactor(password: string, code: string): Promise<{ twoFactorMethod: null }> {
+  return api.post('/auth/2fa/disable', { password, code });
 }
 
 export async function disableMfa(password: string, code: string): Promise<{ success: boolean; message: string }> {
   return api.post('/auth/mfa/disable', { password, code });
 }
 
+// POST /auth/reactivate — a deactivated worker turns their account back on,
+// then signs in as usual.
+export async function reactivateAccount(email: string, password: string): Promise<{ message?: string }> {
+  return api.post('/auth/reactivate', { email, password });
+}
+
 // GET /auth/me — lighter than getUserProfile()'s /users/me (no
-// notification prefs, addresses, etc.), used where only the MFA-related
-// flags matter: currently just the Two-Factor Authentication settings screen.
+// notification prefs, addresses, etc.), used where only the sign-in
+// security settings matter.
 export async function fetchCurrentUser(): Promise<{
   id: string;
   role: string;
+  phone: string | null;
   mfaEnabled: boolean;
+  twoFactorMethod: TwoFactorMethod | null;
 }> {
   return api.get('/auth/me');
 }
@@ -419,7 +466,8 @@ export async function createBooking(details: CreateBookingPayload): Promise<Crea
       lat: details.lat,
       lng: details.lng,
       date: details.date,
-      timeSlot: details.timeSlot,
+      time: details.time,
+      parentBookingId: details.parentBookingId ?? undefined,
       addOns: details.addOns || [],
       packageIds: details.packageIds || [],
       priorities: details.priorities ?? [],
@@ -434,37 +482,6 @@ export async function createBooking(details: CreateBookingPayload): Promise<Crea
     return response;
   } catch (error) {
     console.error('Create booking error:', error);
-    throw error;
-  }
-}
-
-export async function createMultiDayBooking(
-  details: CreateMultiDayBookingPayload
-): Promise<CreateMultiDayBookingResponse> {
-  try {
-    const response = await api.post('/bookings/multi-day', {
-      workerId: details.workerId,
-      serviceType: details.serviceType,
-      serviceTaskId: details.serviceTaskId ?? undefined,
-      description: details.description || '',
-      address: details.address,
-      city: details.city || '',
-      lat: details.lat,
-      lng: details.lng,
-      startDate: details.startDate,
-      dayCount: details.dayCount,
-      timeSlot: details.timeSlot,
-      priorities: details.priorities ?? [],
-      notes: details.notes || '',
-      paymentMethodType: details.paymentMethodType,
-      paymentAccountIdentifier: details.paymentAccountIdentifier,
-      scopeAnswers: details.scopeAnswers ?? undefined,
-      issuePhotoUrls: details.issuePhotoUrls ?? [],
-      idempotencyKey: details.idempotencyKey ?? undefined,
-    });
-    return response;
-  } catch (error) {
-    console.error('Create multi-day booking error:', error);
     throw error;
   }
 }
@@ -488,11 +505,22 @@ export async function updateBookingStatus(bookingId: string, status: string) {
 }
 
 // workerCancellationReason is required by the backend when the caller is a
-// worker (one of 'WORKER_FAULT' | 'CLIENT_NO_SHOW' | 'OTHER') — omit it
-// entirely for a client's own cancellation.
-export async function cancelBooking(bookingId: string, reason?: string, workerCancellationReason?: string) {
+// worker who hasn't arrived yet (one of 'WORKER_FAULT' | 'CLIENT_NO_SHOW' |
+// 'OTHER') — omit it entirely for a client's own cancellation. After
+// arriving, a worker instead sends `fault` ('CLIENT' | 'WORKER') plus 1-5
+// proof photos (uploadJobPhoto).
+export async function cancelBooking(
+  bookingId: string,
+  reason?: string,
+  workerCancellationReason?: string,
+  afterArrival?: { fault: 'CLIENT' | 'WORKER'; proofUrls: string[] },
+): Promise<{ id: string; status: string; penaltyAmount?: number | null; compensationStatus?: string }> {
   try {
-    const response = await api.patch(`/bookings/${bookingId}/cancel`, { reason, workerCancellationReason });
+    const response = await api.patch(`/bookings/${bookingId}/cancel`, {
+      reason,
+      workerCancellationReason: afterArrival ? undefined : workerCancellationReason,
+      ...(afterArrival ?? {}),
+    });
     return response;
   } catch (error) {
     console.error('Cancel booking error:', error);
@@ -506,6 +534,18 @@ export async function approveQuote(bookingId: string) {
     return response;
   } catch (error) {
     console.error('Approve quote error:', error);
+    throw error;
+  }
+}
+
+// Client refuses a quote (e.g. it doesn't match the receipt) — it goes back
+// to the worker to revise and resubmit.
+export async function rejectQuote(bookingId: string, reason: string) {
+  try {
+    const response = await api.patch(`/bookings/${bookingId}/quote/reject`, { reason });
+    return response;
+  } catch (error) {
+    console.error('Reject quote error:', error);
     throw error;
   }
 }
@@ -560,7 +600,6 @@ export async function getWorkers(filters?: {
 export interface DiscoverWorkersFilters {
   serviceType?: string;
   date?: string; // YYYY-MM-DD
-  timeSlot?: TimeSlot;
   // Answers to the selected category's scope fields, keyed by field label —
   // only fields the admin flagged "use to match workers" actually filter
   // candidates server-side (see matchingService.buildCapabilityFilters).
@@ -569,8 +608,8 @@ export interface DiscoverWorkersFilters {
   serviceTaskId?: string;
   lat?: number;
   lng?: number;
-  // Scopes results to a single worker — used to check a specific (e.g.
-  // profile-locked) worker's real open slots rather than discovering a list.
+  // Scopes results to a single worker — used to check whether a specific
+  // (e.g. profile-locked) worker works on a date rather than discovering a list.
   workerId?: string;
   page?: number;
   limit?: number;
@@ -582,9 +621,9 @@ export interface DiscoverWorkersResult {
 }
 
 /**
- * GET /workers with the Phase 2 discovery contract (scope + time filters,
- * server-side KYC/capacity/slot filtering, sorted rating desc). Used by
- * Step 2 (live pro-count per time slot) and Step 3 (full worker card list)
+ * GET /workers with the Phase 2 discovery contract (scope + date filters,
+ * server-side KYC/availability filtering, sorted rating desc). Used by
+ * Step 2 (live pro count for the date) and Step 3 (full worker card list)
  * — unlike the legacy `getWorkers`/`searchWorkers` above, filtering/
  * sorting/pagination all happen server-side here.
  */
@@ -593,7 +632,6 @@ export async function discoverWorkers(filters: DiscoverWorkersFilters): Promise<
     const params: Record<string, string | number> = {};
     if (filters.serviceType) params.serviceType = filters.serviceType;
     if (filters.date) params.date = filters.date;
-    if (filters.timeSlot) params.timeSlot = filters.timeSlot;
     if (filters.scopeAnswers && Object.keys(filters.scopeAnswers).length > 0) {
       params.scopeAnswers = JSON.stringify(filters.scopeAnswers);
     }
@@ -615,6 +653,26 @@ export async function discoverWorkers(filters: DiscoverWorkersFilters): Promise<
     console.error('Discover workers error:', error);
     throw error;
   }
+}
+
+/**
+ * GET /workers/:id/blocked-dates — dates in the booking window this worker
+ * doesn't work (weekly schedule + days they closed). The booking calendar
+ * greys them out for a profile-picked worker.
+ */
+export async function getWorkerUnavailableDates(workerId: string): Promise<string[]> {
+  const response = await api.get(`/workers/${workerId}/blocked-dates`);
+  return Array.isArray(response?.dates) ? response.dates : [];
+}
+
+/**
+ * GET /workers/:id/availability?date= — whether the worker works that day
+ * and the start times of the jobs they already have on it (a hint only —
+ * workers can take several jobs a day).
+ */
+export async function getWorkerDayAvailability(workerId: string, date: string): Promise<{ available: boolean; occupied: string[] }> {
+  const response = await api.get(`/workers/${workerId}/availability`, { params: { date } });
+  return { available: Boolean(response?.available), occupied: Array.isArray(response?.occupied) ? response.occupied : [] };
 }
 
 function normalizeWorkerListItem(worker: any): NormalizedWorkerListItem {
@@ -1359,9 +1417,11 @@ export async function removePushToken() {
 // WORKER ENDPOINTS
 // ============================================================================
 
-export async function acceptBooking(bookingId: string) {
+// confirmFollowUp: a follow-up job (after the worker's own inspection) needs
+// the worker's explicit second confirmation — see the request screen.
+export async function acceptBooking(bookingId: string, options?: { confirmFollowUp?: boolean }) {
   try {
-    const response = await api.patch(`/bookings/${bookingId}/accept`);
+    const response = await api.patch(`/bookings/${bookingId}/accept`, options ?? {});
     return response;
   } catch (error) {
     console.error('Accept booking error:', error);
@@ -1389,26 +1449,30 @@ export async function startBooking(bookingId: string) {
   }
 }
 
-export interface ExtendBookingResult {
-  targetDate: string;
-  resolved: number;
-  escalated: number;
+export interface BookingVisit {
+  id: string;
+  scheduledDate: string;
+  scheduledTime: string;
+  notes: string | null;
+  status: 'SCHEDULED' | 'DONE' | 'CANCELLED';
 }
 
 /**
- * PATCH /bookings/:id/extend — worker signals this job is running into a
- * second day. See backend extendBooking's docblock for the full
- * reschedule-on-conflict behavior this triggers on any other booking of
- * theirs that collides with tomorrow.
+ * POST /bookings/:id/visits — "Follow Up Date": the worker schedules another
+ * visit when the job needs more than one day. nearbyJobs lists their other
+ * jobs starting close to it (a heads-up, never a block).
  */
-export async function extendBooking(bookingId: string): Promise<ExtendBookingResult> {
-  try {
-    const response = await api.patch(`/bookings/${bookingId}/extend`);
-    return response;
-  } catch (error) {
-    console.error('Extend booking error:', error);
-    throw error;
-  }
+export async function scheduleFollowUpVisit(
+  bookingId: string,
+  date: string,
+  time: string,
+  notes?: string,
+): Promise<{ visit: BookingVisit; nearbyJobs: { bookingId: string; time: string; service: string }[] }> {
+  return api.post(`/bookings/${bookingId}/visits`, { date, time, notes });
+}
+
+export async function cancelFollowUpVisit(bookingId: string, visitId: string): Promise<BookingVisit> {
+  return api.patch(`/bookings/${bookingId}/visits/${visitId}/cancel`);
 }
 
 /** PATCH /bookings/:id/acknowledge-reschedule — client keeps the new date. */
@@ -1423,15 +1487,13 @@ export async function acknowledgeReschedule(bookingId: string) {
 }
 
 /**
- * PATCH /bookings/:id/request-reschedule — client proposes a new date/time
- * for an ACCEPTED booking; the assigned worker must accept or decline it.
- * Distinct from extendBooking above (worker/system-triggered, moves a
- * DIFFERENT booking) — this is the client of THIS booking asking for a
- * different date for it.
+ * PATCH /bookings/:id/request-reschedule — the client OR the worker proposes
+ * a new date + start time for an ACCEPTED booking; the other side accepts or
+ * declines (respondToRescheduleRequest).
  */
-export async function requestReschedule(bookingId: string, date: string, timeSlot: TimeSlot) {
+export async function requestReschedule(bookingId: string, date: string, time: string) {
   try {
-    const response = await api.patch(`/bookings/${bookingId}/request-reschedule`, { date, timeSlot });
+    const response = await api.patch(`/bookings/${bookingId}/request-reschedule`, { date, time });
     return response;
   } catch (error) {
     console.error('Request reschedule error:', error);
@@ -1439,7 +1501,7 @@ export async function requestReschedule(bookingId: string, date: string, timeSlo
   }
 }
 
-/** PATCH /bookings/:id/reschedule-request/withdraw — client backs out of their own pending request. */
+/** PATCH /bookings/:id/reschedule-request/withdraw — the side that asked backs out of its own pending request. */
 export async function withdrawRescheduleRequest(bookingId: string) {
   try {
     const response = await api.patch(`/bookings/${bookingId}/reschedule-request/withdraw`);
@@ -1450,7 +1512,7 @@ export async function withdrawRescheduleRequest(bookingId: string) {
   }
 }
 
-/** PATCH /bookings/:id/reschedule-request/respond — worker accepts or declines the client's proposed date. */
+/** PATCH /bookings/:id/reschedule-request/respond — the other side accepts or declines the proposed date. */
 export async function respondToRescheduleRequest(bookingId: string, accept: boolean) {
   try {
     const response = await api.patch(`/bookings/${bookingId}/reschedule-request/respond`, { accept });
@@ -1502,9 +1564,17 @@ export async function updateWorkerLiveLocation(bookingId: string, lat: number, l
   return response;
 }
 
+// Materials need receipt photos and photos of them in use (uploadJobPhoto).
+// laborCost only for a custom-quote job.
 export async function submitQuote(
   bookingId: string,
-  data: { materialsCost: number; notes?: string },
+  data: {
+    materialsCost: number;
+    laborCost?: number;
+    notes?: string;
+    receiptUrls?: string[];
+    proofOfUseUrls?: string[];
+  },
 ) {
   try {
     const response = await api.post(`/bookings/${bookingId}/quote`, data);
@@ -1565,6 +1635,17 @@ export async function uploadBookingCompletionPhoto(
     console.error('Upload completion photo error:', error);
     throw error;
   }
+}
+
+// The worker's other job photos — quote receipts, materials in use, proof for
+// a cancellation after arriving. Same storage as the completion photo.
+export async function uploadJobPhoto(bookingId: string, uri: string, mimeType?: string | null): Promise<{ url: string }> {
+  const filename = uri.split('/').pop() ?? `job-${Date.now()}.jpg`;
+  const formData = new FormData();
+  formData.append('photo', { uri, name: filename, type: mimeType || 'image/jpeg' } as any);
+  return api.post(`/bookings/${bookingId}/job-photo/upload`, formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+  });
 }
 
 export async function uploadIssuePhoto(uri: string, mimeType?: string | null): Promise<{ url: string }> {
@@ -1655,99 +1736,47 @@ export async function updateAvailability(isAvailable?: boolean, availableDays?: 
   }
 }
 
-export interface WorkerAvailabilitySlot {
-  id: string;
-  workerProfileId: string;
-  date: string;
-  timeSlot: TimeSlot;
-  isBlocked: boolean;
-  isBooked: boolean;
+export interface CalendarJob {
+  bookingId: string;
+  time: string;
+  service: string;
+  kind: 'JOB' | 'VISIT';
+  status: string;
+}
+
+export interface CalendarDay {
+  date: string; // YYYY-MM-DD
+  available: boolean;
+  // true when the worker changed this date from their weekly schedule
+  overridden: boolean;
+  jobCount: number;
+  jobs: CalendarJob[];
+}
+
+export interface WorkerCalendar {
+  availableDays: number[]; // 0=Sun ... 6=Sat
+  isAvailable: boolean;
+  today: string;
+  days: CalendarDay[];
+}
+
+/** GET /workers/me/calendar — availability plus accepted jobs/visits per day (inclusive range). */
+export async function getMyCalendar(from: string, to: string): Promise<WorkerCalendar> {
+  return api.get('/workers/me/calendar', { params: { from, to } });
+}
+
+/** PUT /workers/me/weekly-schedule — the weekdays the worker normally works. */
+export async function updateWeeklySchedule(availableDays: number[]): Promise<{ availableDays: number[] }> {
+  return api.put('/workers/me/weekly-schedule', { availableDays });
 }
 
 /**
- * GET /workers/me/availability-slots — the fine-grained per-date/per-slot
- * schedule (distinct from the coarse day-of-week toggle above). Optionally
- * scoped to a single date for a lighter fetch (see AvailabilityCalendar,
- * which fetches the whole visible 7-day window at once by omitting `date`).
+ * PUT /workers/me/date-overrides — open (true) or close (false) specific
+ * dates; null puts them back on the weekly schedule. Rejected (409) when a
+ * date being closed has an accepted job.
  */
-export interface WorkerAvailabilitySlotsResponse {
-  slots: WorkerAvailabilitySlot[];
-  maxSlotsPerDay: number;
-}
-
-export async function getMyAvailabilitySlots(date?: string): Promise<WorkerAvailabilitySlotsResponse> {
-  try {
-    const response = await api.get('/workers/me/availability-slots', { params: date ? { date } : undefined });
-    return { slots: response.slots ?? [], maxSlotsPerDay: response.maxSlotsPerDay ?? 2 };
-  } catch (error) {
-    console.error('Get availability slots error:', error);
-    throw error;
-  }
-}
-
-/**
- * PATCH /workers/me/availability-slots — replaces the worker's open slots
- * for every date present in `slots`. The backend enforces max 2/day and
- * rejects (409) closing a slot that currently has an active booking
- * (isBooked === true); this wrapper just forwards the desired set.
- */
-export async function updateAvailabilitySlots(
-  slots: Array<{ date: string; timeSlot: TimeSlot }>,
-  dates?: string[],
-): Promise<WorkerAvailabilitySlot[]> {
-  try {
-    const response = await api.patch('/workers/me/availability-slots', { slots, dates });
-    return response.slots ?? [];
-  } catch (error) {
-    console.error('Update availability slots error:', error);
-    throw error;
-  }
-}
-
-export interface AvailabilityTemplateDay {
-  dayOfWeek: number; // 0=Sun ... 6=Sat
-  timeSlot: TimeSlot;
-}
-
-/**
- * GET/PUT /workers/me/availability-template — a worker's recurring weekly
- * pattern (see B8), distinct from the concrete per-date slots above. Saving
- * it immediately opens matching slots ~30 days ahead and keeps rolling that
- * window forward daily, so a worker with a stable schedule doesn't have to
- * re-open the same days every week.
- */
-export async function getMyAvailabilityTemplate(): Promise<AvailabilityTemplateDay[]> {
-  try {
-    const response = await api.get('/workers/me/availability-template');
-    return response.template ?? [];
-  } catch (error) {
-    console.error('Get availability template error:', error);
-    throw error;
-  }
-}
-
-export async function updateMyAvailabilityTemplate(days: AvailabilityTemplateDay[]): Promise<void> {
-  try {
-    await api.put('/workers/me/availability-template', { days });
-  } catch (error) {
-    console.error('Update availability template error:', error);
-    throw error;
-  }
-}
-
-/**
- * POST /workers/me/availability/unavailable-range — bulk "mark unavailable"
- * for a vacation/leave stretch (see B8). All-or-nothing: rejects (409) if
- * any date/slot in range already has an active booking.
- */
-export async function setUnavailableRange(startDate: string, endDate: string): Promise<{ blocked: number }> {
-  try {
-    const response = await api.post('/workers/me/availability/unavailable-range', { startDate, endDate });
-    return { blocked: response.blocked ?? 0 };
-  } catch (error) {
-    console.error('Set unavailable range error:', error);
-    throw error;
-  }
+export async function updateDateOverrides(dates: string[], isAvailable: boolean | null): Promise<void> {
+  await api.put('/workers/me/date-overrides', { dates, isAvailable });
 }
 
 export interface MyWorkerProfileDetails {
@@ -1763,6 +1792,11 @@ export interface MyWorkerProfileDetails {
   digitalIdTrade: string | null;
   digitalIdServiceArea: string | null;
   licenseNumber: string | null;
+  birthDate: string | null;
+  // Years in the trade (incl. outside HomeEase) — set during KYC, confirmed
+  // by the admin, then locked. One of the expertise-tier requirements.
+  yearsExperience: number | null;
+  availableDays: number[];
   kycStatus: string;
   kycSubmittedAt: string | null;
   kycApprovedAt: string | null;
@@ -1782,8 +1816,10 @@ export async function getMyWorkerProfileDetails(): Promise<MyWorkerProfileDetail
 }
 
 export async function updateWorkerProfileDetails(data: {
-  // YYYY-MM-DD; the backend rejects anyone under 18.
+  // YYYY-MM-DD; the backend checks the accepted age range. Locked after KYC approval.
   birthDate?: string;
+  // Locked after KYC approval, like birthDate.
+  yearsExperience?: number;
   bio?: string;
   serviceAreaRadius?: number;
   address?: string;
@@ -1806,16 +1842,6 @@ export async function updateWorkerProfileDetails(data: {
     return response;
   } catch (error) {
     console.error('Update worker profile error:', error);
-    throw error;
-  }
-}
-
-export async function getWorkerCapacity() {
-  try {
-    const response = await api.get('/workers/me/capacity');
-    return response;
-  } catch (error) {
-    console.error('Get worker capacity error:', error);
     throw error;
   }
 }
@@ -2493,17 +2519,33 @@ export async function changePassword(currentPassword: string, newPassword: strin
   }
 }
 
-export async function logoutAllSessions() {
+/** How many devices are signed in — "Log out other devices" only shows when there's more than one. */
+export async function getActiveSessionCount(): Promise<number> {
+  const response = await api.get('/users/me/sessions');
+  return response.activeSessions ?? 1;
+}
+
+// Signs out every OTHER device (this one stays signed in). signedOutCurrent
+// is true only for a session from before per-device sessions existed, in
+// which case this device was signed out too.
+export async function logoutAllSessions(): Promise<{ success: true; message: string; signedOutCurrent: boolean }> {
   try {
     const response = await api.post('/users/me/logout-all', {});
     return {
       success: true,
-      message: response.message || "Logged out of all devices",
+      message: response.message || "Logged out of your other devices",
+      signedOutCurrent: Boolean(response.signedOutCurrent),
     };
   } catch (error) {
     console.error('Logout all sessions error:', error);
     throw error;
   }
+}
+
+// Worker only — takes them off HomeEase without deleting anything; signing
+// in again offers to reactivate.
+export async function deactivateAccount(password: string, reason?: string): Promise<{ message?: string }> {
+  return api.post('/users/me/deactivate', { password, reason });
 }
 
 export async function getUserProfile() {
@@ -2553,9 +2595,16 @@ export async function updateNotificationPreferences(preferences: {
   }
 }
 
-export async function deleteAccount(password: string) {
+// Step 2 of deleting the account: rejected (409, with `blockers`) while
+// something still ties the account down; otherwise emails a code.
+export async function requestAccountDeletionCode(): Promise<void> {
+  await api.post('/users/me/delete-code', {});
+}
+
+// Final step: password, the emailed code and the typed confirmation phrase.
+export async function deleteAccount(data: { password: string; code: string; confirmText: string; reason?: string }) {
   try {
-    const response = await api.delete('/users/me', { data: { password } });
+    const response = await api.delete('/users/me', { data });
     return {
       success: true,
       message: response.message || "Account deleted successfully",

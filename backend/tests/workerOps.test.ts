@@ -291,7 +291,7 @@ describe('worker operations overhaul', () => {
         .post('/api/bookings')
         .set('Authorization', `Bearer ${clientToken}`)
         .send(bookingBody(isoDay(addDays(phTodayStart(), 7)), '09:00'));
-      expect(blocked.status).toBe(403);
+      expect(blocked.status).toBe(402);
 
       await prisma.clientProfile.update({ where: { userId: clientId }, data: { paymentHoldAt: null, outstandingBalance: 0 } });
       await prisma.workerProfile.update({ where: { id: workerProfileId }, data: { compensationCredit: 0 } });

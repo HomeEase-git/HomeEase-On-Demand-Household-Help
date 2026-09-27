@@ -1,5 +1,6 @@
 import { useMemo } from 'react';
 import { useBookingStore } from '../store/bookingStore';
+import { RUSH_FEE_RATE, isRushDate } from '../utils/bookingTime';
 import {
   estimateRange,
   estimatePricePoint,
@@ -34,6 +35,10 @@ export type BookingPriceEstimate =
  *   than this hook, since the same resolved number needs to reach both the
  *   category tiles and this preview.
  *
+ * Same-day ("rush") booking: a picked worker's numbers already include the
+ * rush fee (the search is date-scoped). Before that, the range is raised by
+ * the rush share of the service price.
+ *
  * `tipOverride` lets a screen with its own live (not-yet-persisted-to-store)
  * tip state — e.g. step-4's TipSlider, which only writes back to the store
  * on confirm — feed that value in directly so the preview updates as the
@@ -52,6 +57,8 @@ export function useBookingPriceEstimate(
     : undefined;
   const quantity = typeof quantityAnswer === 'string' ? Number(quantityAnswer) : NaN;
   const hasQuantity = Number.isFinite(quantity) && quantity > 0;
+  const rushFactor = isRushDate(draft.date) ? 1 + RUSH_FEE_RATE : 1;
+  const effectiveRange = { min: categoryRange.min * rushFactor, max: categoryRange.max * rushFactor };
 
   return useMemo(() => {
     if (draft.workerEstimatedTotal != null) {
@@ -77,11 +84,11 @@ export function useBookingPriceEstimate(
       // No total is knowable yet (either no worker picked, or no quantity
       // entered) — show the rate itself, labeled, rather than a misleading
       // total. Uses the worker's own rate once picked, else the admin bounds.
-      const rateRange = rate != null ? { min: rate, max: rate } : categoryRange;
+      const rateRange = rate != null ? { min: rate, max: rate } : effectiveRange;
       return { mode: 'range', range: estimateRange(rateRange), unitLabel: draft.selectedTaskUnitLabel };
     }
 
-    return { mode: 'range', range: estimateRange(categoryRange) };
+    return { mode: 'range', range: estimateRange(effectiveRange) };
   }, [
     draft.workerEstimatedTotal,
     draft.workerPriceBreakdown,
@@ -91,8 +98,8 @@ export function useBookingPriceEstimate(
     hasQuantity,
     quantity,
     tip,
-    categoryRange.min,
-    categoryRange.max,
+    effectiveRange.min,
+    effectiveRange.max,
     addOnsTotal,
   ]);
 }

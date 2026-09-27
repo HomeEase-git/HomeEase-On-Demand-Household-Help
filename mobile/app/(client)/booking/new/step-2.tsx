@@ -1,4 +1,4 @@
-import React, { useCallback, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { View, Text, ScrollView, Pressable } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter, useFocusEffect } from "expo-router";
@@ -15,19 +15,15 @@ import AddressPickerBottomSheet, {
 } from "../../../../components/bottom-sheets/AddressPickerBottomSheet";
 import type { BottomSheetHandle } from "../../../../components/bottom-sheets/BottomSheetWrapper";
 import DateGridPicker from "../../../../components/booking4step/DateGridPicker";
-import TimeSlotPicker from "../../../../components/ui/TimeSlotPicker";
+import StartTimePicker from "../../../../components/ui/StartTimePicker";
 import { useBookingStore } from "../../../../store/bookingStore";
-import { useSlotAvailabilityCounts } from "../../../../hooks/useWorkerDiscovery";
+import { useDateAvailabilityCount } from "../../../../hooks/useWorkerDiscovery";
 import * as api from "../../../../services/api";
 import { addressStorage } from "../../../../utils/storage";
 import { formatStructuredAddress, geocodeAddressWithFallback } from "../../../../utils/geo";
-import { TIME_SLOTS, type TimeSlot } from "../../../../types/booking4step.types";
+import { RUSH_FEE_RATE, RUSH_MIN_LEAD_HOURS, isRushDate, phTodayIso, selectableStartTimes } from "../../../../utils/bookingTime";
 
 const BOOKING_STEPS = ["Scope", "Schedule", "Who", "Confirm"];
-// Mirrors backend validation.ts's MAX_MULTI_DAY_BOOKING_DAYS — kept as a
-// separate constant (not fetched) since it changes rarely and the real
-// enforcement lives server-side regardless.
-const MAX_MULTI_DAY_BOOKING_DAYS = 14;
 
 export default function BookingStep2Screen() {
   const router = useRouter();
@@ -43,12 +39,11 @@ export default function BookingStep2Screen() {
   const [lng, setLng] = useState<number | undefined>(draft.lng);
   const [city, setCity] = useState<string | undefined>(draft.city);
   const [date, setDate] = useState<string | null>(draft.date);
-  const [timeSlot, setTimeSlot] = useState<TimeSlot | null>(draft.timeSlot);
-  // Multi-day upfront booking — only offered when the client already locked
-  // in a specific worker (see worker[workerId].tsx's "Book Now"), since a
-  // multi-day job needs one committed worker across every day and there's
-  // no auto-match equivalent for that. 1 = an ordinary single-day booking.
-  const [dayCount, setDayCount] = useState<number>(draft.dayCount ?? 1);
+  const [time, setTime] = useState<string | null>(draft.time);
+  // A profile-picked (locked) worker: the dates they don't work, and the
+  // start times of jobs they already have on the picked date.
+  const [workerClosedDates, setWorkerClosedDates] = useState<string[]>([]);
+  const [workerBusyTimes, setWorkerBusyTimes] = useState<string[]>([]);
 
   const [addresses, setAddresses] = useState<SavedAddress[]>([]);
   const [loadingAddresses, setLoadingAddresses] = useState(true);
@@ -142,46 +137,87 @@ export default function BookingStep2Screen() {
   };
 
   const hasScope = !!draft.serviceType;
-  // When entering via a locked (profile-picked) worker, scope the slot-count
-  // check to that specific worker instead of "how many pros total" — a
-  // locked worker's own real WorkerAvailability rows are what step-4's
-  // createBooking will actually check, so surfacing per-slot availability
-  // here (via the same TimeSlotPicker "N pros/None available" UI) catches a
-  // dead slot before the user fills in steps 3-4, instead of a confusing
-  // failure at final submit.
-  const { counts, loading: loadingCounts } = useSlotAvailabilityCounts(
+  const lockedWorkerId = draft.workerLocked ? (draft.workerId ?? null) : null;
+
+  useEffect(() => {
+    if (!lockedWorkerId) return;
+    let active = true;
+    api
+      .getWorkerUnavailableDates(lockedWorkerId)
+      .then((dates) => {
+        if (active) setWorkerClosedDates(dates);
+      })
+      .catch((error) => console.error("Load worker unavailable dates error:", error));
+    return () => {
+      active = false;
+    };
+  }, [lockedWorkerId]);
+
+  useEffect(() => {
+    if (!lockedWorkerId || !date) return;
+    let active = true;
+    api
+      .getWorkerDayAvailability(lockedWorkerId, date)
+      .then((day) => {
+        if (active) setWorkerBusyTimes(day.occupied);
+      })
+      .catch(() => {
+        if (active) setWorkerBusyTimes([]);
+      });
+    return () => {
+      active = false;
+    };
+  }, [lockedWorkerId, date]);
+
+  // How many pros work on the picked date (for a locked worker: 0 or 1).
+  // Workers take several jobs a day, so the start time doesn't change this.
+  const { count: prosAvailable, loading: loadingCount } = useDateAvailabilityCount(
     {
       serviceType: draft.serviceType ?? undefined,
       date: date ?? undefined,
       scopeAnswers: draft.scopeAnswers,
-      workerId: draft.workerLocked ? (draft.workerId ?? undefined) : undefined,
+      workerId: lockedWorkerId ?? undefined,
     },
     hasScope && !!date
   );
 
-  const noSlotsForLockedWorker =
-    draft.workerLocked &&
-    !!date &&
-    !loadingCounts &&
-    TIME_SLOTS.every((slot) => counts[slot] === 0);
+  // Same-day booking: only start times at least RUSH_MIN_LEAD_HOURS away,
+  // and today is closed once none are left.
+  const today = phTodayIso();
+  const todayHasTimes = selectableStartTimes(today).length > 0;
+  const selectableTimes = useMemo(() => selectableStartTimes(date), [date]);
+  const isRush = isRushDate(date);
+  const unavailableDates = useMemo(
+    () => [...workerClosedDates, ...(todayHasTimes ? [] : [today])],
+    [workerClosedDates, todayHasTimes, today],
+  );
 
-  const canNext =
-    !!address && lat != null && lng != null && !!date && !!timeSlot && !noSlotsForLockedWorker;
+  const handleSelectDate = (iso: string) => {
+    setDate(iso);
+    // Keep the chosen time only if it's still pickable on the new date.
+    if (time && !selectableStartTimes(iso).includes(time)) setTime(null);
+  };
+
+  const noProsOnDate = !!date && !loadingCount && prosAvailable === 0;
+
+  const canNext = !!address && lat != null && lng != null && !!date && !!time && !noProsOnDate;
 
   const handleNext = () => {
-    if (noSlotsForLockedWorker) {
+    if (noProsOnDate) {
       alertModal.warning(
-        "No slots available",
-        `${draft.workerName ?? "This pro"} isn't available on this date. Try a different date, or go back and choose another pro.`,
+        "No pros available",
+        draft.workerLocked
+          ? `${draft.workerName ?? "This pro"} isn't working on this date. Try a different date, or go back and choose another pro.`
+          : "No pros are available on this date. Try a different date.",
       );
       return;
     }
     if (!canNext) {
-      alertModal.warning("Schedule incomplete", "Please set your address, a date, and a time slot to continue.");
+      alertModal.warning("Schedule incomplete", "Please set your address, a date, and a start time to continue.");
       return;
     }
 
-    setDraft({ address, lat, lng, city, date, timeSlot, dayCount: draft.workerLocked ? dayCount : 1 });
+    setDraft({ address, lat, lng, city, date, time });
     router.push("/(client)/booking/new/step-3");
   };
 
@@ -208,56 +244,41 @@ export default function BookingStep2Screen() {
         </Pressable>
 
         <Text className="text-text-primary font-bold text-lg mt-6 mb-3">Select a date</Text>
-        <DateGridPicker selectedDate={date} onSelect={setDate} />
-
-        <Text className="text-text-primary font-bold text-lg mt-6 mb-3">Select a time</Text>
-        <TimeSlotPicker
-          value={timeSlot}
-          onChange={setTimeSlot}
-          counts={date ? counts : undefined}
-          loadingCounts={loadingCounts}
+        <DateGridPicker
+          selectedDate={date}
+          onSelect={handleSelectDate}
+          unavailableDates={unavailableDates}
+          dateBadges={todayHasTimes ? { [today]: "Rush" } : undefined}
         />
 
-        {noSlotsForLockedWorker && (
-          <Text className="text-error text-sm mt-2">
-            {draft.workerName ?? "This pro"} isn&apos;t available on this date. Try another date or pro.
-          </Text>
+        {isRush && (
+          <View className="bg-warning/10 rounded-xl px-4 py-3 mt-3 flex-row">
+            <Ionicons name="flash-outline" size={18} color={colors.warning} />
+            <Text className="text-text-secondary text-sm ml-2 flex-1">
+              Same-day booking: a rush fee of {Math.round(RUSH_FEE_RATE * 100)}% of the service price applies. Start
+              times must be at least {RUSH_MIN_LEAD_HOURS} hours from now.
+            </Text>
+          </View>
         )}
 
-        {draft.workerLocked && (
-          <>
-            <Text className="text-text-primary font-bold text-lg mt-6 mb-1">Multi-day job?</Text>
-            <Text className="text-text-secondary text-sm mb-3">
-              Book {draft.workerName ?? "this pro"} at the same time on consecutive days, starting from the date
-              above.
-            </Text>
-            <View className="bg-card rounded-xl px-4 py-3 flex-row items-center justify-between">
-              <Text className="text-text-primary font-semibold">
-                {dayCount === 1 ? "Single day" : `${dayCount} consecutive days`}
-              </Text>
-              <View className="flex-row items-center">
-                <Pressable accessibilityRole="button" accessibilityLabel="One day fewer"
-                  className="w-9 h-9 rounded-full bg-surface items-center justify-center"
-                  disabled={dayCount <= 1}
-                  onPress={() => setDayCount((c) => Math.max(1, c - 1))}
-                >
-                  <Ionicons name="remove" size={18} color={dayCount <= 1 ? colors.text.muted : colors.brand.DEFAULT} />
-                </Pressable>
-                <Text className="text-text-primary font-bold text-base mx-4">{dayCount}</Text>
-                <Pressable
-                  className="w-9 h-9 rounded-full bg-surface items-center justify-center"
-                  disabled={dayCount >= MAX_MULTI_DAY_BOOKING_DAYS}
-                  onPress={() => setDayCount((c) => Math.min(MAX_MULTI_DAY_BOOKING_DAYS, c + 1))}
-                >
-                  <Ionicons
-                    name="add"
-                    size={18}
-                    color={dayCount >= MAX_MULTI_DAY_BOOKING_DAYS ? colors.text.muted : colors.brand.DEFAULT}
-                  />
-                </Pressable>
-              </View>
-            </View>
-          </>
+        <Text className="text-text-primary font-bold text-lg mt-6 mb-1">Select a start time</Text>
+        <Text className="text-text-muted text-xs mb-3">
+          {date && !loadingCount && prosAvailable != null
+            ? draft.workerLocked
+              ? prosAvailable > 0
+                ? `${draft.workerName ?? "Your pro"} works on this date.`
+                : `${draft.workerName ?? "Your pro"} isn't working on this date.`
+              : `${prosAvailable} pro${prosAvailable === 1 ? "" : "s"} available on this date.`
+            : "When should your pro arrive?"}
+        </Text>
+        <StartTimePicker value={time} onChange={setTime} selectable={selectableTimes} busyTimes={workerBusyTimes} />
+
+        {noProsOnDate && (
+          <Text className="text-error text-sm mt-2">
+            {draft.workerLocked
+              ? `${draft.workerName ?? "This pro"} isn't working on this date. Try another date or pro.`
+              : "No pros are available on this date. Try another date."}
+          </Text>
         )}
 
       </ScrollView>

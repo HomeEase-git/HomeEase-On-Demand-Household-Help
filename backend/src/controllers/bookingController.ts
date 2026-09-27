@@ -114,10 +114,12 @@ export const createBooking = async (req: AuthRequest, res: Response) => {
       where: { userId: clientId },
       select: { paymentHoldAt: true, paymentHoldNote: true },
     });
+    // 402, not 403 — the mobile app's API client signs the user out on any
+    // 403 (see acceptBooking's ACCOUNT_ON_HOLD for the same reason).
     if (holdingClientProfile?.paymentHoldAt) {
-      return res.status(403).json(
+      return res.status(402).json(
         errorResponse(
-          403,
+          402,
           `Your account is on hold${holdingClientProfile.paymentHoldNote ? ` (${holdingClientProfile.paymentHoldNote})` : ''}. Please settle it before booking again.`
         )
       );
@@ -961,6 +963,8 @@ export const getBookingDetail = async (req: AuthRequest, res: Response) => {
           service: f.serviceTask?.name ?? f.serviceType,
         })),
         allowsFollowUp: booking.serviceTask?.allowsFollowUp ?? false,
+        // CUSTOM_QUOTE: priced by the worker's quote (see submitQuote).
+        serviceTaskPricingModel: booking.serviceTask?.pricingModel ?? null,
         visits: booking.visits,
         nearbyJobs,
         // Multi-day upfront booking (see createMultiDayBooking) — null for
