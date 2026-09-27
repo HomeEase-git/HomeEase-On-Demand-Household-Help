@@ -409,6 +409,7 @@ export async function settleWorkerEarnings(paymentId: string): Promise<void> {
       select: {
         id: true,
         commissionOwed: true,
+        compensationCredit: true,
         payoutMethod: true,
         payoutAccountName: true,
         payoutAccountNumber: true,
@@ -425,6 +426,15 @@ export async function settleWorkerEarnings(paymentId: string): Promise<void> {
           note: 'Withheld from payout to clear outstanding cash-job commission dues',
         });
         payoutAmount = roundToCentavo(payoutAmount - applied);
+      }
+      // Approved client-fault cancellation compensation rides along with the
+      // next online payout (see debtLedgerService.creditCompensationTx).
+      if (workerProfile.compensationCredit > 0) {
+        payoutAmount = roundToCentavo(payoutAmount + workerProfile.compensationCredit);
+        await tx.workerProfile.update({
+          where: { id: workerProfile.id },
+          data: { compensationCredit: 0 },
+        });
       }
     }
 

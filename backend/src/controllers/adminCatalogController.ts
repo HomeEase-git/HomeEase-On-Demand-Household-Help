@@ -188,6 +188,8 @@ function taskData(task: CatalogTaskInput, sortOrder: number) {
     // Display-only for FIXED/CUSTOM_QUOTE (the matrix's "per visit").
     unitLabel: task.unitLabel?.trim() || null,
     durationHours: isCustomQuote ? null : task.durationHours ?? null,
+    // Omitted by the job-matrix script, which mustn't reset it.
+    ...(task.allowsFollowUp !== undefined ? { allowsFollowUp: task.allowsFollowUp } : {}),
   };
 }
 

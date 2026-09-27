@@ -36,7 +36,6 @@ const ReviewDetail = lazy(() => import('./pages/ReviewDetail'))
 const Reports = lazy(() => import('./pages/Reports'))
 const Settings = lazy(() => import('./pages/Settings'))
 const MfaSetup = lazy(() => import('./pages/MfaSetup'))
-const PriceControl = lazy(() => import('./pages/PriceControl'))
 const ServiceCatalog = lazy(() => import('./pages/ServiceCatalog'))
 const PromoBanners = lazy(() => import('./pages/PromoBanners'))
 const ServiceCatalogEditor = lazy(() => import('./pages/ServiceCatalogEditor'))
@@ -93,7 +92,6 @@ export default function App() {
           { path: 'reports/service', element: <Reports /> },
           { path: 'reports/activity', element: <Reports /> },
           { path: 'reports/export', element: <Reports /> },
-          { path: 'price-control', element: <PriceControl /> },
           { path: 'pricing-rules', element: <PricingRules /> },
           { path: 'service-catalog', element: <ServiceCatalog /> },
           { path: 'service-catalog/new', element: <ServiceCatalogEditor /> },

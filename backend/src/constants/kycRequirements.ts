@@ -13,6 +13,8 @@ export const TIER_1_REQUIRED_DOCUMENT_TYPES = [
   // reviewed by the admin and parsed into the worker's public skills — it is
   // NOT sent to the AI identity check (see verificationAiService).
   'RESUME',
+  // A medical certificate that the worker is fit to work (2026-09-27).
+  'HEALTH_CERTIFICATE',
 ] as const satisfies readonly KycDocumentType[];
 
 // Government-issued clearances that actually expire in real life, vs. an ID
@@ -30,4 +32,6 @@ export const CLEARANCE_VALIDITY_DAYS: Partial<Record<KycDocumentType, number>> =
   // issued in; 1 year from issue is a reasonable approximation without
   // requiring calendar-aware logic here.
   CEDULA: 365,
+  // Fit-to-work medical certificate: asked for again every year.
+  HEALTH_CERTIFICATE: 365,
 };

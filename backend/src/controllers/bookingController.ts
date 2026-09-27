@@ -1,5 +1,5 @@
 import { Request, Response } from 'express';
-import type { ConditionType, PaymentMethodType, Prisma, RoomType, TimeSlot, WorkerCancellationReason } from '@prisma/client';
+import type { BookingStatus, ConditionType, PaymentMethodType, RoomType, WorkerCancellationReason } from '@prisma/client';
 import prisma from '@config/database';
 import { errorResponse } from '@utils/errorResponse';
 import { notifyUser } from '@utils/notify';
@@ -11,7 +11,6 @@ import { resolveDrivingDistanceKm } from '@services/googleDistanceService';
 import { taskBasePrice } from '@services/taskPriceService';
 import { getWorkerSetupStatus, WORKER_SETUP_INCOMPLETE_MESSAGE } from '@services/workerSetupService';
 import { findAutoMatchWorker, LATE_CANCEL_THRESHOLD_HOURS } from '@services/matchingService';
-import { validatePriceWithinPricingRule } from '@services/pricingRuleService';
 import {
   settleCashBooking,
   createCompletionInvoice,
@@ -19,17 +18,17 @@ import {
 } from '@services/paymentLifecycleService';
 import {
   toDayStart,
-  findSlot,
-  markSlotBooked,
-  freeSlot,
-  blockSlotForExtend,
-  findNextOpenSlot,
-  RESCHEDULE_SEARCH_WINDOW_DAYS,
+  isoDay,
+  checkBookingStart,
+  bookingStartTime,
+  bookingStartInstant,
   isOutsideBookedWindow,
-  getSlotStartInstant,
-  isSlotAndOverflowFree,
-  additionalSlotsForDuration,
+  isWorkerAvailableOn,
+  findNearbyJobs,
+  formatTime12h,
 } from '@services/workerAvailabilityService';
+import { chargePenaltyTx } from '@services/debtLedgerService';
+import { toOwnedBookingPhotoUrls } from '@utils/storageUrls';
 import {
   calculateWorkerPayout,
   computeBookingFinalTotal,
@@ -42,10 +41,8 @@ import { roundToCentavo } from '@utils/money';
 import { buildCapabilityFilters } from '@services/matchingService';
 import { schedulePendingExpiry, cancelPendingExpiryJob } from '@queues/bookingQueue';
 import { VALID_TRANSITIONS, isValidTransition } from '@services/bookingStateMachine';
-import { MIN_BOOKING_LEAD_DAYS } from '@middleware/validation';
 import { getAppSettings } from '@services/appSettingsService';
 import { computeWorkerTier, tierMultiplier } from '@utils/workerTier';
-import { VALID_TIME_SLOTS } from '@/constants/bookingEnums';
 import { validateScopeAnswers } from '@utils/scopeFields';
 import { getIO } from '../socket';
 import type { JwtPayload } from '@/types/index';
@@ -72,16 +69,29 @@ async function loadScopeFields(serviceTypeId: string) {
   return prisma.serviceScopeField.findMany({ where: { serviceTypeId }, include: scopeFieldInclude });
 }
 
+// A follow-up job can be requested once the inspection/diagnosis job's work
+// is done (the client may still be paying for it).
+const FOLLOW_UP_PARENT_STATUSES: BookingStatus[] = ['PENDING_COMPLETION', 'AWAITING_PAYMENT', 'COMPLETED'];
+
 /**
  * POST /api/bookings
  * Create a new booking (client only).
  *
  * If workerId is omitted, runs the "surprise me" auto-match algorithm
  * (see matchingService.findAutoMatchWorker) to pick a worker instead of
- * requiring the client to choose one. Price is always computed server-side
- * (basePrice + distance/urgency/tier surcharges — see utils/pricing.
- * computeJobPricing), logged via PricingLog, and checked against any
- * PricingRule for (city, serviceType).
+ * requiring the client to choose one. Price is always computed server-side:
+ * the admin-set service price, plus the worker's expertise-tier fee, the
+ * distance fee, and the rush fee for a same-day booking (see utils/pricing.
+ * computeJobPricing), plus priced packages — logged via PricingLog.
+ *
+ * Scheduling is a date plus an exact start time. Workers can take any
+ * number of jobs a day; the only availability rule is the worker's weekly
+ * schedule and date overrides (see workerAvailabilityService).
+ *
+ * parentBookingId makes this a follow-up job (e.g. the repair after an
+ * inspection): same worker as the finished inspection/diagnosis job, which
+ * the worker still has to accept.
+ *
  * No Payment row is created here — payment is taken after the job is finished
  * and finally priced (see confirmCompletion). A 1-hour expiry job is queued so
  * an unanswered PENDING booking auto-cancels (see queues/bookingQueue +
@@ -96,18 +106,20 @@ export const createBooking = async (req: AuthRequest, res: Response) => {
 
     // Payment hold — mirrors WorkerProfile.debtHoldAt's "blocks new activity
     // until cleared" pattern, applied to the client side of the same
-    // problem. Set by adminDisputeController.resolveDispute's
-    // RESOLVE_FOR_WORKER action when this client confirmed a job (so the
-    // worker's labor is real and done) but the 72h non-payment dispute got
-    // resolved without payment ever landing — without this, that client
-    // could go straight on to book and strand a second worker the same way.
+    // problem. Set when this client left a booking unpaid (see
+    // adminDisputeController.resolveDispute's RESOLVE_FOR_WORKER) or owes a
+    // cancellation fee (see adminCancellationController) — without this they
+    // could go straight on to book and strand another worker the same way.
     const holdingClientProfile = await prisma.clientProfile.findUnique({
       where: { userId: clientId },
-      select: { paymentHoldAt: true },
+      select: { paymentHoldAt: true, paymentHoldNote: true },
     });
     if (holdingClientProfile?.paymentHoldAt) {
       return res.status(403).json(
-        errorResponse(403, 'Your account is on hold for an unpaid booking. Please settle it before booking again.')
+        errorResponse(
+          403,
+          `Your account is on hold${holdingClientProfile.paymentHoldNote ? ` (${holdingClientProfile.paymentHoldNote})` : ''}. Please settle it before booking again.`
+        )
       );
     }
 
@@ -122,7 +134,8 @@ export const createBooking = async (req: AuthRequest, res: Response) => {
       lat,
       lng,
       date,
-      timeSlot,
+      time,
+      parentBookingId,
       addOns,
       packageIds,
       priorities,
@@ -144,7 +157,8 @@ export const createBooking = async (req: AuthRequest, res: Response) => {
       lat: number;
       lng: number;
       date: string;
-      timeSlot: TimeSlot;
+      time: string;
+      parentBookingId?: string | null;
       addOns?: Array<{ id?: string; name?: string; price: number }>;
       packageIds?: string[];
       priorities?: string[];
@@ -185,7 +199,8 @@ export const createBooking = async (req: AuthRequest, res: Response) => {
             isAutoMatched: existing.isAutoMatched,
             status: existing.status,
             scheduledDate: existing.scheduledDate,
-            timeSlot: existing.timeSlot,
+            scheduledTime: bookingStartTime(existing),
+            isRush: existing.isRush,
             workerTier: (log?.breakdown as { workerTier?: string } | null)?.workerTier ?? null,
             estimatedPrice: existing.estimatedPrice,
             estimatedDurationHours: existing.estimatedDurationHours,
@@ -196,6 +211,7 @@ export const createBooking = async (req: AuthRequest, res: Response) => {
                   conditionFee: log.conditionFee,
                   distanceFee: log.distanceFee,
                   urgencyFee: log.urgencyFee,
+                  rushFee: log.rushFee ?? 0,
                   tierFee: log.tierFee,
                   addOnsTotal: log.addOnsTotal,
                   finalEstimate: log.finalEstimate,
@@ -206,10 +222,20 @@ export const createBooking = async (req: AuthRequest, res: Response) => {
         });
       }
     }
+
+    const appSettings = await getAppSettings();
+
+    // Date + start time: not in the past, and a same-day ("rush") booking
+    // needs enough lead time for the worker to accept and travel.
+    const startCheck = checkBookingStart(date, time, appSettings.rushMinLeadHours);
+    if (!startCheck.ok) {
+      return res.status(400).json(errorResponse(400, startCheck.message));
+    }
+    const isRush = startCheck.isRush;
+
     // Urgency was removed as a platform concept (2026-09-14, see
     // utils/pricing.ts) — every new booking is STANDARD. Kept as a named
-    // constant (rather than deleted outright) so the PricingLog breakdown
-    // JSON below stays self-describing for anyone reading old vs. new rows.
+    // constant so the PricingLog breakdown JSON stays self-describing.
     const effectiveUrgencyLevel = 'STANDARD' as const;
 
     const scheduledDate = toDayStart(date);
@@ -227,6 +253,34 @@ export const createBooking = async (req: AuthRequest, res: Response) => {
       return res.status(404).json(errorResponse(404, 'Service task not found'));
     }
 
+    // Follow-up job: only after an inspection/diagnosis job, only with the
+    // same worker, only once that job is done.
+    let followUpWorkerId: string | null = null;
+    if (parentBookingId) {
+      const parent = await prisma.booking.findUnique({
+        where: { id: parentBookingId },
+        select: {
+          clientId: true,
+          workerId: true,
+          status: true,
+          serviceTask: { select: { allowsFollowUp: true } },
+        },
+      });
+      if (!parent || parent.clientId !== clientId) {
+        return res.status(404).json(errorResponse(404, 'The original booking was not found'));
+      }
+      if (!parent.serviceTask?.allowsFollowUp) {
+        return res.status(409).json(errorResponse(409, 'Follow-up jobs can only be requested after an inspection or diagnosis job'));
+      }
+      if (!FOLLOW_UP_PARENT_STATUSES.includes(parent.status)) {
+        return res.status(409).json(errorResponse(409, 'You can request a follow-up job once the inspection is finished'));
+      }
+      if (!parent.workerId || (requestedWorkerId && requestedWorkerId !== parent.workerId)) {
+        return res.status(409).json(errorResponse(409, 'A follow-up job goes to the same pro who did the inspection'));
+      }
+      followUpWorkerId = parent.workerId;
+    }
+
     const resolvedServiceTypeName = serviceTask?.serviceType.name ?? serviceType;
     // Category config (for its flat basePrice) is only needed when the client
     // booked straight off a ServiceType rather than a specific ServiceTask.
@@ -236,18 +290,14 @@ export const createBooking = async (req: AuthRequest, res: Response) => {
       return res.status(404).json(errorResponse(404, 'Service type not found'));
     }
 
-    // basePrice can't be resolved yet for a serviceTask booking — FIXED/
-    // PER_UNIT depend on which worker gets picked (their own WorkerTaskPrice),
-    // and CUSTOM_QUOTE has no upfront price at all. Resolved per-candidate
-    // inside the worker-resolution loop below (see "basePrice resolution").
+    // CUSTOM_QUOTE has no upfront price at all — the worker quotes on site.
     const isCustomQuoteTask = serviceTask?.pricingModel === 'CUSTOM_QUOTE';
 
     const effectiveScopeAnswers =
       scopeAnswers && typeof scopeAnswers === 'object' && !Array.isArray(scopeAnswers) ? scopeAnswers : undefined;
 
     // Only the fields that apply to the chosen task are enforced (see
-    // utils/scopeFields.fieldAppliesToTask) — a task booking used to skip
-    // this check entirely, back when every field was category-wide.
+    // utils/scopeFields.fieldAppliesToTask).
     const scopeFields = serviceTask
       ? await loadScopeFields(serviceTask.serviceTypeId)
       : serviceTypeConfig!.scopeFields;
@@ -257,9 +307,7 @@ export const createBooking = async (req: AuthRequest, res: Response) => {
     }
 
     // Condition is no longer a platform-wide concept — new bookings don't
-    // collect it (an admin who still wants a "condition"-style question can
-    // add it as an ordinary scope field). The Booking.condition column is
-    // kept only for historical rows.
+    // collect it. The Booking.condition column is kept only for historical rows.
     const effectiveCondition: ConditionType | null = null;
     const effectiveIssuePhotoUrls = Array.isArray(issuePhotoUrls)
       ? issuePhotoUrls.filter((url): url is string => typeof url === 'string' && url.length > 0)
@@ -267,17 +315,13 @@ export const createBooking = async (req: AuthRequest, res: Response) => {
 
     const hasPets = Array.isArray(priorities) && priorities.some((p) => p.toLowerCase().includes('pet'));
 
-    let resolvedWorkerId = requestedWorkerId ?? null;
+    let resolvedWorkerId = followUpWorkerId ?? requestedWorkerId ?? null;
     let isAutoMatched = false;
 
     // DeclinedWorker is scoped to one Booking row, so it never protected a
-    // client across separate booking ATTEMPTS — decline a match, start a
-    // fresh booking request (very plausible right after a "declined" push
-    // notification), and the new row's declinedWorkerIds starts empty,
-    // letting the same worker who just declined get auto-matched right back
-    // immediately. Look up this client's recent declines across ALL their
-    // bookings (joining through Booking.clientId, no schema change needed)
-    // and exclude them from this brand-new booking's very first match too.
+    // client across separate booking ATTEMPTS — look up this client's recent
+    // declines across ALL their bookings and exclude them from this brand-new
+    // booking's very first match too.
     const RECENT_DECLINE_COOLDOWN_HOURS = 48;
     const recentDeclineCutoff = new Date(Date.now() - RECENT_DECLINE_COOLDOWN_HOURS * 60 * 60 * 1000);
     const recentDeclines = await prisma.declinedWorker.findMany({
@@ -287,18 +331,18 @@ export const createBooking = async (req: AuthRequest, res: Response) => {
     });
     const recentlyDeclinedWorkerIds = recentDeclines.map((d) => d.workerId);
 
+    const autoMatchParams = {
+      serviceType: resolvedServiceTypeName,
+      serviceTaskId,
+      date: scheduledDate,
+      scopeAnswers: effectiveScopeAnswers,
+      hasPets,
+      clientLat: lat,
+      clientLng: lng,
+    };
+
     if (!resolvedWorkerId) {
-      const match = await findAutoMatchWorker({
-        serviceType: resolvedServiceTypeName,
-        serviceTaskId,
-        date: scheduledDate,
-        timeSlot,
-        scopeAnswers: effectiveScopeAnswers,
-        hasPets,
-        clientLat: lat,
-        clientLng: lng,
-        excludeWorkerIds: recentlyDeclinedWorkerIds,
-      });
+      const match = await findAutoMatchWorker({ ...autoMatchParams, excludeWorkerIds: recentlyDeclinedWorkerIds });
 
       if (!match) {
         return res.status(404).json(errorResponse(404, 'No available worker found for this request'));
@@ -308,757 +352,218 @@ export const createBooking = async (req: AuthRequest, res: Response) => {
       isAutoMatched = true;
     }
 
-    // Bounded so a pathological run of simultaneous auto-match collisions
-    // can't loop forever — 2 retries (3 attempts total) covers "two clients
-    // landed on the same best worker+slot at once" without turning a single
-    // request into an unbounded worker search. Only an auto-matched booking
-    // retries; a client who explicitly picked this worker gets the same
-    // immediate failure as before — silently substituting a different worker
-    // for a choice they made themselves isn't this fix's job.
+    // Bounded so a pathological run of auto-match failures can't loop
+    // forever. Only an auto-matched booking retries; a client who explicitly
+    // picked this worker gets the failure straight away.
     const MAX_AUTO_MATCH_RETRIES = 2;
     const triedWorkerIds: string[] = [
       ...recentlyDeclinedWorkerIds,
       ...(isAutoMatched && resolvedWorkerId ? [resolvedWorkerId] : []),
     ];
-    const autoMatchParams = {
-      serviceType: resolvedServiceTypeName,
-      serviceTaskId,
-      date: scheduledDate,
-      timeSlot,
-      scopeAnswers: effectiveScopeAnswers,
-      hasPets,
-      clientLat: lat,
-      clientLng: lng,
-    };
 
     // Fetched once outside the retry loop — a client's own phone doesn't
     // change across auto-match retries within the same request.
     const requestingClient = await prisma.user.findUnique({ where: { id: clientId }, select: { phone: true } });
 
     for (let attempt = 0; ; attempt++) {
-    const workerProfile = await prisma.workerProfile.findUnique({
-      where: { userId: resolvedWorkerId },
-      include: {
-        user: { select: { phone: true } },
-        serviceCategories: { include: { serviceType: { select: { name: true } } } },
-      },
-    });
-
-    if (!workerProfile) {
-      return res.status(404).json(errorResponse(404, 'Worker not found'));
-    }
-
-    // Client booking themselves (or a shared family line) — see the
-    // resolved policy on Booking.selfDealingFlag's schema comment:
-    // non-blocking, just a signal for admin review. A missing phone on
-    // either side never counts as a match.
-    const selfDealingFlag = Boolean(
-      requestingClient?.phone && workerProfile.user.phone && requestingClient.phone === workerProfile.user.phone
-    );
-
-    // Shared by every retryable failure below (slot conflict, unpriced task)
-    // so the "exclude this worker, try the next-best auto-match candidate"
-    // logic exists in exactly one place instead of being copy-pasted per
-    // failure type.
-    const tryNextAutoMatchCandidate = async (): Promise<boolean> => {
-      if (!isAutoMatched || attempt >= MAX_AUTO_MATCH_RETRIES) return false;
-      const nextMatch = await findAutoMatchWorker({ ...autoMatchParams, excludeWorkerIds: triedWorkerIds });
-      if (!nextMatch) return false;
-      resolvedWorkerId = nextMatch.workerId;
-      triedWorkerIds.push(resolvedWorkerId);
-      return true;
-    };
-
-    // A client picking a specific worker (not auto-match) could otherwise
-    // bypass the capability filter Step 3 already applied — re-check
-    // server-side so a stale/tampered request can't book a worker who
-    // doesn't actually handle what was asked for. Auto-match is already
-    // guaranteed correct here (findAutoMatchWorker filters on both at the DB
-    // level), so these two checks only matter for an explicitly-picked
-    // worker — but without them, a client could bypass search entirely and
-    // directly book a worker whose category is still PENDING_VERIFICATION
-    // (or who was never connected to it at all), making that gate meaningless.
-    if (!isAutoMatched) {
-      const capabilityFilters = await buildCapabilityFilters(resolvedServiceTypeName, effectiveScopeAnswers, serviceTask?.id);
-      if (capabilityFilters.length > 0) {
-        const eligible = await prisma.workerProfile.findFirst({
-          where: { userId: resolvedWorkerId, AND: capabilityFilters },
-          select: { id: true },
-        });
-        if (!eligible) {
-          return res.status(409).json(errorResponse(409, 'This pro does not handle the selected option for this service'));
-        }
-      }
-
-      const bookedCategory = workerProfile.serviceCategories.find(
-        (c) => c.serviceType.name.toLowerCase() === resolvedServiceTypeName.toLowerCase()
-      );
-      if (!bookedCategory || bookedCategory.status !== 'VERIFIED') {
-        return res.status(409).json(errorResponse(409, 'This pro does not offer this service'));
-      }
-    }
-
-    if (workerProfile.kycStatus !== 'APPROVED') {
-      return res.status(403).json(errorResponse(403, 'Worker is not verified yet'));
-    }
-
-    // A worker who hasn't finished account setup can't take requests (see
-    // workerSetupService). Auto-match already filters them out.
-    if (!(await getWorkerSetupStatus(workerProfile.userId))?.complete) {
-      if (await tryNextAutoMatchCandidate()) continue;
-      return res.status(409).json(errorResponse(409, "This pro isn't taking bookings yet"));
-    }
-
-    if (!workerProfile.isAvailable) {
-      return res.status(409).json(errorResponse(409, 'Worker is not currently available'));
-    }
-
-    if (workerProfile.debtHoldAt) {
-      return res.status(409).json(errorResponse(409, 'Worker is not currently available'));
-    }
-
-    if (workerProfile.activeJobCount >= workerProfile.maxConcurrentJobs) {
-      return res.status(409).json(errorResponse(409, 'Worker is at maximum capacity'));
-    }
-
-    // A job whose estimated duration exceeds one 4h TimeSlot bucket also
-    // needs whichever same-day slot(s) it spills into to be free — checking
-    // only the requested slot let a genuinely double-booking-length job
-    // through the front door in the first place (see
-    // additionalSlotsForDuration's schema-adjacent comment).
-    const slotAndOverflowFree = await isSlotAndOverflowFree(
-      prisma,
-      workerProfile.id,
-      scheduledDate,
-      timeSlot,
-      serviceTask?.durationHours
-    );
-    if (!slotAndOverflowFree) {
-      if (await tryNextAutoMatchCandidate()) continue;
-      return res.status(409).json(errorResponse(409, 'Selected slot is no longer available'));
-    }
-
-    // Every task is priced by the admin (see taskPriceService), so the only
-    // per-worker question is whether this worker offers the task at all.
-    // findAutoMatchWorker already filters auto-match candidates on that; an
-    // explicitly-picked worker isn't filtered, hence the 409 fallback here.
-    // CUSTOM_QUOTE has no upfront price; the client is never shown one until
-    // the worker submits a quote, so basePrice is 0 and the VAT snapshot
-    // below is deliberately deferred to that moment instead of now.
-    let basePrice: number;
-    if (serviceTask) {
-      const selection = await prisma.workerTaskSelection.findUnique({
-        where: {
-          workerProfileId_serviceTaskId: { workerProfileId: workerProfile.id, serviceTaskId: serviceTask.id },
+      const workerProfile = await prisma.workerProfile.findUnique({
+        where: { userId: resolvedWorkerId },
+        include: {
+          user: { select: { phone: true, status: true } },
+          serviceCategories: { include: { serviceType: { select: { name: true } } } },
         },
       });
-      if (!selection?.isActive) {
-        if (await tryNextAutoMatchCandidate()) continue;
-        return res.status(409).json(errorResponse(409, 'This pro does not offer this specific service'));
-      }
-      const priced = taskBasePrice(serviceTask, effectiveScopeAnswers);
-      if (!priced.ok) {
-        return res.status(400).json(errorResponse(400, `"${priced.missingLabel}" is required for this service`));
-      }
-      basePrice = priced.basePrice;
-    } else {
-      basePrice = serviceTypeConfig!.basePrice;
-    }
 
-    // VAT snapshot — pinned from the worker's status at the earliest point a
-    // real price is shown, so settlement never re-checks the worker's live
-    // vatRegistered flag (see paymentLifecycleService.priceBooking).
-    const vatApplicable = !isCustomQuoteTask && workerProfile.vatRegistered;
-    const vatRate = vatApplicable ? VAT_RATE : null;
-
-    // Distance fee is based on the worker's fixed service address, not a
-    // live position — bookings are scheduled in advance, not dispatched to
-    // wherever the worker happens to be right now, so this is a static
-    // "shipping fee" style distance rather than real-time proximity (see
-    // WorkerProfile.addressLat/addressLng comment). Real driving-route
-    // distance (Google Routes API) when configured, falling back to
-    // straight-line distance otherwise — see googleDistanceService.
-    const workerDistanceKm =
-      workerProfile.addressLat != null && workerProfile.addressLng != null
-        ? await resolveDrivingDistanceKm(clientLocation, { lat: workerProfile.addressLat, lng: workerProfile.addressLng })
-        : null;
-
-    // Expertise tier — computed live from rating + completed-job count (see
-    // utils/workerTier.ts), not stored, so it never drifts from those numbers.
-    const appSettings = await getAppSettings();
-    const workerCompletedJobs = await prisma.booking.count({
-      where: { workerId: resolvedWorkerId, status: 'COMPLETED' },
-    });
-    const workerTier = computeWorkerTier(workerProfile.rating, workerCompletedJobs, appSettings);
-
-    // Free job-preference toggles carry no price of their own — clamp
-    // server-side so a tampered client can't slip a nonzero price through
-    // this array (only resolvedPackages below, priced from the worker's own
-    // WorkerPackage rows, are a trustworthy priced-add-on source).
-    const preferenceAddOns = (Array.isArray(addOns) ? addOns : []).map((a) => ({
-      name: a.name || a.id || 'Add-on',
-      price: 0,
-    }));
-
-    let resolvedPackages: { name: string; price: number }[] = [];
-    if (Array.isArray(packageIds) && packageIds.length > 0) {
-      const found = await prisma.workerPackage.findMany({
-        where: { id: { in: packageIds }, workerProfileId: workerProfile.id, isActive: true, status: 'APPROVED' },
-      });
-      if (found.length !== packageIds.length) {
-        return res.status(400).json(errorResponse(400, 'One or more selected packages are unavailable'));
-      }
-      resolvedPackages = found.map((p) => ({ name: p.name, price: p.price }));
-    }
-
-    const addOnsList = [...preferenceAddOns, ...resolvedPackages];
-    const addOnsTotal = addOnsList.reduce((sum, a) => sum + (typeof a.price === 'number' ? a.price : 0), 0);
-    const { distanceFee, urgencyFee, tierFee, estimatedPrice } = computeJobPricing({
-      basePrice,
-      tierMultiplier: tierMultiplier(workerTier, appSettings),
-      distanceKm: workerDistanceKm,
-      freeDistanceKm: appSettings.freeDistanceKm,
-      perKmFee: appSettings.perKmFee,
-    });
-    // Kept in the response/log shape below for compatibility with existing
-    // clients/receipts — always 0 now that condition carries no platform fee.
-    const conditionFee = 0;
-    const finalEstimate = round2(estimatedPrice + addOnsTotal);
-
-    const priceCheck = await validatePriceWithinPricingRule(cityName, resolvedServiceTypeName, finalEstimate);
-    if (!priceCheck.ok) {
-      return res.status(409).json(
-        errorResponse(
-          409,
-          `Calculated price ₱${finalEstimate} is outside the allowed range (₱${priceCheck.bounds.minPrice}–₱${priceCheck.bounds.maxPrice}) for ${cityName || 'this city'}/${resolvedServiceTypeName}`
-        )
-      );
-    }
-
-    try {
-      const { booking } = await prisma.$transaction(async (tx) => {
-        // Re-check KYC + capacity + slot inside the transaction to close the
-        // race between the checks above and this insert (e.g. an admin
-        // rejecting the worker in that window).
-        const workerTx = await tx.workerProfile.findUnique({ where: { userId: resolvedWorkerId! } });
-        if (!workerTx) throw new Error('WORKER_NOT_FOUND');
-        if (workerTx.kycStatus !== 'APPROVED') throw new Error('WORKER_NOT_APPROVED');
-        if (workerTx.activeJobCount >= workerTx.maxConcurrentJobs) throw new Error('AT_CAPACITY');
-
-        const slotAndOverflowFreeTx = await isSlotAndOverflowFree(
-          tx,
-          workerTx.id,
-          scheduledDate,
-          timeSlot,
-          serviceTask?.durationHours
-        );
-        if (!slotAndOverflowFreeTx) throw new Error('SLOT_TAKEN');
-
-        const created = await tx.booking.create({
-          data: {
-            clientId,
-            workerId: resolvedWorkerId,
-            serviceType: resolvedServiceTypeName,
-            serviceTaskId: serviceTaskId ?? null,
-            description: description ?? '',
-            estimatedDurationHours: serviceTask?.durationHours ?? null,
-            rooms: Array.isArray(rooms) ? rooms : [],
-            condition: effectiveCondition,
-            priorities: Array.isArray(priorities) ? priorities : [],
-            addOnsSnapshot: addOnsList.length > 0 ? addOnsList : undefined,
-            scopeAnswers: effectiveScopeAnswers,
-            issuePhotoUrls: effectiveIssuePhotoUrls,
-            scheduledDate,
-            timeSlot,
-            isAutoMatched,
-            selfDealingFlag,
-            declinedWorkerIds: [],
-            expiresAt: new Date(Date.now() + 60 * 60 * 1000),
-            idempotencyKey: hasIdempotencyKey ? (idempotencyKey as string) : null,
-            estimatedPrice,
-            vatApplicable,
-            vatRate,
-            tip: typeof tip === 'number' ? tip : 0,
-            notes: notes ?? null,
-            paymentMethodType: paymentMethodType ?? null,
-            paymentAccountIdentifier: paymentAccountIdentifier ?? null,
-            location: address,
-            city: cityName,
-            clientLat: lat,
-            clientLng: lng,
-            workerLat: workerProfile.addressLat ?? null,
-            workerLng: workerProfile.addressLng ?? null,
-            distanceMeters: workerDistanceKm != null ? Math.round(workerDistanceKm * 1000) : null,
-            status: 'PENDING',
-          },
-          include: {
-            client: { select: { id: true, fullName: true, email: true } },
-            worker: { select: { id: true, fullName: true, email: true } },
-            serviceTask: true,
-          },
-        });
-
-        if (addOnsList.length > 0) {
-          await tx.bookingAddOn.createMany({
-            data: addOnsList.map((a) => ({
-              bookingId: created.id,
-              name: a.name,
-              price: typeof a.price === 'number' ? a.price : 0,
-            })),
-          });
-        }
-
-        await tx.pricingLog.create({
-          data: {
-            bookingId: created.id,
-            basePrice,
-            conditionFee,
-            distanceFee,
-            urgencyFee,
-            tierFee,
-            addOnsTotal,
-            finalEstimate,
-            breakdown: {
-              basePrice,
-              conditionFee,
-              distanceFee,
-              urgencyFee,
-              tierFee,
-              addOnsTotal,
-              finalEstimate,
-              condition: effectiveCondition,
-              urgencyLevel: effectiveUrgencyLevel,
-              workerTier,
-              distanceKm: workerDistanceKm,
-              isAutoMatched,
-            },
-          },
-        });
-
-        await markSlotBooked(tx, workerTx.id, scheduledDate, timeSlot, serviceTask?.durationHours);
-
-        // No Payment row is created here — the client pays after the job is
-        // finished and finally priced (see confirmCompletion). Nothing is held.
-        return { booking: created };
-      });
-
-      // Best-effort — the booking is already committed at this point, so a
-      // Redis hiccup here must not turn a real success into an apparent
-      // failure to the client (it would just retry into the idempotency
-      // path above and get told "already created" for a booking it thinks
-      // never happened). Worst case if this silently fails: the booking
-      // never gets its 1-hour PENDING auto-expiry, which is a smaller,
-      // recoverable gap than a false "booking failed" error.
-      await schedulePendingExpiry(booking.id).catch((error) => {
-        console.error(`Failed to schedule pending-expiry for booking ${booking.id}:`, error);
-      });
-
-      await notifyUser({
-        userId: booking.workerId as string,
-        type: 'BOOKING_REQUEST',
-        title: 'New Booking Request',
-        message: `${booking.client.fullName} has requested your service`,
-        relatedId: booking.id,
-      });
-
-      return res.status(201).json({
-        success: true,
-        message: 'Booking created successfully',
-        data: {
-          id: booking.id,
-          clientName: booking.client.fullName,
-          workerName: booking.worker?.fullName ?? null,
-          isAutoMatched,
-          status: booking.status,
-          scheduledDate: booking.scheduledDate,
-          timeSlot: booking.timeSlot,
-          workerTier,
-          estimatedPrice: booking.estimatedPrice,
-          estimatedDurationHours: booking.estimatedDurationHours,
-          expiresAt: booking.expiresAt,
-          pricing: {
-            basePrice,
-            conditionFee,
-            distanceFee,
-            urgencyFee,
-            tierFee,
-            addOnsTotal,
-            finalEstimate,
-            addOns: addOnsList,
-          },
-          // Payment is collected after completion — none exists yet.
-          payment: null,
-        },
-      });
-    } catch (txErr: any) {
-      const isIdempotencyConflict =
-        txErr.code === 'P2002' &&
-        hasIdempotencyKey &&
-        Array.isArray(txErr.meta?.target) &&
-        txErr.meta.target.includes('idempotencyKey');
-      const isSlotConflict = txErr.message === 'SLOT_TAKEN' || (txErr.code === 'P2002' && !isIdempotencyConflict);
-
-      // Same retry as the pre-transaction slot check above — a second client
-      // can win the race between our findSlot check and this insert
-      // (worker_live_slot_unique surfaces it as SLOT_TAKEN or a P2002 on
-      // that index). For an auto-matched booking that's not something the client
-      // did wrong, so retry with the next-best candidate instead of making
-      // them resubmit manually.
-      if (isSlotConflict && (await tryNextAutoMatchCandidate())) continue;
-
-      if (txErr.message === 'SLOT_TAKEN') {
-        return res.status(409).json(errorResponse(409, 'Slot no longer available'));
-      }
-      if (txErr.message === 'AT_CAPACITY') {
-        return res.status(409).json(errorResponse(409, 'Worker is at maximum capacity'));
-      }
-      if (txErr.message === 'WORKER_NOT_FOUND') {
+      if (!workerProfile) {
         return res.status(404).json(errorResponse(404, 'Worker not found'));
       }
-      if (txErr.message === 'WORKER_NOT_APPROVED') {
+
+      // Client booking themselves (or a shared family line) — see the
+      // resolved policy on Booking.selfDealingFlag's schema comment:
+      // non-blocking, just a signal for admin review.
+      const selfDealingFlag = Boolean(
+        requestingClient?.phone && workerProfile.user.phone && requestingClient.phone === workerProfile.user.phone
+      );
+
+      // Shared by every retryable failure below so the "exclude this worker,
+      // try the next-best auto-match candidate" logic exists in one place.
+      const tryNextAutoMatchCandidate = async (): Promise<boolean> => {
+        if (!isAutoMatched || attempt >= MAX_AUTO_MATCH_RETRIES) return false;
+        const nextMatch = await findAutoMatchWorker({ ...autoMatchParams, excludeWorkerIds: triedWorkerIds });
+        if (!nextMatch) return false;
+        resolvedWorkerId = nextMatch.workerId;
+        triedWorkerIds.push(resolvedWorkerId);
+        return true;
+      };
+
+      // A client picking a specific worker (not auto-match) could otherwise
+      // bypass the capability filter Step 3 already applied — re-check
+      // server-side so a stale/tampered request can't book a worker who
+      // doesn't actually handle what was asked for, or whose category is
+      // still PENDING_VERIFICATION.
+      if (!isAutoMatched) {
+        const capabilityFilters = await buildCapabilityFilters(resolvedServiceTypeName, effectiveScopeAnswers, serviceTask?.id);
+        if (capabilityFilters.length > 0) {
+          const eligible = await prisma.workerProfile.findFirst({
+            where: { userId: resolvedWorkerId, AND: capabilityFilters },
+            select: { id: true },
+          });
+          if (!eligible) {
+            return res.status(409).json(errorResponse(409, 'This pro does not handle the selected option for this service'));
+          }
+        }
+
+        const bookedCategory = workerProfile.serviceCategories.find(
+          (c) => c.serviceType.name.toLowerCase() === resolvedServiceTypeName.toLowerCase()
+        );
+        if (!bookedCategory || bookedCategory.status !== 'VERIFIED') {
+          return res.status(409).json(errorResponse(409, 'This pro does not offer this service'));
+        }
+      }
+
+      if (workerProfile.kycStatus !== 'APPROVED') {
         return res.status(403).json(errorResponse(403, 'Worker is not verified yet'));
       }
-      if (txErr.code === 'P2002') {
-        // Two near-simultaneous requests carrying the same idempotencyKey
-        // both passed the upfront lookup above before either committed —
-        // genuine race, not a slot conflict. Whichever loses this race
-        // should see the same "already created" reply as a normal replay,
-        // not a misleading slot error.
-        if (isIdempotencyConflict) {
-          return res.status(409).json(
-            errorResponse(409, 'This booking request is already being processed — check your bookings list.')
-          );
-        }
-        return res.status(409).json(errorResponse(409, 'Slot no longer available'));
+
+      if (workerProfile.user.status !== 'ACTIVE' || !workerProfile.isAvailable || workerProfile.debtHoldAt) {
+        if (await tryNextAutoMatchCandidate()) continue;
+        return res.status(409).json(errorResponse(409, 'Worker is not currently available'));
       }
-      throw txErr;
-    }
-    }
-  } catch (error) {
-    console.error('Error creating booking:', error);
-    return res.status(500).json(errorResponse(500, 'Failed to create booking'));
-  }
-};
 
-/**
- * POST /api/bookings/multi-day
- * Books the SAME worker for N consecutive calendar days upfront (e.g. a
- * 3-day deep-clean job) — see the "multi-day upfront booking" backlog item.
- *
- * Deliberately NOT a Booking.scheduledDate date-range: every downstream
- * system (pricing, chat threads, arrival/completion verification, payment/
- * payout, worker matching) assumes one Booking row = one calendar day, and
- * reworking that would ripple through all of it. Instead this creates a
- * lightweight BookingGroup that links N ordinary single-day Booking rows —
- * each day accepts/declines, checks in, completes, and gets paid completely
- * independently, exactly like any other single-day booking; BookingGroup
- * exists purely so "My Bookings" can show "Day 2 of 3" instead of three
- * unrelated-looking jobs.
- *
- * A much narrower version of createBooking above, by design:
- * - workerId is REQUIRED — no auto-match. A multi-day job needs one worker
- *   committed across every day, which only makes sense once the client has
- *   already picked that specific worker (the worker-profile "Book Now"
- *   entry point, mirrored by mobile's `draft.workerLocked`).
- * - CUSTOM_QUOTE service tasks aren't supported — there's no price to sum
- *   across days until a worker inspects the job and quotes it, which is
- *   inherently a single-job flow, not an upfront multi-day one.
- * - No packages/addOns/tip for this first version — those interact with
- *   per-day pricing in ways (charged once? per day?) that have no obvious
- *   right answer yet, so they're left for a follow-up rather than guessed at.
- *
- * All-or-nothing: every one of the N consecutive days is checked for
- * availability before anything is written, and re-checked again inside the
- * transaction that creates the group — if ANY day conflicts, the whole
- * request fails and zero rows are created (mirrors createBooking's own
- * race-closing re-check, just looped over N days instead of one).
- */
-export const createMultiDayBooking = async (req: AuthRequest, res: Response) => {
-  try {
-    if (!req.user || req.user.role !== 'CLIENT') {
-      return res.status(403).json(errorResponse(403, 'Only clients can create bookings'));
-    }
-    const clientId = req.user.userId;
-
-    const holdingClientProfile = await prisma.clientProfile.findUnique({
-      where: { userId: clientId },
-      select: { paymentHoldAt: true },
-    });
-    if (holdingClientProfile?.paymentHoldAt) {
-      return res.status(403).json(
-        errorResponse(403, 'Your account is on hold for an unpaid booking. Please settle it before booking again.')
-      );
-    }
-
-    const {
-      workerId,
-      serviceType,
-      serviceTaskId,
-      description,
-      address,
-      city,
-      lat,
-      lng,
-      startDate,
-      dayCount,
-      timeSlot,
-      priorities,
-      notes,
-      paymentMethodType,
-      paymentAccountIdentifier,
-      scopeAnswers,
-      issuePhotoUrls,
-      idempotencyKey,
-    } = req.body as {
-      workerId: string;
-      serviceType: string;
-      serviceTaskId?: string;
-      description?: string;
-      address: string;
-      city?: string;
-      lat: number;
-      lng: number;
-      startDate: string;
-      dayCount: number;
-      timeSlot: TimeSlot;
-      priorities?: string[];
-      notes?: string;
-      paymentMethodType?: PaymentMethodType;
-      paymentAccountIdentifier?: string;
-      scopeAnswers?: Record<string, string | string[]>;
-      issuePhotoUrls?: string[];
-      idempotencyKey?: string;
-    };
-
-    // Idempotent replay — same rationale as createBooking's, but keyed off
-    // BookingGroup (see its schema comment for why it can't share Booking's
-    // own idempotencyKey column: every one of the N rows in a group would
-    // otherwise collide on the same (clientId, idempotencyKey) pair).
-    const hasIdempotencyKey = typeof idempotencyKey === 'string' && idempotencyKey.trim().length > 0;
-    if (hasIdempotencyKey) {
-      const existingGroup = await prisma.bookingGroup.findUnique({
-        where: { client_group_idempotency_key_unique: { clientId, idempotencyKey: idempotencyKey! } },
-        include: { bookings: { orderBy: { scheduledDate: 'asc' } } },
-      });
-      if (existingGroup) {
-        return res.status(200).json({
-          success: true,
-          message: 'Booking already created for this request',
-          data: formatMultiDayBookingResponse(existingGroup),
-        });
+      // A worker who hasn't finished account setup can't take requests (see
+      // workerSetupService). Auto-match already filters them out.
+      if (!(await getWorkerSetupStatus(workerProfile.userId))?.complete) {
+        if (await tryNextAutoMatchCandidate()) continue;
+        return res.status(409).json(errorResponse(409, "This pro isn't taking bookings yet"));
       }
-    }
 
-    const cityName = city ?? '';
-    const clientLocation = { lat, lng };
-    const startDay = toDayStart(startDate);
-    const scheduledDays: Date[] = Array.from({ length: dayCount }, (_, i) => {
-      const d = new Date(startDay);
-      d.setUTCDate(d.getUTCDate() + i);
-      return d;
-    });
-
-    const serviceTask = serviceTaskId
-      ? await prisma.serviceTask.findUnique({
-          where: { id: serviceTaskId },
-          include: { serviceType: true, quantityScopeField: true },
-        })
-      : null;
-
-    if (serviceTaskId && !serviceTask) {
-      return res.status(404).json(errorResponse(404, 'Service task not found'));
-    }
-
-    if (serviceTask?.pricingModel === 'CUSTOM_QUOTE') {
-      return res.status(400).json(
-        errorResponse(400, "Multi-day bookings aren't available for custom-quote services yet — book one day at a time instead.")
-      );
-    }
-
-    const resolvedServiceTypeName = serviceTask?.serviceType.name ?? serviceType;
-    const serviceTypeConfig = serviceTask ? null : await resolveServiceTypeConfig(resolvedServiceTypeName);
-
-    if (!serviceTask && !serviceTypeConfig) {
-      return res.status(404).json(errorResponse(404, 'Service type not found'));
-    }
-
-    const effectiveScopeAnswers =
-      scopeAnswers && typeof scopeAnswers === 'object' && !Array.isArray(scopeAnswers) ? scopeAnswers : undefined;
-
-    // Only the fields that apply to the chosen task are enforced (see
-    // utils/scopeFields.fieldAppliesToTask) — a task booking used to skip
-    // this check entirely, back when every field was category-wide.
-    const scopeFields = serviceTask
-      ? await loadScopeFields(serviceTask.serviceTypeId)
-      : serviceTypeConfig!.scopeFields;
-    const scopeError = validateScopeAnswers(scopeFields, effectiveScopeAnswers ?? {}, serviceTask);
-    if (scopeError) {
-      return res.status(400).json(errorResponse(400, scopeError));
-    }
-
-    const effectiveIssuePhotoUrls = Array.isArray(issuePhotoUrls)
-      ? issuePhotoUrls.filter((url): url is string => typeof url === 'string' && url.length > 0)
-      : [];
-
-    const requestingClient = await prisma.user.findUnique({ where: { id: clientId }, select: { phone: true } });
-
-    const workerProfile = await prisma.workerProfile.findUnique({
-      where: { userId: workerId },
-      include: {
-        user: { select: { phone: true } },
-        serviceCategories: { include: { serviceType: { select: { name: true } } } },
-      },
-    });
-    if (!workerProfile) {
-      return res.status(404).json(errorResponse(404, 'Worker not found'));
-    }
-
-    const selfDealingFlag = Boolean(
-      requestingClient?.phone && workerProfile.user.phone && requestingClient.phone === workerProfile.user.phone
-    );
-
-    // Same capability/category re-check as createBooking's explicit-worker
-    // path (there is no auto-match path here to have already guaranteed it).
-    const capabilityFilters = await buildCapabilityFilters(resolvedServiceTypeName, effectiveScopeAnswers, serviceTask?.id);
-    if (capabilityFilters.length > 0) {
-      const eligible = await prisma.workerProfile.findFirst({
-        where: { userId: workerId, AND: capabilityFilters },
-        select: { id: true },
-      });
-      if (!eligible) {
-        return res.status(409).json(errorResponse(409, 'This pro does not handle the selected option for this service'));
+      // Weekly schedule + date overrides. Not re-checked for a follow-up job:
+      // the client and worker are already working together, and the worker
+      // can still decline.
+      if (!followUpWorkerId && !(await isWorkerAvailableOn(prisma, workerProfile, scheduledDate))) {
+        if (await tryNextAutoMatchCandidate()) continue;
+        return res.status(409).json(errorResponse(409, "This pro isn't working on that date"));
       }
-    }
-    const bookedCategory = workerProfile.serviceCategories.find(
-      (c) => c.serviceType.name.toLowerCase() === resolvedServiceTypeName.toLowerCase()
-    );
-    if (!bookedCategory || bookedCategory.status !== 'VERIFIED') {
-      return res.status(409).json(errorResponse(409, 'This pro does not offer this service'));
-    }
-    if (workerProfile.kycStatus !== 'APPROVED') {
-      return res.status(403).json(errorResponse(403, 'Worker is not verified yet'));
-    }
-    if (!(await getWorkerSetupStatus(workerProfile.userId))?.complete) {
-      return res.status(409).json(errorResponse(409, "This pro isn't taking bookings yet"));
-    }
-    if (!workerProfile.isAvailable) {
-      return res.status(409).json(errorResponse(409, 'Worker is not currently available'));
-    }
-    if (workerProfile.debtHoldAt) {
-      return res.status(409).json(errorResponse(409, 'Worker is not currently available'));
-    }
-    if (workerProfile.activeJobCount >= workerProfile.maxConcurrentJobs) {
-      return res.status(409).json(errorResponse(409, 'Worker is at maximum capacity'));
-    }
 
-    // Every day must be free before anything is written — a client-facing
-    // pre-check so a day-5-of-7 conflict is reported clearly instead of a
-    // generic transaction failure, mirrored again (race-closing) inside the
-    // transaction below.
-    for (const day of scheduledDays) {
-      const free = await isSlotAndOverflowFree(prisma, workerProfile.id, day, timeSlot, serviceTask?.durationHours);
-      if (!free) {
-        return res.status(409).json(
-          errorResponse(409, `${workerProfile.user ? 'This pro' : 'The selected worker'} isn't available on ${day.toISOString().slice(0, 10)} — try a different start date or day count.`)
-        );
-      }
-    }
-
-    // basePrice/distance/tier are identical for every day (same worker, same
-    // task, same address) — computed once and reused N times, rather than
-    // re-derived per day.
-    let basePrice: number;
-    if (serviceTask) {
-      const selection = await prisma.workerTaskSelection.findUnique({
-        where: { workerProfileId_serviceTaskId: { workerProfileId: workerProfile.id, serviceTaskId: serviceTask.id } },
-      });
-      if (!selection?.isActive) {
-        return res.status(409).json(errorResponse(409, 'This pro does not offer this specific service'));
-      }
-      const priced = taskBasePrice(serviceTask, effectiveScopeAnswers);
-      if (!priced.ok) {
-        return res.status(400).json(errorResponse(400, `"${priced.missingLabel}" is required for this service`));
-      }
-      basePrice = priced.basePrice;
-    } else {
-      basePrice = serviceTypeConfig!.basePrice;
-    }
-
-    const vatApplicable = workerProfile.vatRegistered;
-    const vatRate = vatApplicable ? VAT_RATE : null;
-
-    const workerDistanceKm =
-      workerProfile.addressLat != null && workerProfile.addressLng != null
-        ? await resolveDrivingDistanceKm(clientLocation, { lat: workerProfile.addressLat, lng: workerProfile.addressLng })
-        : null;
-
-    const appSettings = await getAppSettings();
-    const workerCompletedJobs = await prisma.booking.count({ where: { workerId, status: 'COMPLETED' } });
-    const workerTier = computeWorkerTier(workerProfile.rating, workerCompletedJobs, appSettings);
-
-    const { distanceFee, urgencyFee, tierFee, estimatedPrice } = computeJobPricing({
-      basePrice,
-      tierMultiplier: tierMultiplier(workerTier, appSettings),
-      distanceKm: workerDistanceKm,
-      freeDistanceKm: appSettings.freeDistanceKm,
-      perKmFee: appSettings.perKmFee,
-    });
-    const finalEstimate = round2(estimatedPrice);
-
-    const priceCheck = await validatePriceWithinPricingRule(cityName, resolvedServiceTypeName, finalEstimate);
-    if (!priceCheck.ok) {
-      return res.status(409).json(
-        errorResponse(
-          409,
-          `Calculated price ₱${finalEstimate} is outside the allowed range (₱${priceCheck.bounds.minPrice}–₱${priceCheck.bounds.maxPrice}) for ${cityName || 'this city'}/${resolvedServiceTypeName}`
-        )
-      );
-    }
-
-    try {
-      const group = await prisma.$transaction(async (tx) => {
-        const workerTx = await tx.workerProfile.findUnique({ where: { userId: workerId } });
-        if (!workerTx) throw new Error('WORKER_NOT_FOUND');
-        if (workerTx.kycStatus !== 'APPROVED') throw new Error('WORKER_NOT_APPROVED');
-        if (workerTx.activeJobCount >= workerTx.maxConcurrentJobs) throw new Error('AT_CAPACITY');
-
-        for (const day of scheduledDays) {
-          const freeTx = await isSlotAndOverflowFree(tx, workerTx.id, day, timeSlot, serviceTask?.durationHours);
-          if (!freeTx) throw new Error(`SLOT_TAKEN:${day.toISOString().slice(0, 10)}`);
-        }
-
-        const createdGroup = await tx.bookingGroup.create({
-          data: {
-            clientId,
-            workerId,
-            totalDays: dayCount,
-            idempotencyKey: hasIdempotencyKey ? (idempotencyKey as string) : null,
+      // Every task is priced by the admin (see taskPriceService), so the only
+      // per-worker question is whether this worker offers the task at all.
+      // CUSTOM_QUOTE has no upfront price; the client is never shown one until
+      // the worker submits a quote, so basePrice is 0 and the VAT snapshot
+      // below is deliberately deferred to that moment instead of now.
+      let basePrice: number;
+      if (serviceTask) {
+        const selection = await prisma.workerTaskSelection.findUnique({
+          where: {
+            workerProfileId_serviceTaskId: { workerProfileId: workerProfile.id, serviceTaskId: serviceTask.id },
           },
         });
+        if (!selection?.isActive) {
+          if (await tryNextAutoMatchCandidate()) continue;
+          return res.status(409).json(errorResponse(409, 'This pro does not offer this specific service'));
+        }
+        const priced = taskBasePrice(serviceTask, effectiveScopeAnswers);
+        if (!priced.ok) {
+          return res.status(400).json(errorResponse(400, `"${priced.missingLabel}" is required for this service`));
+        }
+        basePrice = priced.basePrice;
+      } else {
+        basePrice = serviceTypeConfig!.basePrice;
+      }
 
-        for (const day of scheduledDays) {
-          const createdBooking = await tx.booking.create({
+      // VAT snapshot — pinned from the worker's status at the earliest point a
+      // real price is shown, so settlement never re-checks the worker's live
+      // vatRegistered flag (see paymentLifecycleService.priceBooking).
+      const vatApplicable = !isCustomQuoteTask && workerProfile.vatRegistered;
+      const vatRate = vatApplicable ? VAT_RATE : null;
+
+      // Distance fee is based on the worker's fixed service address, not a
+      // live position (see WorkerProfile.addressLat/addressLng comment).
+      // Real driving-route distance when configured, straight-line otherwise.
+      const workerDistanceKm =
+        workerProfile.addressLat != null && workerProfile.addressLng != null
+          ? await resolveDrivingDistanceKm(clientLocation, { lat: workerProfile.addressLat, lng: workerProfile.addressLng })
+          : null;
+
+      // Expertise tier — computed live (see utils/workerTier.ts), not stored.
+      const workerCompletedJobs = await prisma.booking.count({
+        where: { workerId: resolvedWorkerId, status: 'COMPLETED' },
+      });
+      const workerTier = computeWorkerTier(
+        { rating: workerProfile.rating, completedJobs: workerCompletedJobs, yearsExperience: workerProfile.yearsExperience },
+        appSettings
+      );
+
+      // Free job-preference toggles carry no price of their own — clamp
+      // server-side so a tampered client can't slip a nonzero price through
+      // this array (only resolvedPackages below, priced from the worker's own
+      // approved WorkerPackage rows, are a trustworthy priced-add-on source).
+      const preferenceAddOns = (Array.isArray(addOns) ? addOns : []).map((a) => ({
+        name: a.name || a.id || 'Add-on',
+        price: 0,
+      }));
+
+      let resolvedPackages: { name: string; price: number }[] = [];
+      if (Array.isArray(packageIds) && packageIds.length > 0) {
+        const found = await prisma.workerPackage.findMany({
+          where: { id: { in: packageIds }, workerProfileId: workerProfile.id, isActive: true, status: 'APPROVED' },
+        });
+        if (found.length !== packageIds.length) {
+          return res.status(400).json(errorResponse(400, 'One or more selected packages are unavailable'));
+        }
+        resolvedPackages = found.map((p) => ({ name: p.name, price: p.price }));
+      }
+
+      const addOnsList = [...preferenceAddOns, ...resolvedPackages];
+      const addOnsTotal = addOnsList.reduce((sum, a) => sum + (typeof a.price === 'number' ? a.price : 0), 0);
+      const { distanceFee, urgencyFee, rushFee, tierFee, estimatedPrice } = computeJobPricing({
+        basePrice,
+        tierMultiplier: tierMultiplier(workerTier, appSettings),
+        rushFeeRate: isRush ? appSettings.rushFeeRate : 0,
+        distanceKm: workerDistanceKm,
+        freeDistanceKm: appSettings.freeDistanceKm,
+        perKmFee: appSettings.perKmFee,
+      });
+      // Kept in the response/log shape for compatibility with existing
+      // clients/receipts — always 0 now that condition carries no platform fee.
+      const conditionFee = 0;
+      const finalEstimate = round2(estimatedPrice + addOnsTotal);
+
+      try {
+        const booking = await prisma.$transaction(async (tx) => {
+          // Re-check KYC inside the transaction to close the race between the
+          // checks above and this insert (e.g. an admin rejecting the worker
+          // in that window).
+          const workerTx = await tx.workerProfile.findUnique({ where: { userId: resolvedWorkerId! } });
+          if (!workerTx) throw new Error('WORKER_NOT_FOUND');
+          if (workerTx.kycStatus !== 'APPROVED') throw new Error('WORKER_NOT_APPROVED');
+
+          const created = await tx.booking.create({
             data: {
               clientId,
-              workerId,
-              groupId: createdGroup.id,
+              workerId: resolvedWorkerId,
+              parentBookingId: parentBookingId ?? null,
               serviceType: resolvedServiceTypeName,
               serviceTaskId: serviceTaskId ?? null,
               description: description ?? '',
               estimatedDurationHours: serviceTask?.durationHours ?? null,
+              rooms: Array.isArray(rooms) ? rooms : [],
+              condition: effectiveCondition,
               priorities: Array.isArray(priorities) ? priorities : [],
+              addOnsSnapshot: addOnsList.length > 0 ? addOnsList : undefined,
               scopeAnswers: effectiveScopeAnswers,
               issuePhotoUrls: effectiveIssuePhotoUrls,
-              scheduledDate: day,
-              timeSlot,
-              isAutoMatched: false,
+              scheduledDate,
+              scheduledTime: time,
+              isRush,
+              isAutoMatched,
               selfDealingFlag,
               declinedWorkerIds: [],
               expiresAt: new Date(Date.now() + 60 * 60 * 1000),
-              estimatedPrice: finalEstimate,
+              idempotencyKey: hasIdempotencyKey ? (idempotencyKey as string) : null,
+              estimatedPrice,
               vatApplicable,
               vatRate,
-              tip: 0,
+              tip: typeof tip === 'number' ? tip : 0,
               notes: notes ?? null,
               paymentMethodType: paymentMethodType ?? null,
               paymentAccountIdentifier: paymentAccountIdentifier ?? null,
@@ -1071,113 +576,130 @@ export const createMultiDayBooking = async (req: AuthRequest, res: Response) => 
               distanceMeters: workerDistanceKm != null ? Math.round(workerDistanceKm * 1000) : null,
               status: 'PENDING',
             },
+            include: {
+              client: { select: { id: true, fullName: true, email: true } },
+              worker: { select: { id: true, fullName: true, email: true } },
+              serviceTask: true,
+            },
           });
+
+          if (addOnsList.length > 0) {
+            await tx.bookingAddOn.createMany({
+              data: addOnsList.map((a) => ({
+                bookingId: created.id,
+                name: a.name,
+                price: typeof a.price === 'number' ? a.price : 0,
+              })),
+            });
+          }
 
           await tx.pricingLog.create({
             data: {
-              bookingId: createdBooking.id,
+              bookingId: created.id,
               basePrice,
-              conditionFee: 0,
+              conditionFee,
               distanceFee,
               urgencyFee,
+              rushFee,
               tierFee,
-              addOnsTotal: 0,
+              addOnsTotal,
               finalEstimate,
               breakdown: {
                 basePrice,
-                conditionFee: 0,
+                conditionFee,
                 distanceFee,
                 urgencyFee,
+                rushFee,
                 tierFee,
-                addOnsTotal: 0,
+                addOnsTotal,
                 finalEstimate,
+                condition: effectiveCondition,
+                urgencyLevel: effectiveUrgencyLevel,
+                isRush,
+                rushFeeRate: isRush ? appSettings.rushFeeRate : 0,
                 workerTier,
                 distanceKm: workerDistanceKm,
-                isAutoMatched: false,
-                groupId: createdGroup.id,
+                isAutoMatched,
               },
             },
           });
 
-          await markSlotBooked(tx, workerTx.id, day, timeSlot, serviceTask?.durationHours);
-        }
-
-        return tx.bookingGroup.findUniqueOrThrow({
-          where: { id: createdGroup.id },
-          include: { bookings: { orderBy: { scheduledDate: 'asc' } } },
+          // No Payment row is created here — the client pays after the job is
+          // finished and finally priced (see confirmCompletion).
+          return created;
         });
-      });
 
-      // Best-effort, same reasoning as createBooking's — a Redis hiccup here
-      // must not turn an already-committed group into an apparent failure.
-      await Promise.all(
-        group.bookings.map((b) =>
-          schedulePendingExpiry(b.id).catch((error) => {
-            console.error(`Failed to schedule pending-expiry for booking ${b.id}:`, error);
-          })
-        )
-      );
+        // Best-effort — the booking is already committed at this point, so a
+        // Redis hiccup here must not turn a real success into an apparent
+        // failure (the client would retry into the idempotency path above).
+        await schedulePendingExpiry(booking.id).catch((error) => {
+          console.error(`Failed to schedule pending-expiry for booking ${booking.id}:`, error);
+        });
 
-      await notifyUser({
-        userId: workerId,
-        type: 'BOOKING_REQUEST',
-        title: 'New Multi-Day Booking Request',
-        message: `A client has requested your service for ${dayCount} consecutive days starting ${scheduledDays[0].toISOString().slice(0, 10)}`,
-        relatedId: group.bookings[0]?.id,
-      });
+        await notifyUser({
+          userId: booking.workerId as string,
+          type: 'BOOKING_REQUEST',
+          title: parentBookingId ? 'Follow-up Job Request' : isRush ? 'Same-day Booking Request' : 'New Booking Request',
+          message: parentBookingId
+            ? `${booking.client.fullName} is asking you for a follow-up job after your inspection`
+            : `${booking.client.fullName} has requested your service`,
+          relatedId: booking.id,
+        });
 
-      return res.status(201).json({
-        success: true,
-        message: 'Multi-day booking created successfully',
-        data: formatMultiDayBookingResponse(group),
-      });
-    } catch (txErr: any) {
-      if (typeof txErr.message === 'string' && txErr.message.startsWith('SLOT_TAKEN:')) {
-        const conflictDate = txErr.message.split(':')[1];
-        return res.status(409).json(errorResponse(409, `Slot no longer available on ${conflictDate}`));
-      }
-      if (txErr.message === 'AT_CAPACITY') {
-        return res.status(409).json(errorResponse(409, 'Worker is at maximum capacity'));
-      }
-      if (txErr.message === 'WORKER_NOT_FOUND') {
-        return res.status(404).json(errorResponse(404, 'Worker not found'));
-      }
-      if (txErr.message === 'WORKER_NOT_APPROVED') {
-        return res.status(403).json(errorResponse(403, 'Worker is not verified yet'));
-      }
-      if (txErr.code === 'P2002') {
-        if (hasIdempotencyKey && Array.isArray(txErr.meta?.target) && txErr.meta.target.includes('idempotencyKey')) {
+        return res.status(201).json({
+          success: true,
+          message: 'Booking created successfully',
+          data: {
+            id: booking.id,
+            clientName: booking.client.fullName,
+            workerName: booking.worker?.fullName ?? null,
+            isAutoMatched,
+            status: booking.status,
+            scheduledDate: booking.scheduledDate,
+            scheduledTime: booking.scheduledTime,
+            isRush,
+            parentBookingId: booking.parentBookingId,
+            workerTier,
+            estimatedPrice: booking.estimatedPrice,
+            estimatedDurationHours: booking.estimatedDurationHours,
+            expiresAt: booking.expiresAt,
+            pricing: {
+              basePrice,
+              conditionFee,
+              distanceFee,
+              urgencyFee,
+              rushFee,
+              tierFee,
+              addOnsTotal,
+              finalEstimate,
+              addOns: addOnsList,
+            },
+            // Payment is collected after completion — none exists yet.
+            payment: null,
+          },
+        });
+      } catch (txErr: any) {
+        if (txErr.message === 'WORKER_NOT_FOUND') {
+          return res.status(404).json(errorResponse(404, 'Worker not found'));
+        }
+        if (txErr.message === 'WORKER_NOT_APPROVED') {
+          return res.status(403).json(errorResponse(403, 'Worker is not verified yet'));
+        }
+        if (txErr.code === 'P2002') {
+          // Two near-simultaneous requests carrying the same idempotencyKey
+          // both passed the upfront lookup above before either committed.
           return res.status(409).json(
             errorResponse(409, 'This booking request is already being processed — check your bookings list.')
           );
         }
-        return res.status(409).json(errorResponse(409, 'Slot no longer available'));
+        throw txErr;
       }
-      throw txErr;
     }
   } catch (error) {
-    console.error('Error creating multi-day booking:', error);
-    return res.status(500).json(errorResponse(500, 'Failed to create multi-day booking'));
+    console.error('Error creating booking:', error);
+    return res.status(500).json(errorResponse(500, 'Failed to create booking'));
   }
 };
-
-function formatMultiDayBookingResponse(
-  group: Prisma.BookingGroupGetPayload<{ include: { bookings: true } }>
-) {
-  return {
-    groupId: group.id,
-    totalDays: group.totalDays,
-    bookings: group.bookings.map((b) => ({
-      id: b.id,
-      scheduledDate: b.scheduledDate,
-      timeSlot: b.timeSlot,
-      status: b.status,
-      estimatedPrice: b.estimatedPrice,
-      expiresAt: b.expiresAt,
-    })),
-    totalEstimatedPrice: round2(group.bookings.reduce((sum, b) => sum + b.estimatedPrice, 0)),
-  };
-}
 
 /**
  * GET /api/bookings
@@ -1228,6 +750,11 @@ export const listBookings = async (req: AuthRequest, res: Response) => {
           // Ordered by date (not insertion order) so dayIndex below always
           // reflects calendar position even if rows were created out of order.
           group: { include: { bookings: { select: { id: true }, orderBy: { scheduledDate: 'asc' } } } },
+          visits: {
+            where: { status: 'SCHEDULED' },
+            orderBy: [{ scheduledDate: 'asc' }, { scheduledTime: 'asc' }],
+            select: { id: true, scheduledDate: true, scheduledTime: true },
+          },
         },
         orderBy: { createdAt: 'desc' },
         skip,
@@ -1260,7 +787,14 @@ export const listBookings = async (req: AuthRequest, res: Response) => {
       category: b.serviceTask?.serviceType?.name ?? b.serviceType,
       status: b.status,
       scheduledDate: b.scheduledDate,
+      scheduledTime: bookingStartTime(b),
       timeSlot: b.timeSlot,
+      isRush: b.isRush,
+      parentBookingId: b.parentBookingId ?? null,
+      quoteStatus: b.quoteStatus ?? null,
+      workerArrivedAt: b.workerArrivedAt ?? null,
+      // Follow-up visits still to come (see scheduleVisit).
+      upcomingVisits: b.visits,
       urgencyLevel: b.urgencyLevel,
       rooms: b.rooms,
       condition: b.condition,
@@ -1329,6 +863,14 @@ export const getBookingDetail = async (req: AuthRequest, res: Response) => {
         },
         serviceTask: { include: { serviceType: { select: { name: true } } } },
         payment: true,
+        parentBooking: {
+          select: { id: true, scheduledDate: true, serviceType: true, serviceTask: { select: { name: true } } },
+        },
+        followUps: {
+          select: { id: true, status: true, scheduledDate: true, serviceType: true, serviceTask: { select: { name: true } } },
+          orderBy: { createdAt: 'desc' },
+        },
+        visits: { orderBy: [{ scheduledDate: 'asc' }, { scheduledTime: 'asc' }] },
         // Quote data lives inline on Booking (laborCost, materialsCost, etc.)
         addOns: true,  // schema relation is addOns (capital O)
         review: true,
@@ -1372,10 +914,14 @@ export const getBookingDetail = async (req: AuthRequest, res: Response) => {
     // is only filled in at settlement, see schema) over the pre-settlement 0.
     const latestPricingLog = booking.pricingLogs[booking.pricingLogs.length - 1] ?? null;
     const breakdownTip = booking.payment?.tip ?? booking.tip ?? 0;
+    // The first (booking-time) log carries the fee split; later logs are
+    // quote stages.
+    const bookingPricingLog = booking.pricingLogs[0] ?? null;
     const priceBreakdown = {
       basePrice: latestPricingLog?.basePrice ?? null,
-      distanceFee: latestPricingLog?.distanceFee ?? 0,
-      tierFee: latestPricingLog?.tierFee ?? 0,
+      distanceFee: bookingPricingLog?.distanceFee ?? 0,
+      tierFee: bookingPricingLog?.tierFee ?? 0,
+      rushFee: bookingPricingLog?.rushFee ?? 0,
       addOns: (booking.addOns || [])
         .filter((addon: any) => addon.clientApprovedAt != null)
         .map((addon: any) => ({ name: addon.name, price: addon.price })),
@@ -1387,11 +933,36 @@ export const getBookingDetail = async (req: AuthRequest, res: Response) => {
       total: booking.payment?.totalAmount ?? round2(finalPrice + breakdownTip),
     };
 
+    // Heads-up for the worker before accepting (or while planning the day):
+    // their other jobs starting close to this one.
+    const isAssignedWorker = booking.workerId === req.user.userId;
+    const nearbyJobs =
+      isAssignedWorker && (booking.status === 'PENDING' || booking.status === 'ACCEPTED')
+        ? await findNearbyJobs(prisma, booking.workerId!, booking.scheduledDate, bookingStartTime(booking), booking.id)
+        : [];
+
     return res.status(200).json({
       success: true,
       message: 'Booking details retrieved successfully',
       data: {
         id: booking.id,
+        // Follow-up jobs (see createBooking's parentBookingId).
+        parentBooking: booking.parentBooking
+          ? {
+              id: booking.parentBooking.id,
+              scheduledDate: booking.parentBooking.scheduledDate,
+              service: booking.parentBooking.serviceTask?.name ?? booking.parentBooking.serviceType,
+            }
+          : null,
+        followUps: booking.followUps.map((f) => ({
+          id: f.id,
+          status: f.status,
+          scheduledDate: f.scheduledDate,
+          service: f.serviceTask?.name ?? f.serviceType,
+        })),
+        allowsFollowUp: booking.serviceTask?.allowsFollowUp ?? false,
+        visits: booking.visits,
+        nearbyJobs,
         // Multi-day upfront booking (see createMultiDayBooking) — null for
         // the overwhelming majority of ordinary single-day bookings. Sibling
         // list is date-ordered so the client can compute "Day X of N" and
@@ -1444,8 +1015,9 @@ export const getBookingDetail = async (req: AuthRequest, res: Response) => {
         clientLat: booking.clientLat,
         clientLng: booking.clientLng,
         scheduledDate: booking.scheduledDate,
-        scheduledTime: booking.scheduledTime,
+        scheduledTime: bookingStartTime(booking),
         timeSlot: booking.timeSlot,
+        isRush: booking.isRush,
         urgencyLevel: booking.urgencyLevel,
         // Reschedule-on-conflict (see extendBooking) — rescheduleAcknowledgedAt
         // null means this is still an open episode awaiting the client's
@@ -1461,7 +1033,12 @@ export const getBookingDetail = async (req: AuthRequest, res: Response) => {
         // Reschedule-on-REQUEST (see requestReschedule) — rescheduleRequestRespondedAt
         // null means still awaiting the worker's accept/decline.
         rescheduleRequestedAt: booking.rescheduleRequestedAt,
+        rescheduleRequestedBy: booking.rescheduleRequestedBy ?? (booking.rescheduleRequestedAt ? 'CLIENT' : null),
         requestedScheduledDate: booking.requestedScheduledDate,
+        requestedScheduledTime:
+          booking.requestedScheduledDate != null
+            ? bookingStartTime({ scheduledTime: booking.requestedScheduledTime, timeSlot: booking.requestedTimeSlot })
+            : null,
         requestedTimeSlot: booking.requestedTimeSlot,
         rescheduleRequestRespondedAt: booking.rescheduleRequestRespondedAt,
         rescheduleRequestAccepted: booking.rescheduleRequestAccepted,
@@ -1520,6 +1097,11 @@ export const getBookingDetail = async (req: AuthRequest, res: Response) => {
               notes: booking.quoteNotes,
               status: booking.quoteStatus,
               quotedAt: booking.quotedAt,
+              receiptUrls: booking.quoteReceiptUrls,
+              proofOfUseUrls: booking.quoteProofOfUseUrls,
+              rejectedAt: booking.quoteRejectedAt,
+              rejectionReason: booking.quoteRejectionReason,
+              revision: booking.quoteRevision,
             }
           : null,
         addOns: booking.addOns,
@@ -1584,6 +1166,15 @@ export const acceptBooking = async (req: AuthRequest, res: Response) => {
 
     const currentUserId = req.user.userId;
 
+    // Follow-up jobs need an explicit second confirmation from the worker —
+    // the app asks twice before sending this.
+    if (booking.parentBookingId && req.body?.confirmFollowUp !== true) {
+      return res.status(400).json({
+        ...errorResponse(400, 'Confirm that you will do this follow-up job'),
+        code: 'FOLLOW_UP_CONFIRMATION_REQUIRED',
+      });
+    }
+
     // Setup must be complete to accept a request (see workerSetupService).
     if (!(await getWorkerSetupStatus(currentUserId))?.complete) {
       return res.status(403).json({ ...errorResponse(403, WORKER_SETUP_INCOMPLETE_MESSAGE), code: 'WORKER_SETUP_INCOMPLETE' });
@@ -1599,10 +1190,6 @@ export const acceptBooking = async (req: AuthRequest, res: Response) => {
 
         if (!workerProfile) {
           throw new Error('Worker profile not found');
-        }
-
-        if (workerProfile.activeJobCount >= workerProfile.maxConcurrentJobs) {
-          throw new Error('Worker is at maximum capacity');
         }
 
         // Outstanding-dues gate — blocks acceptance while the worker's
@@ -1648,15 +1235,11 @@ export const acceptBooking = async (req: AuthRequest, res: Response) => {
           },
         });
 
-        // Increment activeJobCount
+        // activeJobCount is informational only now — workers aren't capped.
         await tx.workerProfile.update({
           where: { userId: currentUserId },
           data: { activeJobCount: { increment: 1 } },
         });
-
-        if (booking.timeSlot) {
-          await markSlotBooked(tx, workerProfile.id, booking.scheduledDate, booking.timeSlot, booking.estimatedDurationHours);
-        }
 
         return { booking: updated, debtWarning };
       });
@@ -1701,9 +1284,6 @@ export const acceptBooking = async (req: AuthRequest, res: Response) => {
         },
       });
     } catch (txError: any) {
-      if (txError.message === 'Worker is at maximum capacity') {
-        return res.status(409).json(errorResponse(409, txError.message));
-      }
       if (txError.message === 'ACCOUNT_ON_HOLD') {
         // 402 (not 403) — the mobile app's axios interceptor force-logs-out
         // on any 401/403, which would be wrong here (this isn't an auth
@@ -1770,9 +1350,6 @@ export const declineBooking = async (req: AuthRequest, res: Response) => {
       });
 
       const workerProfile = await tx.workerProfile.findUnique({ where: { userId: workerId }, select: { id: true } });
-      if (workerProfile && booking.timeSlot) {
-        await freeSlot(tx, workerProfile.id, booking.scheduledDate, booking.timeSlot, booking.estimatedDurationHours);
-      }
 
       // Decline-limit cooldown — count this worker's declines in the rolling
       // window; once they hit the threshold, exclude them from auto-match
@@ -1819,18 +1396,15 @@ export const declineBooking = async (req: AuthRequest, res: Response) => {
 
     // Suggest alternatives — best-effort; a client-facing rebooking flow
     // still goes through POST /api/bookings with workerId omitted.
-    const alternatives = updated.timeSlot
-      ? await findAutoMatchWorker({
-          serviceType: updated.serviceType,
-          serviceTaskId: updated.serviceTaskId,
-          date: updated.scheduledDate,
-          timeSlot: updated.timeSlot,
-          scopeAnswers: updated.scopeAnswers as Record<string, string | string[]> | null,
-          excludeWorkerIds: updatedDeclinedWorkerIds,
-          clientLat: updated.clientLat,
-          clientLng: updated.clientLng,
-        }).catch(() => null)
-      : null;
+    const alternatives = await findAutoMatchWorker({
+      serviceType: updated.serviceType,
+      serviceTaskId: updated.serviceTaskId,
+      date: updated.scheduledDate,
+      scopeAnswers: updated.scopeAnswers as Record<string, string | string[]> | null,
+      excludeWorkerIds: updatedDeclinedWorkerIds,
+      clientLat: updated.clientLat,
+      clientLng: updated.clientLng,
+    }).catch(() => null);
 
     // Notify client
     await notifyUser({
@@ -1930,7 +1504,7 @@ export const arriveBooking = async (req: AuthRequest, res: Response) => {
       return res.status(409).json(errorResponse(409, 'Booking has no client location on file to verify arrival against'));
     }
 
-    const { geofenceRadiusMeters } = await getAppSettings();
+    const { geofenceRadiusMeters, noShowGraceMinutes } = await getAppSettings();
     const clientLocation = { lat: booking.clientLat, lng: booking.clientLng };
     const workerLocation = { lat, lng };
     const distance = distanceMeters(clientLocation, workerLocation);
@@ -1945,9 +1519,7 @@ export const arriveBooking = async (req: AuthRequest, res: Response) => {
     const arrivedAt = new Date();
     // Flag-only, per C9 — never blocks the check-in itself, just surfaces a
     // suspicious early/late/wrong-day arrival for admin dispute review.
-    // timeSlot is nullable only for legacy rows predating the column; skip
-    // the check rather than flag when it's unknown.
-    const outsideWindow = booking.timeSlot ? isOutsideBookedWindow(booking.scheduledDate, booking.timeSlot, arrivedAt) : false;
+    const outsideWindow = isOutsideBookedWindow(bookingStartInstant(booking), arrivedAt, noShowGraceMinutes);
 
     const [arrival, updated] = await prisma.$transaction([
       prisma.arrivalVerification.create({
@@ -2002,7 +1574,7 @@ export const arriveBooking = async (req: AuthRequest, res: Response) => {
         action: 'ARRIVAL_OUTSIDE_BOOKED_WINDOW',
         category: 'STATUS_CHANGE',
         message: `Worker checked in for booking ${formatDisplayId(id)} outside its booked date/time window`,
-        metadata: { bookingId: id, scheduledDate: booking.scheduledDate.toISOString(), timeSlot: booking.timeSlot, arrivedAt: arrivedAt.toISOString() },
+        metadata: { bookingId: id, scheduledDate: booking.scheduledDate.toISOString(), scheduledTime: bookingStartTime(booking), arrivedAt: arrivedAt.toISOString() },
       });
     }
 
@@ -2145,266 +1717,122 @@ export const startBooking = async (req: AuthRequest, res: Response) => {
   }
 };
 
+// A job's work is under way in these statuses — the worker can plan another
+// visit for it.
+const VISIT_ALLOWED_STATUSES = ['IN_PROGRESS', 'QUOTE_SUBMITTED', 'QUOTE_APPROVED'];
+
 /**
- * PATCH /api/bookings/:id/extend
- * Worker signals a job is running into a second day. Reserves tomorrow's
- * calendar for the spillover, and — for any other booking of theirs that
- * collides with it — reschedules it to the worker's next open day (same
- * TimeSlot), or escalates to an admin-visible dispute if none is found
- * within RESCHEDULE_SEARCH_WINDOW_DAYS. Deliberately a side-channel field
- * change, not a new BookingStatus (mirrors arriveBooking writing
- * workerArrivedAt without transitioning status) — this booking's own status
- * is untouched by this endpoint.
- *
- * Narrow and worker/system-triggered by design — NOT the general client-
- * facing "reschedule whenever" feature removed 2026-08-17, and not the
- * client-initiated reschedule-request either (a client never calls this).
+ * POST /api/bookings/:id/visits
+ * "Follow Up Date": the worker schedules another visit when the job needs
+ * more than one day. The job stays one booking (and one price); the visit
+ * just goes on both calendars and the client is told. Replaces the old
+ * "Continue Tomorrow" (extendBooking), which pushed other clients' bookings
+ * around — with no per-day job limit there's nothing to push, and the worker
+ * sees their own calendar when picking the date.
  */
-export const extendBooking = async (req: AuthRequest, res: Response) => {
+export const scheduleVisit = async (req: AuthRequest, res: Response) => {
   try {
     if (!req.user || req.user.role !== 'WORKER') {
-      return res.status(403).json(errorResponse(403, 'Only workers can extend a job'));
+      return res.status(403).json(errorResponse(403, 'Only workers can schedule a follow-up visit'));
     }
 
     const id = req.params.id as string;
-    const booking = await prisma.booking.findUnique({ where: { id } });
+    const { date, time, notes } = req.body as { date: string; time: string; notes?: string | null };
 
+    const booking = await prisma.booking.findUnique({ where: { id }, select: { id: true, workerId: true, clientId: true, status: true } });
     if (!booking) {
       return res.status(404).json(errorResponse(404, 'Booking not found'));
     }
     if (booking.workerId !== req.user.userId) {
       return res.status(403).json(errorResponse(403, 'This booking is not assigned to you'));
     }
-    if (booking.status !== 'IN_PROGRESS') {
-      return res.status(409).json(errorResponse(409, `Cannot extend a booking with status ${booking.status}`));
+    if (!VISIT_ALLOWED_STATUSES.includes(booking.status)) {
+      return res.status(409).json(errorResponse(409, 'You can schedule a follow-up visit while the job is in progress'));
     }
 
-    const workerProfile = await prisma.workerProfile.findUnique({
-      where: { userId: req.user.userId },
-      select: { id: true, availableDays: true },
-    });
-    if (!workerProfile) {
-      return res.status(404).json(errorResponse(404, 'Worker profile not found'));
+    // Same date/time rules as a booking, but no lead time (it's the worker's
+    // own plan) and no rush fee (the job is already priced).
+    const startCheck = checkBookingStart(date, time, 0);
+    if (!startCheck.ok) {
+      return res.status(400).json(errorResponse(400, startCheck.message));
     }
 
-    // Anchored to whichever is later: tomorrow relative to right now, or the
-    // day after this booking's ORIGINALLY scheduled date. Plain "tomorrow
-    // relative to now" breaks if the job spills past midnight before the
-    // worker taps this — at 1am on what's now day 2, "tomorrow" would
-    // resolve to day 3, skipping the day actually being worked. A repeat
-    // call (spillover into a third day) still correctly advances past
-    // whichever day was already reserved, since scheduledDate never moves
-    // on the ORIGINAL booking — only the anchor's "now" component changes.
-    const now = new Date();
-    const tomorrowFromNow = toDayStart(now);
-    tomorrowFromNow.setUTCDate(tomorrowFromNow.getUTCDate() + 1);
-    const dayAfterScheduled = toDayStart(booking.scheduledDate);
-    dayAfterScheduled.setUTCDate(dayAfterScheduled.getUTCDate() + 1);
-    const targetDate = tomorrowFromNow.getTime() > dayAfterScheduled.getTime() ? tomorrowFromNow : dayAfterScheduled;
-
-    const { moved, escalated, steamrolledRequests } = await prisma.$transaction(async (tx) => {
-      const moved: { bookingId: string; clientId: string; newDate: Date }[] = [];
-      const escalated: { bookingId: string; clientId: string }[] = [];
-      const steamrolledRequests: { bookingId: string; clientId: string }[] = [];
-
-      for (const timeSlot of VALID_TIME_SLOTS) {
-        const collision = await tx.booking.findFirst({
-          where: {
-            workerId: req.user!.userId,
-            scheduledDate: targetDate,
-            timeSlot,
-            status: { in: ['PENDING', 'ACCEPTED'] },
-          },
-        });
-
-        if (collision) {
-          let handled = false;
-          let searchFrom = targetDate;
-
-          for (let attempt = 0; attempt < RESCHEDULE_SEARCH_WINDOW_DAYS; attempt++) {
-            const nextOpenDate = await findNextOpenSlot(tx, workerProfile.id, workerProfile.availableDays, searchFrom, timeSlot);
-            if (!nextOpenDate) break;
-
-            try {
-              // Keyed by the collision's expected pre-move fields — a second,
-              // overlapping /extend call racing the same collision matches 0
-              // rows here and silently no-ops instead of double-moving it.
-              const moveResult = await tx.booking.updateMany({
-                where: {
-                  id: collision.id,
-                  scheduledDate: collision.scheduledDate,
-                  timeSlot: collision.timeSlot,
-                  status: { in: ['PENDING', 'ACCEPTED'] },
-                },
-                data: {
-                  scheduledDate: nextOpenDate,
-                  rescheduledAt: new Date(),
-                  previousScheduledDate: collision.scheduledDate,
-                  previousTimeSlot: collision.timeSlot,
-                  // Written once, only if this is the first hop — see
-                  // Booking.originalScheduledDate's schema comment. `collision`
-                  // reflects the pre-move state fetched moments ago in this
-                  // same transaction, and the where clause above is keyed to
-                  // that exact state, so this stays consistent with the
-                  // existing race-safety guarantee (a losing concurrent call
-                  // matches 0 rows here regardless).
-                  ...(collision.originalScheduledDate == null
-                    ? { originalScheduledDate: collision.scheduledDate, originalTimeSlot: collision.timeSlot }
-                    : {}),
-                  rescheduledFromBookingId: booking.id,
-                  rescheduleAcknowledgedAt: null,
-                  rescheduleReminderSentAt: null,
-                },
-              });
-
-              if (moveResult.count === 1) {
-                // Non-null — the collision was found by filtering on this
-                // exact timeSlot above, Booking.timeSlot is just nullable in
-                // the schema for rows that predate it being required.
-                await freeSlot(tx, workerProfile.id, collision.scheduledDate, collision.timeSlot!);
-                await markSlotBooked(tx, workerProfile.id, nextOpenDate, timeSlot);
-                moved.push({ bookingId: collision.id, clientId: collision.clientId, newDate: nextOpenDate });
-              }
-              // count === 0: an overlapping call already moved this exact
-              // collision — treat as handled either way, nothing left to do.
-              handled = true;
-              break;
-            } catch {
-              // worker_live_slot_unique hit — this candidate day was claimed
-              // by a real, still-live booking between the search and the
-              // move. Advance one more day within the same bound and try
-              // again.
-              searchFrom = nextOpenDate;
-            }
-          }
-
-          if (!handled) {
-            escalated.push({ bookingId: collision.id, clientId: collision.clientId });
-          }
-        }
-
-        // A different booking's pending client-initiated reschedule REQUEST
-        // (see requestReschedule) targeting this exact slot is about to be
-        // silently invalidated by the block below — blockSlotForExtend
-        // always overwrites blockedByBookingId unconditionally, with no
-        // awareness of what it's displacing. Resolve it as declined now
-        // (mirrors respondToRescheduleRequest's own decline shape) and
-        // notify that client immediately instead of letting them find out
-        // later via a generic 409 when the worker tries to accept it.
-        const pendingRequestCollision = await tx.booking.findFirst({
-          where: {
-            workerId: req.user!.userId,
-            requestedScheduledDate: targetDate,
-            requestedTimeSlot: timeSlot,
-            rescheduleRequestedAt: { not: null },
-            rescheduleRequestRespondedAt: null,
-          },
-          select: { id: true, clientId: true },
-        });
-        if (pendingRequestCollision) {
-          await tx.booking.update({
-            where: { id: pendingRequestCollision.id },
-            data: { rescheduleRequestRespondedAt: new Date(), rescheduleRequestAccepted: false },
-          });
-          steamrolledRequests.push({ bookingId: pendingRequestCollision.id, clientId: pendingRequestCollision.clientId });
-        }
-
-        // Reserve targetDate for THIS booking's own spillover regardless of
-        // whether a collision existed there, moved, or got escalated — the
-        // worker still needs the day either way.
-        await blockSlotForExtend(tx, workerProfile.id, targetDate, timeSlot, booking.id);
-      }
-
-      return { moved, escalated, steamrolledRequests };
+    const scheduledDate = toDayStart(date);
+    const visit = await prisma.bookingVisit.create({
+      data: { bookingId: id, scheduledDate, scheduledTime: time, notes: notes?.trim() || null },
     });
 
-    await Promise.all(
-      moved.map((m) =>
-        notifyUser({
-          userId: m.clientId,
-          type: 'BOOKING_RESCHEDULED',
-          title: 'Your Booking Was Moved',
-          message: `Your pro needs another day for a previous job — we moved your booking to ${m.newDate.toLocaleDateString('en-PH', { month: 'short', day: 'numeric' })}. Keep the new date or cancel free of charge.`,
-          relatedId: m.bookingId,
-        })
-      )
-    );
+    // Shown to the worker as a heads-up, never blocking — they chose the date.
+    const nearbyJobs = await findNearbyJobs(prisma, req.user.userId, scheduledDate, time, id);
 
-    for (const e of escalated) {
-      const existingDispute = await prisma.dispute.findFirst({
-        where: { bookingId: e.bookingId, status: { in: ['OPEN', 'UNDER_REVIEW'] } },
-      });
-      if (existingDispute) continue;
-
-      const dispute = await prisma.dispute.create({
-        data: {
-          bookingId: e.bookingId,
-          raisedById: req.user.userId,
-          reason: 'A worker needed another day for a previous job and no open slot was found within 14 days to move this booking to.',
-          status: 'OPEN',
-        },
-      });
-
-      const admins = await prisma.user.findMany({ where: { role: 'ADMIN', isDeleted: false }, select: { id: true } });
-      await Promise.all(
-        admins.map((admin) =>
-          notifyUser({
-            userId: admin.id,
-            type: 'BOOKING_RESCHEDULE_ESCALATED',
-            title: 'Reschedule Needs Attention',
-            message: `Booking ${formatDisplayId(e.bookingId)} couldn't be rescheduled automatically — no open slot found for its worker within 14 days.`,
-            relatedId: dispute.id,
-          })
-        )
-      );
-
-      await notifyUser({
-        userId: e.clientId,
-        type: 'BOOKING_RESCHEDULE_ESCALATED',
-        title: 'Your Booking Needs Rescheduling',
-        message: 'Your pro needs another day for a previous job and we could not find a new slot automatically — support will reach out to reschedule this with you.',
-        relatedId: e.bookingId,
-      });
-    }
-
-    await Promise.all(
-      steamrolledRequests.map((r) =>
-        notifyUser({
-          userId: r.clientId,
-          type: 'BOOKING_RESCHEDULE_REQUEST_DECLINED',
-          title: 'Reschedule Declined',
-          message: 'The date/time you requested is no longer available — your pro needed it for another job. Your booking stays as originally scheduled; feel free to request a different date.',
-          relatedId: r.bookingId,
-        })
-      )
-    );
+    const when = `${scheduledDate.toLocaleDateString('en-PH', { month: 'short', day: 'numeric', timeZone: 'UTC' })} at ${formatTime12h(time)}`;
+    await notifyUser({
+      userId: booking.clientId,
+      type: 'FOLLOW_UP_VISIT_SCHEDULED',
+      title: 'Follow-up Visit Scheduled',
+      message: `Your pro needs another visit to finish the job: ${when}.${visit.notes ? ` Note: ${visit.notes}` : ''}`,
+      relatedId: id,
+    });
 
     await writeAuditLog({
       actorId: req.user.userId,
       actorRole: req.user.role,
-      action: 'BOOKING_EXTENDED',
+      action: 'BOOKING_VISIT_SCHEDULED',
       category: 'STATUS_CHANGE',
-      message: `Booking ${formatDisplayId(id)} extended into ${targetDate.toISOString().slice(0, 10)} — ${moved.length} booking(s) rescheduled, ${escalated.length} escalated, ${steamrolledRequests.length} pending reschedule request(s) invalidated`,
-      metadata: {
-        bookingId: id,
-        targetDate: targetDate.toISOString(),
-        moved: moved.length,
-        escalated: escalated.length,
-        steamrolledRequests: steamrolledRequests.length,
-      },
+      message: `Follow-up visit scheduled for booking ${formatDisplayId(id)} on ${isoDay(scheduledDate)} ${time}`,
+      metadata: { bookingId: id, visitId: visit.id },
     });
 
-    return res.status(200).json({
+    return res.status(201).json({
       success: true,
-      message:
-        escalated.length > 0
-          ? `Reserved tomorrow. ${moved.length} booking(s) rescheduled; ${escalated.length} escalated to support.`
-          : `Reserved tomorrow.${moved.length > 0 ? ` ${moved.length} booking(s) rescheduled automatically.` : ''}`,
-      data: { targetDate, resolved: moved.length, escalated: escalated.length },
+      message: 'Follow-up visit scheduled',
+      data: { visit, nearbyJobs },
     });
   } catch (error) {
-    console.error('Error extending booking:', error);
-    return res.status(500).json(errorResponse(500, 'Failed to extend booking'));
+    console.error('Error scheduling follow-up visit:', error);
+    return res.status(500).json(errorResponse(500, 'Failed to schedule the follow-up visit'));
+  }
+};
+
+/**
+ * PATCH /api/bookings/:id/visits/:visitId/cancel
+ * Worker removes a follow-up visit they scheduled (the client is told).
+ */
+export const cancelVisit = async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user || req.user.role !== 'WORKER') {
+      return res.status(403).json(errorResponse(403, 'Only workers can cancel a follow-up visit'));
+    }
+
+    const { id, visitId } = req.params as { id: string; visitId: string };
+    const visit = await prisma.bookingVisit.findUnique({
+      where: { id: visitId },
+      include: { booking: { select: { workerId: true, clientId: true } } },
+    });
+    if (!visit || visit.bookingId !== id) {
+      return res.status(404).json(errorResponse(404, 'Visit not found'));
+    }
+    if (visit.booking.workerId !== req.user.userId) {
+      return res.status(403).json(errorResponse(403, 'This booking is not assigned to you'));
+    }
+    if (visit.status !== 'SCHEDULED') {
+      return res.status(409).json(errorResponse(409, 'This visit is no longer scheduled'));
+    }
+
+    const updated = await prisma.bookingVisit.update({ where: { id: visitId }, data: { status: 'CANCELLED' } });
+
+    await notifyUser({
+      userId: visit.booking.clientId,
+      type: 'FOLLOW_UP_VISIT_SCHEDULED',
+      title: 'Follow-up Visit Cancelled',
+      message: `Your pro cancelled the follow-up visit on ${visit.scheduledDate.toLocaleDateString('en-PH', { month: 'short', day: 'numeric', timeZone: 'UTC' })}.`,
+      relatedId: id,
+    });
+
+    return res.status(200).json({ success: true, message: 'Visit cancelled', data: updated });
+  } catch (error) {
+    console.error('Error cancelling follow-up visit:', error);
+    return res.status(500).json(errorResponse(500, 'Failed to cancel the visit'));
   }
 };
 
@@ -2475,36 +1903,28 @@ export const acknowledgeReschedule = async (req: AuthRequest, res: Response) => 
 
 /**
  * PATCH /api/bookings/:id/request-reschedule
- * Client-initiated reschedule-on-REQUEST — distinct from extendBooking's
- * reschedule-on-CONFLICT above (that one is worker/system-triggered and
- * moves a DIFFERENT booking; this is the client of THIS booking asking for
- * a different date, which the assigned worker must explicitly accept).
- * Deliberately narrow: one proposed date/slot, one worker response — NOT a
- * return of the general free-form reschedule feature removed 2026-08-17.
- * Only available on an ACCEPTED booking (worker hasn't started yet).
+ * Either side of an ACCEPTED booking proposes a new date + start time, and
+ * the other side accepts or declines (respondToRescheduleRequest). A worker
+ * uses this when two of their jobs overlap; if the client declines, the
+ * booking stays as it is and the worker has to show up or take the no-show
+ * penalty. One pending request at a time.
  */
 export const requestReschedule = async (req: AuthRequest, res: Response) => {
   try {
-    if (!req.user || req.user.role !== 'CLIENT') {
-      return res.status(403).json(errorResponse(403, 'Only the client can request a reschedule'));
+    if (!req.user || (req.user.role !== 'CLIENT' && req.user.role !== 'WORKER')) {
+      return res.status(403).json(errorResponse(403, 'Only the client or the worker can request a reschedule'));
     }
 
     const id = req.params.id as string;
-    const { date, timeSlot } = req.body as { date?: string; timeSlot?: TimeSlot };
-
-    if (!date || isNaN(new Date(date).getTime())) {
-      return res.status(400).json(errorResponse(400, 'date is required and must be a valid date'));
-    }
-    if (!timeSlot || !VALID_TIME_SLOTS.includes(timeSlot)) {
-      return res.status(400).json(errorResponse(400, `timeSlot is required and must be one of ${VALID_TIME_SLOTS.join(', ')}`));
-    }
+    const { date, time } = req.body as { date: string; time: string };
 
     const booking = await prisma.booking.findUnique({ where: { id } });
     if (!booking) {
       return res.status(404).json(errorResponse(404, 'Booking not found'));
     }
-    if (booking.clientId !== req.user.userId) {
-      return res.status(403).json(errorResponse(403, 'This booking does not belong to you'));
+    const isClient = req.user.role === 'CLIENT';
+    if ((isClient && booking.clientId !== req.user.userId) || (!isClient && booking.workerId !== req.user.userId)) {
+      return res.status(403).json(errorResponse(403, 'This booking is not yours'));
     }
     if (booking.status !== 'ACCEPTED') {
       return res.status(409).json(errorResponse(409, `Cannot request a reschedule for a booking with status ${booking.status}`));
@@ -2513,57 +1933,58 @@ export const requestReschedule = async (req: AuthRequest, res: Response) => {
       return res.status(409).json(errorResponse(409, 'This booking has no assigned worker'));
     }
     if (booking.rescheduleRequestedAt != null && booking.rescheduleRequestRespondedAt == null) {
-      return res.status(409).json(errorResponse(409, 'You already have a pending reschedule request for this booking'));
+      return res.status(409).json(errorResponse(409, 'There is already a pending reschedule request for this booking'));
+    }
+
+    // Same date/time rules as a new booking. The price was already agreed,
+    // so moving to today doesn't add a rush fee.
+    const { rushMinLeadHours } = await getAppSettings();
+    const startCheck = checkBookingStart(date, time, rushMinLeadHours);
+    if (!startCheck.ok) {
+      return res.status(400).json(errorResponse(400, startCheck.message));
     }
 
     const requestedDate = toDayStart(date);
-
-    // Same minimum-lead-time rule a new booking is held to — the worker
-    // still needs advance notice, a reschedule request shouldn't be a
-    // backdoor around it.
-    const minLeadMs = MIN_BOOKING_LEAD_DAYS * 24 * 60 * 60 * 1000;
-    const todayUtc = toDayStart(new Date());
-    if (requestedDate.getTime() - todayUtc.getTime() < minLeadMs) {
-      return res.status(400).json(errorResponse(400, `date must be at least ${MIN_BOOKING_LEAD_DAYS} days from today`));
-    }
-    if (requestedDate.getTime() === toDayStart(booking.scheduledDate).getTime() && timeSlot === booking.timeSlot) {
-      return res.status(400).json(errorResponse(400, 'That is already this booking\'s current date and time'));
+    if (requestedDate.getTime() === toDayStart(booking.scheduledDate).getTime() && time === bookingStartTime(booking)) {
+      return res.status(400).json(errorResponse(400, "That is already this booking's date and time"));
     }
 
-    const workerProfile = await prisma.workerProfile.findUnique({
-      where: { userId: booking.workerId },
-      select: { id: true },
-    });
-    if (!workerProfile) {
-      return res.status(404).json(errorResponse(404, 'Worker profile not found'));
-    }
-
-    await prisma.$transaction(async (tx) => {
-      const slot = await findSlot(tx, workerProfile.id, requestedDate, timeSlot);
-      if (slot && (slot.isBlocked || slot.isBooked)) {
-        throw new Error('SLOT_TAKEN');
-      }
-
-      await blockSlotForExtend(tx, workerProfile.id, requestedDate, timeSlot, booking.id);
-
-      await tx.booking.update({
-        where: { id },
-        data: {
-          requestedScheduledDate: requestedDate,
-          requestedTimeSlot: timeSlot,
-          rescheduleRequestedAt: new Date(),
-          rescheduleRequestReminderSentAt: null,
-          rescheduleRequestRespondedAt: null,
-          rescheduleRequestAccepted: null,
-        },
+    // A client can only propose a day the worker works.
+    if (isClient) {
+      const workerProfile = await prisma.workerProfile.findUnique({
+        where: { userId: booking.workerId },
+        select: { id: true, availableDays: true },
       });
+      if (!workerProfile) {
+        return res.status(404).json(errorResponse(404, 'Worker profile not found'));
+      }
+      if (!(await isWorkerAvailableOn(prisma, workerProfile, requestedDate))) {
+        return res.status(409).json(errorResponse(409, "Your pro isn't working on that date"));
+      }
+    }
+
+    await prisma.booking.update({
+      where: { id },
+      data: {
+        requestedScheduledDate: requestedDate,
+        requestedScheduledTime: time,
+        requestedTimeSlot: null,
+        rescheduleRequestedBy: isClient ? 'CLIENT' : 'WORKER',
+        rescheduleRequestedAt: new Date(),
+        rescheduleRequestReminderSentAt: null,
+        rescheduleRequestRespondedAt: null,
+        rescheduleRequestAccepted: null,
+      },
     });
 
+    const when = `${requestedDate.toLocaleDateString('en-PH', { month: 'short', day: 'numeric', timeZone: 'UTC' })} at ${formatTime12h(time)}`;
     await notifyUser({
-      userId: booking.workerId,
+      userId: isClient ? booking.workerId : booking.clientId,
       type: 'BOOKING_RESCHEDULE_REQUESTED',
       title: 'Reschedule Requested',
-      message: `Your client asked to move this booking to ${requestedDate.toLocaleDateString('en-PH', { month: 'short', day: 'numeric' })}. Review and accept or decline.`,
+      message: isClient
+        ? `Your client asked to move this booking to ${when}. Review and accept or decline.`
+        : `Your pro asked to move this booking to ${when}. Review and accept or decline.`,
       relatedId: id,
     });
 
@@ -2572,34 +1993,36 @@ export const requestReschedule = async (req: AuthRequest, res: Response) => {
       actorRole: req.user.role,
       action: 'BOOKING_RESCHEDULE_REQUESTED',
       category: 'STATUS_CHANGE',
-      message: `Client requested a reschedule for booking ${formatDisplayId(id)} to ${requestedDate.toISOString().slice(0, 10)} ${timeSlot}`,
-      metadata: { bookingId: id, requestedDate: requestedDate.toISOString(), timeSlot },
+      message: `${isClient ? 'Client' : 'Worker'} requested a reschedule for booking ${formatDisplayId(id)} to ${isoDay(requestedDate)} ${time}`,
+      metadata: { bookingId: id, requestedDate: requestedDate.toISOString(), time },
     });
 
     return res.status(200).json({
       success: true,
-      message: 'Reschedule requested — waiting for your pro to respond',
-      data: { id, requestedScheduledDate: requestedDate, requestedTimeSlot: timeSlot },
+      message: isClient ? 'Reschedule requested — waiting for your pro to respond' : 'Reschedule requested — waiting for the client to respond',
+      data: { id, requestedScheduledDate: requestedDate, requestedScheduledTime: time },
     });
-  } catch (error: any) {
-    if (error.message === 'SLOT_TAKEN') {
-      return res.status(409).json(errorResponse(409, 'Your pro is not available at that date/time'));
-    }
+  } catch (error) {
     console.error('Error requesting reschedule:', error);
     return res.status(500).json(errorResponse(500, 'Failed to request reschedule'));
   }
 };
 
+/** Who asked for the pending reschedule — a request from before this was tracked came from the client. */
+function rescheduleRequester(booking: { rescheduleRequestedBy: string | null }): 'CLIENT' | 'WORKER' {
+  return booking.rescheduleRequestedBy === 'WORKER' ? 'WORKER' : 'CLIENT';
+}
+
 /**
  * PATCH /api/bookings/:id/reschedule-request/withdraw
- * Client backs out of their own still-pending reschedule request. Recorded
- * as a resolved episode with rescheduleRequestAccepted left null — distinct
- * from an explicit accept (true) or decline (false) by the worker.
+ * The side that asked backs out of its own still-pending request. Recorded
+ * as resolved with rescheduleRequestAccepted left null — distinct from an
+ * accept (true) or decline (false).
  */
 export const withdrawRescheduleRequest = async (req: AuthRequest, res: Response) => {
   try {
-    if (!req.user || req.user.role !== 'CLIENT') {
-      return res.status(403).json(errorResponse(403, 'Only the client can withdraw a reschedule request'));
+    if (!req.user) {
+      return res.status(401).json(errorResponse(401, 'Not authenticated'));
     }
 
     const id = req.params.id as string;
@@ -2608,37 +2031,17 @@ export const withdrawRescheduleRequest = async (req: AuthRequest, res: Response)
     if (!booking) {
       return res.status(404).json(errorResponse(404, 'Booking not found'));
     }
-    if (booking.clientId !== req.user.userId) {
-      return res.status(403).json(errorResponse(403, 'This booking does not belong to you'));
-    }
     if (booking.rescheduleRequestedAt == null || booking.rescheduleRequestRespondedAt != null) {
       return res.status(409).json(errorResponse(409, 'There is no pending reschedule request to withdraw'));
     }
+    const requesterId = rescheduleRequester(booking) === 'CLIENT' ? booking.clientId : booking.workerId;
+    if (requesterId !== req.user.userId) {
+      return res.status(403).json(errorResponse(403, 'Only the side that asked can withdraw this request'));
+    }
 
-    await prisma.$transaction(async (tx) => {
-      if (booking.workerId && booking.requestedScheduledDate && booking.requestedTimeSlot) {
-        const workerProfile = await tx.workerProfile.findUnique({
-          where: { userId: booking.workerId },
-          select: { id: true },
-        });
-        if (workerProfile) {
-          await tx.workerAvailability.updateMany({
-            where: {
-              workerProfileId: workerProfile.id,
-              date: booking.requestedScheduledDate,
-              timeSlot: booking.requestedTimeSlot,
-              blockedByBookingId: booking.id,
-              isBooked: false,
-            },
-            data: { isBlocked: false, blockedByBookingId: null },
-          });
-        }
-      }
-
-      await tx.booking.update({
-        where: { id },
-        data: { rescheduleRequestRespondedAt: new Date(), rescheduleRequestAccepted: null },
-      });
+    await prisma.booking.update({
+      where: { id },
+      data: { rescheduleRequestRespondedAt: new Date(), rescheduleRequestAccepted: null },
     });
 
     return res.status(200).json({ success: true, message: 'Reschedule request withdrawn', data: { id } });
@@ -2650,14 +2053,13 @@ export const withdrawRescheduleRequest = async (req: AuthRequest, res: Response)
 
 /**
  * PATCH /api/bookings/:id/reschedule-request/respond
- * Worker accepts or declines the client's proposed new date/time. Accepting
- * moves the booking for real (frees the old slot, books the new one);
- * declining just releases the held slot and leaves the booking as-is.
+ * The other side accepts or declines the proposed date/time. Accepting moves
+ * the booking; declining leaves it as it was.
  */
 export const respondToRescheduleRequest = async (req: AuthRequest, res: Response) => {
   try {
-    if (!req.user || req.user.role !== 'WORKER') {
-      return res.status(403).json(errorResponse(403, 'Only the assigned worker can respond to a reschedule request'));
+    if (!req.user) {
+      return res.status(401).json(errorResponse(401, 'Not authenticated'));
     }
 
     const id = req.params.id as string;
@@ -2670,102 +2072,59 @@ export const respondToRescheduleRequest = async (req: AuthRequest, res: Response
     if (!booking) {
       return res.status(404).json(errorResponse(404, 'Booking not found'));
     }
-    if (booking.workerId !== req.user.userId) {
-      return res.status(403).json(errorResponse(403, 'This booking is not assigned to you'));
-    }
     if (booking.rescheduleRequestedAt == null || booking.rescheduleRequestRespondedAt != null) {
       return res.status(409).json(errorResponse(409, 'There is no pending reschedule request to respond to'));
     }
-    if (!booking.requestedScheduledDate || !booking.requestedTimeSlot) {
+    const requester = rescheduleRequester(booking);
+    const responderId = requester === 'CLIENT' ? booking.workerId : booking.clientId;
+    if (responderId !== req.user.userId) {
+      return res.status(403).json(errorResponse(403, 'Only the other side can respond to this request'));
+    }
+    if (!booking.requestedScheduledDate || (!booking.requestedScheduledTime && !booking.requestedTimeSlot)) {
       return res.status(409).json(errorResponse(409, 'This reschedule request is missing its requested date/time'));
     }
-
-    const workerProfile = await prisma.workerProfile.findUnique({
-      where: { userId: req.user.userId },
-      select: { id: true },
-    });
-    if (!workerProfile) {
-      return res.status(404).json(errorResponse(404, 'Worker profile not found'));
+    if (accept && booking.status !== 'ACCEPTED') {
+      return res.status(409).json(errorResponse(409, 'This booking can no longer be moved'));
     }
 
-    await prisma.$transaction(async (tx) => {
-      if (accept) {
-        // Re-check the requested slot is still genuinely open — the block
-        // from requestReschedule should have held it, but this guards
-        // against anything that slipped past it (e.g. an admin adjustment).
-        // No row at all is fine (nothing occupies it, same convention
-        // findSlot's other callers use) — only a REAL booking there, or a
-        // block belonging to someone else, is a genuine conflict.
-        const slot = await findSlot(tx, workerProfile.id, booking.requestedScheduledDate!, booking.requestedTimeSlot!);
-        if (slot && (slot.isBooked || (slot.isBlocked && slot.blockedByBookingId !== booking.id))) {
-          throw new Error('SLOT_NO_LONGER_AVAILABLE');
-        }
-        // For a multi-hour job, also guard its overflow slot(s) — unlike the
-        // primary slot, requestReschedule never pre-holds these, so any
-        // occupant at all (booked or blocked, no "belongs to this booking"
-        // exception) is a genuine conflict.
-        for (const extraSlot of additionalSlotsForDuration(booking.requestedTimeSlot!, booking.estimatedDurationHours)) {
-          const extra = await findSlot(tx, workerProfile.id, booking.requestedScheduledDate!, extraSlot);
-          if (extra && (extra.isBooked || extra.isBlocked)) {
-            throw new Error('SLOT_NO_LONGER_AVAILABLE');
-          }
-        }
+    const newTime = bookingStartTime({ scheduledTime: booking.requestedScheduledTime, timeSlot: booking.requestedTimeSlot });
 
-        if (booking.timeSlot) {
-          await freeSlot(tx, workerProfile.id, booking.scheduledDate, booking.timeSlot, booking.estimatedDurationHours);
-        }
-        await markSlotBooked(tx, workerProfile.id, booking.requestedScheduledDate!, booking.requestedTimeSlot!, booking.estimatedDurationHours);
-        // markSlotBooked only sets isBooked — explicitly clear the block
-        // fields too, since this slot is a real booking now, not a hold.
-        await tx.workerAvailability.updateMany({
-          where: { workerProfileId: workerProfile.id, date: booking.requestedScheduledDate!, timeSlot: booking.requestedTimeSlot! },
-          data: { isBlocked: false, blockedByBookingId: null },
-        });
-
-        await tx.booking.update({
-          where: { id },
-          data: {
-            scheduledDate: booking.requestedScheduledDate!,
-            timeSlot: booking.requestedTimeSlot!,
+    await prisma.booking.update({
+      where: { id },
+      data: accept
+        ? {
+            scheduledDate: booking.requestedScheduledDate,
+            scheduledTime: newTime,
+            timeSlot: null,
+            // The new start time resets the no-show clock.
+            workerNoShowFlaggedAt: null,
             rescheduleRequestRespondedAt: new Date(),
             rescheduleRequestAccepted: true,
-          },
-        });
-      } else {
-        await tx.workerAvailability.updateMany({
-          where: {
-            workerProfileId: workerProfile.id,
-            date: booking.requestedScheduledDate!,
-            timeSlot: booking.requestedTimeSlot!,
-            blockedByBookingId: booking.id,
-            isBooked: false,
-          },
-          data: { isBlocked: false, blockedByBookingId: null },
-        });
-
-        await tx.booking.update({
-          where: { id },
-          data: { rescheduleRequestRespondedAt: new Date(), rescheduleRequestAccepted: false },
-        });
-      }
+          }
+        : { rescheduleRequestRespondedAt: new Date(), rescheduleRequestAccepted: false },
     });
 
-    await notifyUser({
-      userId: booking.clientId,
-      type: accept ? 'BOOKING_RESCHEDULE_REQUEST_ACCEPTED' : 'BOOKING_RESCHEDULE_REQUEST_DECLINED',
-      title: accept ? 'Reschedule Accepted' : 'Reschedule Declined',
-      message: accept
-        ? 'Your pro accepted the new date for your booking.'
-        : 'Your pro could not accommodate the new date — your booking stays as originally scheduled.',
-      relatedId: id,
-    });
+    const requesterId = requester === 'CLIENT' ? booking.clientId : booking.workerId;
+    if (requesterId) {
+      await notifyUser({
+        userId: requesterId,
+        type: accept ? 'BOOKING_RESCHEDULE_REQUEST_ACCEPTED' : 'BOOKING_RESCHEDULE_REQUEST_DECLINED',
+        title: accept ? 'Reschedule Accepted' : 'Reschedule Declined',
+        message: accept
+          ? `The new date for your booking was accepted.`
+          : requester === 'WORKER'
+            ? 'The client kept the original date and time. Please arrive on time — a no-show is cancelled with a penalty.'
+            : 'Your pro could not take the new date — your booking stays as originally scheduled.',
+        relatedId: id,
+      });
+    }
 
     await writeAuditLog({
       actorId: req.user.userId,
       actorRole: req.user.role,
       action: accept ? 'BOOKING_RESCHEDULE_REQUEST_ACCEPTED' : 'BOOKING_RESCHEDULE_REQUEST_DECLINED',
       category: 'STATUS_CHANGE',
-      message: `Worker ${accept ? 'accepted' : 'declined'} the reschedule request for booking ${formatDisplayId(id)}`,
+      message: `${req.user.role === 'WORKER' ? 'Worker' : 'Client'} ${accept ? 'accepted' : 'declined'} the reschedule request for booking ${formatDisplayId(id)}`,
       metadata: { bookingId: id },
     });
 
@@ -2774,10 +2133,7 @@ export const respondToRescheduleRequest = async (req: AuthRequest, res: Response
       message: accept ? 'Reschedule accepted' : 'Reschedule declined',
       data: { id },
     });
-  } catch (error: any) {
-    if (error.message === 'SLOT_NO_LONGER_AVAILABLE') {
-      return res.status(409).json(errorResponse(409, 'That slot is no longer available'));
-    }
+  } catch (error) {
     console.error('Error responding to reschedule request:', error);
     return res.status(500).json(errorResponse(500, 'Failed to respond to reschedule request'));
   }
@@ -2785,11 +2141,15 @@ export const respondToRescheduleRequest = async (req: AuthRequest, res: Response
 
 /**
  * POST /api/bookings/:id/quote
- * Worker submits a quote for additional costs on top of the booking's
- * already-settled estimatedPrice (the labor cost, agreed at booking time).
- * laborCost is never taken from the request — it's always pinned to
- * booking.estimatedPrice so the client can't be charged more for labor than
- * what was agreed when they booked.
+ * Worker submits a quote for materials on top of the booking's already-agreed
+ * service price. laborCost is pinned to booking.estimatedPrice (the client
+ * can't be charged more for labor than what was agreed when they booked),
+ * except for a CUSTOM_QUOTE job, where the worker's quote IS the first price.
+ *
+ * Any materials cost needs proof: photos of the receipt(s) and of the
+ * materials used on site. If the quoted amount doesn't match the receipt the
+ * client refuses the quote (rejectQuote) and the worker revises it here —
+ * a resubmission after a refusal bumps quoteRevision.
  * Quote data is stored inline on the Booking model (no separate Quote table in schema)
  */
 export const submitQuote = async (req: AuthRequest, res: Response) => {
@@ -2801,11 +2161,6 @@ export const submitQuote = async (req: AuthRequest, res: Response) => {
     const id = req.params.id as string;
     const { notes } = req.body;
 
-    // Unlike laborCost (validated below for CUSTOM_QUOTE tasks, pinned to
-    // estimatedPrice otherwise), materialsCost was taken straight from the
-    // request with no check at all — a worker could submit a negative value
-    // (reducing the client's total below what labor alone costs) or a
-    // non-numeric value that would silently corrupt the stored quote.
     const rawMaterialsCost = req.body.materialsCost;
     const materialsCost = rawMaterialsCost === undefined || rawMaterialsCost === null ? 0 : Number(rawMaterialsCost);
     if (!Number.isFinite(materialsCost) || materialsCost < 0) {
@@ -2829,14 +2184,23 @@ export const submitQuote = async (req: AuthRequest, res: Response) => {
       return res.status(409).json(errorResponse(409, `Cannot submit quote for booking with status ${booking.status}`));
     }
 
+    // Proof of purchase + proof of use for any materials. Only booking photos
+    // this worker uploaded count (see utils/storageUrls).
+    const receiptUrls = toOwnedBookingPhotoUrls(req.body.receiptUrls ?? [], req.user.userId);
+    const proofOfUseUrls = toOwnedBookingPhotoUrls(req.body.proofOfUseUrls ?? [], req.user.userId);
+    if (!receiptUrls || !proofOfUseUrls) {
+      return res.status(400).json(errorResponse(400, 'Upload the photos again — one of them could not be verified'));
+    }
+    if (materialsCost > 0 && (receiptUrls.length === 0 || proofOfUseUrls.length === 0)) {
+      return res.status(400).json(
+        errorResponse(400, 'Materials need proof: add a photo of the receipt and a photo of the materials used on the job')
+      );
+    }
+
     // CUSTOM_QUOTE tasks have no upfront price (estimatedPrice is 0 from
     // createBooking) — the worker's laborCost here IS the first real price
     // the client sees, so it's accepted from the request instead of pinned,
-    // and the VAT snapshot (deliberately deferred at creation — see
-    // createBooking) happens now instead, from the worker's status at this
-    // exact moment. Every other task keeps today's behavior unchanged:
-    // laborCost pinned to the already-agreed estimatedPrice, VAT already
-    // snapshotted at creation, never touched again.
+    // and the VAT snapshot (deliberately deferred at creation) happens now.
     const isCustomQuoteTask = booking.serviceTask?.pricingModel === 'CUSTOM_QUOTE';
     let laborCost = booking.estimatedPrice;
     let vatUpdate: { vatApplicable: boolean; vatRate: number | null } | undefined;
@@ -2844,7 +2208,7 @@ export const submitQuote = async (req: AuthRequest, res: Response) => {
     if (isCustomQuoteTask) {
       const requestedLaborCost = Number(req.body.laborCost);
       if (!Number.isFinite(requestedLaborCost) || requestedLaborCost <= 0) {
-        return res.status(400).json(errorResponse(400, 'laborCost is required for a custom-quote service'));
+        return res.status(400).json(errorResponse(400, 'Enter your price for the work (labor) for a custom-quote service'));
       }
       laborCost = requestedLaborCost;
 
@@ -2858,6 +2222,8 @@ export const submitQuote = async (req: AuthRequest, res: Response) => {
       vatUpdate = { vatApplicable, vatRate: vatApplicable ? VAT_RATE : null };
     }
 
+    const isRevision = booking.quoteStatus === 'REJECTED';
+
     // Quote fields live directly on Booking — no separate Quote model in schema.
     const updated = await prisma.booking.update({
       where: { id },
@@ -2865,8 +2231,12 @@ export const submitQuote = async (req: AuthRequest, res: Response) => {
         laborCost,
         materialsCost,
         quoteNotes: notes,
+        quoteReceiptUrls: receiptUrls,
+        quoteProofOfUseUrls: proofOfUseUrls,
         quoteStatus: 'SUBMITTED',
         quotedAt: new Date(),
+        quoteReminderSentAt: null,
+        ...(isRevision ? { quoteRevision: { increment: 1 } } : {}),
         status: 'QUOTE_SUBMITTED',
         ...vatUpdate,
       },
@@ -2880,32 +2250,37 @@ export const submitQuote = async (req: AuthRequest, res: Response) => {
         basePrice: updated.laborCost ?? booking.estimatedPrice,
         finalEstimate: (updated.laborCost ?? 0) + (updated.materialsCost ?? 0),
         breakdown: {
-          stage: 'QUOTE_SUBMITTED',
+          stage: isRevision ? 'QUOTE_REVISED' : 'QUOTE_SUBMITTED',
           laborCost: updated.laborCost,
           materialsCost: updated.materialsCost,
           notes: updated.quoteNotes,
+          revision: updated.quoteRevision,
         },
       },
     });
 
-    // Notify client
     await notifyUser({
       userId: booking.clientId,
       type: 'QUOTE_SUBMITTED',
-      title: 'Quote Submitted',
-      message: 'Worker has submitted a quote for your booking',
+      title: isRevision ? 'Revised Quote Submitted' : 'Quote Submitted',
+      message: isRevision
+        ? 'Your pro revised the quote. Check it against the receipt and approve or refuse it.'
+        : 'Your pro submitted a quote. Check it against the receipt and approve or refuse it.',
       relatedId: id,
     });
 
     return res.status(201).json({
       success: true,
-      message: 'Quote submitted successfully',
+      message: isRevision ? 'Revised quote submitted' : 'Quote submitted successfully',
       data: {
         id: updated.id,
         laborCost: updated.laborCost,
         materialsCost: updated.materialsCost,
         totalCost: (updated.laborCost ?? 0) + (updated.materialsCost ?? 0),
         notes: updated.quoteNotes,
+        receiptUrls: updated.quoteReceiptUrls,
+        proofOfUseUrls: updated.quoteProofOfUseUrls,
+        revision: updated.quoteRevision,
       },
     });
   } catch (error) {
@@ -2996,6 +2371,74 @@ export const approveQuote = async (req: AuthRequest, res: Response) => {
   } catch (error) {
     console.error('Error approving quote:', error);
     return res.status(500).json(errorResponse(500, 'Failed to approve quote'));
+  }
+};
+
+/**
+ * PATCH /api/bookings/:id/quote/reject
+ * Client refuses a submitted quote — e.g. the materials price doesn't match
+ * the receipt. The booking goes back to IN_PROGRESS and the worker revises
+ * and resubmits (submitQuote); nothing is charged for the refused version.
+ * Distinct from disputeQuote, which asks an admin to step in.
+ */
+export const rejectQuote = async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user || req.user.role !== 'CLIENT') {
+      return res.status(403).json(errorResponse(403, 'Only clients can refuse quotes'));
+    }
+
+    const id = req.params.id as string;
+    const reason = String(req.body.reason).trim();
+
+    const booking = await prisma.booking.findUnique({ where: { id } });
+    if (!booking) {
+      return res.status(404).json(errorResponse(404, 'Booking not found'));
+    }
+    if (booking.clientId !== req.user.userId) {
+      return res.status(403).json(errorResponse(403, 'This booking is not yours'));
+    }
+    if (booking.status !== 'QUOTE_SUBMITTED') {
+      return res.status(409).json(errorResponse(409, `Cannot refuse a quote for a booking with status ${booking.status}`));
+    }
+
+    // Status-guarded so a racing approve / auto-approve can't be overwritten.
+    const result = await prisma.booking.updateMany({
+      where: { id, status: 'QUOTE_SUBMITTED' },
+      data: {
+        status: 'IN_PROGRESS',
+        quoteStatus: 'REJECTED',
+        quoteRejectedAt: new Date(),
+        quoteRejectionReason: reason,
+        quoteReminderSentAt: null,
+      },
+    });
+    if (result.count === 0) {
+      return res.status(409).json(errorResponse(409, 'This quote was already answered'));
+    }
+
+    if (booking.workerId) {
+      await notifyUser({
+        userId: booking.workerId,
+        type: 'QUOTE_REJECTED',
+        title: 'Quote Refused',
+        message: `The client refused your quote: ${reason}. Please revise it and submit it again.`,
+        relatedId: id,
+      });
+    }
+
+    await writeAuditLog({
+      actorId: req.user.userId,
+      actorRole: req.user.role,
+      action: 'QUOTE_REJECTED',
+      category: 'STATUS_CHANGE',
+      message: `Client refused the quote for booking ${formatDisplayId(id)}: ${reason}`,
+      metadata: { bookingId: id },
+    });
+
+    return res.status(200).json({ success: true, message: 'Quote refused — your pro will revise it', data: { id, status: 'IN_PROGRESS' } });
+  } catch (error) {
+    console.error('Error refusing quote:', error);
+    return res.status(500).json(errorResponse(500, 'Failed to refuse quote'));
   }
 };
 
@@ -3175,27 +2618,21 @@ export const completeBooking = async (req: AuthRequest, res: Response) => {
         },
       });
 
-      // The worker's side of the job is done — free up their capacity and
-      // calendar slot now rather than waiting on the client's confirmation,
-      // which may be delayed or (via the 24h auto-settle job) skipped.
+      // The worker's side of the job is done — update their active-job
+      // count now rather than waiting on the client's confirmation, which may
+      // be delayed or (via the 24h auto-settle job) skipped.
       if (booking.workerId) {
-        const workerProfile = await tx.workerProfile.update({
+        await tx.workerProfile.update({
           where: { userId: booking.workerId },
           data: { activeJobCount: { decrement: 1 } },
         });
-
-        if (booking.timeSlot) {
-          await freeSlot(tx, workerProfile.id, booking.scheduledDate, booking.timeSlot, booking.estimatedDurationHours);
-        }
-
-        // Same reasoning as cancelBooking's mirrored cleanup — releases any
-        // never-claimed future calendar block this booking created via
-        // /extend, now that the job it was reserved for is actually done.
-        await tx.workerAvailability.updateMany({
-          where: { workerProfileId: workerProfile.id, blockedByBookingId: booking.id, isBooked: false },
-          data: { isBlocked: false, blockedByBookingId: null },
-        });
       }
+
+      // Follow-up visits: any still ahead are no longer needed.
+      await tx.bookingVisit.updateMany({
+        where: { bookingId: id, status: 'SCHEDULED' },
+        data: { status: 'DONE' },
+      });
 
       return b;
     });
@@ -3348,7 +2785,18 @@ export const confirmCompletion = async (req: AuthRequest, res: Response) => {
 
 /**
  * PATCH /api/bookings/:id/cancel
- * Cancel booking (status-gated)
+ * Cancel booking (status-gated).
+ *
+ * Client: only while PENDING (plus the legacy reschedule/no-show carve-outs).
+ * Worker, before arriving: any time, with a reason; a late self-reported
+ * WORKER_FAULT counts against their auto-match score.
+ * Worker, after arriving at the job site: only with photo proof and whose
+ * fault it is —
+ *   fault WORKER: the no-show penalty (AppSettings.noShowPenaltyAmount) is
+ *     charged right away.
+ *   fault CLIENT: an admin checks the proof (adminCancellationController);
+ *     if approved the client pays AppSettings.clientFaultCompensationAmount
+ *     and the worker is compensated, if refused the worker is penalized.
  */
 export const cancelBooking = async (req: AuthRequest, res: Response) => {
   try {
@@ -3357,7 +2805,12 @@ export const cancelBooking = async (req: AuthRequest, res: Response) => {
     }
 
     const id = req.params.id as string;
-    const { reason, workerCancellationReason } = req.body as { reason?: string; workerCancellationReason?: string };
+    const { reason, workerCancellationReason, fault, proofUrls: rawProofUrls } = req.body as {
+      reason?: string;
+      workerCancellationReason?: string;
+      fault?: string;
+      proofUrls?: unknown;
+    };
 
     const booking = await prisma.booking.findUnique({
       where: { id },
@@ -3372,26 +2825,17 @@ export const cancelBooking = async (req: AuthRequest, res: Response) => {
       return res.status(403).json(errorResponse(403, 'You do not have permission to cancel this booking'));
     }
 
-    // A booking a worker's spillover moved to a new date is the one
-    // exception to the rule below — the client didn't choose to be moved,
-    // so declining the new date is a free cancel, not backing out of a job
-    // they already committed to. Resolved (explicitly kept, or auto-confirmed
-    // — see remindAndAutoConfirmReschedules) the moment rescheduleAcknowledgedAt
-    // is set, at which point this carve-out stops applying.
+    // Legacy carve-outs: a booking moved by the old "Continue Tomorrow"
+    // spillover, or one flagged as a worker no-show before no-shows were
+    // cancelled automatically. The client didn't choose either, so it's a
+    // free cancel.
     const hasPendingReschedule = booking.rescheduledAt != null && booking.rescheduleAcknowledgedAt == null;
-
-    // The other exception — the worker never showed up at all (see
-    // bookingWorker.flagWorkerNoShows / Booking.workerNoShowFlaggedAt).
-    // The client didn't choose this either, so it's the same free-cancel
-    // carve-out as a forced reschedule.
     const hasWorkerNoShow = booking.workerNoShowFlaggedAt != null;
 
     // A client's cancellation window closes the moment a worker accepts —
-    // by then the worker has committed real capacity and a calendar slot to
-    // this job, so backing out is no longer the client's call (a worker
-    // still can, from ACCEPTED onward, per the state machine below — e.g.
-    // an emergency on their end). This is a hard rule, not a fee: there is
-    // no "cancel for a charge" path past PENDING for the client, by design.
+    // by then the worker has committed their day to this job. This is a
+    // hard rule, not a fee: there is no "cancel for a charge" path past
+    // PENDING for the client, by design.
     if (req.user.role === 'CLIENT' && booking.status !== 'PENDING' && !hasPendingReschedule && !hasWorkerNoShow) {
       return res.status(409).json(
         errorResponse(
@@ -3406,90 +2850,94 @@ export const cancelBooking = async (req: AuthRequest, res: Response) => {
     }
 
     const cancelledByRole = req.user.role === 'WORKER' ? 'WORKER' : 'CLIENT';
+    const settings = await getAppSettings();
 
-    // Required so a worker can distinguish "my fault" from "the client
-    // wasn't there" or an unrelated reason — previously every late worker
-    // cancellation was penalized identically regardless of whose fault it
-    // actually was, which discouraged ever honestly reporting a client
-    // no-show. Validated here rather than in the shared validation
-    // middleware since it only applies when the CALLER turns out to be a
-    // worker, which isn't known until after the booking/ownership lookup.
-    const VALID_WORKER_CANCEL_REASONS = ['WORKER_FAULT', 'CLIENT_NO_SHOW', 'OTHER'];
-    if (cancelledByRole === 'WORKER' && !VALID_WORKER_CANCEL_REASONS.includes(workerCancellationReason ?? '')) {
-      return res.status(400).json(
-        errorResponse(400, `workerCancellationReason must be one of ${VALID_WORKER_CANCEL_REASONS.join(', ')}`)
-      );
+    // After arrival the job has started on site — the worker needs proof and
+    // has to say whose fault it is (see the docblock).
+    const afterArrival = cancelledByRole === 'WORKER' && booking.workerArrivedAt != null;
+    let cancelFault: 'CLIENT' | 'WORKER' | null = null;
+    let proofUrls: string[] = [];
+
+    if (afterArrival) {
+      if (fault !== 'CLIENT' && fault !== 'WORKER') {
+        return res.status(400).json(errorResponse(400, "You've already arrived — say whose fault the cancellation is (CLIENT or WORKER)"));
+      }
+      if (typeof reason !== 'string' || reason.trim().length < 10) {
+        return res.status(400).json(errorResponse(400, 'Explain what happened (at least 10 characters)'));
+      }
+      const owned = toOwnedBookingPhotoUrls(rawProofUrls ?? [], req.user.userId);
+      if (!owned) {
+        return res.status(400).json(errorResponse(400, 'Upload the proof photos again — one of them could not be verified'));
+      }
+      if (owned.length === 0 || owned.length > 5) {
+        return res.status(400).json(errorResponse(400, 'Add 1 to 5 photos as proof'));
+      }
+      cancelFault = fault;
+      proofUrls = owned;
+    } else if (cancelledByRole === 'WORKER') {
+      // Required so a worker can distinguish "my fault" from "the client
+      // wasn't there" or an unrelated reason.
+      const VALID_WORKER_CANCEL_REASONS = ['WORKER_FAULT', 'CLIENT_NO_SHOW', 'OTHER'];
+      if (!VALID_WORKER_CANCEL_REASONS.includes(workerCancellationReason ?? '')) {
+        return res.status(400).json(
+          errorResponse(400, `workerCancellationReason must be one of ${VALID_WORKER_CANCEL_REASONS.join(', ')}`)
+        );
+      }
     }
 
     // Notice given, in hours — feeds the auto-match penalty for repeated
-    // last-minute cancellations (see B6 / matchingService's lateCancelCount).
-    // Only meaningful for a WORKER backing out of a slot they'd already
-    // committed to; clamped at 0 if the slot had already started.
+    // last-minute cancellations (see matchingService's lateCancelCount).
+    // Clamped at 0 if the job had already started.
     const cancelledWithinHours =
-      cancelledByRole === 'WORKER' && booking.timeSlot
-        ? Math.max(0, Math.round((getSlotStartInstant(booking.scheduledDate, booking.timeSlot).getTime() - Date.now()) / (60 * 60 * 1000)))
+      cancelledByRole === 'WORKER'
+        ? Math.max(0, Math.round((bookingStartInstant(booking).getTime() - Date.now()) / (60 * 60 * 1000)))
         : null;
 
-    // Who (if anyone) takes the auto-match scoring penalty for this
-    // cancellation — see Cancellation.penalizedWorkerId's schema comment.
-    // Two paths set it: the worker self-reporting fault on a late cancel
-    // (unchanged threshold/timing from the old cancelledBy='WORKER' logic),
-    // or the client cancelling because this exact worker never showed up.
+    const penaltyAmount = cancelFault === 'WORKER' ? settings.noShowPenaltyAmount : null;
+    const compensationAmount = cancelFault === 'CLIENT' ? settings.clientFaultCompensationAmount : null;
+
+    // Who takes the auto-match scoring penalty for this cancellation — see
+    // Cancellation.penalizedWorkerId's schema comment. A CLIENT-fault claim
+    // isn't decided until an admin reviews it.
     const penalizedWorkerId =
-      cancelledByRole === 'WORKER' &&
-      workerCancellationReason === 'WORKER_FAULT' &&
-      cancelledWithinHours != null &&
-      cancelledWithinHours < LATE_CANCEL_THRESHOLD_HOURS
+      cancelFault === 'WORKER'
         ? req.user.userId
-        : hasWorkerNoShow && booking.workerId
-          ? booking.workerId
-          : null;
+        : cancelledByRole === 'WORKER' &&
+            !afterArrival &&
+            workerCancellationReason === 'WORKER_FAULT' &&
+            cancelledWithinHours != null &&
+            cancelledWithinHours < LATE_CANCEL_THRESHOLD_HOURS
+          ? req.user.userId
+          : hasWorkerNoShow && booking.workerId
+            ? booking.workerId
+            : null;
 
     const updated = await prisma.$transaction(async (tx) => {
-      // If the job was occupying capacity and a calendar slot, free both up.
-      // Covers every pre-completion status the state machine allows a
-      // cancel from (mobile's "Cancel Job" is enabled for all of these —
-      // see canCancelJob in the worker job-detail screen), not just the
-      // initial ACCEPTED state. A DISPUTED booking can also be reached
-      // post-completion (AWAITING_PAYMENT -> DISPUTED, e.g. payment
-      // overdue) where completeBooking already freed both — workerCompletedAt
-      // being set is what distinguishes that case, so skip to avoid
-      // double-freeing.
+      // Free up the worker's active-job count for any pre-completion status.
+      // A DISPUTED booking can also be reached post-completion
+      // (AWAITING_PAYMENT -> DISPUTED) where completeBooking already freed
+      // it — workerCompletedAt distinguishes that case.
+      const workerProfile = booking.workerId
+        ? await tx.workerProfile.findUnique({ where: { userId: booking.workerId }, select: { id: true } })
+        : null;
       if (
-        booking.workerId &&
+        workerProfile &&
         !booking.workerCompletedAt &&
         ['ACCEPTED', 'IN_PROGRESS', 'QUOTE_SUBMITTED', 'QUOTE_APPROVED', 'DISPUTED'].includes(booking.status)
       ) {
-        const workerProfile = await tx.workerProfile.update({
-          where: { userId: booking.workerId },
+        await tx.workerProfile.update({
+          where: { id: workerProfile.id },
           data: { activeJobCount: { decrement: 1 } },
         });
-        if (booking.timeSlot) {
-          await freeSlot(tx, workerProfile.id, booking.scheduledDate, booking.timeSlot, booking.estimatedDurationHours);
-        }
       }
 
-      // Releases any never-claimed future calendar block this booking
-      // created via /extend (see extendBooking) — otherwise a worker's
-      // reserved spillover day survives the very booking that reserved it.
-      // isBooked: false excludes a block a real different booking has since
-      // moved into (see extendBooking's own move logic), which must stay put.
-      if (booking.workerId) {
-        const workerProfile = await tx.workerProfile.findUnique({
-          where: { userId: booking.workerId },
-          select: { id: true },
-        });
-        if (workerProfile) {
-          await tx.workerAvailability.updateMany({
-            where: { workerProfileId: workerProfile.id, blockedByBookingId: booking.id, isBooked: false },
-            data: { isBlocked: false, blockedByBookingId: null },
-          });
-        }
-      }
+      await tx.bookingVisit.updateMany({
+        where: { bookingId: id, status: 'SCHEDULED' },
+        data: { status: 'CANCELLED' },
+      });
 
-      // A booking cancelled outside dispute resolution (e.g. the worker
-      // backing out of a DISPUTED job) ends whatever dispute was open on it —
-      // otherwise it lingers in the admin queue with nothing left to resolve.
+      // A booking cancelled outside dispute resolution ends whatever dispute
+      // was open on it — otherwise it lingers in the admin queue.
       await tx.dispute.updateMany({
         where: { bookingId: id, status: { in: ['OPEN', 'UNDER_REVIEW'] } },
         data: {
@@ -3506,22 +2954,41 @@ export const cancelBooking = async (req: AuthRequest, res: Response) => {
           cancelledById: req.user!.userId,
           reason: hasPendingReschedule
             ? 'CLIENT_DECLINED_RESCHEDULE'
-            : hasWorkerNoShow
+            : hasWorkerNoShow && cancelledByRole === 'CLIENT'
               ? 'WORKER_NO_SHOW'
               : typeof reason === 'string'
-                ? reason
+                ? reason.trim()
                 : null,
           cancelledWithinHours,
-          workerCancellationReason: cancelledByRole === 'WORKER' ? (workerCancellationReason as WorkerCancellationReason) : null,
+          workerCancellationReason:
+            cancelledByRole === 'WORKER'
+              ? afterArrival
+                ? cancelFault === 'WORKER'
+                  ? 'WORKER_FAULT'
+                  : 'OTHER'
+                : (workerCancellationReason as WorkerCancellationReason)
+              : null,
           penalizedWorkerId,
+          fault: cancelFault,
+          proofUrls,
+          penaltyAmount,
+          compensationAmount,
+          compensationStatus: cancelFault === 'CLIENT' ? 'PENDING_REVIEW' : 'NOT_APPLICABLE',
         },
       });
+
+      if (penaltyAmount && workerProfile) {
+        await chargePenaltyTx(tx, workerProfile.id, penaltyAmount, {
+          bookingId: id,
+          note: `Cancelled booking ${formatDisplayId(id)} after arriving (worker's fault)`,
+        });
+      }
 
       return tx.booking.update({
         where: { id },
         data: {
           status: 'CANCELLED',
-          notes: reason, // schema has no cancelReason; storing in notes — kept as the client's own free-text reason even when Cancellation.reason is the CLIENT_DECLINED_RESCHEDULE tag
+          notes: reason, // schema has no cancelReason; kept as the canceller's own free-text reason
         },
       });
     });
@@ -3541,20 +3008,54 @@ export const cancelBooking = async (req: AuthRequest, res: Response) => {
     if (notificationUserId) {
       await notifyUser({
         userId: notificationUserId,
-        // No BOOKING_CANCELLED in schema; BOOKING_REJECTED is the closest
         type: 'BOOKING_CANCELLED',
         title: 'Booking Cancelled',
-        message: `Booking has been cancelled: ${reason}`,
+        message:
+          cancelFault === 'CLIENT'
+            ? `Your pro cancelled this job on site and reported it was caused on the client's side: ${reason}. HomeEase will review their proof; a ₱${compensationAmount?.toFixed(0)} cancellation fee applies if it's confirmed.`
+            : `Booking has been cancelled${reason ? `: ${reason}` : ''}`,
         relatedId: id,
       });
     }
 
+    if (penaltyAmount) {
+      await notifyUser({
+        userId: req.user.userId,
+        type: 'CANCELLATION_PENALTY',
+        title: 'Cancellation Penalty',
+        message: `A ₱${penaltyAmount.toFixed(2)} penalty was added to your platform dues for cancelling after arriving. It's deducted from your next payouts.`,
+        relatedId: id,
+      });
+    }
+
+    if (cancelFault === 'CLIENT') {
+      const admins = await prisma.user.findMany({ where: { role: 'ADMIN', isDeleted: false }, select: { id: true } });
+      await Promise.all(
+        admins.map((admin) =>
+          notifyUser({
+            userId: admin.id,
+            type: 'CANCELLATION_COMPENSATION',
+            title: 'Cancellation Needs Review',
+            message: `A worker cancelled booking ${formatDisplayId(id)} on site, blaming the client. Review the proof to decide the compensation.`,
+            relatedId: id,
+          })
+        )
+      );
+    }
+
     return res.status(200).json({
       success: true,
-      message: 'Booking cancelled successfully',
+      message:
+        cancelFault === 'CLIENT'
+          ? 'Booking cancelled — HomeEase will review your proof'
+          : penaltyAmount
+            ? `Booking cancelled — a ₱${penaltyAmount.toFixed(2)} penalty applies`
+            : 'Booking cancelled successfully',
       data: {
         id: updated.id,
         status: updated.status,
+        penaltyAmount,
+        compensationStatus: cancelFault === 'CLIENT' ? 'PENDING_REVIEW' : 'NOT_APPLICABLE',
       },
     });
   } catch (error) {

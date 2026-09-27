@@ -44,8 +44,9 @@ describe('Admin verification approve/reject', () => {
         city: 'Manila',
         addressLat: 14.5995,
         addressLng: 120.9842,
-        // Workers must be 18+ (utils/age.ts).
+        // Inside the accepted age range (utils/age.ts).
         birthDate: new Date('1990-05-15T00:00:00Z'),
+        yearsExperience: 4,
       },
     });
 
@@ -64,6 +65,7 @@ describe('Admin verification approve/reject', () => {
             { documentType: 'SELFIE', fileUrl: 'https://example.invalid/selfie.jpg' },
             { documentType: 'NBI_CLEARANCE', fileUrl: 'https://example.invalid/nbi.jpg' },
             { documentType: 'RESUME', fileUrl: 'https://example.invalid/resume.pdf' },
+            { documentType: 'HEALTH_CERTIFICATE', fileUrl: 'https://example.invalid/health.pdf' },
           ],
         },
       },
@@ -84,7 +86,34 @@ describe('Admin verification approve/reject', () => {
       .send({ adminOverrideReason: 'Looks fine to me on the documents' });
 
     expect(res.status).toBe(400);
-    expect(res.body.message).toMatch(/under 18/);
+    expect(res.body.message).toMatch(/at least 18/);
+  });
+
+  it('refuses to approve a worker over the maximum age', async () => {
+    const { worker, verification } = await seedPendingVerification('overage');
+    const sixtyFive = new Date();
+    sixtyFive.setUTCFullYear(sixtyFive.getUTCFullYear() - 65);
+    await prisma.workerProfile.update({ where: { userId: worker.id }, data: { birthDate: sixtyFive } });
+
+    const res = await request(app)
+      .patch(`/api/admin/verifications/${verification.id}/approve`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ adminOverrideReason: 'Looks fine to me on the documents' });
+
+    expect(res.status).toBe(400);
+    expect(res.body.message).toMatch(/18 to 60/);
+  });
+
+  it('saves the years of experience the admin confirms at approval', async () => {
+    const { worker, verification } = await seedPendingVerification('experience');
+
+    const res = await request(app)
+      .patch(`/api/admin/verifications/${verification.id}/approve`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ yearsExperience: 7 });
+
+    expect(res.status).toBe(200);
+    expect((await prisma.workerProfile.findUnique({ where: { userId: worker.id } }))?.yearsExperience).toBe(7);
   });
 
   it('requires an override to approve a worker with no date of birth on file', async () => {

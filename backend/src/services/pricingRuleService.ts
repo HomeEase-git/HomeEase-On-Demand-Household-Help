@@ -1,50 +1,9 @@
-import prisma from '@config/database';
 import type { DoleWageReference } from '@/constants/doleWageReference';
 
-export interface PriceBounds {
-  minPrice: number;
-  maxPrice: number;
-}
-
-/**
- * Pure boundary check, split out from the DB lookup below so it's directly
- * unit-testable without touching PricingRule at all.
- */
-export function isPriceWithinBounds(price: number, bounds: PriceBounds): boolean {
-  return price >= bounds.minPrice && price <= bounds.maxPrice;
-}
-
-/**
- * Looks up the PricingRule for (city, serviceType) and validates price
- * against it. No matching rule means no boundary is enforced (city/service
- * combinations without an admin-configured rule are allowed through) —
- * mirrors how PricingRule is optional/admin-curated elsewhere in the app
- * (pricingRuleController has no "every city needs a rule" requirement).
- */
-export async function validatePriceWithinPricingRule(
-  city: string,
-  serviceType: string,
-  price: number
-): Promise<{ ok: true } | { ok: false; bounds: PriceBounds }> {
-  // findFirst + case-insensitive equals, not findUnique on the compound key
-  // — city/serviceType here come from whatever a client typed/geocoded, and
-  // Prisma's findUnique on a compound key can't take a `mode` filter at all,
-  // so a casing mismatch against what an admin typed when creating the rule
-  // ("Manila" vs "City of Manila" vs "manila") silently made this whole
-  // guardrail a no-op. Matches the same equals+insensitive pattern already
-  // used for city/serviceType lookups in matchingService.ts.
-  const rule = await prisma.pricingRule.findFirst({
-    where: {
-      city: { equals: city, mode: 'insensitive' },
-      serviceType: { equals: serviceType, mode: 'insensitive' },
-    },
-  });
-
-  if (!rule) return { ok: true };
-
-  const bounds: PriceBounds = { minPrice: rule.minPrice, maxPrice: rule.maxPrice };
-  return isPriceWithinBounds(price, bounds) ? { ok: true } : { ok: false, bounds };
-}
+// City price rules (PricingRule) were retired with admin-fixed pricing
+// (2026-09-27): a job's price only changes with add-ons, distance, the
+// expertise tier, units and a same-day rush fee, so there's nothing left for
+// a per-city min/max to guard. Only the DOLE wage-floor check remains.
 
 export type DoleFloorCheck =
   | { blocked: true; message: string }

@@ -1,6 +1,7 @@
 import request from 'supertest';
 import app from '@/app';
 import prisma from '@config/database';
+import { BOOKING_PHOTO_BUCKET } from '@config/supabase';
 import { createTestUser, deleteTestUser, createTestBooking, deleteTestBooking } from './helpers';
 
 // Manila coordinates, mirroring tests/unit/geo.test.ts's known-good deltas:
@@ -195,10 +196,18 @@ describe('Booking flow — arrival geofencing, quote submission, dispute resolut
       const booking = await createTestBooking({ clientId, workerId, status: 'IN_PROGRESS', estimatedPrice: 1500 });
       createdBookingIds.push(booking.id);
 
+      // Materials need a receipt photo and a photo of them in use.
+      const photo = (name: string) =>
+        `${process.env.SUPABASE_URL}/storage/v1/object/public/${BOOKING_PHOTO_BUCKET}/${workerId}/${name}.jpg`;
       const res = await request(app)
         .post(`/api/bookings/${booking.id}/quote`)
         .set('Authorization', `Bearer ${workerToken}`)
-        .send({ materialsCost: 300, notes: 'Extra cleaning supplies' });
+        .send({
+          materialsCost: 300,
+          notes: 'Extra cleaning supplies',
+          receiptUrls: [photo('receipt')],
+          proofOfUseUrls: [photo('in-use')],
+        });
 
       expect(res.status).toBe(201);
       expect(res.body.data.laborCost).toBe(1500);

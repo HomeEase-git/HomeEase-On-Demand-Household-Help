@@ -18,10 +18,7 @@ export const getServiceTypes = async (_req: Request, res: Response) => {
             taskLinks: { select: { serviceTaskId: true } },
           },
         },
-        // Capacity (activeJobCount < maxConcurrentJobs) can't be compared in
-        // a Prisma `where` since both are columns on the same row, so it's
-        // filtered in memory below — same pattern as workerController's
-        // searchWorkers. Only a VERIFIED category connection counts — a
+        // Only a VERIFIED category connection counts — a
         // worker whose 2nd+ category is still PENDING_VERIFICATION isn't
         // actually bookable for it yet (see WorkerServiceCategory's docblock).
         workerCategories: {
@@ -30,14 +27,14 @@ export const getServiceTypes = async (_req: Request, res: Response) => {
             workerProfile: { isAvailable: true, kycStatus: 'APPROVED', debtHoldAt: null },
           },
           select: {
-            workerProfile: { select: { userId: true, rating: true, activeJobCount: true, maxConcurrentJobs: true } },
+            workerProfile: { select: { userId: true, rating: true, yearsExperience: true } },
           },
         },
       },
       orderBy: { name: 'asc' },
     });
 
-    // Batch-compute each worker's tier (same rating+completed-jobs formula as
+    // Batch-compute each worker's tier (same rating/completed-jobs/years formula as
     // workerController's searchWorkers) so the price range below reflects
     // what a client could actually be charged — cheapest task at the
     // cheapest available worker's tier, up to the priciest task at the
@@ -69,7 +66,10 @@ export const getServiceTypes = async (_req: Request, res: Response) => {
 
       const multipliers = workers.length
         ? workers.map((w) => {
-            const tier = computeWorkerTier(w.rating, completedByWorkerId.get(w.userId) ?? 0, tierSettings);
+            const tier = computeWorkerTier(
+              { rating: w.rating, completedJobs: completedByWorkerId.get(w.userId) ?? 0, yearsExperience: w.yearsExperience },
+              tierSettings
+            );
             return tierMultiplier(tier, tierSettings);
           })
         : [1.0];
@@ -77,7 +77,7 @@ export const getServiceTypes = async (_req: Request, res: Response) => {
       return {
         ...service,
         tasks,
-        availableWorkerCount: workers.filter((w) => w.activeJobCount < w.maxConcurrentJobs).length,
+        availableWorkerCount: workers.length,
         priceRangeMin: Math.round(Math.min(...taskPrices) * Math.min(...multipliers)),
         priceRangeMax: Math.round(Math.max(...taskPrices) * Math.max(...multipliers)),
       };

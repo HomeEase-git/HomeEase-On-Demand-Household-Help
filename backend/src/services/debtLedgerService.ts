@@ -19,7 +19,7 @@ export async function accrueDebtTx(
   client: TxClient,
   workerProfileId: string,
   amount: number,
-  opts: { bookingId?: string; note?: string } = {}
+  opts: { bookingId?: string; note?: string; type?: 'COMMISSION_DEBIT' | 'PENALTY' } = {}
 ) {
   const abs = Math.abs(amount);
   const updated = await client.workerProfile.update({
@@ -30,7 +30,7 @@ export async function accrueDebtTx(
   const entry = await client.debtLedgerEntry.create({
     data: {
       workerProfileId,
-      type: 'COMMISSION_DEBIT',
+      type: opts.type ?? 'COMMISSION_DEBIT',
       amount: abs,
       balanceAfter: updated.commissionOwed,
       bookingId: opts.bookingId,
@@ -137,6 +137,51 @@ export async function reverseDebtTx(
   opts: { bookingId?: string; note?: string } = {}
 ) {
   return creditDebtTx(client, workerProfileId, amount, 'REVERSAL', opts);
+}
+
+/**
+ * Worker no-show / worker-fault cancellation penalty — added to what the
+ * worker owes, recovered from their next payouts like cash-job dues (and it
+ * can trip the same account hold).
+ */
+export async function chargePenaltyTx(
+  client: TxClient,
+  workerProfileId: string,
+  amount: number,
+  opts: { bookingId?: string; note?: string } = {}
+) {
+  return accrueDebtTx(client, workerProfileId, amount, { ...opts, type: 'PENALTY' });
+}
+
+/**
+ * Admin-approved client-fault cancellation compensation. Pays down what the
+ * worker owes the platform first; anything left over is held as
+ * WorkerProfile.compensationCredit and added to their next online payout
+ * (see paymentLifecycleService.settleWorkerEarnings).
+ */
+export async function creditCompensationTx(
+  client: TxClient,
+  workerProfileId: string,
+  amount: number,
+  opts: { bookingId?: string; note?: string } = {}
+) {
+  const abs = Math.abs(amount);
+  const current = await client.workerProfile.findUniqueOrThrow({
+    where: { id: workerProfileId },
+    select: { commissionOwed: true },
+  });
+  const againstDebt = roundToCentavo(Math.min(Math.max(0, current.commissionOwed), abs));
+  if (againstDebt > 0) {
+    await creditDebtTx(client, workerProfileId, againstDebt, 'COMPENSATION', opts);
+  }
+  const remainder = roundToCentavo(abs - againstDebt);
+  if (remainder > 0) {
+    await client.workerProfile.update({
+      where: { id: workerProfileId },
+      data: { compensationCredit: { increment: remainder } },
+    });
+  }
+  return { againstDebt, credited: remainder };
 }
 
 /** Admin manual correction — always requires a reason, logged either direction. */

@@ -2,8 +2,8 @@ import { Request, Response, NextFunction } from 'express';
 import { errorResponse } from '../utils/errorResponse';
 import { KYC_DOCUMENT_TYPES } from '../utils/kycDocumentTypes';
 import { isValidTin } from '../utils/taxId';
+import { isValidStartTime } from '../services/workerAvailabilityService';
 import {
-  VALID_TIME_SLOTS,
   VALID_CONDITIONS,
   VALID_ROOM_TYPES,
   VALID_PAYMENT_METHOD_TYPES,
@@ -292,44 +292,6 @@ export const validateUpdateCertificationVisibility = (
   return next();
 };
 
-export const validateUpdateAvailabilitySlots = (
-  req: Request,
-  res: Response,
-  next: NextFunction
-) => {
-  const { slots, dates } = req.body;
-
-  if (!Array.isArray(slots)) {
-    return res.status(400).json(errorResponse(400, 'slots must be an array'));
-  }
-
-  // slots may be empty as long as `dates` names at least one day to clear —
-  // that's how a worker closes a day down to zero open slots.
-  if (slots.length === 0 && (!Array.isArray(dates) || dates.length === 0)) {
-    return res.status(400).json(errorResponse(400, 'slots must be non-empty, or dates must list at least one day to clear'));
-  }
-
-  for (const slot of slots) {
-    if (!slot || typeof slot !== 'object') {
-      return res.status(400).json(errorResponse(400, 'Each slot must be an object with date and timeSlot'));
-    }
-    if (!slot.date || isNaN(new Date(slot.date).getTime())) {
-      return res.status(400).json(errorResponse(400, 'Each slot.date must be a valid date'));
-    }
-    if (!VALID_TIME_SLOTS.includes(slot.timeSlot)) {
-      return res.status(400).json(errorResponse(400, `Each slot.timeSlot must be one of ${VALID_TIME_SLOTS.join(', ')}`));
-    }
-  }
-
-  if (dates !== undefined) {
-    if (!Array.isArray(dates) || dates.some((d: unknown) => typeof d !== 'string' || isNaN(new Date(d).getTime()))) {
-      return res.status(400).json(errorResponse(400, 'dates must be an array of valid date strings'));
-    }
-  }
-
-  return next();
-};
-
 export const validateRegisterPushToken = (
   req: Request,
   res: Response,
@@ -393,21 +355,13 @@ export const validateUpdateTaxInfo = (req: Request, res: Response, next: NextFun
 // coastline, since a false rejection is worse than a slightly loose bound.
 const PH_BOUNDS = { minLat: 4, maxLat: 21.5, minLng: 116, maxLng: 127 };
 
-// A booking must be at least this many days out from today — gives a worker
-// advance notice to prepare instead of a same-day/next-day job landing on
-// them with no warning. Mirrored on mobile in DateGridPicker.tsx, which
-// disables those days in the calendar, so this check should only ever catch
-// a tampered/direct API request, not a normal booking. Compared in UTC
-// (see below), same normalization workerAvailabilityService.toDayStart uses
-// for scheduledDate elsewhere — PH local time (UTC+8) is always ahead of
-// UTC, so a UTC "today" never rejects a date PH-local "today" should allow.
-export const MIN_BOOKING_LEAD_DAYS = 2;
 
 /**
- * Booking creation no longer takes a client-supplied estimatedPrice or free-text
- * scheduledTime — price is computed server-side (see bookingController.createBooking
- * / pricingRuleService) and scheduling uses the TimeSlot enum. workerId is optional:
- * omitting it triggers auto-match.
+ * Booking creation takes no client-supplied price — it's computed server-side
+ * (see bookingController.createBooking). Scheduling is a date plus an exact
+ * start time "HH:00"; whether that date/time is still bookable (not past,
+ * same-day lead time) is checked in the controller against AppSettings.
+ * workerId is optional: omitting it triggers auto-match.
  */
 export const validateCreateBooking = (
   req: Request,
@@ -425,7 +379,8 @@ export const validateCreateBooking = (
     lat,
     lng,
     date,
-    timeSlot,
+    time,
+    parentBookingId,
     addOns,
     priorities,
     tip,
@@ -455,12 +410,8 @@ export const validateCreateBooking = (
     return res.status(400).json(errorResponse(400, 'address is required and must be a string'));
   }
 
-  // Required, not just recommended: an empty city silently no-ops any
-  // city-keyed PricingRule lookup (see bookingController.createBooking's
-  // validatePriceWithinPricingRule call) — better to reject up front than
-  // let pricing enforcement quietly not apply. The client always has this
-  // (see mobile step-2's address picker, which sets it from the geocoded
-  // result), so this doesn't tighten anything a real booking needs.
+  // The client always has this (see mobile step-2's address picker, which
+  // sets it from the geocoded result).
   if (!city || typeof city !== 'string' || !city.trim()) {
     return res.status(400).json(errorResponse(400, 'city is required and must be a non-empty string'));
   }
@@ -485,17 +436,12 @@ export const validateCreateBooking = (
     return res.status(400).json(errorResponse(400, 'date is required and must be a valid date'));
   }
 
-  const requestedDayUtc = new Date(date);
-  requestedDayUtc.setUTCHours(0, 0, 0, 0);
-  const todayUtc = new Date();
-  todayUtc.setUTCHours(0, 0, 0, 0);
-  const minLeadMs = MIN_BOOKING_LEAD_DAYS * 24 * 60 * 60 * 1000;
-  if (requestedDayUtc.getTime() - todayUtc.getTime() < minLeadMs) {
-    return res.status(400).json(errorResponse(400, `date must be at least ${MIN_BOOKING_LEAD_DAYS} days from today`));
+  if (!isValidStartTime(time)) {
+    return res.status(400).json(errorResponse(400, 'time is required and must be an hourly start time like "09:00"'));
   }
 
-  if (!timeSlot || !VALID_TIME_SLOTS.includes(timeSlot)) {
-    return res.status(400).json(errorResponse(400, `timeSlot is required and must be one of ${VALID_TIME_SLOTS.join(', ')}`));
+  if (parentBookingId !== undefined && parentBookingId !== null && typeof parentBookingId !== 'string') {
+    return res.status(400).json(errorResponse(400, 'parentBookingId must be a string'));
   }
 
   if (rooms !== undefined) {
@@ -522,152 +468,6 @@ export const validateCreateBooking = (
 
   if (tip !== undefined && (typeof tip !== 'number' || tip < 0)) {
     return res.status(400).json(errorResponse(400, 'tip must be a non-negative number'));
-  }
-
-  if (paymentMethodType !== undefined) {
-    if (typeof paymentMethodType !== 'string' || !VALID_PAYMENT_METHOD_TYPES.includes(paymentMethodType as (typeof VALID_PAYMENT_METHOD_TYPES)[number])) {
-      return res.status(400).json(
-        errorResponse(400, `paymentMethodType must be one of: ${VALID_PAYMENT_METHOD_TYPES.join(', ')}`)
-      );
-    }
-  }
-
-  if (paymentAccountIdentifier !== undefined && typeof paymentAccountIdentifier !== 'string') {
-    return res.status(400).json(errorResponse(400, 'paymentAccountIdentifier must be a string'));
-  }
-
-  if (scopeAnswers !== undefined) {
-    const isPlainObject = typeof scopeAnswers === 'object' && scopeAnswers !== null && !Array.isArray(scopeAnswers);
-    const hasValidValues =
-      isPlainObject &&
-      Object.values(scopeAnswers).every(
-        (v: unknown) => typeof v === 'string' || (Array.isArray(v) && v.every((x) => typeof x === 'string'))
-      );
-    if (!hasValidValues) {
-      return res
-        .status(400)
-        .json(errorResponse(400, 'scopeAnswers must be an object mapping field labels to a string or string array'));
-    }
-  }
-
-  const { issuePhotoUrls } = req.body;
-  if (issuePhotoUrls !== undefined) {
-    const isValid =
-      Array.isArray(issuePhotoUrls) &&
-      issuePhotoUrls.length <= 5 &&
-      issuePhotoUrls.every((url: unknown) => typeof url === 'string' && url.length <= 2048);
-    if (!isValid) {
-      return res.status(400).json(errorResponse(400, 'issuePhotoUrls must be an array of at most 5 URL strings'));
-    }
-  }
-
-  return next();
-};
-
-// Bounded so a client can't request an absurdly long job (and so the
-// per-day availability-check loop in createMultiDayBooking stays cheap) —
-// same order of magnitude as workerAvailabilityService's own
-// RESCHEDULE_SEARCH_WINDOW_DAYS.
-export const MAX_MULTI_DAY_BOOKING_DAYS = 14;
-
-/**
- * POST /bookings/multi-day — a lighter validator than validateCreateBooking
- * above: workerId is REQUIRED (no auto-match — see createMultiDayBooking's
- * docblock for why a multi-day job needs one committed worker across every
- * day), startDate+dayCount replace date, and there's no addOns/packageIds/
- * tip (not supported for a first version of this feature — see the
- * controller for the full reasoning).
- */
-export const validateCreateMultiDayBooking = (
-  req: Request,
-  res: Response,
-  next: NextFunction
-) => {
-  const {
-    workerId,
-    serviceType,
-    serviceTaskId,
-    address,
-    city,
-    lat,
-    lng,
-    startDate,
-    dayCount,
-    timeSlot,
-    priorities,
-    paymentMethodType,
-    paymentAccountIdentifier,
-    scopeAnswers,
-    idempotencyKey,
-  } = req.body;
-
-  if (!workerId || typeof workerId !== 'string') {
-    return res.status(400).json(errorResponse(400, 'workerId is required and must be a string'));
-  }
-
-  if (!serviceType || typeof serviceType !== 'string') {
-    return res.status(400).json(errorResponse(400, 'serviceType is required and must be a string'));
-  }
-
-  if (serviceTaskId !== undefined && serviceTaskId !== null && typeof serviceTaskId !== 'string') {
-    return res.status(400).json(errorResponse(400, 'serviceTaskId must be a string'));
-  }
-
-  if (idempotencyKey !== undefined && (typeof idempotencyKey !== 'string' || idempotencyKey.length > 200)) {
-    return res.status(400).json(errorResponse(400, 'idempotencyKey must be a string of at most 200 characters'));
-  }
-
-  if (!address || typeof address !== 'string') {
-    return res.status(400).json(errorResponse(400, 'address is required and must be a string'));
-  }
-
-  if (!city || typeof city !== 'string' || !city.trim()) {
-    return res.status(400).json(errorResponse(400, 'city is required and must be a non-empty string'));
-  }
-
-  if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
-    return res.status(400).json(errorResponse(400, 'lat and lng are required and must be numbers'));
-  }
-
-  if (
-    lat < PH_BOUNDS.minLat || lat > PH_BOUNDS.maxLat ||
-    lng < PH_BOUNDS.minLng || lng > PH_BOUNDS.maxLng
-  ) {
-    return res.status(400).json(errorResponse(400, 'lat/lng must fall within the Philippines'));
-  }
-
-  if (!startDate || isNaN(new Date(startDate).getTime())) {
-    return res.status(400).json(errorResponse(400, 'startDate is required and must be a valid date'));
-  }
-
-  const requestedDayUtc = new Date(startDate);
-  requestedDayUtc.setUTCHours(0, 0, 0, 0);
-  const todayUtc = new Date();
-  todayUtc.setUTCHours(0, 0, 0, 0);
-  const minLeadMs = MIN_BOOKING_LEAD_DAYS * 24 * 60 * 60 * 1000;
-  if (requestedDayUtc.getTime() - todayUtc.getTime() < minLeadMs) {
-    return res.status(400).json(errorResponse(400, `startDate must be at least ${MIN_BOOKING_LEAD_DAYS} days from today`));
-  }
-
-  if (
-    typeof dayCount !== 'number' ||
-    !Number.isInteger(dayCount) ||
-    dayCount < 2 ||
-    dayCount > MAX_MULTI_DAY_BOOKING_DAYS
-  ) {
-    return res.status(400).json(
-      errorResponse(400, `dayCount must be an integer between 2 and ${MAX_MULTI_DAY_BOOKING_DAYS}`)
-    );
-  }
-
-  if (!timeSlot || !VALID_TIME_SLOTS.includes(timeSlot)) {
-    return res.status(400).json(errorResponse(400, `timeSlot is required and must be one of ${VALID_TIME_SLOTS.join(', ')}`));
-  }
-
-  if (priorities !== undefined) {
-    if (!Array.isArray(priorities) || !priorities.every((p: unknown) => typeof p === 'string')) {
-      return res.status(400).json(errorResponse(400, 'priorities must be an array of strings'));
-    }
   }
 
   if (paymentMethodType !== undefined) {
@@ -760,23 +560,61 @@ export const validateLiveLocation = (
   return next();
 };
 
+const isUrlList = (value: unknown, max: number) =>
+  Array.isArray(value) && value.length <= max && value.every((url) => typeof url === 'string' && url.length <= 2048);
+
 export const validateSubmitQuote = (
   req: Request,
   res: Response,
   next: NextFunction
 ) => {
-  const { materialsCost, notes } = req.body;
+  const { materialsCost, laborCost, notes, receiptUrls, proofOfUseUrls } = req.body;
 
-  // laborCost is not accepted here — it's pinned to the booking's settled
-  // estimatedPrice server-side. Only additional (materials) costs are quoted.
+  // laborCost is only read for a custom-quote job (see
+  // bookingController.submitQuote); every other job's labor is its booked price.
   if (typeof materialsCost !== 'number' || materialsCost < 0) {
     return res.status(400).json(errorResponse(400, 'materialsCost must be a non-negative number'));
+  }
+
+  if (laborCost !== undefined && laborCost !== null && (typeof laborCost !== 'number' || laborCost < 0)) {
+    return res.status(400).json(errorResponse(400, 'laborCost must be a non-negative number'));
   }
 
   if (notes !== undefined && typeof notes !== 'string') {
     return res.status(400).json(errorResponse(400, 'notes must be a string'));
   }
 
+  if (receiptUrls !== undefined && !isUrlList(receiptUrls, 10)) {
+    return res.status(400).json(errorResponse(400, 'receiptUrls must be an array of up to 10 URL strings'));
+  }
+
+  if (proofOfUseUrls !== undefined && !isUrlList(proofOfUseUrls, 10)) {
+    return res.status(400).json(errorResponse(400, 'proofOfUseUrls must be an array of up to 10 URL strings'));
+  }
+
+  return next();
+};
+
+export const validateRejectQuote = (req: Request, res: Response, next: NextFunction) => {
+  const { reason } = req.body;
+  if (typeof reason !== 'string' || reason.trim().length < 5 || reason.length > 1000) {
+    return res.status(400).json(errorResponse(400, 'Tell the worker why (5 to 1000 characters)'));
+  }
+  return next();
+};
+
+/** A date + hourly start time, used by reschedule requests and follow-up visits. */
+export const validateDateAndTime = (req: Request, res: Response, next: NextFunction) => {
+  const { date, time, notes } = req.body;
+  if (typeof date !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(date) || isNaN(new Date(date).getTime())) {
+    return res.status(400).json(errorResponse(400, 'date is required (YYYY-MM-DD)'));
+  }
+  if (!isValidStartTime(time)) {
+    return res.status(400).json(errorResponse(400, 'time is required and must be an hourly start time like "09:00"'));
+  }
+  if (notes !== undefined && notes !== null && (typeof notes !== 'string' || notes.length > 500)) {
+    return res.status(400).json(errorResponse(400, 'notes must be at most 500 characters'));
+  }
   return next();
 };
 

@@ -1,7 +1,7 @@
 import { randomUUID } from 'crypto';
 import bcryptjs from 'bcryptjs';
 import prisma from '@config/database';
-import type { BookingStatus, Role, TimeSlot } from '@prisma/client';
+import type { BookingStatus, Role } from '@prisma/client';
 
 // All test-created accounts share this marker in the local part of the email
 // so a stray failed run is easy to spot and hand-clean in the DB if needed.
@@ -50,7 +50,7 @@ interface CreateTestBookingOptions {
   clientId: string;
   workerId?: string | null;
   status?: BookingStatus;
-  timeSlot?: TimeSlot;
+  scheduledTime?: string;
   scheduledDate?: Date;
   estimatedPrice?: number;
   clientLat?: number;
@@ -70,7 +70,7 @@ export async function createTestBooking(options: CreateTestBookingOptions) {
       location: '123 Test St, Test City',
       city: 'Manila',
       scheduledDate: options.scheduledDate ?? new Date(Date.now() + 24 * 60 * 60 * 1000 + Math.random() * 1e10),
-      timeSlot: options.timeSlot ?? 'MORNING',
+      scheduledTime: options.scheduledTime ?? '09:00',
       estimatedPrice: options.estimatedPrice ?? 1000,
       status: options.status ?? 'PENDING',
       clientLat: options.clientLat,
@@ -89,7 +89,7 @@ export async function deleteTestBooking(bookingId: string) {
 }
 // Fills in everything a worker must set up before they can be found,
 // booked or accept a request (see services/workerSetupService.ts): photo,
-// payout method, geocoded address, a weekly availability pattern and one
+// payout method, geocoded address, a weekly schedule and one
 // ticked task under a VERIFIED service. Pass serviceTypeId to register the
 // worker for an existing service; otherwise a throwaway one is created and
 // its id returned so the test can delete it (tasks/selections cascade).
@@ -113,12 +113,9 @@ export async function completeWorkerSetup(
       city: 'Manila',
       addressLat: options.lat ?? 14.5995,
       addressLng: options.lng ?? 120.9842,
+      // Every day, so tests can book any date.
+      availableDays: [0, 1, 2, 3, 4, 5, 6],
     },
-  });
-  await prisma.workerAvailabilityTemplate.upsert({
-    where: { workerProfileId_dayOfWeek_timeSlot: { workerProfileId: profile.id, dayOfWeek: 1, timeSlot: 'MORNING' } },
-    create: { workerProfileId: profile.id, dayOfWeek: 1, timeSlot: 'MORNING' },
-    update: {},
   });
   await prisma.workerServiceCategory.upsert({
     where: { workerProfileId_serviceTypeId: { workerProfileId: profile.id, serviceTypeId } },

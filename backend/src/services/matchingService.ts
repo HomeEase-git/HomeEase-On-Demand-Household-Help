@@ -1,9 +1,10 @@
 import prisma from '@config/database';
 import { fieldAppliesToTask } from '@utils/scopeFields';
-import type { Prisma, TimeSlot } from '@prisma/client';
+import type { Prisma } from '@prisma/client';
 import { isWithinRadiusKm } from '@utils/geo';
 import { offersTaskFilter } from '@services/taskPriceService';
 import { workerSetupCompleteWhere } from '@services/workerSetupService';
+import { availableOnDateWhere } from '@services/workerAvailabilityService';
 
 // Fallback when a worker hasn't set WorkerProfile.serviceAreaRadius (it has
 // a DB default, but stay defensive for any row created before that default
@@ -154,7 +155,6 @@ export interface AutoMatchParams {
   serviceType: string;
   serviceTaskId?: string | null;
   date: Date;
-  timeSlot: TimeSlot;
   scopeAnswers?: Record<string, string | string[]> | null;
   hasPets?: boolean;
   excludeWorkerIds?: string[];
@@ -177,10 +177,9 @@ export interface AutoMatchResult {
  * DB-backed candidate lookup + selection for "surprise me" bookings (no
  * workerId supplied by the client). A worker is only a candidate if:
  *  - KYC approved and currently marked available
- *  - under their maxConcurrentJobs capacity
  *  - offers the requested serviceType
- *  - has an explicit open WorkerAvailability row for (date, timeSlot) —
- *    not blocked, not already booked
+ *  - available on the date (weekly schedule + date overrides, see
+ *    workerAvailabilityService.availableOnDateWhere)
  *  - accepts pets if the booking involves pets
  *  - matches every usedForMatching scope field the client answered (see
  *    buildCapabilityFilters)
@@ -191,18 +190,12 @@ export async function findAutoMatchWorker(params: AutoMatchParams): Promise<Auto
     serviceType,
     serviceTaskId,
     date,
-    timeSlot,
     scopeAnswers,
     hasPets,
     excludeWorkerIds = [],
     clientLat,
     clientLng,
   } = params;
-
-  const dayStart = new Date(date);
-  dayStart.setUTCHours(0, 0, 0, 0);
-  const dayEnd = new Date(date);
-  dayEnd.setUTCHours(23, 59, 59, 999);
 
   const capabilityFilters = await buildCapabilityFilters(serviceType, scopeAnswers, serviceTaskId);
 
@@ -224,15 +217,7 @@ export async function findAutoMatchWorker(params: AutoMatchParams): Promise<Auto
       serviceCategories: { some: { status: 'VERIFIED', serviceType: { name: { equals: serviceType, mode: 'insensitive' } } } },
       ...(hasPets ? { acceptsPets: true } : {}),
       ...(serviceTaskId ? offersTaskFilter(serviceTaskId) : {}),
-      AND: [...capabilityFilters, workerSetupCompleteWhere()],
-      availability: {
-        some: {
-          date: { gte: dayStart, lte: dayEnd },
-          timeSlot,
-          isBlocked: false,
-          isBooked: false,
-        },
-      },
+      AND: [...capabilityFilters, workerSetupCompleteWhere(), availableOnDateWhere(date)],
     },
     select: {
       id: true,

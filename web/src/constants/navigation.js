@@ -22,7 +22,6 @@ export const NAV_STRUCTURE = [
     children: [
       { to: '/service-catalog', page: 'service-catalog', icon: 'fa-list-check', label: 'Service Catalog' },
       { to: '/worker-packages', page: 'worker-packages', icon: 'fa-box', label: 'Worker Packages' },
-      { to: '/price-control', page: 'price-control', icon: 'fa-sliders', label: 'Price Control' },
       { to: '/pricing-rules', page: 'pricing-rules', icon: 'fa-coins', label: 'Pricing Rules' },
       { to: '/promo-banners', page: 'promo-banners', icon: 'fa-images', label: 'Promo Banners' },
     ],

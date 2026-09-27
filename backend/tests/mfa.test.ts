@@ -4,6 +4,18 @@ import app from '@/app';
 import prisma from '@config/database';
 import { createTestUser, deleteTestUser } from './helpers';
 
+// Two-step sign-in codes go out by email; nothing is really sent in tests.
+jest.mock('@utils/emailService', () => ({
+  ...jest.requireActual('@utils/emailService'),
+  sendOtpEmail: jest.fn().mockResolvedValue(undefined),
+}));
+
+/** The code the server just stored for this user (codes are single-use). */
+async function latestCode(userId: string, type: 'LOGIN_2FA' | 'ACCOUNT_ACTION'): Promise<string> {
+  const row = await prisma.authToken.findFirstOrThrow({ where: { userId, type }, orderBy: { createdAt: 'desc' } });
+  return row.token;
+}
+
 describe('Admin MFA', () => {
   const createdUserIds: string[] = [];
 
@@ -179,62 +191,76 @@ describe('Admin MFA', () => {
     });
   });
 
-  // Opt-in MFA for CLIENT/WORKER — the same setup/verify/challenge/disable
-  // routes ADMIN uses above, now widened to these roles too (see
-  // routes/auth.ts). Unlike admin, enrollment must never be forced.
-  describe('Opt-in MFA for CLIENT/WORKER accounts', () => {
-    it('lets a CLIENT enroll (no force-nudge), requires MFA on the next login, and disable works', async () => {
-      const { user, plainPassword } = await createTestUser('mfa-client-optin', { role: 'CLIENT' });
+  // Clients and workers use an email/SMS code instead of an authenticator
+  // app (see routes/auth.ts /2fa). Opt-in; never forced.
+  describe('Two-step sign-in for CLIENT/WORKER accounts', () => {
+    it('no longer offers authenticator-app setup to a CLIENT', async () => {
+      const { user, plainPassword } = await createTestUser('mfa-client-totp', { role: 'CLIENT' });
+      createdUserIds.push(user.id);
+      const login = await request(app).post('/api/auth/login').send({ email: user.email, password: plainPassword });
+      const setup = await request(app)
+        .post('/api/auth/mfa/setup')
+        .set('Authorization', `Bearer ${login.body.data.token}`);
+      expect(setup.status).toBe(403);
+    });
+
+    it('lets a CLIENT turn on email codes, requires the code on the next login, and turn it off', async () => {
+      const { user, plainPassword } = await createTestUser('twofa-client', { role: 'CLIENT' });
       createdUserIds.push(user.id);
 
-      const firstLogin = await request(app)
-        .post('/api/auth/login')
-        .send({ email: user.email, password: plainPassword });
-
+      const firstLogin = await request(app).post('/api/auth/login').send({ email: user.email, password: plainPassword });
       expect(firstLogin.status).toBe(200);
-      // Opt-in, not mandatory — a client who hasn't enrolled gets a normal
-      // session with no force-enroll nudge (that stays admin-only).
       expect(firstLogin.body.data.mfaSetupRequired).toBeUndefined();
       const sessionToken = firstLogin.body.data.token;
 
-      const setup = await request(app)
-        .post('/api/auth/mfa/setup')
-        .set('Authorization', `Bearer ${sessionToken}`);
-      expect(setup.status).toBe(200);
-      const totpSecret = setup.body.data.secret;
-
-      const verifySetup = await request(app)
-        .post('/api/auth/mfa/verify-setup')
+      const sent = await request(app)
+        .post('/api/auth/2fa/code')
         .set('Authorization', `Bearer ${sessionToken}`)
-        .send({ code: authenticator.generate(totpSecret) });
-      expect(verifySetup.status).toBe(200);
+        .send({ method: 'EMAIL' });
+      expect(sent.status).toBe(200);
 
-      const secondLogin = await request(app)
-        .post('/api/auth/login')
-        .send({ email: user.email, password: plainPassword });
-      expect(secondLogin.body.data.mfaRequired).toBe(true);
+      const wrong = await request(app)
+        .post('/api/auth/2fa/enable')
+        .set('Authorization', `Bearer ${sessionToken}`)
+        .send({ method: 'EMAIL', code: '000000' });
+      expect(wrong.status).toBe(400);
+
+      const enable = await request(app)
+        .post('/api/auth/2fa/enable')
+        .set('Authorization', `Bearer ${sessionToken}`)
+        .send({ method: 'EMAIL', code: await latestCode(user.id, 'ACCOUNT_ACTION') });
+      expect(enable.status).toBe(200);
+
+      const secondLogin = await request(app).post('/api/auth/login').send({ email: user.email, password: plainPassword });
+      expect(secondLogin.status).toBe(200);
+      expect(secondLogin.body.data.twoFactorRequired).toBe(true);
       expect(secondLogin.body.data.token).toBeUndefined();
+      const challengeToken = secondLogin.body.data.challengeToken;
 
-      const challenge = await request(app)
-        .post('/api/auth/mfa/challenge')
-        .send({ challengeToken: secondLogin.body.data.challengeToken, code: authenticator.generate(totpSecret) });
+      // The challenge token alone is not a session.
+      const blocked = await request(app).get('/api/auth/me').set('Authorization', `Bearer ${challengeToken}`);
+      expect(blocked.status).toBe(401);
 
-      expect(challenge.status).toBe(200);
-      expect(challenge.body.data.role).toBe('CLIENT');
-      // hasAcceptedTerms must come back as a real boolean here too — this
-      // endpoint used to hardcode it (and kycStatus) to undefined since only
-      // ADMIN ever reached it.
-      expect(typeof challenge.body.data.hasAcceptedTerms).toBe('boolean');
-      const clientSessionToken = challenge.body.data.token;
+      const verified = await request(app)
+        .post('/api/auth/2fa/verify')
+        .send({ challengeToken, code: await latestCode(user.id, 'LOGIN_2FA') });
+      expect(verified.status).toBe(200);
+      expect(verified.body.data.role).toBe('CLIENT');
+      expect(typeof verified.body.data.hasAcceptedTerms).toBe('boolean');
+      const clientSessionToken = verified.body.data.token;
 
+      const me = await request(app).get('/api/auth/me').set('Authorization', `Bearer ${clientSessionToken}`);
+      expect(me.body.data.twoFactorMethod).toBe('EMAIL');
+
+      await request(app).post('/api/auth/2fa/code').set('Authorization', `Bearer ${clientSessionToken}`).send({});
       const disable = await request(app)
-        .post('/api/auth/mfa/disable')
+        .post('/api/auth/2fa/disable')
         .set('Authorization', `Bearer ${clientSessionToken}`)
-        .send({ password: plainPassword, code: authenticator.generate(totpSecret) });
+        .send({ password: plainPassword, code: await latestCode(user.id, 'ACCOUNT_ACTION') });
       expect(disable.status).toBe(200);
 
       const disabled = await prisma.user.findUnique({ where: { id: user.id } });
-      expect(disabled?.mfaEnabled).toBe(false);
+      expect(disabled?.twoFactorMethod).toBeNull();
     });
 
     it('surfaces mfaEnabled and kycStatus in getMe for a WORKER, not just ADMIN', async () => {

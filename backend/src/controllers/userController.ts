@@ -1,17 +1,22 @@
 import { Request, Response } from 'express';
-import { ContractType, KycDocumentType } from '@prisma/client';
+import { ContractType, KycDocumentType, TokenType } from '@prisma/client';
 import * as bcrypt from 'bcryptjs';
 import prisma from '@config/database';
 import { errorResponse } from '@utils/errorResponse';
 import { toOwnedStoredUrl } from '@utils/storageUrls';
-import { ageInYears, MIN_WORKER_AGE } from '@utils/age';
+import { ageInYears, workerAgeError } from '@utils/age';
+import { getAppSettings } from '@services/appSettingsService';
 import { eraseAccount, findDeletionBlockers } from '@services/accountDeletionService';
 import { JWT_EXPIRY } from '@utils/jwt';
 import { mimeTypeFromUrl, storagePathFromUrl } from '@utils/kycFileMeta';
 import { verificationQueue, VERIFICATION_JOB_OPTIONS } from '@queues/verificationQueue';
 import { checkResubmissionCooldown } from '@utils/kycResubmissionCooldown';
 import { TIER_1_REQUIRED_DOCUMENT_TYPES } from '@/constants/kycRequirements';
-import { revokeAllRefreshTokens } from '@utils/otpService';
+import { revokeAllRefreshTokens, generateOtp, storeOtp, verifyOtp } from '@utils/otpService';
+import { sendOtpEmail } from '@utils/emailService';
+import { revokeUserSessions } from '@utils/tokenRevocation';
+import { writeAuditLog } from '@utils/auditLog';
+import { countActiveSessions, revokeOtherSessions } from '@services/sessionService';
 import type { JwtPayload } from '@/types/index';
 
 interface AuthRequest extends Request {
@@ -187,29 +192,174 @@ export const changePassword = async (req: AuthRequest, res: Response) => {
 };
 
 /**
- * POST /api/users/me/logout-all
- * Revoke all of the current user's refresh tokens (log out every other
- * device/session). The caller's own current access token keeps working
- * until it naturally expires (access tokens aren't tracked server-side),
- * but no refresh token issued before this call can mint a new one — so a
- * client that also calls the normal logout/redirect flow after this
- * effectively signs the user out everywhere.
+ * GET /api/users/me/sessions
+ * How many devices are signed in to this account — the app only offers
+ * "Log out other devices" when there's more than one.
  */
-export const logoutAllSessions = async (req: AuthRequest, res: Response) => {
+export const getSessions = async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      return res.status(401).json(errorResponse(401, 'Not authenticated'));
+    }
+    const activeSessions = await countActiveSessions(req.user.userId);
+    return res.status(200).json({ success: true, data: { activeSessions } });
+  } catch (error) {
+    console.error('Error counting sessions:', error);
+    return res.status(500).json(errorResponse(500, 'Failed to load your devices'));
+  }
+};
+
+/**
+ * POST /api/users/me/logout-all
+ * Signs out every OTHER device: their refresh tokens are deleted and their
+ * current access tokens stop working right away (see sessionService). This
+ * device stays signed in. An access token from before per-device sessions
+ * can't tell which device it is, so then every device (this one included)
+ * is signed out.
+ */
+export const logoutOtherSessions = async (req: AuthRequest, res: Response) => {
   try {
     if (!req.user) {
       return res.status(401).json(errorResponse(401, 'Not authenticated'));
     }
 
-    await revokeAllRefreshTokens(req.user.userId);
+    if (!req.user.sid) {
+      await revokeAllRefreshTokens(req.user.userId);
+      await revokeUserSessions(req.user.userId, JWT_EXPIRY);
+      return res.status(200).json({
+        success: true,
+        message: 'Logged out of all devices',
+        data: { signedOut: null, signedOutCurrent: true },
+      });
+    }
+
+    const signedOut = await revokeOtherSessions(req.user.userId, req.user.sid);
+
+    await writeAuditLog({
+      actorId: req.user.userId,
+      actorName: req.user.email,
+      actorRole: req.user.role,
+      action: 'OTHER_SESSIONS_REVOKED',
+      category: 'LOGIN',
+      message: `Signed out ${signedOut} other device(s)`,
+    });
 
     return res.status(200).json({
       success: true,
-      message: 'Logged out of all devices',
+      message: signedOut > 0 ? `Logged out of ${signedOut} other device${signedOut === 1 ? '' : 's'}` : 'No other devices were signed in',
+      data: { signedOut, signedOutCurrent: false },
     });
   } catch (error) {
-    console.error('Error logging out all sessions:', error);
-    return res.status(500).json(errorResponse(500, 'Failed to log out all sessions'));
+    console.error('Error logging out other sessions:', error);
+    return res.status(500).json(errorResponse(500, 'Failed to log out other devices'));
+  }
+};
+
+// Bookings that still need the worker — they can't deactivate until these
+// are finished, cancelled or declined.
+const DEACTIVATION_BLOCKING_STATUSES = [
+  'PENDING',
+  'ACCEPTED',
+  'IN_PROGRESS',
+  'QUOTE_SUBMITTED',
+  'QUOTE_APPROVED',
+  'DISPUTED',
+  'PENDING_COMPLETION',
+  'AWAITING_PAYMENT',
+] as const;
+
+/**
+ * POST /api/users/me/deactivate
+ * Body: { password, reason? } — a worker takes a break from HomeEase without
+ * deleting anything: they disappear from search, can't be booked, and are
+ * signed out everywhere. Signing in again offers to reactivate
+ * (authController.reactivateAccount). Not allowed while a job is still open.
+ */
+export const deactivateAccount = async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user || req.user.role !== 'WORKER') {
+      return res.status(403).json(errorResponse(403, 'Only worker accounts can be deactivated'));
+    }
+
+    const { password, reason } = req.body as { password?: string; reason?: string };
+    if (!password) {
+      return res.status(400).json(errorResponse(400, 'Password required to deactivate your account'));
+    }
+
+    const user = await prisma.user.findUnique({ where: { id: req.user.userId }, select: { password: true, fullName: true } });
+    if (!user) {
+      return res.status(404).json(errorResponse(404, 'User not found'));
+    }
+    if (!(await bcrypt.compare(password, user.password))) {
+      return res.status(401).json(errorResponse(401, 'Password is incorrect'));
+    }
+
+    const openJobs = await prisma.booking.count({
+      where: { workerId: req.user.userId, status: { in: [...DEACTIVATION_BLOCKING_STATUSES] } },
+    });
+    if (openJobs > 0) {
+      return res.status(409).json(
+        errorResponse(409, `You have ${openJobs} open job${openJobs === 1 ? '' : 's'} or request${openJobs === 1 ? '' : 's'}. Finish, cancel or decline ${openJobs === 1 ? 'it' : 'them'} first.`)
+      );
+    }
+
+    await prisma.$transaction([
+      prisma.user.update({
+        where: { id: req.user.userId },
+        data: { status: 'DEACTIVATED', deactivatedAt: new Date(), pushToken: null },
+      }),
+      prisma.workerProfile.updateMany({ where: { userId: req.user.userId }, data: { isAvailable: false } }),
+    ]);
+    await revokeAllRefreshTokens(req.user.userId);
+    await revokeUserSessions(req.user.userId, JWT_EXPIRY);
+
+    await writeAuditLog({
+      actorId: req.user.userId,
+      actorName: user.fullName,
+      actorRole: req.user.role,
+      action: 'ACCOUNT_DEACTIVATED',
+      category: 'ADMIN_ACTION',
+      message: `${user.fullName} deactivated their account${reason?.trim() ? `: ${reason.trim().slice(0, 500)}` : ''}`,
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: 'Your account is deactivated. Sign in any time to reactivate it.',
+    });
+  } catch (error) {
+    console.error('Error deactivating account:', error);
+    return res.status(500).json(errorResponse(500, 'Failed to deactivate your account'));
+  }
+};
+
+// Typed by the user as the final confirmation of a deletion.
+const DELETE_CONFIRMATION_TEXT = 'DELETE MY ACCOUNT';
+
+/**
+ * POST /api/users/me/delete-code
+ * Step 2 of deleting the account: checks nothing blocks it, then emails a
+ * one-time code the final DELETE /users/me needs.
+ */
+export const sendDeletionCode = async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      return res.status(401).json(errorResponse(401, 'Not authenticated'));
+    }
+    const blockers = await findDeletionBlockers(req.user.userId);
+    if (blockers.length > 0) {
+      return res.status(409).json({ ...errorResponse(409, blockers.join(' ')), blockers });
+    }
+    const user = await prisma.user.findUnique({ where: { id: req.user.userId }, select: { email: true } });
+    if (!user) {
+      return res.status(404).json(errorResponse(404, 'User not found'));
+    }
+    const code = generateOtp();
+    await storeOtp(req.user.userId, code, TokenType.ACCOUNT_ACTION);
+    await sendOtpEmail(user.email, code);
+    return res.status(200).json({ success: true, message: 'We emailed you a code to confirm the deletion' });
+  } catch (error) {
+    console.error('Error sending deletion code:', error);
+    return res.status(500).json(errorResponse(500, 'Failed to send the code'));
   }
 };
 
@@ -838,13 +988,17 @@ export const acceptContract = async (req: AuthRequest, res: Response) => {
 
         const profile = await prisma.workerProfile.findUnique({
           where: { userId: req.user.userId },
-          select: { birthDate: true },
+          select: { birthDate: true, yearsExperience: true },
         });
         if (!profile?.birthDate) {
-          return res.status(400).json(errorResponse(400, 'Please enter your date of birth on the ID step before submitting.'));
+          return res.status(400).json(errorResponse(400, 'Please add your date of birth before submitting.'));
         }
-        if (ageInYears(profile.birthDate) < MIN_WORKER_AGE) {
-          return res.status(400).json(errorResponse(400, `You must be at least ${MIN_WORKER_AGE} years old to work on HomeEase.`));
+        const ageError = workerAgeError(ageInYears(profile.birthDate), await getAppSettings());
+        if (ageError) {
+          return res.status(400).json(errorResponse(400, `${ageError}.`));
+        }
+        if (profile.yearsExperience == null) {
+          return res.status(400).json(errorResponse(400, 'Please enter your years of experience on the resume step before submitting.'));
         }
 
         await prisma.$transaction([
@@ -879,31 +1033,59 @@ export const deleteAccount = async (req: AuthRequest, res: Response) => {
     if (!req.user) {
       return res.status(401).json(errorResponse(401, 'Not authenticated'));
     }
-    
-    const { password } = req.body;
-    
+
+    // Final step of a deliberately slow flow (see the app's delete screen):
+    // the password, the emailed code from POST /me/delete-code, and the
+    // confirmation phrase typed out in full.
+    const { password, code, confirmText, reason } = req.body as {
+      password?: string;
+      code?: string;
+      confirmText?: string;
+      reason?: string;
+    };
+
     if (!password) {
       return res.status(400).json(errorResponse(400, 'Password required to delete account'));
     }
-    
+    if (typeof confirmText !== 'string' || confirmText.trim().toUpperCase() !== DELETE_CONFIRMATION_TEXT) {
+      return res.status(400).json(errorResponse(400, `Type "${DELETE_CONFIRMATION_TEXT}" to confirm`));
+    }
+    if (typeof code !== 'string' || !/^\d{6}$/.test(code.trim())) {
+      return res.status(400).json(errorResponse(400, 'Enter the 6-digit code we emailed you'));
+    }
+
     const user = await prisma.user.findUnique({
       where: { id: req.user.userId },
-      select: { password: true },
+      select: { password: true, fullName: true },
     });
-    
+
     if (!user) {
       return res.status(404).json(errorResponse(404, 'User not found'));
     }
-    
+
     const isPasswordValid = await bcrypt.compare(password, user.password);
     if (!isPasswordValid) {
       return res.status(401).json(errorResponse(401, 'Password is incorrect'));
     }
-    
+
+    if (!(await verifyOtp(req.user.userId, code.trim(), TokenType.ACCOUNT_ACTION))) {
+      return res.status(400).json(errorResponse(400, 'That code is wrong or has expired'));
+    }
+
     const blockers = await findDeletionBlockers(req.user.userId);
     if (blockers.length > 0) {
       return res.status(409).json({ ...errorResponse(409, blockers.join(' ')), blockers });
     }
+
+    await writeAuditLog({
+      actorId: req.user.userId,
+      actorName: user.fullName,
+      actorRole: req.user.role,
+      action: 'ACCOUNT_DELETED',
+      category: 'ADMIN_ACTION',
+      level: 'WARN',
+      message: `User deleted their account${reason?.trim() ? `: ${reason.trim().slice(0, 500)}` : ''}`,
+    });
 
     // Anonymizes the account and removes personal data and files; keeps
     // bookings, payments and tax records (see accountDeletionService).

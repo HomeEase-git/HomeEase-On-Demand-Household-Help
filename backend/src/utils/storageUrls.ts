@@ -1,4 +1,4 @@
-import { supabase, KYC_DOCUMENT_BUCKET, RESUME_BUCKET, CHAT_IMAGE_BUCKET } from '@config/supabase';
+import { supabase, KYC_DOCUMENT_BUCKET, RESUME_BUCKET, CHAT_IMAGE_BUCKET, BOOKING_PHOTO_BUCKET } from '@config/supabase';
 
 // Buckets holding government IDs, NBI clearances, selfies, resumes and chat
 // photos. These are private: their objects are only reachable through
@@ -86,6 +86,22 @@ export function isOwnedByUser(url: string, userId: string): boolean {
  */
 export function toOwnedStoredUrl(url: string, userId: string): string | null {
   return isOwnedByUser(url, userId) ? toStoredUrl(url) : null;
+}
+
+/**
+ * For evidence photos (quote receipts, cancellation proof): every URL must be
+ * a booking photo this user uploaded (uploads are named `<userId>/...`).
+ * Returns the URLs to persist, or null if any one isn't.
+ */
+export function toOwnedBookingPhotoUrls(urls: unknown, userId: string): string[] | null {
+  if (!Array.isArray(urls)) return null;
+  const out: string[] = [];
+  for (const url of urls) {
+    const ref = parseStorageUrl(url);
+    if (!ref || ref.bucket !== BOOKING_PHOTO_BUCKET || !ref.path.startsWith(`${userId}/`)) return null;
+    out.push(canonicalObjectUrl(ref.bucket, ref.path));
+  }
+  return out;
 }
 
 /** Signed URL for a freshly uploaded private object, for the upload response. */

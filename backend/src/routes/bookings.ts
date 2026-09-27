@@ -1,7 +1,6 @@
 import { Router } from 'express';
 import {
   createBooking,
-  createMultiDayBooking,
   listBookings,
   getBookingDetail,
   acceptBooking,
@@ -9,13 +8,15 @@ import {
   arriveBooking,
   updateWorkerLiveLocation,
   startBooking,
-  extendBooking,
+  scheduleVisit,
+  cancelVisit,
   acknowledgeReschedule,
   requestReschedule,
   withdrawRescheduleRequest,
   respondToRescheduleRequest,
   submitQuote,
   approveQuote,
+  rejectQuote,
   disputeQuote,
   completeBooking,
   confirmCompletion,
@@ -29,8 +30,9 @@ import { authMiddleware } from '../middleware/auth';
 import { restrictTo } from '../middleware/role';
 import {
   validateCreateBooking,
-  validateCreateMultiDayBooking,
   validateSubmitQuote,
+  validateRejectQuote,
+  validateDateAndTime,
   validateBookingStatusUpdate,
   validateApproveQuote,
   validateDisputeQuote,
@@ -54,11 +56,6 @@ router.get('/:id', getBookingDetail);
 // Create booking (client only)
 router.post('/', restrictTo('CLIENT'), validateCreateBooking, createBooking);
 
-// Book the same worker for N consecutive days upfront (client only) — see
-// createMultiDayBooking's docblock for how this differs from a single-day
-// POST / above.
-router.post('/multi-day', restrictTo('CLIENT'), validateCreateMultiDayBooking, createMultiDayBooking);
-
 // Upload a pre-booking issue photo (client only) — no bookingId yet, since
 // this runs during Step 1 before the booking exists; the returned URL is
 // included in the createBooking payload as issuePhotoUrls.
@@ -80,30 +77,36 @@ router.patch('/:id/live-location', restrictTo('WORKER'), validateLiveLocation, u
 // Start booking (worker only) — requires a prior verified arrival
 router.patch('/:id/start', restrictTo('WORKER'), startBooking);
 
-// Worker signals a job is running into a second day (worker only) — see
-// extendBooking's docblock for the reschedule-on-conflict behavior this triggers
-router.patch('/:id/extend', restrictTo('WORKER'), extendBooking);
+// "Follow Up Date": the worker schedules another visit when the job needs
+// more than one day (worker only)
+router.post('/:id/visits', restrictTo('WORKER'), validateDateAndTime, scheduleVisit);
+router.patch('/:id/visits/:visitId/cancel', restrictTo('WORKER'), cancelVisit);
 
-// Client keeps the new date for a booking a worker's spillover moved (client only)
+// Client keeps the new date for a booking the old "Continue Tomorrow"
+// spillover moved (client only; bookings from before follow-up visits)
 router.patch('/:id/acknowledge-reschedule', restrictTo('CLIENT'), acknowledgeReschedule);
 
-// Client-initiated reschedule request (ACCEPTED bookings only) — client
-// proposes a new date/time, the assigned worker must accept or decline it.
-router.patch('/:id/request-reschedule', restrictTo('CLIENT'), requestReschedule);
-router.patch('/:id/reschedule-request/withdraw', restrictTo('CLIENT'), withdrawRescheduleRequest);
-router.patch('/:id/reschedule-request/respond', restrictTo('WORKER'), respondToRescheduleRequest);
+// Reschedule request (ACCEPTED bookings only) — the client or the worker
+// proposes a new date/time and the other side accepts or declines it.
+router.patch('/:id/request-reschedule', restrictTo('CLIENT', 'WORKER'), validateDateAndTime, requestReschedule);
+router.patch('/:id/reschedule-request/withdraw', restrictTo('CLIENT', 'WORKER'), withdrawRescheduleRequest);
+router.patch('/:id/reschedule-request/respond', restrictTo('CLIENT', 'WORKER'), respondToRescheduleRequest);
 
 // Submit quote (worker only)
 router.post('/:id/quote', restrictTo('WORKER'), validateSubmitQuote, submitQuote);
 
-// Approve quote (client only)
+// Approve or refuse quote (client only)
 router.patch('/:id/quote/approve', restrictTo('CLIENT'), validateApproveQuote, approveQuote);
+router.patch('/:id/quote/reject', restrictTo('CLIENT'), validateRejectQuote, rejectQuote);
 
 // Dispute quote (client only)
 router.patch('/:id/quote/dispute', restrictTo('CLIENT'), validateDisputeQuote, disputeQuote);
 
 // Upload a job-completion proof photo (worker only)
 router.post('/:id/completion-photo/upload', restrictTo('WORKER'), bookingPhotoUpload, uploadBookingCompletionPhoto);
+// Same upload for the worker's other job photos: quote receipts, materials
+// in use, and proof for a cancellation after arriving.
+router.post('/:id/job-photo/upload', restrictTo('WORKER'), bookingPhotoUpload, uploadBookingCompletionPhoto);
 
 // Complete booking — worker submits completion photo, awaits client confirmation (worker only)
 router.patch('/:id/complete', restrictTo('WORKER'), completeBooking);

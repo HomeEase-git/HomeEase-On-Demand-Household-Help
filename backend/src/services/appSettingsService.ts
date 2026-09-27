@@ -6,7 +6,6 @@ export interface AppSettingsConfig {
   notificationsEnabled: boolean;
   commissionRate: number;
   withholdingTaxRate: number;
-  maxSlotsPerDay: number;
   pendingExpiryMinutes: number;
   geofenceRadiusMeters: number;
   maxDeclinesBeforeCooldown: number;
@@ -14,15 +13,23 @@ export interface AppSettingsConfig {
   declineCooldownHours: number;
   tierProMinRating: number;
   tierProMinJobs: number;
+  tierProMinYears: number;
   tierProMultiplier: number;
   tierExpertMinRating: number;
   tierExpertMinJobs: number;
+  tierExpertMinYears: number;
   tierExpertMultiplier: number;
   freeDistanceKm: number;
   perKmFee: number;
   workerDebtHoldLimit: number;
   atcCode: string | null;
-  noShowGraceHours: number;
+  workerMinAge: number;
+  workerMaxAge: number;
+  rushFeeRate: number;
+  rushMinLeadHours: number;
+  noShowGraceMinutes: number;
+  noShowPenaltyAmount: number;
+  clientFaultCompensationAmount: number;
   disputeEscalationHours: number;
   autoSuspendRatingThreshold: number | null;
   autoSuspendDisputeCountThreshold: number | null;
@@ -39,7 +46,6 @@ const FALLBACK_DEFAULTS: AppSettingsConfig = {
   notificationsEnabled: true,
   commissionRate: 0.1,
   withholdingTaxRate: 0.02,
-  maxSlotsPerDay: 2,
   pendingExpiryMinutes: 60,
   geofenceRadiusMeters: 100,
   maxDeclinesBeforeCooldown: 3,
@@ -47,15 +53,23 @@ const FALLBACK_DEFAULTS: AppSettingsConfig = {
   declineCooldownHours: 24,
   tierProMinRating: 4.5,
   tierProMinJobs: 20,
+  tierProMinYears: 2,
   tierProMultiplier: 1.15,
   tierExpertMinRating: 4.8,
   tierExpertMinJobs: 50,
+  tierExpertMinYears: 5,
   tierExpertMultiplier: 1.3,
   freeDistanceKm: 5,
   perKmFee: 10,
   workerDebtHoldLimit: 500,
   atcCode: null,
-  noShowGraceHours: 2,
+  workerMinAge: 18,
+  workerMaxAge: 60,
+  rushFeeRate: 0.25,
+  rushMinLeadHours: 2,
+  noShowGraceMinutes: 60,
+  noShowPenaltyAmount: 200,
+  clientFaultCompensationAmount: 200,
   disputeEscalationHours: 48,
   autoSuspendRatingThreshold: null,
   autoSuspendDisputeCountThreshold: null,
@@ -75,7 +89,7 @@ let cachedAt = 0;
 /**
  * Reads the singleton AppSettings row, creating it with schema defaults on
  * first access. Business rules that must react to an admin's live setting
- * change (worker slot cap, arrival geofence radius, pending-booking hold
+ * change (arrival geofence radius, pending-booking hold
  * timeout, platform commission/tax split) read through this getter instead
  * of a static config constant.
  */
