@@ -87,6 +87,7 @@ export function serviceToDraft(service) {
     price: t.basePrice,
     model: t.pricingModel === 'TIERED' ? 'PER_UNIT' : t.pricingModel,
     durationHours: t.durationHours ?? '',
+    allowsFollowUp: Boolean(t.allowsFollowUp),
     isActive: t.isActive,
     overrideReason: '',
     quantityRef: null,
@@ -177,6 +178,7 @@ export function draftToPayload(draft) {
         quantityFieldRef: usesCount(j.model) ? j.quantityRef : null,
         durationHours: quote || j.durationHours === '' || j.durationHours == null ? null : Number(j.durationHours),
         isActive: j.isActive,
+        allowsFollowUp: Boolean(j.allowsFollowUp),
         overrideReason: j.overrideReason.trim() || undefined,
       }
     }),

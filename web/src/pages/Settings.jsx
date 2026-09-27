@@ -10,13 +10,17 @@ import {
 // and withholding tax/ATC on Tax Settings — this page keeps site identity,
 // admin account/alert settings, and booking-operation rules.
 const NUMBER_FIELD_BOUNDS = {
-  maxSlotsPerDay: [1, 24],
   pendingExpiryMinutes: [5, 10080],
   geofenceRadiusMeters: [10, 5000],
   maxDeclinesBeforeCooldown: [1, 20],
   declineWindowHours: [1, 720],
   declineCooldownHours: [1, 720],
-  noShowGraceHours: [0, 48],
+  noShowGraceMinutes: [15, 480],
+  noShowPenaltyAmount: [0, 100000],
+  clientFaultCompensationAmount: [0, 100000],
+  rushMinLeadHours: [0, 24],
+  workerMinAge: [18, 100],
+  workerMaxAge: [18, 100],
   disputeEscalationHours: [1, 720],
 }
 
@@ -77,7 +81,7 @@ export default function Settings() {
           <SettingsSection
             icon="fa-shield-halved"
             title="Security"
-            description="Two-factor authentication is required for every admin account."
+            description="Admins sign in with an authenticator app (required). Clients and workers can turn on email or text-message codes from the app."
           >
             <div className="toggle-row">
               <div>
@@ -118,13 +122,15 @@ export default function Settings() {
             <p className="settings-group__label" style={{ marginTop: 0 }}>Booking &amp; Availability</p>
             <div className="detail-grid" style={{ marginBottom: 0 }}>
               <AdornedNumberField
-                id="settings-max-slots"
-                label="Max Availability Slots / Day"
-                min={1}
+                id="settings-rush-lead"
+                label="Same-Day Minimum Notice"
+                suffix="hrs"
+                min={0}
                 max={24}
-                value={current.maxSlotsPerDay}
-                onChange={updateNumberField('maxSlotsPerDay')}
-                error={fieldErrors.maxSlotsPerDay}
+                value={current.rushMinLeadHours}
+                onChange={updateNumberField('rushMinLeadHours')}
+                error={fieldErrors.rushMinLeadHours}
+                hint="How far ahead a same-day booking must start. The same-day fee is in Pricing Rules."
               />
               <AdornedNumberField
                 id="settings-pending-expiry"
@@ -182,6 +188,33 @@ export default function Settings() {
                 />
               </div>
             </div>
+
+            <div className="settings-group">
+              <p className="settings-group__label">Worker Age</p>
+              <div className="detail-grid" style={{ marginBottom: 0 }}>
+                <AdornedNumberField
+                  id="settings-worker-min-age"
+                  label="Minimum Age"
+                  suffix="yrs"
+                  min={18}
+                  max={100}
+                  value={current.workerMinAge}
+                  onChange={updateNumberField('workerMinAge')}
+                  error={fieldErrors.workerMinAge}
+                  hint="Checked at sign-up and again at KYC approval. Never below 18."
+                />
+                <AdornedNumberField
+                  id="settings-worker-max-age"
+                  label="Maximum Age"
+                  suffix="yrs"
+                  min={18}
+                  max={100}
+                  value={current.workerMaxAge}
+                  onChange={updateNumberField('workerMaxAge')}
+                  error={fieldErrors.workerMaxAge}
+                />
+              </div>
+            </div>
           </SettingsSection>
 
           <SettingsSection
@@ -194,13 +227,37 @@ export default function Settings() {
               <AdornedNumberField
                 id="settings-no-show-grace"
                 label="Worker No-Show Grace Period"
-                suffix="hrs"
+                suffix="min"
+                min={15}
+                max={480}
+                value={current.noShowGraceMinutes}
+                onChange={updateNumberField('noShowGraceMinutes')}
+                error={fieldErrors.noShowGraceMinutes}
+                hint="How long past the start time without a check-in before the job is cancelled as a no-show."
+              />
+              <AdornedNumberField
+                id="settings-no-show-penalty"
+                label="Worker No-Show Penalty"
+                prefix="₱"
                 min={0}
-                max={48}
-                value={current.noShowGraceHours}
-                onChange={updateNumberField('noShowGraceHours')}
-                error={fieldErrors.noShowGraceHours}
-                hint="How long past the scheduled start before a client can cancel penalty-free."
+                max={100000}
+                step={50}
+                value={current.noShowPenaltyAmount}
+                onChange={updateNumberField('noShowPenaltyAmount')}
+                error={fieldErrors.noShowPenaltyAmount}
+                hint="Added to the worker's dues for a no-show or a worker-fault cancellation on site."
+              />
+              <AdornedNumberField
+                id="settings-client-fault-fee"
+                label="Client-Fault Compensation"
+                prefix="₱"
+                min={0}
+                max={100000}
+                step={50}
+                value={current.clientFaultCompensationAmount}
+                onChange={updateNumberField('clientFaultCompensationAmount')}
+                error={fieldErrors.clientFaultCompensationAmount}
+                hint="Charged to the client and paid to the worker when an on-site cancellation is approved as the client's fault."
               />
               <AdornedNumberField
                 id="settings-dispute-escalation"
@@ -255,7 +312,7 @@ export default function Settings() {
           </SettingsSection>
 
           <p className="toggle-row__hint" style={{ marginTop: '0.5rem' }}>
-            Looking for commission, distance fee, or expertise tiers? They're in{' '}
+            Looking for commission, the same-day fee, distance fee, or expertise tiers? They're in{' '}
             <Link to="/pricing-rules">Pricing Rules</Link>. Withholding tax and the BIR ATC code are in{' '}
             <Link to="/tax/settings">Tax Settings</Link>.
           </p>

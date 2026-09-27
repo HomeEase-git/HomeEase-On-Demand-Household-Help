@@ -302,6 +302,8 @@ async function formatWorkersBatch(users: WorkerRow[]) {
       rating: user.workerProfile?.rating.toFixed(1) ?? '0.0',
       reviews: user.workerProfile?.totalReviews ?? 0,
       tier,
+      // Confirmed by the admin at KYC approval — one of the tier requirements.
+      yearsExperience: user.workerProfile?.yearsExperience ?? null,
       status: statusLabel,
       verification: statusLabel,
       // Real account status (ACTIVE/SUSPENDED/BANNED/DEACTIVATED) — distinct from the KYC

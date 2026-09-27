@@ -380,7 +380,14 @@ export default function ServiceCatalogEditor() {
           }}
         >
           <i className="fas fa-chevron-right sce-chev" aria-hidden="true" />
-          <span className="sce-job__name">{job.name}</span>
+          <span className="sce-job__name">
+            {job.name}
+            {job.allowsFollowUp && (
+              <span className="sce-chip" style={{ marginLeft: '0.5rem' }} title="Allows a follow-up job">
+                Follow-up
+              </span>
+            )}
+          </span>
           <span className="sce-job__unit">{job.unit ? `per ${job.unit}` : '—'}</span>
           <span className="sce-job__price sce-r">{job.model === 'CUSTOM_QUOTE' ? 'Quote' : formatPeso(job.price)}</span>
           <span className="sce-job__qs sce-r">

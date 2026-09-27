@@ -13,6 +13,7 @@ export default function JobModal({ initial, numberQuestions, doleRef, onSave, on
     price: '',
     model: 'FIXED',
     durationHours: '',
+    allowsFollowUp: false,
     overrideReason: '',
     quantityRef: null,
     ...initial,
@@ -147,9 +148,24 @@ export default function JobModal({ initial, numberQuestions, doleRef, onSave, on
           {!quote && (
             <div className="sce-note">
               Every client pays this price and every worker earns from it. Workers can't change it; only the
-              expertise-tier surcharge and the distance fee are added at booking.
+              expertise-tier surcharge, the distance fee and the same-day fee are added at booking.
             </div>
           )}
+
+          <label className="sce-check">
+            <input
+              type="checkbox"
+              checked={Boolean(job.allowsFollowUp)}
+              onChange={(e) => patch({ allowsFollowUp: e.target.checked })}
+            />
+            <span>
+              Inspection / diagnosis job — allows a follow-up job
+              <small>
+                After this job the worker can propose the repair as a follow-up job. It's only booked once the client
+                confirms.
+              </small>
+            </span>
+          </label>
 
           {belowFloor && (
             <div className="sce-field">

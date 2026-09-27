@@ -2,6 +2,7 @@ import { useCallback, useState } from 'react'
 import { Link } from 'react-router-dom'
 import PageHeader from '../components/common/PageHeader'
 import SubNav from '../components/common/SubNav'
+import { BOOKINGS_SUB_NAV } from '../constants/bookingsSubNav'
 import SearchBar from '../components/common/SearchBar'
 import FilterTabs from '../components/common/FilterTabs'
 import SectionCard from '../components/common/SectionCard'
@@ -16,10 +17,6 @@ import { fetchBookings, cancelBookingAdmin } from '../services/bookings'
 import { useToast } from '../context/ToastContext'
 import { getBookingStatusVariant } from '../utils/statusBadge'
 
-const SUB_NAV = [
-  { to: '/bookings', label: 'All Bookings' },
-  { to: '/bookings/dispute', label: 'Booking Dispute' },
-]
 
 const STATUS_MAP = {
   All: 'all',
@@ -142,7 +139,7 @@ export default function Bookings() {
           </button>
         }
         title="Booking Management" subtitle="All bookings" />
-      <SubNav items={SUB_NAV} />
+      <SubNav items={BOOKINGS_SUB_NAV} />
       <div className="toolbar">
         <SearchBar placeholder="Search bookings..." value={params.search || ''} onChange={setSearch} />
         <FilterTabs

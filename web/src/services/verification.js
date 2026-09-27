@@ -12,10 +12,15 @@ export async function fetchVerificationById(id) {
   return response.data;
 }
 
-export async function approveVerification(id, adminOverrideReason = '') {
+// yearsExperience (workers): the admin confirms or corrects the worker's
+// declared years against the resume — it's an expertise-tier requirement.
+export async function approveVerification(id, adminOverrideReason = '', yearsExperience = undefined) {
   const response = await apiRequest(`/admin/verifications/${id}/approve`, {
     method: 'PATCH',
-    body: JSON.stringify({ adminOverrideReason }),
+    body: JSON.stringify({
+      adminOverrideReason,
+      ...(yearsExperience !== undefined ? { yearsExperience } : {}),
+    }),
   });
   return response.data;
 }

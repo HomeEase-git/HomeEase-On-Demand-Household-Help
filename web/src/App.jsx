@@ -19,6 +19,7 @@ const VerificationDetail = lazy(() => import('./pages/VerificationDetail'))
 const Bookings = lazy(() => import('./pages/Bookings'))
 const BookingDetail = lazy(() => import('./pages/BookingDetail'))
 const BookingDispute = lazy(() => import('./pages/BookingDispute'))
+const CancellationReviews = lazy(() => import('./pages/CancellationReviews'))
 const Payments = lazy(() => import('./pages/Payments'))
 const TransactionDetail = lazy(() => import('./pages/TransactionDetail'))
 const Refunds = lazy(() => import('./pages/Refunds'))
@@ -71,6 +72,7 @@ export default function App() {
           { path: 'bookings', element: <Bookings /> },
           { path: 'bookings/detail/:id', element: <BookingDetail /> },
           { path: 'bookings/dispute', element: <BookingDispute /> },
+          { path: 'bookings/cancellations', element: <CancellationReviews /> },
           { path: 'payments', element: <Payments /> },
           { path: 'payments/transaction/:id', element: <TransactionDetail /> },
           { path: 'payments/refunds', element: <Refunds /> },
