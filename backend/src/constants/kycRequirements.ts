@@ -9,6 +9,10 @@ export const TIER_1_REQUIRED_DOCUMENT_TYPES = [
   'GOVERNMENT_ID_BACK',
   'SELFIE',
   'NBI_CLEARANCE',
+  // Business decision (2026-09-25): every worker submits a resume. It's
+  // reviewed by the admin and parsed into the worker's public skills — it is
+  // NOT sent to the AI identity check (see verificationAiService).
+  'RESUME',
 ] as const satisfies readonly KycDocumentType[];
 
 // Government-issued clearances that actually expire in real life, vs. an ID

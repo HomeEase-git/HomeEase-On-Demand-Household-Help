@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { View, Text, Pressable, ActivityIndicator } from "react-native";
 import { KeyboardAwareScrollView } from "../../../../components/ui/KeyboardAwareScrollView";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -10,7 +10,18 @@ import PrimaryButton from "../../../../components/ui/PrimaryButton";
 import OutlinedButton from "../../../../components/ui/OutlinedButton";
 import { colors, cardShadow } from "../../../../constants";
 import { addressStorage } from "../../../../utils/storage";
-import { geocodeAddressWithFallback, searchAddresses, reverseGeocodeDetailed, formatStructuredAddress, type PlaceResult } from "../../../../utils/geo";
+import * as Location from "expo-location";
+import {
+  geocodeAddressWithFallback,
+  autocompleteAddresses,
+  getPlaceDetails,
+  newPlacesSessionToken,
+  reverseGeocodeDetailed,
+  formatStructuredAddress,
+  type AddressSuggestion,
+  type LatLng,
+  type PlaceResult,
+} from "../../../../utils/geo";
 import { getPrecisePosition, LocationPermissionDeniedError, LocationTimeoutError } from "../../../../services/location";
 import { useDebouncedCallback } from "../../../../utils/performanceOptimization";
 import * as api from "../../../../services/api";
@@ -36,9 +47,21 @@ export default function AddressEditScreen() {
   const [showManualFields, setShowManualFields] = useState(!isNew);
 
   const [searchQuery, setSearchQuery] = useState("");
-  const [searchResults, setSearchResults] = useState<PlaceResult[]>([]);
+  const [searchResults, setSearchResults] = useState<AddressSuggestion[]>([]);
   const [searching, setSearching] = useState(false);
+  const [resolvingPlaceId, setResolvingPlaceId] = useState<string | null>(null);
   const [locating, setLocating] = useState(false);
+
+  // One Places Autocomplete session = every keystroke + the Place Details
+  // call for the suggestion picked, billed as a single lookup. Created on the
+  // first keystroke, dropped once a suggestion is resolved.
+  const sessionTokenRef = useRef<string | null>(null);
+  // The latest query typed — a slow response for an older query must not
+  // overwrite suggestions for what's in the box now.
+  const latestQueryRef = useRef("");
+  // Where the device last was (only if location permission was ALREADY
+  // granted — never prompts), to rank nearby suggestions first.
+  const searchBiasRef = useRef<LatLng | undefined>(undefined);
 
   // Tracks the lat/lng resolved from search/current-location, along with the
   // address text it was resolved for, so `handleSave` can skip a redundant
@@ -49,6 +72,23 @@ export default function AddressEditScreen() {
   // address or a search suggestion) — this is the one case we actually know
   // how accurate the pin is, and it's worth surfacing to the client.
   const [resolvedAccuracy, setResolvedAccuracy] = useState<number | null>(null);
+  // True when the last resolved place is an area (a city, a barangay) rather
+  // than an exact spot, so saving it warns the pin is only approximate.
+  const [resolvedApproximate, setResolvedApproximate] = useState(false);
+
+  useEffect(() => {
+    if (!isNew) return;
+    (async () => {
+      try {
+        const { status } = await Location.getForegroundPermissionsAsync();
+        if (status !== "granted") return;
+        const last = await Location.getLastKnownPositionAsync();
+        if (last) searchBiasRef.current = { lat: last.coords.latitude, lng: last.coords.longitude };
+      } catch {
+        // Bias is a nice-to-have; search works without it.
+      }
+    })();
+  }, [isNew]);
 
   useEffect(() => {
     const loadExisting = async () => {
@@ -95,8 +135,9 @@ export default function AddressEditScreen() {
       return;
     }
     try {
-      const results = await searchAddresses(query);
-      setSearchResults(results);
+      if (!sessionTokenRef.current) sessionTokenRef.current = newPlacesSessionToken();
+      const results = await autocompleteAddresses(query, sessionTokenRef.current, searchBiasRef.current);
+      if (latestQueryRef.current === query) setSearchResults(results);
     } catch (error) {
       console.error("Address search error:", error);
     } finally {
@@ -106,6 +147,7 @@ export default function AddressEditScreen() {
 
   const handleSearchChange = (text: string) => {
     setSearchQuery(text);
+    latestQueryRef.current = text;
     if (text.trim().length < 3) {
       setSearchResults([]);
       setSearching(false);
@@ -115,7 +157,7 @@ export default function AddressEditScreen() {
     runSearch(text);
   };
 
-  const applyResolvedPlace = (place: PlaceResult, accuracy: number | null = null) => {
+  const applyResolvedPlace = (place: PlaceResult, accuracy: number | null = null, landmarkHint?: string) => {
     const { houseNumber: h, street: s, barangay: b, city: c, state: st, zipCode: z } = place.components ?? {};
     const nextHouseNumber = h ?? "";
     const nextStreet = s ?? "";
@@ -142,13 +184,32 @@ export default function AddressEditScreen() {
       }),
     );
     setResolvedAccuracy(accuracy);
+    setResolvedApproximate(!!place.approximate);
+    if (landmarkHint) setLandmark((current) => current || landmarkHint);
     setShowManualFields(true);
     setSearchResults([]);
     setSearchQuery("");
+    latestQueryRef.current = "";
   };
 
-  const handleSelectSuggestion = (place: PlaceResult) => {
-    applyResolvedPlace(place);
+  const handleSelectSuggestion = async (suggestion: AddressSuggestion) => {
+    setResolvingPlaceId(suggestion.placeId);
+    try {
+      const place = await getPlaceDetails(suggestion.placeId, sessionTokenRef.current ?? undefined);
+      sessionTokenRef.current = null;
+      if (!place) {
+        alertModal.error("Couldn't load that address", "Please pick another suggestion or fill in the fields below.");
+        setShowManualFields(true);
+        return;
+      }
+      // For a named place (a mall, a school), Google's address leaves the
+      // name out — e.g. "SM City Marikina" resolves to just "Marikina, 1800
+      // Metro Manila" — so keep the name as the landmark for the worker.
+      const isNamedPlace = !place.formatted_address.toLowerCase().includes(suggestion.mainText.toLowerCase());
+      applyResolvedPlace(place, null, isNamedPlace ? suggestion.mainText : undefined);
+    } finally {
+      setResolvingPlaceId(null);
+    }
   };
 
   const handleUseCurrentLocation = async () => {
@@ -162,6 +223,7 @@ export default function AddressEditScreen() {
         setResolvedLatLng(position);
         setResolvedFor(null);
         setResolvedAccuracy(position.accuracy);
+        setResolvedApproximate(false);
         setShowManualFields(true);
         alertModal.error(
           "Couldn't fill in details",
@@ -195,7 +257,7 @@ export default function AddressEditScreen() {
       const fullAddress = formatStructuredAddress({ houseNumber, street, barangay, city, state, zipCode });
       const isFreshResolution = resolvedLatLng && resolvedFor === fullAddress;
       const geocoded = isFreshResolution
-        ? { geometry: { location: resolvedLatLng! }, approximate: false }
+        ? { geometry: { location: resolvedLatLng! }, approximate: resolvedApproximate }
         : await geocodeAddressWithFallback({ houseNumber, street, barangay, city, state, zipCode }).catch(() => null);
       // Only a device GPS fix carries a real accuracy figure — a fresh
       // free-text geocode (fields were edited since the last resolve) has none.
@@ -264,6 +326,7 @@ export default function AddressEditScreen() {
   const clearResolution = () => {
     setResolvedFor(null);
     setResolvedAccuracy(null);
+    setResolvedApproximate(false);
   };
 
   return (
@@ -315,15 +378,27 @@ export default function AddressEditScreen() {
 
             {!searching && searchResults.length > 0 && (
               <View className="mb-4">
-                {searchResults.map((place, index) => (
+                {searchResults.map((suggestion) => (
                   <Pressable
-                    key={`${place.formatted_address}-${index}`}
-                    onPress={() => handleSelectSuggestion(place)}
+                    key={suggestion.placeId}
+                    onPress={() => handleSelectSuggestion(suggestion)}
+                    disabled={resolvingPlaceId !== null}
                     className="bg-white rounded-2xl p-3 mb-2 flex-row items-start"
                     style={cardShadow}
+                    accessibilityRole="button"
+                    accessibilityLabel={suggestion.text}
                   >
-                    <Ionicons name="location-outline" size={18} color={colors.text.muted} style={{ marginTop: 2 }} />
-                    <Text className="text-text-primary text-sm ml-2 flex-1">{place.formatted_address}</Text>
+                    {resolvingPlaceId === suggestion.placeId ? (
+                      <ActivityIndicator size="small" color={colors.brand.DEFAULT} style={{ marginTop: 2 }} />
+                    ) : (
+                      <Ionicons name="location-outline" size={18} color={colors.text.muted} style={{ marginTop: 2 }} />
+                    )}
+                    <View className="ml-2 flex-1">
+                      <Text className="text-text-primary text-sm font-semibold">{suggestion.mainText}</Text>
+                      {!!suggestion.secondaryText && (
+                        <Text className="text-text-secondary text-xs mt-0.5">{suggestion.secondaryText}</Text>
+                      )}
+                    </View>
                   </Pressable>
                 ))}
               </View>

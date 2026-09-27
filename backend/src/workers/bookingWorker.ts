@@ -1058,7 +1058,7 @@ export async function autoSuspendUnderperformingWorkers(): Promise<void> {
 
       await prisma.user.update({
         where: { id: worker.userId },
-        data: { status: 'SUSPENDED', isDeleted: true, deletedAt: new Date() },
+        data: { status: 'SUSPENDED' },
       });
       // Same immediate-effect session revocation as a manual admin suspend
       // (adminUserController.setUserStatus) — otherwise an auto-suspended
@@ -1097,6 +1097,31 @@ export async function autoSuspendUnderperformingWorkers(): Promise<void> {
     } catch (error) {
       console.error(`Failed to evaluate auto-suspension for worker ${worker.userId}:`, error);
     }
+  }
+}
+
+// Live location is only collected while a worker travels to an ACCEPTED
+// booking (updateWorkerLiveLocation) and is cleared at check-in
+// (arriveBooking). This backstop clears anything left over — a cancelled
+// trip, an app that stopped pinging — so a worker's position is never
+// retained beyond what the Privacy Policy states (Data Privacy Act §11).
+const LIVE_LOCATION_MAX_AGE_MS = 2 * HOUR_MS;
+
+export async function clearStaleWorkerLocations(): Promise<void> {
+  const cutoff = new Date(Date.now() - LIVE_LOCATION_MAX_AGE_MS);
+  const result = await prisma.workerProfile.updateMany({
+    where: {
+      currentLat: { not: null },
+      OR: [
+        { lastLocationUpdate: null },
+        { lastLocationUpdate: { lt: cutoff } },
+        { user: { bookingsAsWorker: { none: { status: 'ACCEPTED', workerArrivedAt: null } } } },
+      ],
+    },
+    data: { currentLat: null, currentLng: null, lastLocationUpdate: null },
+  });
+  if (result.count > 0) {
+    console.log(`Cleared stale live location for ${result.count} worker(s)`);
   }
 }
 
@@ -1140,6 +1165,9 @@ export async function startBookingWorker() {
           break;
         case JOB_NAMES.AUTO_SUSPEND_SWEEP:
           await autoSuspendUnderperformingWorkers();
+          break;
+        case JOB_NAMES.LOCATION_CLEANUP_SWEEP:
+          await clearStaleWorkerLocations();
           break;
         default:
           console.warn(`Unknown booking queue job: ${job.name}`);

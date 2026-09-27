@@ -1,4 +1,11 @@
-import { geocodeAddressGoogle, reverseGeocodeGoogle, searchAddressesGoogle, getDirectionsGoogle } from "../services/api";
+import * as Location from "expo-location";
+import {
+  geocodeAddressGoogle,
+  autocompleteAddressesGoogle,
+  getPlaceDetailsGoogle,
+  getDirectionsGoogle,
+  type GoogleGeocodeResult,
+} from "../services/api";
 
 export type LatLng = { lat: number; lng: number };
 
@@ -34,6 +41,13 @@ export type PlaceResult = {
   approximate?: boolean;
 };
 
+export type AddressSuggestion = {
+  placeId: string;
+  text: string;
+  mainText: string;
+  secondaryText: string;
+};
+
 export type RouteResult = {
   coordinates: LatLng[];
   distanceKm: number;
@@ -62,24 +76,26 @@ export function haversineDistanceKm(a: LatLng, b: LatLng): number {
 // a broader area — a road, a neighborhood) and APPROXIMATE are not.
 const PRECISE_GOOGLE_LOCATION_TYPES = new Set(["ROOFTOP", "RANGE_INTERPOLATED"]);
 
-// Google Geocoding API (proxied through the backend, which holds the API
-// key) is the only geocoding provider in this app — OpenStreetMap/Nominatim
-// has been fully removed. Returns null whenever Google isn't configured
-// server-side, the address genuinely doesn't resolve, or the request fails;
-// geocodeAddressGoogle never throws, so this never needs its own try/catch.
-export async function geocodeAddress(address: string): Promise<PlaceResult | null> {
-  const normalized = address.trim();
-  if (!normalized) return null;
-
-  const result = await geocodeAddressGoogle(normalized);
-  if (!result) return null;
-
+function toPlaceResult(result: GoogleGeocodeResult): PlaceResult {
   return {
     formatted_address: result.formattedAddress,
     geometry: { location: { lat: result.lat, lng: result.lng } },
     components: result.components,
     approximate: result.partialMatch || !PRECISE_GOOGLE_LOCATION_TYPES.has(result.locationType),
   };
+}
+
+// Free-text address → coordinates via Google Places Text Search (New),
+// proxied through the backend, which holds the API key. Returns null whenever
+// Google isn't configured server-side, the address genuinely doesn't resolve,
+// or the request fails; geocodeAddressGoogle never throws, so this never
+// needs its own try/catch.
+export async function geocodeAddress(address: string): Promise<PlaceResult | null> {
+  const normalized = address.trim();
+  if (!normalized) return null;
+
+  const result = await geocodeAddressGoogle(normalized);
+  return result ? toPlaceResult(result) : null;
 }
 
 // Builds one well-ordered query string (most-specific first) from the
@@ -126,34 +142,101 @@ export async function geocodeAddressWithFallback(parts: StructuredAddress): Prom
   return null;
 }
 
-/**
- * Multi-result address search for autocomplete-style UI (as opposed to
- * `geocodeAddress`, which only returns the single best match). Backed by the
- * same backend-proxied Google Geocoding API as everything else here.
- */
-export async function searchAddresses(query: string, limit = 5): Promise<PlaceResult[]> {
-  const normalized = query.trim();
-  if (normalized.length < 3) return [];
-
-  const results = await searchAddressesGoogle(normalized, limit);
-  return results.map((result) => ({
-    formatted_address: result.formattedAddress,
-    geometry: { location: { lat: result.lat, lng: result.lng } },
-    components: result.components,
-  }));
+// Places Autocomplete bills a whole "session" (every keystroke plus the one
+// Place Details call that ends it) as a single lookup, as long as all of those
+// calls share one token. Start a token when the user starts typing, pass it
+// to both autocompleteAddresses and getPlaceDetails, then throw it away. The
+// token only needs to be unique, not secret, so Math.random is fine here
+// (Hermes has no crypto.randomUUID).
+export function newPlacesSessionToken(): string {
+  return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
+    const r = (Math.random() * 16) | 0;
+    return (c === "x" ? r : (r & 0x3) | 0x8).toString(16);
+  });
 }
 
+/**
+ * As-you-type address suggestions (Places Autocomplete (New)). These carry
+ * no coordinates — resolve the one the user picks with getPlaceDetails,
+ * using the same session token.
+ */
+export async function autocompleteAddresses(
+  input: string,
+  sessionToken: string,
+  near?: LatLng,
+): Promise<AddressSuggestion[]> {
+  const normalized = input.trim();
+  if (normalized.length < 3) return [];
+  return autocompleteAddressesGoogle(normalized, sessionToken, near);
+}
+
+/** Resolves a picked suggestion to coordinates + address parts; ends the session. */
+export async function getPlaceDetails(placeId: string, sessionToken?: string): Promise<PlaceResult | null> {
+  const result = await getPlaceDetailsGoogle(placeId, sessionToken);
+  return result ? toPlaceResult(result) : null;
+}
+
+// Android's native geocoder reports the PH region (e.g. "Central Luzon",
+// "Calabarzon") in `region` and usually the province in `subregion` — but not
+// always. A region name must never land in the Province field (same bug the
+// server-side parser guards against), so it's dropped and the user fills the
+// province in. The capital region is the one exception: it has no province,
+// so "Metro Manila" is the right value there.
+const PH_REGION_NAME = /\b(region|calabarzon|mimaropa|soccsksargen|caraga|bangsamoro|barmm|cordillera|luzon|visayas|mindanao)\b/i;
+const CAPITAL_REGION = /national capital region|metro manila|\bncr\b/i;
+
+function provinceFrom(subregion?: string | null, region?: string | null): string | undefined {
+  for (const candidate of [subregion, region]) {
+    const value = candidate?.trim();
+    if (!value) continue;
+    if (CAPITAL_REGION.test(value)) return "Metro Manila";
+    if (!PH_REGION_NAME.test(value)) return value;
+  }
+  return undefined;
+}
+
+function cleanPart(value?: string | null): string | undefined {
+  const trimmed = value?.trim();
+  if (!trimmed || /^unnamed road$/i.test(trimmed)) return undefined;
+  return trimmed;
+}
+
+/**
+ * "What address is at this GPS fix?" — answered on-device by Android's
+ * native geocoder (expo-location), with no Google API call or backend round
+ * trip. Returns null when the device has no geocoder (no Play services) or
+ * finds nothing, in which case the caller asks the user to fill the fields in.
+ */
 export async function reverseGeocodeDetailed(lat: number, lng: number): Promise<PlaceResult | null> {
-  const result = await reverseGeocodeGoogle(lat, lng);
-  if (!result) return null;
+  let results: Location.LocationGeocodedAddress[];
+  try {
+    results = await Location.reverseGeocodeAsync({ latitude: lat, longitude: lng });
+  } catch (error) {
+    console.warn("On-device reverse geocode failed:", error);
+    return null;
+  }
+
+  const top = results[0];
+  if (!top) return null;
+
+  const components: AddressComponents = {
+    houseNumber: cleanPart(top.streetNumber),
+    street: cleanPart(top.street),
+    barangay: cleanPart(top.district),
+    city: cleanPart(top.city) ?? cleanPart(top.subregion),
+    state: provinceFrom(top.subregion, top.region),
+    zipCode: cleanPart(top.postalCode),
+  };
+  if (!components.street && !components.city) return null;
 
   return {
-    formatted_address: result.formattedAddress,
-    // Keep the caller's own GPS fix rather than Google's (possibly
-    // snapped-to-road) geometry — this is "what address is at this point?",
-    // not "give me a new point."
+    formatted_address:
+      cleanPart(top.formattedAddress) ??
+      formatStructuredAddress({ ...components, street: components.street ?? "", city: components.city ?? "" }),
+    // Keep the caller's own GPS fix — this is "what address is at this
+    // point?", not "give me a new point."
     geometry: { location: { lat, lng } },
-    components: result.components,
+    components,
   };
 }
 

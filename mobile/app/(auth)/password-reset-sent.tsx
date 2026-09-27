@@ -1,4 +1,5 @@
 import React from "react";
+import { COMPANY } from "../../constants/legalDocuments";
 import { View, Text, ScrollView, Linking } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { AppIcon as Ionicons } from "../../components/icons/AppIcon";
@@ -91,7 +92,7 @@ export default function PasswordResetSentScreen() {
           Having trouble?{" "}
           <Text
             className="text-accent underline"
-            onPress={() => Linking.openURL("mailto:support@homeease.com")}
+            onPress={() => Linking.openURL(`mailto:${COMPANY.supportEmail}`)}
           >
             Contact Support
           </Text>

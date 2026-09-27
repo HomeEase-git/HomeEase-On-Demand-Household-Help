@@ -20,7 +20,7 @@ import {
   settleWorkerEarnings,
 } from '@services/paymentLifecycleService';
 import { releaseDebtHold } from '@services/debtLedgerService';
-import { createTestUser, deleteTestUser, deleteTestBooking } from './helpers';
+import { createTestUser, deleteTestUser, deleteTestBooking, completeWorkerSetup } from './helpers';
 
 const { createInvoice } = require('@services/xenditService');
 const { schedulePayout } = require('@queues/payoutQueue');
@@ -39,6 +39,7 @@ describe('Pay-after-completion payment lifecycle', () => {
   let workerId: string;
   let workerProfileId: string;
   let workerToken: string;
+  let setupServiceTypeId: string | null = null;
 
   beforeAll(async () => {
     const { user: client } = await createTestUser('pac-client', { role: 'CLIENT' });
@@ -52,6 +53,7 @@ describe('Pay-after-completion payment lifecycle', () => {
       data: { payoutMethod: 'GCASH', payoutAccountName: 'Test Worker', payoutAccountNumber: '09171234567' },
     });
     workerProfileId = profile.id;
+    setupServiceTypeId = (await completeWorkerSetup(workerId)).createdServiceTypeId;
 
     const workerLogin = await request(app).post('/api/auth/login').send({ email: worker.email, password: workerPw });
     workerToken = workerLogin.body.data.token;
@@ -60,6 +62,7 @@ describe('Pay-after-completion payment lifecycle', () => {
   afterAll(async () => {
     for (const id of createdBookingIds) await deleteTestBooking(id);
     for (const id of createdUserIds) await deleteTestUser(id);
+    if (setupServiceTypeId) await prisma.serviceType.delete({ where: { id: setupServiceTypeId } }).catch(() => {});
     await prisma.$disconnect();
   });
 

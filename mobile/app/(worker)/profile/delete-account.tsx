@@ -31,14 +31,19 @@ export default function WorkerDeleteAccountScreen() {
       logout();
       alertModal.success(
         "Account deleted",
-        "Your account has been permanently deleted",
+        "Your account and personal data have been deleted",
         [{ text: "OK", onPress: () => router.replace("/landing") }],
       );
     } catch (error) {
-      const message =
-        isAxiosError(error) && error.response?.status === 401
+      // 409 = something still open (a booking in progress, unpaid
+      // balance or earnings not yet paid out); the server says what.
+      const message = !isAxiosError(error)
+        ? "Failed to delete account"
+        : error.response?.status === 401
           ? "Password is incorrect"
-          : "Failed to delete account";
+          : error.response?.status === 409
+            ? error.response.data?.message || "Your account can't be deleted yet"
+            : "Failed to delete account";
       alertModal.error("Error", message);
     } finally {
       setDeleting(false);
@@ -59,10 +64,16 @@ export default function WorkerDeleteAccountScreen() {
         </Text>
         <View className="bg-error/10 border border-error rounded-xl p-4 mb-4">
           <Text className="text-error text-sm">
-            Your account, bookings and data will be permanently deleted. This
-            can&apos;t be undone.
+            Your profile, saved addresses, uploaded documents and photos, and
+            payment details will be erased. This can&apos;t be undone.
           </Text>
         </View>
+        <Text className="text-text-secondary text-sm mb-4">
+          Booking, payment and tax records are kept as required by law, with
+          your name removed. Chat messages stay visible to the people you
+          talked to. You can&apos;t delete your account while a booking is in
+          progress or a payment is still due.
+        </Text>
         <Text className="text-text-secondary text-sm mb-2">
           Type DELETE to confirm
         </Text>

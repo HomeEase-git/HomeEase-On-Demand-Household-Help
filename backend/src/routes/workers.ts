@@ -16,6 +16,7 @@ import {
   selectTask,
   deselectTask,
   getMyTaskCatalog,
+  getMySetupStatus,
   getWorkerCapacity,
   listMyCapabilities,
   replaceMyCapabilities,
@@ -44,9 +45,6 @@ import {
   updatePackage,
   deletePackage,
   getWorkerPackages,
-  listMyTaskPrices,
-  setMyTaskPrice,
-  deleteMyTaskPrice,
 } from '../controllers/workerController';
 import { authMiddleware } from '../middleware/auth';
 import { restrictTo } from '../middleware/role';
@@ -111,6 +109,7 @@ router.post(
 router.delete('/me/service-types/:serviceTypeId', authMiddleware, restrictTo('WORKER'), removeServiceType);
 
 router.get('/me/task-catalog', authMiddleware, restrictTo('WORKER'), getMyTaskCatalog);
+router.get('/me/setup-status', authMiddleware, restrictTo('WORKER'), getMySetupStatus);
 router.put('/me/task-selections/:serviceTaskId', authMiddleware, restrictTo('WORKER'), selectTask);
 router.delete('/me/task-selections/:serviceTaskId', authMiddleware, restrictTo('WORKER'), deselectTask);
 
@@ -119,9 +118,6 @@ router.post('/me/packages', authMiddleware, restrictTo('WORKER'), validateCreate
 router.patch('/me/packages/:packageId', authMiddleware, restrictTo('WORKER'), validateUpdatePackage, updatePackage);
 router.delete('/me/packages/:packageId', authMiddleware, restrictTo('WORKER'), deletePackage);
 
-router.get('/me/task-prices', authMiddleware, restrictTo('WORKER'), listMyTaskPrices);
-router.put('/me/task-prices/:serviceTaskId', authMiddleware, restrictTo('WORKER'), setMyTaskPrice);
-router.delete('/me/task-prices/:serviceTaskId', authMiddleware, restrictTo('WORKER'), deleteMyTaskPrice);
 
 // Registered after '/me/packages' above — see the note near the top of the
 // public-routes block.

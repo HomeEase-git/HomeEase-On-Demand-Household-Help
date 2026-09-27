@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
-import { COMMON_UNITS, PRICING_MODELS, defaultBounds, usesCount } from './catalogModel'
+import { COMMON_UNITS, PRICING_MODELS, usesCount } from './catalogModel'
 
 /**
- * Add/edit one row of the job order matrix. The worker price range defaults
- * to 80%–150% of the standard price until the admin edits it by hand.
+ * Add/edit one row of the job order matrix. The price set here is what every
+ * client pays and every worker earns; workers can't change it.
  */
 export default function JobModal({ initial, numberQuestions, doleRef, onSave, onClose }) {
   const [job, setJob] = useState(() => ({
@@ -11,15 +11,12 @@ export default function JobModal({ initial, numberQuestions, doleRef, onSave, on
     description: '',
     unit: 'job',
     price: '',
-    minPrice: '',
-    maxPrice: '',
     model: 'FIXED',
     durationHours: '',
     overrideReason: '',
     quantityRef: null,
     ...initial,
   }))
-  const [boundsTouched, setBoundsTouched] = useState(!!initial)
   const [error, setError] = useState('')
   const nameRef = useRef(null)
   const closeRef = useRef(onClose)
@@ -33,25 +30,16 @@ export default function JobModal({ initial, numberQuestions, doleRef, onSave, on
   }, [])
 
   const patch = (p) => setJob((prev) => ({ ...prev, ...p }))
-  const setPrice = (value) => {
-    const p = { price: value }
-    if (!boundsTouched && Number(value) > 0) Object.assign(p, defaultBounds(Number(value)))
-    patch(p)
-  }
-
   const quote = job.model === 'CUSTOM_QUOTE'
-  const belowFloor = !quote && doleRef && job.minPrice !== '' && Number(job.minPrice) < doleRef.hourlyWage
+  const belowFloor = !quote && doleRef && job.price !== '' && Number(job.price) < doleRef.hourlyWage
 
   const submit = (e) => {
     e.preventDefault()
     if (!job.name.trim()) return setError('Give the job a name.')
     if (!quote) {
-      if (!(Number(job.price) > 0)) return setError('Set a standard price above ₱0.')
-      if (job.minPrice === '' || job.maxPrice === '' || Number(job.minPrice) < 0 || Number(job.minPrice) > Number(job.maxPrice)) {
-        return setError('Set the lowest and highest price a worker may charge, lowest first.')
-      }
+      if (!(Number(job.price) > 0)) return setError('Set a price above ₱0.')
       if (belowFloor && !job.overrideReason.trim()) {
-        return setError('The lowest worker price is under the DOLE wage reference. Give a reason to keep it.')
+        return setError('The price is under the DOLE wage reference. Give a reason to keep it.')
       }
     }
     if (usesCount(job.model) && !job.unit.trim()) return setError('Per-unit pricing needs a unit, e.g. unit, room, kilo.')
@@ -128,47 +116,21 @@ export default function JobModal({ initial, numberQuestions, doleRef, onSave, on
               </datalist>
             </label>
             <label className="sce-field">
-              <span>Standard price (₱)</span>
+              <span>{usesCount(job.model) ? `Price per ${job.unit || 'unit'} (₱)` : 'Price (₱)'}</span>
               <input
                 className="sce-input"
                 type="number"
                 min="0"
                 value={quote ? '' : job.price}
                 disabled={quote}
-                placeholder={quote ? 'Set by the worker' : ''}
-                onChange={(e) => setPrice(e.target.value)}
+                placeholder={quote ? 'Quoted by the worker on-site' : ''}
+                onChange={(e) => patch({ price: e.target.value })}
               />
             </label>
           </div>
 
           {!quote && (
-            <div className="sce-grid3">
-              <label className="sce-field">
-                <span>Lowest a worker may charge</span>
-                <input
-                  className="sce-input"
-                  type="number"
-                  min="0"
-                  value={job.minPrice ?? ''}
-                  onChange={(e) => {
-                    setBoundsTouched(true)
-                    patch({ minPrice: e.target.value })
-                  }}
-                />
-              </label>
-              <label className="sce-field">
-                <span>Highest a worker may charge</span>
-                <input
-                  className="sce-input"
-                  type="number"
-                  min="0"
-                  value={job.maxPrice ?? ''}
-                  onChange={(e) => {
-                    setBoundsTouched(true)
-                    patch({ maxPrice: e.target.value })
-                  }}
-                />
-              </label>
+            <div className="sce-grid2">
               <label className="sce-field">
                 <span>Duration (hours, optional)</span>
                 <input
@@ -184,15 +146,15 @@ export default function JobModal({ initial, numberQuestions, doleRef, onSave, on
           )}
           {!quote && (
             <div className="sce-note">
-              {usesCount(job.model) ? `Prices are per ${job.unit || 'unit'}. ` : ''}
-              New prices default to 80%–150% of the standard price. Workers set their own within this range.
+              Every client pays this price and every worker earns from it. Workers can't change it; only the
+              expertise-tier surcharge and the distance fee are added at booking.
             </div>
           )}
 
           {belowFloor && (
             <div className="sce-field">
               <div className="sce-note sce-note--warn">
-                The lowest price is under the DOLE {doleRef.label} hourly wage reference (₱{doleRef.hourlyWage.toFixed(2)}/hr,{' '}
+                This price is under the DOLE {doleRef.label} hourly wage reference (₱{doleRef.hourlyWage.toFixed(2)}/hr,{' '}
                 {doleRef.wageOrder}). This is a soft guardrail for independent contractors, not a legal requirement.
               </div>
               <textarea

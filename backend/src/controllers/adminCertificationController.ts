@@ -57,8 +57,18 @@ export const approveCertification = async (req: AuthRequest, res: Response) => {
     // runCategoryGate) — a category can only ever have one PENDING_VERIFICATION
     // gating certification at a time (@@unique on workerProfileId+serviceTypeId),
     // so this is at most one row, but written defensively as updateMany.
+    // A request can carry several documents; approving any one of them
+    // unlocks the service it was attached for.
     const unlockedCategories = await prisma.workerServiceCategory.findMany({
-      where: { gatingCertificationId: certification.id, status: 'PENDING_VERIFICATION' },
+      where: {
+        status: 'PENDING_VERIFICATION',
+        OR: [
+          { gatingCertificationId: certification.id },
+          ...(certification.serviceTypeId
+            ? [{ workerProfileId: certification.workerProfileId, serviceTypeId: certification.serviceTypeId }]
+            : []),
+        ],
+      },
       include: { serviceType: { select: { name: true } } },
     });
     if (unlockedCategories.length > 0) {
@@ -130,10 +140,32 @@ export const rejectCertification = async (req: AuthRequest, res: Response) => {
 
     // Symmetric to approveCertification's unlock — close off any 2nd+
     // service category this certification was gating.
-    const declinedCategories = await prisma.workerServiceCategory.findMany({
-      where: { gatingCertificationId: certification.id, status: 'PENDING_VERIFICATION' },
-      include: { serviceType: { select: { name: true } } },
-    });
+    // Only decline the whole service request once none of its documents are
+    // still waiting for review (a request can carry several).
+    const otherPendingDocs = certification.serviceTypeId
+      ? await prisma.certification.count({
+          where: {
+            workerProfileId: certification.workerProfileId,
+            serviceTypeId: certification.serviceTypeId,
+            verificationStatus: 'PENDING',
+          },
+        })
+      : 0;
+    const declinedCategories =
+      otherPendingDocs > 0
+        ? []
+        : await prisma.workerServiceCategory.findMany({
+            where: {
+              status: 'PENDING_VERIFICATION',
+              OR: [
+                { gatingCertificationId: certification.id },
+                ...(certification.serviceTypeId
+                  ? [{ workerProfileId: certification.workerProfileId, serviceTypeId: certification.serviceTypeId }]
+                  : []),
+              ],
+            },
+            include: { serviceType: { select: { name: true } } },
+          });
     if (declinedCategories.length > 0) {
       await prisma.workerServiceCategory.updateMany({
         where: { id: { in: declinedCategories.map((c) => c.id) } },

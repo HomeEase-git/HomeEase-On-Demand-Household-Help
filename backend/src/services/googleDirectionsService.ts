@@ -1,11 +1,11 @@
-// Google Directions API — replaces the OSRM (OpenStreetMap-data-based)
-// public routing server previously used for drawing a worker's live route on
-// the tracking map. Reuses GOOGLE_MAPS_API_KEY (same Cloud project as
-// googleGeocodingService/googleDistanceService already depend on) — the
-// Directions API just needs to be enabled alongside Geocoding/Distance Matrix.
+// Google Routes API (computeRoutes) — the route drawn on the tracking map.
+// Replaces the legacy Directions API. Reuses GOOGLE_MAPS_API_KEY (same Cloud
+// project googleDistanceService/googlePlacesService already depend on).
+// `TRAFFIC_UNAWARE` keeps this on the cheapest Routes SKU, so durationMin is a
+// free-flow estimate, not a live-traffic ETA.
 import type { LatLng } from '@utils/geo';
 
-const DIRECTIONS_URL = 'https://maps.googleapis.com/maps/api/directions/json';
+const COMPUTE_ROUTES_URL = 'https://routes.googleapis.com/directions/v2:computeRoutes';
 
 export type DirectionsResult = {
   coordinates: LatLng[];
@@ -19,7 +19,7 @@ export function isGoogleDirectionsConfigured(): boolean {
 
 // Standard Google encoded-polyline decoding algorithm (the inverse of the
 // encoding described at https://developers.google.com/maps/documentation/utilities/polylinealgorithm) —
-// Directions API responses carry the route geometry this way instead of raw
+// Routes API responses carry the route geometry this way instead of raw
 // coordinate arrays.
 function decodePolyline(encoded: string): LatLng[] {
   const points: LatLng[] = [];
@@ -53,39 +53,47 @@ function decodePolyline(encoded: string): LatLng[] {
   return points;
 }
 
-function formatLatLng(point: LatLng): string {
-  return `${point.lat},${point.lng}`;
+function toWaypoint(point: LatLng) {
+  return { location: { latLng: { latitude: point.lat, longitude: point.lng } } };
+}
+
+// Routes API durations are protobuf Duration strings, e.g. "1234s".
+function parseDurationSeconds(duration: unknown): number {
+  const seconds = typeof duration === 'string' ? parseFloat(duration) : NaN;
+  return Number.isFinite(seconds) ? seconds : 0;
 }
 
 export async function googleDirections(origin: LatLng, destination: LatLng): Promise<DirectionsResult | null> {
   const apiKey = process.env.GOOGLE_MAPS_API_KEY;
   if (!apiKey) return null;
 
-  const url = `${DIRECTIONS_URL}?${new URLSearchParams({
-    origin: formatLatLng(origin),
-    destination: formatLatLng(destination),
-    mode: 'driving',
-    key: apiKey,
-  }).toString()}`;
-
   try {
-    const response = await fetch(url);
+    const response = await fetch(COMPUTE_ROUTES_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Goog-Api-Key': apiKey,
+        'X-Goog-FieldMask': 'routes.distanceMeters,routes.duration,routes.polyline.encodedPolyline',
+      },
+      body: JSON.stringify({
+        origin: toWaypoint(origin),
+        destination: toWaypoint(destination),
+        travelMode: 'DRIVE',
+        routingPreference: 'TRAFFIC_UNAWARE',
+      }),
+    });
     const data: any = await response.json();
 
-    if (data.status !== 'OK' || !data.routes?.length) {
-      console.error('[googleDirections] request failed:', data.status, data.error_message);
+    const route = data?.routes?.[0];
+    if (!response.ok || !route?.polyline?.encodedPolyline) {
+      console.error('[googleDirections] request failed:', response.status, data?.error?.message ?? 'no route');
       return null;
     }
 
-    const route = data.routes[0];
-    const legs = route.legs || [];
-    const distanceMeters = legs.reduce((sum: number, leg: any) => sum + (leg.distance?.value ?? 0), 0);
-    const durationSeconds = legs.reduce((sum: number, leg: any) => sum + (leg.duration?.value ?? 0), 0);
-
     return {
-      coordinates: decodePolyline(route.overview_polyline.points),
-      distanceKm: distanceMeters / 1000,
-      durationMin: durationSeconds / 60,
+      coordinates: decodePolyline(route.polyline.encodedPolyline),
+      distanceKm: (route.distanceMeters ?? 0) / 1000,
+      durationMin: parseDurationSeconds(route.duration) / 60,
     };
   } catch (error) {
     console.error('[googleDirections] request threw:', error);

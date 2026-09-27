@@ -122,7 +122,7 @@ export const validateAddServiceCategory = (
   res: Response,
   next: NextFunction
 ) => {
-  const { serviceTypeId, certificationId, certification } = req.body;
+  const { serviceTypeId, certificationId, certification, certifications } = req.body;
 
   if (typeof serviceTypeId !== 'string' || !serviceTypeId) {
     return res.status(400).json(errorResponse(400, 'serviceTypeId is required'));
@@ -134,6 +134,13 @@ export const validateAddServiceCategory = (
 
   if (certification !== undefined && (typeof certification !== 'object' || certification === null || Array.isArray(certification))) {
     return res.status(400).json(errorResponse(400, 'certification must be an object'));
+  }
+
+  if (
+    certifications !== undefined &&
+    (!Array.isArray(certifications) || certifications.some((c: unknown) => typeof c !== 'object' || c === null || Array.isArray(c)))
+  ) {
+    return res.status(400).json(errorResponse(400, 'certifications must be a list of objects'));
   }
 
   return next();
@@ -1169,16 +1176,19 @@ export const validateSubmitContractAcceptance = (
   res: Response,
   next: NextFunction
 ) => {
-  const { contractType, acceptedAt } = req.body;
-  
-  if (!contractType || typeof contractType !== 'string') {
-    return res.status(400).json(errorResponse(400, 'contractType is required and must be a string'));
+  const { contractType, contractVersion } = req.body;
+
+  const allowed = ['CLIENT_USER_AGREEMENT', 'WORKER_SERVICE_AGREEMENT', 'PRIVACY_NOTICE', 'KYC_CONSENT'];
+  if (typeof contractType !== 'string' || !allowed.includes(contractType)) {
+    return res.status(400).json(errorResponse(400, `contractType must be one of ${allowed.join(', ')}`));
   }
-  
-  if (acceptedAt !== undefined && isNaN(new Date(acceptedAt).getTime())) {
-    return res.status(400).json(errorResponse(400, 'acceptedAt must be a valid date'));
+
+  if (contractVersion !== undefined && (typeof contractVersion !== 'string' || !/^[\w.-]{1,32}$/.test(contractVersion))) {
+    return res.status(400).json(errorResponse(400, 'contractVersion must be a short version string'));
   }
-  
+
+  // acceptedAt from the client is deliberately ignored — the server's clock
+  // is the only trustworthy record of when the user accepted.
   return next();
 };
 

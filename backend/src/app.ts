@@ -22,6 +22,8 @@ import adminReviewRoutes from '@routes/adminReviews';
 import adminDisputeRoutes from '@routes/adminDisputes';
 import adminVerificationRoutes from '@routes/adminVerifications';
 import adminVatRoutes from '@routes/adminVat';
+import adminServiceRequestRoutes from '@routes/adminServiceRequests';
+import adminPackageRoutes from '@routes/adminPackages';
 import adminDashboardRoutes from '@routes/adminDashboard';
 import adminAnalyticsRoutes from '@routes/adminAnalytics';
 import adminPricingRuleRoutes from '@routes/adminPricingRules';
@@ -36,6 +38,7 @@ import promoBannerRoutes from '@routes/promoBanners';
 import internalCronRoutes from '@routes/internalCron';
 import internalDiagRoutes from '@routes/internalDiag';
 import { errorHandler } from '@middleware/errorHandler';
+import { protectResponseData } from '@middleware/protectResponseData';
 
 const app = express();
 const jsonBodyLimit = process.env.JSON_BODY_LIMIT || '1mb';
@@ -130,6 +133,10 @@ app.use('/internal/diag', internalDiagRoutes);
 // second, stricter limiter inside routes/auth.ts).
 app.use('/api', apiLimiter);
 
+// Sign private-bucket file URLs (KYC, resumes, chat images) and mask
+// encrypted payout/TIN values in every API response.
+app.use('/api', protectResponseData);
+
 // Routes
 app.use('/api/auth', authRoutes);
 app.use('/api/workers', workerRoutes);
@@ -149,6 +156,8 @@ app.use('/api/admin/reviews', adminReviewRoutes);
 app.use('/api/admin/disputes', adminDisputeRoutes);
 app.use('/api/admin/verifications', adminVerificationRoutes);
 app.use('/api/admin/vat-registrations', adminVatRoutes);
+app.use('/api/admin/service-requests', adminServiceRequestRoutes);
+app.use('/api/admin/packages', adminPackageRoutes);
 app.use('/api/admin/dashboard', adminDashboardRoutes);
 app.use('/api/admin/analytics', adminAnalyticsRoutes);
 app.use('/api/admin/pricing-rules', adminPricingRuleRoutes);

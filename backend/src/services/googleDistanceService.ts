@@ -1,61 +1,72 @@
-// Google Distance Matrix API — real driving-route distance instead of the
-// straight-line (Haversine) fallback in utils/geo.ts, which understates the
-// actual km a worker travels on PH road networks (rivers, subdivisions,
-// one-way streets, etc.). Reuses GOOGLE_MAPS_API_KEY (googleGeocodingService
-// already depends on it being set up) — the Distance Matrix API just needs
-// to be enabled on the same Cloud project. Deliberately does NOT pass
-// `departure_time`/`traffic_model`: the `distance.value` Google returns is
-// the route length for the given `mode`, not a traffic-adjusted figure (that
-// only affects `duration`, which this never requests) — so this is a static
-// "how far is the route" number, not a live "how long will it take" one.
+// Google Routes API (computeRouteMatrix) — real driving-route distance
+// instead of the straight-line (Haversine) fallback in utils/geo.ts, which
+// understates the actual km a worker travels on PH road networks (rivers,
+// subdivisions, one-way streets, etc.). Replaces the legacy Distance Matrix
+// API. Reuses GOOGLE_MAPS_API_KEY — the Routes API just needs to be enabled on
+// the same Cloud project. Deliberately uses `TRAFFIC_UNAWARE` routing (the
+// cheapest Routes SKU): `distanceMeters` is the route length, which traffic
+// doesn't change — this is a static "how far is the route" number, not a live
+// "how long will it take" one.
 //
 // Every function here returns null (per-element or for the whole call) when
 // GOOGLE_MAPS_API_KEY isn't set or the request fails, so callers fall back to
 // distanceKm's Haversine calculation with no code branching beyond a null
-// check — same pattern as googleGeocodingService.
+// check — same pattern as googlePlacesService.
 import { distanceKm, type LatLng } from '@utils/geo';
 
-const DISTANCE_MATRIX_URL = 'https://maps.googleapis.com/maps/api/distancematrix/json';
+const ROUTE_MATRIX_URL = 'https://routes.googleapis.com/distanceMatrix/v2:computeRouteMatrix';
 
-// Google caps a single Distance Matrix request at 25 destinations (and 100
-// elements) per origin — batched callers with more candidates than this
-// (e.g. a large worker search page) are chunked into multiple requests.
-const MAX_DESTINATIONS_PER_REQUEST = 25;
+// Routes API allows up to 625 elements per TRAFFIC_UNAWARE matrix request;
+// with a single origin that's far more than any caller needs, but batched
+// callers with more candidates than this (e.g. a large worker search page)
+// are still chunked so one oversized page can't fail the whole request.
+const MAX_DESTINATIONS_PER_REQUEST = 100;
 
 export function isGoogleDistanceConfigured(): boolean {
   return !!process.env.GOOGLE_MAPS_API_KEY;
 }
 
-function formatLatLng(point: LatLng): string {
-  return `${point.lat},${point.lng}`;
+function toWaypoint(point: LatLng) {
+  return { waypoint: { location: { latLng: { latitude: point.lat, longitude: point.lng } } } };
 }
 
 async function fetchDistanceChunkKm(origin: LatLng, destinations: LatLng[]): Promise<(number | null)[]> {
   const apiKey = process.env.GOOGLE_MAPS_API_KEY;
   if (!apiKey || destinations.length === 0) return destinations.map(() => null);
 
-  const url = `${DISTANCE_MATRIX_URL}?${new URLSearchParams({
-    origins: formatLatLng(origin),
-    destinations: destinations.map(formatLatLng).join('|'),
-    mode: 'driving',
-    units: 'metric',
-    key: apiKey,
-  }).toString()}`;
-
   try {
-    const response = await fetch(url);
+    const response = await fetch(ROUTE_MATRIX_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Goog-Api-Key': apiKey,
+        'X-Goog-FieldMask': 'destinationIndex,distanceMeters,condition',
+      },
+      body: JSON.stringify({
+        origins: [toWaypoint(origin)],
+        destinations: destinations.map(toWaypoint),
+        travelMode: 'DRIVE',
+        routingPreference: 'TRAFFIC_UNAWARE',
+      }),
+    });
     const data: any = await response.json();
 
-    if (data.status !== 'OK' || !data.rows?.[0]?.elements) {
-      console.error('[googleDistance] request failed:', data.status, data.error_message);
+    if (!response.ok || !Array.isArray(data)) {
+      console.error('[googleDistance] request failed:', response.status, data?.error?.message ?? data?.[0]?.error?.message);
       return destinations.map(() => null);
     }
 
-    return data.rows[0].elements.map((element: any) =>
-      element.status === 'OK' && typeof element.distance?.value === 'number'
-        ? element.distance.value / 1000
-        : null
-    );
+    // Matrix elements come back in no guaranteed order — place each one by
+    // its destinationIndex rather than its position in the array. (proto3
+    // JSON omits zero-valued fields, so index 0 arrives as undefined.)
+    const results: (number | null)[] = destinations.map(() => null);
+    for (const element of data) {
+      const index = element.destinationIndex ?? 0;
+      if (element.condition === 'ROUTE_EXISTS' && typeof element.distanceMeters === 'number') {
+        results[index] = element.distanceMeters / 1000;
+      }
+    }
+    return results;
   } catch (error) {
     console.error('[googleDistance] request threw:', error);
     return destinations.map(() => null);

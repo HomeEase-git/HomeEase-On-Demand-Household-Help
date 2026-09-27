@@ -145,6 +145,11 @@ export default function RequestDetailScreen() {
             { text: "Cancel" },
           ],
         );
+      } else if (isAxiosError(error) && error.response?.data?.code === "WORKER_SETUP_INCOMPLETE") {
+        alertModal.error("Finish Your Setup", error.message, [
+          { text: "Finish Setup", onPress: () => router.push("/(worker)/profile/setup" as any) },
+          { text: "Cancel" },
+        ]);
       } else {
         alertModal.error("Error", "Failed to accept this job. Please try again.");
       }

@@ -1,10 +1,11 @@
 import request from 'supertest';
 import app from '@/app';
 import prisma from '@config/database';
-import { createTestUser, deleteTestUser } from './helpers';
+import { createTestUser, deleteTestUser, completeWorkerSetup } from './helpers';
 
 describe('Worker search & detail — KYC visibility gate', () => {
   const createdUserIds: string[] = [];
+  const createdServiceTypeIds: string[] = [];
   let workerUserId: string;
 
   beforeAll(async () => {
@@ -17,6 +18,9 @@ describe('Worker search & detail — KYC visibility gate', () => {
   afterAll(async () => {
     for (const id of createdUserIds) {
       await deleteTestUser(id);
+    }
+    for (const id of createdServiceTypeIds) {
+      await prisma.serviceType.delete({ where: { id } }).catch(() => {});
     }
     await prisma.$disconnect();
   });
@@ -59,7 +63,18 @@ describe('Worker search & detail — KYC visibility gate', () => {
       });
     });
 
-    it('includes the worker in search results', async () => {
+    it('still excludes the worker from search until their account setup is complete', async () => {
+      const res = await request(app).get('/api/workers').query({ limit: 100 });
+
+      expect(res.status).toBe(200);
+      const ids = res.body.data.workers.map((w: { id: string }) => w.id);
+      expect(ids).not.toContain(workerUserId);
+    });
+
+    it('includes the worker in search results once setup is complete', async () => {
+      const { createdServiceTypeId } = await completeWorkerSetup(workerUserId);
+      if (createdServiceTypeId) createdServiceTypeIds.push(createdServiceTypeId);
+
       const res = await request(app).get('/api/workers').query({ limit: 100 });
 
       expect(res.status).toBe(200);
@@ -72,6 +87,23 @@ describe('Worker search & detail — KYC visibility gate', () => {
 
       expect(res.status).toBe(200);
       expect(res.body.data.id).toBe(workerUserId);
+    });
+
+    it("never exposes the worker's email, phone or street address on the public profile", async () => {
+      await prisma.user.update({ where: { id: workerUserId }, data: { phone: '09171234567' } });
+      await prisma.workerProfile.update({
+        where: { userId: workerUserId },
+        data: { address: '12 Private St', zipCode: '3000', city: 'Malolos', state: 'Bulacan' },
+      });
+
+      const res = await request(app).get(`/api/workers/${workerUserId}`);
+
+      expect(res.status).toBe(200);
+      const body = JSON.stringify(res.body);
+      expect(body).not.toContain('09171234567');
+      expect(body).not.toContain('12 Private St');
+      expect(body).not.toContain('@homeease.invalid');
+      expect(res.body.data.city).toBe('Malolos');
     });
 
     it('returns worker reviews successfully', async () => {

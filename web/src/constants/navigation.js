@@ -11,6 +11,7 @@ export const NAV_STRUCTURE = [
       { to: '/users', page: 'users', icon: 'fa-users', label: 'Clients' },
       { to: '/workers', page: 'workers', icon: 'fa-user-cog', label: 'Workers' },
       { to: '/verification', page: 'verification', icon: 'fa-id-card', label: 'Verification' },
+      { to: '/service-requests', page: 'service-requests', icon: 'fa-screwdriver-wrench', label: 'Service Requests' },
     ],
   },
   {
@@ -20,6 +21,7 @@ export const NAV_STRUCTURE = [
     label: 'Catalog & Pricing',
     children: [
       { to: '/service-catalog', page: 'service-catalog', icon: 'fa-list-check', label: 'Service Catalog' },
+      { to: '/worker-packages', page: 'worker-packages', icon: 'fa-box', label: 'Worker Packages' },
       { to: '/price-control', page: 'price-control', icon: 'fa-sliders', label: 'Price Control' },
       { to: '/pricing-rules', page: 'pricing-rules', icon: 'fa-coins', label: 'Pricing Rules' },
       { to: '/promo-banners', page: 'promo-banners', icon: 'fa-images', label: 'Promo Banners' },

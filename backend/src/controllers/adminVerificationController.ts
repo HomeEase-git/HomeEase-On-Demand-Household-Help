@@ -3,6 +3,7 @@ import { KYCStatus, Prisma } from '@prisma/client';
 import prisma from '@config/database';
 import { errorResponse } from '@utils/errorResponse';
 import { formatVerification } from '@utils/formatters';
+import { ageInYears, MIN_WORKER_AGE } from '@utils/age';
 import { verificationQueue, VERIFICATION_JOB_OPTIONS } from '@queues/verificationQueue';
 import { writeAuditLog } from '@utils/auditLog';
 import { notifyUser } from '@utils/notify';
@@ -143,6 +144,9 @@ export const getVerificationById = async (req: Request, res: Response) => {
       success: true,
       data: {
         ...formatVerification(record),
+        // For the admin to compare against the ID (18+ requirement).
+        birthDate: record.user.workerProfile?.birthDate?.toISOString().slice(0, 10) ?? null,
+        age: record.user.workerProfile?.birthDate ? ageInYears(record.user.workerProfile.birthDate) : null,
         // Only VERIFIED categories — a still-PENDING_VERIFICATION 2nd+
         // category isn't live yet and has nothing to do with this
         // (onboarding) verification request anyway.
@@ -205,14 +209,23 @@ export const approveVerification = async (req: AuthRequest, res: Response) => {
       const workerProfile = record.user.role === 'WORKER'
         ? await prisma.workerProfile.findUnique({
             where: { userId: record.userId },
-            select: { addressLat: true, addressLng: true },
+            select: { addressLat: true, addressLng: true, birthDate: true },
           })
         : null;
       const missingAddress = record.user.role === 'WORKER' && (workerProfile?.addressLat == null || workerProfile?.addressLng == null);
 
+      // Under-18 is a hard stop — no override. A missing date of birth (older
+      // applications, before it was collected) can be overridden once the
+      // admin has confirmed the age from the ID itself.
+      if (workerProfile?.birthDate && ageInYears(workerProfile.birthDate) < MIN_WORKER_AGE) {
+        return res.status(400).json(errorResponse(400, `Worker is under ${MIN_WORKER_AGE} and cannot be approved.`));
+      }
+      const missingBirthDate = record.user.role === 'WORKER' && !workerProfile?.birthDate;
+
       const missingRequirements = [
         ...missingTypes,
         ...(missingAddress ? ['geocoded address'] : []),
+        ...(missingBirthDate ? ['date of birth (confirm age 18+ from the ID)'] : []),
       ];
       if (missingRequirements.length > 0 && !adminOverrideReason?.trim()) {
         return res.status(400).json(
