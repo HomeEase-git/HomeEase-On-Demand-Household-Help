@@ -62,16 +62,33 @@ export default function SubmitQuoteScreen() {
     return (
       <SafeAreaView className="flex-1 bg-white">
         <ScreenHeader title="Submit Quote" showBack />
-        <KeyboardAwareScrollView contentContainerStyle={{ padding: 24, paddingBottom: 40 }}>
+        <KeyboardAwareScrollView
+          contentContainerStyle={{ padding: 24, paddingBottom: 40 }}
+        >
           <View className="bg-card rounded-2xl p-4 mb-6">
             <Skeleton width="25%" height={10} marginBottom={6} />
             <Skeleton width="60%" height={16} marginBottom={6} />
             <Skeleton width="40%" height={12} marginBottom={0} />
           </View>
           <Skeleton width="40%" height={16} marginBottom={16} />
-          <Skeleton width="100%" height={48} borderRadius={12} marginBottom={16} />
-          <Skeleton width="100%" height={48} borderRadius={12} marginBottom={16} />
-          <Skeleton width="100%" height={80} borderRadius={12} marginBottom={0} />
+          <Skeleton
+            width="100%"
+            height={48}
+            borderRadius={12}
+            marginBottom={16}
+          />
+          <Skeleton
+            width="100%"
+            height={48}
+            borderRadius={12}
+            marginBottom={16}
+          />
+          <Skeleton
+            width="100%"
+            height={80}
+            borderRadius={12}
+            marginBottom={0}
+          />
         </KeyboardAwareScrollView>
       </SafeAreaView>
     );
@@ -103,7 +120,10 @@ export default function SubmitQuoteScreen() {
       );
     } catch (error) {
       console.error("Submit quote error:", error);
-      alertModal.error("Error", "Failed to submit your quote. Please try again.");
+      alertModal.error(
+        "Error",
+        "Failed to submit your quote. Please try again.",
+      );
     } finally {
       setLoading(false);
     }
@@ -112,7 +132,9 @@ export default function SubmitQuoteScreen() {
   return (
     <SafeAreaView className="flex-1 bg-white">
       <ScreenHeader title="Submit Quote" showBack />
-      <KeyboardAwareScrollView contentContainerStyle={{ padding: 24, paddingBottom: 40 }}>
+      <KeyboardAwareScrollView
+        contentContainerStyle={{ padding: 24, paddingBottom: 40 }}
+      >
         {/* Booking Summary */}
         <View className="bg-card rounded-2xl p-4 mb-6">
           <Text className="text-text-secondary text-xs mb-1">Booking</Text>
@@ -130,7 +152,7 @@ export default function SubmitQuoteScreen() {
             color={colors.accent.DEFAULT}
           />
           <Text className="text-text-secondary text-sm ml-2 flex-1">
-            Your labor is covered by the booking price. Add any materials or
+            Your service is covered by the booking price. Add any materials or
             extra costs below. The client will approve or dispute them.
           </Text>
         </View>
@@ -140,7 +162,7 @@ export default function SubmitQuoteScreen() {
 
         <View className="bg-card rounded-xl px-3 py-3 mb-4 flex-row justify-between items-center">
           <Text className="text-text-secondary text-sm">
-            Labor Cost (settled at booking)
+            Service Cost (settled at booking)
           </Text>
           <Text className="text-text-primary font-semibold">
             ₱{labor.toFixed(2)}
@@ -153,7 +175,10 @@ export default function SubmitQuoteScreen() {
               Items already added on-site
             </Text>
             {addOns.map((item) => (
-              <View key={item.id} className="flex-row justify-between items-center mb-1">
+              <View
+                key={item.id}
+                className="flex-row justify-between items-center mb-1"
+              >
                 <Text className="text-text-primary text-sm">{item.name}</Text>
                 <Text className="text-text-primary font-semibold text-sm">
                   ₱{item.price.toFixed(2)}
@@ -187,14 +212,18 @@ export default function SubmitQuoteScreen() {
           </Text>
           <View className="mt-2">
             <View className="flex-row justify-between">
-              <Text className="text-text-muted text-xs">Labor (settled)</Text>
+              <Text className="text-text-muted text-xs">
+                Service Cost (settled)
+              </Text>
               <Text className="text-text-secondary text-xs">
                 ₱{labor.toFixed(2)}
               </Text>
             </View>
             {addOnsTotal > 0 && (
               <View className="flex-row justify-between mt-1">
-                <Text className="text-text-muted text-xs">Items added on-site</Text>
+                <Text className="text-text-muted text-xs">
+                  Items added on-site
+                </Text>
                 <Text className="text-text-secondary text-xs">
                   ₱{addOnsTotal.toFixed(2)}
                 </Text>
@@ -202,7 +231,9 @@ export default function SubmitQuoteScreen() {
             )}
             {materials > 0 && (
               <View className="flex-row justify-between mt-1">
-                <Text className="text-text-muted text-xs">Additional Costs</Text>
+                <Text className="text-text-muted text-xs">
+                  Additional Costs
+                </Text>
                 <Text className="text-text-secondary text-xs">
                   ₱{materials.toFixed(2)}
                 </Text>

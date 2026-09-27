@@ -13,7 +13,11 @@ import DangerButton from "../../../../components/ui/DangerButton";
 import OutlinedButton from "../../../../components/ui/OutlinedButton";
 import ImageSourcePickerBottomSheet from "../../../../components/bottom-sheets/ImageSourcePickerBottomSheet";
 import type { BottomSheetHandle } from "../../../../components/bottom-sheets/BottomSheetWrapper";
-import { useBookingStore, API_STATUS_MAP, type Booking } from "../../../../store/bookingStore";
+import {
+  useBookingStore,
+  API_STATUS_MAP,
+  type Booking,
+} from "../../../../store/bookingStore";
 import {
   approveQuote as apiApproveQuote,
   disputeQuote as apiDisputeQuote,
@@ -142,7 +146,10 @@ export default function QuoteReviewScreen() {
             );
           } catch (error) {
             console.error("Approve quote error:", error);
-            alertModal.error("Error", "Failed to approve quote. Please try again.");
+            alertModal.error(
+              "Error",
+              "Failed to approve quote. Please try again.",
+            );
           } finally {
             setLoading(false);
           }
@@ -158,7 +165,10 @@ export default function QuoteReviewScreen() {
       const { url } = await uploadIssuePhoto(uri);
       setEvidencePhotos((prev) => [...prev, url]);
     } catch {
-      alertModal.error("Upload failed", "Could not upload that photo. Please try again.");
+      alertModal.error(
+        "Upload failed",
+        "Could not upload that photo. Please try again.",
+      );
     } finally {
       setUploadingPhoto(false);
     }
@@ -170,7 +180,10 @@ export default function QuoteReviewScreen() {
 
   const handleDispute = async () => {
     if (!disputeReason.trim()) {
-      alertModal.error("Error", "Please describe why you are disputing this quote.");
+      alertModal.error(
+        "Error",
+        "Please describe why you are disputing this quote.",
+      );
       return;
     }
     setLoading(true);
@@ -193,7 +206,9 @@ export default function QuoteReviewScreen() {
   return (
     <SafeAreaView className="flex-1 bg-white">
       <ScreenHeader title="Review Quote" showBack />
-      <KeyboardAwareScrollView contentContainerStyle={{ padding: 24, paddingBottom: 40 }}>
+      <KeyboardAwareScrollView
+        contentContainerStyle={{ padding: 24, paddingBottom: 40 }}
+      >
         {/* Booking summary */}
         <View className="bg-card rounded-2xl p-4 mb-4">
           <Text className="text-text-secondary text-xs mb-1">Booking</Text>
@@ -257,7 +272,7 @@ export default function QuoteReviewScreen() {
 
           <View className="flex-row justify-between py-2 border-b border-divider">
             <Text className="text-text-secondary text-sm">
-              Labor (agreed at booking)
+              Service (agreed at booking)
             </Text>
             <Text className="text-text-primary font-semibold">
               ₱{quote.laborCost.toFixed(2)}
@@ -323,8 +338,14 @@ export default function QuoteReviewScreen() {
             <View className="flex-row flex-wrap gap-2 mt-1">
               {evidencePhotos.map((url) => (
                 <View key={url} className="relative">
-                  <RemoteImage source={{ uri: url }} className="w-20 h-20 rounded-xl" />
-                  <Pressable accessibilityRole="button" accessibilityLabel="Remove photo" hitSlop={8}
+                  <RemoteImage
+                    source={{ uri: url }}
+                    className="w-20 h-20 rounded-xl"
+                  />
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel="Remove photo"
+                    hitSlop={8}
                     className="absolute -top-1.5 -right-1.5 bg-black/70 rounded-full w-5 h-5 items-center justify-center"
                     onPress={() => handleRemoveEvidencePhoto(url)}
                   >
@@ -343,8 +364,14 @@ export default function QuoteReviewScreen() {
                     <ActivityIndicator size="small" />
                   ) : (
                     <>
-                      <Ionicons name="camera-outline" size={20} color={colors.text.muted} />
-                      <Text className="text-text-secondary text-xs mt-1">Add photo</Text>
+                      <Ionicons
+                        name="camera-outline"
+                        size={20}
+                        color={colors.text.muted}
+                      />
+                      <Text className="text-text-secondary text-xs mt-1">
+                        Add photo
+                      </Text>
                     </>
                   )}
                 </Pressable>
@@ -398,7 +425,10 @@ export default function QuoteReviewScreen() {
           <OutlinedButton label="Go Back" onPress={() => router.back()} />
         )}
       </KeyboardAwareScrollView>
-      <ImageSourcePickerBottomSheet innerRef={photoSheetRef} onSelect={handlePickEvidencePhoto} />
+      <ImageSourcePickerBottomSheet
+        innerRef={photoSheetRef}
+        onSelect={handlePickEvidencePhoto}
+      />
     </SafeAreaView>
   );
 }
