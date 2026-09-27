@@ -1,9 +1,7 @@
 import React from "react";
-import { View, Text, Pressable } from "react-native";
-import { AppIcon as Ionicons } from "../icons/AppIcon";
-import { colors } from "../../constants";
 import { getCategoryIcon } from "../../utils/categoryIcons";
 import type { ScopeField, ServiceTaskOption } from "../../types/booking4step.types";
+import SelectDropdown from "./SelectDropdown";
 
 export type ServiceCategoryOption = {
   id: string;
@@ -24,56 +22,26 @@ type Props = {
   loading?: boolean;
 };
 
-/** Grid-style service category picker (Step 1: SCOPE). */
+/** Dropdown service category picker (Step 1: SCOPE). */
 export default function ServiceCategorySelector({ categories, selectedId, onSelect, loading }: Props) {
-  if (loading) {
-    return (
-      <View className="flex-row flex-wrap -mx-1.5">
-        {[0, 1, 2, 3].map((i) => (
-          <View key={i} className="w-1/2 px-1.5 mb-3">
-            <View className="bg-card rounded-2xl h-28 opacity-50" />
-          </View>
-        ))}
-      </View>
-    );
-  }
-
   return (
-    <View className="flex-row flex-wrap -mx-1.5" accessibilityRole="radiogroup">
-      {categories.map((cat) => {
-        const isSelected = cat.id === selectedId;
-        return (
-          <View key={cat.id} className="w-1/2 px-1.5 mb-3">
-            <Pressable
-              accessibilityRole="radio"
-              accessibilityState={{ selected: isSelected }}
-              onPress={() => onSelect(cat)}
-              className={`rounded-2xl p-4 h-28 justify-between border-2 ${
-                isSelected ? "bg-accent/10 border-accent" : "bg-card border-transparent"
-              }`}
-            >
-              <Ionicons
-                name={(cat.icon || getCategoryIcon(cat.name)) as any}
-                size={26}
-                color={isSelected ? colors.accent.DEFAULT : colors.text.secondary}
-              />
-              <View>
-                <Text
-                  className={`font-bold text-sm ${isSelected ? "text-accent" : "text-text-primary"}`}
-                  numberOfLines={1}
-                >
-                  {cat.name}
-                </Text>
-                <Text className="text-text-muted text-xs mt-0.5">
-                  {cat.priceRangeMin === cat.priceRangeMax
-                    ? `from ₱${cat.priceRangeMin}`
-                    : `₱${cat.priceRangeMin} – ₱${cat.priceRangeMax}`}
-                </Text>
-              </View>
-            </Pressable>
-          </View>
-        );
-      })}
-    </View>
+    <SelectDropdown
+      loading={loading}
+      placeholder="Choose a service"
+      selectedId={selectedId}
+      items={categories.map((cat) => ({
+        id: cat.id,
+        label: cat.name,
+        icon: cat.icon || getCategoryIcon(cat.name),
+        price:
+          cat.priceRangeMin === cat.priceRangeMax
+            ? `from ₱${cat.priceRangeMin}`
+            : `₱${cat.priceRangeMin} – ₱${cat.priceRangeMax}`,
+      }))}
+      onSelect={(id) => {
+        const cat = categories.find((c) => c.id === id);
+        if (cat) onSelect(cat);
+      }}
+    />
   );
 }

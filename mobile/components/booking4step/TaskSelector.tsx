@@ -1,8 +1,6 @@
 import React from "react";
-import { View, Text, Pressable } from "react-native";
-import { AppIcon as Ionicons } from "../icons/AppIcon";
-import { colors } from "../../constants";
 import type { ServiceTaskOption } from "../../types/booking4step.types";
+import SelectDropdown from "./SelectDropdown";
 
 type Props = {
   tasks: ServiceTaskOption[];
@@ -20,40 +18,25 @@ function taskPriceLabel(task: ServiceTaskOption): string {
 }
 
 /**
- * List-style task picker shown once a category is selected (Step 1) —
+ * Dropdown task picker shown once a category is selected (Step 1) —
  * lets the client pick the specific job (e.g. "Toilet Repair" under
  * "Plumbing Repair"), each with its own admin-set price.
  */
 export default function TaskSelector({ tasks, selectedId, onSelect }: Props) {
   return (
-    <View accessibilityRole="radiogroup">
-      {tasks.map((task) => {
-        const isSelected = task.id === selectedId;
-        return (
-          <Pressable
-            key={task.id}
-            accessibilityRole="radio"
-            accessibilityState={{ selected: isSelected }}
-            onPress={() => onSelect(task)}
-            className={`rounded-2xl p-3.5 mb-2 border-2 flex-row items-center justify-between ${
-              isSelected ? "bg-accent/10 border-accent" : "bg-card border-transparent"
-            }`}
-          >
-            <View className="flex-1 pr-3">
-              <Text className={`font-semibold text-sm ${isSelected ? "text-accent" : "text-text-primary"}`}>
-                {task.name}
-              </Text>
-              {!!task.description && (
-                <Text className="text-text-muted text-xs mt-0.5" numberOfLines={2}>
-                  {task.description}
-                </Text>
-              )}
-              <Text className="text-text-secondary text-xs mt-1 font-medium">{taskPriceLabel(task)}</Text>
-            </View>
-            {isSelected && <Ionicons name="checkmark-circle" size={20} color={colors.accent.DEFAULT} />}
-          </Pressable>
-        );
-      })}
-    </View>
+    <SelectDropdown
+      placeholder="Choose the job"
+      selectedId={selectedId}
+      items={tasks.map((task) => ({
+        id: task.id,
+        label: task.name,
+        description: task.description,
+        price: taskPriceLabel(task),
+      }))}
+      onSelect={(id) => {
+        const task = tasks.find((t) => t.id === id);
+        if (task) onSelect(task);
+      }}
+    />
   );
 }

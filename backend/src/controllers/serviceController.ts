@@ -3,6 +3,7 @@ import prisma from '@config/database';
 import { errorResponse } from '@utils/errorResponse';
 import { getAppSettings } from '@services/appSettingsService';
 import { computeWorkerTier, tierMultiplier } from '@utils/workerTier';
+import { workerSetupCompleteWhere } from '@services/workerSetupService';
 
 export const getServiceTypes = async (_req: Request, res: Response) => {
   try {
@@ -21,10 +22,17 @@ export const getServiceTypes = async (_req: Request, res: Response) => {
         // Only a VERIFIED category connection counts — a
         // worker whose 2nd+ category is still PENDING_VERIFICATION isn't
         // actually bookable for it yet (see WorkerServiceCategory's docblock).
+        // Same eligibility as workerController.searchWorkers, setup gate
+        // included, so a tile never counts a worker the list won't show.
         workerCategories: {
           where: {
             status: 'VERIFIED',
-            workerProfile: { isAvailable: true, kycStatus: 'APPROVED', debtHoldAt: null },
+            workerProfile: {
+              isAvailable: true,
+              kycStatus: 'APPROVED',
+              debtHoldAt: null,
+              AND: [workerSetupCompleteWhere()],
+            },
           },
           select: {
             workerProfile: { select: { userId: true, rating: true, yearsExperience: true } },
