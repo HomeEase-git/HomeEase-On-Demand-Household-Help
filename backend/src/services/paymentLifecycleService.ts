@@ -129,16 +129,29 @@ function priceBooking(booking: BookingWithAddOns, commissionRate: number, withho
  * records the transaction and books the platform's uncollected cut as worker
  * debt. No gateway call, no Payout.
  */
+function cashJobDuesMessage(collected: number, platformCut: number, coveredByCredit: number): string {
+  const owed = roundToCentavo(platformCut - coveredByCredit);
+  const intro = `You collected ₱${collected.toFixed(2)} in cash. The ₱${platformCut.toFixed(2)} commission + tax`;
+  if (owed <= 0) return `${intro} was covered by your payout credit — nothing to pay.`;
+  if (coveredByCredit > 0) {
+    return (
+      `${intro} was partly covered by your ₱${coveredByCredit.toFixed(2)} payout credit. ` +
+      `The remaining ₱${owed.toFixed(2)} will be deducted from your next online-job payout.`
+    );
+  }
+  return `${intro} will be deducted from your next online-job payout.`;
+}
+
 export async function settleCashBooking(bookingId: string) {
   const booking = await loadBooking(bookingId);
   const { commissionRate, withholdingTaxRate } = resolveRates(booking, await getAppSettings());
   const priced = priceBooking(booking, commissionRate, withholdingTaxRate);
   const platformCut = roundToCentavo(priced.commissionAmount + priced.withholdingTaxAmount);
 
-  const { payment } = await prisma.$transaction(async (tx) => {
+  const { payment, coveredByCredit } = await prisma.$transaction(async (tx) => {
     const existing = await tx.payment.findUnique({ where: { bookingId } });
     if (existing && existing.status === 'COMPLETED') {
-      return { payment: existing };
+      return { payment: existing, coveredByCredit: 0 };
     }
 
     const paymentData = {
@@ -181,14 +194,15 @@ export async function settleCashBooking(bookingId: string) {
         select: { id: true },
       });
       if (workerProfile) {
-        await accrueDebtTx(tx, workerProfile.id, platformCut, {
+        const accrued = await accrueDebtTx(tx, workerProfile.id, platformCut, {
           bookingId,
           note: 'Commission + withholding tax on a cash job (paid to you in person)',
         });
+        return { payment, coveredByCredit: accrued.coveredByCredit };
       }
     }
 
-    return { payment };
+    return { payment, coveredByCredit: 0 };
   });
 
   if (booking.workerId) {
@@ -196,9 +210,7 @@ export async function settleCashBooking(bookingId: string) {
       userId: booking.workerId,
       type: 'PAYMENT_RECEIVED',
       title: 'Cash Job Completed',
-      message:
-        `You collected ₱${priced.totalAmount.toFixed(2)} in cash. ₱${platformCut.toFixed(2)} ` +
-        `(commission + tax) will be deducted from your next online-job payout.`,
+      message: cashJobDuesMessage(priced.totalAmount, platformCut, coveredByCredit),
       relatedId: bookingId,
     });
   }
@@ -680,7 +692,7 @@ export async function voidUnpaidPayment(bookingId: string, reason: string) {
  * decision) any record whose stored period contains this payment's
  * capturedAt, and notifies admins once if anything was flagged.
  */
-async function flagTaxRecordsForRefundedPayment(payment: {
+export async function flagTaxRecordsForRefundedPayment(payment: {
   id: string;
   bookingId: string;
   capturedAt: Date | null;
@@ -735,10 +747,22 @@ async function flagTaxRecordsForRefundedPayment(payment: {
   );
 }
 
+/** The worker's payout already left — the refund has to be settled manually. */
+export class PayoutAlreadySentError extends Error {
+  constructor(bookingId: string) {
+    super(`Payout for booking ${bookingId} has already been disbursed — this refund needs a manual clawback.`);
+  }
+}
+
+/** The payout worker is mid-send; the refund can simply be retried shortly. */
+export class PayoutInFlightError extends Error {
+  constructor(bookingId: string) {
+    super(`Payout for booking ${bookingId} is being sent right now — retry the refund in a minute.`);
+  }
+}
+
 function manualClawbackError(bookingId: string) {
-  return new Error(
-    `Payout for booking ${bookingId} has already been disbursed — this refund needs a manual clawback.`
-  );
+  return new PayoutAlreadySentError(bookingId);
 }
 
 /**
@@ -754,7 +778,7 @@ function manualClawbackError(bookingId: string) {
  * The lock stays even if the refund then fails, so a retried refund can't
  * race a payout either.
  */
-async function stopWorkerPayout(paymentId: string, bookingId: string, reason: string): Promise<void> {
+export async function stopWorkerPayout(paymentId: string, bookingId: string, reason: string): Promise<void> {
   const claim = await prisma.payment.updateMany({
     where: { id: paymentId, workerSettledAt: null },
     data: { workerSettledAt: new Date() },
@@ -779,7 +803,7 @@ async function stopWorkerPayout(paymentId: string, bookingId: string, reason: st
   const xenditPayoutId = inFlight.xenditDisbursementId;
   if (!xenditPayoutId) {
     // The payout worker is between claiming it and hearing back from Xendit.
-    throw new Error(`Payout for booking ${bookingId} is being sent right now — retry the refund in a minute.`);
+    throw new PayoutInFlightError(bookingId);
   }
 
   const remoteStatus = await cancelPayout(xenditPayoutId)
@@ -845,6 +869,7 @@ export async function reconcilePendingRefund(paymentId: string): Promise<'succee
   const refund = await retrieveRefund(payment.xenditRefundId);
   if (refund.status === 'SUCCEEDED') {
     await prisma.payment.update({ where: { id: payment.id }, data: { xenditRefundStatus: 'SUCCEEDED' } });
+    await undoWorkerSettlement(payment.id);
     return 'succeeded';
   }
   if (refund.status !== 'FAILED' && refund.status !== 'CANCELLED') return 'pending';
@@ -853,6 +878,20 @@ export async function reconcilePendingRefund(paymentId: string): Promise<'succee
     where: { id: payment.id },
     data: { status: 'COMPLETED', escrowStatus: 'RELEASED', xenditRefundStatus: refund.status, refundedAt: null },
   });
+  const failureReason = `Xendit refund ended ${refund.status}${refund.failure_code ? ` (${refund.failure_code})` : ''}`;
+  const approved = await prisma.refundRequest.findMany({
+    where: { paymentId: payment.id, status: 'APPROVED' },
+    select: { id: true, disputeId: true },
+  });
+  for (const request of approved) {
+    await prisma.refundRequest.update({ where: { id: request.id }, data: { status: 'FAILED', failureReason } });
+    if (request.disputeId) {
+      await prisma.dispute.update({
+        where: { id: request.disputeId },
+        data: { refundStatus: 'FAILED', refundFailureReason: failureReason },
+      });
+    }
+  }
   await writeAuditLog({
     action: 'REFUND_FAILED',
     category: 'SYSTEM_ERROR',
@@ -871,7 +910,7 @@ export async function reconcilePendingRefund(paymentId: string): Promise<'succee
  * and compensation credit that rode along is restored. Runs once per payment
  * (claim on settlementReversedAt); a no-op when nothing was settled.
  */
-async function undoWorkerSettlement(paymentId: string): Promise<void> {
+export async function undoWorkerSettlement(paymentId: string): Promise<void> {
   await prisma.$transaction(async (tx) => {
     const claim = await tx.payment.updateMany({
       where: { id: paymentId, settlementReversedAt: null },
@@ -930,9 +969,14 @@ export async function refundOrVoidPayment(bookingId: string, reason: string) {
         amountPesos: payment.capturedAmount ?? payment.totalAmount,
       });
     }
-    // The client's money is going back, so dues netted from this job's
-    // (now stopped) payout weren't really paid.
-    await undoWorkerSettlement(payment.id);
+    // Dues netted from this job's (now stopped) payout weren't really paid
+    // once the client has their money back — so undo the settlement only
+    // when the refund has actually succeeded. A PENDING refund is undone by
+    // the sweep when it completes (reconcilePendingRefund); one that fails
+    // leaves the worker's dues untouched.
+    if (!refund || refund.status === 'SUCCEEDED') {
+      await undoWorkerSettlement(payment.id);
+    }
   } else if (payment.methodType === 'CASH') {
     // Reverse the commission-debt accrual; the worker returns the cash
     // directly. The status claim and the reversal commit together, so a

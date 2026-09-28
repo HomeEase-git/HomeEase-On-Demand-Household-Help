@@ -9,7 +9,7 @@ import { buildPaginationMeta, getPaginationParams } from '@utils/pagination';
 import { writeAuditLog } from '@utils/auditLog';
 import { notifyUser } from '@utils/notify';
 import { sendSmsToUser } from '@utils/smsService';
-import { refundOrVoidPayment } from '@services/paymentLifecycleService';
+import { requestRefund } from '@services/refundRequestService';
 import { cancelPendingExpiryJob } from '@queues/bookingQueue';
 import type { JwtPayload } from '@/types/index';
 
@@ -280,8 +280,14 @@ export const cancelBookingAdmin = async (req: AuthRequest, res: Response) => {
     await cancelPendingExpiryJob(id).catch((error) => {
       console.error(`Failed to cancel pending-expiry job for admin-cancelled booking ${id}:`, error);
     });
-    await refundOrVoidPayment(id, reason?.trim() || 'Cancelled by admin').catch((error) => {
-      console.error(`Failed to refund payment for admin-cancelled booking ${id}:`, error);
+    // A paid booking's refund goes to the Refunds page for approval.
+    await requestRefund({
+      bookingId: id,
+      reason: reason?.trim() || 'Cancelled by admin',
+      source: 'ADMIN_CANCEL',
+      requestedById: adminId,
+    }).catch((error) => {
+      console.error(`Failed to void/refund-request payment for admin-cancelled booking ${id}:`, error);
     });
 
     await writeAuditLog({

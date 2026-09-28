@@ -5,6 +5,7 @@ import { errorResponse } from '@utils/errorResponse';
 import { notifyUser } from '@utils/notify';
 import { sendSmsToUser } from '@utils/smsService';
 import { writeAuditLog } from '@utils/auditLog';
+import { requestRefund } from '@services/refundRequestService';
 import { formatDisplayId } from '@utils/formatters';
 import { distanceMeters, isWithinRadiusMeters } from '@utils/geo';
 import { resolveDrivingDistanceKm } from '@services/googleDistanceService';
@@ -14,7 +15,6 @@ import { findAutoMatchWorker, LATE_CANCEL_THRESHOLD_HOURS } from '@services/matc
 import {
   settleCashBooking,
   createCompletionInvoice,
-  refundOrVoidPayment,
 } from '@services/paymentLifecycleService';
 import {
   toDayStart,
@@ -1384,9 +1384,12 @@ export const declineBooking = async (req: AuthRequest, res: Response) => {
     await cancelPendingExpiryJob(id).catch((error) => {
       console.error(`Failed to cancel pending-expiry job for declined booking ${id}:`, error);
     });
-    await refundOrVoidPayment(id, 'WORKER_DECLINED').catch((error) => {
-      console.error(`Failed to void payment for declined booking ${id}:`, error);
-    });
+    // A paid booking's refund waits for an admin; an unpaid one is voided.
+    await requestRefund({ bookingId: id, reason: 'WORKER_DECLINED', source: 'BOOKING_CANCELLED', requestedById: workerId }).catch(
+      (error) => {
+        console.error(`Failed to void/refund-request payment for declined booking ${id}:`, error);
+      }
+    );
 
     await writeAuditLog({
       actorId: workerId,
@@ -3001,8 +3004,13 @@ export const cancelBooking = async (req: AuthRequest, res: Response) => {
     await cancelPendingExpiryJob(id).catch((error) => {
       console.error(`Failed to cancel pending-expiry job for cancelled booking ${id}:`, error);
     });
-    await refundOrVoidPayment(id, reason || 'Booking cancelled').catch((error) => {
-      console.error(`Failed to void payment for cancelled booking ${id}:`, error);
+    await requestRefund({
+      bookingId: id,
+      reason: reason || 'Booking cancelled',
+      source: 'BOOKING_CANCELLED',
+      requestedById: req.user.userId,
+    }).catch((error) => {
+      console.error(`Failed to void/refund-request payment for cancelled booking ${id}:`, error);
     });
 
     // Notify the other party (workerId may be null if booking is unassigned)

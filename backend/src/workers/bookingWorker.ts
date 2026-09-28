@@ -4,12 +4,12 @@ import { workerConnection as connection } from '@config/redis';
 import { notifyUser } from '@utils/notify';
 import { sendSmsToUser } from '@utils/smsService';
 import { writeAuditLog } from '@utils/auditLog';
+import { requestRefund } from '@services/refundRequestService';
 import { BOOKING_QUEUE_NAME, JOB_NAMES, type ExpirePendingBookingJobData } from '@queues/bookingQueue';
 import { bookingStartInstant } from '@services/workerAvailabilityService';
 import { chargePenaltyTx } from '@services/debtLedgerService';
 import { getAppSettings } from '@services/appSettingsService';
 import {
-  refundOrVoidPayment,
   settleCashBooking,
   settleWorkerEarnings,
   reconcilePendingPayment,
@@ -86,8 +86,8 @@ export async function expirePendingBooking(data: ExpirePendingBookingJobData): P
     });
   });
 
-  await refundOrVoidPayment(booking.id, 'WORKER_NO_RESPONSE').catch((error) => {
-    console.error(`Failed to void payment for expired booking ${booking.id}:`, error);
+  await requestRefund({ bookingId: booking.id, reason: 'WORKER_NO_RESPONSE', source: 'BOOKING_CANCELLED' }).catch((error) => {
+    console.error(`Failed to void/refund-request payment for expired booking ${booking.id}:`, error);
   });
 
   await notifyUser({
@@ -616,8 +616,8 @@ export async function cancelWorkerNoShows(): Promise<void> {
       });
       if (!cancelled) continue;
 
-      await refundOrVoidPayment(booking.id, 'WORKER_NO_SHOW').catch((error) => {
-        console.error(`Failed to void payment for no-show booking ${booking.id}:`, error);
+      await requestRefund({ bookingId: booking.id, reason: 'WORKER_NO_SHOW', source: 'BOOKING_CANCELLED' }).catch((error) => {
+        console.error(`Failed to void/refund-request payment for no-show booking ${booking.id}:`, error);
       });
 
       await notifyUser({

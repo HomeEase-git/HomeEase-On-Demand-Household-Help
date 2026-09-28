@@ -6,7 +6,8 @@ import { notifyUser } from '@utils/notify';
 import { writeAuditLog } from '@utils/auditLog';
 import { formatDisplayId, formatPeso } from '@utils/formatters';
 import { buildPaginationMeta, getPaginationParams } from '@utils/pagination';
-import { refundOrVoidPayment, createCompletionInvoice, settlePlatformFundedPayment } from '@services/paymentLifecycleService';
+import { createCompletionInvoice, settlePlatformFundedPayment } from '@services/paymentLifecycleService';
+import { requestRefund } from '@services/refundRequestService';
 import type { JwtPayload } from '@/types/index';
 
 interface AuthRequest extends Request {
@@ -564,18 +565,28 @@ export const resolveDispute = async (req: AuthRequest, res: Response) => {
     // manual clawback") was caught and only console.error'd, while the API
     // still reported success and nothing else in the system ever surfaced
     // that the client's money never actually moved.
-    let refundStatus: 'NOT_APPLICABLE' | 'SUCCEEDED' | 'FAILED' = 'NOT_APPLICABLE';
+    // A paid booking's refund isn't sent here: it becomes a refund request
+    // (refundStatus PENDING_APPROVAL) that an admin approves on the Refunds
+    // page, which then updates this dispute's refundStatus.
+    let refundStatus: 'NOT_APPLICABLE' | 'SUCCEEDED' | 'FAILED' | 'PENDING_APPROVAL' = 'NOT_APPLICABLE';
     let refundFailureReason: string | null = null;
     let refundAmount: number | null = null;
 
     if (action === 'CANCEL_BOOKING') {
       try {
-        const refundedPayment = await refundOrVoidPayment(
-          booking.id,
-          resolution?.trim() || 'Cancelled via dispute resolution'
-        );
-        refundStatus = 'SUCCEEDED';
-        refundAmount = refundedPayment?.capturedAmount ?? refundedPayment?.totalAmount ?? null;
+        const outcome = await requestRefund({
+          bookingId: booking.id,
+          reason: resolution?.trim() || 'Cancelled via dispute resolution',
+          source: 'DISPUTE_RESOLUTION',
+          requestedById: adminId,
+          disputeId: id,
+        });
+        if (outcome.kind === 'requested') {
+          refundStatus = 'PENDING_APPROVAL';
+          refundAmount = outcome.request.amount;
+        } else if (outcome.kind === 'voided') {
+          refundStatus = 'SUCCEEDED';
+        }
       } catch (error: any) {
         refundStatus = 'FAILED';
         refundFailureReason = error?.message || 'Unknown error';

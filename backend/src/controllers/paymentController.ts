@@ -243,8 +243,8 @@ export const listMyPayments = async (req: AuthRequest, res: Response) => {
  *
  *  - Payment still PENDING (unpaid GCash/Maya) -> void it directly.
  *  - Payment COMPLETED -> money has already moved, so this opens a Dispute for
- *    an admin to review; the actual refund happens in dispute resolution
- *    (adminDisputeController -> refundOrVoidPayment).
+ *    an admin to review; resolving it with Cancel & Refund files a refund
+ *    request that an admin then approves (refundRequestService).
  */
 export const refundPayment = async (req: AuthRequest, res: Response) => {
   try {

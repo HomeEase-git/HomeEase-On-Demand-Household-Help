@@ -209,6 +209,11 @@ enum NotificationType {
   FOLLOW_UP_VISIT_SCHEDULED
   CANCELLATION_PENALTY
   CANCELLATION_COMPENSATION
+  // A paid booking needs a refund decision (admins), or that decision was
+  // made (the client).
+  REFUND_REQUESTED
+  REFUND_APPROVED
+  REFUND_REJECTED
 }
 
 enum TimeSlot {
@@ -1800,7 +1805,7 @@ model Dispute {
   // console.error with the API still reporting success. NOT_APPLICABLE for
   // every action other than CANCEL_BOOKING, and for CANCEL_BOOKING cases
   // where there was nothing to refund (no payment, or already PENDING/void).
-  refundStatus        String  @default("NOT_APPLICABLE") // 'NOT_APPLICABLE' | 'SUCCEEDED' | 'FAILED'
+  refundStatus        String  @default("NOT_APPLICABLE") // 'NOT_APPLICABLE' | 'PENDING_APPROVAL' | 'SUCCEEDED' | 'FAILED' | 'REJECTED' — follows its RefundRequest
   refundFailureReason String?
 
   // SLA sweep (bookingWorker.escalateStaleDisputes) — re-notifies admins
@@ -1863,8 +1868,8 @@ model Payment {
   releasedAt   DateTime?
 
   // Refund audit
-  refundReason String?
-  refundedAt   DateTime?
+  refundReason       String?
+  refundedAt         DateTime?
   // Xendit refund reference + last known status (PENDING/SUCCEEDED/FAILED/
   // CANCELLED). A retried refund reuses xenditRefundId instead of creating a
   // second one; the settle-completions sweep reconciles PENDING refunds.
@@ -1930,7 +1935,8 @@ model Payment {
   // collected from clients" reporting, since no client payment happened.
   platformFunded Boolean @default(false)
 
-  payout Payout?
+  payout         Payout?
+  refundRequests RefundRequest[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -2412,4 +2418,47 @@ model PromoBanner {
   updatedAt         DateTime  @updatedAt
 
   @@index([isActive, sortOrder])
+}
+
+enum RefundRequestStatus {
+  PENDING // waiting for an admin
+  APPROVED // admin approved and the refund went through (or is PENDING at Xendit)
+  FAILED // admin approved but the refund couldn't go through — can be approved again
+  REJECTED // admin decided no refund
+  REFUNDED_MANUALLY // admin settled it outside the app (e.g. the payout was already sent)
+}
+
+enum RefundRequestSource {
+  BOOKING_CANCELLED // client/worker/system cancelled a booking that was already paid
+  ADMIN_CANCEL // admin force-cancelled the booking
+  DISPUTE_RESOLUTION // admin resolved a dispute with Cancel & Refund
+}
+
+// Refunds of money that was actually paid never happen automatically: every
+// one waits here for an admin to approve, reject, or record as done manually.
+// Voiding an unpaid payment needs no request (no money moved).
+model RefundRequest {
+  id        String  @id @default(cuid())
+  paymentId String
+  payment   Payment @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+  bookingId String // soft reference, for listing
+  disputeId String? // set when it came from a dispute; its refundStatus follows this request
+
+  amount        Float
+  reason        String
+  source        RefundRequestSource
+  requestedById String? // soft reference — the user who triggered it (null = system)
+
+  status        RefundRequestStatus @default(PENDING)
+  decidedById   String?
+  decidedAt     DateTime?
+  decisionNote  String?
+  failureReason String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([status])
+  @@index([paymentId])
+  @@index([bookingId])
 }

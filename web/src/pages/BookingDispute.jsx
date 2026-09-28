@@ -238,6 +238,8 @@ export default function BookingDispute() {
       setDisputes((prev) => (params.statusTab === 'Open' ? prev.filter((d) => d.id !== selected.id) : prev))
       if (updated?.refundStatus === 'FAILED') {
         showError(`Dispute resolved, but the refund failed and needs manual follow-up: ${updated.refundFailureReason || 'unknown error'}`)
+      } else if (updated?.refundStatus === 'PENDING_APPROVAL') {
+        showSuccess('Dispute resolved. The refund is waiting for approval on the Refunds page.')
       } else {
         showSuccess(`Dispute resolved: ${pendingAction.label}.`)
       }
@@ -298,6 +300,11 @@ export default function BookingDispute() {
                         {d.refundStatus === 'FAILED' && (
                           <span style={{ marginLeft: '0.35rem' }}>
                             <Badge variant="flagged">Refund Failed</Badge>
+                          </span>
+                        )}
+                        {d.refundStatus === 'PENDING_APPROVAL' && (
+                          <span style={{ marginLeft: '0.35rem' }}>
+                            <Badge variant="pending">Refund Awaiting Approval</Badge>
                           </span>
                         )}
                       </td>
@@ -415,11 +422,19 @@ export default function BookingDispute() {
                   <div className="value">{selected.resolution}</div>
                 </div>
               )}
+              {selected.refundStatus === 'PENDING_APPROVAL' && (
+                <div className="detail-block detail-block--full">
+                  <label>Refund Status</label>
+                  <div className="value">
+                    Waiting for approval — <a href="#/payments/refunds">open the Refunds page</a>.
+                  </div>
+                </div>
+              )}
               {selected.refundStatus === 'FAILED' && (
                 <div className="detail-block detail-block--full">
                   <label>Refund Status</label>
                   <div className="value" style={{ color: 'var(--danger)' }}>
-                    Failed — needs manual follow-up in Xendit.
+                    Failed — retry or record it on the Refunds page.
                     {selected.refundFailureReason ? ` (${selected.refundFailureReason})` : ''}
                   </div>
                 </div>
