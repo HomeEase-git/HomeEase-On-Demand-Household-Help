@@ -31,6 +31,21 @@ export async function retryPayout(id) {
 }
 
 /** Downloads the CSV via a raw fetch (apiRequest always parses JSON) and saves it client-side. */
+// Refund approval queue. `status` is a comma-separated RefundRequestStatus list.
+export async function fetchRefundRequests(params = {}) {
+  const response = await apiRequest(`/admin/payments/refund-requests?${buildQuery(params)}`);
+  return { data: response.data, meta: response.meta };
+}
+
+// action: 'approve' | 'reject' | 'manual'
+export async function decideRefundRequest(id, action, note) {
+  const response = await apiRequest(`/admin/payments/refund-requests/${id}/${action}`, {
+    method: 'POST',
+    body: JSON.stringify({ note }),
+  });
+  return response.data;
+}
+
 export async function downloadPayoutsCsv(params = {}) {
   const baseUrl = (import.meta.env.VITE_API_URL || '/api').replace(/\/$/, '');
   const token = getStoredToken();

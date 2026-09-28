@@ -19,7 +19,7 @@ import { formatPeso } from '../data/payments'
 
 const SUB_NAV = [
   { to: '/payments', label: 'All Transactions' },
-  { to: '/payments/refunds', label: 'Refund History' },
+  { to: '/payments/refunds', label: 'Refunds' },
   { to: '/payments/payouts', label: 'Payout Distribution' },
 ]
 

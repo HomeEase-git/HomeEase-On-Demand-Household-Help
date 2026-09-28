@@ -692,7 +692,7 @@ export async function voidUnpaidPayment(bookingId: string, reason: string) {
  * decision) any record whose stored period contains this payment's
  * capturedAt, and notifies admins once if anything was flagged.
  */
-async function flagTaxRecordsForRefundedPayment(payment: {
+export async function flagTaxRecordsForRefundedPayment(payment: {
   id: string;
   bookingId: string;
   capturedAt: Date | null;
@@ -747,10 +747,22 @@ async function flagTaxRecordsForRefundedPayment(payment: {
   );
 }
 
+/** The worker's payout already left — the refund has to be settled manually. */
+export class PayoutAlreadySentError extends Error {
+  constructor(bookingId: string) {
+    super(`Payout for booking ${bookingId} has already been disbursed — this refund needs a manual clawback.`);
+  }
+}
+
+/** The payout worker is mid-send; the refund can simply be retried shortly. */
+export class PayoutInFlightError extends Error {
+  constructor(bookingId: string) {
+    super(`Payout for booking ${bookingId} is being sent right now — retry the refund in a minute.`);
+  }
+}
+
 function manualClawbackError(bookingId: string) {
-  return new Error(
-    `Payout for booking ${bookingId} has already been disbursed — this refund needs a manual clawback.`
-  );
+  return new PayoutAlreadySentError(bookingId);
 }
 
 /**
@@ -766,7 +778,7 @@ function manualClawbackError(bookingId: string) {
  * The lock stays even if the refund then fails, so a retried refund can't
  * race a payout either.
  */
-async function stopWorkerPayout(paymentId: string, bookingId: string, reason: string): Promise<void> {
+export async function stopWorkerPayout(paymentId: string, bookingId: string, reason: string): Promise<void> {
   const claim = await prisma.payment.updateMany({
     where: { id: paymentId, workerSettledAt: null },
     data: { workerSettledAt: new Date() },
@@ -791,7 +803,7 @@ async function stopWorkerPayout(paymentId: string, bookingId: string, reason: st
   const xenditPayoutId = inFlight.xenditDisbursementId;
   if (!xenditPayoutId) {
     // The payout worker is between claiming it and hearing back from Xendit.
-    throw new Error(`Payout for booking ${bookingId} is being sent right now — retry the refund in a minute.`);
+    throw new PayoutInFlightError(bookingId);
   }
 
   const remoteStatus = await cancelPayout(xenditPayoutId)
@@ -866,6 +878,20 @@ export async function reconcilePendingRefund(paymentId: string): Promise<'succee
     where: { id: payment.id },
     data: { status: 'COMPLETED', escrowStatus: 'RELEASED', xenditRefundStatus: refund.status, refundedAt: null },
   });
+  const failureReason = `Xendit refund ended ${refund.status}${refund.failure_code ? ` (${refund.failure_code})` : ''}`;
+  const approved = await prisma.refundRequest.findMany({
+    where: { paymentId: payment.id, status: 'APPROVED' },
+    select: { id: true, disputeId: true },
+  });
+  for (const request of approved) {
+    await prisma.refundRequest.update({ where: { id: request.id }, data: { status: 'FAILED', failureReason } });
+    if (request.disputeId) {
+      await prisma.dispute.update({
+        where: { id: request.disputeId },
+        data: { refundStatus: 'FAILED', refundFailureReason: failureReason },
+      });
+    }
+  }
   await writeAuditLog({
     action: 'REFUND_FAILED',
     category: 'SYSTEM_ERROR',
@@ -884,7 +910,7 @@ export async function reconcilePendingRefund(paymentId: string): Promise<'succee
  * and compensation credit that rode along is restored. Runs once per payment
  * (claim on settlementReversedAt); a no-op when nothing was settled.
  */
-async function undoWorkerSettlement(paymentId: string): Promise<void> {
+export async function undoWorkerSettlement(paymentId: string): Promise<void> {
   await prisma.$transaction(async (tx) => {
     const claim = await tx.payment.updateMany({
       where: { id: paymentId, settlementReversedAt: null },
