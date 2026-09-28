@@ -21,13 +21,13 @@ export const NAV_STRUCTURE = [
     label: 'Catalog & Pricing',
     children: [
       { to: '/service-catalog', page: 'service-catalog', icon: 'fa-list-check', label: 'Service Catalog' },
+      { to: '/price-list', page: 'price-list', icon: 'fa-tags', label: 'Price List' },
+      { to: '/price-adjustments', page: 'price-adjustments', icon: 'fa-sliders', label: 'Price Adjustments' },
       { to: '/worker-packages', page: 'worker-packages', icon: 'fa-box', label: 'Worker Packages' },
-      { to: '/pricing-rules', page: 'pricing-rules', icon: 'fa-coins', label: 'Pricing Rules' },
-      { to: '/promo-banners', page: 'promo-banners', icon: 'fa-images', label: 'Promo Banners' },
     ],
   },
   // Bookings and Payments already expose their sub-pages (Disputes, Payouts,
-  // Refunds) via an in-page SubNav tab strip, so they stay single links here
+  // Refunds, Commission & Debt) via an in-page SubNav tab strip, so they stay single links here
   // instead of duplicating that navigation as a sidebar dropdown too. Tax is
   // deliberately its own group rather than more Payments tabs: it's periodic,
   // deadline-driven BIR work (2307s, remittances, VAT review), not day-to-day
@@ -57,6 +57,7 @@ export const NAV_STRUCTURE = [
       { to: '/analytics', page: 'analytics', icon: 'fa-chart-line', label: 'Analytics' },
     ],
   },
+  { type: 'link', to: '/promo-banners', page: 'promo-banners', icon: 'fa-images', label: 'Promo Banners' },
   { type: 'link', to: '/settings', page: 'settings', icon: 'fa-cog', label: 'Settings' },
 ]
 

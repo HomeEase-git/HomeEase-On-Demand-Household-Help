@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import PageHeader from '../components/common/PageHeader'
 import SubNav from '../components/common/SubNav'
+import { PAYMENTS_SUB_NAV } from '../constants/paymentsNav'
 import SectionCard from '../components/common/SectionCard'
 import Badge from '../components/common/Badge'
 import LoadingState from '../components/common/LoadingState'
@@ -15,13 +16,6 @@ import {
   signOffMonth,
   fetchLedgerTransactions,
 } from '../services/ledger'
-
-const SUB_NAV = [
-  { to: '/payments', label: 'All Transactions' },
-  { to: '/payments/refunds', label: 'Refunds' },
-  { to: '/payments/payouts', label: 'Payout Distribution' },
-  { to: '/payments/books', label: 'Books' },
-]
 
 // Plain-language names; "normal" is the side the account usually sits on,
 // so balances read as positive amounts.
@@ -264,7 +258,7 @@ export default function Books() {
           )
         }
       />
-      <SubNav items={SUB_NAV} />
+      <SubNav items={PAYMENTS_SUB_NAV} />
 
       {!status.openedAt && (
         <SectionCard title="Start the ledger">

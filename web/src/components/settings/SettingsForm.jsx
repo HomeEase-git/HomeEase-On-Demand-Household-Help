@@ -8,7 +8,7 @@ import { useDetailQuery } from '../../hooks/useListQuery'
 import { useToast } from '../../context/ToastContext'
 
 // Shared by every page that edits a slice of the AppSettings singleton
-// (Settings, Pricing Rules, Tax Settings). Each page only ever sends its own
+// (Settings, Price Adjustments, Commission & Debt, Tax Settings). Each page only ever sends its own
 // fields, so saving one page can never overwrite a value another page owns.
 
 export function AdornedNumberField({ id, label, hint, value, onChange, min, max, step, error, prefix, suffix }) {
@@ -206,14 +206,16 @@ export function useSettingsForm({ fields, numberBounds = {}, percentFields = [],
 }
 
 // Renders the loading/error states until the record is available, then the
-// page's sections inside a form with the sticky save bar.
-export function SettingsFormPage({ title, subtitle, form, children }) {
+// page's sections inside a form with the sticky save bar. `nav` (e.g. a
+// SubNav tab strip) sits under the header in every state.
+export function SettingsFormPage({ title, subtitle, form, nav = null, children }) {
   const { current, loading, loadError, reload, error, saving, isDirty, handleSubmit, discardChanges } = form
 
   if (loading && !current) {
     return (
       <>
         <PageHeader title={title} subtitle={subtitle} />
+        {nav}
         <LoadingState variant="block" message="Loading settings..." />
       </>
     )
@@ -223,6 +225,7 @@ export function SettingsFormPage({ title, subtitle, form, children }) {
     return (
       <>
         <PageHeader title={title} subtitle={subtitle} />
+        {nav}
         <ErrorState message={loadError} onRetry={reload} />
       </>
     )
@@ -231,6 +234,7 @@ export function SettingsFormPage({ title, subtitle, form, children }) {
   return (
     <form onSubmit={handleSubmit} noValidate>
       <PageHeader title={title} subtitle={subtitle} />
+      {nav}
 
       {children}
 
