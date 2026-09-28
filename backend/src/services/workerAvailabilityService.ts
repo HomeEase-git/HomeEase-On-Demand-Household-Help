@@ -42,18 +42,19 @@ export function isoDay(day: Date): string {
   return day.toISOString().slice(0, 10);
 }
 
-// Clients pick an hourly start time from FIRST_START_HOUR to LAST_START_HOUR
-// (PH local). Mirrored on mobile in utils/bookingTime.ts.
+// Clients pick a start time (any minute) from FIRST_START_HOUR:00 to
+// LAST_START_HOUR:00 (PH local). Mirrored on mobile in utils/bookingTime.ts.
 export const FIRST_START_HOUR = 7;
 export const LAST_START_HOUR = 18;
 // How far ahead a client can book.
 export const MAX_BOOKING_DAYS_AHEAD = 60;
 
-/** "HH:00" between FIRST_START_HOUR and LAST_START_HOUR. */
+/** "HH:mm" between FIRST_START_HOUR:00 and LAST_START_HOUR:00. */
 export function isValidStartTime(value: unknown): value is string {
-  if (typeof value !== 'string' || !/^\d{2}:00$/.test(value)) return false;
-  const hour = Number(value.slice(0, 2));
-  return hour >= FIRST_START_HOUR && hour <= LAST_START_HOUR;
+  if (typeof value !== 'string' || !/^\d{2}:[0-5]\d$/.test(value)) return false;
+  const [hour, minute] = value.split(':').map(Number);
+  const minutes = hour * 60 + minute;
+  return minutes >= FIRST_START_HOUR * 60 && minutes <= LAST_START_HOUR * 60;
 }
 
 /** "13:00" -> "1:00 PM", for messages. */
@@ -115,7 +116,7 @@ export function checkBookingStart(
   if (!isValidStartTime(time)) {
     return {
       ok: false,
-      message: `Start time must be on the hour between ${FIRST_START_HOUR}:00 and ${LAST_START_HOUR}:00`,
+      message: `Start time must be between ${formatTime12h(`${FIRST_START_HOUR}:00`)} and ${formatTime12h(`${LAST_START_HOUR}:00`)}`,
     };
   }
   const day = toDayStart(date);
