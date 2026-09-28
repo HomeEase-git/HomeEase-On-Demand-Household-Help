@@ -177,9 +177,18 @@ export const LocationPickerMap = React.forwardRef<
     }
   };
 
-  const handleRegionChangeComplete = async (region: Region) => {
+  const handleRegionChangeComplete = async (
+    region: Region,
+    details?: { isGesture?: boolean },
+  ) => {
     setIsDragging(false);
     dropPin();
+
+    // Only a user's own drag re-pins the location. The map also fires this for
+    // its first render and for animateTo (loading a saved pin, picking a
+    // search result) — reverse-geocoding those would overwrite the address
+    // the caller just set, or silently pin the default Manila region.
+    if (details?.isGesture === false) return;
 
     const nextCoords: LatLng = { lat: region.latitude, lng: region.longitude };
     setCurrentCoords(nextCoords);

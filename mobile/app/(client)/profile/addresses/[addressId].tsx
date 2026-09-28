@@ -12,21 +12,17 @@ import { colors, cardShadow } from "../../../../constants";
 import { addressStorage } from "../../../../utils/storage";
 import * as Location from "expo-location";
 import {
-  geocodeAddressWithFallback,
   autocompleteAddresses,
   getPlaceDetails,
   newPlacesSessionToken,
   reverseGeocodeDetailed,
-  formatStructuredAddress,
+  displayAddress,
+  stripCountry,
+  type AddressComponents,
   type AddressSuggestion,
   type LatLng,
   type PlaceResult,
 } from "../../../../utils/geo";
-import {
-  getPrecisePosition,
-  LocationPermissionDeniedError,
-  LocationTimeoutError,
-} from "../../../../services/location";
 import { useDebouncedCallback } from "../../../../utils/performanceOptimization";
 import * as api from "../../../../services/api";
 import { useAlertModal } from "../../../../contexts/AlertModalContext";
@@ -36,6 +32,11 @@ import LocationPickerMap, {
 
 const LABEL_OPTIONS = ["Home", "Work", "Other"];
 
+// The address is one free-text line plus the map pin. The pin (lat/lng) is the
+// location — bookings, distance fees and the worker's navigation all use it —
+// so the text is never geocoded; it's just what the client and worker read.
+// Google's structured parts for the pinned spot ride along silently (city is
+// what bookings are grouped by in admin reports).
 export default function AddressEditScreen() {
   const router = useRouter();
   const alertModal = useAlertModal();
@@ -43,21 +44,25 @@ export default function AddressEditScreen() {
   const isNew = addressId === "new";
 
   const [label, setLabel] = useState("Home");
-  const [houseNumber, setHouseNumber] = useState("");
-  const [street, setStreet] = useState("");
-  const [barangay, setBarangay] = useState("");
-  const [city, setCity] = useState("");
-  const [state, setState] = useState("");
-  const [zipCode, setZipCode] = useState("");
+  const [fullAddress, setFullAddress] = useState("");
   const [landmark, setLandmark] = useState("");
+  const [pin, setPin] = useState<LatLng | null>(null);
+  const [components, setComponents] = useState<AddressComponents>({});
+  // True when the pin is only an area's center (a search result for a whole
+  // barangay or city), so the client is nudged to drag it to their gate.
+  const [approximate, setApproximate] = useState(false);
+  // Once the client has typed in the address box, moving the pin no longer
+  // overwrites their text — it's offered instead (see pinAddressOffer).
+  const [textEdited, setTextEdited] = useState(false);
+  const [pinAddressOffer, setPinAddressOffer] = useState<PlaceResult | null>(
+    null,
+  );
   const [saving, setSaving] = useState(false);
-  const [showManualFields, setShowManualFields] = useState(!isNew);
 
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<AddressSuggestion[]>([]);
   const [searching, setSearching] = useState(false);
   const [resolvingPlaceId, setResolvingPlaceId] = useState<string | null>(null);
-  const [locating, setLocating] = useState(false);
   const pickerMapRef = useRef<LocationPickerMapHandle>(null);
 
   // One Places Autocomplete session = every keystroke + the Place Details
@@ -71,24 +76,7 @@ export default function AddressEditScreen() {
   // granted — never prompts), to rank nearby suggestions first.
   const searchBiasRef = useRef<LatLng | undefined>(undefined);
 
-  // Tracks the lat/lng resolved from search/current-location, along with the
-  // address text it was resolved for, so `handleSave` can skip a redundant
-  // geocode call — but only while the fields still match what was resolved.
-  const [resolvedLatLng, setResolvedLatLng] = useState<{
-    lat: number;
-    lng: number;
-  } | null>(null);
-  const [resolvedFor, setResolvedFor] = useState<string | null>(null);
-  // Only set when resolvedLatLng came from the device's own GPS (not a typed
-  // address or a search suggestion) — this is the one case we actually know
-  // how accurate the pin is, and it's worth surfacing to the client.
-  const [resolvedAccuracy, setResolvedAccuracy] = useState<number | null>(null);
-  // True when the last resolved place is an area (a city, a barangay) rather
-  // than an exact spot, so saving it warns the pin is only approximate.
-  const [resolvedApproximate, setResolvedApproximate] = useState(false);
-
   useEffect(() => {
-    if (!isNew) return;
     (async () => {
       try {
         const { status } = await Location.getForegroundPermissionsAsync();
@@ -103,7 +91,7 @@ export default function AddressEditScreen() {
         // Bias is a nice-to-have; search works without it.
       }
     })();
-  }, [isNew]);
+  }, []);
 
   useEffect(() => {
     const loadExisting = async () => {
@@ -111,33 +99,23 @@ export default function AddressEditScreen() {
       try {
         const addresses = await api.getAddresses();
         const existing = addresses.find((a: any) => a.id === addressId);
-        if (existing) {
-          setLabel(existing.label ?? "Home");
-          setHouseNumber(existing.houseNumber ?? "");
-          setStreet(existing.street ?? "");
-          setBarangay(existing.barangay ?? "");
-          setCity(existing.city ?? "");
-          setState(existing.state ?? "");
-          setZipCode(existing.zipCode ?? "");
-          setLandmark(existing.landmark ?? "");
-          if (existing.lat != null && existing.lng != null) {
-            setResolvedLatLng({ lat: existing.lat, lng: existing.lng });
-            pickerMapRef.current?.animateTo({
-              lat: existing.lat,
-              lng: existing.lng,
-            });
-            setResolvedFor(
-              formatStructuredAddress({
-                houseNumber: existing.houseNumber ?? undefined,
-                street: existing.street ?? "",
-                barangay: existing.barangay ?? undefined,
-                city: existing.city ?? "",
-                state: existing.state ?? undefined,
-                zipCode: existing.zipCode ?? undefined,
-              }),
-            );
-            setResolvedAccuracy(existing.geocodeAccuracy ?? null);
-          }
+        if (!existing) return;
+        setLabel(existing.label ?? "Home");
+        setFullAddress(displayAddress(existing));
+        setTextEdited(true);
+        setLandmark(existing.landmark ?? "");
+        setComponents({
+          houseNumber: existing.houseNumber ?? undefined,
+          street: existing.street || undefined,
+          barangay: existing.barangay ?? undefined,
+          city: existing.city || undefined,
+          state: existing.state ?? undefined,
+          zipCode: existing.zipCode ?? undefined,
+        });
+        if (existing.lat != null && existing.lng != null) {
+          const saved = { lat: existing.lat, lng: existing.lng };
+          setPin(saved);
+          pickerMapRef.current?.animateTo(saved);
         }
       } catch (error) {
         console.error("Load address error:", error);
@@ -181,64 +159,27 @@ export default function AddressEditScreen() {
     runSearch(text);
   };
 
-  const applyResolvedPlace = (
-    place: PlaceResult,
-    accuracy: number | null = null,
-    landmarkHint?: string,
-  ) => {
-    const {
-      houseNumber: h,
-      street: s,
-      barangay: b,
-      city: c,
-      state: st,
-      zipCode: z,
-    } = place.components ?? {};
-    const nextHouseNumber = h ?? "";
-    const nextStreet = s ?? "";
-    const nextBarangay = b ?? "";
-    const nextCity = c ?? "";
-    const nextState = st ?? "";
-    const nextZip = z ?? "";
-
-    setHouseNumber(nextHouseNumber);
-    setStreet(nextStreet);
-    setBarangay(nextBarangay);
-    setCity(nextCity);
-    setState(nextState);
-    setZipCode(nextZip);
-    setResolvedLatLng(place.geometry.location);
-    if (place.geometry?.location) {
-      pickerMapRef.current?.animateTo(place.geometry.location);
-    }
-    setResolvedFor(
-      formatStructuredAddress({
-        houseNumber: nextHouseNumber,
-        street: nextStreet,
-        barangay: nextBarangay,
-        city: nextCity,
-        state: nextState,
-        zipCode: nextZip,
-      }),
-    );
-    setResolvedAccuracy(accuracy);
-    setResolvedApproximate(!!place.approximate);
-    if (landmarkHint) setLandmark((current) => current || landmarkHint);
-    setShowManualFields(true);
-    setSearchResults([]);
-    setSearchQuery("");
-    latestQueryRef.current = "";
+  const applyPlaceAddress = (place: PlaceResult) => {
+    setFullAddress(stripCountry(place.formatted_address));
+    setComponents(place.components ?? {});
+    setTextEdited(false);
+    setPinAddressOffer(null);
   };
 
   const handleMapLocationSelected = (
     location: LatLng,
     place: PlaceResult | null,
   ) => {
-    if (place) {
-      applyResolvedPlace(place, null);
+    // A drag or GPS fix is the client putting the pin exactly where they are.
+    setPin(location);
+    setApproximate(false);
+    if (!place) return;
+    if (textEdited && fullAddress.trim()) {
+      // Keep what they typed; the parts still follow the pin.
+      setComponents(place.components ?? {});
+      setPinAddressOffer(place);
     } else {
-      setResolvedLatLng(location);
-      setShowManualFields(true);
+      applyPlaceAddress(place);
     }
   };
 
@@ -253,175 +194,103 @@ export default function AddressEditScreen() {
       if (!place) {
         alertModal.error(
           "Couldn't load that address",
-          "Please pick another suggestion or fill in the fields below.",
+          "Please pick another suggestion, or drag the map to your location.",
         );
-        setShowManualFields(true);
         return;
       }
+      applyPlaceAddress(place);
+      setPin(place.geometry.location);
+      setApproximate(!!place.approximate);
+      pickerMapRef.current?.animateTo(place.geometry.location);
       // For a named place (a mall, a school), Google's address leaves the
       // name out — e.g. "SM City Marikina" resolves to just "Marikina, 1800
       // Metro Manila" — so keep the name as the landmark for the worker.
       const isNamedPlace = !place.formatted_address
         .toLowerCase()
         .includes(suggestion.mainText.toLowerCase());
-      applyResolvedPlace(
-        place,
-        null,
-        isNamedPlace ? suggestion.mainText : undefined,
-      );
+      if (isNamedPlace) setLandmark((current) => current || suggestion.mainText);
+      setSearchResults([]);
+      setSearchQuery("");
+      latestQueryRef.current = "";
     } finally {
       setResolvingPlaceId(null);
     }
   };
 
-  const handleUseCurrentLocation = async () => {
-    if (pickerMapRef.current) {
-      await pickerMapRef.current.triggerLocate();
+  const handleSave = async () => {
+    if (!pin) {
+      alertModal.error(
+        "Pin your address",
+        "Search for your address, drag the map, or tap the GPS button so we know exactly where you are.",
+      );
       return;
     }
-    setLocating(true);
-    try {
-      const position = await getPrecisePosition();
-      const place = await reverseGeocodeDetailed(position.lat, position.lng);
-      if (place) {
-        applyResolvedPlace(place, position.accuracy);
-      } else {
-        setResolvedLatLng(position);
-        setResolvedFor(null);
-        setResolvedAccuracy(position.accuracy);
-        setResolvedApproximate(false);
-        setShowManualFields(true);
-        alertModal.error(
-          "Couldn't fill in details",
-          "We found your location but couldn't look up the address. Please fill in the fields below.",
-        );
-      }
-    } catch (error) {
-      if (error instanceof LocationPermissionDeniedError) {
-        alertModal.error(
-          "Location needed",
-          "Please enable location access to use your current location.",
-        );
-      } else if (error instanceof LocationTimeoutError) {
-        alertModal.error(
-          "Couldn't get a precise fix",
-          "GPS is taking too long — try moving near a window or open sky, or enter your address manually.",
-        );
-      } else {
-        alertModal.error(
-          "Error",
-          "Unable to get your current location right now.",
-        );
-      }
-    } finally {
-      setLocating(false);
-    }
-  };
-
-  const handleSave = async () => {
-    if (!street.trim() || !city.trim() || !state.trim() || !zipCode.trim()) {
-      alertModal.error("Error", "Please fill in all address fields.");
+    if (!fullAddress.trim()) {
+      alertModal.error("Error", "Please enter your address.");
       return;
     }
 
     setSaving(true);
     try {
-      const fullAddress = formatStructuredAddress({
-        houseNumber,
-        street,
-        barangay,
-        city,
-        state,
-        zipCode,
-      });
-      const isFreshResolution = resolvedLatLng && resolvedFor === fullAddress;
-      const geocoded = isFreshResolution
-        ? {
-            geometry: { location: resolvedLatLng! },
-            approximate: resolvedApproximate,
-          }
-        : await geocodeAddressWithFallback({
-            houseNumber,
-            street,
-            barangay,
-            city,
-            state,
-            zipCode,
-          }).catch(() => null);
-      // Only a device GPS fix carries a real accuracy figure — a fresh
-      // free-text geocode (fields were edited since the last resolve) has none.
-      const geocodeAccuracy = isFreshResolution
-        ? (resolvedAccuracy ?? undefined)
-        : undefined;
+      // Bookings need a city. It almost always comes with the pin's address;
+      // if not (e.g. the reverse lookup failed mid-drag), look it up once more.
+      let parts = components;
+      if (!parts.city) {
+        const place = await reverseGeocodeDetailed(pin.lat, pin.lng).catch(
+          () => null,
+        );
+        parts = { ...parts, ...(place?.components ?? {}) };
+        if (!parts.city) {
+          alertModal.error(
+            "Couldn't identify the city",
+            "We couldn't tell which city this pin is in. Try moving the pin slightly and saving again.",
+          );
+          return;
+        }
+        setComponents(parts);
+      }
 
+      const address = fullAddress.trim();
       const payload = {
         label,
-        houseNumber: houseNumber || undefined,
-        street,
-        barangay: barangay || undefined,
-        city,
-        state,
-        zipCode,
-        landmark: landmark || undefined,
-        lat: geocoded?.geometry.location.lat,
-        lng: geocoded?.geometry.location.lng,
-        geocodeAccuracy,
+        fullAddress: address,
+        lat: pin.lat,
+        lng: pin.lng,
+        // Sent even when blank so an edit that moves the pin doesn't leave the
+        // previous spot's street/barangay behind.
+        houseNumber: parts.houseNumber ?? "",
+        street: parts.street ?? "",
+        barangay: parts.barangay ?? "",
+        city: parts.city,
+        state: parts.state ?? "",
+        zipCode: parts.zipCode ?? "",
+        landmark: landmark.trim(),
       };
 
+      let savedId = addressId!;
       if (isNew) {
-        const result = await api.addAddress(payload);
-        await addressStorage.upsert(result.id, {
-          label,
-          address: fullAddress,
-          lat: geocoded?.geometry.location.lat,
-          lng: geocoded?.geometry.location.lng,
-        });
-      } else if (addressId) {
-        await api.updateAddress(addressId, payload);
-        await addressStorage.upsert(addressId, {
-          label,
-          address: fullAddress,
-          lat: geocoded?.geometry.location.lat,
-          lng: geocoded?.geometry.location.lng,
-        });
-      }
-
-      const baseMessage = isNew
-        ? "Address added successfully."
-        : "Address updated successfully.";
-      if (!geocoded) {
-        // No coordinates at all (even the broadened city-level fallback
-        // failed) — this address won't be selectable for a booking until
-        // it's pinned via GPS, so make that visible now rather than a
-        // confusing "couldn't locate this address" surprise at booking time.
-        alertModal.error(
-          "Saved, but not located",
-          `${baseMessage} We couldn't find this address on the map from the details entered — open it again and use "Use my current location" to pin it precisely.`,
-          [{ text: "OK", onPress: () => router.back() }],
-        );
-      } else if (geocoded.approximate) {
-        alertModal.info(
-          "Saved — approximate location",
-          `${baseMessage} We could only find the general area (not the exact address). For a precise pin, edit it and use "Use my current location".`,
-          [{ text: "OK", onPress: () => router.back() }],
-        );
+        savedId = (await api.addAddress(payload)).id;
       } else {
-        alertModal.success("Success", baseMessage, [
-          { text: "OK", onPress: () => router.back() },
-        ]);
+        await api.updateAddress(savedId, payload);
       }
+      await addressStorage.upsert(savedId, {
+        label,
+        address,
+        lat: pin.lat,
+        lng: pin.lng,
+      });
+
+      alertModal.success(
+        "Success",
+        isNew ? "Address added successfully." : "Address updated successfully.",
+        [{ text: "OK", onPress: () => router.back() }],
+      );
     } catch (error) {
       console.error("Address save error:", error);
       alertModal.error("Error", "Unable to save address right now.");
     } finally {
       setSaving(false);
     }
-  };
-
-  const clearResolution = () => {
-    setResolvedFor(null);
-    setResolvedAccuracy(null);
-    setResolvedApproximate(false);
   };
 
   return (
@@ -435,9 +304,8 @@ export default function AddressEditScreen() {
         <View className="mb-4">
           <LocationPickerMap
             ref={pickerMapRef}
-            initialLocation={resolvedLatLng}
+            initialLocation={pin}
             onLocationSelected={handleMapLocationSelected}
-            onLocatingChange={setLocating}
             onError={(msg) => alertModal.error("Location error", msg)}
             height={260}
           />
@@ -445,193 +313,137 @@ export default function AddressEditScreen() {
             Drag the map to pinpoint your exact gate or rooftop. Tap GPS to
             locate.
           </Text>
+          {approximate && (
+            <View className="flex-row items-center bg-warning/10 rounded-xl px-3 py-2 mt-2">
+              <Ionicons
+                name="information-circle"
+                size={16}
+                color={colors.warning}
+              />
+              <Text className="text-warning text-xs font-semibold ml-2 flex-1">
+                This pin is only the general area — drag the map to your exact
+                location.
+              </Text>
+            </View>
+          )}
         </View>
 
-        {isNew && (
-          <>
-            <InputField
-              returnKeyType="next"
-              label="Search Address"
-              value={searchQuery}
-              onChangeText={handleSearchChange}
-              placeholder="e.g., 123 Rizal Street, Manila"
-            />
+        <InputField
+          returnKeyType="search"
+          label="Search Address"
+          value={searchQuery}
+          onChangeText={handleSearchChange}
+          placeholder="e.g., 123 Rizal Street, Manila"
+        />
 
-            {searching && (
-              <View className="py-3 items-center">
-                <ActivityIndicator size="small" color={colors.brand.DEFAULT} />
-              </View>
-            )}
-
-            {!searching && searchResults.length > 0 && (
-              <View className="mb-4">
-                {searchResults.map((suggestion) => (
-                  <Pressable
-                    key={suggestion.placeId}
-                    onPress={() => handleSelectSuggestion(suggestion)}
-                    disabled={resolvingPlaceId !== null}
-                    className="bg-white rounded-2xl p-3 mb-2 flex-row items-start"
-                    style={cardShadow}
-                    accessibilityRole="button"
-                    accessibilityLabel={suggestion.text}
-                  >
-                    {resolvingPlaceId === suggestion.placeId ? (
-                      <ActivityIndicator
-                        size="small"
-                        color={colors.brand.DEFAULT}
-                        style={{ marginTop: 2 }}
-                      />
-                    ) : (
-                      <Ionicons
-                        name="location-outline"
-                        size={18}
-                        color={colors.text.muted}
-                        style={{ marginTop: 2 }}
-                      />
-                    )}
-                    <View className="ml-2 flex-1">
-                      <Text className="text-text-primary text-sm font-semibold">
-                        {suggestion.mainText}
-                      </Text>
-                      {!!suggestion.secondaryText && (
-                        <Text className="text-text-secondary text-xs mt-0.5">
-                          {suggestion.secondaryText}
-                        </Text>
-                      )}
-                    </View>
-                  </Pressable>
-                ))}
-              </View>
-            )}
-
-            {!showManualFields && (
-              <Pressable
-                onPress={() => setShowManualFields(true)}
-                className="items-center py-2 mb-2"
-              >
-                <Text className="text-text-secondary text-sm underline">
-                  Enter address manually instead
-                </Text>
-              </Pressable>
-            )}
-          </>
-        )}
-
-        {resolvedAccuracy != null && resolvedFor && (
-          <View className="flex-row items-center bg-success/10 rounded-xl px-3 py-2 mb-4">
-            <Ionicons
-              name="checkmark-circle"
-              size={16}
-              color={colors.success}
-            />
-            <Text className="text-success text-xs font-semibold ml-2">
-              Pinned to within ~{Math.round(resolvedAccuracy)}m of your device
-            </Text>
+        {searching && (
+          <View className="py-3 items-center">
+            <ActivityIndicator size="small" color={colors.brand.DEFAULT} />
           </View>
         )}
 
-        {showManualFields && (
-          <>
-            <View className="bg-card rounded-2xl p-4 mb-4" style={cardShadow}>
-              <Text className="text-text-primary text-sm mb-2 font-semibold">
-                Label
-              </Text>
-              <View className="flex-row gap-2">
-                {LABEL_OPTIONS.map((l) => (
-                  <Pressable
-                    key={l}
-                    className={`px-4 py-2 rounded-xl ${label === l ? "bg-accent" : "bg-white"}`}
-                    onPress={() => setLabel(l)}
-                  >
-                    <Text
-                      className={
-                        label === l
-                          ? "text-white font-semibold"
-                          : "text-text-secondary"
-                      }
-                    >
-                      {l}
+        {!searching && searchResults.length > 0 && (
+          <View className="mb-4">
+            {searchResults.map((suggestion) => (
+              <Pressable
+                key={suggestion.placeId}
+                onPress={() => handleSelectSuggestion(suggestion)}
+                disabled={resolvingPlaceId !== null}
+                className="bg-white rounded-2xl p-3 mb-2 flex-row items-start"
+                style={cardShadow}
+                accessibilityRole="button"
+                accessibilityLabel={suggestion.text}
+              >
+                {resolvingPlaceId === suggestion.placeId ? (
+                  <ActivityIndicator
+                    size="small"
+                    color={colors.brand.DEFAULT}
+                    style={{ marginTop: 2 }}
+                  />
+                ) : (
+                  <Ionicons
+                    name="location-outline"
+                    size={18}
+                    color={colors.text.muted}
+                    style={{ marginTop: 2 }}
+                  />
+                )}
+                <View className="ml-2 flex-1">
+                  <Text className="text-text-primary text-sm font-semibold">
+                    {suggestion.mainText}
+                  </Text>
+                  {!!suggestion.secondaryText && (
+                    <Text className="text-text-secondary text-xs mt-0.5">
+                      {suggestion.secondaryText}
                     </Text>
-                  </Pressable>
-                ))}
-              </View>
-            </View>
-
-            <InputField
-              returnKeyType="next"
-              label="House / Unit / Bldg. No. (optional)"
-              value={houseNumber}
-              onChangeText={(text) => {
-                setHouseNumber(text);
-                clearResolution();
-              }}
-              placeholder="e.g., Blk 4 Lot 12, Unit 3B"
-            />
-
-            <InputField
-              returnKeyType="next"
-              label="Street Name"
-              value={street}
-              onChangeText={(text) => {
-                setStreet(text);
-                clearResolution();
-              }}
-              placeholder="e.g., Rizal Street"
-            />
-
-            <InputField
-              returnKeyType="next"
-              label="Barangay"
-              value={barangay}
-              onChangeText={(text) => {
-                setBarangay(text);
-                clearResolution();
-              }}
-              placeholder="e.g., San Isidro"
-            />
-
-            <InputField
-              returnKeyType="next"
-              label="City"
-              value={city}
-              onChangeText={(text) => {
-                setCity(text);
-                clearResolution();
-              }}
-              placeholder="e.g., Manila"
-            />
-
-            <InputField
-              returnKeyType="next"
-              label="State/Province"
-              value={state}
-              onChangeText={(text) => {
-                setState(text);
-                clearResolution();
-              }}
-              placeholder="e.g., Bulacan"
-            />
-
-            <InputField
-              returnKeyType="next"
-              label="ZIP Code"
-              value={zipCode}
-              onChangeText={(text) => {
-                setZipCode(text);
-                clearResolution();
-              }}
-              placeholder="e.g., 1234"
-              keyboardType="number-pad"
-            />
-
-            <InputField
-              label="Landmark (optional)"
-              value={landmark}
-              onChangeText={setLandmark}
-              placeholder="e.g., Beside Mercury Drug"
-            />
-          </>
+                  )}
+                </View>
+              </Pressable>
+            ))}
+          </View>
         )}
+
+        <View className="bg-card rounded-2xl p-4 mb-4" style={cardShadow}>
+          <Text className="text-text-primary text-sm mb-2 font-semibold">
+            Label
+          </Text>
+          <View className="flex-row gap-2">
+            {LABEL_OPTIONS.map((l) => (
+              <Pressable
+                key={l}
+                className={`px-4 py-2 rounded-xl ${label === l ? "bg-accent" : "bg-white"}`}
+                onPress={() => setLabel(l)}
+              >
+                <Text
+                  className={
+                    label === l
+                      ? "text-white font-semibold"
+                      : "text-text-secondary"
+                  }
+                >
+                  {l}
+                </Text>
+              </Pressable>
+            ))}
+          </View>
+        </View>
+
+        <InputField
+          label="Full Address"
+          value={fullAddress}
+          onChangeText={(text) => {
+            setFullAddress(text);
+            setTextEdited(true);
+          }}
+          placeholder="e.g., Blk 4 Lot 12, Rizal St., Brgy. San Isidro, Paombong, Bulacan"
+          multiline
+        />
+
+        {pinAddressOffer && (
+          <Pressable
+            onPress={() => applyPlaceAddress(pinAddressOffer)}
+            className="flex-row items-start -mt-2 mb-4"
+            accessibilityRole="button"
+          >
+            <Ionicons
+              name="refresh"
+              size={14}
+              color={colors.accent.DEFAULT}
+              style={{ marginTop: 2 }}
+            />
+            <Text className="text-accent text-xs ml-1 flex-1">
+              Pin moved — use “{stripCountry(pinAddressOffer.formatted_address)}”
+              instead?
+            </Text>
+          </Pressable>
+        )}
+
+        <InputField
+          label="Landmark (optional)"
+          value={landmark}
+          onChangeText={setLandmark}
+          placeholder="e.g., Beside Mercury Drug, green gate"
+        />
 
         <View className="gap-3 mt-2">
           <PrimaryButton

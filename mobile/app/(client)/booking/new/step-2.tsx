@@ -20,7 +20,7 @@ import { useBookingStore } from "../../../../store/bookingStore";
 import { useDateAvailabilityCount } from "../../../../hooks/useWorkerDiscovery";
 import * as api from "../../../../services/api";
 import { addressStorage } from "../../../../utils/storage";
-import { formatStructuredAddress, geocodeAddressWithFallback } from "../../../../utils/geo";
+import { displayAddress, geocodeAddressWithFallback } from "../../../../utils/geo";
 import { RUSH_FEE_RATE, RUSH_MIN_LEAD_HOURS, isRushDate, phTodayIso, selectableStartTimes } from "../../../../utils/bookingTime";
 
 const BOOKING_STEPS = ["Scope", "Schedule", "Who", "Confirm"];
@@ -69,14 +69,7 @@ export default function BookingStep2Screen() {
   );
 
   const handleSelectAddress = async (item: SavedAddress) => {
-    const fullAddress = formatStructuredAddress({
-      houseNumber: item.houseNumber ?? undefined,
-      street: item.street,
-      barangay: item.barangay ?? undefined,
-      city: item.city,
-      state: item.state,
-      zipCode: item.zipCode,
-    });
+    const fullAddress = displayAddress(item);
 
     const applySelection = (selLat: number, selLng: number) => {
       setAddress(fullAddress);

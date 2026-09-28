@@ -10,11 +10,13 @@ import { Skeleton } from "../../../../components/ui/Skeleton";
 import { colors, cardShadow } from "../../../../constants";
 import * as api from "../../../../services/api";
 import { addressStorage } from "../../../../utils/storage";
+import { displayAddress } from "../../../../utils/geo";
 import { useAlertModal } from "../../../../contexts/AlertModalContext";
 
 type Address = {
   id: string;
   label: string;
+  fullAddress?: string | null;
   street: string;
   city: string;
   state: string;
@@ -110,7 +112,7 @@ export default function AddressesScreen() {
               address={{
                 id: item.id,
                 label: item.label,
-                address: `${item.street}, ${item.city}, ${item.state} ${item.zipCode}`,
+                address: displayAddress(item),
                 isDefault: item.isDefault,
               }}
               onEdit={() =>

@@ -1071,15 +1071,18 @@ export async function getAddresses() {
 
 export async function addAddress(data: {
   label: string;
-  street: string;
-  city: string;
-  state: string;
-  zipCode: string;
+  // One free-text line shown to client and worker; the pin (lat/lng) is the
+  // location. The split fields below are Google's parts for the pin, if any.
+  fullAddress: string;
+  lat: number;
+  lng: number;
+  street?: string;
+  city?: string;
+  state?: string;
+  zipCode?: string;
   houseNumber?: string;
   barangay?: string;
   landmark?: string;
-  lat?: number;
-  lng?: number;
   geocodeAccuracy?: number;
 }) {
   try {
@@ -1093,6 +1096,7 @@ export async function addAddress(data: {
 
 export async function updateAddress(addressId: string, data: {
   label?: string;
+  fullAddress?: string;
   street?: string;
   city?: string;
   state?: string;
