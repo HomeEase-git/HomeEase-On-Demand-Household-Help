@@ -4,6 +4,7 @@ import { errorResponse } from '@utils/errorResponse';
 import { notifyUser } from '@utils/notify';
 import { writeAuditLog } from '@utils/auditLog';
 import { adminAdjustDebt, releaseDebtHold, DuesAdjustmentError } from '@services/debtLedgerService';
+import { postClientFeeCleared } from '@services/ledgerService';
 import type { JwtPayload } from '@/types/index';
 
 interface AuthRequest extends Request {
@@ -196,6 +197,18 @@ export const releaseClientPaymentHold = async (req: AuthRequest, res: Response) 
       where: { userId: id },
       data: { paymentHoldAt: null, paymentHoldNote: note?.trim() ?? null, outstandingBalance: 0 },
     });
+
+    // Book the cancellation fees this client owed as settled outside the app.
+    // Uses the ledger's own figure: outstandingBalance can also hold an
+    // unpaid booking, which was never booked as income.
+    const owed = await prisma.ledgerLine.aggregate({
+      where: { account: 'CLIENT_RECEIVABLE', clientId: id },
+      _sum: { amountCentavos: true },
+    });
+    const owedCentavos = owed._sum.amountCentavos ?? 0;
+    if (owedCentavos > 0) {
+      await postClientFeeCleared(prisma, id, owedCentavos / 100, `${id}:${updated.updatedAt.toISOString()}`);
+    }
 
     await notifyUser({
       userId: id,

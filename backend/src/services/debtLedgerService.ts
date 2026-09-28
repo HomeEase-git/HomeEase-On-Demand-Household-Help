@@ -3,6 +3,7 @@ import { getAppSettings } from '@services/appSettingsService';
 import { notifyUser } from '@utils/notify';
 import { roundToCentavo } from '@utils/money';
 import type { DebtLedgerEntryType, Prisma } from '@prisma/client';
+import { postPenalty, postAdminAdjustment } from '@services/ledgerService';
 
 type TxClient = Prisma.TransactionClient;
 
@@ -222,7 +223,9 @@ export async function chargePenaltyTx(
   amount: number,
   opts: { bookingId?: string; note?: string } = {}
 ) {
-  return accrueDebtTx(client, workerProfileId, amount, { ...opts, type: 'PENALTY' });
+  const result = await accrueDebtTx(client, workerProfileId, amount, { ...opts, type: 'PENALTY' });
+  await postPenalty(client, result.workerProfile.userId, amount, { key: result.entry.id, bookingId: opts.bookingId });
+  return result;
 }
 
 /**
@@ -253,11 +256,15 @@ export async function adminAdjustDebt(
   return prisma.$transaction(async (tx) => {
     if (amount < 0) {
       // Negative = admin is increasing what's owed.
-      return accrueDebtTx(tx, workerProfileId, -amount, { note, type: 'ADMIN_ADJUSTMENT' });
+      const result = await accrueDebtTx(tx, workerProfileId, -amount, { note, type: 'ADMIN_ADJUSTMENT' });
+      await postAdminAdjustment(tx, result.workerProfile.userId, -amount, result.entry.id, note);
+      return result;
     }
     // A waiver can't go below zero — paying a worker extra is a separate
     // decision, not a dues correction.
-    return creditDebtTx(tx, workerProfileId, amount, 'ADMIN_ADJUSTMENT', { note, overflow: 'reject' });
+    const result = await creditDebtTx(tx, workerProfileId, amount, 'ADMIN_ADJUSTMENT', { note, overflow: 'reject' });
+    await postAdminAdjustment(tx, result.workerProfile.userId, -amount, result.entry.id, note);
+    return result;
   });
 }
 

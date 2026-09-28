@@ -23,6 +23,7 @@ const CancellationReviews = lazy(() => import('./pages/CancellationReviews'))
 const Payments = lazy(() => import('./pages/Payments'))
 const TransactionDetail = lazy(() => import('./pages/TransactionDetail'))
 const Refunds = lazy(() => import('./pages/Refunds'))
+const Books = lazy(() => import('./pages/Books'))
 const Payouts = lazy(() => import('./pages/Payouts'))
 const TaxCertificates = lazy(() => import('./pages/TaxCertificates'))
 const TaxRemittance = lazy(() => import('./pages/TaxRemittance'))
@@ -77,6 +78,7 @@ export default function App() {
           { path: 'payments/transaction/:id', element: <TransactionDetail /> },
           { path: 'payments/refunds', element: <Refunds /> },
           { path: 'payments/payouts', element: <Payouts /> },
+          { path: 'payments/books', element: <Books /> },
           { path: 'tax', element: <Navigate to="/tax/certificates" replace /> },
           { path: 'tax/certificates', element: <TaxCertificates /> },
           { path: 'tax/remittance', element: <TaxRemittance /> },

@@ -3,6 +3,7 @@ import type { Payout, PayoutStatus } from '@prisma/client';
 import { notifyUser } from '@utils/notify';
 import { sendSmsToUser } from '@utils/smsService';
 import { writeAuditLog } from '@utils/auditLog';
+import { postPayoutSent } from '@services/ledgerService';
 
 // Xendit's payout states. SUCCEEDED is the documented terminal success;
 // COMPLETED is kept because the original integration assumed it — prune once
@@ -46,6 +47,7 @@ export async function applyXenditPayoutStatus(
       paidAt: new Date(),
     });
     if (updated) {
+      await postPayoutSent(prisma, { ...payout, paidAt: new Date() });
       await notifyUser({
         userId: payout.workerId,
         type: 'PAYOUT_SENT',
@@ -63,6 +65,9 @@ export async function applyXenditPayoutStatus(
     const current = await prisma.payout.findUnique({ where: { id: payout.id }, select: { status: true } });
     if (current?.status === 'CANCELLED') {
       await prisma.payout.update({ where: { id: payout.id }, data: { xenditStatus: rawStatus } });
+      // The money did leave: book it, so the worker's balance shows they now
+      // owe it back (reconciliation flags it until an admin sorts it out).
+      await postPayoutSent(prisma, payout, 'Payout sent after it was cancelled for a refund — recover from the worker');
       await writeAuditLog({
         action: 'PAYOUT_PAID_AFTER_CANCEL',
         category: 'SYSTEM_ERROR',

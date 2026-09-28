@@ -7,6 +7,13 @@ import {
 import { createInvoice, retrieveInvoice, createRefund, retrieveRefund, type XenditRefund } from '@services/xenditService';
 import { cancelPayout, retrievePayout } from '@services/xenditDisbursementService';
 import { applyXenditPayoutStatus } from '@services/payoutStatusService';
+import {
+  postPaymentCaptured,
+  postCashJobSettled,
+  postPlatformFunded,
+  postRefundSent,
+  postCashJobRefunded,
+} from '@services/ledgerService';
 import { notifyUser } from '@utils/notify';
 import { getAppSettings } from '@services/appSettingsService';
 import { schedulePayout } from '@queues/payoutQueue';
@@ -198,6 +205,7 @@ export async function settleCashBooking(bookingId: string) {
           bookingId,
           note: 'Commission + withholding tax on a cash job (paid to you in person)',
         });
+        await postCashJobSettled(tx, payment, booking.workerId);
         return { payment, coveredByCredit: accrued.coveredByCredit };
       }
     }
@@ -571,6 +579,8 @@ export async function finalizePaidBooking(
       data: { status: 'COMPLETED', finalPrice: payment.subtotal, vatAmount: payment.vatAmount, completionDate: new Date() },
     });
 
+    await postPaymentCaptured(tx, p, payment.booking.workerId);
+
     // If the payment-overdue sweep already opened a dispute and the client
     // then paid, close it out.
     await tx.dispute.updateMany({
@@ -640,10 +650,12 @@ export async function settlePlatformFundedPayment(bookingId: string) {
       },
     });
 
-    await tx.booking.update({
+    const booked = await tx.booking.update({
       where: { id: bookingId },
       data: { status: 'COMPLETED', finalPrice: payment.subtotal, vatAmount: payment.vatAmount, completionDate: new Date() },
+      select: { workerId: true },
     });
+    if (booked.workerId) await postPlatformFunded(tx, p, booked.workerId);
 
     return p;
   });
@@ -870,6 +882,8 @@ export async function reconcilePendingRefund(paymentId: string): Promise<'succee
   if (refund.status === 'SUCCEEDED') {
     await prisma.payment.update({ where: { id: payment.id }, data: { xenditRefundStatus: 'SUCCEEDED' } });
     await undoWorkerSettlement(payment.id);
+    const booking = await prisma.booking.findUnique({ where: { id: payment.bookingId }, select: { workerId: true } });
+    await postRefundSent(prisma, payment, booking?.workerId ?? null);
     return 'succeeded';
   }
   if (refund.status !== 'FAILED' && refund.status !== 'CANCELLED') return 'pending';
@@ -977,6 +991,9 @@ export async function refundOrVoidPayment(bookingId: string, reason: string) {
     if (!refund || refund.status === 'SUCCEEDED') {
       await undoWorkerSettlement(payment.id);
     }
+    if (refund?.status === 'SUCCEEDED') {
+      await postRefundSent(prisma, payment, payment.booking.workerId);
+    }
   } else if (payment.methodType === 'CASH') {
     // Reverse the commission-debt accrual; the worker returns the cash
     // directly. The status claim and the reversal commit together, so a
@@ -997,6 +1014,7 @@ export async function refundOrVoidPayment(bookingId: string, reason: string) {
           bookingId,
           note: `Reversed cash-job commission after refund: ${reason}`,
         });
+        await postCashJobRefunded(tx, payment, workerUserId as string);
       }
       return true;
     });
