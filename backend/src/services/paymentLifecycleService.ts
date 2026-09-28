@@ -11,7 +11,7 @@ import { notifyUser } from '@utils/notify';
 import { getAppSettings } from '@services/appSettingsService';
 import { schedulePayout } from '@queues/payoutQueue';
 import { writeAuditLog } from '@utils/auditLog';
-import { recoverDebtTx, accrueDebtTx, reverseDebtTx } from '@services/debtLedgerService';
+import { recoverDebtTx, accrueDebtTx, reverseDebtTx, lockDuesTx, restoreSettlementTx } from '@services/debtLedgerService';
 import { roundToCentavo } from '@utils/money';
 
 /**
@@ -417,8 +417,6 @@ export async function settleWorkerEarnings(paymentId: string): Promise<void> {
       where: { userId: workerUserId },
       select: {
         id: true,
-        commissionOwed: true,
-        compensationCredit: true,
         payoutMethod: true,
         payoutAccountName: true,
         payoutAccountNumber: true,
@@ -427,23 +425,26 @@ export async function settleWorkerEarnings(paymentId: string): Promise<void> {
 
     let payoutAmount = payment.workerPayout;
     if (workerProfile) {
-      const debt = Math.max(0, workerProfile.commissionOwed);
-      const applied = roundToCentavo(Math.min(debt, payoutAmount));
-      if (applied > 0) {
-        await recoverDebtTx(tx, workerProfile.id, applied, {
-          bookingId: payment.bookingId,
-          note: 'Withheld from payout to clear outstanding cash-job commission dues',
-        });
-        payoutAmount = roundToCentavo(payoutAmount - applied);
-      }
-      // Approved client-fault cancellation compensation rides along with the
-      // next online payout (see debtLedgerService.creditCompensationTx).
-      if (workerProfile.compensationCredit > 0) {
-        payoutAmount = roundToCentavo(payoutAmount + workerProfile.compensationCredit);
+      // recoverDebtTx locks the worker's dues row and takes at most what's
+      // owed right now, so a penalty or refund landing concurrently can't be
+      // lost or double-counted.
+      const recovered = await recoverDebtTx(tx, workerProfile.id, payoutAmount, {
+        bookingId: payment.bookingId,
+        note: 'Withheld from payout to clear outstanding platform dues',
+      });
+      payoutAmount = roundToCentavo(payoutAmount - recovered);
+
+      // Approved client-fault cancellation compensation (and credit left
+      // over from refunds) rides along with the next online payout. Recorded
+      // on the payment so a refund of this job can put it back.
+      const { compensationCredit } = await lockDuesTx(tx, workerProfile.id);
+      if (compensationCredit > 0) {
+        payoutAmount = roundToCentavo(payoutAmount + compensationCredit);
         await tx.workerProfile.update({
           where: { id: workerProfile.id },
           data: { compensationCredit: 0 },
         });
+        await tx.payment.update({ where: { id: payment.id }, data: { compensationPaid: compensationCredit } });
       }
     }
 
@@ -864,6 +865,43 @@ export async function reconcilePendingRefund(paymentId: string): Promise<'succee
   return 'failed';
 }
 
+/**
+ * Undoes an online payment's worker settlement after its payout was stopped
+ * for a refund: dues recovered from that payout go back on the worker's tab
+ * and compensation credit that rode along is restored. Runs once per payment
+ * (claim on settlementReversedAt); a no-op when nothing was settled.
+ */
+async function undoWorkerSettlement(paymentId: string): Promise<void> {
+  await prisma.$transaction(async (tx) => {
+    const claim = await tx.payment.updateMany({
+      where: { id: paymentId, settlementReversedAt: null },
+      data: { settlementReversedAt: new Date() },
+    });
+    if (claim.count === 0) return;
+
+    const payment = await tx.payment.findUniqueOrThrow({
+      where: { id: paymentId },
+      select: { bookingId: true, compensationPaid: true, booking: { select: { workerId: true } } },
+    });
+    if (!payment.booking.workerId) return;
+    const workerProfile = await tx.workerProfile.findUnique({
+      where: { userId: payment.booking.workerId },
+      select: { id: true },
+    });
+    if (!workerProfile) return;
+
+    const recovered = await tx.debtLedgerEntry.aggregate({
+      where: { workerProfileId: workerProfile.id, bookingId: payment.bookingId, type: 'DEBT_RECOVERY' },
+      _sum: { amount: true },
+    });
+    await restoreSettlementTx(tx, workerProfile.id, {
+      bookingId: payment.bookingId,
+      duesRecovered: roundToCentavo(-(recovered._sum.amount ?? 0)),
+      compensationPaid: payment.compensationPaid,
+    });
+  });
+}
+
 export async function refundOrVoidPayment(bookingId: string, reason: string) {
   const payment = await prisma.payment.findUnique({
     where: { bookingId },
@@ -892,24 +930,33 @@ export async function refundOrVoidPayment(bookingId: string, reason: string) {
         amountPesos: payment.capturedAmount ?? payment.totalAmount,
       });
     }
+    // The client's money is going back, so dues netted from this job's
+    // (now stopped) payout weren't really paid.
+    await undoWorkerSettlement(payment.id);
   } else if (payment.methodType === 'CASH') {
-    // Reverse the commission-debt accrual; the worker returns the cash directly.
+    // Reverse the commission-debt accrual; the worker returns the cash
+    // directly. The status claim and the reversal commit together, so a
+    // repeated refund call can't reverse the dues twice.
     const workerUserId = payment.booking.workerId;
-    if (workerUserId) {
-      const workerProfile = await prisma.workerProfile.findUnique({
-        where: { userId: workerUserId },
-        select: { id: true },
+    const workerProfile = workerUserId
+      ? await prisma.workerProfile.findUnique({ where: { userId: workerUserId }, select: { id: true } })
+      : null;
+    const platformCut = roundToCentavo(payment.commissionAmount + payment.withholdingTaxAmount);
+    const claimed = await prisma.$transaction(async (tx) => {
+      const claim = await tx.payment.updateMany({
+        where: { id: payment.id, status: 'COMPLETED' },
+        data: { status: 'REFUNDED', escrowStatus: 'REFUNDED', refundReason: reason, refundedAt: new Date() },
       });
-      const platformCut = roundToCentavo(payment.commissionAmount + payment.withholdingTaxAmount);
+      if (claim.count === 0) return false;
       if (workerProfile && platformCut > 0) {
-        await prisma.$transaction((tx) =>
-          reverseDebtTx(tx, workerProfile.id, platformCut, {
-            bookingId,
-            note: `Reversed cash-job commission after refund: ${reason}`,
-          })
-        );
+        await reverseDebtTx(tx, workerProfile.id, platformCut, {
+          bookingId,
+          note: `Reversed cash-job commission after refund: ${reason}`,
+        });
       }
-    }
+      return true;
+    });
+    if (!claimed) return prisma.payment.findUnique({ where: { id: payment.id } });
   }
 
   const refunded = await prisma.payment.update({

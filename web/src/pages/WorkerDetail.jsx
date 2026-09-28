@@ -22,6 +22,9 @@ const DEBT_TYPE_LABELS = {
   DEBT_RECOVERY: 'Recovered from Payout',
   ADMIN_ADJUSTMENT: 'Admin Adjustment',
   REVERSAL: 'Reversed (refund)',
+  PENALTY: 'Penalty (no-show / worker fault)',
+  COMPENSATION: 'Compensation (client fault)',
+  RECOVERY_REVERSED: 'Recovery put back (job refunded)',
 }
 
 const CERT_STATUS_VARIANT = {
@@ -383,6 +386,11 @@ export default function WorkerDetail() {
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
               <p style={{ fontSize: '1.25rem', fontWeight: 700, margin: 0 }}>
                 ₱{(debt?.commissionOwed ?? 0).toFixed(2)} owed
+                {debt?.compensationCredit > 0 && (
+                  <span style={{ marginLeft: '0.75rem', fontSize: '0.95rem', fontWeight: 500, color: 'var(--text-muted)' }}>
+                    + ₱{debt.compensationCredit.toFixed(2)} credit due with next payout
+                  </span>
+                )}
               </p>
               <div style={{ display: 'flex', gap: '0.5rem' }}>
                 {debt?.debtHoldAt && (
