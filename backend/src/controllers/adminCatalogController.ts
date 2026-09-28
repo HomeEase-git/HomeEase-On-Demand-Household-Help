@@ -135,6 +135,11 @@ export function validateCatalog(
       numberFieldRefs
     );
     if (taskError) return `Job "${task.name?.trim() || 'Untitled'}": ${taskError.replace('quantityScopeFieldId', 'the count question')}`;
+    // The count multiplies the price, so it can't go below one unit.
+    const countField = task.quantityFieldRef ? fieldsByRef.get(task.quantityFieldRef) : undefined;
+    if (countField?.minValue != null && countField.minValue < 1) {
+      return `Question "${countField.label?.trim()}" sets the price of "${task.name?.trim() || 'Untitled'}", so its minimum must be at least 1.`;
+    }
     if (task.isActive !== undefined && typeof task.isActive !== 'boolean') {
       return `Job "${task.name?.trim()}": isActive must be a boolean.`;
     }

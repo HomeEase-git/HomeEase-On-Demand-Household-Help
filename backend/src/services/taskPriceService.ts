@@ -16,12 +16,17 @@ export function isPerUnitModel(pricingModel: string): boolean {
   return pricingModel === 'PER_UNIT' || pricingModel === 'TIERED';
 }
 
-export type TaskPriceResult = { ok: true; basePrice: number } | { ok: false; missingLabel: string };
+export type TaskPriceResult = { ok: true; basePrice: number } | { ok: false; missingLabel: string; message: string };
+
+/** The fewest units a per-unit job can be booked for. */
+export const MIN_BOOKABLE_QUANTITY = 1;
 
 /**
  * The job's base price for a booking. Per-unit tasks need the quantity
- * answer (keyed by the quantity question's label, like every scope answer);
- * a missing or non-numeric answer is reported so the caller can 400.
+ * answer (keyed by the quantity question's label, like every scope answer).
+ * A missing, non-numeric, infinite or below-1 count is refused, so a per-unit
+ * job can never price at ₱0 or below, whatever limits the question was
+ * configured with.
  */
 export function taskBasePrice(
   task: { basePrice: number; pricingModel: string; quantityScopeField?: { label: string } | null },
@@ -31,9 +36,14 @@ export function taskBasePrice(
   if (!isPerUnitModel(task.pricingModel)) return { ok: true, basePrice: task.basePrice };
 
   const field = task.quantityScopeField;
-  const quantity = field ? Number(scopeAnswers?.[field.label]) : NaN;
-  if (!field || Number.isNaN(quantity)) {
-    return { ok: false, missingLabel: field?.label ?? 'quantity' };
+  const label = field?.label ?? 'quantity';
+  const raw = field ? scopeAnswers?.[field.label] : undefined;
+  if (!field || raw === undefined || raw === null || (typeof raw === 'string' && !raw.trim())) {
+    return { ok: false, missingLabel: label, message: `"${label}" is required for this service` };
+  }
+  const quantity = Number(raw);
+  if (!Number.isFinite(quantity) || quantity < MIN_BOOKABLE_QUANTITY) {
+    return { ok: false, missingLabel: label, message: `"${label}" must be at least ${MIN_BOOKABLE_QUANTITY}` };
   }
   return { ok: true, basePrice: Math.round(task.basePrice * quantity * 100) / 100 };
 }

@@ -191,6 +191,14 @@ describe('Admin service catalog save', () => {
     expect(res.body.message).toMatch(/count question/);
   });
 
+  it('rejects a count question whose minimum is below 1, since it sets the price', async () => {
+    const body = newCatalog();
+    body.scopeFields = body.scopeFields.map((f) => (f.key === 'f-units' ? { ...f, minValue: 0 } : f)) as never;
+    const res = await create(body);
+    expect(res.status).toBe(400);
+    expect(res.body.message).toMatch(/minimum must be at least 1/);
+  });
+
   it("rejects ids from another category, so a save can't reach outside it", async () => {
     const a = (await create(newCatalog())).body.data;
     createdServiceTypeIds.push(a.id);

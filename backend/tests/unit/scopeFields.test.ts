@@ -78,5 +78,19 @@ describe('validateScopeAnswers', () => {
     expect(validateScopeAnswers(fields, { 'Where is the problem?': 'x', 'How many toilets?': 'two' }, toiletJob)).toBe(
       '"How many toilets?" must be a number'
     );
+    expect(validateScopeAnswers(fields, { 'Where is the problem?': 'x', 'How many toilets?': 'Infinity' }, toiletJob)).toBe(
+      '"How many toilets?" must be a number'
+    );
+  });
+
+  it("refuses a count below one even when the question's own minimum allows it", () => {
+    const loose = fields.map((f) => (f.id === 'f-toilets' ? { ...f, minValue: 0 } : f));
+    expect(validateScopeAnswers(loose, { 'Where is the problem?': 'x', 'How many toilets?': '0' }, toiletJob)).toBe(
+      '"How many toilets?" must be at least 1'
+    );
+    const noLimits = fields.map((f) => (f.id === 'f-toilets' ? { ...f, minValue: null, maxValue: null } : f));
+    expect(validateScopeAnswers(noLimits, { 'Where is the problem?': 'x', 'How many toilets?': '-3' }, toiletJob)).toBe(
+      '"How many toilets?" must be at least 1'
+    );
   });
 });

@@ -23,7 +23,31 @@ describe('taskBasePrice', () => {
     expect(taskBasePrice({ basePrice: 350, pricingModel: 'PER_UNIT', quantityScopeField: qty }, {})).toEqual({
       ok: false,
       missingLabel: 'How many units?',
+      message: '"How many units?" is required for this service',
     });
+  });
+
+  it.each(['0', '-2', '0.5', 'Infinity', 'two', '   '])(
+    'never prices a per-unit job from a count of %p (no ₱0 or negative jobs)',
+    (answer) => {
+      const result = taskBasePrice(
+        { basePrice: 350, pricingModel: 'PER_UNIT', quantityScopeField: qty },
+        { 'How many units?': answer }
+      );
+      expect(result.ok).toBe(false);
+    }
+  );
+
+  it('explains a count below one', () => {
+    const result = taskBasePrice({ basePrice: 350, pricingModel: 'PER_UNIT', quantityScopeField: qty }, { 'How many units?': '0' });
+    expect(result).toMatchObject({ ok: false, message: '"How many units?" must be at least 1' });
+  });
+
+  it('still allows a fractional count of at least one (e.g. 12.5 sq.m.)', () => {
+    const area = { label: 'Wall area (sq.m.)' };
+    expect(
+      taskBasePrice({ basePrice: 100, pricingModel: 'PER_UNIT', quantityScopeField: area }, { 'Wall area (sq.m.)': '12.5' })
+    ).toEqual({ ok: true, basePrice: 1250 });
   });
 
   it('has no upfront price for a custom-quote task', () => {

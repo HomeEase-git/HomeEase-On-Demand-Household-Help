@@ -465,7 +465,7 @@ export const createBooking = async (req: AuthRequest, res: Response) => {
         }
         const priced = taskBasePrice(serviceTask, effectiveScopeAnswers);
         if (!priced.ok) {
-          return res.status(400).json(errorResponse(400, `"${priced.missingLabel}" is required for this service`));
+          return res.status(400).json(errorResponse(400, priced.message));
         }
         basePrice = priced.basePrice;
       } else {

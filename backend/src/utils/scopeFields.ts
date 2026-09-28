@@ -59,8 +59,13 @@ export function validateScopeAnswers(
     }
     if (hasAnswer && field.fieldType === 'NUMBER') {
       const n = Number(answer);
-      if (Number.isNaN(n)) {
+      // Number("Infinity") is a number too — answers arrive as text.
+      if (!Number.isFinite(n)) {
         return `"${field.label}" must be a number`;
+      }
+      // The job's count sets its price: never below one unit.
+      if (task?.quantityScopeFieldId === field.id && n < 1) {
+        return `"${field.label}" must be at least 1`;
       }
       if ((field.minValue != null && n < field.minValue) || (field.maxValue != null && n > field.maxValue)) {
         return `"${field.label}" is outside the allowed range`;
