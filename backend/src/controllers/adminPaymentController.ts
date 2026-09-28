@@ -7,6 +7,7 @@ import { formatDisplayId, formatPeso } from '@utils/formatters';
 import { buildPaginationMeta, getPaginationParams } from '@utils/pagination';
 import { writeAuditLog } from '@utils/auditLog';
 import { schedulePayout } from '@queues/payoutQueue';
+import { paymentBreakdown } from '@services/financeReportService';
 import type { JwtPayload } from '@/types/index';
 
 interface AuthRequest extends Request {
@@ -27,7 +28,11 @@ type PaymentRecord = Prisma.PaymentGetPayload<{ include: typeof paymentInclude }
 function formatPayment(record: PaymentRecord) {
   const totalAmount = record.totalAmount ?? 0;
   const commissionAmount = record.commissionAmount ?? 0;
-  const workerAmount = Math.max(totalAmount - commissionAmount, 0);
+  // The stored share (after commission and withholding tax), not total minus
+  // commission — that would count VAT and withheld tax as the worker's.
+  const workerAmount = record.workerPayout ?? 0;
+  // When the money came in, for a paid payment; otherwise when it was created.
+  const paymentDate = record.capturedAt ?? record.createdAt;
 
   return {
     id: record.id,
@@ -41,8 +46,9 @@ function formatPayment(record: PaymentRecord) {
     userAmount: totalAmount,
     workerAmount,
     platformFee: commissionAmount,
+    withholdingTax: record.withholdingTaxAmount ?? 0,
     method: record.methodType ?? '—',
-    date: record.createdAt.toLocaleDateString('en-US', {
+    date: paymentDate.toLocaleDateString('en-US', {
       month: 'short',
       day: 'numeric',
       year: 'numeric',
@@ -79,7 +85,9 @@ export const listPayments = async (req: Request, res: Response) => {
     const { orderBy } = parseListSort<Prisma.PaymentOrderByWithRelationInput>(
       req.query,
       {
-        date: (dir) => ({ createdAt: dir }),
+        // Matches the Date column: when the money came in. Unpaid payments
+        // (no capture yet) sit with the newest.
+        date: (dir) => ({ capturedAt: { sort: dir, nulls: dir === 'desc' ? 'first' : 'last' } }),
         client: (dir) => ({ booking: { client: { fullName: dir } } }),
         worker: (dir) => ({ booking: { worker: { fullName: dir } } }),
         clientPaid: (dir) => ({ totalAmount: dir }),
@@ -93,12 +101,11 @@ export const listPayments = async (req: Request, res: Response) => {
 
     const where = buildPaymentWhere(search, status);
     // Commission Overview is always a Completed-payments summary regardless
-    // of which status tab is selected (mirrors the old client-side
-    // `.filter(status === 'Completed')`) — computed over the full matching
-    // set, not just the current page, same as listPayouts' aggregate below.
+    // of which status tab is selected — computed over the full matching set,
+    // not just the current page. See financeReportService.paymentBreakdown.
     const completedWhere = buildPaymentWhere(search, 'completed');
 
-    const [total, records, completedAggregate] = await Promise.all([
+    const [total, records, breakdown] = await Promise.all([
       prisma.payment.count({ where }),
       prisma.payment.findMany({
         where,
@@ -107,20 +114,22 @@ export const listPayments = async (req: Request, res: Response) => {
         orderBy,
         include: paymentInclude,
       }),
-      prisma.payment.aggregate({ where: completedWhere, _sum: { totalAmount: true, commissionAmount: true } }),
+      paymentBreakdown(completedWhere),
     ]);
-
-    const completedGross = completedAggregate._sum.totalAmount ?? 0;
-    const completedCommission = completedAggregate._sum.commissionAmount ?? 0;
 
     return res.json({
       success: true,
       data: records.map(formatPayment),
       meta: {
         ...buildPaginationMeta(total, page, limit),
-        completedGrossVolume: completedGross,
-        completedWorkerEarnings: Math.max(completedGross - completedCommission, 0),
-        completedPlatformCommission: completedCommission,
+        // Where completed client payments went. Withholding tax and VAT are
+        // held for BIR — neither is the platform's or the worker's money.
+        completedGrossVolume: breakdown.clientPaid,
+        completedWorkerEarnings: breakdown.workerEarnings,
+        completedPlatformCommission: breakdown.platformCommission,
+        completedWithholdingTax: breakdown.withholdingTax,
+        completedVatCollected: breakdown.vatCollected,
+        commissionRatePercent: breakdown.commissionRatePercent,
       },
     });
   } catch (error) {

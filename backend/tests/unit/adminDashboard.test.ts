@@ -2,7 +2,13 @@ import type { Request, Response } from 'express';
 
 const mockUserCount = jest.fn();
 const mockBookingCount = jest.fn();
-const mockPaymentAggregate = jest.fn();
+const mockPlatformRevenue = jest.fn();
+const mockWorkerPayoutsPaid = jest.fn();
+
+jest.mock('@services/financeReportService', () => ({
+  platformRevenue: mockPlatformRevenue,
+  workerPayoutsPaid: mockWorkerPayoutsPaid,
+}));
 
 jest.mock('@config/database', () => ({
   __esModule: true,
@@ -11,7 +17,6 @@ jest.mock('@config/database', () => ({
     verificationRequest: { count: jest.fn().mockResolvedValue(0) },
     booking: { count: mockBookingCount, findMany: jest.fn().mockResolvedValue([]) },
     dispute: { count: jest.fn().mockResolvedValue(0) },
-    payment: { aggregate: mockPaymentAggregate },
     auditLog: { findMany: jest.fn().mockResolvedValue([]) },
     workerProfile: {
       findMany: jest.fn().mockResolvedValue([]),
@@ -41,7 +46,8 @@ describe('getDashboardStats range and trends', () => {
     jest.clearAllMocks();
     mockUserCount.mockResolvedValue(0);
     mockBookingCount.mockResolvedValue(0);
-    mockPaymentAggregate.mockResolvedValue({ _sum: { totalAmount: 0, workerPayout: 0 } });
+    mockPlatformRevenue.mockResolvedValue({ revenue: 0, fromCashJobs: 0 });
+    mockWorkerPayoutsPaid.mockResolvedValue(0);
   });
 
   it.each([
@@ -64,12 +70,12 @@ describe('getDashboardStats range and trends', () => {
       if (where.role === 'CLIENT') return current ? 12 : 10;
       return current ? 3 : 4;
     });
-    mockPaymentAggregate.mockImplementation(async ({ where }) => {
-      const w = where.createdAt ?? where.releasedAt;
-      if (!w) return { _sum: { totalAmount: 5000, workerPayout: 4000 } };
-      const current = !w.lt;
-      return { _sum: { totalAmount: current ? 1500 : 1000, workerPayout: current ? 900 : 1200 } };
-    });
+    // No period = all-time; a period with `lt` = the previous window.
+    mockPlatformRevenue.mockImplementation(async (period?: { lt?: Date }) => ({
+      revenue: !period ? 5000 : period.lt ? 1000 : 1500,
+      fromCashJobs: 0,
+    }));
+    mockWorkerPayoutsPaid.mockImplementation(async (period?: { lt?: Date }) => (!period ? 4000 : period.lt ? 1200 : 900));
 
     const body = await callWith({ days: '30' });
     expect(body.data.trends).toMatchObject({
@@ -78,6 +84,8 @@ describe('getDashboardStats range and trends', () => {
       revenue: { current: 1500, previous: 1000 },
       payouts: { current: 900, previous: 1200 },
     });
+    expect(body.data.stats.totalRevenue).toMatch(/5,000/);
+    expect(body.data.stats.totalPayouts).toMatch(/4,000/);
   });
 
   it('uses back-to-back windows of the chosen length', async () => {
