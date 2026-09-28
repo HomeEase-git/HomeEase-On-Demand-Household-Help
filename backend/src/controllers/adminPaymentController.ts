@@ -290,10 +290,14 @@ export const retryPayout = async (req: AuthRequest, res: Response) => {
       return res.status(400).json(errorResponse(400, 'Only a failed payout can be retried'));
     }
 
-    await prisma.payout.update({
-      where: { id },
+    // Guarded: a refund may have cancelled this payout since the read above.
+    const reopened = await prisma.payout.updateMany({
+      where: { id, status: 'FAILED' },
       data: { status: 'PENDING', failureReason: null, failedAt: null },
     });
+    if (reopened.count === 0) {
+      return res.status(409).json(errorResponse(409, 'This payout changed and can no longer be retried'));
+    }
 
     // Unlike the booking-flow expiry-job calls elsewhere, this one can't be
     // a silent best-effort catch: the update above already flipped this
@@ -305,8 +309,8 @@ export const retryPayout = async (req: AuthRequest, res: Response) => {
       await schedulePayout(id);
     } catch (error) {
       console.error(`Failed to schedule retried payout ${id}:`, error);
-      await prisma.payout.update({
-        where: { id },
+      await prisma.payout.updateMany({
+        where: { id, status: 'PENDING' },
         data: { status: 'FAILED', failureReason: 'Retry could not be queued — please try again.' },
       });
       return res.status(500).json(errorResponse(500, 'Failed to re-queue payout. Please try again.'));

@@ -4,7 +4,9 @@ import {
   calculateWithholdingTax,
   computeBookingFinalTotal,
 } from '@utils/pricing';
-import { createInvoice, retrieveInvoice, createRefund } from '@services/xenditService';
+import { createInvoice, retrieveInvoice, createRefund, retrieveRefund, type XenditRefund } from '@services/xenditService';
+import { cancelPayout, retrievePayout } from '@services/xenditDisbursementService';
+import { applyXenditPayoutStatus } from '@services/payoutStatusService';
 import { notifyUser } from '@utils/notify';
 import { getAppSettings } from '@services/appSettingsService';
 import { schedulePayout } from '@queues/payoutQueue';
@@ -236,18 +238,20 @@ export async function createCompletionInvoice(bookingId: string): Promise<
   // already shows it PAID (the invoice-paid webhook was missed/delayed),
   // self-heal right here instead of minting a duplicate invoice and charging
   // the client a second time.
+  let underpaid = false;
   if (existing && existing.status === 'PENDING' && existing.xenditInvoiceId) {
     try {
       const inv = await retrieveInvoice(existing.xenditInvoiceId);
       const invStatus = (inv?.status as string)?.toUpperCase();
       if (invStatus === 'PAID' || invStatus === 'SETTLED') {
-        await finalizePaidBooking(
+        const finalized = await finalizePaidBooking(
           existing.id,
           inv.payment_id ?? null,
           inv.paid_amount ?? null,
           inv.paid_at ? new Date(inv.paid_at) : null
         );
-        return { alreadyPaid: true };
+        if (!finalized) underpaid = true;
+        else return { alreadyPaid: true };
       }
       if (invStatus === 'PENDING' && inv?.invoice_url) {
         return {
@@ -260,6 +264,11 @@ export async function createCompletionInvoice(bookingId: string): Promise<
     } catch {
       // fall through and mint a fresh invoice
     }
+  }
+  // The client already paid part of the old invoice; a fresh full-amount
+  // invoice would charge them again.
+  if (underpaid) {
+    throw new Error(`Booking ${bookingId} has a partly paid invoice that needs a manual review`);
   }
 
   const redirectBase = process.env.XENDIT_REDIRECT_BASE_URL || 'https://homeease.app';
@@ -496,6 +505,10 @@ export async function settleWorkerEarnings(paymentId: string): Promise<void> {
  * booking, then settles the worker's earnings. Idempotent — a Payment already
  * COMPLETED short-circuits to settleWorkerEarnings so a missing payout still
  * self-heals.
+ *
+ * Returns null (and changes nothing) when Xendit reports less money paid than
+ * the invoice total — the booking is not marked paid and no payout is made
+ * until an admin has looked at it.
  */
 export async function finalizePaidBooking(
   paymentId: string,
@@ -512,6 +525,19 @@ export async function finalizePaidBooking(
   if (payment.status === 'COMPLETED') {
     await settleWorkerEarnings(payment.id);
     return payment;
+  }
+
+  if (paidAmount != null && roundToCentavo(paidAmount) < roundToCentavo(payment.totalAmount)) {
+    await writeAuditLog({
+      action: 'PAYMENT_UNDERPAID',
+      category: 'SYSTEM_ERROR',
+      level: 'ERROR',
+      message:
+        `Xendit reports ₱${paidAmount.toFixed(2)} paid for booking ${payment.bookingId}, ` +
+        `but the invoice total is ₱${payment.totalAmount.toFixed(2)} — not marked paid, review it manually.`,
+      metadata: { paymentId: payment.id, bookingId: payment.bookingId, paidAmount, totalAmount: payment.totalAmount },
+    });
+    return null;
   }
 
   const updated = await prisma.$transaction(async (tx) => {
@@ -708,6 +734,136 @@ async function flagTaxRecordsForRefundedPayment(payment: {
   );
 }
 
+function manualClawbackError(bookingId: string) {
+  return new Error(
+    `Payout for booking ${bookingId} has already been disbursed — this refund needs a manual clawback.`
+  );
+}
+
+/**
+ * Makes sure no worker payout goes out for a payment that is about to be
+ * refunded. In order:
+ *  - not settled yet: take the same `workerSettledAt` claim settleWorkerEarnings
+ *    uses, so a payout is never created for it;
+ *  - payout queued (PENDING) or FAILED: cancel it here — the payout worker and
+ *    admin retry only ever send PENDING/FAILED rows;
+ *  - payout already at Xendit (PROCESSING): cancel it at Xendit, which only
+ *    works while Xendit still holds it;
+ *  - otherwise the money is gone and the refund is refused (manual clawback).
+ * The lock stays even if the refund then fails, so a retried refund can't
+ * race a payout either.
+ */
+async function stopWorkerPayout(paymentId: string, bookingId: string, reason: string): Promise<void> {
+  const claim = await prisma.payment.updateMany({
+    where: { id: paymentId, workerSettledAt: null },
+    data: { workerSettledAt: new Date() },
+  });
+  if (claim.count === 1) return;
+
+  const cancelIfNotSent = () =>
+    prisma.payout.updateMany({
+      where: { paymentId, status: { in: ['PENDING', 'FAILED'] } },
+      data: { status: 'CANCELLED', failureReason: `Booking refunded: ${reason}`, failedAt: new Date() },
+    });
+
+  // No Payout row: the whole amount went to the worker's dues.
+  const payout = await prisma.payout.findUnique({ where: { paymentId } });
+  if (!payout || payout.status === 'CANCELLED') return;
+  if (payout.status === 'PAID') throw manualClawbackError(bookingId);
+  if ((await cancelIfNotSent()).count === 1) return;
+
+  const inFlight = await prisma.payout.findUniqueOrThrow({ where: { paymentId } });
+  if (inFlight.status === 'CANCELLED') return;
+  if (inFlight.status !== 'PROCESSING') throw manualClawbackError(bookingId);
+  const xenditPayoutId = inFlight.xenditDisbursementId;
+  if (!xenditPayoutId) {
+    // The payout worker is between claiming it and hearing back from Xendit.
+    throw new Error(`Payout for booking ${bookingId} is being sent right now — retry the refund in a minute.`);
+  }
+
+  const remoteStatus = await cancelPayout(xenditPayoutId)
+    .then((r) => r.status)
+    // Xendit refuses the cancel once it has handed the money on — find out where it is.
+    .catch(() =>
+      retrievePayout(xenditPayoutId)
+        .then((r) => r.status)
+        .catch(() => undefined)
+    );
+  await applyXenditPayoutStatus(inFlight, remoteStatus, { failureReason: `Booking refunded: ${reason}` });
+  await cancelIfNotSent();
+
+  const final = await prisma.payout.findUniqueOrThrow({ where: { paymentId }, select: { status: true } });
+  if (final.status !== 'CANCELLED') throw manualClawbackError(bookingId);
+}
+
+/**
+ * Refunds the client through Xendit at most once. An earlier refund that is
+ * PENDING or SUCCEEDED is reused; only a FAILED/CANCELLED one is retried,
+ * under a new idempotency key (Xendit would otherwise replay the failure).
+ */
+async function requestXenditRefund(payment: {
+  id: string;
+  xenditInvoiceId: string;
+  xenditRefundId: string | null;
+  amountPesos: number;
+}): Promise<XenditRefund> {
+  const prior = payment.xenditRefundId ? await retrieveRefund(payment.xenditRefundId) : null;
+  const refund =
+    prior && (prior.status === 'PENDING' || prior.status === 'SUCCEEDED')
+      ? prior
+      : await createRefund({
+          xenditInvoiceId: payment.xenditInvoiceId,
+          amountPesos: payment.amountPesos,
+          reason: 'REQUESTED_BY_CUSTOMER',
+          idempotencyKey: prior ? `refund-${payment.id}-after-${prior.id}` : `refund-${payment.id}`,
+        });
+
+  await prisma.payment.update({
+    where: { id: payment.id },
+    data: { xenditRefundId: refund.id, xenditRefundStatus: refund.status },
+  });
+
+  // PENDING is normal for e-wallets: Xendit has accepted it and the sweep
+  // follows it up (reconcilePendingRefund).
+  if (refund.status !== 'SUCCEEDED' && refund.status !== 'PENDING') {
+    throw new Error(`Xendit refund for invoice ${payment.xenditInvoiceId} did not succeed (status: ${refund.status})`);
+  }
+  return refund;
+}
+
+/**
+ * Sweep follow-up for a refund Xendit accepted as PENDING. If it later
+ * fails, the client never got their money: the payment goes back to
+ * COMPLETED (the worker's payout stays stopped) so the refund can be retried,
+ * and the failure is logged for an admin.
+ */
+export async function reconcilePendingRefund(paymentId: string): Promise<'succeeded' | 'failed' | 'pending'> {
+  const payment = await prisma.payment.findUnique({ where: { id: paymentId } });
+  if (!payment?.xenditRefundId || payment.xenditRefundStatus !== 'PENDING') return 'pending';
+
+  const refund = await retrieveRefund(payment.xenditRefundId);
+  if (refund.status === 'SUCCEEDED') {
+    await prisma.payment.update({ where: { id: payment.id }, data: { xenditRefundStatus: 'SUCCEEDED' } });
+    return 'succeeded';
+  }
+  if (refund.status !== 'FAILED' && refund.status !== 'CANCELLED') return 'pending';
+
+  await prisma.payment.update({
+    where: { id: payment.id },
+    data: { status: 'COMPLETED', escrowStatus: 'RELEASED', xenditRefundStatus: refund.status, refundedAt: null },
+  });
+  await writeAuditLog({
+    action: 'REFUND_FAILED',
+    category: 'SYSTEM_ERROR',
+    level: 'ERROR',
+    message:
+      `Xendit refund ${refund.id} for booking ${payment.bookingId} ended ${refund.status}` +
+      `${refund.failure_code ? ` (${refund.failure_code})` : ''} — the client has not been refunded; retry it.`,
+    metadata: { paymentId: payment.id, bookingId: payment.bookingId, refundId: refund.id },
+  });
+  return 'failed';
+}
+
 export async function refundOrVoidPayment(bookingId: string, reason: string) {
   const payment = await prisma.payment.findUnique({
     where: { bookingId },
@@ -723,29 +879,17 @@ export async function refundOrVoidPayment(bookingId: string, reason: string) {
     return payment;
   }
 
+  let refund: XenditRefund | null = null;
   if (payment.methodType === 'GCASH' || payment.methodType === 'MAYA') {
-    if (payment.payout && payment.payout.status === 'PAID') {
-      throw new Error(
-        `Payout for booking ${bookingId} has already been disbursed — this refund needs a manual clawback.`
-      );
-    }
+    // Stop the worker's payout BEFORE money goes back to the client, so the
+    // same peso can never leave twice. Throws if it has already been sent.
+    await stopWorkerPayout(payment.id, bookingId, reason);
     if (payment.xenditInvoiceId) {
-      const refund = await createRefund({
+      refund = await requestXenditRefund({
+        id: payment.id,
         xenditInvoiceId: payment.xenditInvoiceId,
+        xenditRefundId: payment.xenditRefundId,
         amountPesos: payment.capturedAmount ?? payment.totalAmount,
-        reason: 'REQUESTED_BY_CUSTOMER',
-      });
-      if (refund.status !== 'SUCCEEDED') {
-        throw new Error(
-          `Xendit refund for invoice ${payment.xenditInvoiceId} did not succeed (status: ${refund.status})`
-        );
-      }
-    }
-    // Cancel a not-yet-sent payout so the worker isn't paid for a refunded job.
-    if (payment.payout && (payment.payout.status === 'PENDING' || payment.payout.status === 'PROCESSING')) {
-      await prisma.payout.update({
-        where: { id: payment.payout.id },
-        data: { status: 'FAILED', failureReason: `Booking refunded: ${reason}`, failedAt: new Date() },
       });
     }
   } else if (payment.methodType === 'CASH') {
@@ -775,6 +919,7 @@ export async function refundOrVoidPayment(bookingId: string, reason: string) {
       escrowStatus: 'REFUNDED',
       refundReason: reason,
       refundedAt: new Date(),
+      ...(refund ? { xenditRefundId: refund.id, xenditRefundStatus: refund.status } : {}),
     },
   });
 
@@ -795,13 +940,13 @@ export async function reconcilePendingPayment(paymentId: string): Promise<'paid'
   const status = (inv?.status as string | undefined)?.toUpperCase();
 
   if (status === 'PAID' || status === 'SETTLED') {
-    await finalizePaidBooking(
+    const finalized = await finalizePaidBooking(
       payment.id,
       inv.payment_id ?? null,
       inv.paid_amount ?? null,
       inv.paid_at ? new Date(inv.paid_at) : null
     );
-    return 'paid';
+    return finalized ? 'paid' : 'pending';
   }
   if (status === 'EXPIRED' || status === 'FAILED') {
     await prisma.payment.update({

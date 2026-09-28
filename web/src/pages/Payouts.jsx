@@ -18,6 +18,8 @@ const STATUS_BADGE_VARIANT = {
   Processing: 'pending',
   Pending: 'pending',
   Failed: 'flagged',
+  // Stopped because the client was refunded — never sent, never retried.
+  Cancelled: 'suspended',
 }
 
 const SUB_NAV = [
