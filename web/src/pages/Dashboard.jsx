@@ -61,8 +61,10 @@ export default function Dashboard() {
     { label: 'Active Bookings', value: String(stats.activeBookings), icon: 'fa-calendar-check', color: 'blue', to: '/bookings' },
     { label: 'Pending Approvals', value: String(stats.pendingApprovals), icon: 'fa-id-card', color: 'orange', to: '/verification' },
     { label: 'Open Disputes', value: String(stats.openDisputes), icon: 'fa-triangle-exclamation', color: 'pink', to: '/bookings/dispute' },
-    { label: 'Total Revenue', value: stats.totalRevenue, icon: 'fa-peso-sign', color: 'green', to: '/payments', trend: describeTrend(trends?.revenue, rangeDays, (n) => pesoFormatter.format(n)) },
-    { label: 'Total Worker Payouts', value: stats.totalPayouts, icon: 'fa-money-bill-transfer', color: 'green', to: '/payments/payouts', trend: describeTrend(trends?.payouts, rangeDays, (n) => pesoFormatter.format(n)) },
+    // Revenue is the platform's commission (not what clients paid); payouts
+    // are money actually sent to workers.
+    { label: 'Platform Revenue', sublabel: stats.revenueFromCashJobs && stats.revenueFromCashJobs !== '₱0.00' ? `Commission · ${stats.revenueFromCashJobs} owed from cash jobs` : 'Commission earned', value: stats.totalRevenue, icon: 'fa-peso-sign', color: 'green', to: '/payments', trend: describeTrend(trends?.revenue, rangeDays, (n) => pesoFormatter.format(n)) },
+    { label: 'Paid to Workers', sublabel: 'GCash/Maya payouts sent', value: stats.totalPayouts, icon: 'fa-money-bill-transfer', color: 'green', to: '/payments/payouts', trend: describeTrend(trends?.payouts, rangeDays, (n) => pesoFormatter.format(n)) },
   ]
 
   // Everything waiting on an admin, in one place: the header bell's queues

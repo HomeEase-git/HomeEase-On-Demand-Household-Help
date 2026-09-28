@@ -66,15 +66,17 @@ export default function Payments() {
   // Backend-aggregated across every Completed payment matching the current
   // search (not just the current page) — see listPayments' completedWhere.
   const totals = useMemo(() => {
-    const gross = meta.completedGrossVolume ?? 0
-    const workers = meta.completedWorkerEarnings ?? 0
-    const platform = meta.completedPlatformCommission ?? 0
-    // Derived from the actual totals rather than a hardcoded constant, so
-    // this always reflects AppSettings.commissionRate as configured —
-    // whatever an admin sets it to in Settings — instead of going stale.
-    const ratePercent = gross > 0 ? Math.round((platform / gross) * 100) : null
-    return { gross, workers, platform, ratePercent }
-  }, [meta.completedGrossVolume, meta.completedWorkerEarnings, meta.completedPlatformCommission])
+    return {
+      gross: meta.completedGrossVolume ?? 0,
+      workers: meta.completedWorkerEarnings ?? 0,
+      platform: meta.completedPlatformCommission ?? 0,
+      withholding: meta.completedWithholdingTax ?? 0,
+      vat: meta.completedVatCollected ?? 0,
+      // Commission as a share of the service price, from the real totals — so
+      // it reflects whatever rate was actually charged.
+      ratePercent: meta.commissionRatePercent ?? null,
+    }
+  }, [meta])
 
   const { showSuccess, showError } = useToast()
   const [exporting, setExporting] = useState(false)
@@ -92,6 +94,7 @@ export default function Payments() {
           'Client Paid': t.userAmount,
           'Worker Earnings': t.workerAmount,
           'Platform Fee': t.platformFee,
+          'Withholding Tax': t.withholdingTax,
           Method: t.method,
           Date: t.date,
           Status: t.status,
@@ -132,24 +135,34 @@ export default function Payments() {
       <SectionCard title="Commission Overview">
         <div className="detail-grid" style={{ marginBottom: 0 }}>
           <div className="detail-block">
-            <label>Completed Gross Volume</label>
+            <label>Clients Paid</label>
             <div className="value">{formatPeso(totals.gross)}</div>
           </div>
           <div className="detail-block">
-            <label>Worker Earnings (Payout)</label>
+            <label>Worker Earnings</label>
             <div className="value">{formatPeso(totals.workers)}</div>
           </div>
           <div className="detail-block">
-            <label>Platform Commission</label>
+            <label>Platform Commission (revenue)</label>
             <div className="value">
               {formatPeso(totals.platform)}{' '}
               {totals.ratePercent != null && (
                 <span style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>
-                  (~{totals.ratePercent}% of completed payments)
+                  ({totals.ratePercent}% of service prices)
                 </span>
               )}
             </div>
           </div>
+          <div className="detail-block">
+            <label>Withholding Tax Held (for BIR)</label>
+            <div className="value">{formatPeso(totals.withholding)}</div>
+          </div>
+          {totals.vat > 0 && (
+            <div className="detail-block">
+              <label>VAT Collected (for BIR)</label>
+              <div className="value">{formatPeso(totals.vat)}</div>
+            </div>
+          )}
         </div>
       </SectionCard>
       <SectionCard>

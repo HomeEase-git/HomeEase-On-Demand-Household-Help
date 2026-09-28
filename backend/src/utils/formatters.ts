@@ -46,5 +46,5 @@ export function formatDisplayId(id: string) {
 }
 
 export function formatPeso(amount: number) {
-  return `₱${amount.toLocaleString('en-PH', { minimumFractionDigits: 0, maximumFractionDigits: 2 })}`;
+  return `₱${amount.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }

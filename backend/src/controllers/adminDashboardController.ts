@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import prisma from '@config/database';
+import { platformRevenue, workerPayoutsPaid } from '@services/financeReportService';
 import { errorResponse } from '@utils/errorResponse';
 import { formatPeso } from '@utils/formatters';
 import { getBookingsOverTime } from './adminAnalyticsController';
@@ -53,8 +54,8 @@ export const getDashboardStats = async (req: Request, res: Response) => {
       pendingApprovals,
       activeBookings,
       openDisputes,
-      revenueResult,
-      payoutResult,
+      revenueAllTime,
+      payoutsAllTime,
       recentActivityRecords,
       topWorkerRecords,
       bookingsTrend,
@@ -68,8 +69,10 @@ export const getDashboardStats = async (req: Request, res: Response) => {
       prisma.verificationRequest.count({ where: { status: 'PENDING' } }),
       prisma.booking.count({ where: { status: { in: [...ACTIVE_BOOKING_STATUSES] } } }),
       prisma.dispute.count({ where: { status: 'OPEN' } }),
-      prisma.payment.aggregate({ where: { status: 'COMPLETED' }, _sum: { totalAmount: true } }),
-      prisma.payment.aggregate({ where: { escrowStatus: 'RELEASED' }, _sum: { workerPayout: true } }),
+      // Revenue = platform commission; payouts = money actually sent to
+      // workers. See financeReportService for the exact definitions.
+      platformRevenue(),
+      workerPayoutsPaid(),
       prisma.auditLog.findMany({ orderBy: { createdAt: 'desc' }, take: 8 }),
       prisma.workerProfile.findMany({
         orderBy: [{ rating: 'desc' }, { totalReviews: 'desc' }],
@@ -114,10 +117,10 @@ export const getDashboardStats = async (req: Request, res: Response) => {
       prisma.user.count({ where: { role: 'WORKER', isDeleted: false, createdAt: inPrevious } }),
       prisma.booking.count({ where: { createdAt: inPeriod } }),
       prisma.booking.count({ where: { createdAt: inPrevious } }),
-      prisma.payment.aggregate({ where: { status: 'COMPLETED', createdAt: inPeriod }, _sum: { totalAmount: true } }),
-      prisma.payment.aggregate({ where: { status: 'COMPLETED', createdAt: inPrevious }, _sum: { totalAmount: true } }),
-      prisma.payment.aggregate({ where: { escrowStatus: 'RELEASED', releasedAt: inPeriod }, _sum: { workerPayout: true } }),
-      prisma.payment.aggregate({ where: { escrowStatus: 'RELEASED', releasedAt: inPrevious }, _sum: { workerPayout: true } }),
+      platformRevenue(inPeriod),
+      platformRevenue(inPrevious),
+      workerPayoutsPaid(inPeriod),
+      workerPayoutsPaid(inPrevious),
     ]);
 
     const trend = (current: number, previous: number): PeriodTrend => ({ current, previous });
@@ -125,8 +128,8 @@ export const getDashboardStats = async (req: Request, res: Response) => {
       clients: trend(newClients, newClientsPrevious),
       workers: trend(newWorkers, newWorkersPrevious),
       bookings: trend(bookingsCount, bookingsCountPrevious),
-      revenue: trend(revenuePeriod._sum.totalAmount ?? 0, revenuePrevious._sum.totalAmount ?? 0),
-      payouts: trend(payoutsPeriod._sum.workerPayout ?? 0, payoutsPrevious._sum.workerPayout ?? 0),
+      revenue: trend(revenuePeriod.revenue, revenuePrevious.revenue),
+      payouts: trend(payoutsPeriod, payoutsPrevious),
     };
 
     return res.json({
@@ -139,8 +142,9 @@ export const getDashboardStats = async (req: Request, res: Response) => {
           pendingApprovals,
           activeBookings,
           openDisputes,
-          totalRevenue: formatPeso(revenueResult._sum.totalAmount ?? 0),
-          totalPayouts: formatPeso(payoutResult._sum.workerPayout ?? 0),
+          totalRevenue: formatPeso(revenueAllTime.revenue),
+          revenueFromCashJobs: formatPeso(revenueAllTime.fromCashJobs),
+          totalPayouts: formatPeso(payoutsAllTime),
           outstandingWorkerDebt: formatPeso(workerDebtResult._sum.commissionOwed ?? 0),
           workersOnHoldCount,
           overduePayments: overduePaymentCount,

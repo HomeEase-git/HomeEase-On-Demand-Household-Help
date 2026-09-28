@@ -110,8 +110,8 @@ export const getPaymentDetail = async (req: AuthRequest, res: Response) => {
         priceBreakdown: breakdown,
         createdAt: payment.createdAt,
         updatedAt: payment.updatedAt,
-        // schema has no receivedAt; use createdAt as proxy
-        receivedAt: payment.createdAt,
+        // When the client's money was captured (createdAt for unpaid ones).
+        receivedAt: payment.capturedAt ?? payment.createdAt,
         releasedAt: payment.releasedAt,
         // schema has xenditPaymentId, not paymentMethodReference
         transactionId: payment.xenditPaymentId ?? null,
