@@ -115,6 +115,35 @@ export function formatStructuredAddress(parts: StructuredAddress): string {
     .join(', ');
 }
 
+// The one-line address to show for a saved address. `fullAddress` is what the
+// client confirmed on the address screen; older rows without one fall back to
+// joining the structured parts.
+export function displayAddress(address: {
+  fullAddress?: string | null;
+  houseNumber?: string | null;
+  street?: string | null;
+  barangay?: string | null;
+  city?: string | null;
+  state?: string | null;
+  zipCode?: string | null;
+}): string {
+  if (address.fullAddress?.trim()) return address.fullAddress.trim();
+  return formatStructuredAddress({
+    houseNumber: address.houseNumber ?? undefined,
+    street: address.street ?? '',
+    barangay: address.barangay ?? undefined,
+    city: address.city ?? '',
+    state: address.state ?? undefined,
+    zipCode: address.zipCode ?? undefined,
+  }).replace(/, Philippines$/, '');
+}
+
+// Google's formatted addresses end in ", Philippines" — noise for an app that
+// only serves the Philippines.
+export function stripCountry(formattedAddress: string): string {
+  return formattedAddress.replace(/,?\s*Philippines$/i, '').trim();
+}
+
 // Even Google occasionally has no exact match for a specific rural barangay/
 // subdivision, even though the surrounding city/province resolves fine.
 // Rather than a hard failure that blocks booking entirely, this tries the

@@ -1,6 +1,6 @@
 import * as Location from 'expo-location';
 import * as api from '../../services/api';
-import { autocompleteAddresses, getPlaceDetails, newPlacesSessionToken, reverseGeocodeDetailed } from '../geo';
+import { autocompleteAddresses, displayAddress, getPlaceDetails, newPlacesSessionToken, reverseGeocodeDetailed, stripCountry } from '../geo';
 
 jest.mock('expo-location', () => ({ reverseGeocodeAsync: jest.fn() }));
 jest.mock('../../services/api', () => ({
@@ -129,5 +129,24 @@ describe('Places autocomplete helpers', () => {
     expect(api.getPlaceDetailsGoogle).toHaveBeenCalledWith('ChIJabc', 'tok');
     expect(result?.approximate).toBe(true);
     expect(result?.geometry.location).toEqual({ lat: 14.84, lng: 120.81 });
+  });
+});
+
+describe('displayAddress / stripCountry', () => {
+  it('prefers the single-line address the client confirmed', () => {
+    expect(displayAddress({ fullAddress: ' Blk 4 Lot 12, Paombong, Bulacan ', street: 'Old St', city: 'Manila' })).toBe(
+      'Blk 4 Lot 12, Paombong, Bulacan',
+    );
+  });
+
+  it('falls back to the structured parts for older addresses', () => {
+    expect(
+      displayAddress({ fullAddress: null, houseNumber: '12', street: 'Rizal St', barangay: null, city: 'Manila', state: 'Metro Manila', zipCode: '1000' }),
+    ).toBe('12 Rizal St, Manila, Metro Manila 1000');
+  });
+
+  it("drops Google's trailing country", () => {
+    expect(stripCountry('Rizal St, Paombong, Bulacan, Philippines')).toBe('Rizal St, Paombong, Bulacan');
+    expect(stripCountry('Paombong, Bulacan')).toBe('Paombong, Bulacan');
   });
 });

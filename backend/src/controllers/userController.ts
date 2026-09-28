@@ -388,6 +388,30 @@ export const getAddresses = async (req: AuthRequest, res: Response) => {
   }
 };
 
+type AddressParts = {
+  houseNumber?: string | null;
+  street?: string | null;
+  barangay?: string | null;
+  city?: string | null;
+  state?: string | null;
+  zipCode?: string | null;
+};
+
+// For older app versions that send only the split fields — builds the same
+// one-line address the backfill migration produced, so every row has one.
+const composeFullAddress = (parts: AddressParts): string | null => {
+  const clean = (v?: string | null) => (v && v.trim() ? v.trim() : null);
+  const line = [
+    [clean(parts.houseNumber), clean(parts.street)].filter(Boolean).join(' '),
+    clean(parts.barangay) ? `Barangay ${clean(parts.barangay)}` : null,
+    clean(parts.city),
+    [clean(parts.state), clean(parts.zipCode)].filter(Boolean).join(' '),
+  ]
+    .filter(Boolean)
+    .join(', ');
+  return line || null;
+};
+
 /**
  * POST /api/users/me/addresses
  */
@@ -397,14 +421,18 @@ export const createAddress = async (req: AuthRequest, res: Response) => {
       return res.status(401).json(errorResponse(401, 'Not authenticated'));
     }
     
-    const { label, street, city, state, zipCode, houseNumber, barangay, landmark, lat, lng, geocodeAccuracy } = req.body;
+    const { label, fullAddress, street, city, state, zipCode, houseNumber, barangay, landmark, lat, lng, geocodeAccuracy } = req.body;
 
     const address = await prisma.userAddress.create({
       data: {
         userId: req.user.userId,
         label,
-        street,
-        city,
+        fullAddress:
+          typeof fullAddress === 'string'
+            ? fullAddress.trim()
+            : composeFullAddress({ houseNumber, street, barangay, city, state, zipCode }),
+        street: street ?? '',
+        city: city ?? '',
         state,
         zipCode,
         houseNumber,
@@ -438,7 +466,7 @@ export const updateAddress = async (req: AuthRequest, res: Response) => {
     }
     
     const addressId = req.params.addressId as string;
-    const { label, street, city, state, zipCode, houseNumber, barangay, landmark, lat, lng, geocodeAccuracy } = req.body;
+    const { label, fullAddress, street, city, state, zipCode, houseNumber, barangay, landmark, lat, lng, geocodeAccuracy } = req.body;
 
     const address = await prisma.userAddress.findFirst({
       where: { id: addressId, isDeleted: false },
@@ -457,6 +485,19 @@ export const updateAddress = async (req: AuthRequest, res: Response) => {
     if (houseNumber !== undefined) updateData.houseNumber = houseNumber;
     if (barangay !== undefined) updateData.barangay = barangay;
     if (landmark !== undefined) updateData.landmark = landmark;
+    if (typeof fullAddress === 'string') {
+      updateData.fullAddress = fullAddress.trim();
+    } else if ([street, city, state, zipCode, houseNumber, barangay].some((v) => v !== undefined)) {
+      // An older app edited the split fields — keep the one-line address in step.
+      updateData.fullAddress = composeFullAddress({
+        houseNumber: houseNumber !== undefined ? houseNumber : address.houseNumber,
+        street: street !== undefined ? street : address.street,
+        barangay: barangay !== undefined ? barangay : address.barangay,
+        city: city !== undefined ? city : address.city,
+        state: state !== undefined ? state : address.state,
+        zipCode: zipCode !== undefined ? zipCode : address.zipCode,
+      });
+    }
     if (lat !== undefined) {
       updateData.lat = lat;
       updateData.geocodedAt = lat != null ? new Date() : null;

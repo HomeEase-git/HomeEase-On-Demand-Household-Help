@@ -354,11 +354,15 @@ model UserAddress {
   user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   label       String?
-  // House/unit/building number and barangay are split out from `street` so
-  // the geocoder can be given a structured query (street+barangay+city vs. one
-  // free-text blob) — Nominatim resolves PH addresses far more precisely with
-  // the barangay present, and house number lets a future routing/geocoding
-  // provider pin the exact lot rather than just the street.
+  // The address as the client typed/confirmed it — one free-text line,
+  // prefilled from Google and editable. It's for display to the client and
+  // worker only; the location itself comes from `lat`/`lng` (the map pin),
+  // never from geocoding this text. Null only for rows saved before it existed.
+  fullAddress String?
+  // Structured parts. Since `fullAddress` these are no longer typed by the
+  // client — they're filled from Google's address components for the pinned
+  // spot (so may be empty), and kept for `city`-based reporting and for older
+  // app versions that still send the split fields.
   houseNumber String?
   street      String
   barangay    String?

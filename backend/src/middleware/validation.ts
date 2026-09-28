@@ -839,6 +839,18 @@ export const validateChangePassword = (
   return next();
 };
 
+const MAX_FULL_ADDRESS_LENGTH = 500;
+
+const checkFullAddress = (fullAddress: unknown): string | null => {
+  if (typeof fullAddress !== 'string' || !fullAddress.trim()) {
+    return 'fullAddress must be a non-empty string';
+  }
+  if (fullAddress.length > MAX_FULL_ADDRESS_LENGTH) {
+    return `fullAddress must be at most ${MAX_FULL_ADDRESS_LENGTH} characters`;
+  }
+  return null;
+};
+
 // Shared by both address validators — lat/lng are optional (an address saved
 // before geocoding resolves, or one Google couldn't resolve at all, still
 // has to save), but when present must be real Philippine coordinates so a bad
@@ -876,26 +888,45 @@ export const validateAddAddress = (
   res: Response,
   next: NextFunction
 ) => {
-  const { label, street, city, state, zipCode, houseNumber, barangay, landmark } = req.body;
+  const { label, fullAddress, street, city, state, zipCode, houseNumber, barangay, landmark, lat, lng } = req.body;
 
   if (!label || typeof label !== 'string') {
     return res.status(400).json(errorResponse(400, 'label is required and must be a string'));
   }
 
-  if (!street || typeof street !== 'string') {
-    return res.status(400).json(errorResponse(400, 'street is required and must be a string'));
-  }
+  if (fullAddress !== undefined) {
+    // Current app: one free-text address line + the map pin. The pin is what
+    // locates the address (the text is never geocoded), so it's required.
+    const fullAddressError = checkFullAddress(fullAddress);
+    if (fullAddressError) return res.status(400).json(errorResponse(400, fullAddressError));
 
-  if (!city || typeof city !== 'string') {
-    return res.status(400).json(errorResponse(400, 'city is required and must be a string'));
-  }
+    if (lat == null || lng == null) {
+      return res.status(400).json(errorResponse(400, 'lat and lng are required — pin the address on the map'));
+    }
 
-  if (!state || typeof state !== 'string') {
-    return res.status(400).json(errorResponse(400, 'state is required and must be a string'));
-  }
+    // Structured parts come from Google for the pinned spot and may be blank.
+    for (const [field, value] of [['street', street], ['city', city], ['state', state], ['zipCode', zipCode]] as const) {
+      if (value !== undefined && value !== null && typeof value !== 'string') {
+        return res.status(400).json(errorResponse(400, `${field} must be a string`));
+      }
+    }
+  } else {
+    // Older app versions still send the split fields only.
+    if (!street || typeof street !== 'string') {
+      return res.status(400).json(errorResponse(400, 'street is required and must be a string'));
+    }
 
-  if (!zipCode || typeof zipCode !== 'string') {
-    return res.status(400).json(errorResponse(400, 'zipCode is required and must be a string'));
+    if (!city || typeof city !== 'string') {
+      return res.status(400).json(errorResponse(400, 'city is required and must be a string'));
+    }
+
+    if (!state || typeof state !== 'string') {
+      return res.status(400).json(errorResponse(400, 'state is required and must be a string'));
+    }
+
+    if (!zipCode || typeof zipCode !== 'string') {
+      return res.status(400).json(errorResponse(400, 'zipCode is required and must be a string'));
+    }
   }
 
   for (const [field, value] of [['houseNumber', houseNumber], ['barangay', barangay], ['landmark', landmark]] as const) {
@@ -915,10 +946,15 @@ export const validateUpdateAddress = (
   res: Response,
   next: NextFunction
 ) => {
-  const { label, street, city, state, zipCode, houseNumber, barangay, landmark } = req.body;
+  const { label, fullAddress, street, city, state, zipCode, houseNumber, barangay, landmark } = req.body;
 
   if (label !== undefined && typeof label !== 'string') {
     return res.status(400).json(errorResponse(400, 'label must be a string'));
+  }
+
+  if (fullAddress !== undefined) {
+    const fullAddressError = checkFullAddress(fullAddress);
+    if (fullAddressError) return res.status(400).json(errorResponse(400, fullAddressError));
   }
 
   if (street !== undefined && typeof street !== 'string') {

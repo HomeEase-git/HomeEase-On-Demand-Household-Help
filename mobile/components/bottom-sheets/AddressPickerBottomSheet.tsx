@@ -3,10 +3,13 @@ import { View, Text, Pressable, ScrollView, ActivityIndicator } from "react-nati
 import { AppIcon as Ionicons } from "../icons/AppIcon";
 import BottomSheetWrapper, { BottomSheetHandle } from "./BottomSheetWrapper";
 import { colors, cardShadow } from "../../constants";
+import { displayAddress } from "../../utils/geo";
 
 export type SavedAddress = {
   id: string;
   label: string;
+  fullAddress?: string | null;
+  landmark?: string | null;
   houseNumber?: string | null;
   street: string;
   barangay?: string | null;
@@ -77,7 +80,7 @@ export const AddressPickerBottomSheet: React.FC<Props> = ({
                     )}
                   </View>
                   <Text className="text-text-secondary text-sm mt-1">
-                    {`${item.street}, ${item.city}, ${item.state} ${item.zipCode}`}
+                    {displayAddress(item)}
                   </Text>
                 </View>
                 {isResolving ? (
