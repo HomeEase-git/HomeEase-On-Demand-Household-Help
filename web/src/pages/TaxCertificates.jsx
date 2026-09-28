@@ -8,31 +8,17 @@ import Badge from '../components/common/Badge'
 import { useListQuery } from '../hooks/useListQuery'
 import { fetchTaxCertificates, generateTaxCertificates, getCertificateDownloadUrl } from '../services/tax'
 import { useToast } from '../context/ToastContext'
+import { recentClosedQuarters, monthShort } from '../utils/taxPeriods'
 
 const STATUS_BADGE_VARIANT = { ISSUED: 'approved', DRAFT: 'pending', NEEDS_REVIEW: 'flagged' }
 
-function formatDate(value) {
-  return new Date(value).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
-}
-
-// Defaults to the calendar quarter before the current one — the quarter that
-// just closed is almost always the one an admin wants to generate next.
-function defaultQuarter() {
-  const now = new Date()
-  const q = Math.floor(now.getUTCMonth() / 3)
-  const year = q === 0 ? now.getUTCFullYear() - 1 : now.getUTCFullYear()
-  const startMonth = q === 0 ? 9 : (q - 1) * 3
-  const periodStart = new Date(Date.UTC(year, startMonth, 1))
-  const periodEnd = new Date(Date.UTC(year, startMonth + 3, 1))
-  return {
-    periodStart: periodStart.toISOString().slice(0, 10),
-    periodEnd: periodEnd.toISOString().slice(0, 10),
-  }
-}
+// Form 2307 is issued per calendar quarter; the one that just closed is
+// almost always the one an admin wants next, so it's the default.
+const QUARTERS = recentClosedQuarters(8)
 
 export default function TaxCertificates() {
   const { showError, showSuccess } = useToast()
-  const [period, setPeriod] = useState(defaultQuarter())
+  const [period, setPeriod] = useState(QUARTERS[0])
   const [generating, setGenerating] = useState(false)
   const [downloadingId, setDownloadingId] = useState(null)
 
@@ -86,24 +72,20 @@ export default function TaxCertificates() {
         contains the correct figures but has not been verified as identical to BIR's official template; confirm
         with an accountant before relying on it for formal filing.
       </p>
-      <SectionCard title="Generate Certificates for a Period">
+      <SectionCard title="Generate Certificates for a Quarter">
         <div className="toolbar" style={{ alignItems: 'center' }}>
-          <label className="text-muted text-small">From</label>
-          <input
-            type="date"
+          <label className="text-muted text-small" htmlFor="cert-quarter">Quarter</label>
+          <select
+            id="cert-quarter"
             className="form-input"
             value={period.periodStart}
-            onChange={(e) => setPeriod((p) => ({ ...p, periodStart: e.target.value }))}
+            onChange={(e) => setPeriod(QUARTERS.find((q) => q.periodStart === e.target.value))}
             style={{ maxWidth: '160px' }}
-          />
-          <label className="text-muted text-small">To</label>
-          <input
-            type="date"
-            className="form-input"
-            value={period.periodEnd}
-            onChange={(e) => setPeriod((p) => ({ ...p, periodEnd: e.target.value }))}
-            style={{ maxWidth: '160px' }}
-          />
+          >
+            {QUARTERS.map((q) => (
+              <option key={q.periodStart} value={q.periodStart}>{q.label}</option>
+            ))}
+          </select>
           <button type="button" className="btn btn-primary" onClick={handleGenerate} disabled={generating}>
             {generating ? 'Generating...' : 'Generate'}
           </button>
@@ -133,9 +115,16 @@ export default function TaxCertificates() {
                       <tr key={c.id}>
                         <td>{c.workerName}</td>
                         <td style={{ fontFamily: 'monospace' }}>{c.maskedTin}</td>
-                        <td>{formatDate(c.periodStart)} – {formatDate(c.periodEnd)}</td>
+                        <td>{c.periodLabel}</td>
                         <td>{c.totalIncomePaymentsFormatted}</td>
-                        <td>{c.totalTaxWithheldFormatted}</td>
+                        <td>
+                          {c.totalTaxWithheldFormatted}
+                          {Array.isArray(c.monthlyBreakdown) && (
+                            <div className="text-muted text-small">
+                              {c.monthlyBreakdown.map((m) => `${monthShort(m.month)} ₱${m.taxWithheld.toFixed(2)}`).join(' · ')}
+                            </div>
+                          )}
+                        </td>
                         <td><Badge variant={STATUS_BADGE_VARIANT[c.status] ?? 'pending'}>{c.status}</Badge></td>
                         <td>
                           <button

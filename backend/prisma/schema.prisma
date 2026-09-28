@@ -2310,6 +2310,11 @@ model TaxCertificate {
 
   totalIncomePayments Float // sum of (Payment.subtotal - Payment.commissionAmount) captured in the period
   totalTaxWithheld    Float // sum of Payment.withholdingTaxAmount captured in the period
+  // Per Manila calendar month of the quarter, as BIR Form 2307 lays it out:
+  // [{ month: "2026-07", incomePayments, taxWithheld }, ...] — one entry per
+  // month in the period, zeros included. Null on certificates generated
+  // before this was added (regenerate to fill it).
+  monthlyBreakdown Json?
 
   pdfPath String // Supabase Storage object path in a PRIVATE bucket — a signed URL is minted on read, never stored here
   status  TaxCertificateStatus @default(DRAFT)

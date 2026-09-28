@@ -6,37 +6,13 @@ import ErrorState from '../components/common/ErrorState'
 import Badge from '../components/common/Badge'
 import { fetchRemittancePeriods, markRemittancePeriodRemitted } from '../services/tax'
 import { useToast } from '../context/ToastContext'
+import { recentClosedQuarters, monthShort } from '../utils/taxPeriods'
 
-function formatDate(value) {
-  return new Date(value).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
-}
-
-// The last 8 calendar quarters — BIR withholding remittance is filed
-// quarterly (1601-EQ). Computed client-side; nothing is stored until an
-// admin actually marks one remitted.
-function lastEightQuarters() {
-  const now = new Date()
-  const periods = []
-  let year = now.getUTCFullYear()
-  let quarter = Math.floor(now.getUTCMonth() / 3)
-
-  for (let i = 0; i < 8; i++) {
-    quarter -= 1
-    if (quarter < 0) {
-      quarter = 3
-      year -= 1
-    }
-    const startMonth = quarter * 3
-    const periodStart = new Date(Date.UTC(year, startMonth, 1))
-    const periodEnd = new Date(Date.UTC(year, startMonth + 3, 1))
-    periods.push({
-      periodStart: periodStart.toISOString().slice(0, 10),
-      periodEnd: periodEnd.toISOString().slice(0, 10),
-      label: `Q${quarter + 1} ${year}`,
-    })
-  }
-  return periods
-}
+// The last 8 closed calendar quarters (Manila time). BIR takes the first two
+// months of each quarter on monthly remittance forms and the quarter on the
+// quarterly return, so each row also shows the per-month amounts. Nothing is
+// stored until an admin marks a quarter remitted.
+const lastEightQuarters = () => recentClosedQuarters(8)
 
 export default function TaxRemittance() {
   const { showError, showSuccess } = useToast()
@@ -125,7 +101,14 @@ export default function TaxRemittance() {
                   return (
                     <tr key={period.periodStart}>
                       <td>{period.label}</td>
-                      <td>{summary ? summary.totalTaxWithheldFormatted : '—'}</td>
+                      <td>
+                        {summary ? summary.totalTaxWithheldFormatted : '—'}
+                        {summary?.months?.length > 0 && (
+                          <div className="text-muted text-small">
+                            {summary.months.map((m) => `${monthShort(m.month)} ${m.taxWithheldFormatted}`).join(' · ')}
+                          </div>
+                        )}
+                      </td>
                       <td>
                         <Badge
                           variant={

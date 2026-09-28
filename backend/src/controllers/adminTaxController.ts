@@ -9,20 +9,26 @@ import { writeAuditLog } from '@utils/auditLog';
 import { generateQuarterlyCertificates, getCertificateDownloadUrl } from '@services/taxCertificateService';
 import { summarizeRemittancePeriod, markPeriodRemitted } from '@services/taxRemittanceService';
 import { generateVatSummaries } from '@services/vatSummaryService';
+import { parseManilaDate, manilaDateKey, isManilaQuarter, formatManilaPeriod } from '@utils/manilaTime';
 import type { JwtPayload } from '@/types/index';
 
 interface AuthRequest extends Request {
   user?: JwtPayload;
 }
 
+// Period boundaries are Manila calendar days: "2026-07-01" means midnight
+// Manila time, so a payment at 3 AM on July 1 is in Q3, not Q2.
 function parsePeriod(query: Request['query']) {
-  const periodStart = new Date(String(query.periodStart ?? ''));
-  const periodEnd = new Date(String(query.periodEnd ?? ''));
-  if (Number.isNaN(periodStart.getTime()) || Number.isNaN(periodEnd.getTime()) || periodStart >= periodEnd) {
+  const periodStart = parseManilaDate(query.periodStart);
+  const periodEnd = parseManilaDate(query.periodEnd);
+  if (!periodStart || !periodEnd || periodStart >= periodEnd) {
     return null;
   }
   return { periodStart, periodEnd };
 }
+
+const periodLabel = (p: { periodStart: Date; periodEnd: Date }) =>
+  `${manilaDateKey(p.periodStart)}–${manilaDateKey(p.periodEnd)}`;
 
 /**
  * POST /api/admin/tax/certificates/generate
@@ -38,6 +44,11 @@ export const generateCertificates = async (req: AuthRequest, res: Response) => {
       return res.status(400).json(errorResponse(400, 'periodStart and periodEnd must be valid dates with periodStart before periodEnd'));
     }
 
+    // Form 2307 covers exactly one calendar quarter.
+    if (!isManilaQuarter(period.periodStart, period.periodEnd)) {
+      return res.status(400).json(errorResponse(400, 'Certificates are issued per calendar quarter — pick a quarter (e.g. 2026-07-01 to 2026-10-01)'));
+    }
+
     const adminId = req.user?.userId as string;
     const result = await generateQuarterlyCertificates(period.periodStart, period.periodEnd, adminId);
 
@@ -45,7 +56,7 @@ export const generateCertificates = async (req: AuthRequest, res: Response) => {
       actorId: adminId,
       action: 'TAX_CERTIFICATES_GENERATED',
       category: 'ADMIN_ACTION',
-      message: `Admin generated ${result.generated} tax certificate(s) for ${period.periodStart.toISOString().slice(0, 10)}–${period.periodEnd.toISOString().slice(0, 10)}`,
+      message: `Admin generated ${result.generated} tax certificate(s) for ${periodLabel(period)}`,
       metadata: { ...period, generated: result.generated, skippedNoTin: result.skippedNoTin },
     });
 
@@ -94,10 +105,13 @@ export const listCertificates = async (req: Request, res: Response) => {
         maskedTin: maskTin(decryptField(r.workerTin)),
         periodStart: r.periodStart,
         periodEnd: r.periodEnd,
+        // Manila dates, end inclusive ("Jul 1, 2026 to Sep 30, 2026").
+        periodLabel: formatManilaPeriod(r.periodStart, r.periodEnd, 'short'),
         totalIncomePayments: r.totalIncomePayments,
         totalIncomePaymentsFormatted: formatPeso(r.totalIncomePayments),
         totalTaxWithheld: r.totalTaxWithheld,
         totalTaxWithheldFormatted: formatPeso(r.totalTaxWithheld),
+        monthlyBreakdown: r.monthlyBreakdown,
         status: r.status,
         issuedAt: r.issuedAt,
       })),
@@ -153,7 +167,7 @@ export const generateVatSummary = async (req: AuthRequest, res: Response) => {
       actorId: adminId,
       action: 'VAT_SUMMARY_GENERATED',
       category: 'ADMIN_ACTION',
-      message: `Admin generated ${result.generated} VAT summary/summaries for ${period.periodStart.toISOString().slice(0, 10)}–${period.periodEnd.toISOString().slice(0, 10)}`,
+      message: `Admin generated ${result.generated} VAT summary/summaries for ${periodLabel(period)}`,
       metadata: { ...period, ...result },
     });
 
@@ -193,6 +207,7 @@ export const listVatSummaries = async (req: Request, res: Response) => {
         workerName: r.workerName,
         periodStart: r.periodStart,
         periodEnd: r.periodEnd,
+        periodLabel: formatManilaPeriod(r.periodStart, r.periodEnd, 'short'),
         totalVatCollected: r.totalVatCollected,
         totalVatCollectedFormatted: formatPeso(r.totalVatCollected),
         needsReview: r.needsReview,
@@ -218,8 +233,8 @@ export const listRemittancePeriods = async (req: Request, res: Response) => {
       .split(',')
       .map((chunk) => chunk.split(':'))
       .filter((pair) => pair.length === 2)
-      .map(([start, end]) => ({ periodStart: new Date(start as string), periodEnd: new Date(end as string) }))
-      .filter((p) => !Number.isNaN(p.periodStart.getTime()) && !Number.isNaN(p.periodEnd.getTime()));
+      .map(([start, end]) => ({ periodStart: parseManilaDate(start), periodEnd: parseManilaDate(end) }))
+      .filter((p): p is { periodStart: Date; periodEnd: Date } => Boolean(p.periodStart && p.periodEnd));
 
     if (periods.length === 0) {
       return res.status(400).json(errorResponse(400, 'periods must be a comma-separated list of start:end date pairs'));
@@ -234,6 +249,7 @@ export const listRemittancePeriods = async (req: Request, res: Response) => {
       data: summaries.map((s) => ({
         ...s,
         totalTaxWithheldFormatted: formatPeso(s.totalTaxWithheld),
+        months: s.months.map((m) => ({ ...m, taxWithheldFormatted: formatPeso(m.taxWithheld) })),
       })),
     });
   } catch (error) {
@@ -273,7 +289,7 @@ export const markRemitted = async (req: AuthRequest, res: Response) => {
       actorId: adminId,
       action: 'TAX_REMITTANCE_MARKED',
       category: 'ADMIN_ACTION',
-      message: `Admin marked ${period.periodStart.toISOString().slice(0, 10)}–${period.periodEnd.toISOString().slice(0, 10)} as remitted (ref ${referenceNumber.trim()})`,
+      message: `Admin marked ${periodLabel(period)} as remitted (ref ${referenceNumber.trim()})`,
       metadata: { ...period, referenceNumber: referenceNumber.trim(), totalTaxWithheld: record.totalTaxWithheld },
     });
 

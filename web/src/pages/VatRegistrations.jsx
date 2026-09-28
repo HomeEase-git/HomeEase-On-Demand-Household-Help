@@ -14,21 +14,13 @@ import {
   generateVatSummary,
 } from '../services/vat'
 import { useToast } from '../context/ToastContext'
+import { recentClosedQuarters } from '../utils/taxPeriods'
 
-// Defaults to the calendar quarter before the current one — same reasoning
-// as TaxCertificates.jsx's defaultQuarter: the quarter that just closed is
-// almost always the one an admin wants to generate next.
+// Defaults to the calendar quarter that just closed (Manila time) — almost
+// always the one an admin wants to generate next.
 function defaultQuarter() {
-  const now = new Date()
-  const q = Math.floor(now.getUTCMonth() / 3)
-  const year = q === 0 ? now.getUTCFullYear() - 1 : now.getUTCFullYear()
-  const startMonth = q === 0 ? 9 : (q - 1) * 3
-  const periodStart = new Date(Date.UTC(year, startMonth, 1))
-  const periodEnd = new Date(Date.UTC(year, startMonth + 3, 1))
-  return {
-    periodStart: periodStart.toISOString().slice(0, 10),
-    periodEnd: periodEnd.toISOString().slice(0, 10),
-  }
+  const { periodStart, periodEnd } = recentClosedQuarters(1)[0]
+  return { periodStart, periodEnd }
 }
 
 const STATUS_BADGE_VARIANT = { PENDING: 'pending', APPROVED: 'active', REJECTED: 'suspended' }
@@ -264,7 +256,7 @@ export default function VatRegistrations() {
                     summaries.map((s) => (
                       <tr key={s.id}>
                         <td>{s.workerName}</td>
-                        <td>{formatDate(s.periodStart)} – {formatDate(s.periodEnd)}</td>
+                        <td>{s.periodLabel ?? `${formatDate(s.periodStart)} – ${formatDate(s.periodEnd)}`}</td>
                         <td>{s.totalVatCollectedFormatted}</td>
                         <td>
                           {s.needsReview ? (
