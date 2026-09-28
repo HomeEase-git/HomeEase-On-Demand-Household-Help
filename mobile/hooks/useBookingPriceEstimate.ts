@@ -56,7 +56,8 @@ export function useBookingPriceEstimate(
     ? draft.scopeAnswers?.[draft.selectedTaskQuantityFieldLabel]
     : undefined;
   const quantity = typeof quantityAnswer === 'string' ? Number(quantityAnswer) : NaN;
-  const hasQuantity = Number.isFinite(quantity) && quantity > 0;
+  // Matches the server: a per-unit job is booked for at least one unit.
+  const hasQuantity = Number.isFinite(quantity) && quantity >= 1;
   const rushFactor = isRushDate(draft.date) ? 1 + RUSH_FEE_RATE : 1;
   const effectiveRange = { min: categoryRange.min * rushFactor, max: categoryRange.max * rushFactor };
 
