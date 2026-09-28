@@ -1,6 +1,7 @@
 import { useCallback, useMemo, useState } from 'react'
 import PageHeader from '../components/common/PageHeader'
 import SubNav from '../components/common/SubNav'
+import { PAYMENTS_SUB_NAV } from '../constants/paymentsNav'
 import SearchBar from '../components/common/SearchBar'
 import SectionCard from '../components/common/SectionCard'
 import Pagination from '../components/common/Pagination'
@@ -21,13 +22,6 @@ const STATUS_BADGE_VARIANT = {
   // Stopped because the client was refunded — never sent, never retried.
   Cancelled: 'suspended',
 }
-
-const SUB_NAV = [
-  { to: '/payments', label: 'All Transactions' },
-  { to: '/payments/refunds', label: 'Refunds' },
-  { to: '/payments/payouts', label: 'Payout Distribution' },
-  { to: '/payments/books', label: 'Books' },
-]
 
 export default function Payouts() {
   const { showError, showSuccess } = useToast()
@@ -103,7 +97,7 @@ export default function Payouts() {
           </button>
         )}
       />
-      <SubNav items={SUB_NAV} />
+      <SubNav items={PAYMENTS_SUB_NAV} />
       <p className="form-hint">
         Payouts are sent to the worker&apos;s configured GCash/Maya account via Xendit once a booking&apos;s held
         payment is released. Failed sends can be retried below.

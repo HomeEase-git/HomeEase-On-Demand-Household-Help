@@ -6,9 +6,11 @@ import {
   useSettingsForm,
 } from '../components/settings/SettingsForm'
 
-// Pricing (commission, distance fee, expertise tiers) lives on Pricing Rules
-// and withholding tax/ATC on Tax Settings — this page keeps site identity,
-// admin account/alert settings, and booking-operation rules.
+// Price changes (same-day fee, distance fee, expertise tiers, no-show penalty,
+// client-fault compensation) live on Price Adjustments, commission and worker
+// debt on Payments → Commission & Debt, and withholding tax/ATC on Tax
+// Settings — this page keeps site identity, admin account/alert settings, and
+// booking-operation rules.
 const NUMBER_FIELD_BOUNDS = {
   pendingExpiryMinutes: [5, 10080],
   geofenceRadiusMeters: [10, 5000],
@@ -16,8 +18,6 @@ const NUMBER_FIELD_BOUNDS = {
   declineWindowHours: [1, 720],
   declineCooldownHours: [1, 720],
   noShowGraceMinutes: [15, 480],
-  noShowPenaltyAmount: [0, 100000],
-  clientFaultCompensationAmount: [0, 100000],
   rushMinLeadHours: [0, 24],
   workerMinAge: [18, 100],
   workerMaxAge: [18, 100],
@@ -130,7 +130,7 @@ export default function Settings() {
                 value={current.rushMinLeadHours}
                 onChange={updateNumberField('rushMinLeadHours')}
                 error={fieldErrors.rushMinLeadHours}
-                hint="How far ahead a same-day booking must start. The same-day fee is in Pricing Rules."
+                hint="How far ahead a same-day booking must start. The same-day fee is in Price Adjustments."
               />
               <AdornedNumberField
                 id="settings-pending-expiry"
@@ -223,6 +223,10 @@ export default function Settings() {
             description="No-show/dispute handling and automatic suspension. The auto-suspend thresholds are OFF (leave blank) until you set both a rating floor and a dispute-count/window — suspension is reversible, never a ban."
           >
             <p className="settings-group__label" style={{ marginTop: 0 }}>Booking &amp; Dispute Handling</p>
+            <p className="toggle-row__hint" style={{ marginTop: 0 }}>
+              The no-show penalty and client-fault compensation amounts are in{' '}
+              <Link to="/price-adjustments">Price Adjustments</Link>.
+            </p>
             <div className="detail-grid" style={{ marginBottom: 0 }}>
               <AdornedNumberField
                 id="settings-no-show-grace"
@@ -234,30 +238,6 @@ export default function Settings() {
                 onChange={updateNumberField('noShowGraceMinutes')}
                 error={fieldErrors.noShowGraceMinutes}
                 hint="How long past the start time without a check-in before the job is cancelled as a no-show."
-              />
-              <AdornedNumberField
-                id="settings-no-show-penalty"
-                label="Worker No-Show Penalty"
-                prefix="₱"
-                min={0}
-                max={100000}
-                step={50}
-                value={current.noShowPenaltyAmount}
-                onChange={updateNumberField('noShowPenaltyAmount')}
-                error={fieldErrors.noShowPenaltyAmount}
-                hint="Added to the worker's dues for a no-show or a worker-fault cancellation on site."
-              />
-              <AdornedNumberField
-                id="settings-client-fault-fee"
-                label="Client-Fault Compensation"
-                prefix="₱"
-                min={0}
-                max={100000}
-                step={50}
-                value={current.clientFaultCompensationAmount}
-                onChange={updateNumberField('clientFaultCompensationAmount')}
-                error={fieldErrors.clientFaultCompensationAmount}
-                hint="Charged to the client and paid to the worker when an on-site cancellation is approved as the client's fault."
               />
               <AdornedNumberField
                 id="settings-dispute-escalation"
@@ -312,8 +292,9 @@ export default function Settings() {
           </SettingsSection>
 
           <p className="toggle-row__hint" style={{ marginTop: '0.5rem' }}>
-            Looking for commission, the same-day fee, distance fee, or expertise tiers? They're in{' '}
-            <Link to="/pricing-rules">Pricing Rules</Link>. Withholding tax and the BIR ATC code are in{' '}
+            Looking for job prices or fees? Job prices are on the <Link to="/price-list">Price List</Link>; the same-day
+            fee, distance fee and expertise tiers are in <Link to="/price-adjustments">Price Adjustments</Link>; commission
+            is in <Link to="/payments/commission">Payments → Commission &amp; Debt</Link>. Withholding tax and the BIR ATC code are in{' '}
             <Link to="/tax/settings">Tax Settings</Link>.
           </p>
         </>

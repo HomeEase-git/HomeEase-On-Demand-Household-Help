@@ -6,7 +6,7 @@ import { sendSmsToUser } from '@utils/smsService';
 import { writeAuditLog } from '@utils/auditLog';
 import { requestRefund } from '@services/refundRequestService';
 import { BOOKING_QUEUE_NAME, JOB_NAMES, type ExpirePendingBookingJobData } from '@queues/bookingQueue';
-import { bookingStartInstant } from '@services/workerAvailabilityService';
+import { bookingStartInstant, phTodayStart } from '@services/workerAvailabilityService';
 import { chargePenaltyTx } from '@services/debtLedgerService';
 import { getAppSettings } from '@services/appSettingsService';
 import {
@@ -564,7 +564,10 @@ export async function cancelWorkerNoShows(): Promise<void> {
       workerArrivedAt: null,
       // Cheap DB-side pre-filter — a booking scheduled for a future day
       // can't be a no-show yet. The precise start-time check is below.
-      scheduledDate: { lte: now },
+      // scheduledDate is the PH calendar day at UTC midnight, so compare it
+      // to today's PH date: comparing to `now` skipped the morning's
+      // bookings from 00:00 to 08:00 PH, when the PH date is a day ahead.
+      scheduledDate: { lte: phTodayStart(now) },
     },
   });
 

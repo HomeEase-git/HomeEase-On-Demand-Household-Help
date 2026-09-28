@@ -2,6 +2,7 @@ import { useCallback, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import PageHeader from '../components/common/PageHeader'
 import SubNav from '../components/common/SubNav'
+import { PAYMENTS_SUB_NAV } from '../constants/paymentsNav'
 import SearchBar from '../components/common/SearchBar'
 import FilterTabs from '../components/common/FilterTabs'
 import SectionCard from '../components/common/SectionCard'
@@ -16,13 +17,6 @@ import ErrorState from '../components/common/ErrorState'
 import { useListQuery } from '../hooks/useListQuery'
 import { fetchPayments } from '../services/payments'
 import { formatPeso } from '../data/payments'
-
-const SUB_NAV = [
-  { to: '/payments', label: 'All Transactions' },
-  { to: '/payments/refunds', label: 'Refunds' },
-  { to: '/payments/payouts', label: 'Payout Distribution' },
-  { to: '/payments/books', label: 'Books' },
-]
 
 const STATUS_MAP = {
   All: 'all',
@@ -120,7 +114,7 @@ export default function Payments() {
           </button>
         }
         title="Payment Management" subtitle="All transactions" />
-      <SubNav items={SUB_NAV} />
+      <SubNav items={PAYMENTS_SUB_NAV} />
       <div className="toolbar">
         <SearchBar
           placeholder="Search by ID, booking, client, or worker..."

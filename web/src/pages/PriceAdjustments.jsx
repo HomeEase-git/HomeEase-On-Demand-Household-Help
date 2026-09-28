@@ -1,3 +1,4 @@
+import { Link } from 'react-router-dom'
 import {
   AdornedNumberField,
   SettingsFormPage,
@@ -6,8 +7,11 @@ import {
   useSettingsForm,
 } from '../components/settings/SettingsForm'
 
+// Everything that can move a booking's price away from its Price List price.
+// Commission and worker debt aren't here on purpose: they come off the
+// worker's side and never change what the client pays (Payments → Commission
+// & Debt). Same-day minimum notice stays a booking rule in Settings.
 const NUMBER_FIELD_BOUNDS = {
-  workerDebtHoldLimit: [0, 100000],
   freeDistanceKm: [0, 50],
   perKmFee: [0, 500],
   tierProMinRating: [0, 5],
@@ -18,57 +22,33 @@ const NUMBER_FIELD_BOUNDS = {
   tierExpertMinJobs: [0, null],
   tierExpertMinYears: [0, 60],
   tierExpertMultiplier: [1, 5],
+  noShowPenaltyAmount: [0, 100000],
+  clientFaultCompensationAmount: [0, 100000],
 }
-const PERCENT_FIELDS = ['commissionRate', 'rushFeeRate']
+const PERCENT_FIELDS = ['rushFeeRate']
 const FIELDS = [...Object.keys(NUMBER_FIELD_BOUNDS), ...PERCENT_FIELDS]
 
-export default function PricingRules() {
+export default function PriceAdjustments() {
   const form = useSettingsForm({ fields: FIELDS, numberBounds: NUMBER_FIELD_BOUNDS, percentFields: PERCENT_FIELDS })
   const { current, fieldErrors, updateNumberField, updatePercentField } = form
 
   return (
     <SettingsFormPage
-      title="Pricing Rules"
-      subtitle="Service prices are fixed in the Service Catalog. These rules are what can change a booking's price: add-ons, distance, expertise tier, units and the same-day fee."
+      title="Price Adjustments"
+      subtitle="What can change a booking's price after the job price is set. Job prices themselves are on the Price List."
       form={form}
     >
       {current && (
         <>
           <SettingsSection
-            icon="fa-coins"
-            title="Commission & Worker Debt"
-            description="Commission rate changes apply to new payments going forward; existing payments keep the rate they were charged at."
-          >
-            <div className="detail-grid" style={{ marginBottom: 0 }}>
-              <AdornedNumberField
-                id="settings-commission-rate"
-                label="Commission Rate"
-                suffix="%"
-                min={0}
-                max={100}
-                step={0.5}
-                value={toPercentDisplay(current.commissionRate)}
-                onChange={updatePercentField('commissionRate')}
-                error={fieldErrors.commissionRate}
-              />
-              <AdornedNumberField
-                id="settings-debt-hold-limit"
-                label="Worker Debt Hold Limit"
-                prefix="₱"
-                min={0}
-                max={100000}
-                step={50}
-                value={current.workerDebtHoldLimit}
-                onChange={updateNumberField('workerDebtHoldLimit')}
-                error={fieldErrors.workerDebtHoldLimit}
-              />
-            </div>
-          </SettingsSection>
-
-          <SettingsSection
             icon="fa-bolt"
             title="Same-Day Fee"
-            description="Added to the service price when a client books for today. The minimum notice for same-day bookings is in Settings."
+            description={
+              <>
+                Added when a client books for today. How much notice a same-day booking needs is set in{' '}
+                <Link to="/settings">Settings → Booking Rules</Link>.
+              </>
+            }
           >
             <div className="detail-grid" style={{ marginBottom: 0 }}>
               <AdornedNumberField
@@ -81,7 +61,7 @@ export default function PricingRules() {
                 value={toPercentDisplay(current.rushFeeRate)}
                 onChange={updatePercentField('rushFeeRate')}
                 error={fieldErrors.rushFeeRate}
-                hint="Percent of the service price (not add-ons, materials or distance)."
+                hint="Percent of the job price only. Not add-ons, materials or distance."
               />
             </div>
           </SettingsSection>
@@ -210,6 +190,47 @@ export default function PricingRules() {
               </div>
             </div>
           </SettingsSection>
+
+          <SettingsSection
+            icon="fa-scale-balanced"
+            title="Penalties & Compensation"
+            description="Fixed amounts charged when a booking goes wrong on site. They aren't part of the job price and are only charged in these cases."
+          >
+            <div className="detail-grid" style={{ marginBottom: 0 }}>
+              <AdornedNumberField
+                id="settings-no-show-penalty"
+                label="Worker No-Show Penalty"
+                prefix="₱"
+                min={0}
+                max={100000}
+                step={50}
+                value={current.noShowPenaltyAmount}
+                onChange={updateNumberField('noShowPenaltyAmount')}
+                error={fieldErrors.noShowPenaltyAmount}
+                hint="Added to the worker's dues for a no-show or a worker-fault cancellation on site."
+              />
+              <AdornedNumberField
+                id="settings-client-fault-fee"
+                label="Client-Fault Compensation"
+                prefix="₱"
+                min={0}
+                max={100000}
+                step={50}
+                value={current.clientFaultCompensationAmount}
+                onChange={updateNumberField('clientFaultCompensationAmount')}
+                error={fieldErrors.clientFaultCompensationAmount}
+                hint="Charged to the client and paid to the worker when an on-site cancellation is approved as the client's fault."
+              />
+            </div>
+            <p className="toggle-row__hint" style={{ marginTop: '0.75rem', marginBottom: 0 }}>
+              The no-show grace period and dispute handling are in <Link to="/settings">Settings → Trust &amp; Safety</Link>.
+            </p>
+          </SettingsSection>
+
+          <p className="toggle-row__hint" style={{ marginTop: '0.5rem' }}>
+            Looking for the commission rate or the worker debt limit? They don&apos;t change what clients pay, so they&apos;re in{' '}
+            <Link to="/payments/commission">Payments → Commission &amp; Debt</Link>.
+          </p>
         </>
       )}
     </SettingsFormPage>

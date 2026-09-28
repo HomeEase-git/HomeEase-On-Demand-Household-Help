@@ -1,6 +1,7 @@
 import { useCallback, useState } from 'react'
 import PageHeader from '../components/common/PageHeader'
 import SubNav from '../components/common/SubNav'
+import { PAYMENTS_SUB_NAV } from '../constants/paymentsNav'
 import SectionCard from '../components/common/SectionCard'
 import Badge from '../components/common/Badge'
 import FilterTabs from '../components/common/FilterTabs'
@@ -10,13 +11,6 @@ import Pagination from '../components/common/Pagination'
 import { fetchRefundRequests, decideRefundRequest } from '../services/payments'
 import { useListQuery } from '../hooks/useListQuery'
 import { useToast } from '../context/ToastContext'
-
-const SUB_NAV = [
-  { to: '/payments', label: 'All Transactions' },
-  { to: '/payments/refunds', label: 'Refunds' },
-  { to: '/payments/payouts', label: 'Payout Distribution' },
-  { to: '/payments/books', label: 'Books' },
-]
 
 // Tab label -> RefundRequest statuses it shows.
 const TABS = {
@@ -135,7 +129,7 @@ export default function Refunds() {
         title="Refunds"
         subtitle={awaiting > 0 ? `${awaiting} waiting for a decision` : 'Every refund of a paid booking needs admin approval'}
       />
-      <SubNav items={SUB_NAV} />
+      <SubNav items={PAYMENTS_SUB_NAV} />
       <SectionCard>
         <FilterTabs tabs={Object.keys(TABS)} activeTab={params.tab} onTabChange={(tab) => setFilter('tab', tab)} />
         {loading && <LoadingState message="Loading refunds..." />}

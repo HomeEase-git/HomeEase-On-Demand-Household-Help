@@ -31,7 +31,9 @@ const VatRegistrations = lazy(() => import('./pages/VatRegistrations'))
 const ServiceRequests = lazy(() => import('./pages/ServiceRequests'))
 const WorkerPackages = lazy(() => import('./pages/WorkerPackages'))
 const TaxSettings = lazy(() => import('./pages/TaxSettings'))
-const PricingRules = lazy(() => import('./pages/PricingRules'))
+const PriceAdjustments = lazy(() => import('./pages/PriceAdjustments'))
+const PriceList = lazy(() => import('./pages/PriceList'))
+const CommissionSettings = lazy(() => import('./pages/CommissionSettings'))
 const Reviews = lazy(() => import('./pages/Reviews'))
 const ReviewsFlagged = lazy(() => import('./pages/ReviewsFlagged'))
 const ReviewDetail = lazy(() => import('./pages/ReviewDetail'))
@@ -79,6 +81,7 @@ export default function App() {
           { path: 'payments/refunds', element: <Refunds /> },
           { path: 'payments/payouts', element: <Payouts /> },
           { path: 'payments/books', element: <Books /> },
+          { path: 'payments/commission', element: <CommissionSettings /> },
           { path: 'tax', element: <Navigate to="/tax/certificates" replace /> },
           { path: 'tax/certificates', element: <TaxCertificates /> },
           { path: 'tax/remittance', element: <TaxRemittance /> },
@@ -96,7 +99,10 @@ export default function App() {
           { path: 'reports/service', element: <Reports /> },
           { path: 'reports/activity', element: <Reports /> },
           { path: 'reports/export', element: <Reports /> },
-          { path: 'pricing-rules', element: <PricingRules /> },
+          { path: 'price-list', element: <PriceList /> },
+          { path: 'price-adjustments', element: <PriceAdjustments /> },
+          // Old name, from before city price rules were retired — kept so bookmarks still resolve.
+          { path: 'pricing-rules', element: <Navigate to="/price-adjustments" replace /> },
           { path: 'service-catalog', element: <ServiceCatalog /> },
           { path: 'service-catalog/new', element: <ServiceCatalogEditor /> },
           { path: 'service-catalog/:id', element: <ServiceCatalogEditor /> },

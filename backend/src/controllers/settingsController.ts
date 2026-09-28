@@ -11,7 +11,7 @@ interface AuthRequest extends Request {
 }
 
 // Every admin-editable number, with its allowed range. Every field is
-// optional on update so each admin page (Settings, Pricing Rules, Tax
+// optional on update so each admin page (Settings, Price Adjustments, Commission & Debt, Tax
 // Settings) can save just its own slice of this singleton.
 const NUMERIC_FIELDS = {
   commissionRate: [0, 1],
