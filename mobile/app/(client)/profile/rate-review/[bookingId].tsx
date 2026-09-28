@@ -10,7 +10,7 @@ import PrimaryButton from "../../../../components/ui/PrimaryButton";
 import OutlinedButton from "../../../../components/ui/OutlinedButton";
 import InputField from "../../../../components/ui/InputField";
 import GenericSuccessModal from "../../../../components/modals/GenericSuccessModal";
-import { LoadingSkeleton } from "../../../../components/feedback/LoadingSkeleton";
+import { ScreenSkeleton } from "../../../../components/feedback/ScreenSkeleton";
 import { EmptyState } from "../../../../components/feedback/EmptyState";
 import ImageSourcePickerBottomSheet from "../../../../components/bottom-sheets/ImageSourcePickerBottomSheet";
 import type { BottomSheetHandle } from "../../../../components/bottom-sheets/BottomSheetWrapper";
@@ -147,7 +147,7 @@ export default function RateBookingScreen() {
     return (
       <SafeAreaView className="flex-1 bg-white">
         <ScreenHeader title="Rate & Review" showBack />
-        <LoadingSkeleton type="booking" count={1} />
+        <ScreenSkeleton />
       </SafeAreaView>
     );
   }
