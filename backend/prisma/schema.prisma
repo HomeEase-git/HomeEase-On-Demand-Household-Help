@@ -96,6 +96,7 @@ enum PayoutStatus {
   PROCESSING // Xendit disbursement created, awaiting webhook confirmation
   PAID // Xendit confirmed the payout succeeded
   FAILED // Xendit confirmed failure, or a platform-side error before send
+  CANCELLED // Stopped because the payment was refunded — never retried or sent
 }
 
 enum PaymentMethodType {
@@ -1864,6 +1865,11 @@ model Payment {
   // Refund audit
   refundReason String?
   refundedAt   DateTime?
+  // Xendit refund reference + last known status (PENDING/SUCCEEDED/FAILED/
+  // CANCELLED). A retried refund reuses xenditRefundId instead of creating a
+  // second one; the settle-completions sweep reconciles PENDING refunds.
+  xenditRefundId     String?
+  xenditRefundStatus String?
 
   // Set when status becomes FAILED — raw reason from Xendit's webhook
   // payload (translated for end users via utils/xenditFailureMessages.ts).

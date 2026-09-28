@@ -139,6 +139,28 @@ describe('payoutWorker.processSendPayout', () => {
     expect(updated?.failedAt).not.toBeNull();
   });
 
+  it('never sends a payout cancelled because its payment was refunded', async () => {
+    const payout = await seedPendingPayout('GCASH');
+    await prisma.payout.update({ where: { id: payout.id }, data: { status: 'CANCELLED' } });
+    (xenditChannelCodeFor as jest.Mock).mockReturnValue('PH_GCASH');
+
+    await processSendPayout(fakeJob(0, 5), { payoutId: payout.id });
+
+    expect(createPayout).not.toHaveBeenCalled();
+    const unchanged = await prisma.payout.findUnique({ where: { id: payout.id } });
+    expect(unchanged?.status).toBe('CANCELLED');
+  });
+
+  it('does not send a FAILED payout from a stale queued job (only an admin retry re-sends)', async () => {
+    const payout = await seedPendingPayout('GCASH');
+    await prisma.payout.update({ where: { id: payout.id }, data: { status: 'FAILED' } });
+    (xenditChannelCodeFor as jest.Mock).mockReturnValue('PH_GCASH');
+
+    await processSendPayout(fakeJob(0, 5), { payoutId: payout.id });
+
+    expect(createPayout).not.toHaveBeenCalled();
+  });
+
   it('is a no-op for an already-PROCESSING payout (duplicate job guard)', async () => {
     const payout = await seedPendingPayout('GCASH');
     await prisma.payout.update({ where: { id: payout.id }, data: { status: 'PROCESSING' } });

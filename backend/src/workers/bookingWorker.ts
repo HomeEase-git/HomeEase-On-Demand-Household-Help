@@ -13,8 +13,10 @@ import {
   settleCashBooking,
   settleWorkerEarnings,
   reconcilePendingPayment,
+  reconcilePendingRefund,
 } from '@services/paymentLifecycleService';
 import { retrievePayout } from '@services/xenditDisbursementService';
+import { applyXenditPayoutStatus } from '@services/payoutStatusService';
 import { schedulePayout } from '@queues/payoutQueue';
 import { formatDisplayId } from '@utils/formatters';
 import { revokeUserSessions } from '@utils/tokenRevocation';
@@ -314,26 +316,29 @@ export async function remindAndAutoSettleCompletions(): Promise<void> {
     }
   }
 
+  // 4b. Follow up refunds Xendit accepted but hadn't finished (e-wallet
+  //     refunds often start PENDING).
+  const pendingRefunds = await prisma.payment.findMany({
+    where: { xenditRefundStatus: 'PENDING', xenditRefundId: { not: null }, refundedAt: { lte: reconcileCutoff } },
+    select: { id: true },
+  });
+  for (const payment of pendingRefunds) {
+    try {
+      await reconcilePendingRefund(payment.id);
+    } catch (error) {
+      console.error(`Failed to reconcile pending refund for payment ${payment.id}:`, error);
+    }
+  }
+
   // 5. Reconcile PROCESSING payouts against Xendit (missed payout webhook).
   const staleProcessingPayouts = await prisma.payout.findMany({
     where: { status: 'PROCESSING', processingAt: { lte: reconcileCutoff }, xenditDisbursementId: { not: null } },
-    select: { id: true, xenditDisbursementId: true, workerId: true, amount: true },
+    select: { id: true, xenditDisbursementId: true, workerId: true, bookingId: true, amount: true, channel: true },
   });
   for (const payout of staleProcessingPayouts) {
     try {
       const remote = await retrievePayout(payout.xenditDisbursementId as string);
-      const status = remote.status?.toUpperCase();
-      if (status === 'COMPLETED' || status === 'SUCCEEDED') {
-        await prisma.payout.update({
-          where: { id: payout.id },
-          data: { status: 'PAID', xenditStatus: remote.status, paidAt: new Date() },
-        });
-      } else if (status === 'FAILED') {
-        await prisma.payout.update({
-          where: { id: payout.id },
-          data: { status: 'FAILED', xenditStatus: remote.status, failureReason: 'Xendit reported failure', failedAt: new Date() },
-        });
-      }
+      await applyXenditPayoutStatus(payout, remote.status);
     } catch (error) {
       console.error(`Failed to reconcile processing payout ${payout.id}:`, error);
     }

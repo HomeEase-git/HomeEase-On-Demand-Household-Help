@@ -1,15 +1,23 @@
 jest.mock('@services/xenditService', () => ({
   ...jest.requireActual('@services/xenditService'),
   createRefund: jest.fn(),
+  retrieveRefund: jest.fn(),
+}));
+
+jest.mock('@services/xenditDisbursementService', () => ({
+  ...jest.requireActual('@services/xenditDisbursementService'),
+  cancelPayout: jest.fn(),
+  retrievePayout: jest.fn(),
 }));
 
 import request from 'supertest';
 import app from '@/app';
 import prisma from '@config/database';
-import { refundOrVoidPayment } from '@services/paymentLifecycleService';
+import { refundOrVoidPayment, reconcilePendingRefund, settleWorkerEarnings } from '@services/paymentLifecycleService';
 import { createTestUser, deleteTestUser, createTestBooking, deleteTestBooking } from './helpers';
 
-const { createRefund } = require('@services/xenditService');
+const { createRefund, retrieveRefund } = require('@services/xenditService');
+const { cancelPayout, retrievePayout } = require('@services/xenditDisbursementService');
 
 describe('Refunds — pay-after-completion model', () => {
   const createdUserIds: string[] = [];
@@ -41,6 +49,9 @@ describe('Refunds — pay-after-completion model', () => {
 
   beforeEach(() => {
     (createRefund as jest.Mock).mockReset();
+    (retrieveRefund as jest.Mock).mockReset();
+    (cancelPayout as jest.Mock).mockReset();
+    (retrievePayout as jest.Mock).mockReset();
   });
 
   async function seedPayment(overrides: {
@@ -150,13 +161,74 @@ describe('Refunds — pay-after-completion model', () => {
         xenditInvoiceId: `inv_svc_fail_${Date.now()}`,
         capturedAmount: 1000,
       });
-      (createRefund as jest.Mock).mockResolvedValueOnce({ id: 'refund_456', status: 'PENDING' });
+      (createRefund as jest.Mock).mockResolvedValueOnce({ id: 'refund_456', status: 'FAILED' });
 
       await expect(refundOrVoidPayment(booking.id, 'Worker never arrived')).rejects.toThrow();
 
       const updated = await prisma.payment.findUnique({ where: { id: payment.id } });
       expect(updated?.status).toBe('COMPLETED');
       expect(updated?.escrowStatus).toBe('RELEASED');
+      expect(updated?.xenditRefundId).toBe('refund_456');
+      expect(updated?.xenditRefundStatus).toBe('FAILED');
+    });
+
+    it('accepts a PENDING refund (normal for e-wallets) and records it for the sweep', async () => {
+      const { booking, payment } = await seedPayment({
+        status: 'COMPLETED',
+        escrowStatus: 'RELEASED',
+        xenditInvoiceId: `inv_svc_pending_${Date.now()}`,
+        capturedAmount: 1000,
+      });
+      (createRefund as jest.Mock).mockResolvedValueOnce({ id: 'refund_pending', status: 'PENDING' });
+
+      await refundOrVoidPayment(booking.id, 'Worker never arrived');
+
+      expect(createRefund).toHaveBeenCalledWith(expect.objectContaining({ idempotencyKey: `refund-${payment.id}` }));
+      const updated = await prisma.payment.findUnique({ where: { id: payment.id } });
+      expect(updated?.status).toBe('REFUNDED');
+      expect(updated?.xenditRefundStatus).toBe('PENDING');
+    });
+
+    it('reuses an earlier refund instead of refunding the client twice', async () => {
+      const { booking, payment } = await seedPayment({
+        status: 'COMPLETED',
+        escrowStatus: 'RELEASED',
+        xenditInvoiceId: `inv_svc_reuse_${Date.now()}`,
+        capturedAmount: 1000,
+      });
+      // A previous attempt reached Xendit but crashed before marking the payment refunded.
+      await prisma.payment.update({
+        where: { id: payment.id },
+        data: { xenditRefundId: 'refund_earlier', xenditRefundStatus: 'PENDING' },
+      });
+      (retrieveRefund as jest.Mock).mockResolvedValueOnce({ id: 'refund_earlier', status: 'SUCCEEDED' });
+
+      await refundOrVoidPayment(booking.id, 'Worker never arrived');
+
+      expect(createRefund).not.toHaveBeenCalled();
+      const updated = await prisma.payment.findUnique({ where: { id: payment.id } });
+      expect(updated?.status).toBe('REFUNDED');
+    });
+
+    it('retries a failed refund under a new idempotency key', async () => {
+      const { booking, payment } = await seedPayment({
+        status: 'COMPLETED',
+        escrowStatus: 'RELEASED',
+        xenditInvoiceId: `inv_svc_retry_${Date.now()}`,
+        capturedAmount: 1000,
+      });
+      await prisma.payment.update({
+        where: { id: payment.id },
+        data: { xenditRefundId: 'refund_failed', xenditRefundStatus: 'FAILED' },
+      });
+      (retrieveRefund as jest.Mock).mockResolvedValueOnce({ id: 'refund_failed', status: 'FAILED' });
+      (createRefund as jest.Mock).mockResolvedValueOnce({ id: 'refund_second', status: 'SUCCEEDED' });
+
+      await refundOrVoidPayment(booking.id, 'Worker never arrived');
+
+      expect(createRefund).toHaveBeenCalledWith(
+        expect.objectContaining({ idempotencyKey: `refund-${payment.id}-after-refund_failed` })
+      );
     });
 
     it('reverses the cash-job commission debt for a CASH payment', async () => {
@@ -180,6 +252,148 @@ describe('Refunds — pay-after-completion model', () => {
       expect(updatedProfile.commissionOwed).toBeCloseTo(0, 2);
       const updated = await prisma.payment.findUnique({ where: { id: payment.id } });
       expect(updated?.status).toBe('REFUNDED');
+    });
+  });
+
+  describe('refunds never let the worker payout go out as well', () => {
+    async function seedPaidOnline(payoutStatus?: 'PENDING' | 'PROCESSING' | 'FAILED' | 'PAID', xenditDisbursementId?: string) {
+      const { booking, payment } = await seedPayment({
+        status: 'COMPLETED',
+        escrowStatus: 'RELEASED',
+        xenditInvoiceId: `inv_dp_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+        capturedAmount: 1000,
+      });
+      if (!payoutStatus) return { booking, payment, payout: null };
+      await prisma.payment.update({ where: { id: payment.id }, data: { workerSettledAt: new Date() } });
+      const payout = await prisma.payout.create({
+        data: {
+          paymentId: payment.id,
+          bookingId: booking.id,
+          workerId,
+          amount: 882,
+          channel: 'GCASH',
+          accountNumber: '09171234567',
+          status: payoutStatus,
+          xenditDisbursementId: xenditDisbursementId ?? null,
+        },
+      });
+      return { booking, payment, payout };
+    }
+
+    it('blocks settlement of a not-yet-settled payment so no payout is ever created', async () => {
+      const { booking, payment } = await seedPaidOnline();
+      (createRefund as jest.Mock).mockResolvedValueOnce({ id: 'refund_unsettled', status: 'SUCCEEDED' });
+
+      await refundOrVoidPayment(booking.id, 'Worker never arrived');
+      await settleWorkerEarnings(payment.id);
+
+      const payout = await prisma.payout.findUnique({ where: { paymentId: payment.id } });
+      expect(payout).toBeNull();
+    });
+
+    it('cancels a queued (PENDING) payout before refunding', async () => {
+      const { booking, payout } = await seedPaidOnline('PENDING');
+      (createRefund as jest.Mock).mockResolvedValueOnce({ id: 'refund_queued', status: 'SUCCEEDED' });
+
+      await refundOrVoidPayment(booking.id, 'Worker never arrived');
+
+      const updated = await prisma.payout.findUnique({ where: { id: payout!.id } });
+      expect(updated?.status).toBe('CANCELLED');
+      expect(cancelPayout).not.toHaveBeenCalled();
+    });
+
+    it('cancels a FAILED payout so an admin retry cannot send it later', async () => {
+      const { booking, payout } = await seedPaidOnline('FAILED');
+      (createRefund as jest.Mock).mockResolvedValueOnce({ id: 'refund_failed_payout', status: 'SUCCEEDED' });
+
+      await refundOrVoidPayment(booking.id, 'Worker never arrived');
+
+      const updated = await prisma.payout.findUnique({ where: { id: payout!.id } });
+      expect(updated?.status).toBe('CANCELLED');
+    });
+
+    it('cancels an in-flight payout at Xendit before refunding', async () => {
+      const { booking, payment, payout } = await seedPaidOnline('PROCESSING', `disb_inflight_${Date.now()}`);
+      (cancelPayout as jest.Mock).mockResolvedValueOnce({ id: payout!.xenditDisbursementId, status: 'CANCELLED' });
+      (createRefund as jest.Mock).mockResolvedValueOnce({ id: 'refund_inflight', status: 'SUCCEEDED' });
+
+      await refundOrVoidPayment(booking.id, 'Worker never arrived');
+
+      expect(cancelPayout).toHaveBeenCalledWith(payout!.xenditDisbursementId);
+      const updated = await prisma.payout.findUnique({ where: { id: payout!.id } });
+      expect(updated?.status).toBe('CANCELLED');
+      const refunded = await prisma.payment.findUnique({ where: { id: payment.id } });
+      expect(refunded?.status).toBe('REFUNDED');
+    });
+
+    it('refuses the refund when Xendit has already sent the in-flight payout', async () => {
+      const { booking, payment, payout } = await seedPaidOnline('PROCESSING', `disb_sent_${Date.now()}`);
+      (cancelPayout as jest.Mock).mockRejectedValueOnce(new Error('Payout can no longer be cancelled'));
+      (retrievePayout as jest.Mock).mockResolvedValueOnce({ id: payout!.xenditDisbursementId, status: 'SUCCEEDED' });
+
+      await expect(refundOrVoidPayment(booking.id, 'Worker never arrived')).rejects.toThrow(/manual clawback/);
+
+      expect(createRefund).not.toHaveBeenCalled();
+      const updated = await prisma.payout.findUnique({ where: { id: payout!.id } });
+      expect(updated?.status).toBe('PAID');
+      const unchanged = await prisma.payment.findUnique({ where: { id: payment.id } });
+      expect(unchanged?.status).toBe('COMPLETED');
+    });
+
+    it('refuses the refund while the payout worker is mid-send (no Xendit id yet)', async () => {
+      const { booking } = await seedPaidOnline('PROCESSING');
+
+      await expect(refundOrVoidPayment(booking.id, 'Worker never arrived')).rejects.toThrow(/being sent right now/);
+
+      expect(createRefund).not.toHaveBeenCalled();
+    });
+
+    it('refuses the refund when the payout is already PAID', async () => {
+      const { booking } = await seedPaidOnline('PAID');
+
+      await expect(refundOrVoidPayment(booking.id, 'Worker never arrived')).rejects.toThrow(/manual clawback/);
+
+      expect(createRefund).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('reconcilePendingRefund (sweep)', () => {
+    it('reopens the payment and logs an error when a PENDING refund later fails', async () => {
+      const { payment } = await seedPayment({
+        status: 'REFUNDED',
+        escrowStatus: 'REFUNDED',
+        xenditInvoiceId: `inv_rec_${Date.now()}`,
+      });
+      await prisma.payment.update({
+        where: { id: payment.id },
+        data: { xenditRefundId: 'refund_later_failed', xenditRefundStatus: 'PENDING', refundedAt: new Date() },
+      });
+      (retrieveRefund as jest.Mock).mockResolvedValueOnce({ id: 'refund_later_failed', status: 'FAILED', failure_code: 'INSUFFICIENT_BALANCE' });
+
+      await expect(reconcilePendingRefund(payment.id)).resolves.toBe('failed');
+
+      const updated = await prisma.payment.findUnique({ where: { id: payment.id } });
+      expect(updated?.status).toBe('COMPLETED');
+      expect(updated?.xenditRefundStatus).toBe('FAILED');
+      const alert = await prisma.auditLog.findFirst({
+        where: { action: 'REFUND_FAILED', metadata: { path: ['paymentId'], equals: payment.id } },
+      });
+      expect(alert).not.toBeNull();
+    });
+
+    it('marks a PENDING refund SUCCEEDED once Xendit completes it', async () => {
+      const { payment } = await seedPayment({ status: 'REFUNDED', escrowStatus: 'REFUNDED' });
+      await prisma.payment.update({
+        where: { id: payment.id },
+        data: { xenditRefundId: 'refund_later_ok', xenditRefundStatus: 'PENDING', refundedAt: new Date() },
+      });
+      (retrieveRefund as jest.Mock).mockResolvedValueOnce({ id: 'refund_later_ok', status: 'SUCCEEDED' });
+
+      await expect(reconcilePendingRefund(payment.id)).resolves.toBe('succeeded');
+
+      const updated = await prisma.payment.findUnique({ where: { id: payment.id } });
+      expect(updated?.status).toBe('REFUNDED');
+      expect(updated?.xenditRefundStatus).toBe('SUCCEEDED');
     });
   });
 });

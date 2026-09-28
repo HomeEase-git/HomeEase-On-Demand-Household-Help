@@ -131,6 +131,54 @@ describe('Xendit payout webhook — token verification and status handling', () 
     expect(updated?.failureReason).toBe('DESTINATION_ACCOUNT_INVALID');
   });
 
+  it('keeps a refund-cancelled payout CANCELLED and logs a clawback alert if Xendit reports it paid', async () => {
+    const { payout } = await seedProcessingPayout();
+    const xenditId = `disb_cancelled_${Date.now()}`;
+    await prisma.payout.update({
+      where: { id: payout.id },
+      data: { xenditDisbursementId: xenditId, status: 'CANCELLED' },
+    });
+
+    const res = await request(app).post(WEBHOOK_PATH).set(xenditHeaders()).send({ id: xenditId, status: 'SUCCEEDED' });
+
+    expect(res.status).toBe(200);
+    const updated = await prisma.payout.findUnique({ where: { id: payout.id } });
+    expect(updated?.status).toBe('CANCELLED');
+    expect(updated?.paidAt).toBeNull();
+    const alert = await prisma.auditLog.findFirst({
+      where: { action: 'PAYOUT_PAID_AFTER_CANCEL', metadata: { path: ['payoutId'], equals: payout.id } },
+    });
+    expect(alert).not.toBeNull();
+  });
+
+  it('does not re-notify the worker on a duplicate success webhook', async () => {
+    const { booking, payout } = await seedProcessingPayout();
+    const xenditId = `disb_dupe_${Date.now()}`;
+    await prisma.payout.update({ where: { id: payout.id }, data: { xenditDisbursementId: xenditId } });
+
+    await request(app).post(WEBHOOK_PATH).set(xenditHeaders()).send({ id: xenditId, status: 'SUCCEEDED' });
+    await request(app).post(WEBHOOK_PATH).set(xenditHeaders()).send({ id: xenditId, status: 'SUCCEEDED' });
+
+    const sent = await prisma.notification.count({
+      where: { userId: workerId, type: 'PAYOUT_SENT', relatedId: booking.id },
+    });
+    expect(sent).toBe(1);
+  });
+
+  it('does not downgrade a PAID payout on a late FAILED webhook', async () => {
+    const { payout } = await seedProcessingPayout();
+    const xenditId = `disb_late_fail_${Date.now()}`;
+    await prisma.payout.update({
+      where: { id: payout.id },
+      data: { xenditDisbursementId: xenditId, status: 'PAID', paidAt: new Date() },
+    });
+
+    await request(app).post(WEBHOOK_PATH).set(xenditHeaders()).send({ id: xenditId, status: 'FAILED' });
+
+    const updated = await prisma.payout.findUnique({ where: { id: payout.id } });
+    expect(updated?.status).toBe('PAID');
+  });
+
   it('returns 200 without error when no matching payout exists', async () => {
     const payload = { id: 'disb_no_match', status: 'COMPLETED' };
 

@@ -109,6 +109,26 @@ describe('Xendit invoice webhook — token verification and event handling', () 
     expect(updated?.capturedAmount).toBe(payment.totalAmount);
   });
 
+  it('does not mark a payment paid when Xendit reports less than the invoice total', async () => {
+    const invoiceId = `inv_test_underpaid_${Date.now()}`;
+    const { payment } = await seedPendingPayment(invoiceId);
+
+    const res = await request(app)
+      .post(WEBHOOK_PATH)
+      .set(xenditHeaders())
+      .send({ id: invoiceId, status: 'PAID', payment_id: 'ewc_short', paid_amount: payment.totalAmount - 100 });
+
+    expect(res.status).toBe(200);
+    const updated = await prisma.payment.findUnique({ where: { id: payment.id } });
+    expect(updated?.status).toBe('PENDING');
+    const payout = await prisma.payout.findUnique({ where: { paymentId: payment.id } });
+    expect(payout).toBeNull();
+    const alert = await prisma.auditLog.findFirst({
+      where: { action: 'PAYMENT_UNDERPAID', metadata: { path: ['paymentId'], equals: payment.id } },
+    });
+    expect(alert).not.toBeNull();
+  });
+
   it('does not re-complete a payment that is no longer PENDING', async () => {
     const invoiceId = `inv_test_already_${Date.now()}`;
     const { payment } = await seedPendingPayment(invoiceId);

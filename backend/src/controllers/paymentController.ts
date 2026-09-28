@@ -12,6 +12,7 @@ import {
   createCompletionInvoice,
 } from '@services/paymentLifecycleService';
 import { translateXenditFailureReason } from '@utils/xenditFailureMessages';
+import { applyXenditPayoutStatus } from '@services/payoutStatusService';
 
 interface AuthRequest extends Request {
   user?: JwtPayload;
@@ -448,12 +449,13 @@ async function handleInvoicePaid(invoice: any) {
 
   // finalizePaidBooking marks the Payment COMPLETED, finalizes the booking,
   // nets any outstanding worker commission dues and schedules the payout.
-  await finalizePaidBooking(
+  const finalized = await finalizePaidBooking(
     payment.id,
     invoice.payment_id ?? null,
     invoice.paid_amount ?? null,
     invoice.paid_at ? new Date(invoice.paid_at) : null
   );
+  if (!finalized) return; // underpaid — held for admin review
 
   void sendSmsToUser({
     userId: payment.booking.clientId,
@@ -595,50 +597,13 @@ export const handleXenditPayoutWebhook = async (req: Request, res: Response) => 
       return res.status(200).json({ success: true, message: 'No matching payout' });
     }
 
-    if (status === 'COMPLETED' || status === 'SUCCEEDED') {
-      await prisma.payout.update({
-        where: { id: resolved.id },
-        data: {
-          status: 'PAID',
-          xenditStatus: status,
-          xenditDisbursementId: payoutId ?? resolved.xenditDisbursementId,
-          paidAt: new Date(),
-        },
-      });
-      await notifyUser({
-        userId: resolved.workerId,
-        type: 'PAYOUT_SENT',
-        title: 'Payout Sent',
-        message: `₱${resolved.amount.toFixed(2)} has been sent to your ${resolved.channel} account`,
-        relatedId: resolved.bookingId,
-      });
-      void sendSmsToUser({
-        userId: resolved.workerId,
-        message: `HomeEase: ₱${resolved.amount.toFixed(2)} has been sent to your ${resolved.channel} account.`,
-      });
-    } else if (status === 'FAILED') {
-      await prisma.payout.update({
-        where: { id: resolved.id },
-        data: {
-          status: 'FAILED',
-          xenditStatus: status,
-          xenditDisbursementId: payoutId ?? resolved.xenditDisbursementId,
-          failureReason: failureReason ?? 'Xendit reported failure',
-          failedAt: new Date(),
-        },
-      });
-      await notifyUser({
-        userId: resolved.workerId,
-        type: 'PAYOUT_FAILED',
-        title: 'Payout Failed',
-        message: `We couldn't send your ₱${resolved.amount.toFixed(2)} payout. ${translateXenditFailureReason(failureReason)}`,
-        relatedId: resolved.bookingId,
-      });
-      void sendSmsToUser({
-        userId: resolved.workerId,
-        message: `HomeEase: We couldn't send your ₱${resolved.amount.toFixed(2)} payout. ${translateXenditFailureReason(failureReason)}`,
-      });
-    }
+    // Guarded transition: duplicates are no-ops, and a payout cancelled by a
+    // refund is never flipped to PAID (see payoutStatusService).
+    await applyXenditPayoutStatus(resolved, status, {
+      xenditDisbursementId: payoutId ?? null,
+      failureReason: failureReason ?? null,
+      failureNotice: translateXenditFailureReason(failureReason),
+    });
 
     return res.status(200).json({ success: true, message: 'Webhook received' });
   } catch (error) {

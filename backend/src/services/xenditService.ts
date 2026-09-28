@@ -69,6 +69,10 @@ interface CreateRefundParams {
   xenditInvoiceId: string;
   amountPesos: number;
   reason?: XenditRefundReason;
+  // Sent as the Idempotency-key header: a retry after a timeout (where the
+  // first request may still have gone through) gets the original refund
+  // back instead of refunding the client twice.
+  idempotencyKey: string;
 }
 
 export interface XenditRefund {
@@ -88,12 +92,21 @@ export interface XenditRefund {
  * real API keys before fully trusting this in production.
  */
 export async function createRefund(params: CreateRefundParams): Promise<XenditRefund> {
-  const res = await secretClient().post('/refunds', {
-    invoice_id: params.xenditInvoiceId,
-    amount: params.amountPesos,
-    currency: 'PHP',
-    reason: params.reason ?? 'REQUESTED_BY_CUSTOMER',
-  });
+  const res = await secretClient().post(
+    '/refunds',
+    {
+      invoice_id: params.xenditInvoiceId,
+      amount: params.amountPesos,
+      currency: 'PHP',
+      reason: params.reason ?? 'REQUESTED_BY_CUSTOMER',
+    },
+    { headers: { 'Idempotency-key': params.idempotencyKey } }
+  );
 
+  return res.data;
+}
+
+export async function retrieveRefund(refundId: string): Promise<XenditRefund> {
+  const res = await secretClient().get(`/refunds/${refundId}`);
   return res.data;
 }

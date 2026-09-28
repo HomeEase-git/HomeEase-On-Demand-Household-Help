@@ -7,22 +7,16 @@ import { sendSmsToUser } from '@utils/smsService';
 import { writeAuditLog } from '@utils/auditLog';
 import { PAYOUT_QUEUE_NAME, PAYOUT_JOB_NAMES, type SendPayoutJobData } from '@queues/payoutQueue';
 import { createPayout, xenditChannelCodeFor } from '@services/xenditDisbursementService';
-
-// Xendit's synchronous payout response is ACCEPTED — this is NOT terminal
-// (unlike PayMongo's 'succeeded', which was). A hand-validated manual test
-// showed a payout can sit at ACCEPTED well past its estimated_arrival_time;
-// the actual terminal state (COMPLETED or FAILED) arrives later via the
-// payout webhook (see paymentController.handleXenditPayoutWebhook).
-// SUCCEEDED is included defensively in case Xendit uses it interchangeably
-// with COMPLETED — UNCONFIRMED, prune once real payloads are observed.
-const TERMINAL_SUCCESS_STATUSES = new Set(['COMPLETED', 'SUCCEEDED']);
+import { applyXenditPayoutStatus } from '@services/payoutStatusService';
 
 export async function processSendPayout(job: Job, data: SendPayoutJobData): Promise<void> {
   const payout = await prisma.payout.findUnique({ where: { id: data.payoutId } });
   if (!payout) return; // deleted/invalid — nothing to do
 
-  // Already terminal — a retried/duplicate job shouldn't resend.
-  if (payout.status === 'PAID' || payout.status === 'PROCESSING') return;
+  // Only a PENDING payout is sendable. PAID/PROCESSING are already handled,
+  // FAILED waits for an admin retry, and CANCELLED means the payment was
+  // refunded — sending it would pay the worker for money the client got back.
+  if (payout.status !== 'PENDING') return;
 
   const channelCode = xenditChannelCodeFor(payout.channel);
   if (!channelCode) {
@@ -37,10 +31,13 @@ export async function processSendPayout(job: Job, data: SendPayoutJobData): Prom
     return; // not retryable — don't throw, this will never succeed
   }
 
-  await prisma.payout.update({
-    where: { id: payout.id },
+  // Atomic claim: a refund cancelling this payout (or a duplicate job) racing
+  // us between the read above and here wins, and nothing is sent.
+  const claim = await prisma.payout.updateMany({
+    where: { id: payout.id, status: 'PENDING' },
     data: { status: 'PROCESSING', processingAt: new Date(), attempts: { increment: 1 } },
   });
+  if (claim.count === 0) return;
 
   try {
     const xenditPayout = await createPayout({
@@ -52,57 +49,23 @@ export async function processSendPayout(job: Job, data: SendPayoutJobData): Prom
       description: `HomeEase payout for booking ${payout.bookingId}`,
     });
 
-    const normalizedStatus = xenditPayout.status.toUpperCase();
-    const isImmediatelyPaid = TERMINAL_SUCCESS_STATUSES.has(normalizedStatus);
-    const isImmediatelyFailed = normalizedStatus === 'FAILED';
-
+    // ACCEPTED is the usual synchronous answer and leaves the payout
+    // PROCESSING; the payout webhook (or the reconciliation sweep) reports
+    // the final state later. Record the Xendit id either way so a refund can
+    // cancel it while it's still in flight.
     await prisma.payout.update({
       where: { id: payout.id },
-      data: {
-        xenditDisbursementId: xenditPayout.id,
-        xenditStatus: xenditPayout.status,
-        ...(isImmediatelyPaid ? { status: 'PAID', paidAt: new Date() } : {}),
-        ...(isImmediatelyFailed
-          ? { status: 'FAILED', failureReason: 'Xendit reported immediate failure', failedAt: new Date() }
-          : {}),
-      },
+      data: { xenditDisbursementId: xenditPayout.id, xenditStatus: xenditPayout.status },
     });
-
-    if (isImmediatelyPaid) {
-      await notifyUser({
-        userId: payout.workerId,
-        type: 'PAYOUT_SENT',
-        title: 'Payout Sent',
-        message: `₱${payout.amount.toFixed(2)} has been sent to your ${payout.channel} account`,
-        relatedId: payout.bookingId,
-      });
-      // Money moving is the clearest case for SMS — same expectation as a
-      // bank alert. Fire-and-forget, never blocks the worker job.
-      void sendSmsToUser({
-        userId: payout.workerId,
-        message: `HomeEase: ₱${payout.amount.toFixed(2)} has been sent to your ${payout.channel} account.`,
-      });
-    } else if (isImmediatelyFailed) {
-      await notifyUser({
-        userId: payout.workerId,
-        type: 'PAYOUT_FAILED',
-        title: 'Payout Failed',
-        message: `We couldn't send your ₱${payout.amount.toFixed(2)} payout. Our team has been notified.`,
-        relatedId: payout.bookingId,
-      });
-      void sendSmsToUser({
-        userId: payout.workerId,
-        message: `HomeEase: We couldn't send your ₱${payout.amount.toFixed(2)} payout. Our team has been notified.`,
-      });
-    }
-    // Otherwise (ACCEPTED/PENDING) the payout stays PROCESSING — the payout
-    // webhook (handleXenditPayoutWebhook) will flip it to PAID/FAILED later.
+    await applyXenditPayoutStatus({ ...payout, xenditDisbursementId: xenditPayout.id }, xenditPayout.status, {
+      failureReason: 'Xendit reported immediate failure',
+    });
   } catch (error) {
     const isFinalAttempt = job.attemptsMade + 1 >= (job.opts.attempts ?? 1);
     const message = error instanceof Error ? error.message : 'Unknown disbursement error';
 
-    await prisma.payout.update({
-      where: { id: payout.id },
+    await prisma.payout.updateMany({
+      where: { id: payout.id, status: 'PROCESSING' },
       data: {
         status: isFinalAttempt ? 'FAILED' : 'PENDING',
         failureReason: message,

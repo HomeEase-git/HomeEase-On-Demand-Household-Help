@@ -29,6 +29,7 @@ const PAYOUT_STATUS_LABELS: Record<string, { label: string; className: string }>
   PROCESSING: { label: "Payout processing", className: "text-accent" },
   PAID: { label: "Paid out", className: "text-success" },
   FAILED: { label: "Payout failed", className: "text-error" },
+  CANCELLED: { label: "Refunded to client", className: "text-text-secondary" },
 };
 
 export default function PayoutMethodScreen() {

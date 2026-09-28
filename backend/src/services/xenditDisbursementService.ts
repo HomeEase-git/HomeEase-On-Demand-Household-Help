@@ -83,3 +83,18 @@ export async function retrievePayout(payoutId: string): Promise<XenditPayout> {
     estimatedArrivalTime: res.data.estimated_arrival_time ?? null,
   };
 }
+
+/**
+ * Cancels a payout Xendit hasn't handed to the e-wallet yet. Xendit only
+ * allows this while the payout is still ACCEPTED; once it's REQUESTED or
+ * SUCCEEDED the call errors and the money can only come back by clawback.
+ * Endpoint per Xendit's Payouts v2 reference — confirm in the sandbox.
+ */
+export async function cancelPayout(payoutId: string): Promise<XenditPayout> {
+  const res = await secretClient().post(`/v2/payouts/${payoutId}/cancel`);
+  return {
+    id: res.data.id,
+    status: res.data.status,
+    estimatedArrivalTime: res.data.estimated_arrival_time ?? null,
+  };
+}
