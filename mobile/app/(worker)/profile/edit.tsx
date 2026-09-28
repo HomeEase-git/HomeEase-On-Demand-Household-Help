@@ -10,7 +10,14 @@ import { useAuthStore } from "../../../store/authStore";
 import * as api from "../../../services/api";
 import { cardShadow } from "../../../constants";
 import { useAlertModal } from "../../../contexts/AlertModalContext";
-import { geocodeAddress } from "../../../utils/geo";
+import {
+  geocodeAddress,
+  type LatLng,
+  type PlaceResult,
+} from "../../../utils/geo";
+import LocationPickerMap, {
+  type LocationPickerMapHandle,
+} from "../../../components/ui/LocationPickerMap";
 
 export default function WorkerEditProfileScreen() {
   const router = useRouter();
@@ -35,7 +42,10 @@ export default function WorkerEditProfileScreen() {
   const [city, setCity] = useState("");
   const [addressState, setAddressState] = useState("");
   const [zipCode, setZipCode] = useState("");
-  const [addressCoords, setAddressCoords] = useState<{ lat: number; lng: number } | null>(null);
+  const [addressCoords, setAddressCoords] = useState<{
+    lat: number;
+    lng: number;
+  } | null>(null);
   // True once the address/city/state/zip text has been edited since the
   // last resolved coordinate pair — distinguishes "never touched this
   // session" (fine to leave addressLat/Lng untouched on save) from
@@ -51,13 +61,17 @@ export default function WorkerEditProfileScreen() {
         const detail = await api.getMyWorkerProfileDetails();
         if (!active || !detail) return;
         setBio(detail.bio ?? "");
-        setAreaRadius(detail.serviceAreaRadius ? String(detail.serviceAreaRadius) : "");
+        setAreaRadius(
+          detail.serviceAreaRadius ? String(detail.serviceAreaRadius) : "",
+        );
         setAddress(detail.address ?? "");
         setCity(detail.city ?? "");
         setAddressState(detail.state ?? "");
         setZipCode(detail.zipCode ?? "");
         if (detail.addressLat != null && detail.addressLng != null) {
-          setAddressCoords({ lat: detail.addressLat, lng: detail.addressLng });
+          const coords = { lat: detail.addressLat, lng: detail.addressLng };
+          setAddressCoords(coords);
+          pickerMapRef.current?.animateTo(coords);
         }
       } catch (error) {
         console.error("Load worker profile for edit error:", error);
@@ -85,6 +99,25 @@ export default function WorkerEditProfileScreen() {
   const phoneRef = useRef<TextInput>(null);
   const bioRef = useRef<TextInput>(null);
   const areaRef = useRef<TextInput>(null);
+  const pickerMapRef = useRef<LocationPickerMapHandle>(null);
+
+  const handleWorkerMapLocationSelected = (
+    location: LatLng,
+    place: PlaceResult | null,
+  ) => {
+    setAddressCoords(location);
+    setAddressDirty(false);
+    if (place) {
+      const parts = place.components ?? {};
+      const streetPart = [parts.houseNumber, parts.street]
+        .filter(Boolean)
+        .join(" ");
+      if (streetPart) setAddress(streetPart);
+      if (parts.city) setCity(parts.city);
+      if (parts.state) setAddressState(parts.state);
+      if (parts.zipCode) setZipCode(parts.zipCode);
+    }
+  };
 
   // Re-geocode whenever the address text changes so a stale coordinate pair
   // never gets sent alongside edited text.
@@ -116,7 +149,12 @@ export default function WorkerEditProfileScreen() {
       let coords = addressCoords;
 
       if (trimmedAddress && trimmedCity && !coords) {
-        const fullAddress = [trimmedAddress, trimmedCity, addressState.trim(), zipCode.trim()]
+        const fullAddress = [
+          trimmedAddress,
+          trimmedCity,
+          addressState.trim(),
+          zipCode.trim(),
+        ]
           .filter(Boolean)
           .join(", ");
         try {
@@ -132,7 +170,7 @@ export default function WorkerEditProfileScreen() {
         if (!coords) {
           alertModal.info(
             "Address saved, pricing not updated",
-            "We couldn't locate that address, so it won't be used for distance pricing yet. Everything else was saved."
+            "We couldn't locate that address, so it won't be used for distance pricing yet. Everything else was saved.",
           );
         }
       }
@@ -221,11 +259,29 @@ export default function WorkerEditProfileScreen() {
         />
 
         <View className="bg-card-light rounded-2xl p-4 mb-5" style={cardShadow}>
-          <Text className="text-text-primary font-semibold">Service address</Text>
-          <Text className="text-text-secondary text-sm mt-1 mb-3">
-            Where you&apos;re based. Used for distance fees, not to track your
-            location.
+          <Text className="text-text-primary font-semibold">
+            Service Base & Coverage
           </Text>
+          <Text className="text-text-secondary text-sm mt-1 mb-3">
+            Where you&apos;re based. Used for distance fees and client discovery
+            radius.
+          </Text>
+
+          {/* Interactive Map with Service Radius Circle & Locate Button */}
+          <View className="mb-4">
+            <LocationPickerMap
+              ref={pickerMapRef}
+              initialLocation={addressCoords}
+              serviceRadiusKm={parseInt(areaRadius, 10) || 5}
+              onLocationSelected={handleWorkerMapLocationSelected}
+              onError={(msg) => alertModal.error("Location error", msg)}
+              height={220}
+            />
+            <Text className="text-text-muted text-xs text-center mt-2">
+              Pin your shop or home base. The circle shows your{" "}
+              {parseInt(areaRadius, 10) || 5}km service area.
+            </Text>
+          </View>
 
           <InputField
             returnKeyType="next"
@@ -257,12 +313,17 @@ export default function WorkerEditProfileScreen() {
             placeholder="1100"
           />
           {addressCoords && (
-            <Text className="text-success text-xs mt-1">Address verified for pricing.</Text>
+            <Text className="text-success text-xs font-semibold mt-1">
+              ✓ Pinned coordinates saved ({addressCoords.lat.toFixed(4)},{" "}
+              {addressCoords.lng.toFixed(4)})
+            </Text>
           )}
         </View>
 
         <View className="bg-card-light rounded-2xl p-4 mb-5" style={cardShadow}>
-          <Text className="text-text-primary font-semibold">Digital ID details</Text>
+          <Text className="text-text-primary font-semibold">
+            Digital ID details
+          </Text>
           <Text className="text-text-secondary text-sm mt-1 mb-3">
             Shown on your Digital ID card.
           </Text>

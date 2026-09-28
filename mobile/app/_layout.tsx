@@ -74,7 +74,9 @@ export default function RootLayout() {
       if (!currentUserId) return;
 
       const otherUserId =
-        message.senderId === currentUserId ? message.receiverId : message.senderId;
+        message.senderId === currentUserId
+          ? message.receiverId
+          : message.senderId;
       const hasConversation = useMessageStore
         .getState()
         .conversations.some((c) => c.userId === otherUserId);
@@ -82,8 +84,12 @@ export default function RootLayout() {
       if (!hasConversation) {
         api
           .getConversations()
-          .then((conversations) => useMessageStore.getState().setConversations(conversations))
-          .catch((error) => console.error("Refresh conversations error:", error));
+          .then((conversations) =>
+            useMessageStore.getState().setConversations(conversations),
+          )
+          .catch((error) =>
+            console.error("Refresh conversations error:", error),
+          );
       }
 
       useMessageStore.getState().receiveMessage(currentUserId, message);
@@ -138,7 +144,10 @@ export default function RootLayout() {
         "QUOTE_AUTO_APPROVED",
         "BOOKING_AUTO_COMPLETED",
       ];
-      if (currentUser?.role === "worker" && JOB_LIST_AFFECTING_TYPES.includes(notification.type)) {
+      if (
+        currentUser?.role === "worker" &&
+        JOB_LIST_AFFECTING_TYPES.includes(notification.type)
+      ) {
         useWorkerStore.getState().refreshJobs();
       }
     });

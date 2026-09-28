@@ -22,10 +22,17 @@ import {
   type LatLng,
   type PlaceResult,
 } from "../../../../utils/geo";
-import { getPrecisePosition, LocationPermissionDeniedError, LocationTimeoutError } from "../../../../services/location";
+import {
+  getPrecisePosition,
+  LocationPermissionDeniedError,
+  LocationTimeoutError,
+} from "../../../../services/location";
 import { useDebouncedCallback } from "../../../../utils/performanceOptimization";
 import * as api from "../../../../services/api";
 import { useAlertModal } from "../../../../contexts/AlertModalContext";
+import LocationPickerMap, {
+  type LocationPickerMapHandle,
+} from "../../../../components/ui/LocationPickerMap";
 
 const LABEL_OPTIONS = ["Home", "Work", "Other"];
 
@@ -51,6 +58,7 @@ export default function AddressEditScreen() {
   const [searching, setSearching] = useState(false);
   const [resolvingPlaceId, setResolvingPlaceId] = useState<string | null>(null);
   const [locating, setLocating] = useState(false);
+  const pickerMapRef = useRef<LocationPickerMapHandle>(null);
 
   // One Places Autocomplete session = every keystroke + the Place Details
   // call for the suggestion picked, billed as a single lookup. Created on the
@@ -66,7 +74,10 @@ export default function AddressEditScreen() {
   // Tracks the lat/lng resolved from search/current-location, along with the
   // address text it was resolved for, so `handleSave` can skip a redundant
   // geocode call — but only while the fields still match what was resolved.
-  const [resolvedLatLng, setResolvedLatLng] = useState<{ lat: number; lng: number } | null>(null);
+  const [resolvedLatLng, setResolvedLatLng] = useState<{
+    lat: number;
+    lng: number;
+  } | null>(null);
   const [resolvedFor, setResolvedFor] = useState<string | null>(null);
   // Only set when resolvedLatLng came from the device's own GPS (not a typed
   // address or a search suggestion) — this is the one case we actually know
@@ -83,7 +94,11 @@ export default function AddressEditScreen() {
         const { status } = await Location.getForegroundPermissionsAsync();
         if (status !== "granted") return;
         const last = await Location.getLastKnownPositionAsync();
-        if (last) searchBiasRef.current = { lat: last.coords.latitude, lng: last.coords.longitude };
+        if (last)
+          searchBiasRef.current = {
+            lat: last.coords.latitude,
+            lng: last.coords.longitude,
+          };
       } catch {
         // Bias is a nice-to-have; search works without it.
       }
@@ -107,6 +122,10 @@ export default function AddressEditScreen() {
           setLandmark(existing.landmark ?? "");
           if (existing.lat != null && existing.lng != null) {
             setResolvedLatLng({ lat: existing.lat, lng: existing.lng });
+            pickerMapRef.current?.animateTo({
+              lat: existing.lat,
+              lng: existing.lng,
+            });
             setResolvedFor(
               formatStructuredAddress({
                 houseNumber: existing.houseNumber ?? undefined,
@@ -135,8 +154,13 @@ export default function AddressEditScreen() {
       return;
     }
     try {
-      if (!sessionTokenRef.current) sessionTokenRef.current = newPlacesSessionToken();
-      const results = await autocompleteAddresses(query, sessionTokenRef.current, searchBiasRef.current);
+      if (!sessionTokenRef.current)
+        sessionTokenRef.current = newPlacesSessionToken();
+      const results = await autocompleteAddresses(
+        query,
+        sessionTokenRef.current,
+        searchBiasRef.current,
+      );
       if (latestQueryRef.current === query) setSearchResults(results);
     } catch (error) {
       console.error("Address search error:", error);
@@ -157,8 +181,19 @@ export default function AddressEditScreen() {
     runSearch(text);
   };
 
-  const applyResolvedPlace = (place: PlaceResult, accuracy: number | null = null, landmarkHint?: string) => {
-    const { houseNumber: h, street: s, barangay: b, city: c, state: st, zipCode: z } = place.components ?? {};
+  const applyResolvedPlace = (
+    place: PlaceResult,
+    accuracy: number | null = null,
+    landmarkHint?: string,
+  ) => {
+    const {
+      houseNumber: h,
+      street: s,
+      barangay: b,
+      city: c,
+      state: st,
+      zipCode: z,
+    } = place.components ?? {};
     const nextHouseNumber = h ?? "";
     const nextStreet = s ?? "";
     const nextBarangay = b ?? "";
@@ -173,6 +208,9 @@ export default function AddressEditScreen() {
     setState(nextState);
     setZipCode(nextZip);
     setResolvedLatLng(place.geometry.location);
+    if (place.geometry?.location) {
+      pickerMapRef.current?.animateTo(place.geometry.location);
+    }
     setResolvedFor(
       formatStructuredAddress({
         houseNumber: nextHouseNumber,
@@ -192,27 +230,55 @@ export default function AddressEditScreen() {
     latestQueryRef.current = "";
   };
 
+  const handleMapLocationSelected = (
+    location: LatLng,
+    place: PlaceResult | null,
+  ) => {
+    if (place) {
+      applyResolvedPlace(place, null);
+    } else {
+      setResolvedLatLng(location);
+      setShowManualFields(true);
+    }
+  };
+
   const handleSelectSuggestion = async (suggestion: AddressSuggestion) => {
     setResolvingPlaceId(suggestion.placeId);
     try {
-      const place = await getPlaceDetails(suggestion.placeId, sessionTokenRef.current ?? undefined);
+      const place = await getPlaceDetails(
+        suggestion.placeId,
+        sessionTokenRef.current ?? undefined,
+      );
       sessionTokenRef.current = null;
       if (!place) {
-        alertModal.error("Couldn't load that address", "Please pick another suggestion or fill in the fields below.");
+        alertModal.error(
+          "Couldn't load that address",
+          "Please pick another suggestion or fill in the fields below.",
+        );
         setShowManualFields(true);
         return;
       }
       // For a named place (a mall, a school), Google's address leaves the
       // name out — e.g. "SM City Marikina" resolves to just "Marikina, 1800
       // Metro Manila" — so keep the name as the landmark for the worker.
-      const isNamedPlace = !place.formatted_address.toLowerCase().includes(suggestion.mainText.toLowerCase());
-      applyResolvedPlace(place, null, isNamedPlace ? suggestion.mainText : undefined);
+      const isNamedPlace = !place.formatted_address
+        .toLowerCase()
+        .includes(suggestion.mainText.toLowerCase());
+      applyResolvedPlace(
+        place,
+        null,
+        isNamedPlace ? suggestion.mainText : undefined,
+      );
     } finally {
       setResolvingPlaceId(null);
     }
   };
 
   const handleUseCurrentLocation = async () => {
+    if (pickerMapRef.current) {
+      await pickerMapRef.current.triggerLocate();
+      return;
+    }
     setLocating(true);
     try {
       const position = await getPrecisePosition();
@@ -232,14 +298,20 @@ export default function AddressEditScreen() {
       }
     } catch (error) {
       if (error instanceof LocationPermissionDeniedError) {
-        alertModal.error("Location needed", "Please enable location access to use your current location.");
+        alertModal.error(
+          "Location needed",
+          "Please enable location access to use your current location.",
+        );
       } else if (error instanceof LocationTimeoutError) {
         alertModal.error(
           "Couldn't get a precise fix",
           "GPS is taking too long — try moving near a window or open sky, or enter your address manually.",
         );
       } else {
-        alertModal.error("Error", "Unable to get your current location right now.");
+        alertModal.error(
+          "Error",
+          "Unable to get your current location right now.",
+        );
       }
     } finally {
       setLocating(false);
@@ -254,14 +326,33 @@ export default function AddressEditScreen() {
 
     setSaving(true);
     try {
-      const fullAddress = formatStructuredAddress({ houseNumber, street, barangay, city, state, zipCode });
+      const fullAddress = formatStructuredAddress({
+        houseNumber,
+        street,
+        barangay,
+        city,
+        state,
+        zipCode,
+      });
       const isFreshResolution = resolvedLatLng && resolvedFor === fullAddress;
       const geocoded = isFreshResolution
-        ? { geometry: { location: resolvedLatLng! }, approximate: resolvedApproximate }
-        : await geocodeAddressWithFallback({ houseNumber, street, barangay, city, state, zipCode }).catch(() => null);
+        ? {
+            geometry: { location: resolvedLatLng! },
+            approximate: resolvedApproximate,
+          }
+        : await geocodeAddressWithFallback({
+            houseNumber,
+            street,
+            barangay,
+            city,
+            state,
+            zipCode,
+          }).catch(() => null);
       // Only a device GPS fix carries a real accuracy figure — a fresh
       // free-text geocode (fields were edited since the last resolve) has none.
-      const geocodeAccuracy = isFreshResolution ? (resolvedAccuracy ?? undefined) : undefined;
+      const geocodeAccuracy = isFreshResolution
+        ? (resolvedAccuracy ?? undefined)
+        : undefined;
 
       const payload = {
         label,
@@ -295,7 +386,9 @@ export default function AddressEditScreen() {
         });
       }
 
-      const baseMessage = isNew ? "Address added successfully." : "Address updated successfully.";
+      const baseMessage = isNew
+        ? "Address added successfully."
+        : "Address updated successfully.";
       if (!geocoded) {
         // No coordinates at all (even the broadened city-level fallback
         // failed) — this address won't be selectable for a booking until
@@ -313,7 +406,9 @@ export default function AddressEditScreen() {
           [{ text: "OK", onPress: () => router.back() }],
         );
       } else {
-        alertModal.success("Success", baseMessage, [{ text: "OK", onPress: () => router.back() }]);
+        alertModal.success("Success", baseMessage, [
+          { text: "OK", onPress: () => router.back() },
+        ]);
       }
     } catch (error) {
       console.error("Address save error:", error);
@@ -332,36 +427,28 @@ export default function AddressEditScreen() {
   return (
     <SafeAreaView className="flex-1 bg-white">
       <ScreenHeader title={isNew ? "Add Address" : "Edit Address"} showBack />
-      <KeyboardAwareScrollView contentContainerStyle={{ padding: 24 }} keyboardShouldPersistTaps="handled">
-        <View className="items-center mb-5">
-          <View className="w-16 h-16 rounded-full bg-accent/10 items-center justify-center">
-            <Ionicons name="location-outline" size={30} color={colors.accent.DEFAULT} />
-          </View>
+      <KeyboardAwareScrollView
+        contentContainerStyle={{ padding: 24 }}
+        keyboardShouldPersistTaps="handled"
+      >
+        {/* Interactive Pin Map with Locate Me Button */}
+        <View className="mb-4">
+          <LocationPickerMap
+            ref={pickerMapRef}
+            initialLocation={resolvedLatLng}
+            onLocationSelected={handleMapLocationSelected}
+            onLocatingChange={setLocating}
+            onError={(msg) => alertModal.error("Location error", msg)}
+            height={260}
+          />
+          <Text className="text-text-muted text-xs text-center mt-2">
+            Drag the map to pinpoint your exact gate or rooftop. Tap GPS to
+            locate.
+          </Text>
         </View>
 
         {isNew && (
           <>
-            <Pressable
-              onPress={handleUseCurrentLocation}
-              disabled={locating}
-              className="flex-row items-center justify-center rounded-2xl py-3.5 mb-3 bg-accent/10"
-            >
-              {locating ? (
-                <ActivityIndicator size="small" color={colors.accent.DEFAULT} />
-              ) : (
-                <Ionicons name="locate-outline" size={18} color={colors.accent.DEFAULT} />
-              )}
-              <Text className="text-accent font-semibold ml-2">
-                {locating ? "Getting a precise fix..." : "Use my current location"}
-              </Text>
-            </Pressable>
-
-            <View className="flex-row items-center mb-3">
-              <View className="flex-1 h-px bg-divider" />
-              <Text className="text-text-muted text-xs mx-3">or search</Text>
-              <View className="flex-1 h-px bg-divider" />
-            </View>
-
             <InputField
               returnKeyType="next"
               label="Search Address"
@@ -389,14 +476,27 @@ export default function AddressEditScreen() {
                     accessibilityLabel={suggestion.text}
                   >
                     {resolvingPlaceId === suggestion.placeId ? (
-                      <ActivityIndicator size="small" color={colors.brand.DEFAULT} style={{ marginTop: 2 }} />
+                      <ActivityIndicator
+                        size="small"
+                        color={colors.brand.DEFAULT}
+                        style={{ marginTop: 2 }}
+                      />
                     ) : (
-                      <Ionicons name="location-outline" size={18} color={colors.text.muted} style={{ marginTop: 2 }} />
+                      <Ionicons
+                        name="location-outline"
+                        size={18}
+                        color={colors.text.muted}
+                        style={{ marginTop: 2 }}
+                      />
                     )}
                     <View className="ml-2 flex-1">
-                      <Text className="text-text-primary text-sm font-semibold">{suggestion.mainText}</Text>
+                      <Text className="text-text-primary text-sm font-semibold">
+                        {suggestion.mainText}
+                      </Text>
                       {!!suggestion.secondaryText && (
-                        <Text className="text-text-secondary text-xs mt-0.5">{suggestion.secondaryText}</Text>
+                        <Text className="text-text-secondary text-xs mt-0.5">
+                          {suggestion.secondaryText}
+                        </Text>
                       )}
                     </View>
                   </Pressable>
@@ -405,8 +505,13 @@ export default function AddressEditScreen() {
             )}
 
             {!showManualFields && (
-              <Pressable onPress={() => setShowManualFields(true)} className="items-center py-2 mb-2">
-                <Text className="text-text-secondary text-sm underline">Enter address manually instead</Text>
+              <Pressable
+                onPress={() => setShowManualFields(true)}
+                className="items-center py-2 mb-2"
+              >
+                <Text className="text-text-secondary text-sm underline">
+                  Enter address manually instead
+                </Text>
               </Pressable>
             )}
           </>
@@ -414,7 +519,11 @@ export default function AddressEditScreen() {
 
         {resolvedAccuracy != null && resolvedFor && (
           <View className="flex-row items-center bg-success/10 rounded-xl px-3 py-2 mb-4">
-            <Ionicons name="checkmark-circle" size={16} color={colors.success} />
+            <Ionicons
+              name="checkmark-circle"
+              size={16}
+              color={colors.success}
+            />
             <Text className="text-success text-xs font-semibold ml-2">
               Pinned to within ~{Math.round(resolvedAccuracy)}m of your device
             </Text>
@@ -424,7 +533,9 @@ export default function AddressEditScreen() {
         {showManualFields && (
           <>
             <View className="bg-card rounded-2xl p-4 mb-4" style={cardShadow}>
-              <Text className="text-text-primary text-sm mb-2 font-semibold">Label</Text>
+              <Text className="text-text-primary text-sm mb-2 font-semibold">
+                Label
+              </Text>
               <View className="flex-row gap-2">
                 {LABEL_OPTIONS.map((l) => (
                   <Pressable
