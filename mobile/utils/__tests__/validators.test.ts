@@ -35,7 +35,8 @@ describe('Validators', () => {
 
   describe('Password Validation', () => {
     it('should validate strong passwords', () => {
-      expect(validators.isValidPassword('Test1234')).toBe(true);
+      expect(validators.isValidPassword('Test123456')).toBe(true);
+      expect(validators.isValidPassword('Test1234')).toBe(false); // 8 chars: below the 10 minimum
       expect(validators.isValidPassword('MyPassword123')).toBe(true);
       expect(validators.isValidPassword('SecurePass99')).toBe(true);
     });
@@ -56,7 +57,7 @@ describe('Validators', () => {
     });
 
     it('validatePassword should show which requirements are missing', () => {
-      const result = validators.validatePassword('NoDigits');
+      const result = validators.validatePassword('NoDigitsHere');
       expect(result.valid).toBe(false);
       expect(result.requirements?.minLength).toBe(true);
       expect(result.requirements?.hasUppercase).toBe(true);
@@ -64,7 +65,7 @@ describe('Validators', () => {
     });
 
     it('validatePassword should accept valid password', () => {
-      const result = validators.validatePassword('Test1234');
+      const result = validators.validatePassword('Test123456');
       expect(result.valid).toBe(true);
     });
   });

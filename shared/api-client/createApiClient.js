@@ -1,10 +1,49 @@
 export function createApiClient({ getBaseUrl, storage }) {
   const getStoredToken = () => storage.getToken();
   const getStoredUser = () => storage.getUser();
-  const setAuthSession = (token, user) => storage.setSession(token, user);
+  const setAuthSession = (token, user, refreshToken) => storage.setSession(token, user, refreshToken);
   const clearAuthSession = () => storage.clearSession();
+  const baseUrl = () => getBaseUrl().replace(/\/$/, '');
 
-  async function apiRequest(path, options = {}) {
+  // Access tokens last minutes; this trades the stored refresh token for a
+  // new pair. One request at a time per tab: the server treats a second use
+  // of the same refresh token as theft and ends the session. Resolves the
+  // new access token, or null if the session is over.
+  let refreshInFlight = null;
+  const RACE_WAIT_MS = 5000;
+
+  function refreshSession() {
+    if (!refreshInFlight) {
+      refreshInFlight = (async () => {
+        const refreshToken = storage.getRefreshToken();
+        if (!refreshToken) return null;
+        const response = await fetch(`${baseUrl()}/auth/refresh`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ refreshToken }),
+        });
+        if (!response.ok) {
+          // Another tab rotated the shared token a moment ago — wait for it
+          // to store the new pair and use that, rather than signing out.
+          const body = await response.json().catch(() => ({}));
+          if (body.code !== 'REFRESH_RACE') return null;
+          for (let waited = 0; waited < RACE_WAIT_MS; waited += 100) {
+            if (storage.getRefreshToken() !== refreshToken) return storage.getToken();
+            await new Promise((resolve) => setTimeout(resolve, 100));
+          }
+          return null;
+        }
+        const { data } = await response.json();
+        storage.setTokens(data.token, data.refreshToken);
+        return data.token;
+      })().finally(() => {
+        refreshInFlight = null;
+      });
+    }
+    return refreshInFlight;
+  }
+
+  async function apiRequest(path, options = {}, isRetry = false) {
     const token = getStoredToken();
     const isFormData = typeof FormData !== 'undefined' && options.body instanceof FormData;
 
@@ -20,11 +59,26 @@ export function createApiClient({ getBaseUrl, storage }) {
       headers.Authorization = `Bearer ${token}`;
     }
 
-    const baseUrl = getBaseUrl().replace(/\/$/, '');
-    const response = await fetch(`${baseUrl}${path}`, {
+    const response = await fetch(`${baseUrl()}${path}`, {
       ...options,
       headers,
     });
+
+    // Expired access token: refresh once and replay. Only for requests that
+    // carried a session (a wrong password at login is also a 401).
+    if (response.status === 401 && token && !isRetry) {
+      let newToken = null;
+      try {
+        newToken = await refreshSession();
+      } catch {
+        // Network failure while refreshing — report the original error.
+      }
+      if (newToken) return apiRequest(path, options, true);
+      if (newToken === null && getStoredToken() === token) {
+        clearAuthSession();
+        if (typeof window !== 'undefined') window.dispatchEvent(new Event('homeease:session-expired'));
+      }
+    }
 
     let data = {};
     try {
@@ -63,7 +117,7 @@ export function createApiClient({ getBaseUrl, storage }) {
       email: user.email,
       phone: user.phone,
       role: user.role,
-    });
+    }, user.refreshToken);
 
     return user;
   }
@@ -83,7 +137,7 @@ export function createApiClient({ getBaseUrl, storage }) {
       email: user.email,
       phone: user.phone,
       role: user.role,
-    });
+    }, user.refreshToken);
 
     return user;
   }
@@ -101,7 +155,7 @@ export function createApiClient({ getBaseUrl, storage }) {
       email: user.email,
       phone: user.phone,
       role: user.role,
-    });
+    }, user.refreshToken);
 
     return user;
   }
@@ -111,8 +165,22 @@ export function createApiClient({ getBaseUrl, storage }) {
     return response.data;
   }
 
-  function logout() {
+  // Ends the session server-side (refresh token + current access token),
+  // then locally. Local state is cleared even if the server call fails.
+  async function logout() {
+    const token = getStoredToken();
+    const refreshToken = storage.getRefreshToken();
     clearAuthSession();
+    if (!token) return;
+    try {
+      await fetch(`${baseUrl()}/auth/logout`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify(refreshToken ? { refreshToken } : {}),
+      });
+    } catch {
+      // Best-effort.
+    }
   }
 
   return {

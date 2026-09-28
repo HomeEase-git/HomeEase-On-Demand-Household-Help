@@ -20,6 +20,7 @@ export const VERIFICATION_STATUS = {
 export const AUTH_STORAGE_KEYS = {
   TOKEN: 'homeease_token',
   USER: 'homeease_user',
+  REFRESH_TOKEN: 'homeease_refresh_token',
 };
 
 export const API_PATHS = {

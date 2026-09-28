@@ -22,6 +22,13 @@ jest.mock("@react-native-async-storage/async-storage", () => ({
   multiRemove: jest.fn(() => Promise.resolve()),
 }));
 
+// Mock SecureStore (native Keystore module)
+jest.mock("expo-secure-store", () => ({
+  setItemAsync: jest.fn(() => Promise.resolve()),
+  getItemAsync: jest.fn(() => Promise.resolve(null)),
+  deleteItemAsync: jest.fn(() => Promise.resolve()),
+}));
+
 // Mock NetInfo
 jest.mock("@react-native-community/netinfo", () => ({
   fetch: jest.fn(() =>

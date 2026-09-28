@@ -45,6 +45,48 @@ interface ApiClient {
   delete<T = any>(url: string, config?: AxiosRequestConfig): Promise<T>;
 }
 
+// Access tokens last minutes (server JWT_EXPIRY); this swaps the stored
+// refresh token for a fresh pair. Concurrent callers share one request —
+// the server treats a second use of the same refresh token as theft and
+// ends the session. Resolves the new access token, or null when the server
+// refused (session over). Throws when the server couldn't be reached, so
+// callers can keep the session instead of logging out on a network blip.
+let refreshInFlight: Promise<string | null> | null = null;
+
+export function refreshSession(): Promise<string | null> {
+  if (!refreshInFlight) {
+    refreshInFlight = (async () => {
+      const refreshToken = await authStorage.getRefreshToken();
+      if (!refreshToken) return null;
+      try {
+        const { data } = await axios.post(
+          `${config.API_URL}/api/auth/refresh`,
+          { refreshToken },
+          { timeout: config.API_TIMEOUT_MS },
+        );
+        const next = data?.data;
+        if (!next?.token || !next?.refreshToken) return null;
+        await authStorage.saveRefreshToken(next.refreshToken);
+        await authStorage.saveToken(next.token);
+        // Dynamic import: see the note in the 401 handler below.
+        const { useAuthStore } = await import('../store/authStore');
+        if (useAuthStore.getState().isAuthenticated) {
+          useAuthStore.setState({ token: next.token });
+        }
+        return next.token as string;
+      } catch (error) {
+        // REFRESH_RACE: the token was rotated a moment ago by another
+        // request — transient, so keep the session like a network error.
+        if (isAxiosError(error) && error.response && error.response.data?.code !== 'REFRESH_RACE') return null;
+        throw error;
+      }
+    })().finally(() => {
+      refreshInFlight = null;
+    });
+  }
+  return refreshInFlight;
+}
+
 const createApiClient = (): ApiClient => {
 
   console.log('[API] baseURL configured as:', `${config.API_URL}/api`);
@@ -86,10 +128,36 @@ const createApiClient = (): ApiClient => {
       console.log('[API ←] has request:', !!error.request);
       console.log('[API ←] ERROR response data:', JSON.stringify(error.response?.data));
 
+      // Expired access token: refresh once and replay the request. Only for
+      // requests that carried a session — a 401 from a wrong password on
+      // the login screen has nothing to refresh.
+      let keepSession = false;
+      const original = isAxiosError(error) ? (error.config as (typeof error.config & { _retried?: boolean }) | undefined) : undefined;
+      if (
+        isAxiosError(error) &&
+        error.response?.status === 401 &&
+        original &&
+        !original._retried &&
+        original.headers?.Authorization
+      ) {
+        original._retried = true;
+        try {
+          const newToken = await refreshSession();
+          if (newToken) {
+            original.headers.Authorization = `Bearer ${newToken}`;
+            return client.request(original);
+          }
+        } catch {
+          // Couldn't reach the server to refresh — don't sign the user out
+          // over a network blip; the original error is reported below.
+          keepSession = true;
+        }
+      }
+
       try {
         if (isAxiosError(error)) {
           const status = error.response?.status;
-          if (status === 401 || status === 403) {
+          if ((status === 401 || status === 403) && !keepSession) {
             // Dynamic import to avoid a circular dependency at module-load
             // time (authStore -> notificationService -> this file). Safe
             // here since it's only ever touched inside this async handler,
@@ -208,11 +276,20 @@ export async function postSignUp(userData: {
       kycStatus: response.kycStatus,
       hasAcceptedTerms: response.hasAcceptedTerms,
       token: response.token,
+      refreshToken: response.refreshToken as string | undefined,
     };
   } catch (error) {
     console.error('Signup error:', error);
     throw error;
   }
+}
+
+// POST /auth/logout — ends this device's session on the server (refresh
+// token and current access token). Best-effort; the caller clears local
+// state regardless.
+export async function postLogout(): Promise<void> {
+  const refreshToken = await authStorage.getRefreshToken();
+  await api.post('/auth/logout', refreshToken ? { refreshToken } : {});
 }
 
 export async function postLogin(email: string, password: string) {
@@ -248,6 +325,7 @@ export async function postLogin(email: string, password: string) {
       kycStatus: response.kycStatus,
       hasAcceptedTerms: response.hasAcceptedTerms,
       token: response.token,
+      refreshToken: response.refreshToken as string | undefined,
     };
   } catch (error) {
     console.error('Login error:', error);
@@ -270,6 +348,7 @@ export async function postMfaChallenge(challengeToken: string, code: string) {
       kycStatus: response.kycStatus,
       hasAcceptedTerms: response.hasAcceptedTerms,
       token: response.token,
+      refreshToken: response.refreshToken as string | undefined,
     };
   } catch (error) {
     console.error('MFA challenge error:', error);
@@ -290,6 +369,7 @@ export async function postLoginCode(challengeToken: string, code: string) {
     kycStatus: response.kycStatus,
     hasAcceptedTerms: response.hasAcceptedTerms,
     token: response.token,
+    refreshToken: response.refreshToken as string | undefined,
   };
 }
 

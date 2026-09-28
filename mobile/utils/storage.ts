@@ -1,8 +1,12 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as SecureStore from 'expo-secure-store';
+import { Platform } from 'react-native';
 
 const STORAGE_KEYS = {
   AUTH_TOKEN: '@homeease_auth_token',
   AUTH_USER: '@homeease_auth_user',
+  // SecureStore keys may only contain [A-Za-z0-9._-].
+  REFRESH_TOKEN: 'homeease_refresh_token',
   BOOKING_DRAFT: '@homeease_booking_draft',
   SEARCH_HISTORY: '@homeease_search_history',
   ADDRESSES: '@homeease_addresses',
@@ -44,6 +48,23 @@ const writeStoredValue = async (key: string, value: unknown) => {
 // `null` = loaded, no token. Kept in sync by saveToken/clearAuth below.
 let cachedToken: string | null | undefined;
 
+// The refresh token lives for 30 days and can mint new sessions, so it goes
+// in the Android Keystore (SecureStore), not AsyncStorage. SecureStore has
+// no web implementation — the web build (dev/testing only) falls back.
+const secureStore = {
+  async get(key: string): Promise<string | null> {
+    return Platform.OS === 'web' ? AsyncStorage.getItem(key) : SecureStore.getItemAsync(key);
+  },
+  async set(key: string, value: string): Promise<void> {
+    if (Platform.OS === 'web') await AsyncStorage.setItem(key, value);
+    else await SecureStore.setItemAsync(key, value);
+  },
+  async remove(key: string): Promise<void> {
+    if (Platform.OS === 'web') await AsyncStorage.removeItem(key);
+    else await SecureStore.deleteItemAsync(key);
+  },
+};
+
 // Auth Storage
 export const authStorage = {
   async saveToken(token: string) {
@@ -66,6 +87,23 @@ export const authStorage = {
       return token;
     } catch (error) {
       console.error('Error reading auth token:', error);
+      return null;
+    }
+  },
+
+  async saveRefreshToken(refreshToken: string) {
+    try {
+      await secureStore.set(STORAGE_KEYS.REFRESH_TOKEN, refreshToken);
+    } catch (error) {
+      console.error('Error saving refresh token:', error);
+    }
+  },
+
+  async getRefreshToken(): Promise<string | null> {
+    try {
+      return await secureStore.get(STORAGE_KEYS.REFRESH_TOKEN);
+    } catch (error) {
+      console.error('Error reading refresh token:', error);
       return null;
     }
   },
@@ -93,6 +131,7 @@ export const authStorage = {
     try {
       await AsyncStorage.removeItem(STORAGE_KEYS.AUTH_TOKEN);
       await AsyncStorage.removeItem(STORAGE_KEYS.AUTH_USER);
+      await secureStore.remove(STORAGE_KEYS.REFRESH_TOKEN);
       cachedToken = null;
     } catch (error) {
       console.error('Error clearing auth:', error);

@@ -14,10 +14,13 @@ export function validateEmail(email: string): { valid: boolean; error?: string }
   return { valid: true };
 }
 
-// Password validation
+// Password validation — keep in step with backend/src/utils/passwordPolicy.ts
+// (the server also rejects passwords found in known data breaches).
+export const PASSWORD_MIN_LENGTH = 10;
+
 export function isValidPassword(password: string): boolean {
   return (
-    password.length >= 8 &&
+    password.length >= PASSWORD_MIN_LENGTH &&
     /[A-Z]/.test(password) &&
     /\d/.test(password)
   );
@@ -45,7 +48,7 @@ export function validatePassword(password: string): {
   }
 
   const requirements = {
-    minLength: password.length >= 8,
+    minLength: password.length >= PASSWORD_MIN_LENGTH,
     hasUppercase: /[A-Z]/.test(password),
     hasNumber: /\d/.test(password),
   };
@@ -54,7 +57,7 @@ export function validatePassword(password: string): {
 
   if (!valid) {
     const missing = [];
-    if (!requirements.minLength) missing.push('at least 8 characters');
+    if (!requirements.minLength) missing.push(`at least ${PASSWORD_MIN_LENGTH} characters`);
     if (!requirements.hasUppercase) missing.push('uppercase letter');
     if (!requirements.hasNumber) missing.push('number');
     return {

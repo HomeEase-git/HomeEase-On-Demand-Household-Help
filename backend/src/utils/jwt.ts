@@ -1,7 +1,10 @@
 import jwt, { Secret } from 'jsonwebtoken';
 import type { JwtPayload } from '../types';
 
-const DEFAULT_JWT_EXPIRY_SECONDS = 60 * 60 * 24 * 7;
+// Short-lived on purpose: the apps renew silently through POST /auth/refresh
+// (rotating, reuse-detected refresh tokens — see otpService.consumeRefreshToken),
+// so a leaked access token is only useful for minutes, not days.
+const DEFAULT_JWT_EXPIRY_SECONDS = 15 * 60;
 const DEVELOPMENT_JWT_SECRET = 'homeease_development_secret_change_me';
 
 const getJwtSecret = (): Secret => {

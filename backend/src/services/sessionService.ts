@@ -61,3 +61,28 @@ export async function revokeOtherSessions(userId: string, currentSessionId: stri
   await revokeSessionIds(sessionIds, JWT_EXPIRY);
   return new Set(others.map((o) => o.sessionId ?? `legacy:${o.id}`)).size;
 }
+
+/**
+ * Signs out one device: deletes its refresh tokens (including rotated ones)
+ * and revokes its session id so its current access token stops working.
+ */
+export async function revokeSession(sessionId: string): Promise<void> {
+  await prisma.authToken.deleteMany({ where: { type: TokenType.REFRESH, sessionId } });
+  await revokeSessionIds([sessionId], JWT_EXPIRY);
+}
+
+/**
+ * Signs out every device of an account (password reset). Unlike
+ * tokenRevocation.revokeUserSessions — which blocks the whole account for a
+ * token lifetime, right for bans — this still lets the user sign in again
+ * straight away.
+ */
+export async function revokeAllSessions(userId: string): Promise<void> {
+  const rows = await prisma.authToken.findMany({
+    where: { userId, type: TokenType.REFRESH, sessionId: { not: null } },
+    select: { sessionId: true },
+  });
+  await prisma.authToken.deleteMany({ where: { userId, type: TokenType.REFRESH } });
+  const sessionIds = Array.from(new Set(rows.map((r) => r.sessionId).filter((s): s is string => !!s)));
+  await revokeSessionIds(sessionIds, JWT_EXPIRY);
+}

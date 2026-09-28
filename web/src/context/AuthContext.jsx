@@ -59,6 +59,17 @@ export function AuthProvider({ children }) {
     };
   }, []);
 
+  // The API client fires this when a refresh is refused (session revoked or
+  // expired) — drop to the login screen instead of failing every request.
+  useEffect(() => {
+    const onSessionExpired = () => {
+      setUser(null);
+      setToken(null);
+    };
+    window.addEventListener('homeease:session-expired', onSessionExpired);
+    return () => window.removeEventListener('homeease:session-expired', onSessionExpired);
+  }, []);
+
   const login = async (email, password) => {
     const data = await loginRequest(email, password);
 

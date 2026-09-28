@@ -3,11 +3,6 @@ export const validateEmail = (email: string): boolean => {
   return regex.test(email);
 };
 
-export const validatePassword = (password: string): boolean => {
-  // Min 8 chars, 1 uppercase, 1 number
-  return /^(?=.*[A-Z])(?=.*\d).{8,}$/.test(password);
-};
-
 export const validatePhone = (phone: string): boolean => {
   return /^\d{10,}$/.test(phone.replace(/\D/g, ''));
 };

@@ -87,12 +87,12 @@ export const MAX_OTP_ATTEMPTS = 5;
  * within the current window. Fails open (returns false) on a Redis error
  * or while the circuit breaker is open.
  */
-export async function isOtpAttemptLocked(userId: string, type: string): Promise<boolean> {
+export async function isOtpAttemptLocked(userId: string, type: string, maxAttempts: number = MAX_OTP_ATTEMPTS): Promise<boolean> {
   if (circuitIsOpen()) return false;
   try {
     const raw = await client.get(attemptKey(userId, type));
     recordSuccess();
-    return raw !== null && Number(raw) >= MAX_OTP_ATTEMPTS;
+    return raw !== null && Number(raw) >= maxAttempts;
   } catch (error) {
     recordFailure('isOtpAttemptLocked', error);
     return false;
