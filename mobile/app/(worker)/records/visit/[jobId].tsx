@@ -11,7 +11,7 @@ import StartTimePicker from "../../../../components/ui/StartTimePicker";
 import { getMyCalendar, scheduleFollowUpVisit } from "../../../../services/api";
 import { colors } from "../../../../constants";
 import { useAlertModal } from "../../../../contexts/AlertModalContext";
-import { MAX_BOOKING_DAYS_AHEAD, formatTime12h, selectableStartTimes } from "../../../../utils/bookingTime";
+import { MAX_BOOKING_DAYS_AHEAD, earliestStartTime, formatTime12h } from "../../../../utils/bookingTime";
 
 /**
  * "Follow Up Date": when a job needs more than one day, the worker picks the
@@ -47,7 +47,7 @@ export default function ScheduleVisitScreen() {
   }, [date, jobId]);
 
   // No lead time for the worker's own plan — any later time today is fine.
-  const selectable = useMemo(() => selectableStartTimes(date, 0), [date]);
+  const minTime = useMemo(() => earliestStartTime(date, 0), [date]);
 
   const handleSave = async () => {
     if (!jobId || !date || !time) return;
@@ -84,15 +84,12 @@ export default function ScheduleVisitScreen() {
         <Text className="text-text-primary font-bold text-base mb-2">Visit date</Text>
         <DateGridPicker
           selectedDate={date}
-          onSelect={(iso) => {
-            setDate(iso);
-            if (time && !selectableStartTimes(iso, 0).includes(time)) setTime(null);
-          }}
+          onSelect={setDate}
           daysAhead={MAX_BOOKING_DAYS_AHEAD + 1}
         />
 
         <Text className="text-text-primary font-bold text-base mt-6 mb-2">Start time</Text>
-        <StartTimePicker value={time} onChange={setTime} selectable={selectable} busyTimes={busyTimes} />
+        <StartTimePicker value={time} onChange={setTime} minTime={minTime} busyTimes={busyTimes} />
 
         <Text className="text-text-primary font-bold text-base mt-6 mb-2">Note for the client (optional)</Text>
         <TextInput

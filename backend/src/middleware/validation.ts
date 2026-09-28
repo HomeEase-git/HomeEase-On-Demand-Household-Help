@@ -437,7 +437,7 @@ export const validateCreateBooking = (
   }
 
   if (!isValidStartTime(time)) {
-    return res.status(400).json(errorResponse(400, 'time is required and must be an hourly start time like "09:00"'));
+    return res.status(400).json(errorResponse(400, 'time is required and must be a start time like "09:30" between 07:00 and 18:00'));
   }
 
   if (parentBookingId !== undefined && parentBookingId !== null && typeof parentBookingId !== 'string') {
@@ -603,14 +603,14 @@ export const validateRejectQuote = (req: Request, res: Response, next: NextFunct
   return next();
 };
 
-/** A date + hourly start time, used by reschedule requests and follow-up visits. */
+/** A date + start time, used by reschedule requests and follow-up visits. */
 export const validateDateAndTime = (req: Request, res: Response, next: NextFunction) => {
   const { date, time, notes } = req.body;
   if (typeof date !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(date) || isNaN(new Date(date).getTime())) {
     return res.status(400).json(errorResponse(400, 'date is required (YYYY-MM-DD)'));
   }
   if (!isValidStartTime(time)) {
-    return res.status(400).json(errorResponse(400, 'time is required and must be an hourly start time like "09:00"'));
+    return res.status(400).json(errorResponse(400, 'time is required and must be a start time like "09:30" between 07:00 and 18:00'));
   }
   if (notes !== undefined && notes !== null && (typeof notes !== 'string' || notes.length > 500)) {
     return res.status(400).json(errorResponse(400, 'notes must be at most 500 characters'));

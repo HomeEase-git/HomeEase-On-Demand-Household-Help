@@ -14,12 +14,15 @@ import { computeWorkerTier } from '@utils/workerTier';
 const NOW = new Date('2026-09-27T02:30:00Z');
 
 describe('start times', () => {
-  it('accepts hourly times from 7:00 to 18:00 only', () => {
+  it('accepts any minute from 7:00 to 18:00 only', () => {
     expect(isValidStartTime('07:00')).toBe(true);
+    expect(isValidStartTime('09:30')).toBe(true);
+    expect(isValidStartTime('17:59')).toBe(true);
     expect(isValidStartTime('18:00')).toBe(true);
-    expect(isValidStartTime('06:00')).toBe(false);
+    expect(isValidStartTime('06:59')).toBe(false);
+    expect(isValidStartTime('18:01')).toBe(false);
     expect(isValidStartTime('19:00')).toBe(false);
-    expect(isValidStartTime('09:30')).toBe(false);
+    expect(isValidStartTime('09:60')).toBe(false);
     expect(isValidStartTime('9:00')).toBe(false);
   });
 
@@ -50,6 +53,8 @@ describe('checkBookingStart', () => {
     // 10:30 now + 2h = 12:30, so noon is too soon.
     expect(checkBookingStart('2026-09-27', '12:00', 2, NOW)).toMatchObject({ ok: false });
     expect(checkBookingStart('2026-09-27', '13:00', 2, NOW)).toMatchObject({ ok: true });
+    expect(checkBookingStart('2026-09-27', '12:29', 2, NOW)).toMatchObject({ ok: false });
+    expect(checkBookingStart('2026-09-27', '12:30', 2, NOW)).toMatchObject({ ok: true });
   });
 
   it('rejects past dates and dates too far ahead', () => {

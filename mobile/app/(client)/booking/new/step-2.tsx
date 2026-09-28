@@ -21,7 +21,7 @@ import { useDateAvailabilityCount } from "../../../../hooks/useWorkerDiscovery";
 import * as api from "../../../../services/api";
 import { addressStorage } from "../../../../utils/storage";
 import { displayAddress, geocodeAddressWithFallback } from "../../../../utils/geo";
-import { RUSH_FEE_RATE, RUSH_MIN_LEAD_HOURS, isRushDate, phTodayIso, selectableStartTimes } from "../../../../utils/bookingTime";
+import { RUSH_FEE_RATE, RUSH_MIN_LEAD_HOURS, earliestStartTime, isRushDate, phTodayIso } from "../../../../utils/bookingTime";
 
 const BOOKING_STEPS = ["Scope", "Schedule", "Who", "Confirm"];
 
@@ -177,19 +177,17 @@ export default function BookingStep2Screen() {
   // Same-day booking: only start times at least RUSH_MIN_LEAD_HOURS away,
   // and today is closed once none are left.
   const today = phTodayIso();
-  const todayHasTimes = selectableStartTimes(today).length > 0;
-  const selectableTimes = useMemo(() => selectableStartTimes(date), [date]);
+  const todayHasTimes = earliestStartTime(today) != null;
+  const minTime = useMemo(() => earliestStartTime(date), [date]);
   const isRush = isRushDate(date);
   const unavailableDates = useMemo(
     () => [...workerClosedDates, ...(todayHasTimes ? [] : [today])],
     [workerClosedDates, todayHasTimes, today],
   );
 
-  const handleSelectDate = (iso: string) => {
-    setDate(iso);
-    // Keep the chosen time only if it's still pickable on the new date.
-    if (time && !selectableStartTimes(iso).includes(time)) setTime(null);
-  };
+  // The time picker re-checks the entered time against the new date's
+  // earliest start and clears it if it's no longer allowed.
+  const handleSelectDate = (iso: string) => setDate(iso);
 
   const noProsOnDate = !!date && !loadingCount && prosAvailable === 0;
 
@@ -264,7 +262,7 @@ export default function BookingStep2Screen() {
               : `${prosAvailable} pro${prosAvailable === 1 ? "" : "s"} available on this date.`
             : "When should your pro arrive?"}
         </Text>
-        <StartTimePicker value={time} onChange={setTime} selectable={selectableTimes} busyTimes={workerBusyTimes} />
+        <StartTimePicker value={time} onChange={setTime} minTime={minTime} busyTimes={workerBusyTimes} />
 
         {noProsOnDate && (
           <Text className="text-error text-sm mt-2">

@@ -15,7 +15,7 @@ import {
   requestReschedule,
 } from "../../services/api";
 import { useAlertModal } from "../../contexts/AlertModalContext";
-import { MAX_BOOKING_DAYS_AHEAD, phTodayIso, selectableStartTimes } from "../../utils/bookingTime";
+import { MAX_BOOKING_DAYS_AHEAD, earliestStartTime, isSelectableStartTime, phTodayIso } from "../../utils/bookingTime";
 
 type Props = {
   bookingId: string;
@@ -88,8 +88,8 @@ export default function RescheduleRequestForm({ bookingId, as }: Props) {
     };
   }, [date, as, workerId, bookingId]);
 
-  const selectable = useMemo(() => selectableStartTimes(date), [date]);
-  const canSubmit = !!date && !!time && selectable.includes(time);
+  const minTime = useMemo(() => earliestStartTime(date), [date]);
+  const canSubmit = !!date && isSelectableStartTime(date, time);
 
   const handleSubmit = async () => {
     if (!canSubmit || !date || !time) {
@@ -134,16 +134,13 @@ export default function RescheduleRequestForm({ bookingId, as }: Props) {
         <Text className="text-text-primary font-bold text-lg mb-3">New date</Text>
         <DateGridPicker
           selectedDate={date}
-          onSelect={(iso) => {
-            setDate(iso);
-            if (time && !selectableStartTimes(iso).includes(time)) setTime(null);
-          }}
+          onSelect={setDate}
           unavailableDates={closedDates}
           daysAhead={MAX_BOOKING_DAYS_AHEAD + 1}
         />
 
         <Text className="text-text-primary font-bold text-lg mt-6 mb-3">New start time</Text>
-        <StartTimePicker value={time} onChange={setTime} selectable={selectable} busyTimes={busyTimes} />
+        <StartTimePicker value={time} onChange={setTime} minTime={minTime} busyTimes={busyTimes} />
         {date === phTodayIso() && (
           <Text className="text-text-muted text-xs mt-2">Same-day times must be at least 2 hours from now.</Text>
         )}
