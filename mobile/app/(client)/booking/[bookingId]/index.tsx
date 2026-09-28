@@ -13,7 +13,7 @@ import PrimaryButton from "../../../../components/ui/PrimaryButton";
 import OutlinedButton from "../../../../components/ui/OutlinedButton";
 import DangerButton from "../../../../components/ui/DangerButton";
 import PriceBreakdownCard from "../../../../components/ui/PriceBreakdown";
-import { LoadingSkeleton } from "../../../../components/feedback/LoadingSkeleton";
+import { ScreenSkeleton } from "../../../../components/feedback/ScreenSkeleton";
 import XenditCheckoutModal from "../../../../components/payment/XenditCheckoutModal";
 import { useBookingStore, type Booking } from "../../../../store/bookingStore";
 import {
@@ -99,7 +99,7 @@ export default function BookingDetailScreen() {
     return (
       <SafeAreaView className="flex-1 bg-white">
         <ScreenHeader title="Booking Details" showBack />
-        <LoadingSkeleton type="booking" count={1} />
+        <ScreenSkeleton />
       </SafeAreaView>
     );
   }

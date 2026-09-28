@@ -102,7 +102,7 @@ export default function RequestsScreen() {
         </Text>
       </View>
       {loading ? (
-        <LoadingSkeleton type="booking" count={4} />
+        <LoadingSkeleton type="request" count={4} />
       ) : filtered.length === 0 ? (
         <EmptyState title="No new requests" />
       ) : (

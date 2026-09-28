@@ -148,7 +148,7 @@ export default function SearchScreen() {
       )}
 
       {showLoading ? (
-        <LoadingSkeleton />
+        <LoadingSkeleton type="search" />
       ) : trimmedQuery ? (
         error ? (
           <View className="px-4 py-6">
