@@ -115,13 +115,14 @@ payment reminders) down with it. Two pieces close that gap:
    Render). Hourly is fine because every sweep already tolerates "ran within
    the last hour" — that was its BullMQ schedule too.
 
-Optionally, add an **external keep-alive pinger** (UptimeRobot, cron-job.org
-— free, 5-min interval) hitting `GET /health`. Any request resets Render's
-idle timer, so this keeps the service (and BullMQ's own in-process schedule)
-running continuously instead of relying on the hourly sweep as the only
-mechanism. Not GitHub Actions for this part — scheduled workflows drift
-5-15 min under load and auto-disable after 60 days of repo inactivity, too
-loose for a 15-min idle window.
+3. **`.github/workflows/keep-alive.yml`** — `GET /health` every 5 minutes,
+   best effort. GitHub can delay scheduled runs 5-15 min under load, so the
+   service still sleeps now and then.
+
+For reliable uptime add an **external keep-alive pinger** (UptimeRobot,
+cron-job.org — free, 5-min interval) hitting `GET /health`, or move to a paid
+Render plan (never sleeps; then delete `keep-alive.yml`). Any request resets
+Render's idle timer, keeping BullMQ's own in-process schedule running.
 
 On the free plan, budget ~744 of the 750 free instance-hours/month if kept
 warm continuously — under the cap, but close to it in a 31-day month.
@@ -209,7 +210,8 @@ still come from `backend/.env`.
   run against real Xendit. Step 6 above is mandatory.
 - **Structured logging.** Everything is `console.*`. Add a real logger + log
   aggregation before you need to debug production.
-- **Error tracking / metrics / uptime alerting.** None wired.
+- **Error tracking.** Wired (Sentry) but off until the DSNs are set — see
+  *Production checklist* below. Metrics and uptime alerting: not wired.
 - **Backups.** Confirm Neon's automated backup/PITR settings on the prod
   branch and do one test restore.
 - **Secrets rotation.** `JWT_SECRET` rotation invalidates all sessions — plan for it.
@@ -220,3 +222,42 @@ still come from `backend/.env`.
 
 CI is green as of PR #4 (backend, docker, mobile, web all pass on every push) —
 that gate is done; keep it green on whatever branch you deploy from.
+
+---
+
+## Production checklist (account-side steps)
+
+Things only the account owner can do. The code for each is already in place.
+
+1. **Error monitoring (Sentry, free plan).** At sentry.io create one
+   organization with three projects — *Node* (backend), *React* (admin web),
+   *React Native* (mobile) — and copy each project's DSN:
+   - Render → backend service → Environment: `SENTRY_DSN` (+ `SENTRY_ENVIRONMENT=production`).
+   - Vercel → admin project → Environment Variables: `VITE_SENTRY_DSN`, then redeploy
+     (it is read at build time).
+   - expo.dev → project → Environment variables (production): `EXPO_PUBLIC_SENTRY_DSN`,
+     then a new EAS build.
+   Nothing is reported until a DSN is set. Request bodies, cookies, auth and
+   webhook headers, query strings, user identities and console output are
+   never sent.
+2. **Startup check.** In production the backend refuses to start without
+   `DATABASE_URL` or `JWT_SECRET`, and logs a `Config warning:` line (and a
+   Sentry warning) for every other missing setting — including
+   `XENDIT_SECRET_KEY is a TEST key` while payments run on sandbox keys.
+   After each deploy, check the Render logs for those lines.
+3. **Keep the backend awake** — see *Free-tier hosting* above.
+4. **Rotate the Neon production password** (it was pasted in a chat on
+   2026-09-07): Neon console → project `homeease-prod` → Roles → reset the
+   password, then update `DATABASE_URL` and `DIRECT_URL` on Render.
+5. **Delete the old Google Maps JavaScript key.** It is still in git history
+   (removed from `eas.json` when the app moved to the Maps SDK for Android):
+   Google Cloud console → APIs & Services → Credentials → delete it.
+6. **Backups.** Neon console → project → Settings → check the point-in-time
+   restore window on the production branch, and try one restore to a
+   throwaway branch.
+7. **Admin lost their authenticator and backup codes?** From a trusted
+   machine with the production `DATABASE_URL`:
+   `npx tsx scripts/reset-admin-mfa.ts --email <admin> --reason "<why>"`
+   (dry run), then again with `--confirm`. Verify the person first; it is
+   audit-logged.
+

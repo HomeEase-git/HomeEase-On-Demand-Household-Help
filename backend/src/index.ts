@@ -1,4 +1,8 @@
 import 'dotenv/config';
+// Before anything else, so error monitoring can hook into what loads next.
+import { flushSentry } from './instrument';
+import * as Sentry from '@sentry/node';
+import { checkEnvironment } from '@config/envCheck';
 import dns from 'node:dns';
 import http from 'http';
 import type { Server as SocketIOServer } from 'socket.io';
@@ -55,7 +59,7 @@ process.on('uncaughtException', (error: NodeJS.ErrnoException & { address?: stri
     return;
   }
   console.error('Uncaught exception, exiting:', error);
-  process.exit(1);
+  void flushSentry().finally(() => process.exit(1));
 });
 
 let server: http.Server | undefined;
@@ -64,6 +68,19 @@ const workers: Worker[] = [];
 let shuttingDown = false;
 
 const startServer = async () => {
+  if (process.env.NODE_ENV === 'production') {
+    const { missingRequired, warnings } = checkEnvironment();
+    if (missingRequired.length > 0) {
+      console.error(`Refusing to start — missing required settings: ${missingRequired.join(', ')}`);
+      await flushSentry();
+      process.exit(1);
+    }
+    for (const warning of warnings) console.warn(`Config warning: ${warning}`);
+    if (warnings.length > 0) {
+      Sentry.captureMessage(`Production config: ${warnings.length} warning(s) — ${warnings.join(' | ')}`, 'warning');
+    }
+  }
+
   try {
     // Test database connection
     await prisma.$connect();
@@ -132,6 +149,7 @@ const shutdown = async (signal: string) => {
     await prisma.$disconnect();
     clearTimeout(forceExit);
     console.log('Drain complete — exiting.');
+    await flushSentry();
     process.exit(0);
   } catch (error) {
     console.error('Error during shutdown:', error);
