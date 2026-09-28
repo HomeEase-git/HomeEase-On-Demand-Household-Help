@@ -37,20 +37,30 @@ export async function accrueDebtTx(
   amount: number,
   opts: { bookingId?: string; note?: string; type?: 'COMMISSION_DEBIT' | 'PENALTY' | 'RECOVERY_REVERSED' | 'ADMIN_ADJUSTMENT' } = {}
 ) {
-  const abs = Math.abs(amount);
+  const abs = roundToCentavo(Math.abs(amount));
+  // Payout credit the platform already owes the worker covers new dues
+  // first, so a worker who only takes cash jobs still gets their credit.
+  const current = await lockDuesTx(client, workerProfileId);
+  const covered = roundToCentavo(Math.min(Math.max(0, current.compensationCredit), abs));
+  const added = roundToCentavo(abs - covered);
+
   const updated = await client.workerProfile.update({
     where: { id: workerProfileId },
-    data: { commissionOwed: { increment: abs } },
+    data: {
+      commissionOwed: roundToCentavo(current.commissionOwed + added),
+      ...(covered > 0 ? { compensationCredit: roundToCentavo(current.compensationCredit - covered) } : {}),
+    },
   });
 
+  const coveredNote = covered > 0 ? `₱${covered.toFixed(2)} covered by payout credit` : null;
   const entry = await client.debtLedgerEntry.create({
     data: {
       workerProfileId,
       type: opts.type ?? 'COMMISSION_DEBIT',
-      amount: abs,
+      amount: added,
       balanceAfter: updated.commissionOwed,
       bookingId: opts.bookingId,
-      note: opts.note,
+      note: [opts.note, coveredNote].filter(Boolean).join(' — ') || null,
     },
   });
 
@@ -90,7 +100,7 @@ export async function accrueDebtTx(
     }
   }
 
-  return { workerProfile: updated, entry };
+  return { workerProfile: updated, entry, coveredByCredit: covered };
 }
 
 /**
@@ -179,10 +189,10 @@ export async function restoreSettlementTx(
     });
   }
   if (opts.compensationPaid > 0) {
-    await lockDuesTx(client, workerProfileId);
-    await client.workerProfile.update({
-      where: { id: workerProfileId },
-      data: { compensationCredit: { increment: opts.compensationPaid } },
+    await creditDebtTx(client, workerProfileId, opts.compensationPaid, 'COMPENSATION', {
+      bookingId: opts.bookingId,
+      note: 'Compensation that was in this job\'s payout put back — the job was refunded',
+      overflow: 'credit',
     });
   }
 }

@@ -173,9 +173,10 @@ describe('Worker dues ledger', () => {
     await refundOrVoidPayment(booking.id, 'Worker never arrived');
 
     expect((await prisma.payout.findUniqueOrThrow({ where: { id: payout.id } })).status).toBe('CANCELLED');
+    // ₱300 of dues back on the tab, less the ₱50 credit put back against them.
     const after = await dues();
-    expect(after.commissionOwed).toBeCloseTo(300, 2);
-    expect(after.compensationCredit).toBeCloseTo(50, 2);
+    expect(after.commissionOwed).toBeCloseTo(250, 2);
+    expect(after.compensationCredit).toBe(0);
     const putBack = await prisma.debtLedgerEntry.findFirst({
       where: { workerProfileId, bookingId: booking.id, type: 'RECOVERY_REVERSED' },
     });
@@ -202,6 +203,58 @@ describe('Worker dues ledger', () => {
       where: { workerProfileId, bookingId: booking.id, type: 'RECOVERY_REVERSED' },
     });
     expect(putBacks).toBe(1);
+  });
+
+  it('does not touch dues while a refund is still PENDING, and puts them back once it succeeds', async () => {
+    await setDues(300);
+    const { booking, payment } = await seedPayment('GCASH');
+    await settleWorkerEarnings(payment.id);
+
+    (createRefund as jest.Mock).mockResolvedValueOnce({ id: 'refund_slow', status: 'PENDING' });
+    await refundOrVoidPayment(booking.id, 'Worker never arrived');
+    expect((await dues()).commissionOwed).toBe(0);
+
+    (retrieveRefund as jest.Mock).mockResolvedValueOnce({ id: 'refund_slow', status: 'SUCCEEDED' });
+    await reconcilePendingRefund(payment.id);
+    expect((await dues()).commissionOwed).toBeCloseTo(300, 2);
+  });
+
+  it('leaves dues untouched when an accepted refund later fails', async () => {
+    await setDues(300);
+    const { booking, payment } = await seedPayment('GCASH');
+    await settleWorkerEarnings(payment.id);
+
+    (createRefund as jest.Mock).mockResolvedValueOnce({ id: 'refund_doomed', status: 'PENDING' });
+    await refundOrVoidPayment(booking.id, 'Worker never arrived');
+    (retrieveRefund as jest.Mock).mockResolvedValueOnce({ id: 'refund_doomed', status: 'FAILED' });
+    await reconcilePendingRefund(payment.id);
+
+    expect((await dues()).commissionOwed).toBe(0);
+    const reopened = await prisma.payment.findUniqueOrThrow({ where: { id: payment.id } });
+    expect(reopened.settlementReversedAt).toBeNull();
+  });
+
+  it('uses payout credit to cover new cash-job dues (cash-only workers still get their credit)', async () => {
+    await setDues(0, 118);
+
+    await prisma.$transaction((tx) => accrueDebtTx(tx, workerProfileId, 118, { note: 'Cash job' }));
+
+    expect(await dues()).toEqual({ commissionOwed: 0, compensationCredit: 0 });
+    const entry = await prisma.debtLedgerEntry.findFirst({ where: { workerProfileId } });
+    expect(entry?.amount).toBeCloseTo(0, 2);
+    expect(entry?.note).toMatch(/118\.00 covered by payout credit/);
+  });
+
+  it('uses what credit there is and adds the rest to dues', async () => {
+    await setDues(0, 50);
+
+    await prisma.$transaction((tx) => accrueDebtTx(tx, workerProfileId, 118, { note: 'Cash job' }));
+
+    const after = await dues();
+    expect(after.commissionOwed).toBeCloseTo(68, 2);
+    expect(after.compensationCredit).toBe(0);
+    const ledger = await prisma.debtLedgerEntry.aggregate({ where: { workerProfileId }, _sum: { amount: true } });
+    expect(ledger._sum.amount).toBeCloseTo(68, 2);
   });
 
   it('refuses an admin waiver larger than what the worker owes', async () => {

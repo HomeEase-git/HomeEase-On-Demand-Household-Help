@@ -129,16 +129,29 @@ function priceBooking(booking: BookingWithAddOns, commissionRate: number, withho
  * records the transaction and books the platform's uncollected cut as worker
  * debt. No gateway call, no Payout.
  */
+function cashJobDuesMessage(collected: number, platformCut: number, coveredByCredit: number): string {
+  const owed = roundToCentavo(platformCut - coveredByCredit);
+  const intro = `You collected ₱${collected.toFixed(2)} in cash. The ₱${platformCut.toFixed(2)} commission + tax`;
+  if (owed <= 0) return `${intro} was covered by your payout credit — nothing to pay.`;
+  if (coveredByCredit > 0) {
+    return (
+      `${intro} was partly covered by your ₱${coveredByCredit.toFixed(2)} payout credit. ` +
+      `The remaining ₱${owed.toFixed(2)} will be deducted from your next online-job payout.`
+    );
+  }
+  return `${intro} will be deducted from your next online-job payout.`;
+}
+
 export async function settleCashBooking(bookingId: string) {
   const booking = await loadBooking(bookingId);
   const { commissionRate, withholdingTaxRate } = resolveRates(booking, await getAppSettings());
   const priced = priceBooking(booking, commissionRate, withholdingTaxRate);
   const platformCut = roundToCentavo(priced.commissionAmount + priced.withholdingTaxAmount);
 
-  const { payment } = await prisma.$transaction(async (tx) => {
+  const { payment, coveredByCredit } = await prisma.$transaction(async (tx) => {
     const existing = await tx.payment.findUnique({ where: { bookingId } });
     if (existing && existing.status === 'COMPLETED') {
-      return { payment: existing };
+      return { payment: existing, coveredByCredit: 0 };
     }
 
     const paymentData = {
@@ -181,14 +194,15 @@ export async function settleCashBooking(bookingId: string) {
         select: { id: true },
       });
       if (workerProfile) {
-        await accrueDebtTx(tx, workerProfile.id, platformCut, {
+        const accrued = await accrueDebtTx(tx, workerProfile.id, platformCut, {
           bookingId,
           note: 'Commission + withholding tax on a cash job (paid to you in person)',
         });
+        return { payment, coveredByCredit: accrued.coveredByCredit };
       }
     }
 
-    return { payment };
+    return { payment, coveredByCredit: 0 };
   });
 
   if (booking.workerId) {
@@ -196,9 +210,7 @@ export async function settleCashBooking(bookingId: string) {
       userId: booking.workerId,
       type: 'PAYMENT_RECEIVED',
       title: 'Cash Job Completed',
-      message:
-        `You collected ₱${priced.totalAmount.toFixed(2)} in cash. ₱${platformCut.toFixed(2)} ` +
-        `(commission + tax) will be deducted from your next online-job payout.`,
+      message: cashJobDuesMessage(priced.totalAmount, platformCut, coveredByCredit),
       relatedId: bookingId,
     });
   }
@@ -845,6 +857,7 @@ export async function reconcilePendingRefund(paymentId: string): Promise<'succee
   const refund = await retrieveRefund(payment.xenditRefundId);
   if (refund.status === 'SUCCEEDED') {
     await prisma.payment.update({ where: { id: payment.id }, data: { xenditRefundStatus: 'SUCCEEDED' } });
+    await undoWorkerSettlement(payment.id);
     return 'succeeded';
   }
   if (refund.status !== 'FAILED' && refund.status !== 'CANCELLED') return 'pending';
@@ -930,9 +943,14 @@ export async function refundOrVoidPayment(bookingId: string, reason: string) {
         amountPesos: payment.capturedAmount ?? payment.totalAmount,
       });
     }
-    // The client's money is going back, so dues netted from this job's
-    // (now stopped) payout weren't really paid.
-    await undoWorkerSettlement(payment.id);
+    // Dues netted from this job's (now stopped) payout weren't really paid
+    // once the client has their money back — so undo the settlement only
+    // when the refund has actually succeeded. A PENDING refund is undone by
+    // the sweep when it completes (reconcilePendingRefund); one that fails
+    // leaves the worker's dues untouched.
+    if (!refund || refund.status === 'SUCCEEDED') {
+      await undoWorkerSettlement(payment.id);
+    }
   } else if (payment.methodType === 'CASH') {
     // Reverse the commission-debt accrual; the worker returns the cash
     // directly. The status claim and the reversal commit together, so a
