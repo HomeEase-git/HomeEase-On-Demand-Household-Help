@@ -2314,7 +2314,7 @@ model TaxCertificate {
   // [{ month: "2026-07", incomePayments, taxWithheld }, ...] — one entry per
   // month in the period, zeros included. Null on certificates generated
   // before this was added (regenerate to fill it).
-  monthlyBreakdown Json?
+  monthlyBreakdown    Json?
 
   pdfPath String // Supabase Storage object path in a PRIVATE bucket — a signed URL is minted on read, never stored here
   status  TaxCertificateStatus @default(DRAFT)
@@ -2466,4 +2466,100 @@ model RefundRequest {
   @@index([status])
   @@index([paymentId])
   @@index([bookingId])
+}
+
+// ---------------------------------------------------------------------------
+// Double-entry ledger (see services/ledgerService.ts). Every movement of the
+// platform's money is one LedgerTransaction whose lines sum to exactly zero,
+// in whole centavos. Debits are positive, credits negative. The ledger starts
+// at LedgerState.openedAt with an OPENING transaction built from the state at
+// that moment; nothing is posted before it's opened.
+// ---------------------------------------------------------------------------
+
+enum LedgerAccount {
+  XENDIT_CASH // asset: money held in the Xendit account
+  MANUAL_SETTLEMENTS // clearing: money settled outside the app (manual refunds, fees paid to support)
+  WORKER_BALANCE // per worker: credit = platform owes the worker, debit = the worker owes dues
+  CLIENT_RECEIVABLE // per client: cancellation fees owed to the platform
+  COMMISSION_REVENUE // income: platform commission
+  PENALTY_REVENUE // income: worker no-show / fault penalties
+  WITHHOLDING_TAX_PAYABLE // liability: tax withheld from workers, owed to BIR
+  XENDIT_FEES // expense: Xendit's fees (incl. their VAT)
+  PLATFORM_FUNDED_EXPENSE // expense: worker earnings the platform paid itself
+  REFUND_LOSS // expense: worker share refunded after the worker was already paid
+  ADJUSTMENTS // admin corrections to worker dues
+  OPENING_BALANCE // equity: balances carried in when the ledger was opened
+}
+
+enum LedgerEventType {
+  OPENING
+  PAYMENT_CAPTURED
+  CASH_JOB_SETTLED
+  PLATFORM_FUNDED
+  PAYOUT_SENT
+  REFUND_SENT
+  CASH_JOB_REFUNDED
+  MANUAL_REFUND
+  PENALTY
+  CANCELLATION_FEE
+  CLIENT_FEE_CLEARED
+  ADMIN_ADJUSTMENT
+  XENDIT_FEE
+  TAX_REMITTED
+}
+
+model LedgerTransaction {
+  id             String          @id @default(cuid())
+  type           LedgerEventType
+  occurredAt     DateTime
+  // One posting per real-world event, e.g. "capture:<paymentId>" — a retried
+  // webhook or sweep can never post the same money twice.
+  idempotencyKey String          @unique
+  memo           String
+  bookingId      String? // soft references, for tracing
+  paymentId      String?
+  payoutId       String?
+
+  lines LedgerLine[]
+
+  createdAt DateTime @default(now())
+
+  @@index([occurredAt])
+  @@index([type])
+  @@index([bookingId])
+}
+
+model LedgerLine {
+  id             String            @id @default(cuid())
+  transactionId  String
+  transaction    LedgerTransaction @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+  account        LedgerAccount
+  amountCentavos Int // debit positive, credit negative
+  workerId       String? // User.id, for WORKER_BALANCE lines
+  clientId       String? // User.id, for CLIENT_RECEIVABLE lines
+
+  @@index([transactionId])
+  @@index([account])
+  @@index([workerId])
+  @@index([clientId])
+}
+
+model LedgerState {
+  id                 String    @id @default("singleton")
+  openedAt           DateTime?
+  openedById         String?
+  // Newest Xendit transaction time already fee-synced.
+  xenditFeesSyncedTo DateTime?
+  updatedAt          DateTime  @updatedAt
+}
+
+// A month an admin checked and signed off (see ledgerReconciliationService).
+model LedgerReconciliation {
+  id              String   @id @default(cuid())
+  month           String   @unique // "2026-09", Manila calendar month
+  allChecksPassed Boolean
+  figures         Json // snapshot of the report at sign-off
+  note            String
+  reconciledById  String
+  createdAt       DateTime @default(now())
 }

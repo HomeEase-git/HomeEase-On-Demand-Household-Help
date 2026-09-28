@@ -1,6 +1,7 @@
 import prisma from '@config/database';
 import { roundToCentavo } from '@utils/money';
 import { manilaMonthKey, manilaMonthsIn } from '@utils/manilaTime';
+import { postLedger, toCentavos } from '@services/ledgerService';
 
 export interface RemittancePeriodSummary {
   periodStart: Date;
@@ -71,7 +72,7 @@ export async function markPeriodRemitted(
     _sum: { withholdingTaxAmount: true },
   });
 
-  return prisma.taxRemittance.upsert({
+  const record = await prisma.taxRemittance.upsert({
     where: { periodStart_periodEnd: { periodStart, periodEnd } },
     update: {
       totalTaxWithheld: aggregate._sum.withholdingTaxAmount ?? 0,
@@ -91,5 +92,32 @@ export async function markPeriodRemitted(
       remittedBy: remittedByUserId,
       notes: notes ?? null,
     },
+  });
+
+  await postRemittedWithholding(record.id, record.totalTaxWithheld, record.referenceNumber ?? referenceNumber);
+  return record;
+}
+
+/**
+ * Takes the remitted tax off WITHHOLDING_TAX_PAYABLE (paid to BIR outside
+ * the app). A quarter re-marked with a corrected figure posts only the
+ * difference, so the ledger always shows what was actually remitted.
+ */
+async function postRemittedWithholding(remittanceId: string, totalPesos: number, referenceNumber: string) {
+  const prefix = `tax-remitted:${remittanceId}`;
+  const already = await prisma.ledgerLine.aggregate({
+    where: { account: 'WITHHOLDING_TAX_PAYABLE', transaction: { idempotencyKey: { startsWith: prefix } } },
+    _sum: { amountCentavos: true },
+  });
+  const delta = toCentavos(totalPesos) - (already._sum.amountCentavos ?? 0);
+  if (delta === 0) return;
+  await postLedger(prisma, {
+    type: 'TAX_REMITTED',
+    key: `${prefix}:${toCentavos(totalPesos)}`,
+    memo: `Withholding tax remitted to BIR (ref ${referenceNumber})`,
+    lines: [
+      { account: 'WITHHOLDING_TAX_PAYABLE', amountCentavos: delta },
+      { account: 'MANUAL_SETTLEMENTS', amountCentavos: -delta },
+    ],
   });
 }

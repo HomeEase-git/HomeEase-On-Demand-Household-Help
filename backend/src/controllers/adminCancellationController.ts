@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import prisma from '@config/database';
+import { postCancellationFee } from '@services/ledgerService';
 import { errorResponse } from '@utils/errorResponse';
 import { writeAuditLog } from '@utils/auditLog';
 import { notifyUser } from '@utils/notify';
@@ -154,6 +155,7 @@ export const reviewCancellation = async (req: AuthRequest, res: Response) => {
           bookingId,
           note: `Compensation for client-caused cancellation of ${displayId}`,
         });
+        await postCancellationFee(tx, clientId, workerId, amount, { key: bookingId, bookingId });
       } else if (penalty > 0) {
         await chargePenaltyTx(tx, workerProfile.id, penalty, {
           bookingId,

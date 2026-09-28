@@ -8,6 +8,7 @@ const EXTRA_PAGES = [
   { to: '/bookings/dispute', icon: 'fa-triangle-exclamation', label: 'Disputes', group: 'Bookings' },
   { to: '/payments/refunds', icon: 'fa-rotate-left', label: 'Refunds', group: 'Payments' },
   { to: '/payments/payouts', icon: 'fa-money-bill-transfer', label: 'Payouts', group: 'Payments' },
+  { to: '/payments/books', icon: 'fa-book', label: 'Books & reconciliation', group: 'Payments' },
   { to: '/reviews/flagged', icon: 'fa-flag', label: 'Flagged reviews', group: 'Reviews' },
   { to: '/mfa-setup', icon: 'fa-shield-halved', label: 'Two-factor authentication', group: 'Settings' },
 ]

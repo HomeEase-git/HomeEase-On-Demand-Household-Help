@@ -11,6 +11,7 @@ import {
   flagTaxRecordsForRefundedPayment,
   PayoutAlreadySentError,
 } from '@services/paymentLifecycleService';
+import { postManualRefund } from '@services/ledgerService';
 
 /**
  * Money that was actually paid is never refunded automatically: anything that
@@ -179,11 +180,13 @@ export async function markRefundedManually(id: string, adminId: string, note: st
     where: { id: request.paymentId },
     include: { booking: { select: { workerId: true } } },
   });
+  let workerAlreadyPaid = false;
   if (payment.status === 'COMPLETED' && payment.methodType !== 'CASH') {
     try {
       await stopWorkerPayout(payment.id, request.bookingId, `Refunded manually: ${note}`);
       await undoWorkerSettlement(payment.id);
     } catch (error) {
+      workerAlreadyPaid = error instanceof PayoutAlreadySentError;
       // Already sent is the usual reason for a manual refund; anything else
       // (a payout mid-send) should be retried rather than recorded.
       if (!(error instanceof PayoutAlreadySentError)) {
@@ -209,6 +212,10 @@ export async function markRefundedManually(id: string, adminId: string, note: st
       },
     });
     await flagTaxRecordsForRefundedPayment(payment);
+    // Cash jobs never had the client's money on the platform's books.
+    if (payment.methodType !== 'CASH') {
+      await postManualRefund(prisma, payment, payment.booking.workerId, workerAlreadyPaid);
+    }
   }
 
   await syncDispute(request, { refundStatus: 'SUCCEEDED', refundFailureReason: null, refundAmount: request.amount });
