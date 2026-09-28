@@ -7,6 +7,22 @@ import type { DebtLedgerEntryType, Prisma } from '@prisma/client';
 type TxClient = Prisma.TransactionClient;
 
 /**
+ * Row-locks the worker's dues for the rest of the transaction and returns the
+ * current values. Every read-then-write of commissionOwed/compensationCredit
+ * goes through this, so two money movements for the same worker (a payout
+ * netting dues while a penalty or refund lands) can't overwrite each other.
+ */
+export async function lockDuesTx(client: TxClient, workerProfileId: string) {
+  const rows = await client.$queryRaw<Array<{ commissionOwed: number; compensationCredit: number }>>`
+    SELECT "commissionOwed", "compensationCredit" FROM "WorkerProfile" WHERE "id" = ${workerProfileId} FOR UPDATE`;
+  if (rows.length === 0) throw new Error(`WorkerProfile ${workerProfileId} not found`);
+  return rows[0];
+}
+
+/** Thrown when an admin tries to waive more than the worker actually owes. */
+export class DuesAdjustmentError extends Error {}
+
+/**
  * Accrues `amount` of platform commission + withholding tax onto a worker's
  * running tab — the ONLY path that increases `commissionOwed`. Used when the
  * platform's cut can't be collected through a gateway because the client
@@ -19,7 +35,7 @@ export async function accrueDebtTx(
   client: TxClient,
   workerProfileId: string,
   amount: number,
-  opts: { bookingId?: string; note?: string; type?: 'COMMISSION_DEBIT' | 'PENALTY' } = {}
+  opts: { bookingId?: string; note?: string; type?: 'COMMISSION_DEBIT' | 'PENALTY' | 'RECOVERY_REVERSED' | 'ADMIN_ADJUSTMENT' } = {}
 ) {
   const abs = Math.abs(amount);
   const updated = await client.workerProfile.update({
@@ -77,37 +93,51 @@ export async function accrueDebtTx(
   return { workerProfile: updated, entry };
 }
 
+/**
+ * Lowers what the worker owes by up to `amount`. What's beyond the current
+ * balance is either added to compensationCredit (paid with their next online
+ * payout — e.g. a refunded cash job whose dues were already recovered) or,
+ * with `overflow: 'reject'`, refused. It used to be silently dropped.
+ */
 async function creditDebtTx(
   client: TxClient,
   workerProfileId: string,
   amount: number,
   type: DebtLedgerEntryType,
-  opts: { bookingId?: string; note?: string } = {}
+  opts: { bookingId?: string; note?: string; overflow?: 'credit' | 'reject' } = {}
 ) {
-  const abs = Math.abs(amount);
-  const current = await client.workerProfile.findUniqueOrThrow({
-    where: { id: workerProfileId },
-    select: { commissionOwed: true },
-  });
-  const newOwed = Math.max(0, roundToCentavo(current.commissionOwed - abs));
+  const abs = roundToCentavo(Math.abs(amount));
+  const current = await lockDuesTx(client, workerProfileId);
+  const applied = roundToCentavo(Math.min(Math.max(0, current.commissionOwed), abs));
+  const excess = roundToCentavo(abs - applied);
+
+  if (excess > 0 && opts.overflow === 'reject') {
+    throw new DuesAdjustmentError(
+      `The worker only owes ₱${Math.max(0, current.commissionOwed).toFixed(2)} — can't reduce it by ₱${abs.toFixed(2)}`
+    );
+  }
 
   const updated = await client.workerProfile.update({
     where: { id: workerProfileId },
-    data: { commissionOwed: newOwed },
+    data: {
+      commissionOwed: roundToCentavo(current.commissionOwed - applied),
+      ...(excess > 0 ? { compensationCredit: roundToCentavo(current.compensationCredit + excess) } : {}),
+    },
   });
 
+  const excessNote = excess > 0 ? `₱${excess.toFixed(2)} beyond what was owed added to payout credit` : null;
   const entry = await client.debtLedgerEntry.create({
     data: {
       workerProfileId,
       type,
-      amount: -abs,
+      amount: -applied,
       balanceAfter: updated.commissionOwed,
       bookingId: opts.bookingId,
-      note: opts.note,
+      note: [opts.note, excessNote].filter(Boolean).join(' — ') || null,
     },
   });
 
-  return { workerProfile: updated, entry };
+  return { workerProfile: updated, entry, applied, credited: excess };
 }
 
 /**
@@ -119,16 +149,48 @@ async function creditDebtTx(
 export async function recoverDebtTx(
   client: TxClient,
   workerProfileId: string,
-  amount: number,
+  maxAmount: number,
   opts: { bookingId?: string; note?: string } = {}
+): Promise<number> {
+  const { commissionOwed } = await lockDuesTx(client, workerProfileId);
+  const take = roundToCentavo(Math.min(Math.max(0, commissionOwed), Math.max(0, maxAmount)));
+  if (take <= 0) return 0;
+  await creditDebtTx(client, workerProfileId, take, 'DEBT_RECOVERY', opts);
+  return take;
+}
+
+/**
+ * Undoes a refunded online payment's settlement: dues that were recovered
+ * from its payout go back on the worker's tab (the client got that money
+ * back, so the dues weren't really paid), and compensation credit that rode
+ * along goes back to compensationCredit. Only call once the payout is known
+ * to be stopped.
+ */
+export async function restoreSettlementTx(
+  client: TxClient,
+  workerProfileId: string,
+  opts: { bookingId: string; duesRecovered: number; compensationPaid: number }
 ) {
-  return creditDebtTx(client, workerProfileId, amount, 'DEBT_RECOVERY', opts);
+  if (opts.duesRecovered > 0) {
+    await accrueDebtTx(client, workerProfileId, opts.duesRecovered, {
+      bookingId: opts.bookingId,
+      type: 'RECOVERY_REVERSED',
+      note: 'Dues recovered from this job\'s payout put back — the job was refunded',
+    });
+  }
+  if (opts.compensationPaid > 0) {
+    await lockDuesTx(client, workerProfileId);
+    await client.workerProfile.update({
+      where: { id: workerProfileId },
+      data: { compensationCredit: { increment: opts.compensationPaid } },
+    });
+  }
 }
 
 /**
  * Reverses a previously-accrued COMMISSION_DEBIT because the underlying cash
- * payment was refunded/voided. Same non-negative floor and hold behavior as
- * recoverDebtTx.
+ * payment was refunded/voided. If those dues were already paid down, the
+ * excess becomes payout credit rather than vanishing.
  */
 export async function reverseDebtTx(
   client: TxClient,
@@ -136,7 +198,7 @@ export async function reverseDebtTx(
   amount: number,
   opts: { bookingId?: string; note?: string } = {}
 ) {
-  return creditDebtTx(client, workerProfileId, amount, 'REVERSAL', opts);
+  return creditDebtTx(client, workerProfileId, amount, 'REVERSAL', { ...opts, overflow: 'credit' });
 }
 
 /**
@@ -165,23 +227,11 @@ export async function creditCompensationTx(
   amount: number,
   opts: { bookingId?: string; note?: string } = {}
 ) {
-  const abs = Math.abs(amount);
-  const current = await client.workerProfile.findUniqueOrThrow({
-    where: { id: workerProfileId },
-    select: { commissionOwed: true },
+  const { applied, credited } = await creditDebtTx(client, workerProfileId, amount, 'COMPENSATION', {
+    ...opts,
+    overflow: 'credit',
   });
-  const againstDebt = roundToCentavo(Math.min(Math.max(0, current.commissionOwed), abs));
-  if (againstDebt > 0) {
-    await creditDebtTx(client, workerProfileId, againstDebt, 'COMPENSATION', opts);
-  }
-  const remainder = roundToCentavo(abs - againstDebt);
-  if (remainder > 0) {
-    await client.workerProfile.update({
-      where: { id: workerProfileId },
-      data: { compensationCredit: { increment: remainder } },
-    });
-  }
-  return { againstDebt, credited: remainder };
+  return { againstDebt: applied, credited };
 }
 
 /** Admin manual correction — always requires a reason, logged either direction. */
@@ -193,9 +243,11 @@ export async function adminAdjustDebt(
   return prisma.$transaction(async (tx) => {
     if (amount < 0) {
       // Negative = admin is increasing what's owed.
-      return accrueDebtTx(tx, workerProfileId, -amount, { note });
+      return accrueDebtTx(tx, workerProfileId, -amount, { note, type: 'ADMIN_ADJUSTMENT' });
     }
-    return creditDebtTx(tx, workerProfileId, amount, 'ADMIN_ADJUSTMENT', { note });
+    // A waiver can't go below zero — paying a worker extra is a separate
+    // decision, not a dues correction.
+    return creditDebtTx(tx, workerProfileId, amount, 'ADMIN_ADJUSTMENT', { note, overflow: 'reject' });
   });
 }
 

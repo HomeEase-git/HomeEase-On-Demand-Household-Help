@@ -1871,6 +1871,13 @@ model Payment {
   xenditRefundId     String?
   xenditRefundStatus String?
 
+  // Compensation credit (WorkerProfile.compensationCredit) that rode along
+  // in this payment's payout, and when a refund undid this payment's
+  // settlement (dues recovered + that credit put back). The claim on
+  // settlementReversedAt makes the undo run once.
+  compensationPaid     Float     @default(0)
+  settlementReversedAt DateTime?
+
   // Set when status becomes FAILED — raw reason from Xendit's webhook
   // payload (translated for end users via utils/xenditFailureMessages.ts).
   failureReason String?
@@ -1984,6 +1991,10 @@ enum DebtLedgerEntryType {
   // A previously-accrued COMMISSION_DEBIT reversed because the underlying
   // cash payment was refunded/voided. Decreases commissionOwed.
   REVERSAL
+  // Dues recovered from an online payout put back because that payment was
+  // refunded (the client's money went back, so the dues weren't really
+  // paid). Increases commissionOwed.
+  RECOVERY_REVERSED
 }
 
 // Audit trail for WorkerProfile.commissionOwed — a running tab of platform
@@ -1995,10 +2006,13 @@ model DebtLedgerEntry {
 
   type DebtLedgerEntryType
 
-  // Signed: COMMISSION_DEBIT/negative ADMIN_ADJUSTMENT increase what's owed
-  // (positive amount here), DEBT_RECOVERY/REVERSAL/positive ADMIN_ADJUSTMENT
-  // decrease it (negative amount here). balanceAfter is always the resulting
-  // commissionOwed.
+  // Signed: COMMISSION_DEBIT/PENALTY/RECOVERY_REVERSED/negative
+  // ADMIN_ADJUSTMENT increase what's owed (positive amount here),
+  // DEBT_RECOVERY/REVERSAL/COMPENSATION/positive ADMIN_ADJUSTMENT decrease it
+  // (negative amount here). Amounts only ever cover the change to
+  // commissionOwed — so the entries always sum to it — and any credit beyond
+  // what was owed goes to compensationCredit (named in the note).
+  // balanceAfter is always the resulting commissionOwed.
   amount       Float
   balanceAfter Float
 

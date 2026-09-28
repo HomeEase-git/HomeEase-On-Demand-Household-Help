@@ -3,7 +3,7 @@ import prisma from '@config/database';
 import { errorResponse } from '@utils/errorResponse';
 import { notifyUser } from '@utils/notify';
 import { writeAuditLog } from '@utils/auditLog';
-import { adminAdjustDebt, releaseDebtHold } from '@services/debtLedgerService';
+import { adminAdjustDebt, releaseDebtHold, DuesAdjustmentError } from '@services/debtLedgerService';
 import type { JwtPayload } from '@/types/index';
 
 interface AuthRequest extends Request {
@@ -33,6 +33,8 @@ export const getWorkerDebtAdmin = async (req: AuthRequest, res: Response) => {
       success: true,
       data: {
         commissionOwed: workerProfile.commissionOwed,
+        // Owed TO the worker: paid with their next online payout.
+        compensationCredit: workerProfile.compensationCredit,
         debtHoldAt: workerProfile.debtHoldAt,
         debtHoldNote: workerProfile.debtHoldNote,
         entries: entries.map((e) => ({
@@ -94,6 +96,9 @@ export const adjustWorkerDebtAdmin = async (req: AuthRequest, res: Response) => 
 
     return res.json({ success: true, data: { commissionOwed: updated.commissionOwed } });
   } catch (error) {
+    if (error instanceof DuesAdjustmentError) {
+      return res.status(400).json(errorResponse(400, error.message));
+    }
     console.error('Error adjusting worker debt:', error);
     return res.status(500).json(errorResponse(500, 'Failed to adjust worker debt'));
   }
