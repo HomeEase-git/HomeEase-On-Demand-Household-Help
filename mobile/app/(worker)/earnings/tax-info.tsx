@@ -28,6 +28,12 @@ function formatDate(value: string) {
   return new Date(value).toLocaleDateString("en-PH", { year: "numeric", month: "short", day: "numeric" });
 }
 
+// "2026-07" -> "Jul"
+function monthShort(key: string) {
+  const [year, month] = key.split('-').map(Number);
+  return new Date(Date.UTC(year, month - 1, 15)).toLocaleDateString('en-PH', { month: 'short', timeZone: 'UTC' });
+}
+
 function formatPeso(amount: number) {
   return `₱${amount.toLocaleString("en-PH", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
@@ -228,7 +234,7 @@ export default function TaxInfoScreen() {
                 renderItem={({ item }) => (
                   <View className="bg-card rounded-2xl p-3 mb-2" style={cardShadow}>
                     <Text className="text-text-primary font-semibold">
-                      {formatDate(item.periodStart)} – {formatDate(item.periodEnd)}
+                      {item.periodLabel ?? `${formatDate(item.periodStart)} – ${formatDate(item.periodEnd)}`}
                     </Text>
                     <Text className="text-text-secondary text-xs mt-1">
                       VAT collected: {formatPeso(item.totalVatCollected)}
@@ -255,11 +261,16 @@ export default function TaxInfoScreen() {
                 <View className="flex-row items-center justify-between">
                   <View>
                     <Text className="text-text-primary font-semibold">
-                      {formatDate(item.periodStart)} – {formatDate(item.periodEnd)}
+                      {item.periodLabel ?? `${formatDate(item.periodStart)} – ${formatDate(item.periodEnd)}`}
                     </Text>
                     <Text className="text-text-secondary text-xs mt-1">
                       Tax withheld: {formatPeso(item.totalTaxWithheld)}
                     </Text>
+                    {item.monthlyBreakdown && item.monthlyBreakdown.length > 0 && (
+                      <Text className="text-text-secondary text-xs mt-1">
+                        {item.monthlyBreakdown.map((m) => `${monthShort(m.month)} ${formatPeso(m.taxWithheld)}`).join(' · ')}
+                      </Text>
+                    )}
                   </View>
                   <Text
                     className="text-accent font-semibold"

@@ -2103,6 +2103,8 @@ export type VatSummary = {
   id: string;
   periodStart: string;
   periodEnd: string;
+  // Manila dates with the real last day ("Jul 1, 2026 to Sep 30, 2026").
+  periodLabel?: string;
   totalVatCollected: number;
 };
 
@@ -2340,6 +2342,8 @@ export type TaxCertificate = {
   id: string;
   periodStart: string;
   periodEnd: string;
+  periodLabel?: string;
+  monthlyBreakdown?: Array<{ month: string; incomePayments: number; taxWithheld: number }> | null;
   totalIncomePayments: number;
   totalTaxWithheld: number;
   issuedAt: string;

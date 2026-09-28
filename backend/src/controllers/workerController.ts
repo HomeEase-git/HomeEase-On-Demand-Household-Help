@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import prisma from '@config/database';
+import { formatManilaPeriod } from '@utils/manilaTime';
 import { errorResponse } from '@utils/errorResponse';
 import { toOwnedStoredUrl } from '@utils/storageUrls';
 import { parseWorkerBirthDate } from '@utils/age';
@@ -2617,6 +2618,8 @@ export const getMyTaxCertificates = async (req: AuthRequest, res: Response) => {
         id: cert.id,
         periodStart: cert.periodStart,
         periodEnd: cert.periodEnd,
+        periodLabel: formatManilaPeriod(cert.periodStart, cert.periodEnd, 'short'),
+        monthlyBreakdown: cert.monthlyBreakdown,
         totalIncomePayments: cert.totalIncomePayments,
         totalTaxWithheld: cert.totalTaxWithheld,
         issuedAt: cert.issuedAt,
@@ -2659,6 +2662,7 @@ export const getMyVatSummary = async (req: AuthRequest, res: Response) => {
         id: s.id,
         periodStart: s.periodStart,
         periodEnd: s.periodEnd,
+        periodLabel: formatManilaPeriod(s.periodStart, s.periodEnd, 'short'),
         totalVatCollected: s.totalVatCollected,
       })),
     });
