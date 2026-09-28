@@ -43,8 +43,44 @@ export function createApiClient({ getBaseUrl, storage }) {
     return refreshInFlight;
   }
 
-  async function apiRequest(path, options = {}, isRetry = false) {
+  // Authenticated fetch that returns the raw Response (for downloads) —
+  // refreshes an expired access token once and replays the request.
+  async function apiFetch(path, options = {}, isRetry = false) {
     const token = getStoredToken();
+    const headers = { ...options.headers };
+    if (token) {
+      headers.Authorization = `Bearer ${token}`;
+    }
+
+    const response = await fetch(`${baseUrl()}${path}`, {
+      ...options,
+      headers,
+    });
+
+    // Only for requests that carried a session (a wrong password at login is
+    // also a 401).
+    if (response.status === 401 && token && !isRetry) {
+      let newToken;
+      try {
+        newToken = await refreshSession();
+      } catch {
+        // Couldn't reach the server to refresh — keep the session and report
+        // the original error.
+        return response;
+      }
+      if (newToken) return apiFetch(path, options, true);
+      // Refused: the session is over, unless another tab has signed in again
+      // in the meantime.
+      if (getStoredToken() === token) {
+        clearAuthSession();
+        if (typeof window !== 'undefined') window.dispatchEvent(new Event('homeease:session-expired'));
+      }
+    }
+
+    return response;
+  }
+
+  async function apiRequest(path, options = {}) {
     const isFormData = typeof FormData !== 'undefined' && options.body instanceof FormData;
 
     const headers = {
@@ -55,30 +91,7 @@ export function createApiClient({ getBaseUrl, storage }) {
       headers['Content-Type'] = 'application/json';
     }
 
-    if (token) {
-      headers.Authorization = `Bearer ${token}`;
-    }
-
-    const response = await fetch(`${baseUrl()}${path}`, {
-      ...options,
-      headers,
-    });
-
-    // Expired access token: refresh once and replay. Only for requests that
-    // carried a session (a wrong password at login is also a 401).
-    if (response.status === 401 && token && !isRetry) {
-      let newToken = null;
-      try {
-        newToken = await refreshSession();
-      } catch {
-        // Network failure while refreshing — report the original error.
-      }
-      if (newToken) return apiRequest(path, options, true);
-      if (newToken === null && getStoredToken() === token) {
-        clearAuthSession();
-        if (typeof window !== 'undefined') window.dispatchEvent(new Event('homeease:session-expired'));
-      }
-    }
+    const response = await apiFetch(path, { ...options, headers });
 
     let data = {};
     try {
@@ -185,6 +198,7 @@ export function createApiClient({ getBaseUrl, storage }) {
 
   return {
     apiRequest,
+    apiFetch,
     getStoredToken,
     getStoredUser,
     setAuthSession,

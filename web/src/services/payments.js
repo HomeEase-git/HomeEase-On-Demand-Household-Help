@@ -1,4 +1,4 @@
-import { apiRequest, getStoredToken } from './apiClient';
+import { apiRequest, apiFetch } from './apiClient';
 
 function buildQuery(params) {
   const query = new URLSearchParams();
@@ -47,12 +47,8 @@ export async function decideRefundRequest(id, action, note) {
 }
 
 export async function downloadPayoutsCsv(params = {}) {
-  const baseUrl = (import.meta.env.VITE_API_URL || '/api').replace(/\/$/, '');
-  const token = getStoredToken();
-
-  const response = await fetch(`${baseUrl}/admin/payments/payouts/export?${buildQuery(params)}`, {
-    headers: token ? { Authorization: `Bearer ${token}` } : {},
-  });
+  // apiFetch, not a bare fetch: it renews an expired session token.
+  const response = await apiFetch(`/admin/payments/payouts/export?${buildQuery(params)}`);
 
   if (!response.ok) {
     throw new Error(`Export failed (${response.status})`);
