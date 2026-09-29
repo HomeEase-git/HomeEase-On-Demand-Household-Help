@@ -22,7 +22,7 @@ in here when that changes.
 |---|---|---|
 | Incident lead | Owner | Runs the response, decides, keeps the log |
 | Data Protection Officer (DPO) | Owner (`homeeaseondemand@gmail.com`, as in the Privacy Policy) | Decides on and sends NPC and user notifications |
-| Backup contact | *(name someone who can reach you and has emergency access to the password manager)* | Only if the owner is unreachable |
+| Backup contact | The owner's personal account (address in the password manager). Add a second, trusted person when there is one | If the HomeEase account is unusable, or the owner is unreachable |
 
 ## Severity
 

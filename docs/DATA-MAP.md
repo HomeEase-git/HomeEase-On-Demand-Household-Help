@@ -24,7 +24,7 @@ flowchart LR
     DB[(Database<br/>Neon)]
     R[(Redis<br/>Render)]
   end
-  FS[(File storage<br/>Supabase)]
+  FS[(File storage<br/>Supabase, Singapore)]
   C & W & A -->|HTTPS| API
   C & W -->|upload/view via expiring links| FS
   API --> DB & R & FS
@@ -65,7 +65,7 @@ flowchart LR
 |---|---|---|---|
 | Render | Everything the API handles (in transit and in memory), server logs | Runs the backend and Redis | Singapore |
 | Neon | The whole database | Database hosting | Singapore |
-| Supabase | All uploaded files | File storage | *confirm: Supabase → Project Settings → General → Region* |
+| Supabase | All uploaded files | File storage | Singapore (`ap-southeast-1`) |
 | Anthropic | Verification documents (ID, selfie, clearances) and resume text, for automated review | Helps admins review; never decides | USA |
 | Xendit | Payment amounts and description, payer email; workers' payout account name and number | Payments and payouts | *confirm: Xendit (Philippines entity; data location per its privacy notice)* |
 | Brevo | Email addresses, names, email contents (codes, booking notices) | Sending email | *confirm: Brevo (EU-based)* |
