@@ -14,6 +14,7 @@ export const RETENTION = {
   // A day's grace keeps "this code has expired" answers accurate for a
   // user who comes back to an old code.
   expiredTokenDays: 1,
+  // Age from creation: there's no record of when a notification was read.
   readNotificationDays: 180,
   // Unread too: a notification nobody opened in a year won't be.
   anyNotificationDays: 365,

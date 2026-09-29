@@ -67,7 +67,7 @@ a temporary Neon branch, checks the copy, and deletes it. The checks
 | Check | Fails when |
 |---|---|
 | Migration history | A migration is half-applied |
-| Point in time | The copy holds rows newer than the requested moment, so it isn't the restore that was asked for |
+| Point in time | Any `createdAt` or `updatedAt` in any table is later than the requested moment, so it isn't the restore that was asked for |
 | Data present | No user accounts |
 | Constraints and indexes | Any constraint or index is invalid |
 | Ledger balances | Any double-entry transaction doesn't balance |
@@ -116,7 +116,7 @@ from the cron backstop (task `purge-expired-data`); see
 | Sign-in codes, reset links, refresh tokens | Until they expire, plus 1 day | Deleted | `purge-expired-data` |
 | Used refresh tokens (theft detection) | 24 hours after use | Deleted | On that device's next refresh |
 | Worker live location | Only while travelling to a job; at most 2 hours after the last update | Cleared | `clear-stale-locations`, hourly |
-| Notifications | 180 days once read; 365 days if never read | Deleted | `purge-expired-data` |
+| Notifications | Once read, until 180 days old; unread, until 365 days old | Deleted | `purge-expired-data` |
 | Sign-in audit entries (logins, failed logins, MFA; they hold emails and names, including of people with no account) | 365 days | Deleted | `purge_expired_login_audit()`, database function |
 | Other audit entries (admin actions, security alerts, status changes, errors) | Kept | — | Can't be edited or deleted by the app |
 | Account and profile data, ID/selfie/clearance/certification/resume files | While the account is active | Erased on account deletion | `accountDeletionService.ts` |
@@ -139,12 +139,15 @@ rewrite the audit trail or the books.
 | Login | Used by | Can | Can't |
 |---|---|---|---|
 | Owner (`neondb_owner`) | `DIRECT_URL`: migrations at container start, scripts | Everything | — |
-| `homeease_app` | `DATABASE_URL`: the running server | Read and write rows in app tables; add audit and ledger entries; run the sign-in audit purge. Queries stop after 60s | Create, alter or drop tables; edit or delete audit or ledger entries; read or touch migration history |
+| `homeease_app` | `DATABASE_URL`: the running server | Read and write rows in app tables; add (never edit or delete) audit log, ledger, worker debt history and price calculation entries; run the sign-in audit purge. Queries stop after 60s | Create, alter or drop tables; edit or delete those records; read or touch migration history |
 | `homeease_readonly` | Reports, exports, investigations, `--verify-only` | Read every table | Change anything (every session is read-only) |
 
 `scripts/db-roles.ts` creates both roles and applies the grants. It's
-idempotent and prints a pass/fail line for each rule. Tables added by later
-migrations are granted to both roles automatically. CI creates the roles on
+idempotent and prints a pass/fail line for each rule. Every table must be
+listed in the script as `APPEND_ONLY` (insert-only) or `READ_WRITE`: a
+migration that adds a table fails CI until someone decides which. New tables
+still get read/write rights automatically in production, so a deploy never
+breaks because the script wasn't re-run. CI creates the roles on
 every run and runs the whole test suite as `homeease_app`, so a change that
 needs more rights fails before merge. Always create these roles with the
 script: roles made in the Neon console join `neon_superuser`, which defeats
@@ -174,8 +177,8 @@ To undo, put the previous `DATABASE_URL` back. To change a role's password,
 generate a new one, then
 `APP_DB_PASSWORD="<new>" npx tsx scripts/db-roles.ts --rotate homeease_app`
 (`READONLY_DB_PASSWORD` and `homeease_readonly` for the other role),
-then update Render. A new table the app should only ever add to goes in
-`APPEND_ONLY` in the script; re-run it after that migration deploys.
+then update Render. After deploying a migration that adds an `APPEND_ONLY`
+table, re-run the script against production to take away its edit rights.
 
 ## Known gaps
 

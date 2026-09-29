@@ -133,25 +133,33 @@ async function verify(prisma: PrismaClient, asOf: Date | undefined): Promise<voi
     add('Migration history', 'PASS', `${applied.size} applied, none failed.${note}`);
   }
 
-  // Point in time: nothing in the copy may be newer than the restore point.
-  // Epochs are computed in SQL: the columns are UTC timestamps without a time
-  // zone, which the driver would read as local time.
-  const timestamped = ['AuditLog', 'User', 'Booking', 'Notification', 'Message'].filter(has);
-  const newest = await prisma.$queryRawUnsafe<{ epoch: number | null }[]>(
-    `SELECT max(e)::float8 AS epoch FROM (${timestamped
-      .map((t) => `SELECT EXTRACT(EPOCH FROM max("createdAt")) AS e FROM ${quoteIdent(t)}`)
-      .join(' UNION ALL ')}) x`,
-  );
-  const newestMs = newest[0]?.epoch ? newest[0].epoch * 1000 : null;
+  // Point in time: no row in the copy may have been created or updated after
+  // the restore point. Every table's createdAt and updatedAt columns are
+  // checked (updatedAt catches changes to existing rows). A change that
+  // touches neither column is invisible here; for that we rely on Neon.
+  // Epochs are computed in SQL: the columns are UTC timestamps without a
+  // time zone, which the driver would read as local time.
+  const stampColumns = await prisma.$queryRaw<{ tableName: string; columnName: string }[]>`
+    SELECT table_name AS "tableName", column_name AS "columnName" FROM information_schema.columns
+    WHERE table_schema = 'public' AND column_name IN ('createdAt', 'updatedAt') AND data_type LIKE 'timestamp%'`;
+  const newest = stampColumns.length
+    ? await prisma.$queryRawUnsafe<{ source: string; epoch: number }[]>(
+        `SELECT source, epoch FROM (${stampColumns
+          .map(({ tableName, columnName }) => `SELECT '${`${tableName}.${columnName}`.replace(/'/g, "''")}' AS source,
+            EXTRACT(EPOCH FROM max(${quoteIdent(columnName)}))::float8 AS epoch FROM ${quoteIdent(tableName)}`)
+          .join(' UNION ALL ')}) x WHERE epoch IS NOT NULL ORDER BY epoch DESC LIMIT 1`,
+      )
+    : [];
+  const scope = `${stampColumns.length} createdAt/updatedAt columns`;
   if (!asOf) {
     add('Point in time', 'SKIP', 'No restore point given (--as-of).');
-  } else if (newestMs === null) {
-    add('Point in time', 'WARN', 'No timestamped rows to compare.');
-  } else if (newestMs > asOf.getTime() + CLOCK_SKEW_MS) {
-    add('Point in time', 'FAIL', `Newest row (${new Date(newestMs).toISOString()}) is after the restore point: this is not the requested point in time.`);
+  } else if (newest.length === 0) {
+    add('Point in time', 'WARN', `No timestamped rows to compare (${scope}).`);
+  } else if (newest[0].epoch * 1000 > asOf.getTime() + CLOCK_SKEW_MS) {
+    add('Point in time', 'FAIL', `${newest[0].source} has a value (${new Date(newest[0].epoch * 1000).toISOString()}) after the restore point: this is not the requested point in time.`);
   } else {
-    const gapMin = Math.round((asOf.getTime() - newestMs) / 60_000);
-    add('Point in time', 'PASS', `Newest row ${new Date(newestMs).toISOString()}, ${gapMin} min before the restore point.`);
+    const gapMin = Math.round((asOf.getTime() - newest[0].epoch * 1000) / 60_000);
+    add('Point in time', 'PASS', `Newest change ${new Date(newest[0].epoch * 1000).toISOString()} (${newest[0].source}), ${gapMin} min before the restore point; ${scope} checked.`);
   }
 
   // Row counts (exact). Data present at all is the minimum bar.

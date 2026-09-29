@@ -9,9 +9,12 @@
 //
 // Run AFTER `prisma migrate deploy`, connected as the owner. Idempotent:
 // re-running re-applies every grant and never changes an existing password
-// unless asked. Tables that later migrations add are covered automatically
-// (default privileges), except that a new insert-only table must be added to
-// APPEND_ONLY below and this script re-run.
+// unless asked. Every table needs an explicit decision: it goes in either
+// APPEND_ONLY or READ_WRITE below, and the report fails (so CI fails) for a
+// table in neither. A table a migration adds still gets read/write rights
+// automatically (default privileges), so production keeps working if this
+// script isn't re-run straight after a deploy; re-run it after a migration
+// that adds an APPEND_ONLY table.
 //
 // Usage (from backend/), with DIRECT_URL = the owner connection:
 //   APP_DB_PASSWORD=... READONLY_DB_PASSWORD=... npx tsx scripts/db-roles.ts
@@ -44,9 +47,22 @@ type Role = keyof typeof ROLES;
 
 // The app only ever inserts into these (no UPDATE/DELETE anywhere in src/).
 // Keeping it that way at the database means a bug or an injection can't
-// rewrite who did what or what was paid. Old sign-in audit entries are
-// removed through purge_expired_login_audit() instead.
-const APPEND_ONLY = ['AuditLog', 'LedgerTransaction', 'LedgerLine'];
+// rewrite who did what, what was paid, what a worker owed or how a price was
+// worked out. Old sign-in audit entries are removed through
+// purge_expired_login_audit() instead. (Cascading deletes from a parent row
+// still work: Postgres runs those with the table owner's rights.)
+const APPEND_ONLY = ['AuditLog', 'LedgerTransaction', 'LedgerLine', 'DebtLedgerEntry', 'PricingLog'];
+// Everything else the app reads and writes. A new table goes here or above.
+const READ_WRITE = [
+  'AppSettings', 'ArrivalVerification', 'AuthToken', 'Booking', 'BookingAddOn', 'BookingGroup', 'BookingVisit',
+  'Cancellation', 'Certification', 'ClientProfile', 'ContractAcceptance', 'DeclinedWorker', 'Dispute', 'KycDocument',
+  'LedgerReconciliation', 'LedgerState', 'Message', 'MfaBackupCode', 'MfaSecret', 'Notification', 'Payment', 'Payout',
+  'PricingRule', 'PromoBanner', 'RefundRequest', 'ResumeParseResult', 'Review', 'SavedPaymentMethod',
+  'ServiceScopeField', 'ServiceScopeFieldOption', 'ServiceScopeFieldTask', 'ServiceTask', 'ServiceType',
+  'TaxCertificate', 'TaxRemittance', 'User', 'UserAddress', 'VatCollectionSummary', 'VerificationRequest',
+  'WorkerAvailability', 'WorkerAvailabilityTemplate', 'WorkerDateOverride', 'WorkerPackage', 'WorkerProfile',
+  'WorkerScopeFieldCapability', 'WorkerServiceCategory', 'WorkerTaskPrice', 'WorkerTaskSelection', 'WorkerTaskTierPrice',
+];
 const MIGRATIONS_TABLE = '_prisma_migrations';
 
 // Postgres ends a statement, or a transaction left open, after this long.
@@ -204,6 +220,12 @@ async function report(): Promise<Check[]> {
 
   const tables = (await prisma.$queryRaw<{ tablename: string }[]>`
     SELECT tablename FROM pg_tables WHERE schemaname = 'public'`).map((t) => t.tablename);
+
+  const undecided = tables.filter((t) => t !== MIGRATIONS_TABLE && !APPEND_ONLY.includes(t) && !READ_WRITE.includes(t));
+  checks.push({
+    label: `Every table is listed as APPEND_ONLY or READ_WRITE in this script${undecided.length ? ` (not listed: ${undecided.join(', ')})` : ''}`,
+    ok: undecided.length === 0,
+  });
   const appTables = tables.filter((t) => t !== MIGRATIONS_TABLE);
 
   const appMissing: string[] = [];
