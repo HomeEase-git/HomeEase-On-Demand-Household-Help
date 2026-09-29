@@ -37,7 +37,10 @@ export default function XenditCheckoutModal({
       onFailed();
       return false;
     }
-    return true;
+    // Payment pages only ever need secure web pages. Refuse anything else a
+    // compromised or spoofed page might send the WebView to — plain http://,
+    // file://, javascript:, data:, content:// or intent:// links.
+    return request.url.startsWith("https://") || request.url === "about:blank";
   };
 
   if (!checkoutUrl) return null;

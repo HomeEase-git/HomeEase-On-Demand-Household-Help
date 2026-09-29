@@ -637,6 +637,15 @@ body {
   color: var(--text-subtle);
 }
 
+.form-notice {
+  font-size: 0.8125rem;
+  color: var(--primary-dark);
+  background: var(--primary-light);
+  padding: 0.5rem 0.75rem;
+  border-radius: var(--radius-sm);
+  margin-bottom: 1rem;
+}
+
 .form-error {
   font-size: 0.8125rem;
   color: var(--danger);

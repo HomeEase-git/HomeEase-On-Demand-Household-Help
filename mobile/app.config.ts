@@ -1,4 +1,17 @@
 import type { ConfigContext, ExpoConfig } from "expo/config";
+import { AndroidConfig, withAndroidManifest, type ConfigPlugin } from "expo/config-plugins";
+
+// Release builds talk to the API over HTTPS only. Android already refuses
+// plain http:// by default for this target SDK; this pins it so a future
+// dependency or setting can't quietly turn it back on. Debug builds (the
+// emulator's http://10.0.2.2 dev server) are unaffected — their debug
+// manifest overrides this attribute.
+const withHttpsOnly: ConfigPlugin = (config) =>
+  withAndroidManifest(config, (mod) => {
+    const application = AndroidConfig.Manifest.getMainApplicationOrThrow(mod.modResults);
+    application.$["android:usesCleartextTraffic"] = "false";
+    return mod;
+  });
 
 // Everything static lives in app.json; this only layers on what must come
 // from the environment at build time.
@@ -18,7 +31,7 @@ import type { ConfigContext, ExpoConfig } from "expo/config";
 export default ({ config }: ConfigContext): ExpoConfig => {
   const androidGoogleMapsApiKey = process.env.GOOGLE_MAPS_ANDROID_API_KEY?.trim() || undefined;
 
-  return {
+  return withHttpsOnly({
     ...config,
     name: config.name ?? "HomeEase",
     slug: config.slug ?? "homeease",
@@ -27,5 +40,5 @@ export default ({ config }: ConfigContext): ExpoConfig => {
       ...config.extra,
       hasGoogleMapsKey: !!androidGoogleMapsApiKey,
     },
-  };
+  });
 };
