@@ -10,7 +10,7 @@ export async function checkDatabasePrivileges(db: PrismaClient = prisma): Promis
   const [row] = await db.$queryRaw<
     [{ role: string; superuser: boolean; canCreate: boolean; ownsTables: boolean; canEditAudit: boolean }]
   >`
-    SELECT current_user AS role,
+    SELECT current_user::text AS role,
       (SELECT rolsuper FROM pg_roles WHERE rolname = current_user) AS superuser,
       has_schema_privilege(current_user, 'public', 'CREATE') AS "canCreate",
       EXISTS (SELECT 1 FROM pg_tables WHERE schemaname = 'public' AND tableowner = current_user) AS "ownsTables",

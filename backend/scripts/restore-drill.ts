@@ -106,7 +106,7 @@ const quoteIdent = (name: string) => `"${name.replace(/"/g, '""')}"`;
 
 async function verify(prisma: PrismaClient, asOf: Date | undefined): Promise<void> {
   const tables = (await prisma.$queryRaw<{ tablename: string }[]>`
-    SELECT tablename FROM pg_tables WHERE schemaname = 'public' ORDER BY tablename`).map((t) => t.tablename);
+    SELECT tablename::text AS tablename FROM pg_tables WHERE schemaname = 'public' ORDER BY tablename`).map((t) => t.tablename);
   const has = (table: string) => tables.includes(table);
 
   // Migration history: nothing half-applied, and in step with this checkout.
@@ -140,7 +140,7 @@ async function verify(prisma: PrismaClient, asOf: Date | undefined): Promise<voi
   // Epochs are computed in SQL: the columns are UTC timestamps without a
   // time zone, which the driver would read as local time.
   const stampColumns = await prisma.$queryRaw<{ tableName: string; columnName: string }[]>`
-    SELECT table_name AS "tableName", column_name AS "columnName" FROM information_schema.columns
+    SELECT table_name::text AS "tableName", column_name::text AS "columnName" FROM information_schema.columns
     WHERE table_schema = 'public' AND column_name IN ('createdAt', 'updatedAt') AND data_type LIKE 'timestamp%'`;
   const newest = stampColumns.length
     ? await prisma.$queryRawUnsafe<{ source: string; epoch: number }[]>(

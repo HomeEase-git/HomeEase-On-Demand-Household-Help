@@ -129,10 +129,10 @@ async function roleExists(role: Role): Promise<boolean> {
 async function setUp(): Promise<Role[]> {
   const rolesWithNewLogin: Role[] = [];
   const [{ owner, database }] = await prisma.$queryRaw<[{ owner: string; database: string }]>`
-    SELECT current_user AS owner, current_database() AS database`;
+    SELECT current_user::text AS owner, current_database()::text AS database`;
 
   const tables = await prisma.$queryRaw<{ tablename: string }[]>`
-    SELECT tablename FROM pg_tables WHERE schemaname = 'public'`;
+    SELECT tablename::text AS tablename FROM pg_tables WHERE schemaname = 'public'`;
   if (!tables.some((t) => t.tablename === 'AuditLog')) {
     throw new Error('No application tables here. Run `npx prisma migrate deploy` first.');
   }
@@ -219,7 +219,7 @@ async function report(): Promise<Check[]> {
   };
 
   const tables = (await prisma.$queryRaw<{ tablename: string }[]>`
-    SELECT tablename FROM pg_tables WHERE schemaname = 'public'`).map((t) => t.tablename);
+    SELECT tablename::text AS tablename FROM pg_tables WHERE schemaname = 'public'`).map((t) => t.tablename);
 
   const undecided = tables.filter((t) => t !== MIGRATIONS_TABLE && !APPEND_ONLY.includes(t) && !READ_WRITE.includes(t));
   checks.push({
