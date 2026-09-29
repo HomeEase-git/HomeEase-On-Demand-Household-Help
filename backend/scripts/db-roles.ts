@@ -14,17 +14,20 @@
 // APPEND_ONLY below and this script re-run.
 //
 // Usage (from backend/), with DIRECT_URL = the owner connection:
-//   npx tsx scripts/db-roles.ts                    # create missing roles, apply grants, report
-//   npx tsx scripts/db-roles.ts --check            # report only, change nothing
-//   npx tsx scripts/db-roles.ts --rotate homeease_app   # give that role a new password
+//   APP_DB_PASSWORD=... READONLY_DB_PASSWORD=... npx tsx scripts/db-roles.ts
+//                                        # create missing roles, apply grants, report
+//   npx tsx scripts/db-roles.ts --check  # report only, change nothing
+//   APP_DB_PASSWORD=<new> npx tsx scripts/db-roles.ts --rotate homeease_app
+//                                        # change that role's password
 //   add --neon-websocket  to connect through Neon's WebSocket proxy (port 443)
 //     when the network blocks raw Postgres connections to Neon; needs
 //     `npm i --no-save @prisma/adapter-neon @neondatabase/serverless ws`.
-// A new password is printed once, with the connection string to use; it is
-// not stored anywhere. APP_DB_PASSWORD / READONLY_DB_PASSWORD set a fixed
-// password instead (test databases and CI only).
+// Passwords come from you, never from the script: generate each one in the
+// password manager (or `openssl rand -hex 24`) and pass it in the variable.
+// The script never prints or stores a password; it prints the connection
+// strings with a placeholder where the password goes. A role that already
+// exists keeps its password unless its variable is set.
 import 'dotenv/config';
-import crypto from 'node:crypto';
 import { PrismaClient } from '@prisma/client';
 import { PrismaPg } from '@prisma/adapter-pg';
 import { Pool } from 'pg';
@@ -75,22 +78,24 @@ function makeNeonWebsocketClient(): PrismaClient {
 const quoteIdent = (name: string) => `"${name.replace(/"/g, '""')}"`;
 
 function passwordFor(role: Role): string {
-  const fixed = process.env[ROLES[role]];
-  if (fixed) {
-    // Goes into a SQL string literal below.
-    if (!/^[A-Za-z0-9_.~-]{16,}$/.test(fixed)) {
-      throw new Error(`${ROLES[role]} must be at least 16 characters of letters, digits and _.~-`);
-    }
-    return fixed;
+  const password = process.env[ROLES[role]];
+  if (!password) {
+    throw new Error(`Set ${ROLES[role]} to the password for ${role} (generate one: openssl rand -hex 24).`);
   }
-  return crypto.randomBytes(24).toString('hex');
+  // Goes into a SQL string literal below.
+  if (!/^[A-Za-z0-9_.~-]{16,}$/.test(password)) {
+    throw new Error(`${ROLES[role]} must be at least 16 characters of letters, digits and _.~-`);
+  }
+  return password;
 }
 
-/** The connection string for `role`, on the same host and database as the owner's. */
-function connectionStringFor(role: Role, password: string, pooled: boolean): string {
+const PASSWORD_PLACEHOLDER = 'PASSWORD';
+
+/** The connection string for `role`, password left as a placeholder, on the owner's host and database. */
+function connectionStringFor(role: Role, pooled: boolean): string {
   const url = new URL(connectionString!);
   url.username = role;
-  url.password = password;
+  url.password = PASSWORD_PLACEHOLDER;
   // Neon: the pooled endpoint is the same host with "-pooler" after the endpoint id.
   if (pooled && url.hostname.endsWith('.neon.tech') && !url.hostname.split('.')[0].endsWith('-pooler')) {
     const [endpoint, ...rest] = url.hostname.split('.');
@@ -104,8 +109,9 @@ async function roleExists(role: Role): Promise<boolean> {
   return rows.length > 0;
 }
 
-async function setUp(): Promise<Map<Role, string>> {
-  const newPasswords = new Map<Role, string>();
+/** Returns the roles whose password was set. */
+async function setUp(): Promise<Role[]> {
+  const passwordSet: Role[] = [];
   const [{ owner, database }] = await prisma.$queryRaw<[{ owner: string; database: string }]>`
     SELECT current_user AS owner, current_database() AS database`;
 
@@ -115,16 +121,22 @@ async function setUp(): Promise<Map<Role, string>> {
     throw new Error('No application tables here. Run `npx prisma migrate deploy` first.');
   }
 
+  // Check every password needed before changing anything.
+  const plan = new Map<Role, { exists: boolean; password: string | null }>();
   for (const role of Object.keys(ROLES) as Role[]) {
     const exists = await roleExists(role);
     const setPassword = !exists || ROTATE === role || !!process.env[ROLES[role]];
-    const password = setPassword ? passwordFor(role) : '';
+    plan.set(role, { exists, password: setPassword ? passwordFor(role) : null });
+  }
+
+  for (const [role, { exists, password }] of plan) {
+    const setPassword = password !== null;
     if (!exists) {
       await prisma.$executeRawUnsafe(`CREATE ROLE ${role} LOGIN PASSWORD '${password}'`);
     } else if (setPassword) {
       await prisma.$executeRawUnsafe(`ALTER ROLE ${role} PASSWORD '${password}'`);
     }
-    if (setPassword && !process.env[ROLES[role]]) newPasswords.set(role, password);
+    if (setPassword) passwordSet.push(role);
     await prisma.$executeRawUnsafe(`GRANT CONNECT ON DATABASE ${quoteIdent(database)} TO ${role}`);
     await prisma.$executeRawUnsafe(`GRANT USAGE ON SCHEMA public TO ${role}`);
   }
@@ -147,7 +159,7 @@ async function setUp(): Promise<Map<Role, string>> {
     `ALTER ROLE ${READONLY_ROLE} SET default_transaction_read_only = on`,
   ];
   for (const sql of statements) await prisma.$executeRawUnsafe(sql);
-  return newPasswords;
+  return passwordSet;
 }
 
 interface Check {
@@ -240,19 +252,18 @@ async function report(): Promise<Check[]> {
 }
 
 async function main() {
-  const newPasswords = CHECK_ONLY ? new Map<Role, string>() : await setUp();
+  const passwordSet = CHECK_ONLY ? [] : await setUp();
 
   const checks = await report();
   for (const check of checks) console.log(`${check.ok ? 'ok  ' : 'FAIL'}  ${check.label}`);
 
-  for (const [role, password] of newPasswords) {
-    if (process.env.GITHUB_ACTIONS) console.log(`::add-mask::${password}`);
-    console.log(`\nNew password for ${role} (shown once, not stored):`);
-    console.log(`  pooled: ${connectionStringFor(role, password, true)}`);
-    console.log(`  direct: ${connectionStringFor(role, password, false)}`);
+  for (const role of passwordSet) {
+    console.log(`\nPassword set for ${role} (from ${ROLES[role]}). Connection strings, with ${PASSWORD_PLACEHOLDER} standing for it:`);
+    console.log(`  pooled: ${connectionStringFor(role, true)}`);
+    console.log(`  direct: ${connectionStringFor(role, false)}`);
   }
-  if (newPasswords.has(APP_ROLE)) {
-    console.log(`\nSet the pooled one as DATABASE_URL on the backend host. Keep DIRECT_URL on the owner (migrations).`);
+  if (passwordSet.includes(APP_ROLE)) {
+    console.log(`\nPut the pooled one, with the real password, in DATABASE_URL on the backend host. Keep DIRECT_URL on the owner (migrations).`);
   }
 
   if (checks.some((c) => !c.ok)) process.exitCode = 1;

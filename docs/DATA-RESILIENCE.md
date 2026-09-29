@@ -151,21 +151,29 @@ script: roles made in the Neon console join `neon_superuser`, which defeats
 the point.
 
 **Switching production to `homeease_app` (once, about 10 minutes):**
-1. From `backend/`, with the production **owner** connection string:
+1. In the password manager, create two entries, "HomeEase DB homeease_app"
+   and "HomeEase DB homeease_readonly", each with a generated password
+   (letters and digits only, 32+ characters; or `openssl rand -hex 24`).
+   The script never makes up or prints a password: you supply them.
+2. From `backend/` in Git Bash, enter the passwords without them landing in
+   shell history: `read -rs APP_DB_PASSWORD && read -rs READONLY_DB_PASSWORD && export APP_DB_PASSWORD READONLY_DB_PASSWORD`
+   (paste each, press Enter; nothing is shown). Then, with the production
+   **owner** connection string:
    `DIRECT_URL="<owner direct URL>" npx tsx scripts/db-roles.ts --neon-websocket`
    (drop `--neon-websocket` on a network that allows Postgres connections).
-   All lines should say `ok`. It prints each new role's connection string
-   once; the passwords aren't stored anywhere else.
-2. Render → backend → Environment: set `DATABASE_URL` to the **pooled**
-   `homeease_app` string. Leave `DIRECT_URL` as it is: migrations need the
-   owner. Save; Render redeploys.
-3. Check: `/health/ready` is ready, you can sign in to the admin site, and
+   All lines should say `ok`. It prints each role's connection strings with
+   `PASSWORD` in place of the password.
+3. Render → backend → Environment: set `DATABASE_URL` to the **pooled**
+   `homeease_app` string, with `PASSWORD` replaced by the real one. Leave
+   `DIRECT_URL` as it is: migrations need the owner. Save; Render redeploys.
+4. Check: `/health/ready` is ready, you can sign in to the admin site, and
    the Render log has **no** `Config warning: DATABASE_URL signs in as …` line.
    Until this switch, that warning appears on every start.
-4. Save the `homeease_readonly` string in the password manager.
 
-To undo, put the previous `DATABASE_URL` back. To change a role's password:
-`npx tsx scripts/db-roles.ts --rotate homeease_app` (or `homeease_readonly`),
+To undo, put the previous `DATABASE_URL` back. To change a role's password,
+generate a new one, then
+`APP_DB_PASSWORD="<new>" npx tsx scripts/db-roles.ts --rotate homeease_app`
+(`READONLY_DB_PASSWORD` and `homeease_readonly` for the other role),
 then update Render. A new table the app should only ever add to goes in
 `APPEND_ONLY` in the script; re-run it after that migration deploys.
 

@@ -69,9 +69,11 @@ This covers most third-party keys:
 4. Update any local `.env`, or better, point local work at the dev project instead.
 
 **`homeease_app` or `homeease_readonly`:** these are created by
-`scripts/db-roles.ts`, not in the Neon console. Run
-`DIRECT_URL="<owner direct URL>" npx tsx scripts/db-roles.ts --rotate homeease_app --neon-websocket`,
-put the printed pooled string in `DATABASE_URL` on Render, and confirm
+`scripts/db-roles.ts`, not in the Neon console. Generate a new password in
+the password manager, run
+`DIRECT_URL="<owner direct URL>" APP_DB_PASSWORD="<new>" npx tsx scripts/db-roles.ts --rotate homeease_app --neon-websocket`,
+put the printed pooled string, with the new password in place of
+`PASSWORD`, in `DATABASE_URL` on Render, and confirm
 `/health/ready`. The old password stops working the moment the script runs,
 so do the Render update straight after.
 

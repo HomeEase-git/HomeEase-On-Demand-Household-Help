@@ -275,10 +275,7 @@ async function runDrill() {
   try {
     const connectionString = neon(['connection-string', branch, '--project-id', projectId,
       '--database-name', DATABASE_NAME, '--role-name', option('--role') ?? DEFAULT_ROLE]).trim();
-    if (process.env.GITHUB_ACTIONS) {
-      const password = new URL(connectionString).password;
-      if (password) console.log(`::add-mask::${decodeURIComponent(password)}`);
-    }
+    // Holds the password: only ever passed to the driver, never printed.
     const db = connect(connectionString);
     try {
       await waitForDatabase(db.prisma);
