@@ -11,6 +11,7 @@ import { computeWorkerTier } from '@utils/workerTier';
 import { revokeAllRefreshTokens } from '@utils/otpService';
 import { revokeUserSessions, clearUserSessionRevocation } from '@utils/tokenRevocation';
 import { JWT_EXPIRY } from '@utils/jwt';
+import { mimeTypeFromUrl } from '@utils/kycFileMeta';
 import type { JwtPayload } from '@/types/index';
 
 interface AuthRequest extends Request {
@@ -469,6 +470,98 @@ export const getWorkerById = async (req: Request, res: Response) => {
     });
   } catch (error) {
     console.error('Get worker error:', error);
+    return res.status(500).json(errorResponse(500, 'Internal server error'));
+  }
+};
+
+/**
+ * GET /api/admin/users/workers/:id/documents — every file a worker has
+ * uploaded, in one place: all KYC documents across every verification
+ * submission (newest first, each linking back to its review), the resume
+ * and certificates. Separate from getWorkerById so ID documents are only
+ * fetched (and their short-lived signed links minted — see
+ * protectResponseData) when an admin asks to see them, and every viewing is
+ * audit-logged (Data Privacy Act: access to sensitive personal information).
+ */
+export const getWorkerDocuments = async (req: AuthRequest, res: Response) => {
+  try {
+    const id = req.params.id as string;
+    const user = await prisma.user.findFirst({
+      where: { id, role: 'WORKER' },
+      select: {
+        fullName: true,
+        workerProfile: {
+          select: {
+            resumeUrl: true,
+            certifications: { orderBy: { createdAt: 'desc' } },
+          },
+        },
+        verificationRequests: {
+          orderBy: { submittedAt: 'desc' },
+          include: { documents: { orderBy: { createdAt: 'desc' } } },
+        },
+      },
+    });
+    if (!user) {
+      return res.status(404).json(errorResponse(404, 'Worker not found'));
+    }
+
+    const documents = user.verificationRequests.flatMap((request) =>
+      request.documents.map((doc) => ({
+        id: doc.id,
+        source: 'KYC' as const,
+        documentType: doc.documentType,
+        name: doc.originalName ?? doc.fileName ?? 'document',
+        url: doc.fileUrl,
+        mimeType: doc.mimeType ?? mimeTypeFromUrl(doc.fileUrl),
+        uploadedAt: doc.createdAt.toISOString(),
+        status: doc.status,
+        rejectionReason: doc.rejectionReason ?? null,
+        expiresAt: doc.expiresAt?.toISOString() ?? null,
+        verificationId: request.id,
+        verificationType: request.type,
+        verificationStatus: request.status,
+        verificationSubmittedAt: request.submittedAt.toISOString(),
+      }))
+    );
+
+    // A certificate uploaded during KYC is also copied into Certifications,
+    // and the resume can be both a KYC document and the profile resume —
+    // list each file once.
+    const seen = new Set(documents.map((d) => d.url));
+    const certifications = (user.workerProfile?.certifications ?? [])
+      .filter((c) => c.documentUrl && !seen.has(c.documentUrl))
+      .map((c) => ({
+        id: c.id,
+        source: 'CERTIFICATION' as const,
+        documentType: 'CERTIFICATION',
+        name: c.title,
+        url: c.documentUrl as string,
+        mimeType: mimeTypeFromUrl(c.documentUrl),
+        uploadedAt: c.createdAt.toISOString(),
+        status: c.verificationStatus,
+        rejectionReason: c.rejectionReason ?? null,
+        expiresAt: c.expiryDate?.toISOString() ?? null,
+      }));
+    const resumeUrl = user.workerProfile?.resumeUrl;
+    const resume =
+      resumeUrl && !seen.has(resumeUrl)
+        ? [{ id: 'resume', source: 'RESUME' as const, documentType: 'RESUME', name: 'Resume', url: resumeUrl, mimeType: mimeTypeFromUrl(resumeUrl) }]
+        : [];
+
+    await writeAuditLog({
+      actorId: req.user?.userId,
+      actorName: req.user?.email,
+      actorRole: req.user?.role,
+      action: 'WORKER_DOCUMENTS_VIEWED',
+      category: 'ADMIN_ACTION',
+      message: `Viewed documents of worker ${user.fullName}`,
+      metadata: { workerId: id },
+    });
+
+    return res.json({ success: true, data: [...documents, ...resume, ...certifications] });
+  } catch (error) {
+    console.error('Get worker documents error:', error);
     return res.status(500).json(errorResponse(500, 'Internal server error'));
   }
 };

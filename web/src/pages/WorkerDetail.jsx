@@ -16,6 +16,7 @@ import {
 } from '../services/workers'
 import { suspendUser, reinstateUser } from '../services/users'
 import { useToast } from '../context/ToastContext'
+import WorkerDocuments from '../components/workers/WorkerDocuments'
 
 const DEBT_TYPE_LABELS = {
   COMMISSION_DEBIT: 'Commission Accrued (cash job)',
@@ -287,6 +288,8 @@ export default function WorkerDetail() {
           </table>
         </div>
       </SectionCard>
+
+      <WorkerDocuments workerId={id} />
 
       <SectionCard title="Certifications">
         <div className="table-wrap">
