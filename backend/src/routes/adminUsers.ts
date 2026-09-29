@@ -4,6 +4,7 @@ import {
   getClientById,
   listWorkers,
   getWorkerById,
+  getWorkerDocuments,
   updateUserStatus,
   suspendUser,
   reinstateUser,
@@ -29,6 +30,7 @@ router.get('/clients/:id/payment-hold', getClientPaymentHoldAdmin);
 router.patch('/clients/:id/payment-hold/release', releaseClientPaymentHold);
 router.get('/workers', listWorkers);
 router.get('/workers/:id', getWorkerById);
+router.get('/workers/:id/documents', getWorkerDocuments);
 router.get('/workers/:id/debt', getWorkerDebtAdmin);
 router.patch('/workers/:id/debt/adjust', adjustWorkerDebtAdmin);
 router.patch('/workers/:id/debt/release', releaseWorkerHold);

@@ -20,6 +20,12 @@ export async function fetchWorkerById(id) {
   return response.data;
 }
 
+/** Every file the worker uploaded (KYC, resume, certificates). Audit-logged on the server. */
+export async function fetchWorkerDocuments(id) {
+  const response = await apiRequest(`/admin/users/workers/${id}/documents`);
+  return response.data;
+}
+
 export async function fetchWorkerDebt(id) {
   const response = await apiRequest(`/admin/users/workers/${id}/debt`);
   return response.data;
