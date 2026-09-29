@@ -138,15 +138,27 @@ jobs:
           load: true
           tags: homeease-${{ matrix.name }}:scan
           cache-from: type=gha
-      # Production (Render) runs this image. Prove it still starts the way it
-      # does there: the real entrypoint applies every migration to an empty
-      # database, then hands over to the command. And the package managers
-      # removed from the runtime image really are gone.
+      # Production (Render) runs this image. Start it the same way: the real
+      # entrypoint applies every migration to an empty database, then the
+      # real server must come up and report ready. Keys are random (the
+      # production startup check rejects placeholders); Redis points nowhere,
+      # which the server must survive. Then check the package managers
+      # removed from the runtime image are really gone.
       - name: Start-up smoke test
         if: matrix.name == 'backend'
         run: |
-          docker run --rm --network host             -e DATABASE_URL=postgresql://postgres:postgres@localhost:5432/smoke             -e DIRECT_URL=postgresql://postgres:postgres@localhost:5432/smoke             homeease-backend:scan node -e "console.log('entrypoint handed over')"
-          docker run --rm --entrypoint sh homeease-backend:scan -c             'set -e; for tool in npm npx corepack; do if command -v "$tool"; then echo "$tool is still in the image"; exit 1; fi; done; test -f dist/index.js'
+          key() { openssl rand -hex 32; }
+          docker run -d --name smoke --network host             -e PORT=3999             -e DATABASE_URL=postgresql://postgres:postgres@localhost:5432/smoke             -e DIRECT_URL=postgresql://postgres:postgres@localhost:5432/smoke             -e JWT_SECRET="$(key)" -e DATA_ENCRYPTION_KEY="$(key)" -e MFA_ENCRYPTION_KEY="$(key)"             -e SUPABASE_URL=https://smoke.supabase.co -e SUPABASE_SERVICE_KEY="$(key)" -e SUPABASE_ANON_KEY="$(key)"             -e REDIS_URL=redis://127.0.0.1:6399             homeease-backend:scan
+          ready=
+          for _ in $(seq 1 60); do
+            if curl -sf http://127.0.0.1:3999/health/ready; then echo; ready=1; break; fi
+            [ "$(docker inspect -f '{{.State.Running}}' smoke)" = "true" ] || break
+            sleep 2
+          done
+          docker logs smoke 2>&1 | tail -40
+          [ -n "$ready" ] || { echo "backend image did not become ready"; exit 1; }
+          docker exec smoke sh -c 'for tool in npm npx corepack; do if command -v "$tool"; then echo "$tool is still in the image"; exit 1; fi; done'
+          docker rm -f smoke
       - name: Install Trivy
         run: |
           curl -sSfL -o trivy.tgz \

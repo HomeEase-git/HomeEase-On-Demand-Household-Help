@@ -9,7 +9,7 @@ repository's **Security** tab.
 
 | Check | Where | Catches | Fails the PR when |
 |---|---|---|---|
-| **CodeQL** | `security.yml` → `codeql` | Injection, XSS, path traversal, unsafe redirects, weak crypto and similar code-level bugs in backend, admin web and mobile (JavaScript/TypeScript, `security-extended` queries) | A new alert appears (shown on the PR; details in Security → Code scanning) |
+| **CodeQL** | `security.yml` → `codeql` | Injection, XSS, path traversal, unsafe redirects, weak crypto and similar code-level bugs in backend, admin web and mobile (JavaScript/TypeScript, `security-extended` queries) | The PR adds a new high/critical alert. The `codeql` job itself only uploads results; the separate **CodeQL** check that GitHub adds to the PR is the one that fails. It compares against `main` and respects alerts dismissed as false positives. The same applies to the **Trivy** check. Make both required in branch protection |
 | **Secret scan** (gitleaks) | `security.yml` → `secrets` | API keys, tokens, private keys and passwords in commits | Any commit in the PR adds one, even if a later commit removes it |
 | **Dependency review** | `security.yml` → `dependency-review` | A PR adding or upgrading to a package with a known high/critical vulnerability, in any app, including dev and build tools | Such a package is added |
 | **Container scan** (Trivy) | `security.yml` → `images` | Known vulnerabilities in the backend and admin web Docker images (OS packages + npm). Also starts the backend image the way Render does (migrations, then the app) | A **critical** vulnerability with a released fix. Everything high and critical is reported to the Security tab either way |
@@ -53,7 +53,12 @@ Also on:
 
 These aren't in code. Check them after any repository transfer:
 
-- **Branch protection on `main`:** require the CI and Security checks to pass before merging, and block force-pushes and deletion. No required approvals, since this is a one-person project.
+- **Branch protection on `main`:** require these checks to pass before merging:
+  - from CI: `backend`, `mobile`, `web`, `docker`
+  - from Security: `secrets`, `dependency-review`, `images (backend, …)`, `images (web, …)`
+  - GitHub's code-scanning checks: `CodeQL`, `Trivy`
+  
+  Also block force-pushes and deletion. No required approvals, since this is a one-person project.
 - **Dependabot security updates:** on, so GitHub opens a fix PR as soon as an advisory affects a dependency, instead of waiting for the weekly run.
 - **Private vulnerability reporting:** on, so a researcher can report privately (Security → Advisories).
 - **Secret scanning and push protection:** on (verified 2026-09-29).
