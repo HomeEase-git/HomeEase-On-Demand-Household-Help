@@ -24,13 +24,13 @@ flowchart LR
     DB[(Database<br/>Neon)]
     R[(Redis<br/>Render)]
   end
-  FS[(File storage<br/>Supabase)]
+  FS[(File storage<br/>Supabase, Singapore)]
   C & W & A -->|HTTPS| API
   C & W -->|upload/view via expiring links| FS
   API --> DB & R & FS
   API -->|ID, selfie, clearances, resume| AN[Anthropic<br/>USA]
-  API -->|payer email, amounts, payout account| X[Xendit]
-  API -->|email address, message| B[Brevo]
+  API -->|payer email, amounts, payout account| X[Xendit<br/>USA, PH, Indonesia]
+  API -->|email address, message| B[Brevo<br/>EU, USA]
   API -->|phone number, code| S[PhilSMS<br/>Philippines]
   API -->|coordinates, addresses| G[Google Maps]
   C & W -->|map and place search| G
@@ -65,10 +65,10 @@ flowchart LR
 |---|---|---|---|
 | Render | Everything the API handles (in transit and in memory), server logs | Runs the backend and Redis | Singapore |
 | Neon | The whole database | Database hosting | Singapore |
-| Supabase | All uploaded files | File storage | *confirm: Supabase → Project Settings → General → Region* |
+| Supabase | All uploaded files | File storage | Singapore (`ap-southeast-1`) |
 | Anthropic | Verification documents (ID, selfie, clearances) and resume text, for automated review | Helps admins review; never decides | USA |
-| Xendit | Payment amounts and description, payer email; workers' payout account name and number | Payments and payouts | *confirm: Xendit (Philippines entity; data location per its privacy notice)* |
-| Brevo | Email addresses, names, email contents (codes, booking notices) | Sending email | *confirm: Brevo (EU-based)* |
+| Xendit | Payment amounts and description, payer email; workers' payout account name and number | Payments and payouts | USA, Philippines, Indonesia (Xendit privacy policy §10, *Jurisdiction and cross-border transfer*) |
+| Brevo | Email addresses, names, email contents (codes, booking notices) | Sending email | EU and USA (Brevo privacy policy, *Consent to data transfers*) |
 | PhilSMS | Phone numbers, text contents (codes, notices) | Sending SMS | Philippines |
 | Google Maps Platform | Addresses and places typed, coordinates, route start and end points | Address search, maps, distances | USA / global |
 | Expo and Google Firebase | Device push tokens, notification titles and text | Push notifications | USA |

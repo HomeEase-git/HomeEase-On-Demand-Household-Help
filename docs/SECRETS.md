@@ -134,7 +134,7 @@ The old and new tokens can't both be valid, so keep the gap short:
 
 ## Known past exposure
 
-- **Resend API key (June 2026).** `backend/.env` was committed on 2026-06-23 (commit `27c6e75a`). It was removed two days later, but it's still in the public history and on the `web-side` branch. Its Resend key was the only real credential in it; the other values were placeholders and the database was `localhost`. Resend is no longer used (email is on Brevo), so **revoke that key at resend.com → API Keys**, and close the Resend account if nothing else uses it. Rewriting git history wouldn't help: the repository is public and may already have been cloned. Found by the Phase 5 full-history scan; `.gitleaksignore` records it.
+- **Resend API key (June 2026).** `backend/.env` was committed on 2026-06-23 (commit `27c6e75a`). It was removed two days later, but it's still in the public history and on the `web-side` branch. Its Resend key was the only real credential in it; the other values were placeholders and the database was `localhost`. Resend is no longer used (email is on Brevo); **the key was deleted in Resend on 2026-09-30**, so the value in history no longer works. Rewriting git history wouldn't help: the repository is public and may already have been cloned. Found by the Phase 5 full-history scan; `.gitleaksignore` records it.
 
 ## Suspected leak: what to do first
 

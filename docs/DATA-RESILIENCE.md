@@ -241,7 +241,7 @@ from the cron backstop (task `purge-expired-data`); see
 | Off-site backups (database and files) | 30 nights | Deleted | B2 lifecycle rule; Object Lock blocks earlier deletion |
 | Server logs, error reports | The hosting plan's retention (Render, Sentry) | Rolls off | Provider |
 
-The Privacy Policy (section 6, "How long we keep it", version 2026-09-29)
+The Privacy Policy (section 6, "How long we keep it", version 2026-09-30)
 states these periods, including notifications, sign-in records and backups.
 Change both together.
 

@@ -62,12 +62,12 @@ Close an entry when it's fixed; don't delete the history, strike it through.
 
 | # | Risk | Impact | Status / plan |
 |---|---|---|---|
-| R1 | Access tokens on the live backend still last 7 days (`JWT_EXPIRY=604800`), because older app versions can't refresh | A stolen token works for up to 7 days | Open. Set `JWT_EXPIRY=900` on Render once the current APK has replaced older installs |
-| R2 | A real Resend API key is in the repository's history (June 2026, branch `web-side`) | Email could be sent as HomeEase | Open. Revoke it in Resend (the app now uses Brevo, so nothing breaks) |
-| R3 | No admin account has MFA enrolled in production (seen in the 2026-09-29 restore drill) | A phished admin password is enough to take over | Open. Enrol MFA on every admin account |
+| R1 | Access tokens on the live backend still last 7 days (`JWT_EXPIRY=604800`), because older app versions can't refresh | A stolen token works for up to 7 days | Open. New APK building 2026-09-30 (first build on the `production` update channel). Set `JWT_EXPIRY=900` on Render once it has replaced older installs |
+| R2 | ~~A real Resend API key is in the repository's history (June 2026, branch `web-side`)~~ | Email could be sent as HomeEase | **Closed 2026-09-30:** key deleted in Resend. The value stays in history but no longer works |
+| R3 | ~~No admin account has MFA enrolled in production (seen in the 2026-09-29 restore drill)~~ | A phished admin password is enough to take over | **Closed 2026-09-30:** MFA enabled on the admin account. Every new admin account must enrol too |
 | R4 | The database owner login is on the running server (`DIRECT_URL`), because migrations run at container start | A server compromise can alter the schema | Accepted. Move migrations to a separate release step when the deploy setup allows |
 | R5 | The Supabase S3 key in GitHub (for backups) can also write and delete files | A GitHub secrets leak could damage stored files | Accepted: only the backup job uses it, and pull requests from forks never receive secrets; B2 keeps 30 nights of files. Revisit if Supabase offers read-only S3 keys |
 | R6 | Neon keeps 6 hours of history; the off-site backup is nightly | Damage found after 6 hours loses that day's changes | Accepted. A paid Neon plan with a longer window if that becomes unacceptable |
-| R7 | One person holds every role and credential | Nobody can respond if the owner is unavailable | Open. Set up emergency access (see *Responsibilities*) |
+| R7 | One person holds every role and credential | Nobody can respond if the owner is unavailable | Partly addressed 2026-09-30: the owner's personal account is the fallback if the HomeEase account is unusable (address in the password manager, not here: this repository is public). Still open: a second, trusted person with emergency access |
 | R8 | Legal terms await a Philippine lawyer's review; business registration details not yet in the app (Internet Transactions Act) | Terms may not hold as written; disclosure requirement unmet | Open, before public launch. See the TODO in `mobile/constants/legalDocuments.ts` |
 | R9 | NPC registration of the DPO and processing systems not yet done | Non-compliance once registration thresholds are met | Open. Register when HomeEase processes sensitive personal information of 1,000 or more people (check current NPC thresholds) |
