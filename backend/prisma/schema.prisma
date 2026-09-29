@@ -2163,7 +2163,7 @@ model AuditLog {
   actorRole String?
 
   action   String // e.g. 'USER_LOGIN_SUCCESS', 'BOOKING_DECLINED', 'DISPUTE_RESOLVED'
-  category String // 'ADMIN_ACTION' | 'LOGIN' | 'SYSTEM_ERROR' | 'STATUS_CHANGE'
+  category String // 'ADMIN_ACTION' | 'LOGIN' | 'SYSTEM_ERROR' | 'STATUS_CHANGE' | 'SECURITY'
   level    String @default("INFO") // 'INFO' | 'WARN' | 'ERROR'
   message  String
   metadata Json?

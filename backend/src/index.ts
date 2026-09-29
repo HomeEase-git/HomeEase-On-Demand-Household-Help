@@ -10,6 +10,7 @@ import type { Worker } from 'bullmq';
 import app from './app';
 import prisma from '@config/database';
 import { initSocket } from './socket';
+import { waitForSecurityAlerts } from '@services/securityAlertService';
 import { startVerificationWorker } from '@workers/verificationWorker';
 import { startBookingWorker } from '@workers/bookingWorker';
 import { startPayoutWorker } from '@workers/payoutWorker';
@@ -145,7 +146,9 @@ const shutdown = async (signal: string) => {
     await Promise.allSettled(workers.map((w) => w.close()));
     // 4. Close the queue producer connections.
     await Promise.allSettled([bookingQueue.close(), payoutQueue.close(), verificationQueue.close()]);
-    // 5. Release the DB pool.
+    // 5. Let queued security-alert emails go out (they look up admins).
+    await waitForSecurityAlerts();
+    // 6. Release the DB pool.
     await prisma.$disconnect();
     clearTimeout(forceExit);
     console.log('Drain complete — exiting.');

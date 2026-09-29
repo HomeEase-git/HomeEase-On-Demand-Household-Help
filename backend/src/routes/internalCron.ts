@@ -1,4 +1,5 @@
 import { Router, type Request, type Response } from 'express';
+import { raiseSecurityAlert } from '@services/securityAlertService';
 import crypto from 'node:crypto';
 import { authLimiter } from '@middleware/rateLimit';
 import {
@@ -75,6 +76,12 @@ function isAuthorized(req: Request): boolean {
  */
 router.post('/:task', authLimiter, async (req: Request, res: Response) => {
   if (!isAuthorized(req)) {
+    await raiseSecurityAlert({
+      type: 'CRON_SECRET_INVALID',
+      severity: 'medium',
+      message: `Refused a call to /internal/cron/${String(req.params.task).slice(0, 40)} with a missing or wrong CRON_SECRET — someone probing, or the GitHub Actions secret no longer matches Render.`,
+      throttleKey: 'cron',
+    });
     res.status(401).json({ ok: false, message: 'Unauthorized' });
     return;
   }

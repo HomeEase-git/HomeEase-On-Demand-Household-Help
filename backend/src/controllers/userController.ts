@@ -17,6 +17,7 @@ import { sendOtpEmail } from '@utils/emailService';
 import { revokeUserSessions } from '@utils/tokenRevocation';
 import { writeAuditLog } from '@utils/auditLog';
 import { checkNewPassword } from '@utils/passwordPolicy';
+import { recordPasswordChange } from '@services/securityAlertService';
 import { countActiveSessions, revokeOtherSessions } from '@services/sessionService';
 import type { JwtPayload } from '@/types/index';
 
@@ -157,7 +158,7 @@ export const changePassword = async (req: AuthRequest, res: Response) => {
     
     const user = await prisma.user.findUnique({
       where: { id: req.user.userId },
-      select: { password: true },
+      select: { id: true, email: true, role: true, fullName: true, password: true },
     });
     
     if (!user) {
@@ -191,6 +192,8 @@ export const changePassword = async (req: AuthRequest, res: Response) => {
     } else {
       await revokeAllRefreshTokens(req.user.userId);
     }
+
+    await recordPasswordChange(user, 'changed');
 
     return res.status(200).json({
       success: true,

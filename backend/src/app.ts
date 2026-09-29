@@ -41,6 +41,7 @@ import internalCronRoutes from '@routes/internalCron';
 import internalDiagRoutes from '@routes/internalDiag';
 import { errorHandler } from '@middleware/errorHandler';
 import { protectResponseData } from '@middleware/protectResponseData';
+import { requestContext } from '@utils/requestContext';
 
 const app = express();
 const jsonBodyLimit = process.env.JSON_BODY_LIMIT || '1mb';
@@ -55,6 +56,10 @@ const allowedOrigins = (process.env.ALLOWED_ORIGINS || 'http://localhost:3000')
 // lets everyone share one bucket or lets clients spoof it. TRUST_PROXY is
 // the number of proxy hops in front of the app (default 0 = direct).
 app.set('trust proxy', Number(process.env.TRUST_PROXY || 0));
+
+// First, so every log line, error report and security alert for this request
+// carries its request id (see utils/requestContext.ts).
+app.use(requestContext);
 
 // Security headers. This is a JSON API (no first-party HTML), so CSP and
 // the COEP/CORP embedding controls don't apply; the rest of helmet's

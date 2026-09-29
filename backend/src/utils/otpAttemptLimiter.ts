@@ -107,8 +107,9 @@ export async function isOtpAttemptLocked(userId: string, type: string, maxAttemp
  * post-increment value), so it always expires at "OTP window from the
  * first wrong guess", not sliding forward on every retry.
  */
-export async function recordFailedOtpAttempt(userId: string, type: string, ttlSeconds: number): Promise<void> {
-  if (circuitIsOpen()) return;
+/** Returns the failed-attempt count so far, or null if Redis couldn't be reached. */
+export async function recordFailedOtpAttempt(userId: string, type: string, ttlSeconds: number): Promise<number | null> {
+  if (circuitIsOpen()) return null;
   try {
     const key = attemptKey(userId, type);
     const attempts = await client.incr(key);
@@ -116,8 +117,10 @@ export async function recordFailedOtpAttempt(userId: string, type: string, ttlSe
       await client.expire(key, ttlSeconds);
     }
     recordSuccess();
+    return attempts;
   } catch (error) {
     recordFailure('recordFailedOtpAttempt', error);
+    return null;
   }
 }
 

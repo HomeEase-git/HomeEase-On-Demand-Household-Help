@@ -9,10 +9,17 @@ const CATEGORY_LABEL: Record<string, string> = {
   LOGIN: 'Login History',
   SYSTEM_ERROR: 'System Errors',
   STATUS_CHANGE: 'Status Changes',
+  SECURITY: 'Security',
 };
 
 const SOURCE_PREFIXES: [string, string][] = [
   ['USER_LOGIN', 'Auth'],
+  ['LOGIN_', 'Auth'],
+  ['MFA_', 'Auth'],
+  ['ADMIN_', 'Auth'],
+  ['REFRESH_TOKEN_', 'Auth'],
+  ['PASSWORD_', 'Auth'],
+  ['CRON_', 'System'],
   ['DISPUTE_', 'Dispute'],
   ['BOOKING_', 'Booking'],
   ['VERIFICATION_', 'Verification'],

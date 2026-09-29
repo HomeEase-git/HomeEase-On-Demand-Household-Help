@@ -1,4 +1,5 @@
 import { Request, Response } from 'express';
+import { raiseSecurityAlert } from '@services/securityAlertService';
 import crypto from 'crypto';
 import prisma from '@config/database';
 import { errorResponse } from '@utils/errorResponse';
@@ -508,11 +509,11 @@ export const handleXenditInvoiceWebhook = async (req: Request, res: Response) =>
     }
 
     if (!verifyXenditCallbackToken(req.headers['x-callback-token'], webhookToken)) {
-      await writeAuditLog({
-        action: 'XENDIT_WEBHOOK_INVALID_TOKEN',
-        category: 'SYSTEM_ERROR',
-        level: 'WARN',
-        message: 'Rejected Xendit invoice webhook: callback token mismatch',
+      await raiseSecurityAlert({
+        type: 'XENDIT_WEBHOOK_INVALID_TOKEN',
+        severity: 'medium',
+        message: 'Rejected a Xendit invoice webhook with the wrong callback token — either someone is sending fake payment events, or XENDIT_WEBHOOK_TOKEN no longer matches the Xendit dashboard.',
+        throttleKey: 'invoice',
       });
       return res.status(401).json({ success: false, message: 'Invalid callback token' });
     }
@@ -572,11 +573,11 @@ export const handleXenditPayoutWebhook = async (req: Request, res: Response) => 
     }
 
     if (!verifyXenditCallbackToken(req.headers['x-callback-token'], webhookToken)) {
-      await writeAuditLog({
-        action: 'XENDIT_PAYOUT_WEBHOOK_INVALID_TOKEN',
-        category: 'SYSTEM_ERROR',
-        level: 'WARN',
-        message: 'Rejected Xendit payout webhook: callback token mismatch',
+      await raiseSecurityAlert({
+        type: 'XENDIT_PAYOUT_WEBHOOK_INVALID_TOKEN',
+        severity: 'medium',
+        message: 'Rejected a Xendit payout webhook with the wrong callback token — either someone is sending fake payment events, or XENDIT_WEBHOOK_TOKEN no longer matches the Xendit dashboard.',
+        throttleKey: 'payout',
       });
       return res.status(401).json({ success: false, message: 'Invalid callback token' });
     }

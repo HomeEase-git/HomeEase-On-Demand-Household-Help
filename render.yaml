@@ -91,6 +91,8 @@ services:
         sync: false # the backend project's DSN from sentry.io
       - key: SENTRY_ENVIRONMENT
         value: production
+      - key: SECURITY_ALERT_EMAIL
+        sync: false # who gets security alerts (comma-separated); unset = every active admin. See docs/MONITORING.md
 
       # --- Payments: Xendit LIVE keys ---
       - key: XENDIT_SECRET_KEY

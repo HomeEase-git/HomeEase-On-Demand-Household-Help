@@ -1,4 +1,11 @@
 import * as Sentry from '@sentry/node';
+import { installStructuredConsole, wantsStructuredLogging } from './utils/structuredConsole';
+import { getRequestContext } from './utils/requestContext';
+import { redactString } from './utils/logRedaction';
+
+// JSON logs with secrets scrubbed — before Sentry.init so Sentry's console
+// capture wraps it (see utils/structuredConsole.ts).
+if (wantsStructuredLogging()) installStructuredConsole();
 
 /**
  * Error monitoring. Loaded before anything else (see index.ts) so Sentry can
@@ -46,6 +53,15 @@ export function scrubEvent<T extends Sentry.ErrorEvent>(event: T): T | null {
   // The error itself and its stack are still reported.
   if (event.extra) delete event.extra.arguments;
   delete event.user;
+  // Messages and exception text can quote tokens or connection strings.
+  if (event.message) event.message = redactString(event.message);
+  for (const value of event.exception?.values ?? []) {
+    if (value.value) value.value = redactString(value.value);
+  }
+  // Ties the report to the request's log lines (and the X-Request-Id the
+  // client saw).
+  const requestId = getRequestContext()?.requestId;
+  if (requestId) event.tags = { ...event.tags, request_id: requestId };
   return event;
 }
 
