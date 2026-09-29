@@ -7,11 +7,18 @@
  * the app, since each one only breaks the feature that uses it.
  */
 
-const REQUIRED = ['DATABASE_URL', 'JWT_SECRET'];
+// DATA_/MFA_ENCRYPTION_KEY: without them payout details, TINs and admin
+// two-step sign-in fail on first use — better to not start at all.
+const REQUIRED = ['DATABASE_URL', 'JWT_SECRET', 'DATA_ENCRYPTION_KEY', 'MFA_ENCRYPTION_KEY'];
+
+// Secrets that must be long random values in production.
+const SECRETS = ['JWT_SECRET', 'DATA_ENCRYPTION_KEY', 'MFA_ENCRYPTION_KEY', 'CRON_SECRET', 'XENDIT_WEBHOOK_TOKEN'];
+const MIN_SECRET_LENGTH = 32;
+
+// Values copied from .env.example, CI or the development fallbacks.
+const PLACEHOLDER = /change[_-]?me|replace[_-]?me|placeholder|homeease_development|^ci-test|^(secret|password|test|dev|changeme)$/i;
 
 const RECOMMENDED: Array<[string, string]> = [
-  ['DATA_ENCRYPTION_KEY', 'payout account numbers and TINs cannot be encrypted or read'],
-  ['MFA_ENCRYPTION_KEY', 'admin two-step sign-in cannot work'],
   ['REDIS_URL', 'queued jobs (payouts, reminders, sweeps) cannot run'],
   ['XENDIT_SECRET_KEY', 'online payments, refunds and payouts are off'],
   ['XENDIT_WEBHOOK_TOKEN', 'Xendit payment and payout notifications are rejected'],
@@ -34,11 +41,33 @@ export function checkEnvironment(env: NodeJS.ProcessEnv = process.env): EnvRepor
   const missingRequired = REQUIRED.filter((name) => !env[name]?.trim());
   const warnings: string[] = [];
 
+  for (const name of SECRETS) {
+    const value = env[name]?.trim();
+    if (!value) continue;
+    if (PLACEHOLDER.test(value)) {
+      missingRequired.push(`${name} (still a placeholder value)`);
+    } else if (value.length < MIN_SECRET_LENGTH) {
+      warnings.push(`${name} is shorter than ${MIN_SECRET_LENGTH} characters — use a long random value (openssl rand -hex 32).`);
+    }
+  }
+  if (env.DATA_ENCRYPTION_KEY?.trim() && env.DATA_ENCRYPTION_KEY.trim() === env.MFA_ENCRYPTION_KEY?.trim()) {
+    warnings.push('DATA_ENCRYPTION_KEY and MFA_ENCRYPTION_KEY are the same value — use separate keys so each can be rotated alone.');
+  }
+  for (const name of ['DATA_ENCRYPTION_KEY', 'MFA_ENCRYPTION_KEY']) {
+    const previous = env[`${name}_PREVIOUS`]?.trim();
+    if (!previous) continue;
+    warnings.push(
+      previous === env[name]?.trim()
+        ? `${name}_PREVIOUS equals ${name} — set ${name} to the NEW key and ${name}_PREVIOUS to the old one.`
+        : `${name} rotation in progress — run scripts/rotate-encryption-keys.ts, then remove ${name}_PREVIOUS.`,
+    );
+  }
+  if (!env.TRUST_PROXY?.trim() || env.TRUST_PROXY.trim() === '0') {
+    warnings.push('TRUST_PROXY is not set — behind a proxy (Render) every client looks like one IP, so rate limits and lockouts misfire.');
+  }
+
   for (const [name, effect] of RECOMMENDED) {
     if (!env[name]?.trim()) warnings.push(`${name} is not set — ${effect}.`);
-  }
-  if (env.JWT_SECRET && env.JWT_SECRET.length < 32) {
-    warnings.push('JWT_SECRET is shorter than 32 characters — sign-in tokens are easier to forge.');
   }
   if (env.XENDIT_SECRET_KEY?.startsWith('xnd_development_')) {
     warnings.push('XENDIT_SECRET_KEY is a TEST key — payments are not real money.');

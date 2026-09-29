@@ -72,6 +72,9 @@ services:
         generateValue: true # encrypts admin TOTP secrets at rest — no human needs to know this value
       - key: DATA_ENCRYPTION_KEY
         sync: false # encrypts payout account numbers + TINs; set by hand and keep a copy — the backfill script needs the same value
+      # Key rotation (docs/SECRETS.md): temporarily add DATA_ENCRYPTION_KEY_PREVIOUS
+      # / MFA_ENCRYPTION_KEY_PREVIOUS in the dashboard with the old value, run
+      # scripts/rotate-encryption-keys.ts, then remove them.
 
       # --- Email: Brevo (Render blocks outbound SMTP ports 25/465/587) ---
       - key: EMAIL_PROVIDER

@@ -7,12 +7,13 @@ describe('Production config check', () => {
   const complete = {
     DATABASE_URL: 'postgres://x',
     JWT_SECRET: 'a'.repeat(40),
-    DATA_ENCRYPTION_KEY: 'k',
-    MFA_ENCRYPTION_KEY: 'k',
+    DATA_ENCRYPTION_KEY: 'd'.repeat(64),
+    MFA_ENCRYPTION_KEY: 'm'.repeat(64),
     REDIS_URL: 'redis://x',
     XENDIT_SECRET_KEY: 'xnd_production_abc',
-    XENDIT_WEBHOOK_TOKEN: 't',
-    CRON_SECRET: 'c',
+    XENDIT_WEBHOOK_TOKEN: 't'.repeat(40),
+    CRON_SECRET: 'c'.repeat(40),
+    TRUST_PROXY: '1',
     ALLOWED_ORIGINS: 'https://admin',
     SUPABASE_URL: 'https://s',
     SUPABASE_SERVICE_KEY: 's',
@@ -26,9 +27,52 @@ describe('Production config check', () => {
     expect(checkEnvironment(complete)).toEqual({ missingRequired: [], warnings: [] });
   });
 
-  it('refuses to start without the database or the sign-in secret', () => {
-    const { missingRequired } = checkEnvironment({ ...complete, DATABASE_URL: '', JWT_SECRET: ' ' });
-    expect(missingRequired).toEqual(['DATABASE_URL', 'JWT_SECRET']);
+  it('refuses to start without the database, the sign-in secret or the encryption keys', () => {
+    const { missingRequired } = checkEnvironment({
+      ...complete,
+      DATABASE_URL: '',
+      JWT_SECRET: ' ',
+      DATA_ENCRYPTION_KEY: undefined,
+      MFA_ENCRYPTION_KEY: '',
+    });
+    expect(missingRequired).toEqual(['DATABASE_URL', 'JWT_SECRET', 'DATA_ENCRYPTION_KEY', 'MFA_ENCRYPTION_KEY']);
+  });
+
+  it('refuses to start with a placeholder secret', () => {
+    const { missingRequired } = checkEnvironment({
+      ...complete,
+      JWT_SECRET: 'homeease_development_secret_change_me',
+      DATA_ENCRYPTION_KEY: 'REPLACE_ME',
+      CRON_SECRET: 'ci-test-cron-secret',
+    });
+    expect(missingRequired).toEqual([
+      'JWT_SECRET (still a placeholder value)',
+      'DATA_ENCRYPTION_KEY (still a placeholder value)',
+      'CRON_SECRET (still a placeholder value)',
+    ]);
+  });
+
+  it('warns about short or shared keys, a missing TRUST_PROXY and a rotation in progress', () => {
+    const shared = 'x'.repeat(64);
+    const { missingRequired, warnings } = checkEnvironment({
+      ...complete,
+      DATA_ENCRYPTION_KEY: shared,
+      MFA_ENCRYPTION_KEY: shared,
+      MFA_ENCRYPTION_KEY_PREVIOUS: 'o'.repeat(64),
+      CRON_SECRET: 'short',
+      TRUST_PROXY: undefined,
+    });
+    expect(missingRequired).toEqual([]);
+    const text = warnings.join('\n');
+    expect(text).toMatch(/CRON_SECRET is shorter than 32/);
+    expect(text).toMatch(/are the same value/);
+    expect(text).toMatch(/MFA_ENCRYPTION_KEY rotation in progress/);
+    expect(text).toMatch(/TRUST_PROXY is not set/);
+  });
+
+  it('catches a rotation set up backwards', () => {
+    const { warnings } = checkEnvironment({ ...complete, DATA_ENCRYPTION_KEY_PREVIOUS: complete.DATA_ENCRYPTION_KEY });
+    expect(warnings.join('\n')).toMatch(/DATA_ENCRYPTION_KEY_PREVIOUS equals DATA_ENCRYPTION_KEY/);
   });
 
   it('warns, without refusing, about anything that only breaks one feature', () => {
