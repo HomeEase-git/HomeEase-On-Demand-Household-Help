@@ -70,6 +70,12 @@ fi
 
 echo "Copying file storage..."
 BUCKETS="${BACKUP_BUCKETS:-$(source_s3 s3api list-buckets --query 'Buckets[].Name' --output text)}"
+# An empty list means the wrong endpoint or key, not an app with no files:
+# publishing an empty archive would look like a good backup.
+if [ -z "${BUCKETS//[[:space:]]/}" ] || [ "$BUCKETS" = None ]; then
+  echo "::error::No storage buckets found at SUPABASE_S3_ENDPOINT; refusing to publish an empty file backup." >&2
+  exit 1
+fi
 mkdir -p "$WORK/files"
 FILE_SUMMARY=""
 for bucket in $BUCKETS; do

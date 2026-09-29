@@ -125,7 +125,10 @@ Nothing unencrypted leaves the runner. The upload key can only write: it
 can't read, list or delete backups, so a leaked key exposes nothing and
 can't wipe them. Every pull request that changes the backup runs the full
 backup and restore against throwaway services first (`self-test` job). A
-failed nightly run emails you.
+failed run is only noticed if GitHub tells you: check GitHub → Settings →
+Notifications → **Actions** has email on for failed workflows. GitHub sends
+a scheduled run's failure to the account that last changed its schedule
+(the one that merged this workflow). The same applies to the restore drill.
 
 Copies leave the Philippines (B2 has no Asian region; Neon is in
 Singapore). The Data Privacy Act allows this with the same protection; the
@@ -172,7 +175,10 @@ GitHub's secrets.
 | Variable | `SUPABASE_S3_ENDPOINT` | From step 3, e.g. `https://<project>.storage.supabase.co/storage/v1/s3` |
 | Variable | `SUPABASE_S3_REGION` | From step 3 |
 
-**5. First run:** Actions → **Off-site backup** → Run workflow. Check the
+**5. Failure emails:** GitHub → your avatar → Settings → Notifications →
+**Actions**: email on, "Only notify for failed workflows" on.
+
+**6. First run:** Actions → **Off-site backup** → Run workflow. Check the
 summary (database size, files per bucket), then do the recovery test below
 once, so you know your key works.
 

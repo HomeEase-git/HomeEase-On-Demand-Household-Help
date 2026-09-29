@@ -3,8 +3,9 @@ name: Off-site backup
 # Nightly encrypted copy of the database and every uploaded file, kept at a
 # second provider (backend/scripts/offsite-backup.sh; docs/DATA-RESILIENCE.md,
 # "Off-site backup"). Each night's database copy is restored into a scratch
-# database here and checked before it's uploaded. A failed run emails the
-# repository owner.
+# database here and checked before it's uploaded. GitHub emails a failed
+# scheduled run to whoever last changed its schedule, if their notification
+# settings allow it (docs/DATA-RESILIENCE.md, "Off-site backup").
 #
 # Pull requests that touch the backup run `self-test` instead: the whole
 # backup and restore round trip against throwaway services, no production
@@ -28,6 +29,8 @@ on:
       - backend/scripts/offsite-*.sh
       - backend/scripts/restore-drill.ts
       - backend/scripts/db-roles.ts
+      - backend/prisma/schema.prisma
+      - backend/prisma/migrations/**
 
 permissions:
   contents: read
