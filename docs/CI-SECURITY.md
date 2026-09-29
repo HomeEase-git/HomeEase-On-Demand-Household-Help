@@ -12,7 +12,7 @@ repository's **Security** tab.
 | **CodeQL** | `security.yml` → `codeql` | Injection, XSS, path traversal, unsafe redirects, weak crypto and similar code-level bugs in backend, admin web and mobile (JavaScript/TypeScript, `security-extended` queries) | A new alert appears (shown on the PR; details in Security → Code scanning) |
 | **Secret scan** (gitleaks) | `security.yml` → `secrets` | API keys, tokens, private keys and passwords in commits | Any commit in the PR adds one, even if a later commit removes it |
 | **Dependency review** | `security.yml` → `dependency-review` | A PR adding or upgrading to a package with a known high/critical vulnerability, in any app, including dev and build tools | Such a package is added |
-| **Container scan** (Trivy) | `security.yml` → `images` | Known vulnerabilities in the backend and admin web Docker images (OS packages + npm) | A **critical** vulnerability with a released fix. Everything high and critical is reported to the Security tab either way |
+| **Container scan** (Trivy) | `security.yml` → `images` | Known vulnerabilities in the backend and admin web Docker images (OS packages + npm). Also starts the backend image the way Render does (migrations, then the app) | A **critical** vulnerability with a released fix. Everything high and critical is reported to the Security tab either way |
 | **npm audit** | `ci.yml` | Known vulnerabilities in what each app ships | Backend and web: high or critical. Mobile: critical (see below) |
 | **SBOM** | `security.yml` → `sbom` | Nothing: records every shipped dependency (CycloneDX) for each `main` commit, kept 90 days (Actions → run → Artifacts) | Never |
 
@@ -45,6 +45,8 @@ Also on:
 ## Known exceptions (review these when upgrading Expo)
 
 - **Mobile npm audit is gated at critical, not high.** As of 2026-09-29, the one high finding is `image-size` (denial of service on crafted images). It's used only by the Metro bundler on the build machine to read the app's own image files, and it isn't in the shipped app. The patched version is a major release Metro doesn't support. The 15 moderate findings are all in Expo's build tooling, and npm's only offered "fix" is downgrading Expo to version 46. New high or critical packages are still blocked by dependency review. **After the next Expo SDK upgrade:** run `npm audit --omit=dev` in `mobile/`, and switch the CI gate back to `--audit-level=high` if the high is gone.
+- **Backend image: 56 high findings in Debian (bookworm) packages** such as `util-linux`, `perl-base` and `ncurses`, none with a released fix as of 2026-09-29. They show in the Security tab and don't fail the build. When Debian ships fixes, the weekly scan shows them as fixable: rebuild (Render does on each deploy), or merge Dependabot's base-image PR. The runtime image has no npm, npx or corepack (the npm CLI's own dependencies were the fixable findings), and CI starts the image with its real entrypoint to prove it still works.
+- **Admin web image:** 0 high or critical findings on `nginx:1.30-alpine` (2026-09-29).
 - **`.gitleaksignore`** lists every reviewed historical finding and why. Only one of them was a real credential: the Resend API key committed in June 2026, which must be revoked (see `docs/SECRETS.md`).
 
 ## Repository settings (owner only)
