@@ -10,7 +10,8 @@ set -e
 
 if [ "${RUN_MIGRATIONS:-true}" = "true" ]; then
   echo "[entrypoint] prisma migrate deploy..."
-  npx prisma migrate deploy
+  # The app's own Prisma CLI: the runtime image has no npm/npx (Dockerfile).
+  /app/node_modules/.bin/prisma migrate deploy
 else
   echo "[entrypoint] RUN_MIGRATIONS=false — skipping migrations."
 fi

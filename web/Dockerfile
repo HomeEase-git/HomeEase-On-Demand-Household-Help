@@ -21,6 +21,8 @@ RUN cd web && npm run build
 # 1.27 stopped getting rebuilds in 2025 and carried critical OpenSSL CVEs
 # (found by the Trivy scan, security.yml). Dependabot proposes newer tags.
 FROM nginx:1.30-alpine AS runtime
+# Alpine security fixes released since the tag was last rebuilt.
+RUN apk upgrade --no-cache
 # Upstream for the /api proxy; overridden per environment.
 ENV BACKEND_URL=http://backend:3000
 COPY web/nginx.conf.template /etc/nginx/templates/default.conf.template

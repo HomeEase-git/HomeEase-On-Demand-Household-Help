@@ -60,6 +60,12 @@ COPY --from=build /app/dist ./dist
 COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 
+# npm, npx and corepack are only needed to install and build. Removing them
+# from the image that runs in production drops their own dependencies' CVEs
+# (flagged by the Trivy scan, security.yml) and leaves no package manager for
+# an attacker to use. The entrypoint calls the local Prisma CLI directly.
+RUN rm -rf /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/corepack   /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/corepack
+
 # Drop privileges.
 RUN useradd --system --uid 1001 --home /app appuser \
   && chown -R appuser:appuser /app

@@ -102,6 +102,21 @@ jobs:
     permissions:
       contents: read
       security-events: write
+    # For the backend start-up smoke test below.
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: smoke
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     strategy:
       fail-fast: false
       matrix:
@@ -123,6 +138,15 @@ jobs:
           load: true
           tags: homeease-${{ matrix.name }}:scan
           cache-from: type=gha
+      # Production (Render) runs this image. Prove it still starts the way it
+      # does there: the real entrypoint applies every migration to an empty
+      # database, then hands over to the command. And the package managers
+      # removed from the runtime image really are gone.
+      - name: Start-up smoke test
+        if: matrix.name == 'backend'
+        run: |
+          docker run --rm --network host             -e DATABASE_URL=postgresql://postgres:postgres@localhost:5432/smoke             -e DIRECT_URL=postgresql://postgres:postgres@localhost:5432/smoke             homeease-backend:scan node -e "console.log('entrypoint handed over')"
+          docker run --rm --entrypoint sh homeease-backend:scan -c             'set -e; for tool in npm npx corepack; do if command -v "$tool"; then echo "$tool is still in the image"; exit 1; fi; done; test -f dist/index.js'
       - name: Install Trivy
         run: |
           curl -sSfL -o trivy.tgz \
