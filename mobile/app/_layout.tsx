@@ -1,4 +1,6 @@
 import "react-native-reanimated";
+// Early, so errors from the rest of startup are reported.
+import { withMonitoring } from "../utils/monitoring";
 import "../global.css";
 import React, { useEffect } from "react";
 import { AppState, type AppStateStatus } from "react-native";
@@ -50,7 +52,7 @@ function refetchActiveBookings() {
   }
 }
 
-export default function RootLayout() {
+function RootLayout() {
   const initializeAuth = useAuthStore((state) => state.initializeAuth);
   const restoreDraft = useBookingStore((state) => state.restoreDraft);
   const token = useAuthStore((state) => state.token);
@@ -253,3 +255,5 @@ export default function RootLayout() {
     </GestureHandlerRootView>
   );
 }
+
+export default withMonitoring(RootLayout);

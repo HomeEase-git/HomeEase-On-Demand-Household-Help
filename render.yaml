@@ -16,6 +16,8 @@ services:
     # (booking-expiry, 72h auto-dispute sweep, payment reminders) in this
     # same process. Render's free tier spins down on idle, which would
     # silently kill those background flows and any open websockets.
+    # (The live service was created by hand on the free plan; until it's
+    # upgraded, keep-alive.yml + cron-sweeps.yml cover the gap — DEPLOY.md.)
     plan: 0.5c-512mb
     region: singapore # closest listed region to the Philippines
     healthCheckPath: /health
@@ -71,13 +73,21 @@ services:
       - key: DATA_ENCRYPTION_KEY
         sync: false # encrypts payout account numbers + TINs; set by hand and keep a copy — the backfill script needs the same value
 
-      # --- Email (Gmail SMTP) ---
-      - key: SMTP_USER
+      # --- Email: Brevo (Render blocks outbound SMTP ports 25/465/587) ---
+      - key: EMAIL_PROVIDER
+        value: brevo
+      - key: BREVO_API_KEY
         sync: false
-      - key: SMTP_PASS
-        sync: false
-      - key: SMTP_FROM_NAME
+      - key: BREVO_SENDER_EMAIL
+        sync: false # a sender verified in Brevo
+      - key: BREVO_SENDER_NAME
         value: HomeEase
+
+      # --- Error monitoring: Sentry (optional — off when unset) ---
+      - key: SENTRY_DSN
+        sync: false # the backend project's DSN from sentry.io
+      - key: SENTRY_ENVIRONMENT
+        value: production
 
       # --- Payments: Xendit LIVE keys ---
       - key: XENDIT_SECRET_KEY
@@ -115,9 +125,9 @@ services:
       - key: ANTHROPIC_MODEL
         value: claude-sonnet-5
 
-      # --- Geocoding/Distance/Directions (REQUIRED — no fallback provider) ---
+      # --- Google Maps Platform (REQUIRED — no fallback provider) ---
       - key: GOOGLE_MAPS_API_KEY
-        sync: false
+        sync: false # server key restricted to Routes API + Places API (New)
 
       # --- Uploads ---
       - key: MAX_FILE_SIZE

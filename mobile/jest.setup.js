@@ -132,3 +132,11 @@ if (__DEV__) {
   jest.spyOn(console, "error").mockImplementation(() => null);
   jest.spyOn(console, "warn").mockImplementation(() => null);
 }
+
+// Error monitoring is native code and off without a DSN; keep it out of tests.
+jest.mock('@sentry/react-native', () => ({
+  init: jest.fn(),
+  wrap: (component) => component,
+  captureException: jest.fn(),
+  captureMessage: jest.fn(),
+}));
