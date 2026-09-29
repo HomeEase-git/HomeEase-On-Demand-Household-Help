@@ -93,6 +93,23 @@ describe('RedisFallbackStore', () => {
     store.shutdown();
   });
 
+  it('undoes a hit on the counter that recorded it, even after Redis recovers', async () => {
+    const shared = fakeRedis();
+    const store = new RedisFallbackStore('rl:test:', () => shared.redis);
+    store.init(options);
+    await store.increment('9.9.9.9'); // counted in Redis
+    await store.increment('9.9.9.9');
+
+    shared.setDown(true);
+    await store.increment('9.9.9.9'); // Redis down: counted in memory
+    shared.setDown(false);
+    resetRateLimitCircuit();
+
+    await store.decrement('9.9.9.9'); // that request succeeded
+    expect(shared.counts.get('rl:test:9.9.9.9')).toBe(2); // shared count untouched, never lowered
+    store.shutdown();
+  });
+
   it('decrements and resets keys', async () => {
     const shared = fakeRedis();
     const store = new RedisFallbackStore('rl:test:', () => shared.redis);

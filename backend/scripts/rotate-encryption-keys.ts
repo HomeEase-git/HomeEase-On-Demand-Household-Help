@@ -16,9 +16,18 @@
 //     when the network blocks raw Postgres connections to Neon; needs
 //     `npm i --no-save @prisma/adapter-neon @neondatabase/serverless ws`.
 //
-// Exits 1 without writing that value if something decrypts with neither key.
+// Safety:
+// - Everything is planned first; if any value decrypts with neither key, the
+//   script lists them and writes nothing.
+// - Each write only applies if the row still holds the value that was read,
+//   so a worker saving new details mid-run is never overwritten (that row is
+//   reported; re-run to pick it up).
+// - Two workers with the same TIN can't both exist under one key (unique
+//   index). If one slipped in under different keys while old and new
+//   instances overlapped during the switch, the rehash hits the index and
+//   both profiles are reported for manual resolution.
 import 'dotenv/config';
-import { PrismaClient } from '@prisma/client';
+import { Prisma, PrismaClient } from '@prisma/client';
 import { PrismaPg } from '@prisma/adapter-pg';
 import { Pool } from 'pg';
 import { decrypt, encrypt, isUnderPreviousKey } from '../src/utils/encryption';
@@ -54,7 +63,19 @@ function makeNeonWebsocketClient(): PrismaClient {
   return new PrismaClient({ adapter: new PrismaNeon({ connectionString: process.env.DATABASE_URL }) });
 }
 
+type Table = 'workerProfile' | 'payout' | 'taxCertificate' | 'mfaSecret';
+
+interface PlannedUpdate {
+  table: Table;
+  id: string;
+  label: string;
+  /** Column values the row must still hold for the write to apply. */
+  expect: Record<string, string | null>;
+  data: Record<string, string>;
+}
+
 const unreadable: string[] = [];
+const planned: PlannedUpdate[] = [];
 
 /** New ciphertext if `stored` is under the previous data key; undefined if it needs nothing. */
 function reencryptField(stored: string | null, label: string): string | undefined {
@@ -67,17 +88,13 @@ function reencryptField(stored: string | null, label: string): string | undefine
   }
 }
 
-async function rotateDataKey() {
-  let profiles = 0;
-  let payouts = 0;
-  let certificates = 0;
-
+async function planDataKey() {
   const workerProfiles = await prisma.workerProfile.findMany({
     where: { OR: [{ payoutAccountNumber: { not: null } }, { tin: { not: null } }] },
     select: { id: true, payoutAccountNumber: true, tin: true, tinHash: true },
   });
   for (const profile of workerProfiles) {
-    const data: { payoutAccountNumber?: string; tin?: string; tinHash?: string } = {};
+    const data: Record<string, string> = {};
     const account = reencryptField(profile.payoutAccountNumber, `WorkerProfile ${profile.id} payoutAccountNumber`);
     if (account) data.payoutAccountNumber = account;
 
@@ -95,38 +112,46 @@ async function rotateDataKey() {
     }
 
     if (Object.keys(data).length > 0) {
-      profiles++;
-      if (!DRY_RUN) await prisma.workerProfile.update({ where: { id: profile.id }, data });
+      planned.push({
+        table: 'workerProfile',
+        id: profile.id,
+        label: `WorkerProfile ${profile.id}`,
+        expect: { payoutAccountNumber: profile.payoutAccountNumber, tin: profile.tin },
+        data,
+      });
     }
   }
 
-  const payoutRows = await prisma.payout.findMany({
+  const payouts = await prisma.payout.findMany({
     where: { accountNumber: { startsWith: 'enc:' } },
     select: { id: true, accountNumber: true },
   });
-  for (const payout of payoutRows) {
+  for (const payout of payouts) {
     const accountNumber = reencryptField(payout.accountNumber, `Payout ${payout.id} accountNumber`);
-    if (!accountNumber) continue;
-    payouts++;
-    if (!DRY_RUN) await prisma.payout.update({ where: { id: payout.id }, data: { accountNumber } });
+    if (accountNumber) {
+      planned.push({ table: 'payout', id: payout.id, label: `Payout ${payout.id}`, expect: { accountNumber: payout.accountNumber }, data: { accountNumber } });
+    }
   }
 
-  const certificateRows = await prisma.taxCertificate.findMany({
+  const certificates = await prisma.taxCertificate.findMany({
     where: { workerTin: { startsWith: 'enc:' } },
     select: { id: true, workerTin: true },
   });
-  for (const certificate of certificateRows) {
+  for (const certificate of certificates) {
     const workerTin = reencryptField(certificate.workerTin, `TaxCertificate ${certificate.id} workerTin`);
-    if (!workerTin) continue;
-    certificates++;
-    if (!DRY_RUN) await prisma.taxCertificate.update({ where: { id: certificate.id }, data: { workerTin } });
+    if (workerTin) {
+      planned.push({
+        table: 'taxCertificate',
+        id: certificate.id,
+        label: `TaxCertificate ${certificate.id}`,
+        expect: { workerTin: certificate.workerTin },
+        data: { workerTin },
+      });
+    }
   }
-
-  console.log(`DATA_ENCRYPTION_KEY: worker profiles ${profiles}, payouts ${payouts}, tax certificates ${certificates} ${DRY_RUN ? 'would be' : ''} updated`);
 }
 
-async function rotateMfaKey() {
-  let secrets = 0;
+async function planMfaKey() {
   const rows = await prisma.mfaSecret.findMany({ select: { id: true, secretEncrypted: true } });
   for (const row of rows) {
     let underPrevious: boolean;
@@ -136,28 +161,76 @@ async function rotateMfaKey() {
       unreadable.push(`MfaSecret ${row.id}`);
       continue;
     }
-    if (!underPrevious) continue;
-    secrets++;
-    if (!DRY_RUN) {
-      await prisma.mfaSecret.update({ where: { id: row.id }, data: { secretEncrypted: encrypt(decrypt(row.secretEncrypted)) } });
+    if (underPrevious) {
+      planned.push({
+        table: 'mfaSecret',
+        id: row.id,
+        label: `MfaSecret ${row.id}`,
+        expect: { secretEncrypted: row.secretEncrypted },
+        data: { secretEncrypted: encrypt(decrypt(row.secretEncrypted)) },
+      });
     }
   }
-  console.log(`MFA_ENCRYPTION_KEY: MFA secrets ${secrets} ${DRY_RUN ? 'would be' : ''} updated`);
+}
+
+/** Writes one planned update if the row is unchanged; returns what happened. */
+async function apply(update: PlannedUpdate): Promise<'updated' | 'changed' | 'duplicate'> {
+  const where = { id: update.id, ...update.expect };
+  try {
+    // Dynamic model access: every Table has id + the string columns used here.
+    const delegate = (prisma as unknown as Record<Table, { updateMany: (args: object) => Promise<{ count: number }> }>)[update.table];
+    const { count } = await delegate.updateMany({ where, data: update.data });
+    return count === 1 ? 'updated' : 'changed';
+  } catch (error) {
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') return 'duplicate';
+    throw error;
+  }
 }
 
 async function main() {
   console.log(DRY_RUN ? 'DRY RUN — no changes will be written.' : 'Applying changes.');
-  if (rotatingData) await rotateDataKey();
-  if (rotatingMfa) await rotateMfaKey();
+  if (rotatingData) await planDataKey();
+  if (rotatingMfa) await planMfaKey();
+
+  const count = (table: Table) => planned.filter((u) => u.table === table).length;
+  const verb = DRY_RUN ? 'to update' : 'planned';
+  if (rotatingData) {
+    console.log(`DATA_ENCRYPTION_KEY: worker profiles ${count('workerProfile')}, payouts ${count('payout')}, tax certificates ${count('taxCertificate')} ${verb}`);
+  }
+  if (rotatingMfa) console.log(`MFA_ENCRYPTION_KEY: MFA secrets ${count('mfaSecret')} ${verb}`);
 
   if (unreadable.length > 0) {
-    console.error(`\n${unreadable.length} value(s) decrypt with neither key and were left untouched:`);
+    console.error(`\n${unreadable.length} value(s) decrypt with neither key — nothing was written:`);
     for (const label of unreadable) console.error(`  - ${label}`);
     console.error('Check that the *_PREVIOUS value is the key those rows were written with.');
     process.exitCode = 1;
     return;
   }
-  console.log(DRY_RUN ? '\nDry run complete.' : '\nDone. Once the app has run cleanly, remove the *_PREVIOUS variable(s).');
+  if (DRY_RUN) {
+    console.log('\nDry run complete.');
+    return;
+  }
+
+  const changedMidRun: string[] = [];
+  const duplicates: string[] = [];
+  for (const update of planned) {
+    const outcome = await apply(update);
+    if (outcome === 'changed') changedMidRun.push(update.label);
+    if (outcome === 'duplicate') duplicates.push(update.label);
+  }
+  console.log(`\nUpdated ${planned.length - changedMidRun.length - duplicates.length} of ${planned.length}.`);
+
+  if (changedMidRun.length > 0) {
+    console.warn(`${changedMidRun.length} row(s) were edited while this ran and were left alone — re-run to finish them:`);
+    for (const label of changedMidRun) console.warn(`  - ${label}`);
+    process.exitCode = 1;
+  }
+  if (duplicates.length > 0) {
+    console.error(`${duplicates.length} worker profile(s) share a TIN with another worker (saved under different keys during the switch) — resolve by hand, then re-run:`);
+    for (const label of duplicates) console.error(`  - ${label}`);
+    process.exitCode = 1;
+  }
+  if (!process.exitCode) console.log('Done. Once the app has run cleanly, remove the *_PREVIOUS variable(s).');
 }
 
 main()

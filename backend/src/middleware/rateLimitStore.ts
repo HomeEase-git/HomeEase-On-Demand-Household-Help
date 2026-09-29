@@ -103,8 +103,13 @@ export class RedisFallbackStore implements Store {
     }
   }
 
+  // Undoes a hit (express-rate-limit's skipSuccessfulRequests). If this key
+  // has hits in memory, the hit being undone may have been counted there while
+  // Redis was down — take it from memory. Getting this wrong can then only
+  // leave the shared count too high (stricter), never too low.
   async decrement(key: string): Promise<void> {
-    if (circuitIsOpen()) return this.memory.decrement(key);
+    const inMemory = await this.memory.get(key);
+    if (circuitIsOpen() || (inMemory && inMemory.totalHits > 0)) return this.memory.decrement(key);
     try {
       await this.redis().decr(`${this.prefix}${key}`);
       recordSuccess();

@@ -79,6 +79,31 @@ describe('encryption key rotation (unit)', () => {
 describe('encryption key rotation (database)', () => {
   const createdUserIds: string[] = [];
 
+  const runScript = (extraArgs: string[] = []) =>
+    execFileSync(process.execPath, [require.resolve('tsx/cli'), path.join(__dirname, '../scripts/rotate-encryption-keys.ts'), ...extraArgs], {
+      cwd: path.join(__dirname, '..'),
+      env: {
+        ...process.env,
+        DATA_ENCRYPTION_KEY: NEW_DATA,
+        DATA_ENCRYPTION_KEY_PREVIOUS: OLD_DATA,
+        MFA_ENCRYPTION_KEY: NEW_MFA,
+        MFA_ENCRYPTION_KEY_PREVIOUS: OLD_MFA,
+      },
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+
+  /** Runs the script expecting failure; returns its combined output. */
+  const runScriptExpectingFailure = (): string => {
+    try {
+      runScript();
+    } catch (error) {
+      const { stdout, stderr } = error as { stdout: string; stderr: string };
+      return `${stdout}${stderr}`;
+    }
+    throw new Error('expected the rotation script to fail');
+  };
+
   afterAll(async () => {
     for (const id of createdUserIds) await deleteTestUser(id);
     await prisma.taxCertificate.deleteMany({ where: { workerName: 'Rotation Test' } });
@@ -134,19 +159,6 @@ describe('encryption key rotation (database)', () => {
     });
     await prisma.mfaSecret.create({ data: { userId: admin.id, secretEncrypted: encrypt('JBSWY3DPEHPK3PXP'), pending: false } });
 
-    const runScript = (extraArgs: string[] = []) =>
-      execFileSync(process.execPath, [require.resolve('tsx/cli'), path.join(__dirname, '../scripts/rotate-encryption-keys.ts'), ...extraArgs], {
-        cwd: path.join(__dirname, '..'),
-        env: {
-          ...process.env,
-          DATA_ENCRYPTION_KEY: NEW_DATA,
-          DATA_ENCRYPTION_KEY_PREVIOUS: OLD_DATA,
-          MFA_ENCRYPTION_KEY: NEW_MFA,
-          MFA_ENCRYPTION_KEY_PREVIOUS: OLD_MFA,
-        },
-        encoding: 'utf8',
-      });
-
     const before = await prisma.workerProfile.findUniqueOrThrow({ where: { userId: worker.id } });
     const dryOutput = runScript(['--dry']);
     expect(dryOutput).toMatch(/DRY RUN/);
@@ -167,5 +179,50 @@ describe('encryption key rotation (database)', () => {
 
     // Re-running changes nothing.
     expect(runScript()).toMatch(/worker profiles 0, payouts 0, tax certificates 0/);
+  }, 60_000);
+
+  it('writes nothing if any value decrypts with neither key', async () => {
+    useKeys({ data: OLD_DATA });
+    const { user: readable } = await createTestUser('rotation-readable', { role: 'WORKER' });
+    const { user: stranger } = await createTestUser('rotation-unknown-key', { role: 'WORKER' });
+    createdUserIds.push(readable.id, stranger.id);
+    const readableValue = encryptField('09170000001');
+    await prisma.workerProfile.update({ where: { userId: readable.id }, data: { payoutAccountNumber: readableValue } });
+    useKeys({ data: 'z'.repeat(64) }); // a key the script is never given
+    await prisma.workerProfile.update({ where: { userId: stranger.id }, data: { payoutAccountNumber: encryptField('09170000002') } });
+
+    const output = runScriptExpectingFailure();
+    expect(output).toMatch(/decrypt with neither key — nothing was written/);
+    expect(output).toContain(`WorkerProfile`);
+    const after = await prisma.workerProfile.findUniqueOrThrow({ where: { userId: readable.id } });
+    expect(after.payoutAccountNumber).toBe(readableValue);
+
+    await prisma.workerProfile.update({ where: { userId: stranger.id }, data: { payoutAccountNumber: null } });
+  }, 60_000);
+
+  it('reports two workers who ended up with the same TIN under different keys', async () => {
+    useKeys({ data: OLD_DATA });
+    const { user: oldKeyWorker } = await createTestUser('rotation-dup-old', { role: 'WORKER' });
+    createdUserIds.push(oldKeyWorker.id);
+    await prisma.workerProfile.update({
+      where: { userId: oldKeyWorker.id },
+      data: { tin: encryptField('777-888-999'), tinHash: hashTin('777-888-999') },
+    });
+    useKeys({ data: NEW_DATA });
+    const { user: newKeyWorker } = await createTestUser('rotation-dup-new', { role: 'WORKER' });
+    createdUserIds.push(newKeyWorker.id);
+    await prisma.workerProfile.update({
+      where: { userId: newKeyWorker.id },
+      data: { tin: encryptField('777-888-999'), tinHash: hashTin('777-888-999') },
+    });
+
+    const output = runScriptExpectingFailure();
+    expect(output).toMatch(/share a TIN with another worker/);
+
+    // Clean up so later runs aren't blocked by this pair.
+    await prisma.workerProfile.updateMany({
+      where: { userId: { in: [oldKeyWorker.id, newKeyWorker.id] } },
+      data: { tin: null, tinHash: null },
+    });
   }, 60_000);
 });

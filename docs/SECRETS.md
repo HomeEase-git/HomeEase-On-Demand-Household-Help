@@ -75,14 +75,16 @@ This covers most third-party keys:
 `DATA_ENCRYPTION_KEY` and `MFA_ENCRYPTION_KEY` rotate the same way, and either can be rotated on its own.
 
 1. Generate the new key with `openssl rand -hex 32` and store it in the password manager next to the old one.
-2. On Render, set `<KEY>_PREVIOUS` = the **old** value and `<KEY>` = the **new** value, then save. The app now writes with the new key and reads with either. The startup log shows "rotation in progress", which is expected.
+2. At a quiet time, set `<KEY>_PREVIOUS` = the **old** value and `<KEY>` = the **new** value on Render, then save. The app now writes with the new key and reads with either. The startup log shows "rotation in progress", which is expected.
 3. From `backend/`, with `DATABASE_URL` and both key values set exactly as on Render:
    ```bash
    npx tsx scripts/rotate-encryption-keys.ts --dry   # report what would change
    npx tsx scripts/rotate-encryption-keys.ts         # apply
    ```
    Add `--neon-websocket` if your network blocks direct Postgres connections to Neon.
-   The script re-encrypts payout numbers, TINs and MFA secrets, and recomputes TIN hashes. It stops with a list if anything decrypts with neither key.
+   The script re-encrypts payout numbers, TINs and MFA secrets, and recomputes TIN hashes. It plans everything first and writes nothing if any value decrypts with neither key.
+   If it reports rows edited during the run, run it again.
+   If it reports two workers sharing a TIN, one was saved in the few seconds when old and new instances overlapped. Resolve it by hand, then run the script again.
    It is safe to run again; a second run reports 0 changes.
 4. Check a worker's payout settings, and generate a tax certificate or sign in as an admin with MFA.
 5. Remove `<KEY>_PREVIOUS` on Render.
