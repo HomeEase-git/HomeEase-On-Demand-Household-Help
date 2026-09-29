@@ -89,13 +89,13 @@ function passwordFor(role: Role): string {
   return password;
 }
 
-const PASSWORD_PLACEHOLDER = 'PASSWORD';
+const LOGIN_PLACEHOLDER = 'PASSWORD';
 
 /** The connection string for `role`, password left as a placeholder, on the owner's host and database. */
 function connectionStringFor(role: Role, pooled: boolean): string {
   const url = new URL(connectionString!);
   url.username = role;
-  url.password = PASSWORD_PLACEHOLDER;
+  url.password = LOGIN_PLACEHOLDER;
   // Neon: the pooled endpoint is the same host with "-pooler" after the endpoint id.
   if (pooled && url.hostname.endsWith('.neon.tech') && !url.hostname.split('.')[0].endsWith('-pooler')) {
     const [endpoint, ...rest] = url.hostname.split('.');
@@ -111,7 +111,7 @@ async function roleExists(role: Role): Promise<boolean> {
 
 /** Returns the roles whose password was set. */
 async function setUp(): Promise<Role[]> {
-  const passwordSet: Role[] = [];
+  const rolesWithNewLogin: Role[] = [];
   const [{ owner, database }] = await prisma.$queryRaw<[{ owner: string; database: string }]>`
     SELECT current_user AS owner, current_database() AS database`;
 
@@ -136,7 +136,7 @@ async function setUp(): Promise<Role[]> {
     } else if (setPassword) {
       await prisma.$executeRawUnsafe(`ALTER ROLE ${role} PASSWORD '${password}'`);
     }
-    if (setPassword) passwordSet.push(role);
+    if (setPassword) rolesWithNewLogin.push(role);
     await prisma.$executeRawUnsafe(`GRANT CONNECT ON DATABASE ${quoteIdent(database)} TO ${role}`);
     await prisma.$executeRawUnsafe(`GRANT USAGE ON SCHEMA public TO ${role}`);
   }
@@ -159,7 +159,7 @@ async function setUp(): Promise<Role[]> {
     `ALTER ROLE ${READONLY_ROLE} SET default_transaction_read_only = on`,
   ];
   for (const sql of statements) await prisma.$executeRawUnsafe(sql);
-  return passwordSet;
+  return rolesWithNewLogin;
 }
 
 interface Check {
@@ -252,17 +252,17 @@ async function report(): Promise<Check[]> {
 }
 
 async function main() {
-  const passwordSet = CHECK_ONLY ? [] : await setUp();
+  const rolesWithNewLogin = CHECK_ONLY ? [] : await setUp();
 
   const checks = await report();
   for (const check of checks) console.log(`${check.ok ? 'ok  ' : 'FAIL'}  ${check.label}`);
 
-  for (const role of passwordSet) {
-    console.log(`\nPassword set for ${role} (from ${ROLES[role]}). Connection strings, with ${PASSWORD_PLACEHOLDER} standing for it:`);
+  for (const role of rolesWithNewLogin) {
+    console.log(`\nPassword set for ${role} (from ${ROLES[role]}). Connection strings, with ${LOGIN_PLACEHOLDER} standing for it:`);
     console.log(`  pooled: ${connectionStringFor(role, true)}`);
     console.log(`  direct: ${connectionStringFor(role, false)}`);
   }
-  if (passwordSet.includes(APP_ROLE)) {
+  if (rolesWithNewLogin.includes(APP_ROLE)) {
     console.log(`\nPut the pooled one, with the real password, in DATABASE_URL on the backend host. Keep DIRECT_URL on the owner (migrations).`);
   }
 
