@@ -141,4 +141,4 @@ The old and new tokens can't both be valid, so keep the gap short:
 1. Rotate whatever leaked, starting with the **Critical** rows above.
 2. If `JWT_SECRET` or the database leaked, also sign everyone out. Rotating `JWT_SECRET` does this for access tokens. To end refresh tokens as well, delete the `REFRESH` rows from `AuthToken`.
 3. Check the admin audit log (Reports → Logs) for `REFRESH_TOKEN_REUSE`, unexpected admin logins and status changes.
-4. If personal data may have been exposed, the Data Privacy Act gives **72 hours** to notify the National Privacy Commission (see the incident runbook, Security Phase 7).
+4. If personal data may have been exposed, the Data Privacy Act gives **72 hours** to notify the National Privacy Commission (see [INCIDENT-RESPONSE.md](INCIDENT-RESPONSE.md)).
