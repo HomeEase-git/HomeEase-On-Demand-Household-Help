@@ -54,9 +54,12 @@ const pending = new Set<Promise<void>>();
 const deliveryEnabled = (): boolean =>
   process.env.NODE_ENV !== 'test' || process.env.SECURITY_ALERT_TEST_DELIVERY === 'true';
 
-/** Waits for in-flight alert emails (tests, graceful shutdown). */
+/**
+ * Waits for every in-flight alert — audit write, recipient lookup and emails —
+ * including ones started while waiting (tests, graceful shutdown).
+ */
 export async function waitForSecurityAlerts(): Promise<void> {
-  await Promise.allSettled([...pending]);
+  while (pending.size > 0) await Promise.allSettled([...pending]);
 }
 
 export function resetSecurityAlertThrottle(): void {
@@ -89,12 +92,30 @@ function passThrottle(key: string): number | null {
   return suppressed;
 }
 
-function track(work: Promise<void>): void {
-  pending.add(work);
-  void work.finally(() => pending.delete(work));
+/**
+ * Nobody was told: reopen the window so the next alert of this kind is sent,
+ * and have it mention this one.
+ */
+function releaseThrottle(key: string, undelivered: number): void {
+  const entry = throttle.get(key);
+  if (entry) {
+    entry.until = 0;
+    entry.suppressed += undelivered;
+  }
 }
 
-export async function raiseSecurityAlert(alert: SecurityAlert): Promise<void> {
+function track<T>(work: Promise<T>): Promise<T> {
+  pending.add(work as Promise<unknown> as Promise<void>);
+  void work.finally(() => pending.delete(work as Promise<unknown> as Promise<void>)).catch(() => undefined);
+  return work;
+}
+
+/** Tracked so graceful shutdown waits for the whole alert, not just its email. */
+export function raiseSecurityAlert(alert: SecurityAlert): Promise<void> {
+  return track(raise(alert));
+}
+
+async function raise(alert: SecurityAlert): Promise<void> {
   const context = getRequestContext();
   const time = new Date();
 
@@ -116,7 +137,8 @@ export async function raiseSecurityAlert(alert: SecurityAlert): Promise<void> {
   });
   console.warn(`Security alert ${alert.type}: ${alert.message}`);
 
-  const suppressed = passThrottle(`${alert.type}:${alert.throttleKey ?? ''}`);
+  const throttleKey = `${alert.type}:${alert.throttleKey ?? ''}`;
+  const suppressed = passThrottle(throttleKey);
   if (suppressed === null) return;
 
   Sentry.captureMessage(`Security: ${alert.type} — ${alert.message}`, {
@@ -141,10 +163,22 @@ export async function raiseSecurityAlert(alert: SecurityAlert): Promise<void> {
       if (suppressed > 0) details.push(['Also since last email', `${suppressed} more of this kind (see the audit log)`]);
 
       const subject = `${alert.severity === 'high' ? 'Action needed: ' : ''}${alert.type.replace(/_/g, ' ').toLowerCase()}`;
-      for (const to of await alertRecipients()) {
-        await sendSecurityAlertEmail(to, subject, alert.message, details);
+      const recipients = await alertRecipients();
+      // Each recipient separately: one bad address mustn't stop the rest.
+      const results = await Promise.allSettled(
+        recipients.map((to) => sendSecurityAlertEmail(to, subject, alert.message, details)),
+      );
+      for (const result of results) {
+        if (result.status === 'rejected') console.error('Security alert email failed:', result.reason);
       }
-    })().catch((error) => console.error('Security alert email failed:', error)),
+      if (!results.some((result) => result.status === 'fulfilled')) {
+        if (recipients.length === 0) console.error('Security alert not emailed: no SECURITY_ALERT_EMAIL and no active admin');
+        releaseThrottle(throttleKey, 1);
+      }
+    })().catch((error) => {
+      console.error('Security alert email failed:', error);
+      releaseThrottle(throttleKey, 1);
+    }),
   );
 }
 

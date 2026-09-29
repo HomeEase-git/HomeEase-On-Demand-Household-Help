@@ -1,7 +1,8 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 import crypto from 'crypto';
 import type { NextFunction, Request, Response } from 'express';
-import { setLogContextProvider, writeLogLine } from './structuredConsole';
+import { setLogContextProvider, structuredLoggingEnabled, writeLogLine } from './structuredConsole';
+import { redactString } from './logRedaction';
 
 /**
  * Per-request context (request id, client IP, signed-in user) that follows
@@ -10,7 +11,10 @@ import { setLogContextProvider, writeLogLine } from './structuredConsole';
  * every function.
  */
 export interface RequestContext {
+  /** Always generated here, so it's unique and can't be chosen by a caller. */
   requestId: string;
+  /** An id set by a proxy in front of us, kept only to cross-reference its logs. */
+  upstreamRequestId?: string;
   ip?: string;
   userId?: string;
 }
@@ -20,8 +24,8 @@ setLogContextProvider(() => storage.getStore());
 
 export const getRequestContext = (): RequestContext | undefined => storage.getStore();
 
-// Reuse an id set by a proxy in front of us (so its logs and ours line up),
-// but only if it looks like an id — never echo arbitrary header content.
+// An incoming X-Request-Id is recorded (to match a proxy's logs) only if it
+// looks like an id — never arbitrary header content — and never used as ours.
 const INCOMING_ID = /^[\w-]{8,64}$/;
 
 // Health probes (keep-alive every 5 minutes, uptime monitors) would drown the
@@ -35,24 +39,38 @@ const QUIET_PATHS = new Set(['/health', '/health/ready']);
  */
 export function requestContext(req: Request, res: Response, next: NextFunction): void {
   const incoming = req.headers['x-request-id'];
-  const requestId = typeof incoming === 'string' && INCOMING_ID.test(incoming) ? incoming : crypto.randomUUID();
-  const context: RequestContext = { requestId, ip: req.ip };
+  const requestId = crypto.randomUUID();
+  const context: RequestContext = {
+    requestId,
+    ip: req.ip,
+    ...(typeof incoming === 'string' && INCOMING_ID.test(incoming) ? { upstreamRequestId: incoming } : {}),
+  };
   res.setHeader('X-Request-Id', requestId);
 
   const startedAt = process.hrtime.bigint();
   res.on('finish', () => {
     if (QUIET_PATHS.has(req.path)) return;
     const status = res.statusCode;
-    writeLogLine(status >= 500 ? 'error' : status >= 400 ? 'warn' : 'info', 'request', {
-      requestId,
-      method: req.method,
-      // No query string: it can carry tokens, emails and search terms.
-      path: req.originalUrl.split('?')[0],
-      status,
-      durationMs: Number((process.hrtime.bigint() - startedAt) / 1_000_000n),
-      ip: context.ip,
-      userId: context.userId,
-    });
+    // No query string: it can carry tokens, emails and search terms.
+    const path = req.originalUrl.split('?')[0];
+    const durationMs = Number((process.hrtime.bigint() - startedAt) / 1_000_000n);
+    if (structuredLoggingEnabled()) {
+      writeLogLine(status >= 500 ? 'error' : status >= 400 ? 'warn' : 'info', 'request', {
+        requestId,
+        upstreamRequestId: context.upstreamRequestId,
+        method: req.method,
+        path,
+        status,
+        durationMs,
+        ip: context.ip,
+        userId: context.userId,
+      });
+    } else if (process.env.NODE_ENV === 'production') {
+      // LOG_FORMAT=pretty: same line, plain text.
+      process.stdout.write(
+        `${new Date().toISOString()} ${req.method} ${redactString(path)} ${status} ${durationMs}ms req=${requestId}${context.userId ? ` user=${context.userId}` : ''}\n`,
+      );
+    }
   });
 
   storage.run(context, () => next());

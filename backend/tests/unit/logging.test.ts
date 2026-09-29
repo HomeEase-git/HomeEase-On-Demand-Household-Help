@@ -59,6 +59,7 @@ describe('structured console', () => {
   it('writes one redacted JSON line per call, tagged with the request id', () => {
     const originals = { log: console.log, info: console.info, warn: console.warn, error: console.error, debug: console.debug };
     const lines: string[] = [];
+    let requestId = '';
     const out = jest.spyOn(process.stdout, 'write').mockImplementation((chunk: any) => (lines.push(String(chunk)), true));
     const err = jest.spyOn(process.stderr, 'write').mockImplementation((chunk: any) => (lines.push(String(chunk)), true));
     try {
@@ -68,8 +69,8 @@ describe('structured console', () => {
         const { requestContext } = require('../../src/utils/requestContext');
         /* eslint-enable @typescript-eslint/no-require-imports */
         installStructuredConsole();
-        const req: any = { headers: { 'x-request-id': 'req-abc-12345' }, ip: '1.2.3.4', path: '/x', originalUrl: '/x' };
-        const res: any = { setHeader: jest.fn(), on: jest.fn() };
+        const req: any = { headers: { 'x-request-id': 'upstream-12345' }, ip: '1.2.3.4', path: '/x', originalUrl: '/x' };
+        const res: any = { setHeader: jest.fn((_name: string, value: string) => (requestId = value)), on: jest.fn() };
         requestContext(req, res, () => {
           console.log('saved', { password: 'nope', ok: 1 });
           console.error('failed', new Error('Bearer secret-token-value'));
@@ -82,9 +83,10 @@ describe('structured console', () => {
     }
 
     const [info, error] = lines.map((line) => JSON.parse(line));
-    expect(info).toMatchObject({ level: 'info', msg: 'saved', requestId: 'req-abc-12345', data: { password: '[REDACTED]', ok: 1 } });
+    expect(requestId).toMatch(/^[0-9a-f-]{36}$/); // generated here, not the caller's
+    expect(info).toMatchObject({ level: 'info', msg: 'saved', requestId, data: { password: '[REDACTED]', ok: 1 } });
     expect(error.level).toBe('error');
-    expect(error.requestId).toBe('req-abc-12345');
+    expect(error.requestId).toBe(requestId);
     expect(JSON.stringify(error)).not.toContain('secret-token-value');
   });
 });

@@ -83,15 +83,17 @@ describe('Security alerts', () => {
     expect(details).toEqual(expect.arrayContaining([['Account', user.email]]));
   });
 
-  it('attaches the request id to the alert and returns it to the caller', async () => {
+  it('ties the alert to a server-generated request id the caller can quote', async () => {
     const { token } = await signIn('probe-id');
     const res = await request(app)
       .get('/api/admin/audit-logs')
       .set('Authorization', `Bearer ${token}`)
-      .set('X-Request-Id', 'trace-12345678');
-    expect(res.headers['x-request-id']).toBe('trace-12345678');
+      .set('X-Request-Id', 'chosen-by-caller-123'); // never adopted as ours
+    const requestId = res.headers['x-request-id'];
+    expect(requestId).toMatch(/^[0-9a-f-]{36}$/);
+    await waitForSecurityAlerts();
     const [log] = await securityLogs('ADMIN_ROUTE_DENIED');
-    expect((log.metadata as any).requestId).toBe('trace-12345678');
+    expect((log.metadata as any).requestId).toBe(requestId);
   });
 
   it('alerts on a forged Xendit webhook and a wrong cron secret', async () => {
@@ -137,6 +139,32 @@ describe('Security alerts', () => {
     expect(await securityLogs('PASSWORD_CHANGED')).toHaveLength(1);
     expect(userEmail).toHaveBeenCalledWith(user.email, 'Your HomeEase password was changed', expect.any(String));
     expect(alertEmail).not.toHaveBeenCalled(); // not an admin: no alert to the security contacts
+  });
+
+  it('emails every recipient even when one address fails', async () => {
+    process.env.SECURITY_ALERT_EMAIL = `bad-${SECURITY_CONTACT}, ${SECURITY_CONTACT}`;
+    alertEmail.mockImplementation(async (to) => {
+      if (to.startsWith('bad-')) throw new Error('mailbox rejected');
+    });
+    try {
+      await request(app).post('/internal/cron/all').set('x-cron-secret', 'guess');
+      await waitForSecurityAlerts();
+      expect(alertEmail.mock.calls.map(([to]) => to)).toEqual([`bad-${SECURITY_CONTACT}`, SECURITY_CONTACT]);
+    } finally {
+      process.env.SECURITY_ALERT_EMAIL = SECURITY_CONTACT;
+    }
+  });
+
+  it('does not let a failed email silence the next alert, and the next one mentions it', async () => {
+    alertEmail.mockRejectedValueOnce(new Error('Brevo down'));
+    await request(app).post('/internal/cron/all').set('x-cron-secret', 'guess-1');
+    await waitForSecurityAlerts();
+    await request(app).post('/internal/cron/all').set('x-cron-secret', 'guess-2');
+    await waitForSecurityAlerts();
+
+    expect(alertEmail).toHaveBeenCalledTimes(2); // the second wasn't throttled
+    const details = alertEmail.mock.calls[1][3];
+    expect(details).toEqual(expect.arrayContaining([['Also since last email', '1 more of this kind (see the audit log)']]));
   });
 
   it('still records alerts when an email fails to send', async () => {
