@@ -138,18 +138,23 @@ Privacy Policy should say personal data is stored with providers abroad
 ### Setting it up (once, about 30 minutes)
 
 **1. Encryption key.** In PowerShell: `winget install FiloSottile.age`, open
-a new window, then `age-keygen -o homeease-backup-key.txt`. It prints the
-**public key** (`age1…`). Store the whole file's contents as a secure note in
-the password manager, and a second copy offline (printed, or on a USB stick
-kept somewhere safe): **without this key no backup can ever be read.** Then
-delete the file.
+a **new** window (and restart VS Code, whose terminals don't see newly
+installed programs), go to a folder **outside the project** (`cd ~`), then
+`age-keygen -o homeease-backup-key.txt`. It prints the **public key**
+(`age1…`, 62 characters). The file holds the **private key**, the line
+starting `AGE-SECRET-KEY-1`. Store the whole file's contents as a secure
+note in the password manager, and a second copy offline (printed, or on a
+USB stick kept somewhere safe): **without the private key no backup can ever
+be read.** Then delete the file. (`.gitignore` blocks key files and backups
+from being committed, but keep them out of the project folder anyway.)
 
 **2. Backblaze B2** (backblaze.com, B2 Cloud Storage; free up to 10 GB):
 - Create a bucket, e.g. `homeease-backups`: **Private**. Turn on **Object
   Lock** with a default retention of 30 days, so nobody, not even your own
   account, can delete a copy before it's 30 days old.
-- Bucket → **Lifecycle Settings** → custom: hide files 30 days after upload,
-  delete 1 day after hiding. That keeps 30 nights.
+- Bucket → **Lifecycle Settings** → **Use custom lifecycle rules** →
+  **Add Lifecycle Rules**: *File Path* empty (the whole bucket), *Days Till
+  Hide* `30`, *Days Till Delete* `1` → Update Bucket. That keeps 30 nights.
 - **Application Keys → Add a New Application Key**: only this bucket, type
   **Write Only**. Note the keyID and applicationKey (shown once).
 - The bucket page shows the S3 endpoint, e.g. `s3.us-west-004.backblazeb2.com`;
@@ -179,8 +184,19 @@ GitHub's secrets.
 **Actions**: email on, "Only notify for failed workflows" on.
 
 **6. First run:** Actions → **Off-site backup** → Run workflow. Check the
-summary (database size, files per bucket), then do the recovery test below
-once, so you know your key works.
+summary (database size, files per bucket), then prove your key opens it:
+in B2 → Browse Files, download one night's `db.dump.age` (B2 names the
+download `<folder>_db.dump.age`) to a folder outside the project, then
+`age --decrypt --identity key.txt --output db.dump <that file>` and
+`pg_restore --list db.dump`. It should list `Archive created at …` and the
+tables. Delete the key file and both dumps afterwards.
+
+**Checks log:**
+
+| Date | Check | Result |
+|---|---|---|
+| 2026-09-29 | First nightly backup ([run](https://github.com/HomeEase-git/HomeEase-On-Demand-Household-Help/actions/runs/36573683981)) | ✅ Database 308 KB (restored and checked in CI: 17 users, 2,941 rows, ledger balanced); files 31 MB in 7 buckets |
+| 2026-09-29 | Private key opens the backup | ✅ Downloaded from B2, decrypted, `pg_restore --list`: 453 entries, pg_dump 18.6 from Postgres 18.6 |
 
 ### Getting a backup back
 

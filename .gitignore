@@ -83,3 +83,12 @@ Thumbs.db
 # MD Files
 # ==============================
 x_files/
+
+# ==============================
+# Backups and backup keys (docs/DATA-RESILIENCE.md). Never commit these:
+# a key file reads every backup; a dump is the whole database.
+# ==============================
+*.age
+*.dump
+*backup-key*.txt
+B2-downloads/
