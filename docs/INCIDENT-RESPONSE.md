@@ -136,11 +136,25 @@ used.
 ### An admin account may be compromised
 (Unexplained admin actions, an `ADMIN_*` or `LOGIN_LOCKOUT` alert for an
 admin, a sign-in you don't recognise.)
-1. Change that admin's password from a trusted device; that signs out every
-   other device. If you can't sign in, suspend the account from another
-   admin account (suspension ends its sessions immediately), or reset its MFA
-   with `scripts/reset-admin-mfa.ts` ([DEPLOY.md](../DEPLOY.md)).
-2. Make sure MFA is on, with a new authenticator secret.
+1. **End the attacker's session first.**
+   - If you can still sign in: change the password from a trusted device.
+     That signs out every other device at once (their refresh tokens are
+     deleted and their access tokens revoked).
+   - If you can't: from another admin account, suspend the account (Users →
+     the admin → Suspend), which ends all its sessions at once. With no
+     other admin, rotate `JWT_SECRET` on Render (ends every access token once
+     it redeploys) and, with the owner connection, delete that account's
+     refresh tokens:
+   ```sql
+   DELETE FROM "AuthToken" WHERE type = 'REFRESH';                         -- everyone
+   DELETE FROM "AuthToken" WHERE type = 'REFRESH' AND "userId" = '<id>';  -- one account
+   ```
+   - Don't rely on `scripts/reset-admin-mfa.ts` for this: it deletes refresh
+     tokens only, so an access token already issued keeps working for up to
+     15 minutes.
+2. Then from a trusted device: set a new password, reset MFA
+   (`scripts/reset-admin-mfa.ts`, [DEPLOY.md](../DEPLOY.md)) and enrol a new
+   authenticator. Reinstate the account if you suspended it.
 3. Audit log (Reports → Logs): list everything that account did since the
    earliest suspicious moment: approvals, refunds, payouts, price changes,
    user changes, document views. Undo what's wrong.
@@ -160,8 +174,14 @@ S3 key leaked.)
 (A database password leaked and used, an injection flaw exploited, a dump
 left somewhere public.)
 1. Rotate the owner, `homeease_app` and `homeease_readonly` passwords
-   ([SECRETS.md](SECRETS.md) → *Database password*), then `JWT_SECRET`
-   (signs everyone out) and anything else stored in the database.
+   ([SECRETS.md](SECRETS.md) → *Database password*) and anything else stored
+   in the database. Then sign everyone out: rotating `JWT_SECRET` only ends
+   access tokens (apps renew them with their refresh token), so also delete
+   every refresh token with the owner connection:
+   ```sql
+   DELETE FROM "AuthToken" WHERE type = 'REFRESH';                         -- everyone
+   DELETE FROM "AuthToken" WHERE type = 'REFRESH' AND "userId" = '<id>';  -- one account
+   ```
 2. Assume every table was read unless logs prove otherwise. TINs and payout
    numbers are encrypted: they're safe only if `DATA_ENCRYPTION_KEY` did not
    leak too.

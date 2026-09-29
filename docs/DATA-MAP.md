@@ -35,7 +35,7 @@ flowchart LR
   API -->|coordinates, addresses| G[Google Maps]
   C & W -->|map and place search| G
   API -->|push token, notification text| E[Expo / Firebase<br/>USA]
-  DB & FS -->|nightly, encrypted| GH[GitHub Actions<br/>USA] -->|encrypted copy| BB[(Backblaze B2<br/>USA)]
+  DB & FS -->|nightly copy, unencrypted on the runner only| GH[GitHub Actions<br/>USA] -->|encrypted| BB[(Backblaze B2<br/>USA)]
 ```
 
 ## What we hold, and where
@@ -57,7 +57,7 @@ flowchart LR
 | Terms and consent acceptances (version, time, IP, device) | Everyone | Database | No | Kept (proof of consent) |
 | Admin MFA secrets | Admins | Database, **encrypted** | No | While MFA is on |
 | Server logs (requests, errors; no bodies or passwords) | Everyone | Render | No | Render's retention |
-| Encrypted backups of all of the above | Everyone | Backblaze B2 | Contains sensitive data, encrypted | 30 nights |
+| Encrypted backups of the database and all stored files (not server logs or emails) | Everyone | Backblaze B2 | Contains sensitive data, encrypted | 30 nights |
 
 ## Outside services (processors)
 
@@ -72,7 +72,7 @@ flowchart LR
 | PhilSMS | Phone numbers, text contents (codes, notices) | Sending SMS | Philippines |
 | Google Maps Platform | Addresses and places typed, coordinates, route start and end points | Address search, maps, distances | USA / global |
 | Expo and Google Firebase | Device push tokens, notification titles and text | Push notifications | USA |
-| GitHub (Actions) | The database and files, briefly, while making the nightly encrypted backup; nothing is stored unencrypted | Backup runs | USA |
+| GitHub (Actions) | The whole database and all files, **unencrypted on a temporary runner** for the minutes the nightly backup takes; encrypted before upload, and the runner is deleted afterwards | Backup runs | USA |
 | Backblaze B2 | Encrypted backups (unreadable without our private key) | Off-site backup | USA |
 | Vercel | Admin website files only; admins' IP addresses in its logs. Admin data goes straight to the API, not through Vercel | Hosts the admin website | Global |
 | Sentry | *Not in use yet.* When turned on: error reports with personal data stripped | Error tracking | *confirm when enabled* |
@@ -84,11 +84,18 @@ Philippines.
 
 ## Answering "what do you hold about me?"
 
-For a request from a user (right to access, Data Privacy Act §16): search
-the database by user id for the tables above, list their files in each
-bucket, and include audit log entries naming them. Send it within a
-reasonable time (aim for 15 days), and verify it's really them first (reply
-from the account's email, or a code sent to their phone). Deletion
+For a request from a user (right to access, Data Privacy Act §16):
+1. **Verify it's really them.** A reply "from" their email proves nothing:
+   sender addresses are easy to fake. Email a one-time random code to the
+   account's **registered** address (not whatever address the request came
+   from) and ask them to send it back, or ask them to make the request from
+   inside the signed-in app via support chat.
+2. Gather: the tables above by their user id; their files in each bucket;
+   audit log entries where `actorId` is their id **and** entries whose
+   message or metadata contain their email or name (sign-in entries, and
+   entries from before they had an account, may have no id).
+3. Send it only to the registered address, within a reasonable time (aim
+   for 15 days). Deletion
 requests: the in-app account deletion does it
 ([DATA-RESILIENCE.md](DATA-RESILIENCE.md#retention-schedule) lists what's
 erased and what's kept).
