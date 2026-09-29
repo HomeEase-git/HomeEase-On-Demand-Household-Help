@@ -102,7 +102,7 @@ which works as the reminder.
 
 | Date | Result | Restore time | Notes |
 |---|---|---|---|
-| | | | First drill: pending `NEON_API_KEY` |
+| 2026-09-29 | ✅ Pass ([run](https://github.com/HomeEase-git/HomeEase-On-Demand-Household-Help/actions/runs/36565675185)) | 11 s to a queryable copy; 23 s including checks | Restored to 1 h before; 17 users, 2,925 rows, 54 tables; ledger balanced. Decryption checks skipped (keys not in GitHub). First run of the Neon branch path |
 
 ## Retention schedule
 
