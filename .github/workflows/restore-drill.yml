@@ -1,0 +1,66 @@
+name: Restore drill
+
+# Quarterly proof that production can be restored from Neon's point-in-time
+# history: restores the database as it was an hour ago into a temporary
+# branch, checks the copy, then deletes the branch
+# (backend/scripts/restore-drill.ts). The results table is on the run's
+# summary page; the run history is the record that drills happened. See
+# docs/DATA-RESILIENCE.md.
+#
+# Needs (Settings -> Secrets and variables -> Actions):
+#   Secret   NEON_API_KEY     a Neon API key for the production project
+#   Variable NEON_PROJECT_ID  the production project id
+# Optional secrets DATA_ENCRYPTION_KEY and MFA_ENCRYPTION_KEY (the production
+# values) also prove encrypted fields still decrypt; without them those
+# checks are skipped. Until NEON_API_KEY is set, a run fails with a message
+# saying so, which doubles as the quarterly reminder.
+
+on:
+  schedule:
+    - cron: '41 2 1 1,4,7,10 *' # 02:41 UTC on 1 Jan, 1 Apr, 1 Jul, 1 Oct
+  workflow_dispatch:
+    inputs:
+      minutes_ago:
+        description: Restore the database as it was this many minutes ago (must be inside Neon's restore window)
+        default: '60'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: restore-drill
+  cancel-in-progress: false
+
+jobs:
+  drill:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - run: npm ci
+      # prisma.config.ts requires DIRECT_URL to be set even though generate
+      # never connects.
+      - run: npx prisma generate
+        env:
+          DIRECT_URL: postgresql://unused@localhost/unused
+      - name: Restore and check
+        env:
+          NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
+          NEON_PROJECT_ID: ${{ vars.NEON_PROJECT_ID }}
+          DATA_ENCRYPTION_KEY: ${{ secrets.DATA_ENCRYPTION_KEY }}
+          MFA_ENCRYPTION_KEY: ${{ secrets.MFA_ENCRYPTION_KEY }}
+          MINUTES_AGO: ${{ inputs.minutes_ago || '60' }}
+        run: |
+          if [ -z "$NEON_API_KEY" ] || [ -z "$NEON_PROJECT_ID" ]; then
+            echo "::error::Restore drill isn't set up yet: add the NEON_API_KEY secret and the NEON_PROJECT_ID variable (docs/DATA-RESILIENCE.md, 'Restore drill')."
+            exit 1
+          fi
+          npx tsx scripts/restore-drill.ts --minutes-ago "$MINUTES_AGO"

@@ -22,6 +22,7 @@ import { formatDisplayId } from '@utils/formatters';
 import { revokeUserSessions } from '@utils/tokenRevocation';
 import { revokeAllRefreshTokens } from '@utils/otpService';
 import { JWT_EXPIRY } from '@utils/jwt';
+import { purgeExpiredData } from '@services/dataRetentionService';
 
 const HOUR_MS = 60 * 60 * 1000;
 const COMPLETION_REMINDER_HOURS = 12;
@@ -1111,6 +1112,9 @@ export async function startBookingWorker() {
           break;
         case JOB_NAMES.LOCATION_CLEANUP_SWEEP:
           await clearStaleWorkerLocations();
+          break;
+        case JOB_NAMES.DATA_RETENTION_SWEEP:
+          await purgeExpiredData();
           break;
         default:
           console.warn(`Unknown booking queue job: ${job.name}`);

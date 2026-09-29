@@ -3,6 +3,7 @@ import app from '@/app';
 import prisma from '@config/database';
 import { getHighestDoleWageReference } from '@/constants/doleWageReference';
 import { createTestUser, deleteTestUser } from './helpers';
+import { ownerDb } from './ownerDb';
 
 // The Price List edits only prices — every job's and every category's
 // starting price — in one all-or-nothing save.
@@ -45,7 +46,7 @@ describe('Admin price list', () => {
   });
 
   afterAll(async () => {
-    await prisma.auditLog.deleteMany({ where: { action: 'PRICE_LIST_UPDATED', actorId: { in: createdUserIds } } });
+    await ownerDb.auditLog.deleteMany({ where: { action: 'PRICE_LIST_UPDATED', actorId: { in: createdUserIds } } });
     await prisma.serviceType.deleteMany({ where: { id: serviceTypeId } });
     for (const id of createdUserIds) await deleteTestUser(id);
     await prisma.$disconnect();

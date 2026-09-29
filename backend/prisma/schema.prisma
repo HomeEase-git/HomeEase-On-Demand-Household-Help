@@ -419,6 +419,7 @@ model AuthToken {
   @@index([userId])
   @@index([token])
   @@index([sessionId])
+  @@index([expiresAt]) // retention purge (dataRetentionService)
 }
 
 // One row per user (currently only ever created for ADMIN accounts, but not
@@ -2150,6 +2151,7 @@ model Notification {
   @@index([userId])
   @@index([isRead])
   @@index([userId, isRead])
+  @@index([createdAt]) // retention purge (dataRetentionService)
 }
 
 // ============================================================================

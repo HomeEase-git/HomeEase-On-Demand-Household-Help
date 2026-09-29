@@ -91,13 +91,25 @@ jobs:
       - run: npm audit --omit=dev --audit-level=high
       - run: npx prisma generate
       - run: npx prisma migrate deploy
+      # The least-privilege roles production's DATABASE_URL should use
+      # (docs/DATA-RESILIENCE.md). Fails if any privilege check fails.
+      - run: npx tsx scripts/db-roles.ts
+        env:
+          APP_DB_PASSWORD: ci-app-role-password
+          READONLY_DB_PASSWORD: ci-readonly-role-password
       - run: npx tsc --noEmit
       - run: npm run typecheck:tooling
       # tsc --noEmit only type-checks; this compiles + rewrites path aliases
       # (tsc-alias) so a `dist/` that can't actually `require()` its own
       # modules fails CI instead of only blowing up at deploy time.
       - run: npm run build
+      # As the app role, like production: a change that needs more database
+      # rights than the app role has (a schema change at runtime, editing
+      # the audit log or ledger) fails here. Tests clean up audit and ledger
+      # rows through DIRECT_URL, the owner (tests/ownerDb.ts).
       - run: npm test
+        env:
+          DATABASE_URL: postgresql://homeease_app:ci-app-role-password@localhost:5432/homeease_ci
       # Exercises the real BullMQ queues against a real (ephemeral,
       # redis-memory-server-provisioned) Redis — npm test above mocks these
       # exact modules out, so this is what actually catches a real-queue

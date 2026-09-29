@@ -17,6 +17,7 @@ import {
 import { expireOverduePendingBookings } from '@services/pendingExpirySweep';
 import { flagWorkersOverVatThreshold } from '@services/vatSummaryService';
 import { syncXenditFees } from '@services/ledgerFeeSyncService';
+import { purgeExpiredData } from '@services/dataRetentionService';
 
 const router = Router();
 
@@ -33,6 +34,7 @@ const TASKS = {
   'flag-expired-kyc': flagExpiredKycDocuments,
   'auto-suspend-workers': autoSuspendUnderperformingWorkers,
   'clear-stale-locations': clearStaleWorkerLocations,
+  'purge-expired-data': purgeExpiredData,
   // Books Xendit's fees into the ledger (no-op until the ledger is opened).
   'sync-xendit-fees': syncXenditFees,
 } satisfies Record<string, () => Promise<unknown>>;

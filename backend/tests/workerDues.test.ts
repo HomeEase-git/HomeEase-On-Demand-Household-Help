@@ -22,6 +22,7 @@ import {
   DuesAdjustmentError,
 } from '@services/debtLedgerService';
 import { createTestUser, deleteTestUser, createTestBooking, deleteTestBooking } from './helpers';
+import { ownerDb } from './ownerDb';
 
 const { createRefund, retrieveRefund } = require('@services/xenditService');
 
@@ -58,7 +59,7 @@ describe('Worker dues ledger', () => {
   beforeEach(async () => {
     (createRefund as jest.Mock).mockReset();
     (retrieveRefund as jest.Mock).mockReset();
-    await prisma.debtLedgerEntry.deleteMany({ where: { workerProfileId } });
+    await ownerDb.debtLedgerEntry.deleteMany({ where: { workerProfileId } });
     await prisma.workerProfile.update({
       where: { id: workerProfileId },
       data: { commissionOwed: 0, compensationCredit: 0, debtHoldAt: null },

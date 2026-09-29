@@ -3,6 +3,7 @@ import 'dotenv/config';
 import { flushSentry } from './instrument';
 import * as Sentry from '@sentry/node';
 import { checkEnvironment } from '@config/envCheck';
+import { checkDatabasePrivileges } from '@config/dbPrivilegeCheck';
 import dns from 'node:dns';
 import http from 'http';
 import type { Server as SocketIOServer } from 'socket.io';
@@ -86,6 +87,15 @@ const startServer = async () => {
     // Test database connection
     await prisma.$connect();
     console.log('Database connected');
+
+    if (process.env.NODE_ENV === 'production') {
+      checkDatabasePrivileges()
+        .then((warnings) => {
+          for (const warning of warnings) console.warn(`Config warning: ${warning}`);
+          if (warnings.length > 0) Sentry.captureMessage(`Production config: ${warnings.join(' | ')}`, 'warning');
+        })
+        .catch((error) => console.error('Could not check database privileges:', error));
+    }
 
     server = http.createServer(app);
     io = initSocket(server);
