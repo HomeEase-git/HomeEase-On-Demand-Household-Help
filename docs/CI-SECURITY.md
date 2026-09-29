@@ -14,7 +14,7 @@ repository's **Security** tab.
 | **Dependency review** | `security.yml` → `dependency-review` | A PR adding or upgrading to a package with a known high/critical vulnerability, in any app, including dev and build tools | Such a package is added |
 | **Container scan** (Trivy) | `security.yml` → `images` | Known vulnerabilities in the backend and admin web Docker images (OS packages + npm). Also starts the backend image the way Render does (migrations, then the app) | A **critical** vulnerability with a released fix. Everything high and critical is reported to the Security tab either way |
 | **npm audit** | `ci.yml` | Known vulnerabilities in what each app ships | Backend and web: high or critical. Mobile: critical (see below) |
-| **SBOM** | `security.yml` → `sbom` | Nothing: records every shipped dependency (CycloneDX) for each `main` commit, kept 90 days (Actions → run → Artifacts) | Never |
+| **SBOM** | `security.yml` → `sbom` | Nothing: records every shipped dependency (CycloneDX). Kept 90 days for each `main` commit and 7 days for PRs (Actions → run → Artifacts) | The SBOM can't be generated (e.g. an unreadable lockfile) |
 
 Also on:
 - **GitHub secret scanning with push protection** blocks a push that contains a recognised provider key before it reaches the repository.
