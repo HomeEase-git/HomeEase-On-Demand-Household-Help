@@ -15,7 +15,7 @@
 export const LEGAL_VERSIONS = {
   CLIENT_USER_AGREEMENT: "2026-09-27",
   WORKER_SERVICE_AGREEMENT: "2026-09-27",
-  PRIVACY_NOTICE: "2026-09-29",
+  PRIVACY_NOTICE: "2026-09-30",
   KYC_CONSENT: "2026-09-25",
 } as const;
 
@@ -333,11 +333,11 @@ export const PRIVACY_POLICY: LegalDocument = {
         "The other person in a booking: a worker sees your name, service address and phone number; a client sees the worker's name, photo, rating, phone number, and live location while the worker travels to that job.",
         "Clients browsing see a worker's public profile only (never their ID documents, phone number or home address).",
         "HomeEase admins, who use two-factor login and whose actions are logged.",
-        "Service providers that process data for us: Supabase (file storage), Neon (database, Singapore), Render (servers, Singapore), Anthropic (automated document and resume review, USA), Xendit (payments and payouts), Google Maps (address lookup and distances), PhilSMS (text messages), Brevo (email), Expo / Google Firebase (push notifications), and Backblaze (encrypted backups, USA) with GitHub (runs our automated backups, USA).",
+        "Service providers that process data for us: Supabase (file storage, Singapore), Neon (database, Singapore), Render (servers, Singapore), Anthropic (automated document and resume review, USA), Xendit (payments and payouts; the USA, the Philippines and Indonesia), Google Maps (address lookup and distances), PhilSMS (text messages), Brevo (email; the European Union and the USA), Expo / Google Firebase (push notifications), and Backblaze (encrypted backups, USA) with GitHub (runs our automated backups, USA).",
         "Government authorities such as the BIR, when the law requires it.",
       ],
       paragraphs: [
-        "Some of these providers store or process data outside the Philippines (Singapore and the USA). We remain responsible for your data when they do.",
+        "Some of these providers store or process data outside the Philippines (Singapore, the USA, the European Union and Indonesia). We remain responsible for your data when they do.",
       ],
     },
     {
