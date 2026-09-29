@@ -4,7 +4,8 @@ import { toDataURL } from 'qrcode';
 import prisma from '@config/database';
 import { encrypt, decrypt } from '@utils/encryption';
 import { comparePassword } from '@utils/passwordHash';
-import { isOtpAttemptLocked, recordFailedOtpAttempt, clearOtpAttempts } from '@utils/otpAttemptLimiter';
+import { isOtpAttemptLocked, recordFailedOtpAttempt, clearOtpAttempts, MAX_OTP_ATTEMPTS } from '@utils/otpAttemptLimiter';
+import { raiseSecurityAlert } from '@services/securityAlertService';
 
 // TOTP (RFC 6238) setup/verification for MFA — mandatory for ADMIN, opt-in
 // for CLIENT/WORKER — see controllers/authController.ts
@@ -124,6 +125,18 @@ export const verifyMfaCode = async (userId: string, code: string): Promise<boole
     return true;
   }
 
-  await recordFailedOtpAttempt(userId, MFA_ATTEMPT_TYPE, MFA_ATTEMPT_TTL_SECONDS);
+  const attempts = await recordFailedOtpAttempt(userId, MFA_ATTEMPT_TYPE, MFA_ATTEMPT_TTL_SECONDS);
+  // Reaching the lockout means someone who already has the password is
+  // guessing the second factor.
+  if (attempts === MAX_OTP_ATTEMPTS) {
+    const user = await prisma.user.findUnique({ where: { id: userId }, select: { email: true, role: true, fullName: true } });
+    await raiseSecurityAlert({
+      type: 'MFA_LOCKOUT',
+      severity: 'high',
+      message: `${user?.email ?? userId} entered ${MAX_OTP_ATTEMPTS} wrong two-step codes after a correct password — the password is probably known to someone else. Two-step sign-in is locked for a few minutes.`,
+      actor: { id: userId, email: user?.email, role: user?.role, name: user?.fullName },
+      throttleKey: userId,
+    });
+  }
   return false;
 };

@@ -1,4 +1,5 @@
 import { Request, Response, NextFunction } from 'express';
+import { setRequestUser } from '@utils/requestContext';
 import { verifyToken } from '@utils/jwt';
 import { isUserSessionRevoked, isSessionRevoked } from '@utils/tokenRevocation';
 import type { JwtPayload } from '../types';
@@ -57,6 +58,7 @@ export const authMiddleware = async (
     }
 
     req.user = decoded;
+    setRequestUser(decoded.userId);
     next();
   } catch (error) {
     res.status(401).json({

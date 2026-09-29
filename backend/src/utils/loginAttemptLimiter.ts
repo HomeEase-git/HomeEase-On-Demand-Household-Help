@@ -17,7 +17,8 @@ export const LOGIN_LOCKED_MESSAGE =
 export const isLoginLocked = (email: string): Promise<boolean> =>
   isOtpAttemptLocked(email, LOGIN_ATTEMPT_TYPE, MAX_LOGIN_ATTEMPTS);
 
-export const recordFailedLogin = (email: string): Promise<void> =>
-  recordFailedOtpAttempt(email, LOGIN_ATTEMPT_TYPE, LOGIN_LOCKOUT_MINUTES * 60);
+/** Counts a failed password check; true if this failure just locked the account. */
+export const recordFailedLogin = async (email: string): Promise<boolean> =>
+  (await recordFailedOtpAttempt(email, LOGIN_ATTEMPT_TYPE, LOGIN_LOCKOUT_MINUTES * 60)) === MAX_LOGIN_ATTEMPTS;
 
 export const clearFailedLogins = (email: string): Promise<void> => clearOtpAttempts(email, LOGIN_ATTEMPT_TYPE);

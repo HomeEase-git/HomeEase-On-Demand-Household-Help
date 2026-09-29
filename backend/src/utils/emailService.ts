@@ -240,6 +240,10 @@ const send = async (to: string, subject: string, html: string, label: string): P
   }
 };
 
+// User-supplied text (names) must not become markup in an email.
+const escapeHtml = (value: string): string =>
+  value.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
+
 // Diagnostic — used by POST /internal/diag/email-test to exercise the active
 // transport without creating a signup. Not a user-facing template.
 export const sendTestEmail = async (to: string): Promise<{ provider: string; messageId?: string }> => {
@@ -295,11 +299,56 @@ export const sendWelcomeEmail = async (email: string, fullName: string): Promise
     'Welcome to HomeEase',
     `
       <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-        <h2 style="color: #4169E1;">Welcome to HomeEase, ${fullName}!</h2>
+        <h2 style="color: #4169E1;">Welcome to HomeEase, ${escapeHtml(fullName)}!</h2>
         <p>Your account has been successfully verified. You can now access all HomeEase features.</p>
         <p>Thank you for joining us.</p>
       </div>
     `,
     'welcome email',
+  );
+};
+
+/**
+ * Security alert for the platform's admins (services/securityAlertService.ts).
+ * `details` are label/value rows; values are escaped.
+ */
+export const sendSecurityAlertEmail = async (
+  to: string,
+  subject: string,
+  summary: string,
+  details: Array<[string, string]>,
+): Promise<void> => {
+  const rows = details
+    .map(([label, value]) => `<tr><td style="padding:4px 12px 4px 0;color:#64748b;">${escapeHtml(label)}</td><td style="padding:4px 0;">${escapeHtml(value)}</td></tr>`)
+    .join('');
+  await send(
+    to,
+    `[HomeEase security] ${subject}`,
+    `
+      <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+        <h2 style="color: #B91C1C;">${escapeHtml(subject)}</h2>
+        <p>${escapeHtml(summary)}</p>
+        <table style="font-size: 14px; border-collapse: collapse;">${rows}</table>
+        <p style="color:#64748b;font-size:13px;">Full history: admin site → Reports → Logs → Security.
+        What to do: docs/MONITORING.md in the repository.</p>
+      </div>
+    `,
+    'security alert email',
+  );
+};
+
+/** Tells a user about a change to their own account's security. */
+export const sendAccountSecurityEmail = async (to: string, subject: string, message: string): Promise<void> => {
+  await send(
+    to,
+    subject,
+    `
+      <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+        <h2 style="color: #4169E1;">${escapeHtml(subject)}</h2>
+        <p>${escapeHtml(message)}</p>
+        <p>If this wasn't you, reset your password from the HomeEase app right away and contact support.</p>
+      </div>
+    `,
+    'account security email',
   );
 };

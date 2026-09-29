@@ -31,7 +31,7 @@ const TITLES = {
   export: ['Export Reports', 'Export data to CSV or PDF'],
 }
 
-const LOG_CATEGORY_TABS = ['All', 'Admin Actions', 'Login History', 'System Errors', 'Status Changes']
+const LOG_CATEGORY_TABS = ['All', 'Security', 'Admin Actions', 'Login History', 'System Errors', 'Status Changes']
 
 const EXPORT_FETCHERS = {
   Bookings: fetchBookings,

@@ -5,7 +5,15 @@ import { hashPassword, comparePassword } from '@utils/passwordHash';
 import { generateToken, verifyToken } from '@utils/jwt';
 import { validateEmail, validatePhone, validateOtp } from '@utils/validators';
 import { checkNewPassword } from '@utils/passwordPolicy';
-import { isLoginLocked, recordFailedLogin, clearFailedLogins, LOGIN_LOCKED_MESSAGE } from '@utils/loginAttemptLimiter';
+import {
+  isLoginLocked,
+  recordFailedLogin,
+  clearFailedLogins,
+  LOGIN_LOCKED_MESSAGE,
+  LOGIN_LOCKOUT_MINUTES,
+  MAX_LOGIN_ATTEMPTS,
+} from '@utils/loginAttemptLimiter';
+import { notifyAccountSecurityEvent, raiseSecurityAlert, recordPasswordChange } from '@services/securityAlertService';
 import { errorResponse } from '@utils/errorResponse';
 import { writeAuditLog } from '@utils/auditLog';
 import { notifyUser } from '@utils/notify';
@@ -60,6 +68,27 @@ const normalizeEmail = (value: unknown): string => {
 // Compared against when the email has no account, so "no such user" takes
 // as long as "wrong password" and response timing can't enumerate accounts.
 let dummyPasswordHash: Promise<string> | null = null;
+
+/**
+ * Counts a failed password check. The failure that locks the account raises
+ * a security alert — high for an admin account; for everyone else one email
+ * per 15 minutes carries the count, which is what shows password spraying.
+ */
+const failPasswordCheck = async (
+  email: string,
+  user: { id: string; email: string; role: string; fullName: string } | null,
+): Promise<void> => {
+  if (!(await recordFailedLogin(email))) return;
+  const isAdmin = user?.role === 'ADMIN';
+  const who = isAdmin ? 'Admin account' : user ? 'Account' : 'Unregistered email';
+  await raiseSecurityAlert({
+    type: 'LOGIN_LOCKOUT',
+    severity: isAdmin ? 'high' : 'medium',
+    message: `${who} ${email.slice(0, 254)} was locked after ${MAX_LOGIN_ATTEMPTS} wrong passwords within ${LOGIN_LOCKOUT_MINUTES} minutes.`,
+    actor: user ? { id: user.id, email: user.email, role: user.role, name: user.fullName } : { email: email.slice(0, 254) },
+    throttleKey: isAdmin ? email : 'non-admin',
+  });
+};
 
 /** bcrypt check that costs the same whether or not `user` exists. */
 const passwordMatches = async (user: { password: string } | null, password: string): Promise<boolean> => {
@@ -244,7 +273,7 @@ export const login = async (req: Request, res: Response) => {
 
     if (!user) {
       await passwordMatches(null, password);
-      await recordFailedLogin(email);
+      await failPasswordCheck(email, null);
       await writeAuditLog({
         action: 'USER_LOGIN_FAILED',
         category: 'LOGIN',
@@ -257,7 +286,7 @@ export const login = async (req: Request, res: Response) => {
     const isPasswordValid = await passwordMatches(user, password);
 
     if (!isPasswordValid) {
-      await recordFailedLogin(email);
+      await failPasswordCheck(email, user);
       await writeAuditLog({
         actorId: user.id,
         actorName: user.fullName,
@@ -614,6 +643,15 @@ export const mfaDisable = async (req: Request, res: Response) => {
       level: 'WARN',
       message: `${user.fullName} disabled MFA`,
     });
+    if (user.role === 'ADMIN') {
+      await raiseSecurityAlert({
+        type: 'ADMIN_MFA_DISABLED',
+        severity: 'high',
+        message: `Admin ${user.email} turned off two-step sign-in. They'll be asked to set it up again at next sign-in; if they didn't do this, their password and session are compromised.`,
+        actor: { id: user.id, email: user.email, role: user.role, name: user.fullName },
+        throttleKey: user.id,
+      });
+    }
 
     return res.json({ success: true, message: 'MFA disabled' });
   } catch (error) {
@@ -878,6 +916,7 @@ export const resetPassword = async (req: Request, res: Response) => {
     // lifts any sign-in lockout.
     await revokeAllSessions(user.id);
     await clearFailedLogins(email);
+    await recordPasswordChange(user, 'reset');
 
     return res.json({ success: true, message: 'Password reset successfully' });
   } catch (error) {
@@ -909,13 +948,25 @@ export const refreshToken = async (req: Request, res: Response) => {
       } else {
         await prisma.authToken.deleteMany({ where: { id: existing.tokenId } });
       }
-      await writeAuditLog({
-        actorId: existing.userId,
-        action: 'REFRESH_TOKEN_REUSE',
-        category: 'LOGIN',
-        level: 'WARN',
-        message: `Reused refresh token detected; session ${existing.sessionId ?? '(legacy)'} revoked`,
+      const owner = await prisma.user.findUnique({
+        where: { id: existing.userId },
+        select: { id: true, email: true, role: true, fullName: true },
       });
+      await raiseSecurityAlert({
+        type: 'REFRESH_TOKEN_REUSE',
+        severity: 'high',
+        message: `A sign-in token for ${owner?.email ?? existing.userId} was used after it had already been replaced — a copy is in someone else's hands. That device's session (${existing.sessionId ?? 'legacy'}) was ended.`,
+        actor: owner ? { id: owner.id, email: owner.email, role: owner.role, name: owner.fullName } : { id: existing.userId },
+        throttleKey: existing.userId,
+        metadata: { sessionId: existing.sessionId },
+      });
+      if (owner) {
+        notifyAccountSecurityEvent(
+          owner.email,
+          'We signed out one of your devices',
+          'One of your HomeEase sign-ins was used from two places at once, which can mean someone copied it. We signed that device out to protect your account. Sign in again on your device; if you see this again, change your password.',
+        );
+      }
       return res.status(401).json(errorResponse(401, 'Invalid or expired refresh token'));
     }
 
@@ -1007,7 +1058,7 @@ export const requestSuspensionReview = async (req: Request, res: Response) => {
     }
     const user = await prisma.user.findUnique({ where: { email } });
     if (!(await passwordMatches(user, password)) || !user) {
-      await recordFailedLogin(email);
+      await failPasswordCheck(email, user);
       return res.status(401).json(errorResponse(401, 'Invalid credentials'));
     }
     await clearFailedLogins(email);
@@ -1365,7 +1416,7 @@ export const reactivateAccount = async (req: Request, res: Response) => {
     }
     const user = email ? await prisma.user.findUnique({ where: { email } }) : null;
     if (!password || !(await passwordMatches(user, password)) || !user) {
-      if (email) await recordFailedLogin(email);
+      if (email) await failPasswordCheck(email, user);
       return res.status(401).json(errorResponse(401, 'Invalid credentials'));
     }
     await clearFailedLogins(email);

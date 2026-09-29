@@ -1,7 +1,7 @@
 import { Prisma } from '@prisma/client';
 import prisma from '@config/database';
 
-export type AuditCategory = 'ADMIN_ACTION' | 'LOGIN' | 'SYSTEM_ERROR' | 'STATUS_CHANGE';
+export type AuditCategory = 'ADMIN_ACTION' | 'LOGIN' | 'SYSTEM_ERROR' | 'STATUS_CHANGE' | 'SECURITY';
 export type AuditLevel = 'INFO' | 'WARN' | 'ERROR';
 
 interface AuditLogEntry {
