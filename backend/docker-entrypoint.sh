@@ -5,12 +5,15 @@
 # `prisma migrate deploy` is idempotent and takes a Postgres advisory lock,
 # so it is safe when several instances boot at once. If you would rather run
 # migrations as a separate release step, start the container with
-# RUN_MIGRATIONS=false and run `npx prisma migrate deploy` yourself.
+# RUN_MIGRATIONS=false and run migrations yourself: inside this image
+# `/app/node_modules/.bin/prisma migrate deploy` (the image has no npx), or
+# `npx prisma migrate deploy` from a backend/ checkout.
 set -e
 
 if [ "${RUN_MIGRATIONS:-true}" = "true" ]; then
   echo "[entrypoint] prisma migrate deploy..."
-  npx prisma migrate deploy
+  # The app's own Prisma CLI: the runtime image has no npm/npx (Dockerfile).
+  /app/node_modules/.bin/prisma migrate deploy
 else
   echo "[entrypoint] RUN_MIGRATIONS=false — skipping migrations."
 fi

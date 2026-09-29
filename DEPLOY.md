@@ -228,6 +228,7 @@ that gate is done; keep it green on whatever branch you deploy from.
 ## Production checklist (account-side steps)
 
 Every secret, what it protects and how to rotate it: [docs/SECRETS.md](docs/SECRETS.md).
+Automated security checks in CI, and the repository settings to turn on: [docs/CI-SECURITY.md](docs/CI-SECURITY.md).
 Security alerts, logs and uptime monitoring: [docs/MONITORING.md](docs/MONITORING.md) — set `SECURITY_ALERT_EMAIL`, Sentry alert rules and an external uptime monitor from its *Account-side setup*.
 
 Things only the account owner can do. The code for each is already in place.

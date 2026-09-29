@@ -10,6 +10,11 @@ name: E2E Sandbox
 on:
   workflow_dispatch: {}
 
+# Least privilege: jobs can read the code and nothing else (no pushing,
+# no editing PRs or releases) unless a job asks for more.
+permissions:
+  contents: read
+
 jobs:
   e2e-sandbox:
     runs-on: ubuntu-latest
@@ -74,8 +79,8 @@ jobs:
       run:
         working-directory: backend
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           # See ci.yml's backend job: @supabase/supabase-js needs Node's
           # native WebSocket (stable from Node 22), and this workflow boots

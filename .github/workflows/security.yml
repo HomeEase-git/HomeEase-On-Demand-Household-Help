@@ -1,0 +1,205 @@
+name: Security
+
+# Automated security checks (docs/CI-SECURITY.md):
+#   codeql            code scanning for injection, XSS, path traversal, etc.
+#   secrets           gitleaks: the PR's commits; the whole history weekly
+#   dependency-review a PR may not add a dependency with a known high/critical vuln
+#   images            Trivy: known vulns in the backend and web Docker images
+#   sbom              list of every dependency shipped, kept per main commit
+#
+# Third-party actions are pinned to a full commit SHA (a tag can be moved to
+# different code); Dependabot keeps the pins current. Downloaded scanner
+# binaries are checked against SHA-256s written here, not a checksum file
+# fetched from the same place.
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  schedule:
+    - cron: '23 3 * * 1' # Mondays 03:23 UTC — new advisories and scanner rules
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: security-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  GITLEAKS_VERSION: 8.30.1
+  GITLEAKS_SHA256: 551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb
+  TRIVY_VERSION: 0.74.0
+  TRIVY_SHA256: 2ae6fe3ee734b7fdf11335663e18c75ea12dccc76062f09f164a3b0f8be4371a
+
+jobs:
+  codeql:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write # upload results to the Security tab
+      actions: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: github/codeql-action/init@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2
+        with:
+          languages: javascript-typescript
+          build-mode: none
+          queries: security-extended
+          config: |
+            paths-ignore:
+              - '**/node_modules'
+              - '**/dist'
+              - 'mobile/android'
+              - 'x_files'
+      - uses: github/codeql-action/analyze@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2
+        with:
+          category: /language:javascript-typescript
+
+  secrets:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: Install gitleaks
+        run: |
+          curl -sSfL -o gitleaks.tgz \
+            "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          echo "${GITLEAKS_SHA256}  gitleaks.tgz" | sha256sum -c -
+          tar -xzf gitleaks.tgz gitleaks
+      # A PR is checked commit by commit (a secret added then removed in the
+      # same PR still leaked). Pushes, the weekly run and manual runs scan the
+      # whole history against the latest rules. Reviewed old findings are
+      # listed, with reasons, in .gitleaksignore.
+      - name: Scan
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            ./gitleaks git . --redact --no-banner --log-opts="${BASE}..${HEAD}"
+          else
+            ./gitleaks git . --redact --no-banner
+          fi
+
+  dependency-review:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # Fails a PR that adds or upgrades to a dependency with a known high or
+      # critical vulnerability, in any of backend/web/mobile, including dev
+      # and build-time packages the per-app npm audit gates leave out.
+      - uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
+        with:
+          fail-on-severity: high
+
+  images:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    # For the backend start-up smoke test below.
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: smoke
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: backend
+            context: ./backend
+            file: backend/Dockerfile
+          - name: web
+            context: .
+            file: web/Dockerfile
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+      - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.file }}
+          push: false
+          load: true
+          tags: homeease-${{ matrix.name }}:scan
+          cache-from: type=gha
+      # Production (Render) runs this image. Start it the same way: the real
+      # entrypoint applies every migration to an empty database, then the
+      # real server must come up and report ready. Keys are random (the
+      # production startup check rejects placeholders); Redis points nowhere,
+      # which the server must survive. Then check the package managers
+      # removed from the runtime image are really gone.
+      - name: Start-up smoke test
+        if: matrix.name == 'backend'
+        run: |
+          key() { openssl rand -hex 32; }
+          docker run -d --name smoke --network host             -e PORT=3999             -e DATABASE_URL=postgresql://postgres:postgres@localhost:5432/smoke             -e DIRECT_URL=postgresql://postgres:postgres@localhost:5432/smoke             -e JWT_SECRET="$(key)" -e DATA_ENCRYPTION_KEY="$(key)" -e MFA_ENCRYPTION_KEY="$(key)"             -e SUPABASE_URL=https://smoke.supabase.co -e SUPABASE_SERVICE_KEY="$(key)" -e SUPABASE_ANON_KEY="$(key)"             -e REDIS_URL=redis://127.0.0.1:6399             homeease-backend:scan
+          ready=
+          for _ in $(seq 1 60); do
+            if curl -sf http://127.0.0.1:3999/health/ready; then echo; ready=1; break; fi
+            [ "$(docker inspect -f '{{.State.Running}}' smoke)" = "true" ] || break
+            sleep 2
+          done
+          docker logs smoke 2>&1 | tail -40
+          [ -n "$ready" ] || { echo "backend image did not become ready"; exit 1; }
+          docker exec smoke sh -c 'for tool in npm npx corepack; do if command -v "$tool"; then echo "$tool is still in the image"; exit 1; fi; done'
+          docker rm -f smoke
+      - name: Install Trivy
+        run: |
+          curl -sSfL -o trivy.tgz \
+            "https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}/trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz"
+          echo "${TRIVY_SHA256}  trivy.tgz" | sha256sum -c -
+          tar -xzf trivy.tgz trivy
+      # Everything HIGH/CRITICAL goes to the Security tab; only a CRITICAL with
+      # a released fix fails the build (see docs/CI-SECURITY.md).
+      - name: Report vulnerabilities
+        run: |
+          ./trivy image --quiet --severity HIGH,CRITICAL --format sarif \
+            --output trivy-${{ matrix.name }}.sarif homeease-${{ matrix.name }}:scan
+      - uses: github/codeql-action/upload-sarif@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2
+        if: always() && hashFiles(format('trivy-{0}.sarif', matrix.name)) != ''
+        with:
+          sarif_file: trivy-${{ matrix.name }}.sarif
+          category: trivy-${{ matrix.name }}
+      - name: Fail on fixable critical vulnerabilities
+        run: |
+          ./trivy image --quiet --severity CRITICAL --ignore-unfixed --exit-code 1 \
+            homeease-${{ matrix.name }}:scan
+
+  # Runs on PRs too, so a lockfile the SBOM tool can't read fails before
+  # merge; only main's copies are kept long.
+  sbom:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+      # CycloneDX from the lockfiles: what actually ships (dev tooling left
+      # out). Answers "are we affected?" when the next advisory lands.
+      - name: Generate SBOMs
+        run: |
+          mkdir sbom
+          for app in backend web mobile; do
+            (cd "$app" && npm sbom --package-lock-only --omit dev --sbom-format cyclonedx > "../sbom/homeease-$app.cdx.json")
+          done
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: sbom-${{ github.event.pull_request.head.sha || github.sha }}
+          path: sbom/
+          retention-days: ${{ github.event_name == 'pull_request' && 7 || 90 }}
