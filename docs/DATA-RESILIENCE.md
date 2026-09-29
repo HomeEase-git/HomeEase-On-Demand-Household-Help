@@ -8,7 +8,8 @@ how long each kind of data is kept, and which database login may do what.
 | Store | Holds | Protection today |
 |---|---|---|
 | **Neon Postgres** (project `homeease-prod`) | Everything structured: accounts, bookings, payments, ledger, audit log, chat text | Neon keeps every change for a restore window and can rebuild the database as it was at any moment inside it. The window is **6 hours** on the Free plan (Neon console → project → Settings → Storage / history retention shows the current value). Neon replicates storage across availability zones, so a single disk or server failure loses nothing |
-| **Supabase Storage** | Files: KYC IDs and selfies, resumes, certifications, chat images, avatars, booking photos, tax certificates | **No backup.** Supabase database backups don't cover Storage files. A deleted or overwritten file is gone |
+| **Supabase Storage** | Files: KYC IDs and selfies, resumes, certifications, chat images, avatars, booking photos, tax certificates | Supabase itself keeps no backup of these files. The nightly off-site backup copies every bucket |
+| **Off-site backup** (Backblaze B2, see below) | An encrypted copy of the database and of every file, made each night, kept 30 days | Separate provider and account from Neon and Supabase; only the private key in the password manager can read it |
 | **Redis** (Render Key Value) | Rate-limit and login-lockout counters, session revocations, the job queue | Nothing to back up. If it's wiped: counters restart at zero; repeating jobs are re-registered at the next boot; the hourly cron backstop re-runs every sweep, including expiring overdue pending bookings. Access-token revocations ("log out everywhere", suspensions) are forgotten, so a revoked access token works again until it expires: 15 minutes once `JWT_EXPIRY` is 900. Refresh tokens are in Postgres and stay revoked |
 | **Secrets** | Render, Vercel and EAS settings; password manager | See [SECRETS.md](SECRETS.md). A backup is useless without `DATA_ENCRYPTION_KEY` and `MFA_ENCRYPTION_KEY`: the values they encrypted can't be read |
 
@@ -16,7 +17,8 @@ how long each kind of data is kept, and which database login may do what.
 any second (recovery point: the moment before the damage). A restored branch
 is ready in well under a minute; switching the app to it takes one Render
 redeploy. The quarterly drill measures the real time. Damage noticed only
-**after** the window has passed can't be undone from Neon (see *Known gaps*).
+**after** that window can still be undone from the off-site backup, to the
+state of any of the last 30 nights (anything since that night is lost).
 
 ## Restoring
 
@@ -51,10 +53,12 @@ since, stays as it is.
    reportable breach; follow the incident runbook (governance phase).
 4. Record what happened and why, and what changes so it can't recur.
 
-### C. Neon itself is unavailable
+### C. Older damage, lost files, or Neon/Supabase unavailable
 
-Nothing outside Neon holds a copy today (see *Known gaps*). Watch Neon's
-status page; the app is down until Neon is back.
+Use the off-site backup (below): *Getting a backup back*. It restores the
+database and files as they were on a chosen night; everything after that
+night is lost, as in B. For a Neon outage, wait for Neon first unless it's
+long: restoring elsewhere means a new database and a new `DATABASE_URL`.
 
 ## Restore drill (every quarter)
 
@@ -104,6 +108,94 @@ which works as the reminder.
 |---|---|---|---|
 | 2026-09-29 | ✅ Pass ([run](https://github.com/HomeEase-git/HomeEase-On-Demand-Household-Help/actions/runs/36565675185)) | 11 s to a queryable copy; 23 s including checks | Restored to 1 h before; 17 users, 2,925 rows, 54 tables; ledger balanced. Decryption checks skipped (keys not in GitHub). First run of the Neon branch path |
 
+## Off-site backup (every night)
+
+`.github/workflows/offsite-backup.yml` runs `backend/scripts/offsite-backup.sh`
+at 02:17 Philippine time:
+1. Dumps the database as `homeease_readonly`, restores the dump into a
+   scratch database on the GitHub runner, and runs the restore-drill checks
+   on it. A copy that doesn't restore fails the run and isn't uploaded.
+2. Copies every Supabase Storage bucket.
+3. Encrypts both with [age](https://age-encryption.org) to your public key
+   and uploads them to Backblaze B2 as `<date and time>/db.dump.age`,
+   `files.tar.age` and `SHA256SUMS`. A folder without `SHA256SUMS` is an
+   incomplete run.
+
+Nothing unencrypted leaves the runner. The upload key can only write: it
+can't read, list or delete backups, so a leaked key exposes nothing and
+can't wipe them. Every pull request that changes the backup runs the full
+backup and restore against throwaway services first (`self-test` job). A
+failed nightly run emails you.
+
+Copies leave the Philippines (B2 has no Asian region; Neon is in
+Singapore). The Data Privacy Act allows this with the same protection; the
+Privacy Policy should say personal data is stored with providers abroad
+(governance phase).
+
+### Setting it up (once, about 30 minutes)
+
+**1. Encryption key.** In PowerShell: `winget install FiloSottile.age`, open
+a new window, then `age-keygen -o homeease-backup-key.txt`. It prints the
+**public key** (`age1…`). Store the whole file's contents as a secure note in
+the password manager, and a second copy offline (printed, or on a USB stick
+kept somewhere safe): **without this key no backup can ever be read.** Then
+delete the file.
+
+**2. Backblaze B2** (backblaze.com, B2 Cloud Storage; free up to 10 GB):
+- Create a bucket, e.g. `homeease-backups`: **Private**. Turn on **Object
+  Lock** with a default retention of 30 days, so nobody, not even your own
+  account, can delete a copy before it's 30 days old.
+- Bucket → **Lifecycle Settings** → custom: hide files 30 days after upload,
+  delete 1 day after hiding. That keeps 30 nights.
+- **Application Keys → Add a New Application Key**: only this bucket, type
+  **Write Only**. Note the keyID and applicationKey (shown once).
+- The bucket page shows the S3 endpoint, e.g. `s3.us-west-004.backblazeb2.com`;
+  the region is the middle part (`us-west-004`).
+
+**3. Supabase file access.** Supabase → project → Project Settings →
+Storage → **S3 Connection**: enable it, note the endpoint and region, and
+create an access key. It can read and write every bucket, so it lives only in
+GitHub's secrets.
+
+**4. GitHub** (Settings → Secrets and variables → Actions), or with
+`gh secret set NAME` / `gh variable set NAME --body VALUE`:
+
+| Kind | Name | Value |
+|---|---|---|
+| Secret | `BACKUP_DATABASE_URL` | The `homeease_readonly` **direct** string (host without `-pooler`) with its password |
+| Secret | `OFFSITE_ACCESS_KEY_ID` / `OFFSITE_SECRET_ACCESS_KEY` | B2 keyID / applicationKey |
+| Secret | `SUPABASE_S3_ACCESS_KEY_ID` / `SUPABASE_S3_SECRET_ACCESS_KEY` | Supabase S3 access key |
+| Variable | `AGE_RECIPIENT` | The public key, `age1…` |
+| Variable | `OFFSITE_ENDPOINT` | `https://s3.<region>.backblazeb2.com` |
+| Variable | `OFFSITE_REGION` | e.g. `us-west-004` |
+| Variable | `OFFSITE_BUCKET` | e.g. `homeease-backups` |
+| Variable | `SUPABASE_S3_ENDPOINT` | From step 3, e.g. `https://<project>.storage.supabase.co/storage/v1/s3` |
+| Variable | `SUPABASE_S3_REGION` | From step 3 |
+
+**5. First run:** Actions → **Off-site backup** → Run workflow. Check the
+summary (database size, files per bucket), then do the recovery test below
+once, so you know your key works.
+
+### Getting a backup back
+
+1. In B2, create a temporary **Read Only** key for the bucket.
+2. Save the private key from the password manager to a file, e.g. `key.txt`.
+3. From `backend/` in Git Bash (needs `age`, the AWS CLI and PostgreSQL 18's
+   `pg_restore`; `OFFSITE_*` as in the table, with the read key):
+   `bash scripts/offsite-restore.sh latest key.txt restored`
+   (or a folder name instead of `latest`). It checks the files against
+   `SHA256SUMS`, decrypts, and leaves `restored/db.dump` and
+   `restored/files/<bucket>/…`.
+4. Database: create an empty database (a new Neon branch or project), then
+   `pg_restore --no-owner --no-privileges --dbname "<its URL>" restored/db.dump`,
+   or add `--restore-db "<its URL>"` to step 3. Check it with
+   `npx tsx scripts/restore-drill.ts --verify-only "<its URL>"`, then run
+   `scripts/db-roles.ts` on it before pointing the app at it.
+5. Files: upload a bucket back with the AWS CLI against the Supabase S3
+   endpoint, e.g.
+   `aws s3 sync restored/files/kyc-documents s3://kyc-documents --endpoint-url <SUPABASE_S3_ENDPOINT>`.
+6. Delete `key.txt`, the `restored` folder and the temporary B2 key.
+
 ## Retention schedule
 
 Personal data is kept only as long as needed (Data Privacy Act §11(e)).
@@ -124,6 +216,7 @@ from the cron backstop (task `purge-expired-data`); see
 | Chat messages | Kept: they're the other person's record too | Images removed on account deletion | `accountDeletionService.ts` |
 | Contract and consent acceptances | Kept: proof of consent | — | — |
 | Database restore history | Neon's window (6 hours on Free) | Rolls off | Neon |
+| Off-site backups (database and files) | 30 nights | Deleted | B2 lifecycle rule; Object Lock blocks earlier deletion |
 | Server logs, error reports | The hosting plan's retention (Render, Sentry) | Rolls off | Provider |
 
 The Privacy Policy (section 6, "How long we keep it") covers the first rows
@@ -182,15 +275,12 @@ table, re-run the script against production to take away its edit rights.
 
 ## Known gaps
 
-1. **6-hour restore window.** Damage noticed later can't be undone, and no
-   copy exists outside Neon. Two fixes, one decision:
-   - a paid Neon plan with a longer window (days rather than hours), or
-   - a nightly encrypted `pg_dump` (run as `homeease_readonly`) to storage
-     outside Neon, kept 30 days. This needs a storage account and puts a
-     read-only production credential in GitHub.
-2. **Storage files have no backup.** KYC documents and the rest exist only in
-   Supabase. A nightly copy to a second bucket or provider closes this; it
-   needs the same storage decision as above.
+1. **Between the 6-hour window and last night.** Damage noticed more than 6
+   hours later can only be undone to the previous nightly backup, losing
+   that day's changes. A paid Neon plan with a longer restore window would
+   close this if that ever becomes unacceptable.
+2. **Files are backed up nightly, not live.** A file uploaded and then lost
+   the same day isn't in any backup.
 3. **The owner login is still on Render** (`DIRECT_URL`), because the
    container runs migrations when it starts. Moving migrations into a
    separate deploy step would take it off the running server.

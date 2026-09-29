@@ -44,6 +44,10 @@ G = GitHub Actions secret, L = local `.env` only.
 | `GOOGLE_MAPS_ANDROID_API_KEY` | E | Maps SDK in the app (baked into the APK) | Not secret; protected by its restrictions | [Google keys](#google-keys) |
 | Firebase key in `mobile/google-services.json` | git (by design) | Push notifications | Not secret; protected by its restrictions | [Google keys](#google-keys) |
 | `SMTP_USER` / `SMTP_PASS` (Gmail app password) | L | Local email testing only | Mail sent as that Gmail account | Google Account → App passwords → revoke |
+| `BACKUP_DATABASE_URL` (`homeease_readonly`) | G | Nightly backup's read access to the database | **High:** every row readable | [Database password](#database-password), then update the GitHub secret |
+| `OFFSITE_ACCESS_KEY_ID` / `OFFSITE_SECRET_ACCESS_KEY` (B2, write-only) | G | Uploading backups | Low: can only add files; can't read, list or delete backups | B2 → Application Keys: create a new one, update GitHub, delete the old |
+| `SUPABASE_S3_ACCESS_KEY_ID` / `SUPABASE_S3_SECRET_ACCESS_KEY` | G | Nightly copy of all storage buckets | **Critical:** every ID, selfie, resume and chat image | Supabase → Storage → S3 Connection: new key, update GitHub, revoke the old |
+| Backup private key (age) | Password manager + offline copy | Reading any off-site backup | Backups readable, **if** the B2 bucket also leaks | Make a new key pair and update `AGE_RECIPIENT`; **keep the old private key** until backups made with it have expired (30 days) |
 | `NEON_API_KEY` | L, G (restore drill) | Neon account (branches, databases) | **Critical:** can create, reset or delete databases, and read production | Neon → Account settings → API keys; update the GitHub secret |
 | `SENTRY_DSN`, `VITE_SENTRY_DSN`, `EXPO_PUBLIC_SENTRY_DSN` | R, V, E | Where errors are reported | Not secret (ships in the apps); junk events at worst | New DSN in Sentry only if abused |
 | `E2E_*` (GitHub) | G | Sandbox credentials for the Xendit E2E workflow | Sandbox only | Rotate alongside their sandbox source |
