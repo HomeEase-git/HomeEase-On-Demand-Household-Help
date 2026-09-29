@@ -19,6 +19,11 @@ on:
     - cron: '*/5 * * * *'
   workflow_dispatch: {}
 
+# Least privilege: jobs can read the code and nothing else (no pushing,
+# no editing PRs or releases) unless a job asks for more.
+permissions:
+  contents: read
+
 jobs:
   ping:
     runs-on: ubuntu-latest

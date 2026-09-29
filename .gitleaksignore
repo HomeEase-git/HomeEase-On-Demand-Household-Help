@@ -1,0 +1,21 @@
+# Reviewed gitleaks findings (security Phase 5). One exact commit:file:rule:line
+# each, so the same value leaking anywhere else is still reported.
+# Add a line only after checking the value is not a live secret, with why.
+
+# Fake JWT: test input for log redaction.
+22f6af872746c8997f5f15eaa0c2549be8a66344:backend/tests/unit/logging.test.ts:jwt:26
+
+# Test password in a test, not a credential.
+22f6af872746c8997f5f15eaa0c2549be8a66344:backend/tests/securityAlerts.test.ts:generic-api-key:133
+
+# Old Maps JavaScript key, removed from eas.json 2026-09-22; Google reports it expired (checked 2026-09-29).
+466a8c84cee31f650437c9d90e16c84cd5363c0c:mobile/eas.json:gcp-api-key:20
+
+# Old Maps JavaScript key, removed from eas.json 2026-09-22; Google reports it expired (checked 2026-09-29).
+466a8c84cee31f650437c9d90e16c84cd5363c0c:mobile/eas.json:gcp-api-key:29
+
+# Firebase Android key: meant to ship in the app; restricted to the Android app (checked 2026-09-29, Maps/Places refused). docs/SECRETS.md.
+4d7dde4382d1026ae111fc47416ef2129e5b3c8e:mobile/google-services.json:gcp-api-key:18
+
+# Resend API key committed 2026-06-23 (still on branch web-side). Resend is no longer used; the key must be revoked in the Resend dashboard (docs/SECRETS.md). Ignored here so the weekly full-history scan stays actionable.
+27c6e75a79bbf4cc5fb66370739a832707deaa6a:backend/.env:generic-api-key:14
