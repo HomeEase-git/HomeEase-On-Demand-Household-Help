@@ -1,5 +1,5 @@
 import crypto from 'crypto';
-import { decryptWithKey, deriveKey, encryptWithKey } from '@utils/encryption';
+import { decryptWithKeyring, deriveKey, deriveKeyring, encryptWithKey } from '@utils/encryption';
 
 // Field-level encryption for worker payout account numbers and TINs
 // (WorkerProfile.payoutAccountNumber/tin, Payout.accountNumber,
@@ -14,6 +14,8 @@ const PREFIX = 'enc:v1:';
 const DEVELOPMENT_KEY = 'homeease_development_data_key_change_me';
 
 const getKey = (): Buffer => deriveKey('DATA_ENCRYPTION_KEY', DEVELOPMENT_KEY);
+// Current key first, then DATA_ENCRYPTION_KEY_PREVIOUS during a rotation.
+const getKeyring = (): Buffer[] => deriveKeyring('DATA_ENCRYPTION_KEY', DEVELOPMENT_KEY);
 
 export function isEncryptedField(value: unknown): value is string {
   return typeof value === 'string' && value.startsWith(PREFIX);
@@ -32,7 +34,13 @@ export function encryptOptionalField(plaintext: string | null | undefined): stri
 /** Decrypts a stored value; legacy plaintext is returned unchanged. */
 export function decryptField(stored: string): string {
   if (!isEncryptedField(stored)) return stored;
-  return decryptWithKey(stored.slice(PREFIX.length), getKey());
+  return decryptWithKeyring(stored.slice(PREFIX.length), getKeyring()).plaintext;
+}
+
+/** True if an encrypted value only decrypts with DATA_ENCRYPTION_KEY_PREVIOUS. */
+export function isUnderPreviousDataKey(stored: string): boolean {
+  if (!isEncryptedField(stored)) return false;
+  return decryptWithKeyring(stored.slice(PREFIX.length), getKeyring()).keyIndex > 0;
 }
 
 export function decryptOptionalField(stored: string | null | undefined): string | null | undefined {
@@ -45,7 +53,19 @@ export function decryptOptionalField(stored: string | null | undefined): string 
  * TIN encrypts differently every time).
  */
 export function hashTin(normalizedTin: string): string {
-  return crypto.createHmac('sha256', getKey()).update(`tin:${normalizedTin}`).digest('hex');
+  return hashTinWithKey(normalizedTin, getKey());
+}
+
+/**
+ * Every hash this TIN could be stored under — one per key while a rotation
+ * is in progress — so a duplicate check still finds rows not yet rehashed.
+ */
+export function tinHashCandidates(normalizedTin: string): string[] {
+  return getKeyring().map((key) => hashTinWithKey(normalizedTin, key));
+}
+
+function hashTinWithKey(normalizedTin: string, key: Buffer): string {
+  return crypto.createHmac('sha256', key).update(`tin:${normalizedTin}`).digest('hex');
 }
 
 /** "••••1234" — the last four digits/characters only. */

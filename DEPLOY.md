@@ -227,6 +227,8 @@ that gate is done; keep it green on whatever branch you deploy from.
 
 ## Production checklist (account-side steps)
 
+Every secret, what it protects and how to rotate it: [docs/SECRETS.md](docs/SECRETS.md).
+
 Things only the account owner can do. The code for each is already in place.
 
 1. **Error monitoring (Sentry, free plan).** At sentry.io create one
@@ -241,17 +243,19 @@ Things only the account owner can do. The code for each is already in place.
    webhook headers, query strings, user identities and console output are
    never sent.
 2. **Startup check.** In production the backend refuses to start without
-   `DATABASE_URL` or `JWT_SECRET`, and logs a `Config warning:` line (and a
-   Sentry warning) for every other missing setting — including
-   `XENDIT_SECRET_KEY is a TEST key` while payments run on sandbox keys.
-   After each deploy, check the Render logs for those lines.
+   `DATABASE_URL`, `JWT_SECRET`, `DATA_ENCRYPTION_KEY` or `MFA_ENCRYPTION_KEY`,
+   or while a secret still holds a placeholder value (Render keeps the previous
+   deploy running). It logs a `Config warning:` line (and a Sentry warning) for
+   every other missing or weak setting — short secrets, `TRUST_PROXY` unset,
+   a key rotation in progress, `XENDIT_SECRET_KEY is a TEST key` while payments
+   run on sandbox keys. After each deploy, check the Render logs for those lines.
 3. **Keep the backend awake** — see *Free-tier hosting* above.
 4. **Rotate the Neon production password** (it was pasted in a chat on
    2026-09-07): Neon console → project `homeease-prod` → Roles → reset the
    password, then update `DATABASE_URL` and `DIRECT_URL` on Render.
-5. **Delete the old Google Maps JavaScript key.** It is still in git history
-   (removed from `eas.json` when the app moved to the Maps SDK for Android):
-   Google Cloud console → APIs & Services → Credentials → delete it.
+5. **Old Google Maps JavaScript key** (still in git history, removed from
+   `eas.json` when the app moved to the Maps SDK for Android): checked
+   2026-09-29, Google now rejects it as expired. Nothing left to do.
 6. **Backups.** Neon console → project → Settings → check the point-in-time
    restore window on the production branch, and try one restore to a
    throwaway branch.

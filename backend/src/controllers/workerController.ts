@@ -4,7 +4,7 @@ import { formatManilaPeriod } from '@utils/manilaTime';
 import { errorResponse } from '@utils/errorResponse';
 import { toOwnedStoredUrl } from '@utils/storageUrls';
 import { parseWorkerBirthDate } from '@utils/age';
-import { decryptField, decryptOptionalField, encryptField, encryptOptionalField, hashTin, maskLastFour } from '@utils/fieldEncryption';
+import { decryptField, decryptOptionalField, encryptField, encryptOptionalField, hashTin, maskLastFour, tinHashCandidates } from '@utils/fieldEncryption';
 import {
   toDayStart,
   isoDay,
@@ -2480,6 +2480,16 @@ export const updateTaxInfo = async (req: AuthRequest, res: Response) => {
 
     const { tin } = req.body as { tin: string };
     const normalized = normalizeTin(tin);
+
+    // The unique index only sees hashes under the current key; during a key
+    // rotation another worker's copy may still be under the previous one.
+    const duplicate = await prisma.workerProfile.findFirst({
+      where: { tinHash: { in: tinHashCandidates(normalized) }, NOT: { userId: req.user.userId } },
+      select: { id: true },
+    });
+    if (duplicate) {
+      return res.status(409).json(errorResponse(409, 'This TIN is already on file for another worker'));
+    }
 
     const updated = await prisma.workerProfile.update({
       where: { userId: req.user.userId },

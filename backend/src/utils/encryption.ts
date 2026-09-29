@@ -5,6 +5,12 @@ import crypto from 'crypto';
 // DATA_ENCRYPTION_KEY for worker payout account numbers and TINs
 // (utils/fieldEncryption.ts). Separate keys so either can be rotated
 // without touching the other.
+//
+// Rotation: set the new value as <KEY> and the old one as <KEY>_PREVIOUS.
+// New data is encrypted with <KEY>; reads try <KEY> first, then
+// <KEY>_PREVIOUS — GCM's auth tag makes a wrong key fail loudly, so no key
+// id needs storing. scripts/rotate-encryption-keys.ts then re-encrypts old
+// rows, after which <KEY>_PREVIOUS can be removed. See docs/SECRETS.md.
 
 const ALGORITHM = 'aes-256-gcm';
 const IV_LENGTH = 12; // recommended IV length for GCM
@@ -26,7 +32,18 @@ export const deriveKey = (envVar: string, developmentFallback: string): Buffer =
   return crypto.createHash('sha256').update(raw).digest();
 };
 
+/**
+ * Keys to try when reading, current first: <envVar>, then
+ * <envVar>_PREVIOUS while a rotation is in progress.
+ */
+export const deriveKeyring = (envVar: string, developmentFallback: string): Buffer[] => {
+  const current = deriveKey(envVar, developmentFallback);
+  const previous = process.env[`${envVar}_PREVIOUS`]?.trim();
+  return previous ? [current, crypto.createHash('sha256').update(previous).digest()] : [current];
+};
+
 const getEncryptionKey = (): Buffer => deriveKey('MFA_ENCRYPTION_KEY', DEVELOPMENT_ENCRYPTION_KEY);
+const getDecryptionKeys = (): Buffer[] => deriveKeyring('MFA_ENCRYPTION_KEY', DEVELOPMENT_ENCRYPTION_KEY);
 
 /**
  * Encrypts a plaintext string, returning `iv:authTag:ciphertext` (all hex,
@@ -64,6 +81,26 @@ export const decryptWithKey = (payload: string, key: Buffer): string => {
   return plaintext.toString('utf8');
 };
 
+/**
+ * Decrypts with the first key in `keys` that fits. `keyIndex` > 0 means the
+ * value is still under an old key and should be re-encrypted.
+ */
+export const decryptWithKeyring = (payload: string, keys: Buffer[]): { plaintext: string; keyIndex: number } => {
+  let lastError: unknown;
+  for (let keyIndex = 0; keyIndex < keys.length; keyIndex++) {
+    try {
+      return { plaintext: decryptWithKey(payload, keys[keyIndex]), keyIndex };
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  throw lastError;
+};
+
 export const encrypt = (plaintext: string): string => encryptWithKey(plaintext, getEncryptionKey());
 
-export const decrypt = (payload: string): string => decryptWithKey(payload, getEncryptionKey());
+export const decrypt = (payload: string): string => decryptWithKeyring(payload, getDecryptionKeys()).plaintext;
+
+/** True if `payload` only decrypts with MFA_ENCRYPTION_KEY_PREVIOUS. */
+export const isUnderPreviousKey = (payload: string): boolean =>
+  decryptWithKeyring(payload, getDecryptionKeys()).keyIndex > 0;

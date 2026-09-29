@@ -1,5 +1,6 @@
 import type { RequestHandler } from 'express';
 import rateLimit from 'express-rate-limit';
+import { rateLimitStore } from '@middleware/rateLimitStore';
 
 // Env knobs (all optional — the defaults below are sane for a single small
 // instance behind one proxy). Set RATE_LIMIT_DISABLED=true to turn the
@@ -34,6 +35,7 @@ export const apiLimiter: RequestHandler = disabled
       legacyHeaders: false,
       skip: (req) => WEBHOOK_PATHS.some((p) => req.path.startsWith(p)),
       message: { error: 'Too many requests, please slow down.' },
+      store: rateLimitStore('rl:api:'),
     });
 
 /**
@@ -51,4 +53,5 @@ export const authLimiter: RequestHandler = disabled
       legacyHeaders: false,
       skipSuccessfulRequests: true,
       message: { error: 'Too many attempts. Try again later.' },
+      store: rateLimitStore('rl:auth:'),
     });
