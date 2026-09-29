@@ -15,7 +15,7 @@
 export const LEGAL_VERSIONS = {
   CLIENT_USER_AGREEMENT: "2026-09-27",
   WORKER_SERVICE_AGREEMENT: "2026-09-27",
-  PRIVACY_NOTICE: "2026-09-27",
+  PRIVACY_NOTICE: "2026-09-29",
   KYC_CONSENT: "2026-09-25",
 } as const;
 
@@ -305,6 +305,7 @@ export const PRIVACY_POLICY: LegalDocument = {
         "Workers: government ID, selfie, police/NBI/barangay clearance, health certificate, certifications, resume, date of birth, years of experience, home address, TIN, GCash or Maya payout account, and VAT registration documents.",
         "Location: a worker's live GPS location while travelling to an accepted booking, and their check-in location, including whether a fake-GPS app was detected.",
         "Chat messages and photos, ratings, reviews, disputes, and payment records (amounts, method and status).",
+        "Security records: when you sign in or fail to, and the IP address involved in suspicious activity such as repeated failed sign-ins.",
       ],
       paragraphs: [
         "Government ID numbers, your TIN, clearances and your selfie are sensitive personal information. We collect them only with your specific consent, given before you upload them.",
@@ -332,7 +333,7 @@ export const PRIVACY_POLICY: LegalDocument = {
         "The other person in a booking: a worker sees your name, service address and phone number; a client sees the worker's name, photo, rating, phone number, and live location while the worker travels to that job.",
         "Clients browsing see a worker's public profile only (never their ID documents, phone number or home address).",
         "HomeEase admins, who use two-factor login and whose actions are logged.",
-        "Service providers that process data for us: Supabase (file storage), Neon (database, Singapore), Render (servers, Singapore), Anthropic (automated document and resume review, USA), Xendit (payments and payouts), Google Maps (address lookup and distances), PhilSMS (text messages), Brevo (email) and Expo / Google Firebase (push notifications).",
+        "Service providers that process data for us: Supabase (file storage), Neon (database, Singapore), Render (servers, Singapore), Anthropic (automated document and resume review, USA), Xendit (payments and payouts), Google Maps (address lookup and distances), PhilSMS (text messages), Brevo (email), Expo / Google Firebase (push notifications), and Backblaze (encrypted backups, USA) with GitHub (runs our automated backups, USA).",
         "Government authorities such as the BIR, when the law requires it.",
       ],
       paragraphs: [
@@ -347,6 +348,9 @@ export const PRIVACY_POLICY: LegalDocument = {
         "Live location: only while travelling to a job; cleared at check-in, and never kept more than 2 hours after the last update.",
         "Booking, payment, payout and tax records: for the period required by tax and accounting law, even after you delete your account (with your name removed).",
         "Chat messages you sent stay visible to the person you sent them to.",
+        "Notifications: deleted once they are 180 days old if you have read them, and after a year if you have not.",
+        "Sign-in records: 1 year. Records of security incidents are kept as evidence.",
+        "Backups: encrypted copies of our data are kept for 30 days. Data that is deleted stays in these backups until they expire.",
       ],
     },
     {
@@ -359,7 +363,7 @@ export const PRIVACY_POLICY: LegalDocument = {
     {
       heading: "8. Security",
       paragraphs: [
-        "ID documents, resumes and chat photos are stored privately and shown only through links that expire after an hour. Payout account numbers and TINs are encrypted. If a breach puts your data at real risk, we will notify you and the National Privacy Commission as the law requires.",
+        "ID documents, resumes and chat photos are stored privately and shown only through links that expire after an hour. Payout account numbers and TINs are encrypted, and so are our backups. If a breach puts your data at real risk, we will notify you and the National Privacy Commission as the law requires.",
       ],
     },
     {

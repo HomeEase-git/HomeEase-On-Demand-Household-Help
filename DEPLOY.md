@@ -230,6 +230,7 @@ that gate is done; keep it green on whatever branch you deploy from.
 
 ## Production checklist (account-side steps)
 
+Security governance, calendar and open risks (start here): [docs/GOVERNANCE.md](docs/GOVERNANCE.md). If something has gone wrong: [docs/INCIDENT-RESPONSE.md](docs/INCIDENT-RESPONSE.md).
 Every secret, what it protects and how to rotate it: [docs/SECRETS.md](docs/SECRETS.md).
 Automated security checks in CI, and the repository settings to turn on: [docs/CI-SECURITY.md](docs/CI-SECURITY.md).
 Backups, restore drills, data retention and database roles: [docs/DATA-RESILIENCE.md](docs/DATA-RESILIENCE.md).

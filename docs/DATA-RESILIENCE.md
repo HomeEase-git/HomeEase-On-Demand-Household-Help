@@ -132,8 +132,8 @@ a scheduled run's failure to the account that last changed its schedule
 
 Copies leave the Philippines (B2 has no Asian region; Neon is in
 Singapore). The Data Privacy Act allows this with the same protection; the
-Privacy Policy should say personal data is stored with providers abroad
-(governance phase).
+Privacy Policy names Backblaze and GitHub among the providers abroad
+([DATA-MAP.md](DATA-MAP.md)).
 
 ### Setting it up (once, about 30 minutes)
 
@@ -241,9 +241,9 @@ from the cron backstop (task `purge-expired-data`); see
 | Off-site backups (database and files) | 30 nights | Deleted | B2 lifecycle rule; Object Lock blocks earlier deletion |
 | Server logs, error reports | The hosting plan's retention (Render, Sentry) | Rolls off | Provider |
 
-The Privacy Policy (section 6, "How long we keep it") covers the first rows
-it lists; everything here is kept no longer than it says. Notifications and
-sign-in records aren't named there yet: add them at the next policy update.
+The Privacy Policy (section 6, "How long we keep it", version 2026-09-29)
+states these periods, including notifications, sign-in records and backups.
+Change both together.
 
 ## Database roles
 
