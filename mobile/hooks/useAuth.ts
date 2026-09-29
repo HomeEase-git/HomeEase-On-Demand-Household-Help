@@ -40,7 +40,7 @@ export function useAuth() {
         kycStatus: response.kycStatus,
         hasAcceptedTerms: response.hasAcceptedTerms,
       });
-      store.setToken(response.token);
+      store.setToken(response.token, response.refreshToken);
 
       return { success: true, data: response };
     } catch (err) {
@@ -69,7 +69,7 @@ export function useAuth() {
         kycStatus: response.kycStatus,
         hasAcceptedTerms: response.hasAcceptedTerms,
       });
-      store.setToken(response.token);
+      store.setToken(response.token, response.refreshToken);
 
       return { success: true, data: response };
     } catch (err) {
@@ -97,7 +97,7 @@ export function useAuth() {
         kycStatus: response.kycStatus,
         hasAcceptedTerms: response.hasAcceptedTerms,
       });
-      store.setToken(response.token);
+      store.setToken(response.token, response.refreshToken);
 
       return { success: true, data: response };
     } catch (err) {
@@ -132,7 +132,7 @@ export function useAuth() {
         kycStatus: response.kycStatus,
         hasAcceptedTerms: response.hasAcceptedTerms,
       });
-      store.setToken(response.token);
+      store.setToken(response.token, response.refreshToken);
 
       // Send OTP email for clients
       // if (response.role === 'client') {

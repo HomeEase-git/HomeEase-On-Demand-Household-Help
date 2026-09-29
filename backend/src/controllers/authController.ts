@@ -3,7 +3,9 @@ import prisma from '@config/database';
 import { TokenType, type Role, type TwoFactorMethod } from '@prisma/client';
 import { hashPassword, comparePassword } from '@utils/passwordHash';
 import { generateToken, verifyToken } from '@utils/jwt';
-import { validateEmail, validatePassword, validatePhone, validateOtp } from '@utils/validators';
+import { validateEmail, validatePhone, validateOtp } from '@utils/validators';
+import { checkNewPassword } from '@utils/passwordPolicy';
+import { isLoginLocked, recordFailedLogin, clearFailedLogins, LOGIN_LOCKED_MESSAGE } from '@utils/loginAttemptLimiter';
 import { errorResponse } from '@utils/errorResponse';
 import { writeAuditLog } from '@utils/auditLog';
 import { notifyUser } from '@utils/notify';
@@ -16,9 +18,8 @@ import {
   generateOtp,
   storeOtp,
   verifyOtp,
-  verifyRefreshToken,
+  consumeRefreshToken,
   revokeRefreshToken,
-  revokeAllRefreshTokens,
 } from '@utils/otpService';
 import {
   generateMfaSecret,
@@ -34,7 +35,7 @@ import { sendOtpSms } from '@utils/smsService';
 import { parseWorkerBirthDate } from '@utils/age';
 import { clearUserSessionRevocation } from '@utils/tokenRevocation';
 import { getAppSettings } from '@services/appSettingsService';
-import { issueSession } from '@services/sessionService';
+import { issueSession, revokeSession, revokeAllSessions } from '@services/sessionService';
 import type { JwtPayload } from '../types';
 
 // Short-lived challenge token issued mid-login to an MFA-enabled user (see
@@ -54,6 +55,20 @@ const getPasswordString = (value: unknown): string => {
 
 const normalizeEmail = (value: unknown): string => {
   return getTrimmedString(value).toLowerCase();
+};
+
+// Compared against when the email has no account, so "no such user" takes
+// as long as "wrong password" and response timing can't enumerate accounts.
+let dummyPasswordHash: Promise<string> | null = null;
+
+/** bcrypt check that costs the same whether or not `user` exists. */
+const passwordMatches = async (user: { password: string } | null, password: string): Promise<boolean> => {
+  if (!user) {
+    dummyPasswordHash ??= hashPassword('homeease-timing-equaliser');
+    await comparePassword(password, await dummyPasswordHash);
+    return false;
+  }
+  return comparePassword(password, user.password);
 };
 
 const normalizeSignupRole = (value: unknown): SignupRole | null => {
@@ -86,10 +101,9 @@ export const signup = async (req: Request, res: Response) => {
       return res.status(400).json(errorResponse(400, 'Invalid email format'));
     }
 
-    if (!validatePassword(password)) {
-      return res.status(400).json(
-        errorResponse(400, 'Password must be at least 8 characters with 1 uppercase letter and 1 number')
-      );
+    const passwordError = await checkNewPassword(password);
+    if (passwordError) {
+      return res.status(400).json(errorResponse(400, passwordError));
     }
 
     if (!validatePhone(phone)) {
@@ -219,12 +233,18 @@ export const login = async (req: Request, res: Response) => {
       return res.status(400).json(errorResponse(400, 'Email and password required'));
     }
 
+    if (await isLoginLocked(email)) {
+      return res.status(429).json(errorResponse(429, LOGIN_LOCKED_MESSAGE));
+    }
+
     const user = await prisma.user.findUnique({
       where: { email },
       include: { workerProfile: { select: { kycStatus: true } } },
     });
 
     if (!user) {
+      await passwordMatches(null, password);
+      await recordFailedLogin(email);
       await writeAuditLog({
         action: 'USER_LOGIN_FAILED',
         category: 'LOGIN',
@@ -234,9 +254,10 @@ export const login = async (req: Request, res: Response) => {
       return res.status(401).json(errorResponse(401, 'Invalid credentials'));
     }
 
-    const isPasswordValid = await comparePassword(password, user.password);
+    const isPasswordValid = await passwordMatches(user, password);
 
     if (!isPasswordValid) {
+      await recordFailedLogin(email);
       await writeAuditLog({
         actorId: user.id,
         actorName: user.fullName,
@@ -248,6 +269,8 @@ export const login = async (req: Request, res: Response) => {
       });
       return res.status(401).json(errorResponse(401, 'Invalid credentials'));
     }
+
+    await clearFailedLogins(email);
 
     // A worker who deactivated their own account can turn it back on (see
     // reactivateAccount) — `code` lets the app offer that.
@@ -826,10 +849,9 @@ export const resetPassword = async (req: Request, res: Response) => {
       return res.status(400).json(errorResponse(400, 'OTP must be 6 digits'));
     }
 
-    if (!validatePassword(newPassword)) {
-      return res.status(400).json(
-        errorResponse(400, 'Password must be at least 8 characters with 1 uppercase letter and 1 number')
-      );
+    const passwordError = await checkNewPassword(newPassword);
+    if (passwordError) {
+      return res.status(400).json(errorResponse(400, passwordError));
     }
 
     const user = await prisma.user.findUnique({ where: { email } });
@@ -851,8 +873,11 @@ export const resetPassword = async (req: Request, res: Response) => {
       data: { password: hashedPassword },
     });
 
-    // Revoke all refresh tokens on password reset for security
-    await revokeAllRefreshTokens(user.id);
+    // Sign out every device (refresh tokens and live access tokens) — the
+    // reset may be because someone else got in. The new password also
+    // lifts any sign-in lockout.
+    await revokeAllSessions(user.id);
+    await clearFailedLogins(email);
 
     return res.json({ success: true, message: 'Password reset successfully' });
   } catch (error) {
@@ -873,9 +898,35 @@ export const refreshToken = async (req: Request, res: Response) => {
       return res.status(400).json(errorResponse(400, 'Refresh token required'));
     }
 
-    const existing = await verifyRefreshToken(token);
+    const existing = await consumeRefreshToken(token);
 
-    if (!existing) {
+    // An already-rotated token coming back means a copy of it is in someone
+    // else's hands (OAuth 2.0 Security BCP, refresh token rotation): end that
+    // whole session so neither copy works, and the real user signs in again.
+    if (existing.status === 'reused') {
+      if (existing.sessionId) {
+        await revokeSession(existing.sessionId);
+      } else {
+        await prisma.authToken.deleteMany({ where: { id: existing.tokenId } });
+      }
+      await writeAuditLog({
+        actorId: existing.userId,
+        action: 'REFRESH_TOKEN_REUSE',
+        category: 'LOGIN',
+        level: 'WARN',
+        message: `Reused refresh token detected; session ${existing.sessionId ?? '(legacy)'} revoked`,
+      });
+      return res.status(401).json(errorResponse(401, 'Invalid or expired refresh token'));
+    }
+
+    // Another request (e.g. a second browser tab sharing the token) just
+    // rotated it. `code` tells the client to pick up that result instead of
+    // signing out.
+    if (existing.status === 'race') {
+      return res.status(401).json({ ...errorResponse(401, 'Refresh token already used'), code: 'REFRESH_RACE' });
+    }
+
+    if (existing.status !== 'ok') {
       return res.status(401).json(errorResponse(401, 'Invalid or expired refresh token'));
     }
 
@@ -894,9 +945,8 @@ export const refreshToken = async (req: Request, res: Response) => {
       return res.status(401).json(errorResponse(401, 'Account is not active'));
     }
 
-    // Rotate refresh token, keeping this device's session id (a sign-in from
-    // before session ids gets one now).
-    await revokeRefreshToken(token);
+    // Rotate (the old token was marked used above), keeping this device's
+    // session id (a sign-in from before session ids gets one now).
     const { token: newToken, refreshToken: newRefreshToken } = await issueSession(user, existing.sessionId ?? undefined);
 
     return res.json({
@@ -941,10 +991,15 @@ export const requestSuspensionReview = async (req: Request, res: Response) => {
       return res.status(400).json(errorResponse(400, 'Please explain your request in 10 to 1000 characters'));
     }
 
+    if (await isLoginLocked(email)) {
+      return res.status(429).json(errorResponse(429, LOGIN_LOCKED_MESSAGE));
+    }
     const user = await prisma.user.findUnique({ where: { email } });
-    if (!user || !(await comparePassword(password, user.password))) {
+    if (!(await passwordMatches(user, password)) || !user) {
+      await recordFailedLogin(email);
       return res.status(401).json(errorResponse(401, 'Invalid credentials'));
     }
+    await clearFailedLogins(email);
     if (user.status !== 'SUSPENDED' && user.status !== 'BANNED') {
       return res.status(400).json(errorResponse(400, 'Only suspended or banned accounts can request a review'));
     }
@@ -1004,10 +1059,14 @@ export const logout = async (req: Request, res: Response) => {
       return res.status(401).json(errorResponse(401, 'Unauthorized'));
     }
 
-    if (token) {
-      await revokeRefreshToken(token);
-    } else {
-      await revokeAllRefreshTokens(userId);
+    // Sign out this device: its refresh tokens, and its current access
+    // token too so it can't be used for the rest of its lifetime. The
+    // access token's `sid` identifies the device even if the app didn't
+    // send its refresh token.
+    const refreshSessionId = token ? await revokeRefreshToken(token) : null;
+    const sessionIds = new Set([refreshSessionId, req.user?.sid].filter((s): s is string => !!s));
+    for (const sessionId of sessionIds) {
+      await revokeSession(sessionId);
     }
 
     return res.json({ success: true, message: 'Logged out successfully' });
@@ -1290,10 +1349,15 @@ export const reactivateAccount = async (req: Request, res: Response) => {
   try {
     const email = normalizeEmail(req.body.email);
     const password = getPasswordString(req.body.password);
+    if (email && (await isLoginLocked(email))) {
+      return res.status(429).json(errorResponse(429, LOGIN_LOCKED_MESSAGE));
+    }
     const user = email ? await prisma.user.findUnique({ where: { email } }) : null;
-    if (!user || !password || !(await comparePassword(password, user.password))) {
+    if (!password || !(await passwordMatches(user, password)) || !user) {
+      if (email) await recordFailedLogin(email);
       return res.status(401).json(errorResponse(401, 'Invalid credentials'));
     }
+    await clearFailedLogins(email);
     if (user.status !== 'DEACTIVATED') {
       return res.status(409).json(errorResponse(409, 'This account is not deactivated'));
     }

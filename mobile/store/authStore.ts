@@ -33,7 +33,9 @@ type AuthState = {
   setUser: (user: User) => void;
   setKycStatus: (kycStatus: KycStatus) => void;
   setHasAcceptedTerms: (hasAcceptedTerms: boolean) => void;
-  setToken: (token: string) => void;
+  // refreshToken comes with every sign-in; omitted when only the access
+  // token changes (e.g. after email verification).
+  setToken: (token: string, refreshToken?: string) => void;
   setLoading: (loading: boolean) => void;
   setError: (error: string | null) => void;
   logout: () => void;
@@ -76,10 +78,11 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     authStorage.saveUser(updatedUser);
   },
 
-  setToken: (token) => {
+  setToken: (token, refreshToken) => {
     set({ token });
     // Persist token
     authStorage.saveToken(token);
+    if (refreshToken) authStorage.saveRefreshToken(refreshToken);
   },
   
   setLoading: (loading) =>
@@ -95,6 +98,15 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       await notificationService.clearTokenFromBackend();
     } catch (error) {
       console.error('Error clearing push token on logout:', error);
+    }
+
+    // End the session server-side too, so the stored refresh token can't be
+    // used again. Dynamic import: api.ts imports this store lazily as well.
+    try {
+      const { postLogout } = await import('../services/api');
+      await postLogout();
+    } catch (error) {
+      console.error('Error ending session on logout:', error);
     }
 
     set({

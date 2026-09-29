@@ -55,15 +55,18 @@ function refetchActiveBookings() {
 function RootLayout() {
   const initializeAuth = useAuthStore((state) => state.initializeAuth);
   const restoreDraft = useBookingStore((state) => state.restoreDraft);
-  const token = useAuthStore((state) => state.token);
+  // The socket follows the signed-in state, not the token itself — the
+  // token is replaced every few minutes by a refresh, and the socket reads
+  // the latest one on each (re)connect (see services/socket.ts).
+  const hasSession = useAuthStore((state) => !!state.token);
   const [fontsLoaded] = useFonts({
     // Add any custom fonts here if needed
   });
 
   useEffect(() => {
-    if (!token) return;
+    if (!hasSession) return;
 
-    const socket = connectSocket(token);
+    const socket = connectSocket();
 
     // Catch-up refetch on every (re)connect — socket.io fires "connect" both
     // for the initial handshake and again after any reconnect, so this also
@@ -157,7 +160,7 @@ function RootLayout() {
     return () => {
       disconnectSocket();
     };
-  }, [token]);
+  }, [hasSession]);
 
   useEffect(() => {
     // The socket's own "connect" event doesn't reliably fire on every

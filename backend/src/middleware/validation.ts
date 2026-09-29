@@ -832,10 +832,6 @@ export const validateChangePassword = (
     return res.status(400).json(errorResponse(400, 'newPassword is required and must be a string'));
   }
   
-  if (newPassword.length < 8) {
-    return res.status(400).json(errorResponse(400, 'newPassword must be at least 8 characters'));
-  }
-  
   return next();
 };
 

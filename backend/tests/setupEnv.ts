@@ -5,3 +5,5 @@ import 'dotenv/config';
 // and fail unrelated assertions. Turn them off for tests (exercised
 // directly by their own unit test if needed).
 process.env.RATE_LIMIT_DISABLED = 'true';
+// No outbound Have I Been Pwned calls from tests (see utils/passwordPolicy.ts).
+process.env.PASSWORD_BREACH_CHECK = 'false';

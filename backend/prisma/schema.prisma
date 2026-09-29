@@ -410,6 +410,12 @@ model AuthToken {
   // userController.logoutOtherSessions / middleware/auth.ts).
   sessionId String?
 
+  // REFRESH rows only: set when the token is exchanged for a new one. Used
+  // rows are kept for a while so a replay of an already-rotated token can be
+  // recognised as theft and the whole session revoked (see
+  // otpService.consumeRefreshToken). REFRESH `token` holds a SHA-256 hash.
+  usedAt DateTime?
+
   @@index([userId])
   @@index([token])
   @@index([sessionId])

@@ -48,6 +48,20 @@ client.on('connect', () => {
   loggedConnectionError = false;
 });
 
+// Lets socket.ts drop live connections the moment a session is revoked
+// (registered there, not imported, to avoid a socket ⇄ revocation import
+// cycle). Runs in-process, so it works even while Redis is unreachable.
+export interface RevocationListener {
+  onUserRevoked(userId: string): void;
+  onSessionsRevoked(sessionIds: string[]): void;
+}
+
+let revocationListener: RevocationListener | null = null;
+
+export function setRevocationListener(listener: RevocationListener | null): void {
+  revocationListener = listener;
+}
+
 const REVOKED_KEY_PREFIX = 'revoked:user:';
 const REVOKED_SESSION_KEY_PREFIX = 'revoked:session:';
 
@@ -100,6 +114,7 @@ function recordSuccess(): void {
  * default in production).
  */
 export async function revokeUserSessions(userId: string, ttlSeconds: number): Promise<void> {
+  revocationListener?.onUserRevoked(userId);
   if (circuitIsOpen()) return;
   try {
     await client.set(`${REVOKED_KEY_PREFIX}${userId}`, '1', 'EX', ttlSeconds);
@@ -139,7 +154,9 @@ export async function isUserSessionRevoked(userId: string): Promise<boolean> {
  * Same TTL reasoning as revokeUserSessions.
  */
 export async function revokeSessionIds(sessionIds: string[], ttlSeconds: number): Promise<void> {
-  if (sessionIds.length === 0 || circuitIsOpen()) return;
+  if (sessionIds.length === 0) return;
+  revocationListener?.onSessionsRevoked(sessionIds);
+  if (circuitIsOpen()) return;
   try {
     const pipeline = client.pipeline();
     for (const sid of sessionIds) pipeline.set(`${REVOKED_SESSION_KEY_PREFIX}${sid}`, '1', 'EX', ttlSeconds);

@@ -16,6 +16,7 @@ import { revokeAllRefreshTokens, generateOtp, storeOtp, verifyOtp } from '@utils
 import { sendOtpEmail } from '@utils/emailService';
 import { revokeUserSessions } from '@utils/tokenRevocation';
 import { writeAuditLog } from '@utils/auditLog';
+import { checkNewPassword } from '@utils/passwordPolicy';
 import { countActiveSessions, revokeOtherSessions } from '@services/sessionService';
 import type { JwtPayload } from '@/types/index';
 
@@ -167,6 +168,11 @@ export const changePassword = async (req: AuthRequest, res: Response) => {
     if (!isPasswordValid) {
       return res.status(401).json(errorResponse(401, 'Current password is incorrect'));
     }
+
+    const passwordError = await checkNewPassword(newPassword);
+    if (passwordError) {
+      return res.status(400).json(errorResponse(400, passwordError));
+    }
     
     const hashedPassword = await bcrypt.hash(newPassword, 10);
     
@@ -175,11 +181,16 @@ export const changePassword = async (req: AuthRequest, res: Response) => {
       data: { password: hashedPassword },
     });
 
-    // Revoke all other sessions on self-service password change, same as
-    // the OTP-based resetPassword flow (authController.ts) already does —
-    // a password change should invalidate any refresh tokens issued before
-    // it, in case the change was prompted by a compromised session.
-    await revokeAllRefreshTokens(req.user.userId);
+    // Sign out every other device, in case the change was prompted by a
+    // compromised session. This device stays signed in (with short-lived
+    // access tokens it needs its refresh token to keep working). A token
+    // from before per-device sessions can't tell devices apart, so then
+    // every refresh token goes.
+    if (req.user.sid) {
+      await revokeOtherSessions(req.user.userId, req.user.sid);
+    } else {
+      await revokeAllRefreshTokens(req.user.userId);
+    }
 
     return res.status(200).json({
       success: true,

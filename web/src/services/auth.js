@@ -22,7 +22,7 @@ export async function login(email, password) {
     email: user.email,
     phone: user.phone,
     role: user.role,
-  });
+  }, user.refreshToken);
 
   return user;
 }
@@ -41,7 +41,7 @@ export async function completeMfaChallenge(challengeToken, code) {
     email: user.email,
     phone: user.phone,
     role: user.role,
-  });
+  }, user.refreshToken);
 
   return user;
 }

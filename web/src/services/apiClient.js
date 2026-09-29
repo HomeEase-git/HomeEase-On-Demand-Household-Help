@@ -7,6 +7,7 @@ const client = createApiClient({
 
 export const {
   apiRequest,
+  apiFetch,
   getStoredToken,
   getStoredUser,
   setAuthSession,

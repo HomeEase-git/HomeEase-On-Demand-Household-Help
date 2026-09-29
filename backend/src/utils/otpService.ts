@@ -1,3 +1,4 @@
+import crypto from 'crypto';
 import prisma from '@config/database';
 import { TokenType } from '@prisma/client';
 import { isOtpAttemptLocked, recordFailedOtpAttempt, clearOtpAttempts } from '@utils/otpAttemptLimiter';
@@ -5,7 +6,8 @@ import { isOtpAttemptLocked, recordFailedOtpAttempt, clearOtpAttempts } from '@u
 const OTP_EXPIRY_MINUTES = 10;
 
 export const generateOtp = (): string => {
-  return Math.floor(100000 + Math.random() * 900000).toString();
+  // CSPRNG — Math.random() output is predictable enough to guess codes.
+  return crypto.randomInt(100000, 1000000).toString();
 };
 
 export const storeOtp = async (
@@ -73,6 +75,25 @@ export const verifyOtp = async (
   return true;
 };
 
+// Refresh tokens are stored as a SHA-256 hash, so a database leak doesn't
+// hand out live sessions. They're 40 random bytes, so an unsalted fast hash
+// is enough (nothing to brute-force). Rows from before hashing hold the raw
+// token; lookups accept either until those expire (30 days).
+export const hashRefreshToken = (token: string): string =>
+  crypto.createHash('sha256').update(token).digest('hex');
+
+const refreshTokenLookup = (token: string) => ({ in: [hashRefreshToken(token), token] });
+
+// Two requests from the same device can race to refresh with the same token
+// (e.g. two admin browser tabs). Within this window the loser just gets a 401
+// and picks up the winner's new token; after it, a replay means the token was
+// copied somewhere else.
+export const REFRESH_REUSE_GRACE_MS = 30_000;
+
+// How long rotated tokens are remembered for reuse detection. Bounds the rows
+// a busy device leaves behind (one per access-token lifetime).
+const USED_REFRESH_RETENTION_MS = 24 * 60 * 60 * 1000;
+
 export const storeRefreshToken = async (userId: string, token: string, sessionId?: string): Promise<void> => {
   const expiresAt = new Date();
   expiresAt.setDate(expiresAt.getDate() + 30);
@@ -80,7 +101,7 @@ export const storeRefreshToken = async (userId: string, token: string, sessionId
   await prisma.authToken.create({
     data: {
       userId,
-      token,
+      token: hashRefreshToken(token),
       type: TokenType.REFRESH,
       expiresAt,
       sessionId: sessionId ?? null,
@@ -88,30 +109,69 @@ export const storeRefreshToken = async (userId: string, token: string, sessionId
   });
 };
 
-/** The owner and device of a live refresh token, or null. */
-export const verifyRefreshToken = async (token: string): Promise<{ userId: string; sessionId: string | null } | null> => {
+export type ConsumeRefreshResult =
+  | { status: 'ok'; userId: string; sessionId: string | null }
+  // Already rotated, outside the grace window: someone else holds a copy.
+  | { status: 'reused'; userId: string; sessionId: string | null; tokenId: string }
+  // Just rotated by a concurrent request (see REFRESH_REUSE_GRACE_MS).
+  | { status: 'race' }
+  | { status: 'invalid' };
+
+/**
+ * Spends a refresh token: marks it used (exactly once, even under concurrent
+ * calls) and returns its owner and device. The caller issues the replacement.
+ */
+export const consumeRefreshToken = async (token: string): Promise<ConsumeRefreshResult> => {
+  const now = new Date();
   const record = await prisma.authToken.findFirst({
-    where: {
-      token,
-      type: TokenType.REFRESH,
-      expiresAt: {
-        gt: new Date(),
-      },
-    },
+    where: { token: refreshTokenLookup(token), type: TokenType.REFRESH },
   });
 
-  if (!record) return null;
+  if (!record || record.expiresAt <= now) return { status: 'invalid' };
 
-  return { userId: record.userId, sessionId: record.sessionId };
+  if (record.usedAt) {
+    return now.getTime() - record.usedAt.getTime() < REFRESH_REUSE_GRACE_MS
+      ? { status: 'race' }
+      : { status: 'reused', userId: record.userId, sessionId: record.sessionId, tokenId: record.id };
+  }
+
+  const { count } = await prisma.authToken.updateMany({
+    where: { id: record.id, usedAt: null },
+    data: { usedAt: now },
+  });
+  // Lost a race with a concurrent refresh of the same token.
+  if (count === 0) return { status: 'race' };
+
+  if (record.sessionId) {
+    await prisma.authToken.deleteMany({
+      where: {
+        type: TokenType.REFRESH,
+        sessionId: record.sessionId,
+        usedAt: { lt: new Date(now.getTime() - USED_REFRESH_RETENTION_MS) },
+      },
+    });
+  }
+
+  return { status: 'ok', userId: record.userId, sessionId: record.sessionId };
 };
 
-export const revokeRefreshToken = async (token: string): Promise<void> => {
-  await prisma.authToken.deleteMany({
-    where: {
-      token,
-      type: TokenType.REFRESH,
-    },
+/**
+ * Signs out the device a refresh token belongs to (all of its rotated
+ * tokens too). Returns that device's session id, if it has one.
+ */
+export const revokeRefreshToken = async (token: string): Promise<string | null> => {
+  const record = await prisma.authToken.findFirst({
+    where: { token: refreshTokenLookup(token), type: TokenType.REFRESH },
+    select: { id: true, sessionId: true },
   });
+  if (!record) return null;
+
+  await prisma.authToken.deleteMany({
+    where: record.sessionId
+      ? { type: TokenType.REFRESH, sessionId: record.sessionId }
+      : { id: record.id },
+  });
+  return record.sessionId;
 };
 
 export const revokeAllRefreshTokens = async (userId: string): Promise<void> => {

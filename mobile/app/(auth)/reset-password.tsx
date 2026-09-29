@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { View, Text, Pressable } from "react-native";
 import { KeyboardAwareScrollView } from "../../components/ui/KeyboardAwareScrollView";
+import { PASSWORD_MIN_LENGTH } from "../../utils/validators";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter, useLocalSearchParams } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
@@ -18,8 +19,8 @@ const RESEND_COUNTDOWN_SECONDS = 60;
 const requirements = [
   {
     key: "length",
-    label: "At least 8 characters",
-    test: (s: string) => s.length >= 8,
+    label: `At least ${PASSWORD_MIN_LENGTH} characters`,
+    test: (s: string) => s.length >= PASSWORD_MIN_LENGTH,
   },
   {
     key: "upper",
