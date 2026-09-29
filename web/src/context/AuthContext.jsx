@@ -1,4 +1,6 @@
-import { createContext, useContext, useEffect, useMemo, useState } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
+import IdleWarningModal from '../components/common/IdleWarningModal';
+import { recordActivity, useIdleSignOut } from '../hooks/useIdleSignOut';
 import { getStoredToken, getStoredUser } from '../services/apiClient';
 import {
   fetchCurrentUser,
@@ -8,6 +10,28 @@ import {
 } from '../services/auth';
 
 const AuthContext = createContext(null);
+
+// Why the last session ended, for the login page to explain ('idle' or
+// 'expired'). Per tab, and read once.
+const SIGN_OUT_REASON_KEY = 'homeease_signout_reason';
+
+const setSignOutReason = (reason) => {
+  try {
+    sessionStorage.setItem(SIGN_OUT_REASON_KEY, reason);
+  } catch {
+    // Storage unavailable — the login page just won't say why.
+  }
+};
+
+export function takeSignOutReason() {
+  try {
+    const reason = sessionStorage.getItem(SIGN_OUT_REASON_KEY);
+    sessionStorage.removeItem(SIGN_OUT_REASON_KEY);
+    return reason;
+  } catch {
+    return null;
+  }
+}
 
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(() => getStoredUser());
@@ -63,6 +87,7 @@ export function AuthProvider({ children }) {
   // expired) — drop to the login screen instead of failing every request.
   useEffect(() => {
     const onSessionExpired = () => {
+      setSignOutReason('expired');
       setUser(null);
       setToken(null);
     };
@@ -87,6 +112,7 @@ export function AuthProvider({ children }) {
       phone: data.phone,
       role: data.role,
     });
+    recordActivity();
     setToken(data.token);
     return data;
   };
@@ -102,31 +128,45 @@ export function AuthProvider({ children }) {
       phone: data.phone,
       role: data.role,
     });
+    recordActivity();
     setToken(data.token);
     return data;
   };
 
-  const logout = () => {
+  const logout = useCallback(() => {
     logoutRequest();
     setUser(null);
     setToken(null);
-  };
+  }, []);
+
+  const signOutIdle = useCallback(() => {
+    setSignOutReason('idle');
+    logout();
+  }, [logout]);
+
+  const isAuthenticated = Boolean(user && token);
+  const { secondsLeft, stayActive } = useIdleSignOut(isAuthenticated && !isLoading, signOutIdle);
 
   const value = useMemo(
     () => ({
       user,
       token,
       isLoading,
-      isAuthenticated: Boolean(user && token),
+      isAuthenticated,
       isAdmin: user?.role === 'ADMIN',
       login,
       completeMfaChallenge,
       logout,
     }),
-    [user, token, isLoading]
+    [user, token, isLoading, isAuthenticated, logout]
   );
 
-  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
+  return (
+    <AuthContext.Provider value={value}>
+      {children}
+      {secondsLeft !== null && <IdleWarningModal secondsLeft={secondsLeft} onStay={stayActive} onSignOut={logout} />}
+    </AuthContext.Provider>
+  );
 }
 
 export function useAuth() {

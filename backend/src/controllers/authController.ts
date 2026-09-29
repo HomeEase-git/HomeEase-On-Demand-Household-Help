@@ -35,7 +35,7 @@ import { sendOtpSms } from '@utils/smsService';
 import { parseWorkerBirthDate } from '@utils/age';
 import { clearUserSessionRevocation } from '@utils/tokenRevocation';
 import { getAppSettings } from '@services/appSettingsService';
-import { issueSession, revokeSession, revokeAllSessions } from '@services/sessionService';
+import { issueSession, revokeSession, revokeAllSessions, SessionExpiredError } from '@services/sessionService';
 import type { JwtPayload } from '../types';
 
 // Short-lived challenge token issued mid-login to an MFA-enabled user (see
@@ -947,7 +947,18 @@ export const refreshToken = async (req: Request, res: Response) => {
 
     // Rotate (the old token was marked used above), keeping this device's
     // session id (a sign-in from before session ids gets one now).
-    const { token: newToken, refreshToken: newRefreshToken } = await issueSession(user, existing.sessionId ?? undefined);
+    let renewed;
+    try {
+      renewed = await issueSession(user, existing.sessionId ?? undefined);
+    } catch (error) {
+      if (!(error instanceof SessionExpiredError)) throw error;
+      // Admin session past its maximum length: end it for good.
+      if (existing.sessionId) await revokeSession(existing.sessionId);
+      return res
+        .status(401)
+        .json({ ...errorResponse(401, 'Your session has ended. Please sign in again.'), code: 'SESSION_EXPIRED' });
+    }
+    const { token: newToken, refreshToken: newRefreshToken } = renewed;
 
     return res.json({
       success: true,

@@ -3,9 +3,10 @@ import * as SecureStore from 'expo-secure-store';
 import { Platform } from 'react-native';
 
 const STORAGE_KEYS = {
-  AUTH_TOKEN: '@homeease_auth_token',
-  AUTH_USER: '@homeease_auth_user',
-  // SecureStore keys may only contain [A-Za-z0-9._-].
+  // Sign-in data lives in SecureStore, whose keys may only contain
+  // [A-Za-z0-9._-].
+  ACCESS_TOKEN: 'homeease_access_token',
+  AUTH_USER: 'homeease_auth_user',
   REFRESH_TOKEN: 'homeease_refresh_token',
   BOOKING_DRAFT: '@homeease_booking_draft',
   SEARCH_HISTORY: '@homeease_search_history',
@@ -48,9 +49,8 @@ const writeStoredValue = async (key: string, value: unknown) => {
 // `null` = loaded, no token. Kept in sync by saveToken/clearAuth below.
 let cachedToken: string | null | undefined;
 
-// The refresh token lives for 30 days and can mint new sessions, so it goes
-// in the Android Keystore (SecureStore), not AsyncStorage. SecureStore has
-// no web implementation — the web build (dev/testing only) falls back.
+// Android Keystore-backed storage for sign-in data. SecureStore has no web
+// implementation — the web build (dev/testing only) falls back.
 const secureStore = {
   async get(key: string): Promise<string | null> {
     return Platform.OS === 'web' ? AsyncStorage.getItem(key) : SecureStore.getItemAsync(key);
@@ -65,12 +65,31 @@ const secureStore = {
   },
 };
 
-// Auth Storage
+// Where the access token and signed-in user were kept (plain AsyncStorage)
+// before they moved to SecureStore. Read once to carry an existing sign-in
+// over, then deleted.
+const LEGACY_AUTH_KEYS = {
+  ACCESS_TOKEN: '@homeease_auth_token',
+  AUTH_USER: '@homeease_auth_user',
+};
+
+async function readSecureOrMigrate(key: string, legacyKey: string): Promise<string | null> {
+  const value = await secureStore.get(key);
+  if (value !== null) return value;
+  const legacy = await AsyncStorage.getItem(legacyKey);
+  if (legacy === null) return null;
+  await secureStore.set(key, legacy);
+  await AsyncStorage.removeItem(legacyKey);
+  return legacy;
+}
+
+// Auth Storage — everything that identifies or signs in the user is kept in
+// the Android Keystore (SecureStore), not plain AsyncStorage.
 export const authStorage = {
   async saveToken(token: string) {
     cachedToken = token;
     try {
-      await AsyncStorage.setItem(STORAGE_KEYS.AUTH_TOKEN, token);
+      await secureStore.set(STORAGE_KEYS.ACCESS_TOKEN, token);
       cachedToken = token;
     } catch (error) {
       console.error('Error saving auth token:', error);
@@ -82,7 +101,7 @@ export const authStorage = {
       return cachedToken;
     }
     try {
-      const token = await AsyncStorage.getItem(STORAGE_KEYS.AUTH_TOKEN);
+      const token = await readSecureOrMigrate(STORAGE_KEYS.ACCESS_TOKEN, LEGACY_AUTH_KEYS.ACCESS_TOKEN);
       cachedToken = token;
       return token;
     } catch (error) {
@@ -110,7 +129,7 @@ export const authStorage = {
 
   async saveUser(user: any) {
     try {
-      await AsyncStorage.setItem(STORAGE_KEYS.AUTH_USER, JSON.stringify(user));
+      await secureStore.set(STORAGE_KEYS.AUTH_USER, JSON.stringify(user));
     } catch (error) {
       console.error('Error saving user:', error);
     }
@@ -118,7 +137,7 @@ export const authStorage = {
 
   async getUser() {
     try {
-      const data = await AsyncStorage.getItem(STORAGE_KEYS.AUTH_USER);
+      const data = await readSecureOrMigrate(STORAGE_KEYS.AUTH_USER, LEGACY_AUTH_KEYS.AUTH_USER);
       return data ? JSON.parse(data) : null;
     } catch (error) {
       console.error('Error reading user:', error);
@@ -129,9 +148,10 @@ export const authStorage = {
   async clearAuth() {
     cachedToken = null;
     try {
-      await AsyncStorage.removeItem(STORAGE_KEYS.AUTH_TOKEN);
-      await AsyncStorage.removeItem(STORAGE_KEYS.AUTH_USER);
+      await secureStore.remove(STORAGE_KEYS.ACCESS_TOKEN);
+      await secureStore.remove(STORAGE_KEYS.AUTH_USER);
       await secureStore.remove(STORAGE_KEYS.REFRESH_TOKEN);
+      await AsyncStorage.multiRemove([LEGACY_AUTH_KEYS.ACCESS_TOKEN, LEGACY_AUTH_KEYS.AUTH_USER]);
       cachedToken = null;
     } catch (error) {
       console.error('Error clearing auth:', error);

@@ -133,6 +133,63 @@ describe('Session & login hardening', () => {
     });
   });
 
+  describe('admin session limits', () => {
+    const decode = (jwt: string) => JSON.parse(Buffer.from(jwt.split('.')[1], 'base64url').toString());
+
+    async function adminSignIn(label: string) {
+      const { user, plainPassword } = await createTestUser(label, { role: 'ADMIN' });
+      createdUserIds.push(user.id);
+      const res = await request(app).post('/api/auth/login').send({ email: user.email, password: plainPassword });
+      expect(res.status).toBe(200);
+      return { user, token: res.body.data.token as string, refreshToken: res.body.data.refreshToken as string };
+    }
+
+    it('caps admin access tokens at 15 minutes and refresh tokens at the idle window', async () => {
+      const { token, refreshToken } = await adminSignIn('admin-limits');
+      const claims = decode(token);
+      expect(claims.exp - claims.iat).toBeLessThanOrEqual(15 * 60);
+
+      const row = await prisma.authToken.findFirst({ where: { token: hashRefreshToken(refreshToken) } });
+      const minutesLeft = (row!.expiresAt.getTime() - Date.now()) / 60_000;
+      expect(minutesLeft).toBeGreaterThan(44);
+      expect(minutesLeft).toBeLessThanOrEqual(45);
+
+      expect((await refresh(refreshToken)).status).toBe(200);
+    });
+
+    it('ends an admin session 12 hours after sign-in, however active', async () => {
+      const { refreshToken } = await adminSignIn('admin-max');
+      const row = await prisma.authToken.findFirst({ where: { token: hashRefreshToken(refreshToken) } });
+      // Signed in 13 hours ago; this token was just issued by a recent refresh.
+      await prisma.authToken.update({ where: { id: row!.id }, data: { createdAt: new Date(Date.now() - 13 * 60 * 60 * 1000) } });
+
+      const res = await refresh(refreshToken);
+      expect(res.status).toBe(401);
+      expect(res.body.code).toBe('SESSION_EXPIRED');
+      expect(await prisma.authToken.count({ where: { sessionId: row!.sessionId } })).toBe(0);
+    });
+
+    it('never lets a renewed admin token outlive the 12-hour limit', async () => {
+      const { refreshToken } = await adminSignIn('admin-cap');
+      const row = await prisma.authToken.findFirst({ where: { token: hashRefreshToken(refreshToken) } });
+      // Signed in 11h50m ago: the renewed token must stop at the 12h mark (10 min), not run 45 min.
+      await prisma.authToken.update({ where: { id: row!.id }, data: { createdAt: new Date(Date.now() - (11 * 60 + 50) * 60 * 1000) } });
+
+      const res = await refresh(refreshToken);
+      expect(res.status).toBe(200);
+      const renewed = await prisma.authToken.findFirst({ where: { token: hashRefreshToken(res.body.data.refreshToken) } });
+      const minutesLeft = (renewed!.expiresAt.getTime() - Date.now()) / 60_000;
+      expect(minutesLeft).toBeLessThanOrEqual(10);
+      expect(minutesLeft).toBeGreaterThan(9);
+    });
+
+    it('leaves client sessions at 30 days', async () => {
+      const { refreshToken } = await signIn('client-30d');
+      const row = await prisma.authToken.findFirst({ where: { token: hashRefreshToken(refreshToken) } });
+      expect((row!.expiresAt.getTime() - Date.now()) / 86_400_000).toBeGreaterThan(29);
+    });
+  });
+
   describe('logout', () => {
     it('ends the refresh token and the current access token', async () => {
       const { token, refreshToken } = await signIn('logout');

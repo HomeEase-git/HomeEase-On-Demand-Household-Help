@@ -18,15 +18,63 @@ export interface IssuedSession {
   sessionId: string;
 }
 
-/** Access + refresh token for a sign-in (new device) or a refresh (same device). */
+// Admin sessions reach everything, so they're bounded more tightly than
+// client/worker ones (OWASP ASVS 3.3): signed out after 30 minutes idle and
+// 12 hours after sign-in however active. The admin site runs the idle timer;
+// the server backs it up by making each admin refresh token expire if it
+// isn't used within the idle window plus one access-token lifetime. Admin
+// access tokens are capped at 15 minutes whatever JWT_EXPIRY says — the
+// admin site always renews, unlike older mobile builds.
+export const ADMIN_IDLE_TIMEOUT_MINUTES = 30;
+export const ADMIN_SESSION_MAX_HOURS = 12;
+const ADMIN_ACCESS_TOKEN_SECONDS = 15 * 60;
+const ADMIN_REFRESH_WINDOW_MS = (ADMIN_IDLE_TIMEOUT_MINUTES * 60 + ADMIN_ACCESS_TOKEN_SECONDS) * 1000;
+
+/** An admin session past its 12-hour limit can't be renewed. */
+export class SessionExpiredError extends Error {
+  constructor() {
+    super('Session has reached its maximum length');
+  }
+}
+
+/** When this device signed in: its oldest refresh token still on file. */
+async function sessionStartedAt(sessionId: string): Promise<Date | null> {
+  const { _min } = await prisma.authToken.aggregate({
+    where: { type: TokenType.REFRESH, sessionId },
+    _min: { createdAt: true },
+  });
+  return _min.createdAt;
+}
+
+/**
+ * Access + refresh token for a sign-in (new device, no `sessionId`) or a
+ * refresh (same device). Throws SessionExpiredError for an admin session past
+ * ADMIN_SESSION_MAX_HOURS.
+ */
 export async function issueSession(
   user: { id: string; email: string; role: string },
-  sessionId: string = crypto.randomUUID()
+  sessionId?: string
 ): Promise<IssuedSession> {
+  const sid = sessionId ?? crypto.randomUUID();
   const refreshToken = crypto.randomBytes(40).toString('hex');
-  await storeRefreshToken(user.id, refreshToken, sessionId);
-  const token = generateToken({ userId: user.id, email: user.email, role: user.role, sid: sessionId });
-  return { token, refreshToken, sessionId };
+
+  if (user.role === 'ADMIN') {
+    const now = Date.now();
+    const startedAt = sessionId ? ((await sessionStartedAt(sessionId))?.getTime() ?? now) : now;
+    const sessionEndsAt = startedAt + ADMIN_SESSION_MAX_HOURS * 60 * 60 * 1000;
+    if (sessionEndsAt <= now) throw new SessionExpiredError();
+
+    await storeRefreshToken(user.id, refreshToken, sid, new Date(Math.min(now + ADMIN_REFRESH_WINDOW_MS, sessionEndsAt)));
+    const token = generateToken(
+      { userId: user.id, email: user.email, role: user.role, sid },
+      Math.min(JWT_EXPIRY, ADMIN_ACCESS_TOKEN_SECONDS),
+    );
+    return { token, refreshToken, sessionId: sid };
+  }
+
+  await storeRefreshToken(user.id, refreshToken, sid);
+  const token = generateToken({ userId: user.id, email: user.email, role: user.role, sid });
+  return { token, refreshToken, sessionId: sid };
 }
 
 /**

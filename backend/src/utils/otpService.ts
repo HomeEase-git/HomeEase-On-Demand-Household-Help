@@ -94,9 +94,13 @@ export const REFRESH_REUSE_GRACE_MS = 30_000;
 // a busy device leaves behind (one per access-token lifetime).
 const USED_REFRESH_RETENTION_MS = 24 * 60 * 60 * 1000;
 
-export const storeRefreshToken = async (userId: string, token: string, sessionId?: string): Promise<void> => {
-  const expiresAt = new Date();
-  expiresAt.setDate(expiresAt.getDate() + 30);
+/** `expiresAt` defaults to 30 days (admin sessions pass a shorter one). */
+export const storeRefreshToken = async (
+  userId: string,
+  token: string,
+  sessionId?: string,
+  expiresAt: Date = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+): Promise<void> => {
 
   await prisma.authToken.create({
     data: {

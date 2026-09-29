@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { Navigate, useLocation, useNavigate } from 'react-router-dom'
 import SectionCard from '../components/common/SectionCard'
 import homeEaseLogo from '../components/Assets/home-ease-logo.png'
-import { useAuth } from '../context/AuthContext'
+import { takeSignOutReason, useAuth } from '../context/AuthContext'
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
@@ -10,6 +10,7 @@ export default function Login() {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
+  const [signOutReason] = useState(takeSignOutReason)
   const [fieldErrors, setFieldErrors] = useState({})
   const [isSubmitting, setIsSubmitting] = useState(false)
   // Set once the backend responds with `mfaRequired: true` — while this is
@@ -162,6 +163,13 @@ export default function Login() {
         <p className="page-subtitle" style={{ textAlign: 'center', marginBottom: '1.75rem' }}>
           Sign in to your HomeEase admin account
         </p>
+        {signOutReason && (
+          <div className="form-notice" role="status">
+            {signOutReason === 'idle'
+              ? 'You were signed out after 30 minutes without activity. Please sign in again.'
+              : 'Your session has ended. Please sign in again.'}
+          </div>
+        )}
         <form className="auth-form" onSubmit={handleSubmit} noValidate>
           <div className="form-field">
             <label htmlFor="email">Email</label>
