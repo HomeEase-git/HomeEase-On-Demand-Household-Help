@@ -3,7 +3,7 @@
 #   docker build -f web/Dockerfile -t homeease-web .
 
 # ---------- build ----------
-FROM node:22-bookworm-slim AS build
+FROM node:26-bookworm-slim AS build
 WORKDIR /app
 COPY web/package.json web/package-lock.json ./web/
 RUN cd web && npm ci
