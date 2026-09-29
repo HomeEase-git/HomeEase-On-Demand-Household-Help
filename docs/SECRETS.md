@@ -26,7 +26,9 @@ G = GitHub Actions secret, L = local `.env` only.
 
 | Secret | Where | Protects | If it leaks | Rotate |
 |---|---|---|---|---|
-| `DATABASE_URL`, `DIRECT_URL` (Neon password) | R, L | The whole database | **Critical:** full read/write of all data | [Database password](#database-password) |
+| `DIRECT_URL` (Neon owner password) | R, L | The whole database, schema included (migrations) | **Critical:** full control of all data | [Database password](#database-password) |
+| `DATABASE_URL` (`homeease_app` password, once switched; see [DATA-RESILIENCE.md](DATA-RESILIENCE.md#database-roles)) | R | Rows in app tables | **Critical:** read/write of all rows, but no schema changes and no editing of audit or ledger entries | [Database password](#database-password) |
+| `homeease_readonly` password | Password manager | Read-only access for reports and investigations | **High:** every row readable | [Database password](#database-password) |
 | `DATA_ENCRYPTION_KEY` | R | Payout account numbers, TINs (and the TIN duplicate-check hash) | Encrypted fields readable, **if** the database also leaks | [Encryption keys](#encryption-keys) |
 | `MFA_ENCRYPTION_KEY` | R | Admin authenticator-app secrets | Admin MFA codes could be generated, **if** the database also leaks | [Encryption keys](#encryption-keys) |
 | `JWT_SECRET` | R | Signs every access token | Anyone can mint a token for any account, including admin | [JWT secret](#jwt-secret) |
@@ -42,7 +44,7 @@ G = GitHub Actions secret, L = local `.env` only.
 | `GOOGLE_MAPS_ANDROID_API_KEY` | E | Maps SDK in the app (baked into the APK) | Not secret; protected by its restrictions | [Google keys](#google-keys) |
 | Firebase key in `mobile/google-services.json` | git (by design) | Push notifications | Not secret; protected by its restrictions | [Google keys](#google-keys) |
 | `SMTP_USER` / `SMTP_PASS` (Gmail app password) | L | Local email testing only | Mail sent as that Gmail account | Google Account → App passwords → revoke |
-| `NEON_API_KEY` | L | Neon account (branches, databases) | **Critical:** can create, reset or delete databases | Neon → Account settings → API keys |
+| `NEON_API_KEY` | L, G (restore drill) | Neon account (branches, databases) | **Critical:** can create, reset or delete databases, and read production | Neon → Account settings → API keys; update the GitHub secret |
 | `SENTRY_DSN`, `VITE_SENTRY_DSN`, `EXPO_PUBLIC_SENTRY_DSN` | R, V, E | Where errors are reported | Not secret (ships in the apps); junk events at worst | New DSN in Sentry only if abused |
 | `E2E_*` (GitHub) | G | Sandbox credentials for the Xendit E2E workflow | Sandbox only | Rotate alongside their sandbox source |
 | Redis (`REDIS_URL`) | R (from Render Key Value) | Queues, rate limits, revocations | Only reachable inside Render | Not needed |
@@ -60,10 +62,18 @@ This covers most third-party keys:
 
 ### Database password
 
-1. Neon console → the `homeease-prod` project → Roles → reset the password for the app's role.
-2. Update **both** `DATABASE_URL` and `DIRECT_URL` on Render at once (same new password). Render redeploys. Old connections close as it restarts.
+**Owner (`DIRECT_URL`):**
+1. Neon console → the `homeease-prod` project → Roles → reset the owner role's password.
+2. Update `DIRECT_URL` on Render (and `DATABASE_URL` too, if it still uses the owner). Render redeploys. Old connections close as it restarts.
 3. Confirm `/health/ready` shows `"status":"ready"`.
 4. Update any local `.env`, or better, point local work at the dev project instead.
+
+**`homeease_app` or `homeease_readonly`:** these are created by
+`scripts/db-roles.ts`, not in the Neon console. Run
+`DIRECT_URL="<owner direct URL>" npx tsx scripts/db-roles.ts --rotate homeease_app --neon-websocket`,
+put the printed pooled string in `DATABASE_URL` on Render, and confirm
+`/health/ready`. The old password stops working the moment the script runs,
+so do the Render update straight after.
 
 ### JWT secret
 

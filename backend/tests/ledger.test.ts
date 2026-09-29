@@ -25,13 +25,14 @@ import { markPeriodRemitted } from '@services/taxRemittanceService';
 import { requestRefund, markRefundedManually } from '@services/refundRequestService';
 import { manilaMonthKey } from '@utils/manilaTime';
 import { createTestUser, deleteTestUser, createTestBooking } from './helpers';
+import { ownerDb } from './ownerDb';
 
 const { getXenditBalanceCentavos, listXenditTransactions } = require('@services/xenditTransactionsService');
 const { createRefund } = require('@services/xenditService');
 
 async function wipeLedger() {
-  await prisma.ledgerLine.deleteMany({});
-  await prisma.ledgerTransaction.deleteMany({});
+  await ownerDb.ledgerLine.deleteMany({});
+  await ownerDb.ledgerTransaction.deleteMany({});
   await prisma.ledgerReconciliation.deleteMany({});
   await prisma.ledgerState.deleteMany({});
   resetLedgerOpenCache();

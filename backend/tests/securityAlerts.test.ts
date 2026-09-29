@@ -5,6 +5,7 @@ import { sendAccountSecurityEmail, sendSecurityAlertEmail } from '@utils/emailSe
 import { resetSecurityAlertThrottle, waitForSecurityAlerts } from '@services/securityAlertService';
 import { MAX_LOGIN_ATTEMPTS } from '@utils/loginAttemptLimiter';
 import { createTestUser, deleteTestUser } from './helpers';
+import { ownerDb } from './ownerDb';
 
 jest.mock('@utils/emailService');
 
@@ -47,7 +48,7 @@ describe('Security alerts', () => {
     alertEmail.mockReset().mockResolvedValue(undefined);
     userEmail.mockReset().mockResolvedValue(undefined);
     resetSecurityAlertThrottle();
-    await prisma.auditLog.deleteMany({ where: { category: 'SECURITY' } });
+    await ownerDb.auditLog.deleteMany({ where: { category: 'SECURITY' } });
   });
 
   afterAll(async () => {

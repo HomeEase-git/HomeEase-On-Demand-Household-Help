@@ -104,7 +104,9 @@ payment reminders) down with it. Two pieces close that gap:
    `backend/src/services/pendingExpirySweep.ts`) standing in for the
    per-booking delayed job BullMQ would otherwise handle. Tasks:
    `settle-completions`, `approve-quotes`, `flag-no-shows`,
-   `expire-pending`, or `all`. Authenticated by an `x-cron-secret` header
+   `expire-pending`, `purge-expired-data` (retention, see
+   [docs/DATA-RESILIENCE.md](docs/DATA-RESILIENCE.md)) and the rest listed
+   in `TASKS` there, or `all`. Authenticated by an `x-cron-secret` header
    checked against `CRON_SECRET` (`crypto.timingSafeEqual`, fails closed if
    unset) — set `CRON_SECRET` on the Render service (a long random value,
    e.g. `openssl rand -hex 32`).
@@ -212,8 +214,9 @@ still come from `backend/.env`.
   aggregation before you need to debug production.
 - **Error tracking.** Wired (Sentry) but off until the DSNs are set — see
   *Production checklist* below. Metrics and uptime alerting: not wired.
-- **Backups.** Confirm Neon's automated backup/PITR settings on the prod
-  branch and do one test restore.
+- **Backups.** Restore runbook, quarterly restore drill and the remaining
+  gaps (6-hour restore window, no copy of Storage files) are in
+  [docs/DATA-RESILIENCE.md](docs/DATA-RESILIENCE.md). First drill still to run.
 - **Secrets rotation.** `JWT_SECRET` rotation invalidates all sessions — plan for it.
 - **Load test** the rate-limit ceilings (`RATE_LIMIT_*`) against expected traffic.
 - **`homeease-redis`'s `ipAllowList`** in `render.yaml` is wide open
@@ -229,6 +232,7 @@ that gate is done; keep it green on whatever branch you deploy from.
 
 Every secret, what it protects and how to rotate it: [docs/SECRETS.md](docs/SECRETS.md).
 Automated security checks in CI, and the repository settings to turn on: [docs/CI-SECURITY.md](docs/CI-SECURITY.md).
+Backups, restore drills, data retention and database roles: [docs/DATA-RESILIENCE.md](docs/DATA-RESILIENCE.md).
 Security alerts, logs and uptime monitoring: [docs/MONITORING.md](docs/MONITORING.md) — set `SECURITY_ALERT_EMAIL`, Sentry alert rules and an external uptime monitor from its *Account-side setup*.
 
 Things only the account owner can do. The code for each is already in place.
@@ -258,9 +262,10 @@ Things only the account owner can do. The code for each is already in place.
 5. **Old Google Maps JavaScript key** (still in git history, removed from
    `eas.json` when the app moved to the Maps SDK for Android): checked
    2026-09-29, Google now rejects it as expired. Nothing left to do.
-6. **Backups.** Neon console → project → Settings → check the point-in-time
-   restore window on the production branch, and try one restore to a
-   throwaway branch.
+6. **Backups and database roles.** Follow [docs/DATA-RESILIENCE.md](docs/DATA-RESILIENCE.md):
+   set up the quarterly restore drill (`NEON_API_KEY` secret, `NEON_PROJECT_ID`
+   variable, then run it once), and switch `DATABASE_URL` to the
+   least-privilege `homeease_app` role.
 7. **Admin lost their authenticator and backup codes?** From a trusted
    machine with the production `DATABASE_URL`:
    `npx tsx scripts/reset-admin-mfa.ts --email <admin> --reason "<why>"`

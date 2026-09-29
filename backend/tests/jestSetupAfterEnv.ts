@@ -5,7 +5,9 @@
 // open and Jest warning "did not exit one second after the test run has
 // completed" on every run. Close it once each file's tests are done.
 import prisma from '@config/database';
+import { ownerDb } from './ownerDb';
 
 afterAll(async () => {
   await prisma.$disconnect();
+  await ownerDb.$disconnect();
 });

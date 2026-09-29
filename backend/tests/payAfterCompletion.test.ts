@@ -21,6 +21,7 @@ import {
 } from '@services/paymentLifecycleService';
 import { releaseDebtHold } from '@services/debtLedgerService';
 import { createTestUser, deleteTestUser, deleteTestBooking, completeWorkerSetup } from './helpers';
+import { ownerDb } from './ownerDb';
 
 const { createInvoice } = require('@services/xenditService');
 const { schedulePayout } = require('@queues/payoutQueue');
@@ -286,7 +287,7 @@ describe('Pay-after-completion payment lifecycle', () => {
       expect(payout.amount).toBeCloseTo(payment.workerPayout - 50, 2);
       expect(schedulePayout).toHaveBeenCalledWith(payout.id);
     } finally {
-      await prisma.auditLog.deleteMany({ where: { action: 'PAYOUT_BLOCKED_NO_METHOD', metadata: { path: ['workerId'], equals: workerId } } });
+      await ownerDb.auditLog.deleteMany({ where: { action: 'PAYOUT_BLOCKED_NO_METHOD', metadata: { path: ['workerId'], equals: workerId } } });
       await prisma.workerProfile.update({
         where: { id: workerProfileId },
         data: { payoutMethod: 'GCASH', payoutAccountName: 'Test Worker', payoutAccountNumber: '09171234567' },

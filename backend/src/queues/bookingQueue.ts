@@ -16,6 +16,7 @@ export const JOB_NAMES = {
   KYC_EXPIRY_SWEEP: 'kyc-expiry-sweep',
   AUTO_SUSPEND_SWEEP: 'auto-suspend-sweep',
   LOCATION_CLEANUP_SWEEP: 'worker-location-cleanup-sweep',
+  DATA_RETENTION_SWEEP: 'data-retention-sweep',
 } as const;
 
 // Stable jobIds for the repeatable ticks so re-registering them on every
@@ -31,6 +32,7 @@ export const REPEATABLE_JOB_IDS = {
   KYC_EXPIRY_SWEEP: 'kyc-expiry-sweep-hourly',
   AUTO_SUSPEND_SWEEP: 'auto-suspend-sweep-hourly',
   LOCATION_CLEANUP_SWEEP: 'worker-location-cleanup-sweep-hourly',
+  DATA_RETENTION_SWEEP: 'data-retention-sweep-daily',
 } as const;
 
 export interface ExpirePendingBookingJobData {
@@ -204,6 +206,15 @@ export async function registerRepeatableBookingJobs(): Promise<void> {
     { pattern: '0 * * * *' }, // every hour, on the hour
     {
       name: JOB_NAMES.LOCATION_CLEANUP_SWEEP,
+      data: {},
+      opts: { removeOnComplete: true, removeOnFail: true },
+    }
+  );
+  await bookingQueue.upsertJobScheduler(
+    REPEATABLE_JOB_IDS.DATA_RETENTION_SWEEP,
+    { pattern: '40 3 * * *' }, // daily, 03:40 server time
+    {
+      name: JOB_NAMES.DATA_RETENTION_SWEEP,
       data: {},
       opts: { removeOnComplete: true, removeOnFail: true },
     }
