@@ -53,11 +53,11 @@ export function HelpSupportView({ role }: Props) {
       onPress: () => router.push(contactPath),
     },
     {
-      label: "Problem with a booking?",
+      label: role === "client" ? "My bookings" : "My jobs",
       sub:
         role === "client"
-          ? "Open the booking to cancel or open a dispute"
-          : "Open the job to cancel, reschedule or open a dispute",
+          ? "Cancel, reschedule or review a quote"
+          : "Cancel or reschedule a job",
       icon: "calendar-outline",
       onPress: () => router.push(bookingsPath),
     },

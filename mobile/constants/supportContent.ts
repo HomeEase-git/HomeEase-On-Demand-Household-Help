@@ -141,7 +141,7 @@ export const CLIENT_FAQ: FaqCategory[] = [
       },
       {
         q: "I'm not happy with the work. What can I do?",
-        a: "Open the booking and open a dispute, explaining what went wrong. A HomeEase admin reviews the booking, chat, photos, quotes and the worker's check-in, and decides the outcome, which can include a refund.",
+        a: "Contact us from Help & Support → Contact Us, choose a topic and add your booking ID. If the problem is with a quote, you can also tap Dispute Quote on the quote screen. A HomeEase admin reviews the booking, chat, photos, quotes and the worker's check-in, and decides the outcome, which can include a refund.",
       },
       {
         q: "How do refunds work?",
@@ -167,7 +167,7 @@ export const CLIENT_FAQ: FaqCategory[] = [
       },
       {
         q: "How do I report a worker?",
-        a: "For a problem with a booking, open a dispute on it. For anything about your safety, contact us right away with the booking ID. If you're in danger, call 911 first.",
+        a: "Contact us with the booking ID and tell us what happened. For anything about your safety, contact us right away. If you're in danger, call 911 first.",
       },
     ],
   },
@@ -289,7 +289,7 @@ export const WORKER_FAQ: FaqCategory[] = [
       },
       {
         q: "How are disputes decided?",
-        a: "Either you or the client can open a dispute on a booking. A HomeEase admin reviews the chat, booking records, quotes, photos and check-in location, and decides. If you think a decision is wrong, contact us to ask for it to be reconsidered.",
+        a: "Clients can dispute a quote in the app, and either side can raise a problem with a booking by contacting us with the booking ID. A HomeEase admin reviews the chat, booking records, quotes, photos and check-in location, and decides. If you think a decision is wrong, contact us to ask for it to be reconsidered.",
       },
     ],
   },
