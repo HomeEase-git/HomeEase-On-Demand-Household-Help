@@ -28,7 +28,8 @@
         "android.permission.CAMERA",
         "android.permission.RECORD_AUDIO",
         "android.permission.ACCESS_COARSE_LOCATION",
-        "android.permission.ACCESS_FINE_LOCATION"
+        "android.permission.ACCESS_FINE_LOCATION",
+        "android.permission.MODIFY_AUDIO_SETTINGS"
       ]
     },
     "web": {
@@ -91,6 +92,12 @@
         "projectId": "73469bad-9adb-4f27-a974-1b0397982458"
       }
     },
-    "owner": "homeease"
+    "owner": "homeease",
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/73469bad-9adb-4f27-a974-1b0397982458"
+    }
   }
 }
