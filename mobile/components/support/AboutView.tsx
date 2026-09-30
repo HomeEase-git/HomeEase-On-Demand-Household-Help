@@ -1,5 +1,5 @@
 import React from "react";
-import { View, Text, ScrollView, Pressable, Share, Linking } from "react-native";
+import { View, Text, ScrollView, Pressable, Share, Linking, Image } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import Constants from "expo-constants";
@@ -75,14 +75,14 @@ export function AboutView({ role }: Props) {
       <ScreenHeader title="About HomeEase" showBack />
       <ScrollView contentContainerStyle={{ padding: 24, paddingBottom: 40 }}>
         <View className="items-center">
-          <View
-            className="w-20 h-20 bg-accent rounded-2xl items-center justify-center mb-4"
-            style={cardShadow}
-          >
-            <Ionicons name="home" size={48} color={colors.white} />
-          </View>
-          <Text className="text-text-primary text-xl font-bold">HomeEase</Text>
-          <Text className="text-text-secondary">On-Demand Household Help</Text>
+          {/* The logo includes the "HomeEase" wordmark, so no separate title. */}
+          <Image
+            source={require("../../assets/images/logo/home_ease-logo.png")}
+            style={{ width: 160, height: 152 }}
+            resizeMode="contain"
+            accessibilityLabel="HomeEase logo"
+          />
+          <Text className="text-text-secondary mt-1">On-Demand Household Help</Text>
           <Text className="text-text-muted text-sm mt-1">
             Version {version}
             {updateTag}
