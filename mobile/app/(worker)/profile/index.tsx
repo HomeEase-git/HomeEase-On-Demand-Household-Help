@@ -53,6 +53,7 @@ const MENU_GROUPS = [
     title: "Support & Legal",
     items: [
       { label: "Help & Support", path: "/(worker)/profile/help-support", icon: "help-circle-outline" },
+      { label: "Contact Us", path: "/(worker)/profile/contact-us", icon: "chatbubble-ellipses-outline" },
       { label: "Terms and Conditions", path: "/(worker)/profile/terms", icon: "document-text-outline" },
       { label: "Privacy Policy", path: "/(worker)/profile/privacy-policy", icon: "shield-outline" },
       { label: "About HomeEase", path: "/(worker)/profile/about", icon: "information-circle-outline" },
