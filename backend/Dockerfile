@@ -2,7 +2,7 @@
 # Build context is the backend/ directory:  docker build -t homeease-backend backend/
 
 # ---------- base ----------
-FROM node:22-bookworm-slim AS base
+FROM node:26-bookworm-slim AS base
 # openssl: required by the Prisma query engine. dumb-init: PID 1 signal
 # forwarding + zombie reaping.
 RUN apt-get update \
