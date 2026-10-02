@@ -26,7 +26,6 @@ const REVIEW_FETCH_CONCURRENCY = 4;
 // resume (parsed separately, on the worker's own request) and a VAT
 // registration (reviewed on its own admin screen) add nothing here.
 const NOT_SENT_FOR_REVIEW = new Set(['RESUME', 'VAT_REGISTRATION']);
-const ALLOWED_IMAGE_MIMES = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif']);
 
 function isReviewable(doc: VerificationJobDocument): boolean {
   if (NOT_SENT_FOR_REVIEW.has(doc.documentType)) return false;
