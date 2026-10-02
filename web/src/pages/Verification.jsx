@@ -11,7 +11,13 @@ import { fetchVerifications } from '../services/verification'
 import { useListQuery } from '../hooks/useListQuery'
 import { humanizeEnum, humanizeList } from '../utils/verificationLabels'
 
-const TYPE_MAP = { All: 'all', Clients: 'client', Workers: 'worker' }
+const STATUS_MAP = { All: 'ALL', Pending: 'PENDING', Verified: 'APPROVED', Rejected: 'REJECTED' }
+const EMPTY_MESSAGES = {
+  All: 'No verifications found.',
+  Pending: 'No pending verifications found.',
+  Verified: 'No verified requests found.',
+  Rejected: 'No rejected requests found.',
+}
 const POLL_INTERVAL_MS = 8000
 const PAGE_SIZE = 10
 
@@ -21,8 +27,7 @@ export default function Verification() {
   const fetchFn = useCallback(
     (params) =>
       fetchVerifications({
-        status: 'PENDING',
-        type: TYPE_MAP[params.filterTab] || 'all',
+        status: STATUS_MAP[params.filterTab] || 'ALL',
         search: params.search || '',
       }),
     []
@@ -46,7 +51,7 @@ export default function Verification() {
 
   return (
     <>
-      <PageHeader title="Verification Management" subtitle="Pending account verifications" />
+      <PageHeader title="Verification Management" subtitle="Review and manage account verifications" />
       <div className="toolbar" style={{ marginBottom: '1rem' }}>
         <SearchBar
           placeholder="Search by name or email..."
@@ -54,7 +59,7 @@ export default function Verification() {
           onChange={setSearch}
         />
         <FilterTabs
-          tabs={['All', 'Clients', 'Workers']}
+          tabs={['All', 'Pending', 'Verified', 'Rejected']}
           activeTab={params.filterTab}
           onTabChange={(tab) => setFilter('filterTab', tab)}
         />
@@ -79,7 +84,7 @@ export default function Verification() {
                 {records.length === 0 ? (
                   <tr>
                     <td colSpan={6} className="table-empty">
-                      No pending verifications found.
+                      {EMPTY_MESSAGES[params.filterTab] || EMPTY_MESSAGES.All}
                     </td>
                   </tr>
                 ) : (

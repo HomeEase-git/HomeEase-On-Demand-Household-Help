@@ -1,7 +1,7 @@
 import { apiRequest } from './apiClient';
 
-export async function fetchVerifications({ status = 'PENDING', type = 'all', search = '' } = {}) {
-  const params = new URLSearchParams({ status, type });
+export async function fetchVerifications({ status = 'PENDING', search = '' } = {}) {
+  const params = new URLSearchParams({ status });
   if (search) params.set('search', search);
   const response = await apiRequest(`/admin/verifications?${params.toString()}`);
   return response.data;

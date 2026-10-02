@@ -29,7 +29,10 @@ describe('Admin verification approve/reject', () => {
     await prisma.$disconnect();
   });
 
-  async function seedPendingVerification(label: string, status: 'PENDING' | 'SUBMITTED' = 'PENDING') {
+  async function seedPendingVerification(
+    label: string,
+    status: 'PENDING' | 'SUBMITTED' | 'APPROVED' | 'REJECTED' = 'PENDING'
+  ) {
     const { user: worker } = await createTestUser(label, { role: 'WORKER' });
     createdUserIds.push(worker.id);
 
@@ -144,9 +147,8 @@ describe('Admin verification approve/reject', () => {
   it('includes SUBMITTED (a completed worker application) when the queue is filtered to PENDING', async () => {
     // A worker's request only ever reaches SUBMITTED once they finish
     // onboarding (userController.acceptContract) and never moves back to
-    // PENDING — the admin web's Verification Management page always queries
-    // status=PENDING with no way to change it, so SUBMITTED must show up
-    // there too or a completed application is invisible to admins forever.
+    // PENDING — the Verification Management page's Pending filter includes
+    // SUBMITTED so a completed application remains visible to admins.
     const { worker, verification } = await seedPendingVerification('submitted', 'SUBMITTED');
 
     const res = await request(app)
@@ -170,6 +172,31 @@ describe('Admin verification approve/reject', () => {
 
     expect(approvedRes.body.data.some((v: { id: string }) => v.id === submitted.id)).toBe(false);
     expect(rejectedRes.body.data.some((v: { id: string }) => v.id === submitted.id)).toBe(false);
+  });
+
+  it('filters approved and rejected verification requests separately and includes both in ALL', async () => {
+    const { verification: approved } = await seedPendingVerification('verified-filter', 'APPROVED');
+    const { verification: rejected } = await seedPendingVerification('rejected-filter', 'REJECTED');
+
+    const approvedRes = await request(app)
+      .get('/api/admin/verifications?status=APPROVED')
+      .set('Authorization', `Bearer ${adminToken}`);
+    const rejectedRes = await request(app)
+      .get('/api/admin/verifications?status=REJECTED')
+      .set('Authorization', `Bearer ${adminToken}`);
+    const allRes = await request(app)
+      .get('/api/admin/verifications?status=ALL')
+      .set('Authorization', `Bearer ${adminToken}`);
+
+    expect(approvedRes.status).toBe(200);
+    expect(approvedRes.body.data.some((v: { id: string }) => v.id === approved.id)).toBe(true);
+    expect(approvedRes.body.data.some((v: { id: string }) => v.id === rejected.id)).toBe(false);
+    expect(rejectedRes.status).toBe(200);
+    expect(rejectedRes.body.data.some((v: { id: string }) => v.id === rejected.id)).toBe(true);
+    expect(rejectedRes.body.data.some((v: { id: string }) => v.id === approved.id)).toBe(false);
+    expect(allRes.status).toBe(200);
+    expect(allRes.body.data.some((v: { id: string }) => v.id === approved.id)).toBe(true);
+    expect(allRes.body.data.some((v: { id: string }) => v.id === rejected.id)).toBe(true);
   });
 
   it('approves a verification, updates worker KYC status, and notifies the worker', async () => {
