@@ -1,7 +1,7 @@
 import { downloadStorageObject } from '@utils/storageUrls';
 import prisma from '@config/database';
 
-const ANTHROPIC_MODEL = process.env.ANTHROPIC_MODEL || 'claude-sonnet-5';
+const ANTHROPIC_MODEL = process.env.ANTHROPIC_MODEL || 'claude-sonnet-4-5';
 
 interface ExtractedResume {
   parsedSkills: string[];
