@@ -43,7 +43,7 @@ describe('Xendit invoice webhook — token verification and event handling', () 
   });
 
   async function seedPendingPayment(invoiceId: string) {
-    const booking = await createTestBooking({ clientId, workerId, status: 'ACCEPTED' });
+    const booking = await createTestBooking({ clientId, workerId, status: 'AWAITING_PAYMENT' });
     createdBookingIds.push(booking.id);
     const payment = await prisma.payment.create({
       data: {
