@@ -1651,16 +1651,22 @@ export async function updateWorkerLiveLocation(bookingId: string, lat: number, l
   return response;
 }
 
-// Materials need receipt photos and photos of them in use (uploadJobPhoto).
+export type QuoteItemPayload = {
+  name: string;
+  price: number;
+  receiptUrls: string[];
+  proofOfUseUrls: string[];
+};
+
+// Each item needs its own receipt photos and photos of it in use (uploadJobPhoto).
+// The items replace any earlier set, so editing or deleting one is a resubmit.
 // laborCost only for a custom-quote job.
 export async function submitQuote(
   bookingId: string,
   data: {
-    materialsCost: number;
+    items: QuoteItemPayload[];
     laborCost?: number;
     notes?: string;
-    receiptUrls?: string[];
-    proofOfUseUrls?: string[];
   },
 ) {
   try {
@@ -1672,22 +1678,19 @@ export async function submitQuote(
   }
 }
 
-// Mid-job scope-creep item — worker only, and only while the job is active
-// (IN_PROGRESS/QUOTE_SUBMITTED/QUOTE_APPROVED, enforced server-side). Starts
-// pending — the client must approve it (see respondToBookingAddOn) before it
-// counts toward the price breakdown (see getBookingDetail); it auto-approves
-// after 6h of no response, or auto-rejects if the job completes first.
-export async function addBookingAddOn(bookingId: string, data: { name: string; price: number }) {
+// Takes a submitted/approved quote back to IN_PROGRESS so its items can be
+// edited; the client approves the new total after the worker resubmits.
+export async function reopenQuote(bookingId: string) {
   try {
-    const response = await api.post(`/bookings/${bookingId}/addons`, data);
+    const response = await api.post(`/bookings/${bookingId}/quote/reopen`);
     return response;
   } catch (error) {
-    console.error('Add booking addon error:', error);
+    console.error('Reopen quote error:', error);
     throw error;
   }
 }
 
-// Client approves or rejects a pending addon (see addBookingAddOn).
+// Client approves or rejects a legacy pending addon.
 export async function respondToBookingAddOn(bookingId: string, addonId: string, approve: boolean) {
   try {
     const response = await api.patch(`/bookings/${bookingId}/addons/${addonId}/respond`, { approve });
