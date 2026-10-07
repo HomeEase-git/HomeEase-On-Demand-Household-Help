@@ -7,8 +7,11 @@ const OTP_EXPIRY_MINUTES = 10;
 
 // Codes are stored hashed so a DB read can't be used to sign in or confirm an
 // account action. Six digits is brute-forceable offline, but the code dies in
-// 10 minutes and the per-account limiter caps online guesses.
-const hashOtp = (otp: string): string => crypto.createHash('sha256').update(otp).digest('hex');
+// 10 minutes and the per-account limiter caps online guesses. The user and
+// type are part of the hash: AuthToken.token is unique across all users, and
+// two people can be sent the same six digits.
+const hashOtp = (userId: string, type: TokenType, otp: string): string =>
+  crypto.createHash('sha256').update(`${userId}:${type}:${otp}`).digest('hex');
 
 export const generateOtp = (): string => {
   // CSPRNG — Math.random() output is predictable enough to guess codes.
@@ -34,7 +37,7 @@ export const storeOtp = async (
   await prisma.authToken.create({
     data: {
       userId,
-      token: hashOtp(otp),
+      token: hashOtp(userId, type, otp),
       type,
       expiresAt,
     },
@@ -57,7 +60,10 @@ export const verifyOtp = async (
   const record = await prisma.authToken.findFirst({
     where: {
       userId,
-      token: hashOtp(otp),
+      // ponytail: plaintext match only for codes issued before hashing
+      // shipped (they expire within OTP_EXPIRY_MINUTES); drop it next
+      // release. Six digits only, so a stored hash can't be replayed as a code.
+      token: { in: /^\d{6}$/.test(otp) ? [hashOtp(userId, type, otp), otp] : [hashOtp(userId, type, otp)] },
       type,
       expiresAt: {
         gt: new Date(),

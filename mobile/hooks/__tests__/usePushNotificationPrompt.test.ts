@@ -30,4 +30,9 @@ it("registers push once per account, again after switching accounts", async () =
 
   await signInAndMount("u2");
   expect(mockRequestPermissions).toHaveBeenCalledTimes(2);
+
+  // Logging out unregisters the device; signing back in to the same account registers again.
+  await act(async () => useAuthStore.setState({ user: null, isAuthenticated: false }));
+  await signInAndMount("u2");
+  expect(mockRequestPermissions).toHaveBeenCalledTimes(3);
 });

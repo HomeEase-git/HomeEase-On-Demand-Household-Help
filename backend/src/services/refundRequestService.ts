@@ -178,7 +178,7 @@ export async function markRefundedManually(id: string, adminId: string, note: st
 
   const payment = await prisma.payment.findUniqueOrThrow({
     where: { id: request.paymentId },
-    include: { booking: { select: { workerId: true } } },
+    include: { booking: { select: { workerId: true, clientId: true } } },
   });
   let workerAlreadyPaid = false;
   if (payment.status === 'COMPLETED' && payment.methodType !== 'CASH') {
@@ -214,7 +214,7 @@ export async function markRefundedManually(id: string, adminId: string, note: st
     await flagTaxRecordsForRefundedPayment(payment);
     // Cash jobs never had the client's money on the platform's books.
     if (payment.methodType !== 'CASH') {
-      await postManualRefund(prisma, payment, payment.booking.workerId, workerAlreadyPaid);
+      await postManualRefund(prisma, payment, payment.booking.workerId, workerAlreadyPaid, payment.booking.clientId);
     }
   }
 

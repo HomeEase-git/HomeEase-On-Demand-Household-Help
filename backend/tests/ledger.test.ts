@@ -20,7 +20,7 @@ import { chargePenaltyTx, adminAdjustDebt } from '@services/debtLedgerService';
 import { openLedger, LedgerAlreadyOpenError } from '@services/ledgerOpeningService';
 import { syncXenditFees } from '@services/ledgerFeeSyncService';
 import { buildReconciliation } from '@services/ledgerReconciliationService';
-import { postLedger, resetLedgerOpenCache, postCancellationFee, postClientFeeCleared } from '@services/ledgerService';
+import { postLedger, resetLedgerOpenCache, postCancellationFee, postClientFeeCleared, postRefundSent } from '@services/ledgerService';
 import { markPeriodRemitted } from '@services/taxRemittanceService';
 import { requestRefund, markRefundedManually } from '@services/refundRequestService';
 import { manilaMonthKey } from '@utils/manilaTime';
@@ -275,5 +275,17 @@ describe('Double-entry ledger', () => {
     const lines = await prisma.ledgerLine.findMany({ where: { transaction: { paymentId: payment.id } } });
     expect(lines.find((l) => l.account === 'XENDIT_CASH')?.amountCentavos).toBe(101000);
     expect(lines.find((l) => l.account === 'CLIENT_RECEIVABLE')).toMatchObject({ amountCentavos: -1000, clientId });
+
+    // Refunding it in full sends the overpayment back too: nothing is left
+    // owed to the client or credited to the worker for this payment.
+    await postRefundSent(prisma, await prisma.payment.findUniqueOrThrow({ where: { id: payment.id } }), workerA, clientId);
+    const sums = await prisma.ledgerLine.groupBy({
+      by: ['account'],
+      where: { transaction: { paymentId: payment.id } },
+      _sum: { amountCentavos: true },
+    });
+    for (const account of ['XENDIT_CASH', 'WORKER_BALANCE', 'CLIENT_RECEIVABLE'] as const) {
+      expect(sums.find((r) => r.account === account)?._sum.amountCentavos ?? 0).toBe(0);
+    }
   });
 });

@@ -920,8 +920,8 @@ export async function reconcilePendingRefund(paymentId: string): Promise<'succee
   if (refund.status === 'SUCCEEDED') {
     await prisma.payment.update({ where: { id: payment.id }, data: { xenditRefundStatus: 'SUCCEEDED' } });
     await undoWorkerSettlement(payment.id);
-    const booking = await prisma.booking.findUnique({ where: { id: payment.bookingId }, select: { workerId: true } });
-    await postRefundSent(prisma, payment, booking?.workerId ?? null);
+    const booking = await prisma.booking.findUnique({ where: { id: payment.bookingId }, select: { workerId: true, clientId: true } });
+    await postRefundSent(prisma, payment, booking?.workerId ?? null, booking?.clientId ?? null);
     return 'succeeded';
   }
   if (refund.status !== 'FAILED' && refund.status !== 'CANCELLED') return 'pending';
@@ -996,7 +996,7 @@ export async function undoWorkerSettlement(paymentId: string): Promise<void> {
 export async function refundOrVoidPayment(bookingId: string, reason: string) {
   const payment = await prisma.payment.findUnique({
     where: { bookingId },
-    include: { payout: true, booking: { select: { workerId: true } } },
+    include: { payout: true, booking: { select: { workerId: true, clientId: true } } },
   });
   if (!payment) return null;
 
@@ -1030,7 +1030,7 @@ export async function refundOrVoidPayment(bookingId: string, reason: string) {
       await undoWorkerSettlement(payment.id);
     }
     if (refund?.status === 'SUCCEEDED') {
-      await postRefundSent(prisma, payment, payment.booking.workerId);
+      await postRefundSent(prisma, payment, payment.booking.workerId, payment.booking.clientId);
     }
   } else if (payment.methodType === 'CASH') {
     // Reverse the commission-debt accrual; the worker returns the cash

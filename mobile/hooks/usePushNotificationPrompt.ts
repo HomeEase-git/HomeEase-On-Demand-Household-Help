@@ -3,13 +3,16 @@ import { InteractionManager } from 'react-native';
 import { notificationService } from '../services/notificationService';
 import { useAuthStore } from '../store/authStore';
 
-// Per account, not per app session: after a logout (which unregisters the
-// device) the next account to sign in must register its own push token.
+// Per sign-in, not per app session: logout unregisters the device, so the
+// next sign-in (same account or another) must register its push token again.
 let promptedForUserId: string | null = null;
+useAuthStore.subscribe((state) => {
+  if (!state.user) promptedForUserId = null;
+});
 
 /**
  * Prompts for notification permission (no-ops if already decided) once per
- * signed-in account, and obtains + registers the push token if granted.
+ * sign-in, and obtains + registers the push token if granted.
  *
  * This used to fire from useAuth.ts's login/signup/verifyEmailOtp right
  * after authenticating, deferred with InteractionManager.runAfterInteractions

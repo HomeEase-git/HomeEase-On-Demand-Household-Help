@@ -128,16 +128,23 @@ interface PaymentSplit {
   capturedAt?: Date | null;
 }
 
-/** Client paid online (GCash/Maya): the money lands at Xendit. */
-export function postPaymentCaptured(client: Client, payment: PaymentSplit, workerId: string | null, clientId: string | null = null) {
+/**
+ * How a captured online payment divides. The worker's share is of the
+ * invoice; anything paid over it is owed back to the client (the payout only
+ * ever sends workerPayout, so crediting it to the worker would leave a
+ * balance that never clears).
+ */
+function splitCapture(payment: PaymentSplit) {
   const captured = toCentavos(payment.capturedAmount ?? payment.totalAmount);
-  // Anything paid over the invoice is owed back to the client: the payout only
-  // ever sends workerPayout, so crediting it to the worker would leave a
-  // balance that never clears.
-  const total = Math.min(captured, toCentavos(payment.totalAmount));
-  const overpaid = captured - total;
+  const invoiced = Math.min(captured, toCentavos(payment.totalAmount));
   const commission = toCentavos(payment.commissionAmount);
   const withholding = toCentavos(payment.withholdingTaxAmount);
+  return { captured, overpaid: captured - invoiced, commission, withholding, workerShare: invoiced - commission - withholding };
+}
+
+/** Client paid online (GCash/Maya): the money lands at Xendit. */
+export function postPaymentCaptured(client: Client, payment: PaymentSplit, workerId: string | null, clientId: string | null = null) {
+  const { captured, overpaid, commission, withholding, workerShare } = splitCapture(payment);
   return postLedger(client, {
     type: 'PAYMENT_CAPTURED',
     key: `capture:${payment.id}`,
@@ -150,7 +157,7 @@ export function postPaymentCaptured(client: Client, payment: PaymentSplit, worke
       { account: 'COMMISSION_REVENUE', amountCentavos: -commission },
       { account: 'WITHHOLDING_TAX_PAYABLE', amountCentavos: -withholding },
       // The rest (service price after commission/tax, tip, VAT) is the worker's.
-      { account: 'WORKER_BALANCE', amountCentavos: -(total - commission - withholding), workerId },
+      { account: 'WORKER_BALANCE', amountCentavos: -workerShare, workerId },
       ...(overpaid > 0 ? [{ account: 'CLIENT_RECEIVABLE' as const, amountCentavos: -overpaid, clientId }] : []),
     ],
   });
@@ -218,10 +225,8 @@ export function postPayoutSent(
  * An online payment refunded through Xendit (the worker's payout was stopped
  * first, so their share simply comes back off their balance).
  */
-export function postRefundSent(client: Client, payment: PaymentSplit, workerId: string | null) {
-  const total = toCentavos(payment.capturedAmount ?? payment.totalAmount);
-  const commission = toCentavos(payment.commissionAmount);
-  const withholding = toCentavos(payment.withholdingTaxAmount);
+export function postRefundSent(client: Client, payment: PaymentSplit, workerId: string | null, clientId: string | null = null) {
+  const { captured, overpaid, commission, withholding, workerShare } = splitCapture(payment);
   return postLedger(client, {
     type: 'REFUND_SENT',
     key: `refund:${payment.id}`,
@@ -229,10 +234,12 @@ export function postRefundSent(client: Client, payment: PaymentSplit, workerId: 
     bookingId: payment.bookingId,
     paymentId: payment.id,
     lines: [
-      { account: 'XENDIT_CASH', amountCentavos: -total },
+      { account: 'XENDIT_CASH', amountCentavos: -captured },
       { account: 'COMMISSION_REVENUE', amountCentavos: commission },
       { account: 'WITHHOLDING_TAX_PAYABLE', amountCentavos: withholding },
-      { account: 'WORKER_BALANCE', amountCentavos: total - commission - withholding, workerId },
+      { account: 'WORKER_BALANCE', amountCentavos: workerShare, workerId },
+      // The overpayment went back with the refund, so the client is no longer owed it.
+      ...(overpaid > 0 ? [{ account: 'CLIENT_RECEIVABLE' as const, amountCentavos: overpaid, clientId }] : []),
     ],
   });
 }
@@ -265,12 +272,10 @@ export function postManualRefund(
   client: Client,
   payment: PaymentSplit,
   workerId: string | null,
-  workerAlreadyPaid: boolean
+  workerAlreadyPaid: boolean,
+  clientId: string | null = null
 ) {
-  const total = toCentavos(payment.capturedAmount ?? payment.totalAmount);
-  const commission = toCentavos(payment.commissionAmount);
-  const withholding = toCentavos(payment.withholdingTaxAmount);
-  const workerShare = total - commission - withholding;
+  const { captured, overpaid, commission, withholding, workerShare } = splitCapture(payment);
   return postLedger(client, {
     type: 'MANUAL_REFUND',
     key: `manual-refund:${payment.id}`,
@@ -278,12 +283,13 @@ export function postManualRefund(
     bookingId: payment.bookingId,
     paymentId: payment.id,
     lines: [
-      { account: 'MANUAL_SETTLEMENTS', amountCentavos: -total },
+      { account: 'MANUAL_SETTLEMENTS', amountCentavos: -captured },
       { account: 'COMMISSION_REVENUE', amountCentavos: commission },
       { account: 'WITHHOLDING_TAX_PAYABLE', amountCentavos: withholding },
       workerAlreadyPaid
         ? { account: 'REFUND_LOSS', amountCentavos: workerShare }
         : { account: 'WORKER_BALANCE', amountCentavos: workerShare, workerId },
+      ...(overpaid > 0 ? [{ account: 'CLIENT_RECEIVABLE' as const, amountCentavos: overpaid, clientId }] : []),
     ],
   });
 }

@@ -157,6 +157,9 @@ async function clearData() {
   await prisma.notification.deleteMany();
   await prisma.message.deleteMany();
   await prisma.review.deleteMany();
+  // Payouts, refunds and dues are onDelete: Restrict: clear them before their parents.
+  await prisma.payout.deleteMany();
+  await prisma.refundRequest.deleteMany();
   await prisma.payment.deleteMany();
   await prisma.bookingAddOn.deleteMany();
   await prisma.booking.deleteMany();
@@ -169,6 +172,7 @@ async function clearData() {
   await prisma.serviceTask.deleteMany();
   await prisma.authToken.deleteMany();
   await prisma.userAddress.deleteMany();
+  await prisma.debtLedgerEntry.deleteMany();
   await prisma.workerProfile.deleteMany();
   await prisma.clientProfile.deleteMany();
   await prisma.serviceType.deleteMany();
