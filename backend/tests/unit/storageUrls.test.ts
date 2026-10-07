@@ -119,6 +119,16 @@ describe('signStorageUrlsDeep', () => {
     expect(createSignedUrls).not.toHaveBeenCalled();
   });
 
+  it('never signs private URLs in free-text fields', async () => {
+    const body = { data: { content: KYC, notes: [KYC], imageUrl: CHAT } };
+    const result = await signStorageUrlsDeep(body);
+    expect(createSignedUrls).toHaveBeenCalledTimes(1);
+    expect(createSignedUrls).toHaveBeenCalledWith('chat-images', ['user-2/photo.png'], SIGNED_URL_TTL_SECONDS);
+    expect(result.data.content).toBe(KYC);
+    expect(result.data.notes[0]).toBe(KYC);
+    expect(result.data.imageUrl).toBe(`${BASE}/sign/chat-images/user-2/photo.png?token=t`);
+  });
+
   it('falls back to the stored URL if signing fails', async () => {
     createSignedUrls.mockResolvedValue({ data: null, error: new Error('boom') });
     const errorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
