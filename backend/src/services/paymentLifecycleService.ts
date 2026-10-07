@@ -593,7 +593,7 @@ export async function finalizePaidBooking(
         completionDate: new Date(),
       });
 
-      await postPaymentCaptured(tx, p, payment.booking.workerId);
+      await postPaymentCaptured(tx, p, payment.booking.workerId, payment.booking.clientId);
 
       // If the payment-overdue sweep already opened a dispute and the client
       // then paid, close it out.

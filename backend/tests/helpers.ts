@@ -1,7 +1,8 @@
 import { randomUUID } from 'crypto';
 import bcryptjs from 'bcryptjs';
 import prisma from '@config/database';
-import type { BookingStatus, Role } from '@prisma/client';
+import { ownerDb } from './ownerDb';
+import type { BookingStatus, Prisma, Role } from '@prisma/client';
 
 // All test-created accounts share this marker in the local part of the email
 // so a stray failed run is easy to spot and hand-clean in the DB if needed.
@@ -40,7 +41,20 @@ export async function createTestUser(label: string, options: CreateTestUserOptio
 
 // User has cascading deletes configured for its owned relations (profiles,
 // verification requests, etc.), so removing the user is enough cleanup.
+// Payments, payouts, refunds and dues are onDelete: Restrict (they're BIR
+// records), so a user or booking delete no longer cascades into them. Remove
+// them first, through the owner connection since dues rows are append-only.
+async function deleteMoneyRecords(bookingWhere: Prisma.BookingWhereInput) {
+  const payment = { booking: bookingWhere };
+  await ownerDb.payout.deleteMany({ where: { payment } });
+  await ownerDb.refundRequest.deleteMany({ where: { payment } });
+  await ownerDb.payment.deleteMany({ where: payment });
+}
+
 export async function deleteTestUser(userId: string) {
+  await deleteMoneyRecords({ OR: [{ clientId: userId }, { workerId: userId }] });
+  await ownerDb.booking.deleteMany({ where: { OR: [{ clientId: userId }, { workerId: userId }] } });
+  await ownerDb.debtLedgerEntry.deleteMany({ where: { workerProfile: { userId } } });
   await prisma.user.delete({ where: { id: userId } }).catch(() => {
     // Already deleted by the test itself (e.g. via a status-changing flow) — fine.
   });
@@ -79,10 +93,10 @@ export async function createTestBooking(options: CreateTestBookingOptions) {
   });
 }
 
-// Booking cascades from its client/worker User via onDelete: Cascade, so
-// deleteTestUser cleans these up too — this is for tests that want to tear
-// a booking down independently mid-test.
+// deleteTestUser cleans bookings up too — this is for tests that want to
+// tear a booking down independently mid-test.
 export async function deleteTestBooking(bookingId: string) {
+  await deleteMoneyRecords({ id: bookingId });
   await prisma.booking.delete({ where: { id: bookingId } }).catch(() => {
     // Already removed (e.g. cascaded from a user delete) — fine.
   });

@@ -266,6 +266,7 @@ async function clearData() {
   await prisma.notification.deleteMany();
   await prisma.message.deleteMany();
   await prisma.review.deleteMany();
+  await prisma.refundRequest.deleteMany();
   await prisma.payment.deleteMany();
   await prisma.bookingAddOn.deleteMany();
   await prisma.booking.deleteMany();

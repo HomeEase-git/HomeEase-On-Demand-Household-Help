@@ -129,8 +129,13 @@ interface PaymentSplit {
 }
 
 /** Client paid online (GCash/Maya): the money lands at Xendit. */
-export function postPaymentCaptured(client: Client, payment: PaymentSplit, workerId: string | null) {
-  const total = toCentavos(payment.capturedAmount ?? payment.totalAmount);
+export function postPaymentCaptured(client: Client, payment: PaymentSplit, workerId: string | null, clientId: string | null = null) {
+  const captured = toCentavos(payment.capturedAmount ?? payment.totalAmount);
+  // Anything paid over the invoice is owed back to the client: the payout only
+  // ever sends workerPayout, so crediting it to the worker would leave a
+  // balance that never clears.
+  const total = Math.min(captured, toCentavos(payment.totalAmount));
+  const overpaid = captured - total;
   const commission = toCentavos(payment.commissionAmount);
   const withholding = toCentavos(payment.withholdingTaxAmount);
   return postLedger(client, {
@@ -141,11 +146,12 @@ export function postPaymentCaptured(client: Client, payment: PaymentSplit, worke
     bookingId: payment.bookingId,
     paymentId: payment.id,
     lines: [
-      { account: 'XENDIT_CASH', amountCentavos: total },
+      { account: 'XENDIT_CASH', amountCentavos: captured },
       { account: 'COMMISSION_REVENUE', amountCentavos: -commission },
       { account: 'WITHHOLDING_TAX_PAYABLE', amountCentavos: -withholding },
       // The rest (service price after commission/tax, tip, VAT) is the worker's.
       { account: 'WORKER_BALANCE', amountCentavos: -(total - commission - withholding), workerId },
+      ...(overpaid > 0 ? [{ account: 'CLIENT_RECEIVABLE' as const, amountCentavos: -overpaid, clientId }] : []),
     ],
   });
 }

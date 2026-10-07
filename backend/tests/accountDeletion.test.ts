@@ -2,6 +2,7 @@ import request from 'supertest';
 import app from '@/app';
 import prisma from '@config/database';
 import { encryptField } from '@utils/fieldEncryption';
+import { sendOtpEmail } from '@utils/emailService';
 import { createTestBooking, createTestUser, deleteTestUser } from './helpers';
 
 jest.mock('@utils/emailService', () => ({
@@ -10,11 +11,11 @@ jest.mock('@utils/emailService', () => ({
 }));
 
 /** Steps 2-3 of the delete flow: ask for the emailed code and read it back. */
-async function requestDeletionCode(token: string, userId: string): Promise<string> {
+async function requestDeletionCode(token: string, _userId: string): Promise<string> {
   const res = await request(app).post('/api/users/me/delete-code').set('Authorization', `Bearer ${token}`);
   expect(res.status).toBe(200);
-  const row = await prisma.authToken.findFirstOrThrow({ where: { userId, type: 'ACCOUNT_ACTION' } });
-  return row.token;
+  const calls = jest.mocked(sendOtpEmail).mock.calls;
+  return calls[calls.length - 1][1];
 }
 
 describe('DELETE /api/users/me', () => {
@@ -89,6 +90,23 @@ describe('DELETE /api/users/me', () => {
     // The old credentials no longer work.
     const relogin = await request(app).post('/api/auth/login').send({ email: worker.email, password: plainPassword });
     expect(relogin.status).not.toBe(200);
+  });
+
+  it('removes a client's saved payment methods', async () => {
+    const { user: client, plainPassword } = await createTestUser('delete-saved-pm', { role: 'CLIENT' });
+    createdUserIds.push(client.id);
+    const profile = await prisma.clientProfile.findUniqueOrThrow({ where: { userId: client.id } });
+    await prisma.savedPaymentMethod.create({ data: { clientProfileId: profile.id, type: 'GCASH', accountIdentifier: '****4567' } });
+
+    const token = await login(client.email, plainPassword);
+    const code = await requestDeletionCode(token, client.id);
+    const res = await request(app)
+      .delete('/api/users/me')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ password: plainPassword, code, confirmText: 'DELETE MY ACCOUNT' });
+
+    expect(res.status).toBe(200);
+    expect(await prisma.savedPaymentMethod.count({ where: { clientProfileId: profile.id } })).toBe(0);
   });
 
   it('refuses while a booking is still in progress', async () => {

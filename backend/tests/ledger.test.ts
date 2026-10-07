@@ -264,4 +264,16 @@ describe('Double-entry ledger', () => {
     expect(workers.items).toHaveLength(1);
     await prisma.workerProfile.update({ where: { userId: workerA }, data: { commissionOwed: 0 } });
   });
+
+  it('owes an overpayment back to the client instead of crediting the worker', async () => {
+    const before = await ledgerOwed(workerA);
+    const payment = await onlinePayment(workerA, 1000);
+    await finalizePaidBooking(payment.id, 'ewc_over', 1010, new Date());
+
+    // The worker is credited the ₱882 share of the invoice, not of the ₱1,010 paid.
+    expect((await ledgerOwed(workerA)) - before).toBe(88200);
+    const lines = await prisma.ledgerLine.findMany({ where: { transaction: { paymentId: payment.id } } });
+    expect(lines.find((l) => l.account === 'XENDIT_CASH')?.amountCentavos).toBe(101000);
+    expect(lines.find((l) => l.account === 'CLIENT_RECEIVABLE')).toMatchObject({ amountCentavos: -1000, clientId });
+  });
 });
