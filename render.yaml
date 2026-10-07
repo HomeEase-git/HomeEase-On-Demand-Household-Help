@@ -162,6 +162,7 @@ services:
     # a cache but wrong for a job queue).
     maxmemoryPolicy: noeviction
     persistenceMode: journal-snapshot
-    ipAllowList:
-      - source: 0.0.0.0/0
-        description: "Open for now — tighten once homeease-backend's egress IP is known"
+    # Empty = no access from outside Render. The backend connects over the
+    # private network (REDIS_URL is the internal connectionString), which the
+    # allow-list doesn't apply to.
+    ipAllowList: []

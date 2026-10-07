@@ -176,3 +176,26 @@ jobs:
           push: false
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+  # Migrations run while the old instance is still serving (docker-entrypoint.sh),
+  # so a new migration must not drop, rename or retype anything the deployed code
+  # still reads (docs/money-schema-migration-plan.md, expand/contract). A planned
+  # contract step carries the `contract-migration` label; re-run this job after
+  # adding it.
+  migration-safety:
+    if: github.event_name == 'pull_request' && !contains(github.event.pull_request.labels.*.name, 'contract-migration')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: No destructive SQL in new migrations
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          files=$(git diff --name-only --diff-filter=A "$BASE_SHA"...HEAD -- 'backend/prisma/migrations/*/migration.sql')
+          [ -z "$files" ] && exit 0
+          if grep -nEi 'DROP[[:space:]]+(TABLE|COLUMN)|RENAME|ALTER[[:space:]]+COLUMN[^;]*[[:space:]]TYPE[[:space:]]' $files; then
+            echo "::error::A new migration drops, renames or retypes a table or column. Split it into expand/contract releases, or label the PR contract-migration."
+            exit 1
+          fi

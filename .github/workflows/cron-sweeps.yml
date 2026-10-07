@@ -33,11 +33,14 @@ permissions:
 jobs:
   sweep:
     runs-on: ubuntu-latest
+    timeout-minutes: 12
     steps:
+      # /all runs every sweep one after another, after a possible cold start,
+      # so it can take minutes; 120s used to fail runs that were still working.
       - name: Hit /internal/cron/all
         run: |
           curl --fail --show-error --silent \
-            --max-time 120 \
+            --max-time 600 \
             -X POST \
             -H "x-cron-secret: ${{ secrets.CRON_SECRET }}" \
             "${{ vars.RENDER_URL }}/internal/cron/all"
