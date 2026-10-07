@@ -5,6 +5,11 @@ import { isOtpAttemptLocked, recordFailedOtpAttempt, clearOtpAttempts } from '@u
 
 const OTP_EXPIRY_MINUTES = 10;
 
+// Codes are stored hashed so a DB read can't be used to sign in or confirm an
+// account action. Six digits is brute-forceable offline, but the code dies in
+// 10 minutes and the per-account limiter caps online guesses.
+const hashOtp = (otp: string): string => crypto.createHash('sha256').update(otp).digest('hex');
+
 export const generateOtp = (): string => {
   // CSPRNG — Math.random() output is predictable enough to guess codes.
   return crypto.randomInt(100000, 1000000).toString();
@@ -29,7 +34,7 @@ export const storeOtp = async (
   await prisma.authToken.create({
     data: {
       userId,
-      token: otp,
+      token: hashOtp(otp),
       type,
       expiresAt,
     },
@@ -52,7 +57,7 @@ export const verifyOtp = async (
   const record = await prisma.authToken.findFirst({
     where: {
       userId,
-      token: otp,
+      token: hashOtp(otp),
       type,
       expiresAt: {
         gt: new Date(),

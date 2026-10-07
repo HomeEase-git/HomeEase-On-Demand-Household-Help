@@ -4,6 +4,7 @@ import multer from 'multer';
 import prisma from '@config/database';
 import { supabase, PROMO_BANNER_BUCKET } from '@config/supabase';
 import { errorResponse } from '@utils/errorResponse';
+import { sniffMimeType } from '@utils/sniffMimeType';
 import { writeAuditLog } from '@utils/auditLog';
 import type { JwtPayload } from '@/types/index';
 
@@ -266,12 +267,16 @@ export const promoBannerImageUpload = multer({
 export const uploadPromoBannerImage = async (req: AuthRequest, res: Response) => {
   try {
     if (!req.file) return res.status(400).json(errorResponse(400, 'No image file provided'));
-    const extension = req.file.mimetype.split('/')[1] || 'jpg';
+    const mimeType = sniffMimeType(req.file.buffer);
+    if (!mimeType || !ALLOWED_IMAGE_TYPES.includes(mimeType)) {
+      return res.status(415).json(errorResponse(415, 'Only JPEG, PNG or WebP images are allowed'));
+    }
+    const extension = mimeType.split('/')[1];
     const fileName = `${randomUUID()}.${extension}`;
 
     const { error } = await supabase.storage
       .from(PROMO_BANNER_BUCKET)
-      .upload(fileName, req.file.buffer, { contentType: req.file.mimetype });
+      .upload(fileName, req.file.buffer, { contentType: mimeType });
     if (error) {
       console.error('Promo banner image upload failed:', error);
       return res.status(500).json(errorResponse(500, 'Failed to upload image'));

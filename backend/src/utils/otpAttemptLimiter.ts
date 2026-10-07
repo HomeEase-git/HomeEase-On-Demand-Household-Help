@@ -23,9 +23,8 @@ import { redisConnection } from '@config/redis';
 // suite) fails fast instead of retrying forever and keeping the process
 // alive, and a small circuit breaker so a Redis outage doesn't add a
 // doomed-connection delay to every single OTP verification. Like that
-// module, this one FAILS OPEN on a Redis error — an outage here degrades
-// back to "IP limiter only", which is the status quo today, not a new
-// hole.
+// module, a Redis error never blocks a request: during an outage the
+// in-memory counter below keeps the per-account limit on this instance.
 const client = new Redis({
   ...redisConnection,
   lazyConnect: true,
@@ -77,6 +76,33 @@ function attemptKey(userId: string, type: string): string {
 }
 
 /**
+ * Failed attempts are also counted in this process's memory, so a Redis
+ * outage doesn't reopen unlimited per-account guessing on this instance.
+ */
+// ponytail: per-process counter — covers the single Render instance; with
+// several instances, each one allows MAX_OTP_ATTEMPTS during an outage.
+const localAttempts = new Map<string, { count: number; expiresAt: number }>();
+
+function localCount(key: string): number {
+  const entry = localAttempts.get(key);
+  if (!entry) return 0;
+  if (entry.expiresAt > Date.now()) return entry.count;
+  localAttempts.delete(key);
+  return 0;
+}
+
+function countLocally(key: string, ttlSeconds: number): number {
+  const now = Date.now();
+  if (localAttempts.size >= 10_000) {
+    for (const [k, entry] of localAttempts) if (entry.expiresAt <= now) localAttempts.delete(k);
+  }
+  const count = localCount(key) + 1;
+  const expiresAt = count === 1 ? now + ttlSeconds * 1000 : localAttempts.get(key)!.expiresAt;
+  localAttempts.set(key, { count, expiresAt });
+  return count;
+}
+
+/**
  * How many wrong OTPs are tolerated for a given userId+type before further
  * attempts are locked out for the rest of the counter's TTL window.
  */
@@ -88,6 +114,7 @@ export const MAX_OTP_ATTEMPTS = 5;
  * or while the circuit breaker is open.
  */
 export async function isOtpAttemptLocked(userId: string, type: string, maxAttempts: number = MAX_OTP_ATTEMPTS): Promise<boolean> {
+  if (localCount(attemptKey(userId, type)) >= maxAttempts) return true;
   if (circuitIsOpen()) return false;
   try {
     const raw = await client.get(attemptKey(userId, type));
@@ -107,25 +134,27 @@ export async function isOtpAttemptLocked(userId: string, type: string, maxAttemp
  * post-increment value), so it always expires at "OTP window from the
  * first wrong guess", not sliding forward on every retry.
  */
-/** Returns the failed-attempt count so far, or null if Redis couldn't be reached. */
-export async function recordFailedOtpAttempt(userId: string, type: string, ttlSeconds: number): Promise<number | null> {
-  if (circuitIsOpen()) return null;
+/** Returns the failed-attempt count so far (Redis's, or this process's during an outage). */
+export async function recordFailedOtpAttempt(userId: string, type: string, ttlSeconds: number): Promise<number> {
+  const key = attemptKey(userId, type);
+  const local = countLocally(key, ttlSeconds);
+  if (circuitIsOpen()) return local;
   try {
-    const key = attemptKey(userId, type);
     const attempts = await client.incr(key);
     if (attempts === 1) {
       await client.expire(key, ttlSeconds);
     }
     recordSuccess();
-    return attempts;
+    return Math.max(attempts, local);
   } catch (error) {
     recordFailure('recordFailedOtpAttempt', error);
-    return null;
+    return local;
   }
 }
 
 /** Clears the counter on a successful OTP verification. */
 export async function clearOtpAttempts(userId: string, type: string): Promise<void> {
+  localAttempts.delete(attemptKey(userId, type));
   if (circuitIsOpen()) return;
   try {
     await client.del(attemptKey(userId, type));
