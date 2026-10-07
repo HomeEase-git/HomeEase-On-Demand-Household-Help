@@ -118,6 +118,14 @@ export const GoogleMap = forwardRef<GoogleMapHandle, Props>(function GoogleMap(
     [destination.lat, destination.lng],
   );
 
+  // Each new route (throttled by the caller) reframes the worker, the
+  // destination and the line between them; plain moves just slide the marker.
+  useEffect(() => {
+    if (!route || !mapReadyRef.current) return;
+    fitTo([destination, ...(worker ? [worker] : []), ...route]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [routeCoordinates]);
+
   const handleMapReady = () => {
     mapReadyRef.current = true;
     const points: LatLng[] = [destination];

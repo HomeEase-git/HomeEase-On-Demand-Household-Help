@@ -1,5 +1,5 @@
-import React from "react";
-import { Modal, View, Pressable, ActivityIndicator } from "react-native";
+import React, { useState } from "react";
+import { Modal, View, Text, Pressable, ActivityIndicator } from "react-native";
 import { WebView, WebViewNavigation } from "react-native-webview";
 import { Ionicons } from "@expo/vector-icons";
 import { colors } from "../../constants";
@@ -28,6 +28,10 @@ export default function XenditCheckoutModal({
   onFailed,
   onCancel,
 }: Props) {
+  // Offline or a dead page leaves a blank sheet; show a retry instead.
+  const [failed, setFailed] = useState(false);
+  const [attempt, setAttempt] = useState(0);
+
   const handleShouldStartLoad = (request: WebViewNavigation) => {
     if (request.url.startsWith(REDIRECT_SUCCESS_PREFIX)) {
       onSuccess();
@@ -68,8 +72,31 @@ export default function XenditCheckoutModal({
             <Ionicons name="close" size={24} color={colors.text.primary} />
           </Pressable>
         </View>
+        {failed ? (
+          <View style={{ flex: 1, alignItems: "center", justifyContent: "center", padding: 24 }}>
+            <Ionicons name="cloud-offline-outline" size={40} color={colors.text.muted} />
+            <Text style={{ color: colors.text.primary, fontWeight: "600", marginTop: 12, textAlign: "center" }}>
+              Couldn&apos;t open the payment page
+            </Text>
+            <Text style={{ color: colors.text.secondary, marginTop: 4, textAlign: "center" }}>
+              Check your connection and try again.
+            </Text>
+            <Pressable
+              accessibilityRole="button"
+              onPress={() => {
+                setFailed(false);
+                setAttempt((n) => n + 1);
+              }}
+              style={{ marginTop: 16, paddingHorizontal: 20, paddingVertical: 10, borderRadius: 12, backgroundColor: colors.accent.DEFAULT }}
+            >
+              <Text style={{ color: colors.white, fontWeight: "600" }}>Try again</Text>
+            </Pressable>
+          </View>
+        ) : (
         <WebView
+          key={attempt}
           source={{ uri: checkoutUrl }}
+          onError={() => setFailed(true)}
           onShouldStartLoadWithRequest={handleShouldStartLoad}
           startInLoadingState
           renderLoading={() => (
@@ -84,6 +111,7 @@ export default function XenditCheckoutModal({
             </View>
           )}
         />
+        )}
       </View>
     </Modal>
   );

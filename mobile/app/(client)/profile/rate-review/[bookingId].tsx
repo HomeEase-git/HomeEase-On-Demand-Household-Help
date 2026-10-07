@@ -127,7 +127,7 @@ export default function RateBookingScreen() {
       setSuccessVisible(true);
     } catch (error) {
       console.error("Submit review error:", error);
-      alertModal.error("Error", "Failed to submit review. Please try again.");
+      alertModal.error("Error", error instanceof Error && error.message ? error.message : "Failed to submit review. Please try again.");
     } finally {
       setLoading(false);
     }
@@ -161,6 +161,9 @@ export default function RateBookingScreen() {
     );
   }
 
+  // One review per booking: an existing one is shown read-only.
+  const alreadyRated = !!booking.rating;
+
   return (
     <SafeAreaView className="flex-1 bg-white">
       <ScreenHeader title="Rate & Review" showBack />
@@ -186,7 +189,7 @@ export default function RateBookingScreen() {
           <StarRating
             rating={rating}
             size={32}
-            interactive
+            interactive={!alreadyRated}
             onRate={setRating}
           />
         </View>
@@ -200,7 +203,11 @@ export default function RateBookingScreen() {
           onChangeText={setReview}
           placeholder="Share your experience..."
           multiline
+          editable={!alreadyRated}
         />
+        {alreadyRated && (
+          <Text className="text-text-muted text-sm mt-2">You&apos;ve already reviewed this job.</Text>
+        )}
 
         <View className="flex-row flex-wrap gap-2 mt-3">
           {photos.map((url) => (
@@ -214,7 +221,7 @@ export default function RateBookingScreen() {
               </Pressable>
             </View>
           ))}
-          {photos.length < MAX_REVIEW_PHOTOS && (
+          {!alreadyRated && photos.length < MAX_REVIEW_PHOTOS && (
             <Pressable
               className="w-20 h-20 rounded-xl border border-dashed items-center justify-center"
               style={{ borderColor: colors.divider }}
@@ -234,12 +241,14 @@ export default function RateBookingScreen() {
         </View>
 
         <View className="mt-6 gap-3">
-          <PrimaryButton
-            label="Submit Review"
-            fullWidth
-            loading={loading}
-            onPress={handleSubmit}
-          />
+          {!alreadyRated && (
+            <PrimaryButton
+              label="Submit Review"
+              fullWidth
+              loading={loading}
+              onPress={handleSubmit}
+            />
+          )}
           <OutlinedButton label="Book Again" onPress={handleBookAgain} />
         </View>
       </KeyboardAwareScrollView>

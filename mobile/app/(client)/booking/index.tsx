@@ -1,18 +1,12 @@
 import React, { useState } from "react";
-import { View, Text, FlatList, Pressable } from "react-native";
+import { View, Text, FlatList, Pressable, ActivityIndicator } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useFocusEffect, useRouter } from "expo-router";
 import { AppIcon as Ionicons } from "../../../components/icons/AppIcon";
 import { BookingCard } from "../../../components/cards/BookingCard";
 import { EmptyState } from "../../../components/feedback/EmptyState";
 import { LoadingSkeleton } from "../../../components/feedback/LoadingSkeleton";
-import {
-  useBookingStore,
-  mapApiBooking,
-  type BookingStatus,
-  type ApiBookingListItem,
-} from "../../../store/bookingStore";
-import { getBookings } from "../../../services/api";
+import { useBookingStore, type BookingStatus } from "../../../store/bookingStore";
 import { colors } from "../../../constants";
 import { useAlertModal } from "../../../contexts/AlertModalContext";
 import { useTabRefresh } from "../../../hooks/useTabRefresh";
@@ -23,9 +17,10 @@ const TABS = ["Pending", "Active", "Completed", "Cancelled"] as const;
 // Buckets the granular status into one of the four tabs shown on this screen
 const TAB_STATUS_MAP: Record<(typeof TABS)[number], BookingStatus[]> = {
   Pending: ["Pending", "QuoteSubmitted"],
-  Active: ["Accepted", "InProgress", "QuoteApproved", "PendingCompletion", "AwaitingPayment"],
+  // Disputed is a live job under review, not a cancelled one.
+  Active: ["Accepted", "InProgress", "QuoteApproved", "PendingCompletion", "AwaitingPayment", "Disputed"],
   Completed: ["Completed"],
-  Cancelled: ["Cancelled", "Disputed"],
+  Cancelled: ["Cancelled"],
 };
 
 function tabForStatus(status: BookingStatus): (typeof TABS)[number] {
@@ -41,14 +36,15 @@ export default function MyBookingsScreen() {
   const [activeTab, setActiveTab] = useState<(typeof TABS)[number]>("Pending");
   const [loading, setLoading] = useState(true);
   const bookings = useBookingStore((s) => s.bookings);
-  const setBookings = useBookingStore((s) => s.setBookings);
+  const hasMore = useBookingStore((s) => s.bookingsHasMore);
+  const loadingMore = useBookingStore((s) => s.bookingsLoadingMore);
+  const loadMoreBookings = useBookingStore((s) => s.loadMoreBookings);
   const clearDraft = useBookingStore((s) => s.clearDraft);
 
   const loadBookings = async () => {
     setLoading(true);
     try {
-      const data: ApiBookingListItem[] = await getBookings();
-      setBookings(data.map(mapApiBooking));
+      await useBookingStore.getState().loadBookings();
     } catch (error) {
       console.error("Load bookings error:", error);
       alertModal.error("Error", "Failed to load your bookings");
@@ -73,6 +69,15 @@ export default function MyBookingsScreen() {
   const refreshControl = usePullToRefresh(loadBookings);
 
   const filtered = bookings.filter((b) => tabForStatus(b.status) === activeTab);
+
+  // Tabs filter on the device, so a tab's bookings can sit on pages not
+  // loaded yet. Keep paging until the tab has a screenful or pages run out.
+  // Keyed on bookings.length (not loadingMore) so a failed page doesn't retry
+  // in a loop while offline; pull-to-refresh starts over.
+  const tabShort = filtered.length < 10;
+  React.useEffect(() => {
+    if (!loading && hasMore && tabShort) loadMoreBookings();
+  }, [loading, hasMore, tabShort, bookings.length, loadMoreBookings]);
 
   return (
     <SafeAreaView className="flex-1 bg-white">
@@ -101,7 +106,8 @@ export default function MyBookingsScreen() {
         </View>
       </View>
 
-      {loading ? (
+      {/* Skeleton only on the first load; a refresh keeps the list (and its spinner). */}
+      {(loading && bookings.length === 0) || (filtered.length === 0 && hasMore) ? (
         <LoadingSkeleton type="booking" count={4} />
       ) : filtered.length === 0 ? (
         <EmptyState
@@ -127,6 +133,9 @@ export default function MyBookingsScreen() {
           refreshControl={refreshControl}
           keyExtractor={(item) => item.id}
           contentContainerStyle={{ padding: 16, paddingBottom: 80 }}
+          onEndReached={loadMoreBookings}
+          onEndReachedThreshold={0.5}
+          ListFooterComponent={loadingMore ? <ActivityIndicator className="py-4" /> : null}
           renderItem={({ item }) => (
             <BookingCard
               booking={item}

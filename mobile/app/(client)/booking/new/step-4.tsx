@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import { View, Text, TextInput, Switch } from "react-native";
 import { KeyboardAwareScrollView } from "../../../../components/ui/KeyboardAwareScrollView";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -27,6 +27,7 @@ import {
 } from "../../../../types/booking4step.types";
 import { formatTime12h, isRushDate } from "../../../../utils/bookingTime";
 import { generateIdempotencyKey } from "../../../../utils/idempotencyKey";
+import { isPhMobileNumber } from "../../../../utils/paymentAccount";
 import { feedback } from "../../../../utils/feedback";
 import * as api from "../../../../services/api";
 import { useAlertModal } from "../../../../contexts/AlertModalContext";
@@ -160,10 +161,31 @@ export default function BookingStep4Screen() {
     }, [draft.serviceType, draft.date, draft.workerId, draft.isAutoMatched])
   );
 
+  // Preselect the default saved payment method (and its number) when none is chosen yet.
+  useEffect(() => {
+    if (draft.paymentMethod) return;
+    let active = true;
+    api
+      .getPaymentMethods()
+      .then((methods: any[]) => {
+        const preferred = methods.find((m) => m.isDefault);
+        if (!active || !preferred) return;
+        const id = String(preferred.type).toLowerCase();
+        if (!PAYMENT_METHOD_TYPE_MAP[id]) return;
+        updatePaymentMethod(id);
+        // Only a usable number; a masked value would just fail validation.
+        if (id !== "cash" && isPhMobileNumber(String(preferred.accountIdentifier ?? ""))) {
+          updateAccountValue(String(preferred.accountIdentifier).trim());
+        }
+      })
+      .catch(() => {}); // a convenience only; the picker still works
+    return () => {
+      active = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const requiresAccountValue = paymentMethod === "gcash" || paymentMethod === "maya";
-  // PH mobile number, local (09XXXXXXXXX) or international (+639XXXXXXXXX)
-  // format — matches the "09XXXXXXXXX" placeholder shown for both methods.
-  const PH_MOBILE_NUMBER_PATTERN = /^(09\d{9}|\+639\d{9})$/;
 
   const handleSubmit = () => {
     if (slotNoLongerAvailable) {
@@ -185,7 +207,7 @@ export default function BookingStep4Screen() {
         alertModal.warning("Payment details", "Please enter the required payment details for this method.");
         return;
       }
-      if (!PH_MOBILE_NUMBER_PATTERN.test(trimmed)) {
+      if (!isPhMobileNumber(trimmed)) {
         alertModal.warning("Payment details", "Enter a valid mobile number, e.g. 09XXXXXXXXX.");
         return;
       }

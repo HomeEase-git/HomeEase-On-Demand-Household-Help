@@ -469,6 +469,8 @@ export default function BookingDetailScreen() {
     setCheckoutVisible(false);
     setCheckoutUrl(null);
     setProcessingPayment(false);
+    // The client may have paid and closed the sheet before the redirect fired.
+    refreshBookingDetail().catch(() => {});
   };
 
   // "Confirm & Pay" (online) / "Confirm Cash Payment" (cash). Cash finalizes

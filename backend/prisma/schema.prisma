@@ -317,6 +317,8 @@ model User {
   addresses             UserAddress[]
   sentMessages          Message[]             @relation("sender")
   receivedMessages      Message[]             @relation("receiver")
+  blocksMade            UserBlock[]           @relation("blocker")
+  blockedBy             UserBlock[]           @relation("blocked")
   bookingsAsClient      Booking[]             @relation("client")
   bookingsAsWorker      Booking[]             @relation("worker")
   bookingGroupsAsClient BookingGroup[]        @relation("bookingGroupClient")
@@ -2124,6 +2126,21 @@ enum ReviewStatus {
 // ============================================================================
 // MESSAGING
 // ============================================================================
+
+// One user blocking another (see services/blockService). Either direction
+// stops messaging between the pair and keeps them out of each other's
+// matching and bookings; existing bookings carry on.
+model UserBlock {
+  id        String   @id @default(cuid())
+  blockerId String
+  blocker   User     @relation("blocker", fields: [blockerId], references: [id], onDelete: Cascade)
+  blockedId String
+  blocked   User     @relation("blocked", fields: [blockedId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@unique([blockerId, blockedId])
+  @@index([blockedId])
+}
 
 model Message {
   id         String @id @default(cuid())

@@ -150,3 +150,15 @@ describe('displayAddress / stripCountry', () => {
     expect(stripCountry('Paombong, Bulacan')).toBe('Paombong, Bulacan');
   });
 });
+
+describe('isInPhilippines', () => {
+  const { isInPhilippines } = require('../geo');
+  it('accepts Manila and Davao', () => {
+    expect(isInPhilippines({ lat: 14.5995, lng: 120.9842 })).toBe(true);
+    expect(isInPhilippines({ lat: 7.19, lng: 125.45 })).toBe(true);
+  });
+  it('rejects Singapore and Hong Kong', () => {
+    expect(isInPhilippines({ lat: 1.35, lng: 103.82 })).toBe(false);
+    expect(isInPhilippines({ lat: 22.32, lng: 114.17 })).toBe(false);
+  });
+});

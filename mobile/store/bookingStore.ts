@@ -2,7 +2,8 @@ import { create, type StoreApi, type UseBoundStore } from 'zustand';
 import { bookingStorage } from '../utils/storage';
 import { validateDraftForSubmit as validateDraftUtil } from '../utils/bookingValidation';
 import { mapServiceToCategory } from '../utils/categoryMapping';
-import { getBookings } from '../services/api';
+import { getBookingsPage } from '../services/api';
+import { hasMorePages, uniqueNew } from '../utils/pagination';
 import type { TimeSlot, WorkerTier } from '../types/booking4step.types';
 import { bookingStartTime } from '../utils/bookingTime';
 
@@ -280,7 +281,15 @@ export type BookingState = {
   clearInvalidationReason: () => void;
   validateDraftForSubmit: () => { ok: boolean; errors: string[] };
   setBookings: (bookings: Booking[]) => void;
+  // GET /bookings is paginated; the list holds pages 1..bookingsPage.
+  bookingsPage: number;
+  bookingsHasMore: boolean;
+  bookingsLoadingMore: boolean;
+  /** Reloads page 1. Throws, so a screen can show its own error. */
+  loadBookings: () => Promise<void>;
+  /** loadBookings for background callers: logs instead of throwing. */
   refreshBookings: () => Promise<void>;
+  loadMoreBookings: () => Promise<void>;
   setSelectedBooking: (booking: Booking | null) => void;
   setDraft: (draft: Partial<DraftBooking>) => void;
   clearDraft: () => void;
@@ -352,8 +361,26 @@ const initialDraft: DraftBooking = {
   idempotencyKey: null,
 };
 
+const SUBMITTED_FIELDS = [
+  'workerId',
+  'isAutoMatched',
+  'serviceTaskId',
+  'description',
+  'scopeAnswers',
+  'issuePhotoUrls',
+  'selectedPackageIds',
+  'addOnToggles',
+  'priorities',
+  'tip',
+  'paymentMethod',
+  'paymentAccountIdentifier',
+] as const satisfies readonly (keyof DraftBooking)[];
+
 export const useBookingStore: UseBoundStore<StoreApi<BookingState>> = create<BookingState>((set, get) => ({
   bookings: [],
+  bookingsPage: 1,
+  bookingsHasMore: false,
+  bookingsLoadingMore: false,
   selectedBooking: null,
   draft: initialDraft,
 
@@ -367,12 +394,41 @@ export const useBookingStore: UseBoundStore<StoreApi<BookingState>> = create<Boo
   // entirely while disconnected) or their push-notification fallback
   // (unreliable on Android). Mirrors workerStore.refreshJobs on the worker
   // side.
+  loadBookings: async () => {
+    const { bookings, pagination } = await getBookingsPage(1);
+    set({
+      bookings: (bookings as ApiBookingListItem[]).map(mapApiBooking),
+      bookingsPage: 1,
+      bookingsHasMore: hasMorePages(pagination),
+    });
+  },
+
   refreshBookings: async () => {
     try {
-      const data = await getBookings();
-      set({ bookings: (data as ApiBookingListItem[]).map(mapApiBooking) });
+      await get().loadBookings();
     } catch (error) {
       console.error('Refresh bookings error:', error);
+    }
+  },
+
+  loadMoreBookings: async () => {
+    const { bookingsHasMore, bookingsLoadingMore, bookingsPage: page } = get();
+    if (!bookingsHasMore || bookingsLoadingMore) return;
+    set({ bookingsLoadingMore: true });
+    try {
+      const { bookings, pagination } = await getBookingsPage(page + 1);
+      // A refresh reset the list while this was in flight; its page 1 wins.
+      if (get().bookingsPage !== page) return;
+      const next = (bookings as ApiBookingListItem[]).map(mapApiBooking);
+      set((s) => ({
+        bookings: [...s.bookings, ...uniqueNew(next, s.bookings)],
+        bookingsPage: page + 1,
+        bookingsHasMore: hasMorePages(pagination),
+      }));
+    } catch (error) {
+      console.error('Load more bookings error:', error);
+    } finally {
+      set({ bookingsLoadingMore: false });
     }
   },
 
@@ -417,8 +473,13 @@ export const useBookingStore: UseBoundStore<StoreApi<BookingState>> = create<Boo
       // changes the rush fee, so the date alone decides.
       const dateChanged = draft.date !== undefined && draft.date !== prev.date;
       const slotChanged = draft.time !== undefined && draft.time !== prev.time;
+      // A different task or quantity re-prices the job too: the picked
+      // worker's estimate and unit price were computed for the old scope.
+      const scopeChanged =
+        (draft.serviceTaskId !== undefined && draft.serviceTaskId !== prev.serviceTaskId) ||
+        (draft.scopeAnswers !== undefined && JSON.stringify(draft.scopeAnswers) !== JSON.stringify(prev.scopeAnswers));
       const clearingWorkerForNewSlot =
-        dateChanged &&
+        (dateChanged || scopeChanged) &&
         !updatedDraft.workerLocked &&
         prev.workerId != null &&
         draft.workerId === undefined;
@@ -431,7 +492,9 @@ export const useBookingStore: UseBoundStore<StoreApi<BookingState>> = create<Boo
         updatedDraft.workerUnitPrice = null;
         updatedDraft.isAutoMatched = false;
         updatedDraft.holdStartedAt = null;
-        updatedDraft.lastInvalidationReason = "Your worker isn't confirmed for the new date/time, so we cleared your selection.";
+        updatedDraft.lastInvalidationReason = dateChanged
+          ? "Your worker isn't confirmed for the new date/time, so we cleared your selection."
+          : "Your job details changed, so please pick your pro again.";
       }
 
       // idempotencyKey exists so a retried submit (bad wifi, app backgrounded
@@ -443,8 +506,13 @@ export const useBookingStore: UseBoundStore<StoreApi<BookingState>> = create<Boo
       // error. Only clear on a change this exact call didn't just make
       // (draft.X === undefined), matching the same convention
       // clearingSchedule/clearingWorkerForNewSlot already use above.
+      // The backend replays the ORIGINAL booking for a known key without
+      // comparing payloads, so any field that goes into the request counts.
+      const payloadChanged = SUBMITTED_FIELDS.some(
+        (f) => f in draft && JSON.stringify(draft[f]) !== JSON.stringify(prev[f]),
+      );
       if (
-        (categoryChanged || addressChanged || cityChanged || dateChanged || slotChanged) &&
+        (categoryChanged || addressChanged || cityChanged || dateChanged || slotChanged || payloadChanged) &&
         prev.idempotencyKey &&
         draft.idempotencyKey === undefined
       ) {

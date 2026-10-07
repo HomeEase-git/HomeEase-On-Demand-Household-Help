@@ -5,6 +5,7 @@ import { authStorage } from '../utils/storage';
 import { AbortableRequest } from '../utils/apiErrorHandling';
 import { KycDocumentKey } from '../utils/kycDocumentConfig';
 import { mapKycDocumentType } from '../utils/kycDocumentTypeMap';
+import type { Pagination } from '../utils/pagination';
 import { LEGAL_VERSIONS, type LegalDocumentType } from '../constants/legalDocuments';
 import type { WorkerDetail, WorkerDigitalId, ParsedResume } from "../types/api.types";
 import type {
@@ -531,6 +532,17 @@ export async function getBookings(status?: string) {
     return response.bookings ? response.bookings : [];
   } catch (error) {
     console.error('Get bookings error:', error);
+    throw error;
+  }
+}
+
+// One page of the caller's bookings (newest first) plus the paging metadata.
+export async function getBookingsPage(page: number): Promise<{ bookings: any[]; pagination: Pagination | null }> {
+  try {
+    const response = await api.get('/bookings', { params: { page, limit: 20 } });
+    return { bookings: response.bookings ?? [], pagination: response.pagination ?? null };
+  } catch (error) {
+    console.error('Get bookings page error:', error);
     throw error;
   }
 }
@@ -1267,6 +1279,7 @@ export async function getTransactions(page?: number, status?: 'PENDING' | 'COMPL
       })),
       total: response.pagination?.total ?? payments.length,
       page: response.pagination?.page ?? page ?? 1,
+      pagination: (response.pagination ?? null) as Pagination | null,
     };
   } catch (error) {
     console.error('Get transactions error:', error);
@@ -1393,7 +1406,11 @@ export async function getConversationThread(userId: string, page?: number) {
     const response = await api.get(`/messages/conversations/${userId}`, {
       params: page ? { page } : {},
     });
-    return response.messages ?? [];
+    return {
+      messages: response.messages ?? [],
+      pagination: (response.pagination ?? null) as Pagination | null,
+      blockedByMe: response.blockedByMe === true,
+    };
   } catch (error) {
     console.error('Get conversation thread error:', error);
     throw error;
@@ -1444,6 +1461,45 @@ export async function uploadChatImage(uri: string): Promise<{ url: string }> {
   }
 }
 
+export async function reportMessage(messageId: string, reason: string) {
+  try {
+    return await api.post(`/messages/${messageId}/report`, { reason });
+  } catch (error) {
+    console.error('Report message error:', error);
+    throw error;
+  }
+}
+
+export type BlockedUser = { userId: string; name: string; avatar: string | null; blockedAt: string };
+
+export async function getBlockedUsers(): Promise<BlockedUser[]> {
+  try {
+    const response = await api.get('/blocks');
+    return response.blocks ?? [];
+  } catch (error) {
+    console.error('Get blocked users error:', error);
+    throw error;
+  }
+}
+
+export async function blockUser(userId: string) {
+  try {
+    return await api.post(`/blocks/${userId}`);
+  } catch (error) {
+    console.error('Block user error:', error);
+    throw error;
+  }
+}
+
+export async function unblockUser(userId: string) {
+  try {
+    return await api.delete(`/blocks/${userId}`);
+  } catch (error) {
+    console.error('Unblock user error:', error);
+    throw error;
+  }
+}
+
 // ============================================================================
 // NOTIFICATIONS
 // ============================================================================
@@ -1453,7 +1509,7 @@ export async function getNotifications(page?: number) {
     const response = await api.get('/notifications', {
       params: page ? { page } : {},
     });
-    return response.notifications ?? [];
+    return { notifications: response.notifications ?? [], pagination: (response.pagination ?? null) as Pagination | null };
   } catch (error) {
     console.error('Get notifications error:', error);
     throw error;

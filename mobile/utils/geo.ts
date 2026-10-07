@@ -56,6 +56,13 @@ export type RouteResult = {
 
 const EARTH_RADIUS_KM = 6371;
 
+// Same box the backend enforces on address saves (validation.ts PH_BOUNDS).
+const PH_BOUNDS = { minLat: 4, maxLat: 21.5, minLng: 116, maxLng: 127 };
+
+export function isInPhilippines(p: LatLng): boolean {
+  return p.lat >= PH_BOUNDS.minLat && p.lat <= PH_BOUNDS.maxLat && p.lng >= PH_BOUNDS.minLng && p.lng <= PH_BOUNDS.maxLng;
+}
+
 export function haversineDistanceKm(a: LatLng, b: LatLng): number {
   const toRad = (deg: number) => (deg * Math.PI) / 180;
   const dLat = toRad(b.lat - a.lat);

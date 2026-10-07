@@ -121,7 +121,7 @@ export default function ReceiptScreen() {
           <View className="bg-accent p-6 items-center">
             <Text className="text-text-primary font-bold text-2xl">HomeEase</Text>
             <Text className="text-text-primary/80 text-sm mt-1">
-              Official Receipt
+              Payment Receipt
             </Text>
           </View>
 
@@ -148,6 +148,7 @@ export default function ReceiptScreen() {
                 basePrice={transaction.breakdown.basePrice}
                 distanceFee={transaction.breakdown.distanceFee}
                 tierFee={transaction.breakdown.tierFee}
+                rushFee={transaction.breakdown.rushFee}
                 addOns={transaction.breakdown.addOns}
                 vatApplicable={transaction.breakdown.vatApplicable}
                 vatRate={transaction.breakdown.vatRate}

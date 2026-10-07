@@ -33,7 +33,8 @@ export const notifyUser = async (input: NotifyUserInput) => {
     userId: input.userId,
     title: input.title,
     body: input.message,
-    data: { notificationId: notification.id, type: input.type },
+    // relatedId (usually a booking id) lets a tap open the right screen directly.
+    data: { notificationId: notification.id, type: input.type, ...(input.relatedId ? { relatedId: input.relatedId } : {}) },
   });
 
   return notification;

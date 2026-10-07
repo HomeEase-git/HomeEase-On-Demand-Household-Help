@@ -1,6 +1,6 @@
 import { router } from 'expo-router';
 import { notificationService } from '../services/notificationService';
-import { useNotificationStore, notificationCategory } from '../store/notificationStore';
+import { useNotificationStore, notificationCategory, clientNotificationRoute } from '../store/notificationStore';
 import { useAuthStore } from '../store/authStore';
 
 /**
@@ -16,7 +16,7 @@ import { useAuthStore } from '../store/authStore';
  * - Sound/haptics feedback
  */
 
-type RemotePushData = { notificationId?: string; type?: string };
+type RemotePushData = { notificationId?: string; type?: string; relatedId?: string };
 
 /**
  * Handle notification received while app in foreground
@@ -36,7 +36,7 @@ export function setupNotificationReceivedHandler(): void {
           title: title ?? 'Notification',
           message: body ?? '',
           type: payloadData.type ?? 'system',
-          relatedId: null,
+          relatedId: payloadData.relatedId ?? null,
           isRead: false,
           createdAt: new Date().toISOString(),
         });
@@ -59,7 +59,7 @@ export function setupNotificationInteractionHandler(): void {
   notificationService.onNotificationInteraction(async (notification) => {
     try {
       const payloadData = (notification.request.content.data ?? {}) as RemotePushData;
-      const { notificationId } = payloadData;
+      const { notificationId, type, relatedId } = payloadData;
 
       if (!notificationId) {
         console.warn('[NotificationHandler] Notification tap had no notificationId, ignoring');
@@ -68,9 +68,9 @@ export function setupNotificationInteractionHandler(): void {
 
       const isWorker = useAuthStore.getState().user?.role === 'worker';
       router.push(
-        isWorker
+        (isWorker
           ? `/(worker)/inbox/notification/${notificationId}`
-          : `/(client)/inbox/notification/${notificationId}`,
+          : clientNotificationRoute(type ?? "", relatedId, notificationId)) as any,
       );
 
       const { markAsRead } = useNotificationStore.getState();
@@ -125,8 +125,7 @@ export async function clearNotificationBadge(): Promise<void> {
  */
 export async function updateNotificationBadge(): Promise<void> {
   try {
-    const { notifications } = useNotificationStore.getState();
-    const unreadCount = notifications.filter((n) => !n.isRead).length;
+    const { unreadCount } = useNotificationStore.getState();
     await notificationService.setNotificationBadgeCount(unreadCount);
   } catch (error) {
     console.error('[NotificationHandler] Failed to update badge:', error);

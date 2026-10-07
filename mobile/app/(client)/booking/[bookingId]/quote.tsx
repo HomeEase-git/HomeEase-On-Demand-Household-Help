@@ -13,11 +13,8 @@ import DangerButton from "../../../../components/ui/DangerButton";
 import OutlinedButton from "../../../../components/ui/OutlinedButton";
 import ImageSourcePickerBottomSheet from "../../../../components/bottom-sheets/ImageSourcePickerBottomSheet";
 import type { BottomSheetHandle } from "../../../../components/bottom-sheets/BottomSheetWrapper";
-import {
-  useBookingStore,
-  API_STATUS_MAP,
-  type Booking,
-} from "../../../../store/bookingStore";
+import { useBookingStore } from "../../../../store/bookingStore";
+import { mapApiBookingDetail } from "../../../../utils/mapBookingDetail";
 import {
   approveQuote as apiApproveQuote,
   disputeQuote as apiDisputeQuote,
@@ -29,30 +26,6 @@ import { colors } from "../../../../constants";
 import { useAlertModal } from "../../../../contexts/AlertModalContext";
 
 const MAX_EVIDENCE_PHOTOS = 5;
-
-// Matches the shape of GET /bookings/:id — this screen needs to hydrate the
-// store itself when opened directly (e.g. a push notification deep link)
-// without [bookingId]/index.tsx loading first (see mapApiBookingDetail there
-// for the fuller version; this one only needs the quote-relevant fields).
-function mapDetailToBooking(d: any): Booking {
-  return {
-    id: d.id,
-    service: d.service,
-    worker: d.worker?.fullName ?? "Unassigned",
-    date: d.scheduledDate,
-    status: API_STATUS_MAP[d.status] ?? "Pending",
-    amount: d.finalPrice ?? d.estimatedPrice,
-    quote: d.quote
-      ? {
-          laborCost: d.quote.laborCost,
-          materialsCost: d.quote.materialsCost,
-          totalAmount: d.finalPrice ?? 0,
-          notes: d.quote.notes ?? "",
-          submittedAt: d.quote.quotedAt ?? d.scheduledDate,
-        }
-      : undefined,
-  };
-}
 
 export default function QuoteReviewScreen() {
   const router = useRouter();
@@ -84,7 +57,9 @@ export default function QuoteReviewScreen() {
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
   const photoSheetRef = useRef<BottomSheetHandle | null>(null);
   const [loading, setLoading] = useState(false);
-  const [checkingBooking, setCheckingBooking] = useState(!booking);
+  // A booking from the list has no quote yet, so wait for the detail fetch
+  // instead of flashing "Quote not found".
+  const [checkingBooking, setCheckingBooking] = useState(!booking?.quote);
   const [notFound, setNotFound] = useState(false);
 
   useEffect(() => {
@@ -100,7 +75,7 @@ export default function QuoteReviewScreen() {
           proofOfUseUrls: detail?.quote?.proofOfUseUrls ?? [],
           revision: detail?.quote?.revision ?? 0,
         });
-        const mapped = mapDetailToBooking(detail);
+        const mapped = mapApiBookingDetail(detail);
         useBookingStore.setState((s) => ({
           bookings: [...s.bookings.filter((b) => b.id !== mapped.id), mapped],
         }));
@@ -152,8 +127,10 @@ export default function QuoteReviewScreen() {
     );
   }
 
-  const isAlreadyActedOn =
-    booking.status === "QuoteApproved" || booking.status === "Disputed";
+  // Only a submitted quote can be answered; any other status (approved,
+  // disputed, refused, job finished) is read-only.
+  const canAct = booking.status === "QuoteSubmitted";
+  const isAlreadyActedOn = !canAct;
 
   const handleApprove = async () => {
     alertModal.confirm(
@@ -278,7 +255,7 @@ export default function QuoteReviewScreen() {
         </View>
 
         {/* Status banner for already acted quotes */}
-        {isAlreadyActedOn && (
+        {(booking.status === "QuoteApproved" || booking.status === "Disputed") && (
           <View
             className={`rounded-xl p-4 flex-row items-center mb-4 ${
               booking.status === "QuoteApproved"

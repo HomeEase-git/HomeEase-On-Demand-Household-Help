@@ -3,6 +3,7 @@ import prisma from '@config/database';
 import { errorResponse } from '@utils/errorResponse';
 import { signStorageUrlsDeep, toOwnedStoredUrl } from '@utils/storageUrls';
 import { notifyUser } from '@utils/notify';
+import { isBlockedPair } from '@services/blockService';
 import { getIO } from '../socket';
 import type { JwtPayload } from '@/types/index';
 
@@ -136,7 +137,7 @@ export const getConversationThread = async (req: AuthRequest, res: Response) => 
 
     const currentUserId = req.user.userId;
 
-    const [messages, total] = await Promise.all([
+    const [messages, total, blockedByMe] = await Promise.all([
       prisma.message.findMany({
         where: {
           OR: [
@@ -164,6 +165,9 @@ export const getConversationThread = async (req: AuthRequest, res: Response) => 
           ],
         },
       }),
+      prisma.userBlock
+        .count({ where: { blockerId: currentUserId, blockedId: otherUserId } })
+        .then((n) => n > 0),
     ]);
 
     // Mark all received messages in this thread as read
@@ -181,6 +185,7 @@ export const getConversationThread = async (req: AuthRequest, res: Response) => 
       message: 'Thread retrieved successfully',
       data: {
         messages: messages.reverse(), // chronological order
+        blockedByMe,
         pagination: {
           page: pageNum,
           limit: limitNum,
@@ -242,6 +247,12 @@ export const sendMessage = async (req: AuthRequest, res: Response) => {
       return res
         .status(403)
         .json(errorResponse(403, 'You can only message someone you have a booking with'));
+    }
+
+    // Either side blocking stops the chat. Same wording both ways, so the
+    // blocked user isn't told who blocked whom.
+    if (await isBlockedPair(currentUserId, receiverId)) {
+      return res.status(403).json(errorResponse(403, "You can't message this user."));
     }
 
     const message = await prisma.message.create({

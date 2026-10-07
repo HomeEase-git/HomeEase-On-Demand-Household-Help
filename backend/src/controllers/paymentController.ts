@@ -80,6 +80,7 @@ export const getPaymentDetail = async (req: AuthRequest, res: Response) => {
       basePrice: latestPricingLog?.basePrice ?? null,
       distanceFee: latestPricingLog?.distanceFee ?? 0,
       tierFee: latestPricingLog?.tierFee ?? 0,
+      rushFee: latestPricingLog?.rushFee ?? 0,
       addOns: payment.booking.addOns
         .filter((addon) => addon.clientApprovedAt != null)
         .map((addon) => ({ name: addon.name, price: addon.price })),

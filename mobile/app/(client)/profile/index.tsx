@@ -188,9 +188,9 @@ export default function ClientProfileScreen() {
       />
       <LogoutConfirmationModal
         visible={logoutVisible}
-        onConfirm={() => {
+        onConfirm={async () => {
           setLogoutVisible(false);
-          logout();
+          await logout();
           router.replace("/landing");
         }}
         onCancel={() => setLogoutVisible(false)}

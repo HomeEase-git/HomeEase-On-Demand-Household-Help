@@ -1,6 +1,9 @@
 import { create } from 'zustand';
 import { authStorage } from '../utils/storage';
 import { notificationService } from '../services/notificationService';
+import { useBookingStore } from './bookingStore';
+import { useMessageStore } from './messageStore';
+import { useNotificationStore } from './notificationStore';
 
 type Role = 'client' | 'worker';
 
@@ -117,6 +120,13 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     });
     // Clear from storage
     await authStorage.clearAuth();
+
+    // Per-account data, incl. the persisted booking draft (address, GCash
+    // number), must not outlive the session on a shared device.
+    useBookingStore.setState({ bookings: [], selectedBooking: null });
+    await useBookingStore.getState().clearDraft();
+    useMessageStore.setState({ conversations: [], messagesByUser: {}, openChatUserId: null });
+    useNotificationStore.setState({ notifications: [], unreadCount: 0 });
   },
   
   clearError: () =>

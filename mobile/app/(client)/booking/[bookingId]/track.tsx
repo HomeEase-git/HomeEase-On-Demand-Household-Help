@@ -8,6 +8,11 @@ import ScreenHeader from "../../../../components/ui/ScreenHeader";
 import AddressMap from "../../../../components/ui/AddressMap";
 import GoogleMap, { type GoogleMapHandle } from "../../../../components/ui/GoogleMap";
 import { useBookingStore } from "../../../../store/bookingStore";
+import { mapApiBookingDetail } from "../../../../utils/mapBookingDetail";
+import { isLiveFresh } from "../../../../utils/trackingFreshness";
+import { remainingMinutes } from "../../../../utils/trackingRoute";
+import { haversineDistanceKm, type LatLng } from "../../../../utils/geo";
+import { useTrackingRoute } from "../../../../hooks/useTrackingRoute";
 import * as api from "../../../../services/api";
 import { getSocket } from "../../../../services/socket";
 import { colors } from "../../../../constants";
@@ -36,6 +41,7 @@ export default function TrackBookingScreen() {
   const [hasWorkerLocation, setHasWorkerLocation] = useState(false);
   const [lastUpdatedAt, setLastUpdatedAt] = useState<string | null>(null);
   const mapRef = useRef<GoogleMapHandle>(null);
+  const [workerPos, setWorkerPos] = useState<LatLng | null>(null);
 
   useFocusEffect(
     useCallback(() => {
@@ -49,10 +55,23 @@ export default function TrackBookingScreen() {
           if (detail?.clientLat != null && detail?.clientLng != null) {
             setDestination({ lat: detail.clientLat, lng: detail.clientLng });
           }
-          if (detail?.worker?.currentLat != null && detail?.worker?.currentLng != null) {
-            setInitialWorkerLocation({ lat: detail.worker.currentLat, lng: detail.worker.currentLng });
+          // Only a recent stored position counts as live; an old one is a
+          // leftover from an earlier job, so wait for a real update instead.
+          if (
+            detail?.worker?.currentLat != null &&
+            detail?.worker?.currentLng != null &&
+            isLiveFresh(detail.worker.lastLocationUpdate)
+          ) {
+            const position = { lat: detail.worker.currentLat, lng: detail.worker.currentLng };
+            setWorkerPos(position);
+            setInitialWorkerLocation(position);
             setHasWorkerLocation(true);
-            setLastUpdatedAt(detail.worker.lastLocationUpdate ?? null);
+            setLastUpdatedAt(detail.worker.lastLocationUpdate);
+          }
+          // Opened from a deep link: the store may not know this booking yet.
+          if (!useBookingStore.getState().bookings.some((b) => b.id === bookingId)) {
+            const mapped = mapApiBookingDetail(detail);
+            useBookingStore.setState((s) => ({ bookings: [...s.bookings, mapped] }));
           }
         })
         .catch((error) => {
@@ -68,6 +87,19 @@ export default function TrackBookingScreen() {
   // over the same app-wide socket connection used for chat/notifications
   // (see app/_layout.tsx), so no extra connection to manage here.
   const isLiveTrackable = booking?.status === "Accepted" && !!destination;
+  const { route, routeFailed, isOnline, onWorkerPosition } = useTrackingRoute(isLiveTrackable ? destination : null);
+  useEffect(() => {
+    if (initialWorkerLocation) onWorkerPosition(initialWorkerLocation);
+  }, [initialWorkerLocation, onWorkerPosition]);
+
+  // Re-checks freshness and counts the ETA down between socket events.
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!isLiveTrackable) return;
+    const id = setInterval(() => setNow(Date.now()), 30_000);
+    return () => clearInterval(id);
+  }, [isLiveTrackable]);
+
   useEffect(() => {
     if (!isLiveTrackable || !bookingId) return;
     const socket = getSocket();
@@ -75,16 +107,20 @@ export default function TrackBookingScreen() {
 
     const handler = (event: WorkerLocationEvent) => {
       if (event.bookingId !== bookingId) return;
-      mapRef.current?.updateWorkerLocation({ lat: event.lat, lng: event.lng });
+      const position = { lat: event.lat, lng: event.lng };
+      mapRef.current?.updateWorkerLocation(position);
+      setWorkerPos(position);
+      onWorkerPosition(position);
       setHasWorkerLocation(true);
       setLastUpdatedAt(event.at);
+      setNow(Date.now());
     };
 
     socket.on("worker:location", handler);
     return () => {
       socket.off("worker:location", handler);
     };
-  }, [isLiveTrackable, bookingId]);
+  }, [isLiveTrackable, bookingId, onWorkerPosition]);
 
   if (!booking) {
     return (
@@ -151,6 +187,23 @@ export default function TrackBookingScreen() {
     }
   })();
 
+  // ETA line under the live map. A stale position hides the ETA (it would be
+  // a guess); no route falls back to straight-line distance.
+  const trackingText = (() => {
+    if (!hasWorkerLocation) return "Waiting for the worker to start sharing their location...";
+    const updated = lastUpdatedAt ? new Date(lastUpdatedAt).toLocaleTimeString() : null;
+    if (!isLiveFresh(lastUpdatedAt, now)) return `Worker's location last updated ${updated ?? "a while ago"}`;
+    const offline = isOnline ? "" : " (offline, may be out of date)";
+    if (route) {
+      return `About ${remainingMinutes(route, now)} min away · ${route.distanceKm.toFixed(1)} km${offline}`;
+    }
+    if (routeFailed && workerPos && destination) {
+      const km = haversineDistanceKm(workerPos, destination);
+      return `${km.toFixed(1)} km away in a straight line · route unavailable${offline}`;
+    }
+    return `Live — worker's location${updated ? `, updated ${updated}` : ""}${offline}`;
+  })();
+
   const statusColor =
     booking.status === "Completed"
       ? colors.success
@@ -210,14 +263,13 @@ export default function TrackBookingScreen() {
                 destinationLabel={location ?? undefined}
                 workerLocation={initialWorkerLocation}
                 workerLabel={booking.worker}
+                routeCoordinates={route?.coordinates}
               />
             </View>
             <View className="flex-row items-center mt-2">
               <Ionicons name="navigate-circle" size={14} color={colors.success} />
               <Text className="text-text-muted text-xs ml-1.5">
-                {hasWorkerLocation
-                  ? `Live — worker's location${lastUpdatedAt ? `, updated ${new Date(lastUpdatedAt).toLocaleTimeString()}` : ""}`
-                  : "Waiting for the worker to start sharing their location..."}
+                {trackingText}
               </Text>
             </View>
           </View>
@@ -265,7 +317,7 @@ export default function TrackBookingScreen() {
               className="text-sm font-semibold"
               style={{ color: statusColor }}
             >
-              {booking.status}
+              {booking.status.replace(/([a-z])([A-Z])/g, "$1 $2")}
             </Text>
           </View>
           <Pressable accessibilityRole="button" accessibilityLabel="Message"

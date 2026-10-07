@@ -10,18 +10,22 @@ import * as api from "../../../services/api";
 export default function ReviewsScreen() {
   const [reviews, setReviews] = useState<Awaited<ReturnType<typeof api.getMyReviews>>["data"]>([]);
   const [loading, setLoading] = useState(true);
+  const [failed, setFailed] = useState(false);
+  const [attempt, setAttempt] = useState(0);
 
   useEffect(() => {
     let active = true;
 
     async function load() {
       setLoading(true);
+      setFailed(false);
       try {
         const result = await api.getMyReviews();
         if (!active) return;
         setReviews(result.data);
       } catch (error) {
         console.error("Load my reviews error:", error);
+        if (active) setFailed(true);
       } finally {
         if (active) setLoading(false);
       }
@@ -31,7 +35,7 @@ export default function ReviewsScreen() {
     return () => {
       active = false;
     };
-  }, []);
+  }, [attempt]);
 
   return (
     <SafeAreaView className="flex-1 bg-white">
@@ -40,6 +44,14 @@ export default function ReviewsScreen() {
         <View className="p-4">
           <SkeletonList count={4} SkeletonComponent={ReviewCardSkeleton} />
         </View>
+      ) : failed ? (
+        <EmptyState
+          icon="cloud-offline-outline"
+          title="Couldn't load your reviews"
+          subtitle="Check your connection and try again."
+          actionLabel="Try again"
+          onAction={() => setAttempt((n) => n + 1)}
+        />
       ) : reviews.length === 0 ? (
         <EmptyState
           icon="star-outline"

@@ -7,12 +7,18 @@ type Props = {
   imageUrl?: string | null;
   timestamp: string;
   onImagePress?: (imageUrl: string) => void;
+  onLongPress?: () => void;
 };
 
-export const ChatBubbleReceived: React.FC<Props> = ({ message, imageUrl, timestamp, onImagePress }) => {
+export const ChatBubbleReceived: React.FC<Props> = ({ message, imageUrl, timestamp, onImagePress, onLongPress }) => {
   return (
     <View className="items-start mb-2">
-      <View className="bg-card rounded-2xl rounded-bl-sm px-4 py-2 max-w-[75%]">
+      <Pressable
+        className="bg-card rounded-2xl rounded-bl-sm px-4 py-2 max-w-[75%]"
+        onLongPress={onLongPress}
+        disabled={!onLongPress}
+        accessibilityHint={onLongPress ? "Long press to report" : undefined}
+      >
         {imageUrl && (
           <Pressable onPress={() => onImagePress?.(imageUrl)}>
             <RemoteImage
@@ -24,7 +30,7 @@ export const ChatBubbleReceived: React.FC<Props> = ({ message, imageUrl, timesta
         )}
         {message ? <Text className="text-brand">{message}</Text> : null}
         <Text className="text-text-muted text-xs mt-1">{timestamp}</Text>
-      </View>
+      </Pressable>
     </View>
   );
 };

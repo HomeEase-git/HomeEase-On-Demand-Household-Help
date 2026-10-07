@@ -1,5 +1,5 @@
 import React from "react";
-import { View, Text, ScrollView, ActivityIndicator } from "react-native";
+import { View, Text, ScrollView, ActivityIndicator, Pressable } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { AppIcon as Ionicons } from "../../../../components/icons/AppIcon";
@@ -130,6 +130,13 @@ export default function BookingStep3Screen() {
                 The best available pro is assigned when you submit.
               </Text>
             </View>
+            <Pressable
+              accessibilityRole="button"
+              hitSlop={8}
+              onPress={() => setDraft({ isAutoMatched: false })}
+            >
+              <Text className="text-accent font-semibold text-xs">Choose a pro</Text>
+            </Pressable>
           </View>
         ) : (
           <SurpriseMeButton onPress={chooseSurpriseMe} />
