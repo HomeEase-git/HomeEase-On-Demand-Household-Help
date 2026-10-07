@@ -181,6 +181,12 @@ export const createBooking = async (req: AuthRequest, res: Response) => {
       idempotencyKey?: string;
     };
 
+    // Refuse a blocked pair before any other validation, so the answer never
+    // depends on how the rest of the request happens to look.
+    if (requestedWorkerId && (await blockedUserIds(clientId)).includes(requestedWorkerId)) {
+      return res.status(403).json(errorResponse(403, "You can't book this worker."));
+    }
+
     // Idempotent replay — a retried POST (app backgrounded mid-request,
     // network timeout + user taps Submit again) with the same client-
     // generated key returns the booking already created for it instead of
