@@ -29,6 +29,7 @@ import {
 } from '@services/workerAvailabilityService';
 import { chargePenaltyTx } from '@services/debtLedgerService';
 import { toOwnedBookingPhotoUrls, toOwnedStoredUrl } from '@utils/storageUrls';
+import { validateQuoteItems, sumQuoteItems, type QuoteItemInput } from '@utils/quoteItems';
 import { updateBookingIfStatus, isBookingStatusConflict } from '@services/bookingStatusWrite';
 
 // The booking's status changed between our read and our write (another
@@ -2158,8 +2159,8 @@ export const respondToRescheduleRequest = async (req: AuthRequest, res: Response
  * can't be charged more for labor than what was agreed when they booked),
  * except for a CUSTOM_QUOTE job, where the worker's quote IS the first price.
  *
- * Any materials cost needs proof: photos of the receipt(s) and of the
- * materials used on site. If the quoted amount doesn't match the receipt the
+ * Body is `items`: priced lines, each needing its own photos of the receipt and
+ * of the item used on site (see utils/quoteItems). If the quoted amount doesn't match the receipt the
  * client refuses the quote (rejectQuote) and the worker revises it here —
  * a resubmission after a refusal bumps quoteRevision.
  * Quote data is stored inline on the Booking model (no separate Quote table in schema)
@@ -2172,12 +2173,6 @@ export const submitQuote = async (req: AuthRequest, res: Response) => {
 
     const id = req.params.id as string;
     const { notes } = req.body;
-
-    const rawMaterialsCost = req.body.materialsCost;
-    const materialsCost = rawMaterialsCost === undefined || rawMaterialsCost === null ? 0 : Number(rawMaterialsCost);
-    if (!Number.isFinite(materialsCost) || materialsCost < 0) {
-      return res.status(400).json(errorResponse(400, 'materialsCost must be a non-negative number'));
-    }
 
     const booking = await prisma.booking.findUnique({
       where: { id },
@@ -2196,18 +2191,26 @@ export const submitQuote = async (req: AuthRequest, res: Response) => {
       return res.status(409).json(errorResponse(409, `Cannot submit quote for booking with status ${booking.status}`));
     }
 
-    // Proof of purchase + proof of use for any materials. Only booking photos
-    // this worker uploaded count (see utils/storageUrls).
-    const receiptUrls = toOwnedBookingPhotoUrls(req.body.receiptUrls ?? [], req.user.userId);
-    const proofOfUseUrls = toOwnedBookingPhotoUrls(req.body.proofOfUseUrls ?? [], req.user.userId);
-    if (!receiptUrls || !proofOfUseUrls) {
-      return res.status(400).json(errorResponse(400, 'Upload the photos again — one of them could not be verified'));
+    // Each item carries its own proof of purchase + proof of use. Only booking
+    // photos this worker uploaded count (see utils/storageUrls).
+    const parsed = validateQuoteItems(req.body.items);
+    if (!parsed.ok) {
+      return res.status(400).json(errorResponse(400, parsed.error));
     }
-    if (materialsCost > 0 && (receiptUrls.length === 0 || proofOfUseUrls.length === 0)) {
-      return res.status(400).json(
-        errorResponse(400, 'Materials need proof: add a photo of the receipt and a photo of the materials used on the job')
-      );
+    const items: QuoteItemInput[] = [];
+    for (const item of parsed.items) {
+      const receiptUrls = toOwnedBookingPhotoUrls(item.receiptUrls, req.user.userId);
+      const proofOfUseUrls = toOwnedBookingPhotoUrls(item.proofOfUseUrls, req.user.userId);
+      if (!receiptUrls || !proofOfUseUrls) {
+        return res.status(400).json(errorResponse(400, 'Upload the photos again — one of them could not be verified'));
+      }
+      items.push({ ...item, receiptUrls, proofOfUseUrls });
     }
+    const materialsCost = sumQuoteItems(items);
+    // Booking keeps the union of item photos so the admin and legacy client
+    // views that read the aggregate columns keep working.
+    const receiptUrls = items.flatMap((i) => i.receiptUrls);
+    const proofOfUseUrls = items.flatMap((i) => i.proofOfUseUrls);
 
     // CUSTOM_QUOTE tasks have no upfront price (estimatedPrice is 0 from
     // createBooking) — the worker's laborCost here IS the first real price
@@ -2236,19 +2239,27 @@ export const submitQuote = async (req: AuthRequest, res: Response) => {
 
     const isRevision = booking.quoteStatus === 'REJECTED';
 
-    // Quote fields live directly on Booking — no separate Quote model in schema.
-    await updateBookingIfStatus(prisma, id, booking.status, {
-      laborCost,
-      materialsCost,
-      quoteNotes: notes,
-      quoteReceiptUrls: receiptUrls,
-      quoteProofOfUseUrls: proofOfUseUrls,
-      quoteStatus: 'SUBMITTED',
-      quotedAt: new Date(),
-      quoteReminderSentAt: null,
-      ...(isRevision ? { quoteRevision: { increment: 1 } } : {}),
-      status: 'QUOTE_SUBMITTED',
-      ...vatUpdate,
+    // Quote totals live on Booking; the items live in BookingQuoteItem and are
+    // replaced wholesale, so an edit or delete is just a resubmission. One
+    // transaction so a lost status race can't leave the items swapped.
+    await prisma.$transaction(async (tx) => {
+      await updateBookingIfStatus(tx, id, booking.status, {
+        laborCost,
+        materialsCost,
+        quoteNotes: notes,
+        quoteReceiptUrls: receiptUrls,
+        quoteProofOfUseUrls: proofOfUseUrls,
+        quoteStatus: 'SUBMITTED',
+        quotedAt: new Date(),
+        quoteReminderSentAt: null,
+        ...(isRevision ? { quoteRevision: { increment: 1 } } : {}),
+        status: 'QUOTE_SUBMITTED',
+        ...vatUpdate,
+      });
+      await tx.bookingQuoteItem.deleteMany({ where: { bookingId: id } });
+      if (items.length > 0) {
+        await tx.bookingQuoteItem.createMany({ data: items.map((i) => ({ ...i, bookingId: id })) });
+      }
     });
     const updated = await prisma.booking.findUniqueOrThrow({ where: { id } });
 

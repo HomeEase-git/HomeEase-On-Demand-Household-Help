@@ -560,20 +560,18 @@ export const validateLiveLocation = (
   return next();
 };
 
-const isUrlList = (value: unknown, max: number) =>
-  Array.isArray(value) && value.length <= max && value.every((url) => typeof url === 'string' && url.length <= 2048);
-
 export const validateSubmitQuote = (
   req: Request,
   res: Response,
   next: NextFunction
 ) => {
-  const { materialsCost, laborCost, notes, receiptUrls, proofOfUseUrls } = req.body;
+  const { items, laborCost, notes } = req.body;
 
   // laborCost is only read for a custom-quote job (see
   // bookingController.submitQuote); every other job's labor is its booked price.
-  if (typeof materialsCost !== 'number' || materialsCost < 0) {
-    return res.status(400).json(errorResponse(400, 'materialsCost must be a non-negative number'));
+  // Per-item shape and proof rules live in utils/quoteItems.
+  if (!Array.isArray(items)) {
+    return res.status(400).json(errorResponse(400, 'items must be an array'));
   }
 
   if (laborCost !== undefined && laborCost !== null && (typeof laborCost !== 'number' || laborCost < 0)) {
@@ -582,14 +580,6 @@ export const validateSubmitQuote = (
 
   if (notes !== undefined && typeof notes !== 'string') {
     return res.status(400).json(errorResponse(400, 'notes must be a string'));
-  }
-
-  if (receiptUrls !== undefined && !isUrlList(receiptUrls, 10)) {
-    return res.status(400).json(errorResponse(400, 'receiptUrls must be an array of up to 10 URL strings'));
-  }
-
-  if (proofOfUseUrls !== undefined && !isUrlList(proofOfUseUrls, 10)) {
-    return res.status(400).json(errorResponse(400, 'proofOfUseUrls must be an array of up to 10 URL strings'));
   }
 
   return next();
