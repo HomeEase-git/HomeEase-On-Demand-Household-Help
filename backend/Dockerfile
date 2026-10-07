@@ -6,6 +6,7 @@ FROM node:22-bookworm-slim AS base
 # openssl: required by the Prisma query engine. dumb-init: PID 1 signal
 # forwarding + zombie reaping.
 RUN apt-get update \
+  && apt-get upgrade -y \
   && apt-get install -y --no-install-recommends openssl ca-certificates dumb-init \
   && rm -rf /var/lib/apt/lists/*
 WORKDIR /app

@@ -54,7 +54,7 @@ type Role = keyof typeof ROLES;
 const APPEND_ONLY = ['AuditLog', 'LedgerTransaction', 'LedgerLine', 'DebtLedgerEntry', 'PricingLog'];
 // Everything else the app reads and writes. A new table goes here or above.
 const READ_WRITE = [
-  'AppSettings', 'ArrivalVerification', 'AuthToken', 'Booking', 'BookingAddOn', 'BookingGroup', 'BookingVisit',
+  'AppSettings', 'ArrivalVerification', 'AuthToken', 'Booking', 'BookingAddOn', 'BookingGroup', 'BookingQuoteItem', 'BookingVisit',
   'Cancellation', 'Certification', 'ClientProfile', 'ContractAcceptance', 'DeclinedWorker', 'Dispute', 'KycDocument',
   'LedgerReconciliation', 'LedgerState', 'Message', 'MfaBackupCode', 'MfaSecret', 'Notification', 'Payment', 'Payout',
   'PricingRule', 'PromoBanner', 'RefundRequest', 'ResumeParseResult', 'Review', 'SavedPaymentMethod',
