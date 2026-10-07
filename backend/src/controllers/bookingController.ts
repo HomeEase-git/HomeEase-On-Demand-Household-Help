@@ -882,6 +882,7 @@ export const getBookingDetail = async (req: AuthRequest, res: Response) => {
         visits: { orderBy: [{ scheduledDate: 'asc' }, { scheduledTime: 'asc' }] },
         // Quote data lives inline on Booking (laborCost, materialsCost, etc.)
         addOns: true,  // schema relation is addOns (capital O)
+        quoteItems: { orderBy: { createdAt: 'asc' } },
         review: true,
         pricingLogs: { orderBy: { createdAt: 'asc' } },
         disputes: { orderBy: { createdAt: 'desc' } },
@@ -1110,6 +1111,13 @@ export const getBookingDetail = async (req: AuthRequest, res: Response) => {
               quotedAt: booking.quotedAt,
               receiptUrls: booking.quoteReceiptUrls,
               proofOfUseUrls: booking.quoteProofOfUseUrls,
+              items: booking.quoteItems.map((i) => ({
+                id: i.id,
+                name: i.name,
+                price: i.price,
+                receiptUrls: i.receiptUrls,
+                proofOfUseUrls: i.proofOfUseUrls,
+              })),
               rejectedAt: booking.quoteRejectedAt,
               rejectionReason: booking.quoteRejectionReason,
               revision: booking.quoteRevision,
@@ -2308,6 +2316,56 @@ export const submitQuote = async (req: AuthRequest, res: Response) => {
     if (isBookingStatusConflict(error)) return bookingConflict(res);
     console.error('Error submitting quote:', error);
     return res.status(500).json(errorResponse(500, 'Failed to submit quote'));
+  }
+};
+
+/**
+ * POST /api/bookings/:id/quote/reopen
+ * Worker takes a submitted or approved quote back to IN_PROGRESS to edit its
+ * items. Items are kept; the worker resubmits (submitQuote), and the client
+ * approves the new total. Bumps quoteRevision so the client can't approve the
+ * version they saw before the edit (approveQuote pins the revision).
+ */
+export const reopenQuote = async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user || req.user.role !== 'WORKER') {
+      return res.status(403).json(errorResponse(403, 'Only workers can edit a quote'));
+    }
+
+    const id = req.params.id as string;
+    const booking = await prisma.booking.findUnique({ where: { id } });
+    if (!booking) {
+      return res.status(404).json(errorResponse(404, 'Booking not found'));
+    }
+    if (booking.workerId !== req.user.userId) {
+      return res.status(403).json(errorResponse(403, 'This booking is not assigned to you'));
+    }
+    if (!['QUOTE_SUBMITTED', 'QUOTE_APPROVED'].includes(booking.status) || !isValidTransition(booking.status, 'IN_PROGRESS')) {
+      return res.status(409).json(errorResponse(409, `Cannot edit the quote of a booking with status ${booking.status}`));
+    }
+
+    await updateBookingIfStatus(prisma, id, booking.status, {
+      status: 'IN_PROGRESS',
+      quoteStatus: null,
+      approvedAt: null,
+      finalPrice: null,
+      quoteReminderSentAt: null,
+      quoteRevision: { increment: 1 },
+    });
+
+    await notifyUser({
+      userId: booking.clientId,
+      type: 'QUOTE_SUBMITTED',
+      title: 'Quote being edited',
+      message: 'Your pro is editing the quote. You will be asked to approve the new total.',
+      relatedId: id,
+    });
+
+    return res.json({ success: true, message: 'Quote reopened for editing' });
+  } catch (error) {
+    if (isBookingStatusConflict(error)) return bookingConflict(res);
+    console.error('Error reopening quote:', error);
+    return res.status(500).json(errorResponse(500, 'Failed to reopen quote'));
   }
 };
 

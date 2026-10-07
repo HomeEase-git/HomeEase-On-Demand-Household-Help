@@ -30,7 +30,9 @@ export const VALID_TRANSITIONS: Record<string, string[]> = {
   IN_PROGRESS: ['QUOTE_SUBMITTED', 'CANCELLED'],
   // IN_PROGRESS: the client refused the quote and the worker revises it.
   QUOTE_SUBMITTED: ['QUOTE_APPROVED', 'DISPUTED', 'IN_PROGRESS', 'CANCELLED'],
-  QUOTE_APPROVED: ['PENDING_COMPLETION', 'CANCELLED'],
+  // IN_PROGRESS: the worker reopens an approved quote to edit its items
+  // (bookingController.reopenQuote); the client must approve the new total.
+  QUOTE_APPROVED: ['PENDING_COMPLETION', 'IN_PROGRESS', 'CANCELLED'],
   // IN_PROGRESS (not QUOTE_SUBMITTED) is the restart point for a dispute
   // resolved via REQUEST_NEW_QUOTE — the worker resubmits through the normal
   // submitQuote endpoint from there (see adminDisputeController.resolveDispute).

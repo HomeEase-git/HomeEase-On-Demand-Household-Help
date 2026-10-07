@@ -15,6 +15,7 @@ import {
   withdrawRescheduleRequest,
   respondToRescheduleRequest,
   submitQuote,
+  reopenQuote,
   approveQuote,
   rejectQuote,
   disputeQuote,
@@ -94,6 +95,8 @@ router.patch('/:id/reschedule-request/respond', restrictTo('CLIENT', 'WORKER'), 
 
 // Submit quote (worker only)
 router.post('/:id/quote', restrictTo('WORKER'), validateSubmitQuote, submitQuote);
+// Take a submitted/approved quote back to IN_PROGRESS so its items can be edited
+router.post('/:id/quote/reopen', restrictTo('WORKER'), reopenQuote);
 
 // Approve or refuse quote (client only)
 router.patch('/:id/quote/approve', restrictTo('CLIENT'), validateApproveQuote, approveQuote);
