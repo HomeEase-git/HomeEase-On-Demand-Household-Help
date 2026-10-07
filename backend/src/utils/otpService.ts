@@ -77,12 +77,14 @@ export const verifyOtp = async (
 
 // Refresh tokens are stored as a SHA-256 hash, so a database leak doesn't
 // hand out live sessions. They're 40 random bytes, so an unsalted fast hash
-// is enough (nothing to brute-force). Rows from before hashing hold the raw
-// token; lookups accept either until those expire (30 days).
+// is enough (nothing to brute-force). Lookups match the hash only: accepting
+// the raw value too (for rows from before hashing) let anyone who could read
+// the table replay a stored hash as a live token. Pre-hashing rows simply no
+// longer match; those users sign in again.
 export const hashRefreshToken = (token: string): string =>
   crypto.createHash('sha256').update(token).digest('hex');
 
-const refreshTokenLookup = (token: string) => ({ in: [hashRefreshToken(token), token] });
+const refreshTokenLookup = (token: string) => hashRefreshToken(token);
 
 // Two requests from the same device can race to refresh with the same token
 // (e.g. two admin browser tabs). Within this window the loser just gets a 401

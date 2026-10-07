@@ -14,6 +14,7 @@ import {
 } from '@services/paymentLifecycleService';
 import { translateXenditFailureReason } from '@utils/xenditFailureMessages';
 import { applyXenditPayoutStatus } from '@services/payoutStatusService';
+import { retrieveInvoice } from '@services/xenditService';
 
 interface AuthRequest extends Request {
   user?: JwtPayload;
@@ -448,13 +449,30 @@ async function handleInvoicePaid(invoice: any) {
 
   if (!payment || payment.status !== 'PENDING') return;
 
+  // The callback token is one static shared secret, so the body only tells
+  // us which invoice to look at — what was actually paid comes from Xendit
+  // itself. A failed lookup throws: the webhook answers 500 and Xendit (or
+  // the hourly reconcile sweep) tries again.
+  const remote = await retrieveInvoice(invoiceId);
+  const remoteStatus = (remote?.status as string | undefined)?.toUpperCase();
+  if (remoteStatus !== 'PAID' && remoteStatus !== 'SETTLED') {
+    await writeAuditLog({
+      action: 'XENDIT_WEBHOOK_MISMATCH',
+      category: 'SYSTEM_ERROR',
+      level: 'WARN',
+      message: `Invoice webhook said PAID for payment ${payment.id}, but Xendit reports ${remoteStatus ?? 'no status'} — ignored.`,
+      metadata: { paymentId: payment.id, invoiceId, remoteStatus: remoteStatus ?? null },
+    });
+    return;
+  }
+
   // finalizePaidBooking marks the Payment COMPLETED, finalizes the booking,
   // nets any outstanding worker commission dues and schedules the payout.
   const finalized = await finalizePaidBooking(
     payment.id,
-    invoice.payment_id ?? null,
-    invoice.paid_amount ?? null,
-    invoice.paid_at ? new Date(invoice.paid_at) : null
+    remote.payment_id ?? null,
+    remote.paid_amount ?? null,
+    remote.paid_at ? new Date(remote.paid_at) : null
   );
   if (!finalized) return; // underpaid — held for admin review
 

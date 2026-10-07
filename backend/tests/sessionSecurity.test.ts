@@ -122,14 +122,16 @@ describe('Session & login hardening', () => {
       expect(audit).not.toBeNull();
     });
 
-    it('still accepts a refresh token stored before hashing', async () => {
-      const { user } = await signIn('rt-legacy');
+    it('does not accept a stored token value (hash or pre-hashing raw) as a refresh token', async () => {
+      const { user, refreshToken } = await signIn('rt-stored-value');
       const legacy = 'a'.repeat(80);
       await prisma.authToken.create({
         data: { userId: user.id, token: legacy, type: TokenType.REFRESH, expiresAt: new Date(Date.now() + 86_400_000) },
       });
 
-      expect((await refresh(legacy)).status).toBe(200);
+      // What someone reading the table would see.
+      expect((await refresh(legacy)).status).toBe(401);
+      expect((await refresh(hashRefreshToken(refreshToken))).status).toBe(401);
     });
   });
 

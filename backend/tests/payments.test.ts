@@ -1,7 +1,16 @@
+// The PAID handler re-fetches the invoice from Xendit; each test says what
+// Xendit "reports" for it.
+jest.mock('@services/xenditService', () => ({
+  ...jest.requireActual('@services/xenditService'),
+  retrieveInvoice: jest.fn(),
+}));
+
 import request from 'supertest';
 import app from '@/app';
 import prisma from '@config/database';
 import { createTestUser, deleteTestUser, createTestBooking, deleteTestBooking } from './helpers';
+
+const { retrieveInvoice } = require('@services/xenditService');
 
 const WEBHOOK_PATH = '/api/payments/xendit/invoice-webhook';
 
@@ -99,6 +108,7 @@ describe('Xendit invoice webhook — token verification and event handling', () 
       paid_at: new Date().toISOString(),
     };
 
+    (retrieveInvoice as jest.Mock).mockResolvedValueOnce(payload);
     const res = await request(app).post(WEBHOOK_PATH).set(xenditHeaders()).send(payload);
 
     expect(res.status).toBe(200);
@@ -113,10 +123,9 @@ describe('Xendit invoice webhook — token verification and event handling', () 
     const invoiceId = `inv_test_underpaid_${Date.now()}`;
     const { payment } = await seedPendingPayment(invoiceId);
 
-    const res = await request(app)
-      .post(WEBHOOK_PATH)
-      .set(xenditHeaders())
-      .send({ id: invoiceId, status: 'PAID', payment_id: 'ewc_short', paid_amount: payment.totalAmount - 100 });
+    const short = { id: invoiceId, status: 'PAID', payment_id: 'ewc_short', paid_amount: payment.totalAmount - 100 };
+    (retrieveInvoice as jest.Mock).mockResolvedValueOnce(short);
+    const res = await request(app).post(WEBHOOK_PATH).set(xenditHeaders()).send(short);
 
     expect(res.status).toBe(200);
     const updated = await prisma.payment.findUnique({ where: { id: payment.id } });
@@ -127,6 +136,22 @@ describe('Xendit invoice webhook — token verification and event handling', () 
       where: { action: 'PAYMENT_UNDERPAID', metadata: { path: ['paymentId'], equals: payment.id } },
     });
     expect(alert).not.toBeNull();
+  });
+
+  it('ignores a PAID webhook body when Xendit itself does not report the invoice paid', async () => {
+    const invoiceId = `inv_test_forged_${Date.now()}`;
+    const { payment } = await seedPendingPayment(invoiceId);
+    (retrieveInvoice as jest.Mock).mockResolvedValueOnce({ id: invoiceId, status: 'PENDING' });
+
+    const res = await request(app)
+      .post(WEBHOOK_PATH)
+      .set(xenditHeaders())
+      .send({ id: invoiceId, status: 'PAID', payment_id: 'ewc_forged', paid_amount: payment.totalAmount });
+
+    expect(res.status).toBe(200);
+    expect(retrieveInvoice).toHaveBeenCalledWith(invoiceId);
+    const updated = await prisma.payment.findUnique({ where: { id: payment.id } });
+    expect(updated?.status).toBe('PENDING');
   });
 
   it('does not re-complete a payment that is no longer PENDING', async () => {

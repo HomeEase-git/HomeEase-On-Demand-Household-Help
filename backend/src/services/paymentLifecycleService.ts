@@ -553,13 +553,14 @@ export async function finalizePaidBooking(
     return payment;
   }
 
-  if (paidAmount != null && roundToCentavo(paidAmount) < roundToCentavo(payment.totalAmount)) {
+  // A missing paid amount is held for review too, not taken as paid in full.
+  if (paidAmount == null || roundToCentavo(paidAmount) < roundToCentavo(payment.totalAmount)) {
     await writeAuditLog({
       action: 'PAYMENT_UNDERPAID',
       category: 'SYSTEM_ERROR',
       level: 'ERROR',
       message:
-        `Xendit reports ₱${paidAmount.toFixed(2)} paid for booking ${payment.bookingId}, ` +
+        `Xendit reports ${paidAmount == null ? 'no paid amount' : `₱${paidAmount.toFixed(2)} paid`} for booking ${payment.bookingId}, ` +
         `but the invoice total is ₱${payment.totalAmount.toFixed(2)} — not marked paid, review it manually.`,
       metadata: { paymentId: payment.id, bookingId: payment.bookingId, paidAmount, totalAmount: payment.totalAmount },
     });
