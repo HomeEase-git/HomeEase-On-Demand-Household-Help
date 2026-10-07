@@ -1978,6 +1978,7 @@ model Payout {
   xenditStatus         String? // raw status from Xendit (ACCEPTED/COMPLETED/FAILED/...), for debugging
   failureReason        String?
   attempts             Int          @default(0)
+  retryGeneration      Int          @default(0) // bumped per admin retry — part of the Xendit Idempotency-key (see payoutWorker)
 
   processingAt DateTime?
   paidAt       DateTime?

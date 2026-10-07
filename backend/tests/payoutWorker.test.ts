@@ -5,6 +5,7 @@ jest.mock('@queues/payoutQueue', () => ({
 
 jest.mock('@services/xenditDisbursementService', () => ({
   createPayout: jest.fn(),
+  findLivePayoutByReference: jest.fn(),
   xenditChannelCodeFor: jest.fn(),
 }));
 
@@ -13,7 +14,7 @@ import prisma from '@config/database';
 import { processSendPayout } from '@workers/payoutWorker';
 import { createTestUser, deleteTestUser, createTestBooking, deleteTestBooking } from './helpers';
 
-const { createPayout, xenditChannelCodeFor } = require('@services/xenditDisbursementService');
+const { createPayout, findLivePayoutByReference, xenditChannelCodeFor } = require('@services/xenditDisbursementService');
 
 function fakeJob(attemptsMade: number, attempts: number): Job {
   return { attemptsMade, opts: { attempts } } as unknown as Job;
@@ -45,6 +46,7 @@ describe('payoutWorker.processSendPayout', () => {
 
   beforeEach(() => {
     (createPayout as jest.Mock).mockReset();
+    (findLivePayoutByReference as jest.Mock).mockReset().mockResolvedValue(null);
     (xenditChannelCodeFor as jest.Mock).mockReset();
   });
 
@@ -76,6 +78,34 @@ describe('payoutWorker.processSendPayout', () => {
       },
     });
   }
+
+  it('adopts a payout an earlier interrupted attempt already created instead of sending again', async () => {
+    (xenditChannelCodeFor as jest.Mock).mockReturnValue('PH_GCASH');
+    const payout = await seedPendingPayout();
+    await prisma.payout.update({ where: { id: payout.id }, data: { attempts: 1 } });
+    (findLivePayoutByReference as jest.Mock).mockResolvedValueOnce({ id: 'disb_earlier', status: 'ACCEPTED' });
+
+    await processSendPayout(fakeJob(1, 5), { payoutId: payout.id });
+
+    expect(findLivePayoutByReference).toHaveBeenCalledWith(payout.id);
+    expect(createPayout).not.toHaveBeenCalled();
+    const after = await prisma.payout.findUniqueOrThrow({ where: { id: payout.id } });
+    expect(after.status).toBe('PROCESSING');
+    expect(after.xenditDisbursementId).toBe('disb_earlier');
+  });
+
+  it('uses a fresh idempotency key after an admin retry', async () => {
+    (xenditChannelCodeFor as jest.Mock).mockReturnValue('PH_GCASH');
+    const payout = await seedPendingPayout();
+    await prisma.payout.update({ where: { id: payout.id }, data: { retryGeneration: 2 } });
+    (createPayout as jest.Mock).mockResolvedValueOnce({ id: `disb_retry_${payout.id}`, status: 'ACCEPTED' });
+
+    await processSendPayout(fakeJob(0, 5), { payoutId: payout.id });
+
+    expect(createPayout).toHaveBeenCalledWith(
+      expect.objectContaining({ referenceId: payout.id, idempotencyKey: `${payout.id}-retry-2` })
+    );
+  });
 
   it('marks the payout PAID when Xendit returns COMPLETED immediately', async () => {
     const payout = await seedPendingPayout('GCASH');

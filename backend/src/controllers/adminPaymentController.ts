@@ -302,7 +302,8 @@ export const retryPayout = async (req: AuthRequest, res: Response) => {
     // Guarded: a refund may have cancelled this payout since the read above.
     const reopened = await prisma.payout.updateMany({
       where: { id, status: 'FAILED' },
-      data: { status: 'PENDING', failureReason: null, failedAt: null },
+      // New retry generation → new Xendit Idempotency-key (see payoutWorker).
+      data: { status: 'PENDING', failureReason: null, failedAt: null, retryGeneration: { increment: 1 } },
     });
     if (reopened.count === 0) {
       return res.status(409).json(errorResponse(409, 'This payout changed and can no longer be retried'));

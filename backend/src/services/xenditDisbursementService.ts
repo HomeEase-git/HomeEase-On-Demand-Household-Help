@@ -8,6 +8,9 @@ function secretClient() {
 
   return axios.create({
     baseURL: XENDIT_API_BASE,
+    // Bounded: a hung request would otherwise hold a payout in PROCESSING
+    // with no disbursement id until the process dies.
+    timeout: 30_000,
     headers: {
       Authorization: 'Basic ' + Buffer.from(`${key}:`).toString('base64'),
       'Content-Type': 'application/json',
@@ -28,7 +31,8 @@ export function xenditChannelCodeFor(methodType: string): string | null {
 }
 
 interface CreatePayoutParams {
-  referenceId: string; // Payout.id — used as reference_id AND the Idempotency-key, so a retried BullMQ job or admin retry can't create a duplicate payout
+  referenceId: string; // Payout.id — Xendit's reference_id, which the payout webhook matches on
+  idempotencyKey: string; // Payout.id (+ retry generation) — so a retried BullMQ job can't create a duplicate payout
   amountPesos: number; // decimal PHP pesos, not centavos
   channelCode: string; // e.g. 'PH_GCASH' — from xenditChannelCodeFor
   accountNumber: string;
@@ -65,7 +69,7 @@ export async function createPayout(params: CreatePayoutParams): Promise<XenditPa
       currency: 'PHP',
       description: params.description,
     },
-    { headers: { 'Idempotency-key': params.referenceId } }
+    { headers: { 'Idempotency-key': params.idempotencyKey } }
   );
 
   return {
@@ -73,6 +77,23 @@ export async function createPayout(params: CreatePayoutParams): Promise<XenditPa
     status: res.data.status,
     estimatedArrivalTime: res.data.estimated_arrival_time ?? null,
   };
+}
+
+// Xendit has accepted (or already paid) these — another send would pay twice.
+const LIVE_PAYOUT_STATUSES = new Set(['ACCEPTED', 'REQUESTED', 'SUCCEEDED', 'COMPLETED']);
+
+/**
+ * The live Xendit payout for a reference_id (our Payout.id), if any. Used
+ * before resending a payout whose earlier attempt may have reached Xendit
+ * without us recording its id (crash or timeout mid-request).
+ * Endpoint per Xendit's Payouts v2 reference (GET /v2/payouts?reference_id=)
+ * — confirm in the sandbox.
+ */
+export async function findLivePayoutByReference(referenceId: string): Promise<XenditPayout | null> {
+  const res = await secretClient().get('/v2/payouts', { params: { reference_id: referenceId } });
+  const list: any[] = Array.isArray(res.data) ? res.data : Array.isArray(res.data?.data) ? res.data.data : [];
+  const live = list.find((p) => LIVE_PAYOUT_STATUSES.has(String(p?.status).toUpperCase()));
+  return live ? { id: live.id, status: live.status, estimatedArrivalTime: live.estimated_arrival_time ?? null } : null;
 }
 
 export async function retrievePayout(payoutId: string): Promise<XenditPayout> {

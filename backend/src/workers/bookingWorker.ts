@@ -16,7 +16,7 @@ import {
   reconcilePendingPayment,
   reconcilePendingRefund,
 } from '@services/paymentLifecycleService';
-import { retrievePayout } from '@services/xenditDisbursementService';
+import { retrievePayout, findLivePayoutByReference } from '@services/xenditDisbursementService';
 import { applyXenditPayoutStatus } from '@services/payoutStatusService';
 import { schedulePayout } from '@queues/payoutQueue';
 import { formatDisplayId } from '@utils/formatters';
@@ -346,6 +346,37 @@ export async function remindAndAutoSettleCompletions(): Promise<void> {
       await applyXenditPayoutStatus(payout, remote.status);
     } catch (error) {
       console.error(`Failed to reconcile processing payout ${payout.id}:`, error);
+    }
+  }
+
+  // 5b. PROCESSING payouts with no Xendit id: the process died (deploy, OOM)
+  //     between claiming the payout and saving createPayout's answer. Ask
+  //     Xendit whether it got the request: adopt that payout if so, otherwise
+  //     put the row back to PENDING so step 6 re-enqueues it.
+  const orphanedPayouts = await prisma.payout.findMany({
+    where: { status: 'PROCESSING', processingAt: { lte: reconcileCutoff }, xenditDisbursementId: null },
+    select: { id: true, workerId: true, bookingId: true, amount: true, channel: true, xenditDisbursementId: true },
+  });
+  for (const payout of orphanedPayouts) {
+    try {
+      const remote = await findLivePayoutByReference(payout.id);
+      if (remote) {
+        await applyXenditPayoutStatus(payout, remote.status, { xenditDisbursementId: remote.id });
+      } else {
+        await prisma.payout.updateMany({
+          where: { id: payout.id, status: 'PROCESSING', xenditDisbursementId: null },
+          data: { status: 'PENDING', failureReason: 'Recovered after an interrupted send' },
+        });
+      }
+      await writeAuditLog({
+        action: 'PAYOUT_RECOVERED',
+        category: 'STATUS_CHANGE',
+        level: 'WARN',
+        message: `Payout ${payout.id} was stuck PROCESSING without a Xendit id — ${remote ? `adopted Xendit payout ${remote.id}` : 'reset to PENDING for resend'}`,
+        metadata: { payoutId: payout.id, bookingId: payout.bookingId, xenditDisbursementId: remote?.id ?? null },
+      });
+    } catch (error) {
+      console.error(`Failed to recover orphaned payout ${payout.id}:`, error);
     }
   }
 
