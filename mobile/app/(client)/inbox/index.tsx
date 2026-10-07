@@ -19,6 +19,7 @@ export default function InboxScreen() {
   const alertModal = useAlertModal();
   const [tab, setTab] = useState<"messages" | "notifications">("messages");
   const [loading, setLoading] = useState(true);
+  const [loadFailed, setLoadFailed] = useState(false);
   const notifications = useNotificationStore((s) => s.notifications);
   const notificationsLoading = useNotificationStore((s) => s.loading);
   const fetchNotifications = useNotificationStore((s) => s.fetchNotifications);
@@ -31,8 +32,10 @@ export default function InboxScreen() {
     try {
       const result = await api.getConversations();
       setConversations(result);
+      setLoadFailed(false);
     } catch (error) {
       console.error("Load conversations error:", error);
+      setLoadFailed(true);
     } finally {
       setLoading(false);
     }
@@ -112,7 +115,7 @@ export default function InboxScreen() {
         )}
       </View>
       {tab === "messages" ? (
-        loading ? (
+        loading && conversations.length === 0 ? (
           <View className="py-6 items-center">
             <ActivityIndicator size="small" />
           </View>
@@ -140,6 +143,14 @@ export default function InboxScreen() {
               />
             )}
           />
+        ) : loadFailed ? (
+          <EmptyState
+            icon="cloud-offline-outline"
+            title="Couldn't load your messages"
+            subtitle="Check your connection and try again."
+            actionLabel="Try again"
+            onAction={loadConversations}
+          />
         ) : (
           <EmptyState
             illustration={<EmptyInboxIllustration />}
@@ -147,7 +158,7 @@ export default function InboxScreen() {
             subtitle="Start a new chat from your bookings or worker profiles."
           />
         )
-      ) : notificationsLoading ? (
+      ) : notificationsLoading && notifications.length === 0 ? (
         <View className="py-6 items-center">
           <ActivityIndicator size="small" />
         </View>

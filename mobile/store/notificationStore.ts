@@ -21,6 +21,17 @@ export function notificationCategory(type: string): NotificationCategory {
   return 'system';
 }
 
+// Where a client's push tap goes: straight to the booking (or its quote) when
+// the notification names one, else the notification screen. relatedId is a
+// booking id for booking/payment types only (disputes etc. use other ids).
+export function clientNotificationRoute(type: string, relatedId: string | null | undefined, notificationId: string): string {
+  const category = notificationCategory(type);
+  if (relatedId && (category === "booking" || category === "payment")) {
+    return type === "QUOTE_SUBMITTED" || type === "QUOTE_REMINDER" ? `/(client)/booking/${relatedId}/quote` : `/(client)/booking/${relatedId}`;
+  }
+  return `/(client)/inbox/notification/${notificationId}`;
+}
+
 type NotificationState = {
   notifications: Notification[];
   unreadCount: number;
@@ -80,9 +91,18 @@ export const useNotificationStore = create<NotificationState>((set, get) => ({
     }
   },
 
+  // The same notification can arrive twice (foreground push + socket event);
+  // the push copy has no relatedId, so keep whichever one knows its booking.
   receiveNotification: (notification: Notification) =>
-    set((state) => ({
-      notifications: [notification, ...state.notifications],
-      unreadCount: state.unreadCount + 1,
-    })),
+    set((state) => {
+      const existing = state.notifications.find((n) => n.id === notification.id);
+      if (!existing) {
+        return {
+          notifications: [notification, ...state.notifications],
+          unreadCount: state.unreadCount + 1,
+        };
+      }
+      const merged = { ...existing, ...notification, relatedId: notification.relatedId ?? existing.relatedId };
+      return { notifications: state.notifications.map((n) => (n.id === notification.id ? merged : n)) };
+    }),
 }));

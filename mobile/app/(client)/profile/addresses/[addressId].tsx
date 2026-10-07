@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
-import { View, Text, Pressable, ActivityIndicator } from "react-native";
+import { View, Text, Pressable, ActivityIndicator, Linking } from "react-native";
 import { KeyboardAwareScrollView } from "../../../../components/ui/KeyboardAwareScrollView";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { AppIcon as Ionicons } from "../../../../components/icons/AppIcon";
@@ -14,6 +14,7 @@ import * as Location from "expo-location";
 import {
   autocompleteAddresses,
   getPlaceDetails,
+  isInPhilippines,
   newPlacesSessionToken,
   reverseGeocodeDetailed,
   displayAddress,
@@ -119,6 +120,7 @@ export default function AddressEditScreen() {
         }
       } catch (error) {
         console.error("Load address error:", error);
+        alertModal.error("Error", "Couldn't load this address. Please go back and try again.");
       }
     };
 
@@ -212,6 +214,12 @@ export default function AddressEditScreen() {
       setSearchResults([]);
       setSearchQuery("");
       latestQueryRef.current = "";
+    } catch (error) {
+      console.error("Place details error:", error);
+      alertModal.error(
+        "Couldn't load that address",
+        "Check your connection, then pick it again or drag the map to your location.",
+      );
     } finally {
       setResolvingPlaceId(null);
     }
@@ -223,6 +231,10 @@ export default function AddressEditScreen() {
         "Pin your address",
         "Search for your address, drag the map, or tap the GPS button so we know exactly where you are.",
       );
+      return;
+    }
+    if (!isInPhilippines(pin)) {
+      alertModal.error("Outside the Philippines", "HomeEase only serves addresses in the Philippines. Move the pin to your address.");
       return;
     }
     if (!fullAddress.trim()) {
@@ -306,7 +318,18 @@ export default function AddressEditScreen() {
             ref={pickerMapRef}
             initialLocation={pin}
             onLocationSelected={handleMapLocationSelected}
-            onError={(msg) => alertModal.error("Location error", msg)}
+            onError={(msg, permissionDenied) =>
+              alertModal.error(
+                "Location error",
+                msg,
+                permissionDenied
+                  ? [
+                      { text: "Not now", style: "cancel" },
+                      { text: "Open Settings", onPress: () => Linking.openSettings().catch(() => {}) },
+                    ]
+                  : undefined,
+              )
+            }
             height={260}
           />
           <Text className="text-text-muted text-xs text-center mt-2">

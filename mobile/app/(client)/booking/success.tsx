@@ -1,8 +1,8 @@
-import React, { useEffect, useRef, useState } from "react";
-import { View, Text, ScrollView, Animated, Easing, Pressable, Linking } from "react-native";
+import React, { useCallback, useEffect, useRef, useState } from "react";
+import { View, Text, ScrollView, Animated, Easing, Pressable, Linking, BackHandler } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { AppIcon as Ionicons } from "../../../components/icons/AppIcon";
-import { useRouter } from "expo-router";
+import { useFocusEffect, useRouter } from "expo-router";
 import PrimaryButton from "../../../components/ui/PrimaryButton";
 import OutlinedButton from "../../../components/ui/OutlinedButton";
 import PriceBreakdownCard from "../../../components/ui/PriceBreakdown";
@@ -10,10 +10,9 @@ import { colors } from "../../../constants";
 import { useBookingStore } from "../../../store/bookingStore";
 import { useAlertModal } from "../../../contexts/AlertModalContext";
 import * as api from "../../../services/api";
-import { formatTime12h } from "../../../utils/bookingTime";
+import { formatTime12h, startInstant } from "../../../utils/bookingTime";
 
 const POLL_INTERVAL_MS = 5000;
-const CANCEL_WINDOW_MS = 2 * 60 * 60 * 1000; // 2 hours
 const TERMINAL_STATUSES = ["COMPLETED", "CANCELLED", "REJECTED"];
 
 type BookingDetail = {
@@ -40,6 +39,15 @@ export default function BookingSuccessScreen() {
   const [cancelling, setCancelling] = useState(false);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
+  // Android back would return to an emptied Step 4; go Home instead.
+  useEffect(() => {
+    const sub = BackHandler.addEventListener("hardwareBackPress", () => {
+      router.replace("/(client)/home");
+      return true;
+    });
+    return () => sub.remove();
+  }, [router]);
+
   useEffect(() => {
     // The check pops in with a little overshoot, then two soft rings ripple
     // out behind it before the text fades in.
@@ -56,20 +64,22 @@ export default function BookingSuccessScreen() {
   // Status tracker: poll booking detail every 5s until it reaches a terminal
   // status. This also resolves the real worker (id + name), which the
   // creation response doesn't include when the booking was auto-matched.
-  useEffect(() => {
-    if (!selectedBooking?.id) return;
+  // Focus-scoped so it stops once another screen covers this one.
+  const bookingId = selectedBooking?.id;
+  useFocusEffect(
+    useCallback(() => {
+    if (!bookingId) return;
 
     let cancelled = false;
 
     const poll = async () => {
       try {
-        const data = await api.getBookingDetail(selectedBooking.id);
+        const data = await api.getBookingDetail(bookingId);
         if (cancelled) return;
         setDetail(data);
-        setCanCancel(
-          !TERMINAL_STATUSES.includes(data.status) &&
-            Date.now() - new Date(data.createdAt).getTime() < CANCEL_WINDOW_MS
-        );
+        // The server lets a client cancel only while the request is still
+        // PENDING; once a pro accepts, the window is closed.
+        setCanCancel(data.status === "PENDING");
         if (TERMINAL_STATUSES.includes(data.status) && pollRef.current) {
           clearInterval(pollRef.current);
           pollRef.current = null;
@@ -86,7 +96,8 @@ export default function BookingSuccessScreen() {
       cancelled = true;
       if (pollRef.current) clearInterval(pollRef.current);
     };
-  }, [selectedBooking?.id]);
+    }, [bookingId]),
+  );
 
   const referenceNumber = selectedBooking?.id ?? "Pending";
   const workerName = detail?.worker?.fullName ?? selectedBooking?.worker;
@@ -131,7 +142,11 @@ export default function BookingSuccessScreen() {
     // No native calendar module is wired into this app (no expo-calendar
     // dependency) — opens Google Calendar's web event-creation page instead,
     // which needs no native permissions/rebuild and works cross-platform.
-    const start = new Date(detail.scheduledDate);
+    // scheduledDate is the PH day at UTC midnight; the real start is date + time (PH).
+    const startTime = detail.scheduledTime ?? selectedBooking?.time;
+    const start = startTime
+      ? startInstant(detail.scheduledDate.slice(0, 10), startTime)
+      : new Date(detail.scheduledDate);
     const startStr = start.toISOString().replace(/[-:]|\.\d{3}/g, "");
     const end = new Date(start.getTime() + 2 * 60 * 60 * 1000);
     const endStr = end.toISOString().replace(/[-:]|\.\d{3}/g, "");
@@ -237,7 +252,7 @@ export default function BookingSuccessScreen() {
           </View>
           {!canCancel && detail && !TERMINAL_STATUSES.includes(detail.status) && (
             <Text className="text-text-muted text-xs text-center mb-4 -mt-4">
-              Free cancellation window (2 hours after booking) has passed.
+              Your pro has accepted, so this can no longer be cancelled here. Message them or contact support.
             </Text>
           )}
 

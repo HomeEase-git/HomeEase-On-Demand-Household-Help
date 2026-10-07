@@ -39,7 +39,8 @@ type Props = {
   initialLocation?: LatLng | null;
   onLocationSelected?: (location: LatLng, place: PlaceResult | null) => void;
   onLocatingChange?: (locating: boolean) => void;
-  onError?: (message: string) => void;
+  /** permissionDenied: true when GPS failed for lack of permission (offer Settings). */
+  onError?: (message: string, permissionDenied?: boolean) => void;
   serviceRadiusKm?: number;
   height?: number;
   showLocateButton?: boolean;
@@ -86,6 +87,10 @@ export const LocationPickerMap = React.forwardRef<
       lng: DEFAULT_REGION.longitude,
     },
   );
+
+  // Each pin move gets a number; a geocode reply for an older move is dropped,
+  // so a slow reply can't pull the pin back after a newer drag.
+  const pinRequestRef = useRef(0);
 
   // Subtle lift animation for the center pin when dragging
   const pinElevation = useRef(new Animated.Value(0)).current;
@@ -134,6 +139,7 @@ export const LocationPickerMap = React.forwardRef<
   );
 
   const handleLocateMe = async () => {
+    const request = ++pinRequestRef.current;
     setLocating(true);
     onLocatingChange?.(true);
     try {
@@ -154,15 +160,16 @@ export const LocationPickerMap = React.forwardRef<
 
       setGeocoding(true);
       const place = await reverseGeocodeDetailed(position.lat, position.lng);
-      onLocationSelected?.(nextCoords, place);
+      if (request === pinRequestRef.current) onLocationSelected?.(nextCoords, place);
     } catch (error) {
       let msg = "Unable to get current location.";
-      if (error instanceof LocationPermissionDeniedError) {
+      const denied = error instanceof LocationPermissionDeniedError;
+      if (denied) {
         msg = "Location permission is required to use GPS.";
       } else if (error instanceof LocationTimeoutError) {
         msg = "GPS timed out. Try moving near an open area or enter manually.";
       }
-      onError?.(msg);
+      onError?.(msg, denied);
     } finally {
       setLocating(false);
       setGeocoding(false);
@@ -192,6 +199,7 @@ export const LocationPickerMap = React.forwardRef<
 
     const nextCoords: LatLng = { lat: region.latitude, lng: region.longitude };
     setCurrentCoords(nextCoords);
+    const request = ++pinRequestRef.current;
 
     setGeocoding(true);
     try {
@@ -199,12 +207,12 @@ export const LocationPickerMap = React.forwardRef<
         region.latitude,
         region.longitude,
       );
-      onLocationSelected?.(nextCoords, place);
+      if (request === pinRequestRef.current) onLocationSelected?.(nextCoords, place);
     } catch (err) {
       console.warn("Reverse geocode on drag failed:", err);
-      onLocationSelected?.(nextCoords, null);
+      if (request === pinRequestRef.current) onLocationSelected?.(nextCoords, null);
     } finally {
-      setGeocoding(false);
+      if (request === pinRequestRef.current) setGeocoding(false);
     }
   };
 

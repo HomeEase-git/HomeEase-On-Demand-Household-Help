@@ -8,6 +8,8 @@ import ScreenHeader from "../../../../components/ui/ScreenHeader";
 import AddressMap from "../../../../components/ui/AddressMap";
 import GoogleMap, { type GoogleMapHandle } from "../../../../components/ui/GoogleMap";
 import { useBookingStore } from "../../../../store/bookingStore";
+import { mapApiBookingDetail } from "../../../../utils/mapBookingDetail";
+import { isLiveFresh } from "../../../../utils/trackingFreshness";
 import * as api from "../../../../services/api";
 import { getSocket } from "../../../../services/socket";
 import { colors } from "../../../../constants";
@@ -49,10 +51,21 @@ export default function TrackBookingScreen() {
           if (detail?.clientLat != null && detail?.clientLng != null) {
             setDestination({ lat: detail.clientLat, lng: detail.clientLng });
           }
-          if (detail?.worker?.currentLat != null && detail?.worker?.currentLng != null) {
+          // Only a recent stored position counts as live; an old one is a
+          // leftover from an earlier job, so wait for a real update instead.
+          if (
+            detail?.worker?.currentLat != null &&
+            detail?.worker?.currentLng != null &&
+            isLiveFresh(detail.worker.lastLocationUpdate)
+          ) {
             setInitialWorkerLocation({ lat: detail.worker.currentLat, lng: detail.worker.currentLng });
             setHasWorkerLocation(true);
-            setLastUpdatedAt(detail.worker.lastLocationUpdate ?? null);
+            setLastUpdatedAt(detail.worker.lastLocationUpdate);
+          }
+          // Opened from a deep link: the store may not know this booking yet.
+          if (!useBookingStore.getState().bookings.some((b) => b.id === bookingId)) {
+            const mapped = mapApiBookingDetail(detail);
+            useBookingStore.setState((s) => ({ bookings: [...s.bookings, mapped] }));
           }
         })
         .catch((error) => {
@@ -265,7 +278,7 @@ export default function TrackBookingScreen() {
               className="text-sm font-semibold"
               style={{ color: statusColor }}
             >
-              {booking.status}
+              {booking.status.replace(/([a-z])([A-Z])/g, "$1 $2")}
             </Text>
           </View>
           <Pressable accessibilityRole="button" accessibilityLabel="Message"

@@ -18,6 +18,8 @@ export default function NotificationPreferencesScreen() {
   const [promos, setPromos] = useState(false);
   const [system, setSystem] = useState(true);
   const [saving, setSaving] = useState(false);
+  // Save stays off until the server values are in, or it would overwrite them with defaults.
+  const [loaded, setLoaded] = useState(false);
   const [sounds, setSounds] = useState(areSoundsEnabled());
 
   // Stored on this phone and applied right away (not part of Save below,
@@ -39,8 +41,10 @@ export default function NotificationPreferencesScreen() {
           if (typeof prefs.promotions === "boolean") setPromos(prefs.promotions);
           if (typeof prefs.systemNotifications === "boolean") setSystem(prefs.systemNotifications);
         }
+        setLoaded(true);
       } catch (error) {
         console.error("Load notification preferences error:", error);
+        alertModal.error("Error", "Couldn't load your current preferences. Please go back and try again.");
       }
     };
 
@@ -128,7 +132,7 @@ export default function NotificationPreferencesScreen() {
             fullWidth
             onPress={handleSave}
             loading={saving}
-            disabled={saving}
+            disabled={saving || !loaded}
           />
         </View>
       </ScrollView>

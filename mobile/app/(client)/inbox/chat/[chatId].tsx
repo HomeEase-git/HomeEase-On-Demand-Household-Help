@@ -51,6 +51,7 @@ export default function ChatScreen() {
     s.conversations.find((c) => c.userId === userId),
   );
   const setMessages = useMessageStore((s) => s.setMessages);
+  const setConversations = useMessageStore((s) => s.setConversations);
   const appendMessage = useMessageStore((s) => s.appendMessage);
   const markConversationRead = useMessageStore((s) => s.markConversationRead);
 
@@ -63,12 +64,27 @@ export default function ChatScreen() {
       .then((thread) => {
         if (active) setMessages(userId, thread);
       })
-      .catch((error) => console.error("Load conversation thread error:", error));
+      .catch((error) => {
+        console.error("Load conversation thread error:", error);
+        if (active) alertModal.error("Error", "Couldn't load this conversation. Please try again.");
+      });
 
     return () => {
       active = false;
     };
   }, [userId, setMessages]);
+
+  // Name, avatar and phone come from the conversation list. A first chat (from a
+  // booking or profile) isn't in it yet, so load it now and again after the
+  // first message creates it.
+  const loadConversation = useCallback(() => {
+    api.getConversations().then(setConversations).catch((e) => console.error("Load conversations error:", e));
+  }, [setConversations]);
+  const hasConversation = !!conversation;
+  useEffect(() => {
+    if (!hasConversation) loadConversation();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [userId]);
 
   // Reactively mark the thread read whenever it changes (initial load or a
   // live message pushed in over the socket while this screen is open).
@@ -93,6 +109,7 @@ export default function ChatScreen() {
     try {
       const message = await api.sendMessage(userId, text);
       appendMessage(userId, message);
+      if (!hasConversation) loadConversation();
     } catch (error) {
       console.error("Send message error:", error);
       setInput(text);
@@ -125,7 +142,7 @@ export default function ChatScreen() {
   };
 
   return (
-    <SafeAreaView className="flex-1 bg-white" edges={["top"]}>
+    <SafeAreaView className="flex-1 bg-white" edges={["top", "bottom"]}>
       <View className="flex-row items-center px-4 py-3 border-b border-divider bg-white">
         <Pressable accessibilityRole="button" accessibilityLabel="Go back" onPress={() => router.back()} className="mr-2">
           <Ionicons name="chevron-back" size={24} color={colors.text.primary} />

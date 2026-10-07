@@ -55,7 +55,8 @@ export default function CancelBookingScreen() {
       );
     } catch (error) {
       console.error("Cancel booking error:", error);
-      alertModal.error("Error", "Failed to cancel booking. Please try again.");
+      // The server says why (e.g. already accepted); fall back to a generic line.
+      alertModal.error("Couldn't cancel", error instanceof Error && error.message ? error.message : "Failed to cancel booking. Please try again.");
     } finally {
       setLoading(false);
     }
@@ -79,7 +80,7 @@ export default function CancelBookingScreen() {
           <View className="bg-card rounded-2xl p-4 mb-4">
             <Text className="text-text-primary font-bold">{booking.service}</Text>
             <Text className="text-text-secondary text-sm mt-1">
-              {booking.worker} · {booking.date} · ₱{booking.amount}
+              {booking.worker} · {String(booking.date).slice(0, 10)} · ₱{booking.amount.toFixed(2)}
             </Text>
           </View>
         )}

@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useRef } from "react";
-import { View, TextInput, Text } from "react-native";
+import { View, TextInput, Text, Linking } from "react-native";
 import { KeyboardAwareScrollView } from "../../../components/ui/KeyboardAwareScrollView";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
@@ -200,7 +200,7 @@ export default function WorkerEditProfileScreen() {
         licenseNumber: licenseNumber.trim(),
       });
 
-      setUser(updatedUser);
+      if (user) setUser({ ...user, ...updatedUser }); // keep kycStatus, which the API shape lacks
 
       alertModal.success("Success", "Profile updated successfully.", [
         { text: "OK", onPress: () => router.back() },
@@ -274,7 +274,18 @@ export default function WorkerEditProfileScreen() {
               initialLocation={addressCoords}
               serviceRadiusKm={parseInt(areaRadius, 10) || 5}
               onLocationSelected={handleWorkerMapLocationSelected}
-              onError={(msg) => alertModal.error("Location error", msg)}
+              onError={(msg, permissionDenied) =>
+                alertModal.error(
+                  "Location error",
+                  msg,
+                  permissionDenied
+                    ? [
+                        { text: "Not now", style: "cancel" },
+                        { text: "Open Settings", onPress: () => Linking.openSettings().catch(() => {}) },
+                      ]
+                    : undefined,
+                )
+              }
               height={220}
             />
             <Text className="text-text-muted text-xs text-center mt-2">

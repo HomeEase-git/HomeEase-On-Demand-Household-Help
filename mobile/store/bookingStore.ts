@@ -352,6 +352,21 @@ const initialDraft: DraftBooking = {
   idempotencyKey: null,
 };
 
+const SUBMITTED_FIELDS = [
+  'workerId',
+  'isAutoMatched',
+  'serviceTaskId',
+  'description',
+  'scopeAnswers',
+  'issuePhotoUrls',
+  'selectedPackageIds',
+  'addOnToggles',
+  'priorities',
+  'tip',
+  'paymentMethod',
+  'paymentAccountIdentifier',
+] as const satisfies readonly (keyof DraftBooking)[];
+
 export const useBookingStore: UseBoundStore<StoreApi<BookingState>> = create<BookingState>((set, get) => ({
   bookings: [],
   selectedBooking: null,
@@ -417,8 +432,13 @@ export const useBookingStore: UseBoundStore<StoreApi<BookingState>> = create<Boo
       // changes the rush fee, so the date alone decides.
       const dateChanged = draft.date !== undefined && draft.date !== prev.date;
       const slotChanged = draft.time !== undefined && draft.time !== prev.time;
+      // A different task or quantity re-prices the job too: the picked
+      // worker's estimate and unit price were computed for the old scope.
+      const scopeChanged =
+        (draft.serviceTaskId !== undefined && draft.serviceTaskId !== prev.serviceTaskId) ||
+        (draft.scopeAnswers !== undefined && JSON.stringify(draft.scopeAnswers) !== JSON.stringify(prev.scopeAnswers));
       const clearingWorkerForNewSlot =
-        dateChanged &&
+        (dateChanged || scopeChanged) &&
         !updatedDraft.workerLocked &&
         prev.workerId != null &&
         draft.workerId === undefined;
@@ -431,7 +451,9 @@ export const useBookingStore: UseBoundStore<StoreApi<BookingState>> = create<Boo
         updatedDraft.workerUnitPrice = null;
         updatedDraft.isAutoMatched = false;
         updatedDraft.holdStartedAt = null;
-        updatedDraft.lastInvalidationReason = "Your worker isn't confirmed for the new date/time, so we cleared your selection.";
+        updatedDraft.lastInvalidationReason = dateChanged
+          ? "Your worker isn't confirmed for the new date/time, so we cleared your selection."
+          : "Your job details changed, so please pick your pro again.";
       }
 
       // idempotencyKey exists so a retried submit (bad wifi, app backgrounded
@@ -443,8 +465,13 @@ export const useBookingStore: UseBoundStore<StoreApi<BookingState>> = create<Boo
       // error. Only clear on a change this exact call didn't just make
       // (draft.X === undefined), matching the same convention
       // clearingSchedule/clearingWorkerForNewSlot already use above.
+      // The backend replays the ORIGINAL booking for a known key without
+      // comparing payloads, so any field that goes into the request counts.
+      const payloadChanged = SUBMITTED_FIELDS.some(
+        (f) => f in draft && JSON.stringify(draft[f]) !== JSON.stringify(prev[f]),
+      );
       if (
-        (categoryChanged || addressChanged || cityChanged || dateChanged || slotChanged) &&
+        (categoryChanged || addressChanged || cityChanged || dateChanged || slotChanged || payloadChanged) &&
         prev.idempotencyKey &&
         draft.idempotencyKey === undefined
       ) {

@@ -142,7 +142,7 @@ export function mapApiBookingDetail(d: ApiBookingDetail): Booking {
       ? {
           laborCost: d.quote.laborCost,
           materialsCost: d.quote.materialsCost,
-          totalAmount: d.finalPrice ?? 0,
+          totalAmount: d.finalPrice ?? d.quote.laborCost + d.quote.materialsCost,
           notes: d.quote.notes ?? "",
           submittedAt: d.quote.quotedAt ?? d.scheduledDate,
         }

@@ -23,9 +23,10 @@ const TABS = ["Pending", "Active", "Completed", "Cancelled"] as const;
 // Buckets the granular status into one of the four tabs shown on this screen
 const TAB_STATUS_MAP: Record<(typeof TABS)[number], BookingStatus[]> = {
   Pending: ["Pending", "QuoteSubmitted"],
-  Active: ["Accepted", "InProgress", "QuoteApproved", "PendingCompletion", "AwaitingPayment"],
+  // Disputed is a live job under review, not a cancelled one.
+  Active: ["Accepted", "InProgress", "QuoteApproved", "PendingCompletion", "AwaitingPayment", "Disputed"],
   Completed: ["Completed"],
-  Cancelled: ["Cancelled", "Disputed"],
+  Cancelled: ["Cancelled"],
 };
 
 function tabForStatus(status: BookingStatus): (typeof TABS)[number] {
@@ -101,7 +102,8 @@ export default function MyBookingsScreen() {
         </View>
       </View>
 
-      {loading ? (
+      {/* Skeleton only on the first load; a refresh keeps the list (and its spinner). */}
+      {loading && bookings.length === 0 ? (
         <LoadingSkeleton type="booking" count={4} />
       ) : filtered.length === 0 ? (
         <EmptyState

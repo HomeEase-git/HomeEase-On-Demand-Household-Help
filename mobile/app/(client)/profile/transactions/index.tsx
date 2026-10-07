@@ -24,18 +24,22 @@ export default function TransactionsScreen() {
   const [filter, setFilter] = useState<(typeof FILTERS)[number]>("All");
   const [transactions, setTransactions] = useState<TransactionListItem[]>([]);
   const [loading, setLoading] = useState(true);
+  const [failed, setFailed] = useState(false);
+  const [attempt, setAttempt] = useState(0);
 
   useEffect(() => {
     let active = true;
 
     async function load() {
       setLoading(true);
+      setFailed(false);
       try {
         const result = await api.getTransactions();
         if (!active) return;
         setTransactions(result.data);
       } catch (error) {
         console.error("Load transactions error:", error);
+        if (active) setFailed(true);
       } finally {
         if (active) setLoading(false);
       }
@@ -45,7 +49,7 @@ export default function TransactionsScreen() {
     return () => {
       active = false;
     };
-  }, []);
+  }, [attempt]);
 
   const now = new Date();
 
@@ -94,6 +98,14 @@ export default function TransactionsScreen() {
         <View className="px-4 pt-2">
           <SkeletonList count={6} SkeletonComponent={TransactionItemSkeleton} spacing={0} />
         </View>
+      ) : failed ? (
+        <EmptyState
+          icon="cloud-offline-outline"
+          title="Couldn't load your transactions"
+          subtitle="Check your connection and try again."
+          actionLabel="Try again"
+          onAction={() => setAttempt((n) => n + 1)}
+        />
       ) : filtered.length === 0 ? (
         <EmptyState
           icon="receipt-outline"

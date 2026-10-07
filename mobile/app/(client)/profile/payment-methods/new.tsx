@@ -7,6 +7,7 @@ import ScreenHeader from "../../../../components/ui/ScreenHeader";
 import InputField from "../../../../components/ui/InputField";
 import PrimaryButton from "../../../../components/ui/PrimaryButton";
 import * as api from "../../../../services/api";
+import { isPhMobileNumber } from "../../../../utils/paymentAccount";
 import { cardShadow } from "../../../../constants";
 import { useAlertModal } from "../../../../contexts/AlertModalContext";
 
@@ -22,25 +23,27 @@ export default function AddPaymentMethodScreen() {
   const labelRef = useRef<TextInput>(null);
 
   const handleSubmit = async () => {
-    if (!accountIdentifier.trim()) {
-      alertModal.error("Error", "Please enter your payment account identifier");
+    const isCash = type === "CASH";
+    if (!isCash && !isPhMobileNumber(accountIdentifier)) {
+      alertModal.error("Error", "Enter a valid mobile number, e.g. 09XXXXXXXXX.");
       return;
     }
+    // The server requires an identifier; cash has no account, so it gets a fixed one.
+    const identifier = isCash ? "cash" : accountIdentifier.trim();
 
     setLoading(true);
     try {
       await api.addPaymentMethod({
         type,
-        accountIdentifier: accountIdentifier.trim(),
-        label:
-          label.trim() || `${type} ending in ...${accountIdentifier.slice(-4)}`,
+        accountIdentifier: identifier,
+        label: label.trim() || (isCash ? "Cash" : `${type} ending in ...${identifier.slice(-4)}`),
       });
       alertModal.success("Success", "Payment method added successfully", [
         { text: "OK", onPress: () => router.back() },
       ]);
     } catch (error) {
       console.error("Add payment method error:", error);
-      alertModal.error("Error", "Unable to add payment method");
+      alertModal.error("Error", error instanceof Error && error.message ? error.message : "Unable to add payment method");
     } finally {
       setLoading(false);
     }
@@ -83,15 +86,18 @@ export default function AddPaymentMethodScreen() {
           </View>
         </View>
 
-        <InputField
-          ref={accountRef}
-          label="Account Identifier"
-          placeholder="e.g. 09XXXXXXXXX"
-          value={accountIdentifier}
-          onChangeText={setAccountIdentifier}
-          returnKeyType="next"
-          onSubmitEditing={() => labelRef.current?.focus()}
-        />
+        {type !== "CASH" && (
+          <InputField
+            ref={accountRef}
+            label="Mobile Number"
+            placeholder="e.g. 09XXXXXXXXX"
+            value={accountIdentifier}
+            onChangeText={setAccountIdentifier}
+            keyboardType="phone-pad"
+            returnKeyType="next"
+            onSubmitEditing={() => labelRef.current?.focus()}
+          />
+        )}
 
         <InputField
           ref={labelRef}

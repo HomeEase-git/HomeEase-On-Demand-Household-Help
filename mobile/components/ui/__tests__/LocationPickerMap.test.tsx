@@ -147,6 +147,43 @@ describe("LocationPickerMap", () => {
     );
   });
 
+  it("ignores a slow geocode reply for an older drag", async () => {
+    let resolveFirst: (v: unknown) => void = () => {};
+    (geoUtils.reverseGeocodeDetailed as jest.Mock)
+      .mockImplementationOnce(() => new Promise((r) => (resolveFirst = r)))
+      .mockResolvedValueOnce({ formatted_address: "Second", geometry: { location: { lat: 2, lng: 2 } } });
+
+    const onLocationSelected = jest.fn();
+    const { getByTestId } = await render(<LocationPickerMap onLocationSelected={onLocationSelected} />);
+    const map = getByTestId("map");
+    const region = (lat: number) => ({ latitude: lat, longitude: lat, latitudeDelta: 0.005, longitudeDelta: 0.005 });
+
+    await act(async () => {
+      map.props.onRegionChangeComplete(region(1));
+      map.props.onRegionChangeComplete(region(2));
+    });
+    await act(async () => {
+      resolveFirst({ formatted_address: "First", geometry: { location: { lat: 1, lng: 1 } } });
+    });
+
+    expect(onLocationSelected).toHaveBeenCalledTimes(1);
+    expect(onLocationSelected).toHaveBeenCalledWith({ lat: 2, lng: 2 }, expect.objectContaining({ formatted_address: "Second" }));
+  });
+
+  it("flags a denied permission so the screen can offer Settings", async () => {
+    (locationService.getPrecisePosition as jest.Mock).mockRejectedValue(
+      new (locationService as any).LocationPermissionDeniedError(),
+    );
+    const onError = jest.fn();
+    const { getByLabelText } = await render(<LocationPickerMap onError={onError} />);
+
+    await act(async () => {
+      fireEvent.press(getByLabelText("Locate current position"));
+    });
+
+    expect(onError).toHaveBeenCalledWith(expect.any(String), true);
+  });
+
   it("supports imperative handle animateTo", async () => {
     const ref = React.createRef<LocationPickerMapHandle>();
     await render(<LocationPickerMap ref={ref} />);

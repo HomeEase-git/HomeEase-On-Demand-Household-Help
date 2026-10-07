@@ -24,7 +24,7 @@ function filtersKey(filters: DiscoverWorkersFilters): string {
 export function useWorkerDiscovery(filters: DiscoverWorkersFilters, enabled: boolean): UseWorkerDiscoveryResult {
   const [workers, setWorkers] = useState<WorkerCard[]>([]);
   const [total, setTotal] = useState(0);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true); // true: the first fetch is debounced, so "empty" isn't known yet
   const [error, setError] = useState<string | null>(null);
   const [refetchToken, setRefetchToken] = useState(0);
   const key = filtersKey(filters);
@@ -81,7 +81,7 @@ export function useDateAvailabilityCount(
   enabled: boolean
 ): { count: number | null; loading: boolean } {
   const [count, setCount] = useState<number | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true); // true: the first fetch is debounced, so "empty" isn't known yet
   const key = filtersKey(baseFilters);
   const requestId = useRef(0);
 
@@ -98,7 +98,7 @@ export function useDateAvailabilityCount(
         if (cancelled || requestId.current !== thisRequest) return;
         setCount(result.pagination.total);
       } catch {
-        if (!cancelled && requestId.current === thisRequest) setCount(0);
+        if (!cancelled && requestId.current === thisRequest) setCount(null); // unknown, not "no pros"
       } finally {
         if (!cancelled && requestId.current === thisRequest) setLoading(false);
       }

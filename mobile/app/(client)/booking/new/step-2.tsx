@@ -57,6 +57,7 @@ export default function BookingStep2Screen() {
       setAddresses(data);
     } catch (error) {
       console.error("Load addresses error:", error);
+      alertModal.error("Error", "Couldn't load your saved addresses. Please try again.");
     } finally {
       setLoadingAddresses(false);
     }
@@ -124,6 +125,21 @@ export default function BookingStep2Screen() {
     }
   };
 
+  // Start from the default saved address so a repeat booking is one tap less.
+  const defaultTried = useRef(false);
+  useEffect(() => {
+    if (defaultTried.current || address) return;
+    const preferred = addresses.find((a) => a.isDefault);
+    if (!preferred) return;
+    // Deferred: selecting sets state, which the effect rule disallows synchronously.
+    const timer = setTimeout(() => {
+      defaultTried.current = true;
+      handleSelectAddress(preferred);
+    }, 0);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [addresses]);
+
   const handleAddNew = () => {
     addressSheetRef.current?.close();
     router.push("/(client)/profile/addresses/new");
@@ -167,6 +183,7 @@ export default function BookingStep2Screen() {
   const { count: prosAvailable, loading: loadingCount } = useDateAvailabilityCount(
     {
       serviceType: draft.serviceType ?? undefined,
+      serviceTaskId: draft.serviceTaskId ?? undefined,
       date: date ?? undefined,
       scopeAnswers: draft.scopeAnswers,
       workerId: lockedWorkerId ?? undefined,

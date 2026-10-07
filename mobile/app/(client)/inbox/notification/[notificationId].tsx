@@ -47,7 +47,8 @@ export default function NotificationDetailScreen() {
         ? colors.success
         : colors.warning;
 
-  const isBookingRelated = category === "booking" && notification.relatedId;
+  // Payment notifications (reminders, receipts) also point at a booking.
+  const isBookingRelated = (category === "booking" || category === "payment") && notification.relatedId;
 
   return (
     <SafeAreaView className="flex-1 bg-white">

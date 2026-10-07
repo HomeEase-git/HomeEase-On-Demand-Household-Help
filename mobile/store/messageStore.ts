@@ -52,7 +52,7 @@ export const useMessageStore = create<MessageState>((set) => ({
       const existing = state.messagesByUser[userId] ?? [];
       const updatedConversations = state.conversations.map((c) =>
         c.userId === userId
-          ? { ...c, lastMessage: message.content, lastMessageTime: message.createdAt }
+          ? { ...c, lastMessage: message.content || (message.imageUrl ? "📷 Image" : c.lastMessage), lastMessageTime: message.createdAt }
           : c,
       );
       return {

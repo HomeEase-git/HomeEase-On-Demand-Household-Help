@@ -29,15 +29,17 @@ export default function AddressesScreen() {
   const alertModal = useAlertModal();
   const [addresses, setAddresses] = useState<Address[]>([]);
   const [loading, setLoading] = useState(true);
+  const [failed, setFailed] = useState(false);
 
   const loadAddresses = async () => {
     setLoading(true);
     try {
       const data = await api.getAddresses();
       setAddresses(data);
+      setFailed(false);
     } catch (error) {
       console.error("Load addresses error:", error);
-      alertModal.error("Error", "Failed to load addresses");
+      setFailed(true);
     } finally {
       setLoading(false);
     }
@@ -94,6 +96,14 @@ export default function AddressesScreen() {
             </View>
           ))}
         </View>
+      ) : failed && addresses.length === 0 ? (
+        <EmptyState
+          icon="cloud-offline-outline"
+          title="Couldn't load your addresses"
+          subtitle="Check your connection and try again."
+          actionLabel="Try again"
+          onAction={loadAddresses}
+        />
       ) : addresses.length === 0 ? (
         <EmptyState
           icon="location-outline"
