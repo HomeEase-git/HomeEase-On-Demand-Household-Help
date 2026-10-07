@@ -33,6 +33,11 @@ describe('validateQuoteItems', () => {
     expect(validateQuoteItems([item({ price })]).ok).toBe(false);
   });
 
+  it('rejects a price above the fat-finger cap', () => {
+    expect(validateQuoteItems([item({ price: 500_001 })]).ok).toBe(false);
+    expect(validateQuoteItems([item({ price: 500_000 })]).ok).toBe(true);
+  });
+
   it('rejects a blank name', () => {
     expect(validateQuoteItems([item({ name: '  ' })]).ok).toBe(false);
   });

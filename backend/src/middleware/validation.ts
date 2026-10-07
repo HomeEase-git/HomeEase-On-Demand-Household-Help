@@ -654,36 +654,6 @@ export const validateDisputeQuote = (
   return next();
 };
 
-export const validateAddAddon = (
-  req: Request,
-  res: Response,
-  next: NextFunction
-) => {
-  // Field names match the BookingAddOn schema (name/price) and what
-  // bookingController.addAddon actually reads — this previously validated
-  // title/description/cost, which the controller never read, so every
-  // request that passed validation crashed on the Prisma insert (name/price
-  // are required, non-nullable columns).
-  const { name, price } = req.body;
-
-  if (!name || typeof name !== 'string') {
-    return res.status(400).json(errorResponse(400, 'name is required and must be a string'));
-  }
-
-  // typeof price === 'number' && price > 0 alone lets NaN through (NaN <= 0
-  // is false) and has no upper bound at all — Number.isFinite catches both
-  // NaN and Infinity, and ADDON_MAX_PRICE is a fat-finger/malice backstop
-  // (there's no task-relative bound to check a mid-job addon against). The
-  // real protection is the client-approval gate in bookingController.addAddon
-  // — an unapproved addon never counts toward the bill no matter its price.
-  const ADDON_MAX_PRICE = 500_000;
-  if (typeof price !== 'number' || !Number.isFinite(price) || price <= 0 || price > ADDON_MAX_PRICE) {
-    return res.status(400).json(errorResponse(400, `price must be a positive number up to ₱${ADDON_MAX_PRICE.toLocaleString()}`));
-  }
-
-  return next();
-};
-
 export const validateAddReview = (
   req: Request,
   res: Response,

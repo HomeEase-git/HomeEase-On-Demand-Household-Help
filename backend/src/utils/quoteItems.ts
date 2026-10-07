@@ -9,6 +9,8 @@ export type QuoteItemInput = {
 
 const MAX_ITEMS = 20;
 const MAX_PHOTOS = 5;
+// Fat-finger backstop; the client still approves the total.
+const MAX_PRICE = 500_000;
 
 type Result = { ok: true; items: QuoteItemInput[] } | { ok: false; error: string };
 
@@ -25,8 +27,8 @@ export function validateQuoteItems(raw: unknown): Result {
     const e = (entry ?? {}) as Record<string, unknown>;
     const name = typeof e.name === 'string' ? e.name.trim() : '';
     if (!name || name.length > 120) return { ok: false, error: 'Each item needs a name (up to 120 characters)' };
-    if (typeof e.price !== 'number' || !Number.isFinite(e.price) || e.price <= 0) {
-      return { ok: false, error: `"${name}" needs a price greater than zero` };
+    if (typeof e.price !== 'number' || !Number.isFinite(e.price) || e.price <= 0 || e.price > MAX_PRICE) {
+      return { ok: false, error: `"${name}" needs a price between ₱0.01 and ₱${MAX_PRICE.toLocaleString('en-PH')}` };
     }
     const receiptUrls = e.receiptUrls ?? [];
     const proofOfUseUrls = e.proofOfUseUrls ?? [];

@@ -22,7 +22,6 @@ import {
   completeBooking,
   confirmCompletion,
   cancelBooking,
-  addAddon,
   respondToAddon,
   submitReview,
 } from '../controllers/bookingController';
@@ -37,7 +36,6 @@ import {
   validateBookingStatusUpdate,
   validateApproveQuote,
   validateDisputeQuote,
-  validateAddAddon,
   validateAddReview,
   validateArriveBooking,
   validateLiveLocation,
@@ -121,7 +119,6 @@ router.patch('/:id/confirm-completion', restrictTo('CLIENT'), confirmCompletion)
 router.patch('/:id/cancel', validateBookingStatusUpdate, cancelBooking);
 
 // Add addon (worker only)
-router.post('/:id/addons', restrictTo('WORKER'), validateAddAddon, addAddon);
 router.patch('/:id/addons/:addonId/respond', restrictTo('CLIENT'), respondToAddon);
 
 // Upload a review photo (client only) — no reviewId yet, returned URL is
