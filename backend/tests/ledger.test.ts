@@ -20,7 +20,7 @@ import { chargePenaltyTx, adminAdjustDebt } from '@services/debtLedgerService';
 import { openLedger, LedgerAlreadyOpenError } from '@services/ledgerOpeningService';
 import { syncXenditFees } from '@services/ledgerFeeSyncService';
 import { buildReconciliation } from '@services/ledgerReconciliationService';
-import { postLedger, resetLedgerOpenCache, postCancellationFee, postClientFeeCleared } from '@services/ledgerService';
+import { postLedger, resetLedgerOpenCache, postCancellationFee, postClientFeeCleared, postRefundSent } from '@services/ledgerService';
 import { markPeriodRemitted } from '@services/taxRemittanceService';
 import { requestRefund, markRefundedManually } from '@services/refundRequestService';
 import { manilaMonthKey } from '@utils/manilaTime';
@@ -263,5 +263,29 @@ describe('Double-entry ledger', () => {
     expect(workers.status).toBe('DIFFERENCE');
     expect(workers.items).toHaveLength(1);
     await prisma.workerProfile.update({ where: { userId: workerA }, data: { commissionOwed: 0 } });
+  });
+
+  it('owes an overpayment back to the client instead of crediting the worker', async () => {
+    const before = await ledgerOwed(workerA);
+    const payment = await onlinePayment(workerA, 1000);
+    await finalizePaidBooking(payment.id, 'ewc_over', 1010, new Date());
+
+    // The worker is credited the ₱882 share of the invoice, not of the ₱1,010 paid.
+    expect((await ledgerOwed(workerA)) - before).toBe(88200);
+    const lines = await prisma.ledgerLine.findMany({ where: { transaction: { paymentId: payment.id } } });
+    expect(lines.find((l) => l.account === 'XENDIT_CASH')?.amountCentavos).toBe(101000);
+    expect(lines.find((l) => l.account === 'CLIENT_RECEIVABLE')).toMatchObject({ amountCentavos: -1000, clientId });
+
+    // Refunding it in full sends the overpayment back too: nothing is left
+    // owed to the client or credited to the worker for this payment.
+    await postRefundSent(prisma, await prisma.payment.findUniqueOrThrow({ where: { id: payment.id } }), workerA, clientId);
+    const sums = await prisma.ledgerLine.groupBy({
+      by: ['account'],
+      where: { transaction: { paymentId: payment.id } },
+      _sum: { amountCentavos: true },
+    });
+    for (const account of ['XENDIT_CASH', 'WORKER_BALANCE', 'CLIENT_RECEIVABLE'] as const) {
+      expect(sums.find((r) => r.account === account)?._sum.amountCentavos ?? 0).toBe(0);
+    }
   });
 });

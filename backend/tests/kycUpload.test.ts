@@ -91,6 +91,17 @@ describe('KYC document upload', () => {
     expect(res.status).toBe(400);
   });
 
+  it('rejects a file whose bytes are not the image or PDF it claims to be', async () => {
+    const res = await request(app)
+      .post(UPLOAD_PATH)
+      .set('Authorization', `Bearer ${workerToken}`)
+      .field('documentType', 'GOVERNMENT_ID_FRONT')
+      .attach('documents', Buffer.from('<html><script>alert(1)</script></html>'), { filename: 'id.pdf', contentType: 'application/pdf' });
+
+    expect(res.status).toBe(415);
+    expect(mockUpload).not.toHaveBeenCalled();
+  });
+
   it('accepts a valid upload, stores it via Supabase, and flips kycStatus to SUBMITTED', async () => {
     const res = await attachFile(
       request(app)

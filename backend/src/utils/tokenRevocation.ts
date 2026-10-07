@@ -102,6 +102,31 @@ function recordSuccess(): void {
 }
 
 /**
+ * Every revocation is also kept in this process's memory, so a Redis outage
+ * doesn't let a banned or logged-out session back in on this instance.
+ */
+// ponytail: per-process mirror — covers the single Render instance; with
+// several instances, revocations made during an outage only reach the one
+// that handled them.
+const localRevocations = new Map<string, number>(); // key -> expiry (ms)
+
+function rememberLocally(key: string, ttlSeconds: number): void {
+  const now = Date.now();
+  if (localRevocations.size >= 10_000) {
+    for (const [k, expiresAt] of localRevocations) if (expiresAt <= now) localRevocations.delete(k);
+  }
+  localRevocations.set(key, now + ttlSeconds * 1000);
+}
+
+function revokedLocally(key: string): boolean {
+  const expiresAt = localRevocations.get(key);
+  if (expiresAt === undefined) return false;
+  if (expiresAt > Date.now()) return true;
+  localRevocations.delete(key);
+  return false;
+}
+
+/**
  * Marks every access token currently held by this user as revoked for the
  * next `ttlSeconds` — pass the JWT's own max lifetime (see utils/jwt.ts's
  * JWT_EXPIRY): no token minted before this call can possibly outlive that
@@ -115,6 +140,7 @@ function recordSuccess(): void {
  */
 export async function revokeUserSessions(userId: string, ttlSeconds: number): Promise<void> {
   revocationListener?.onUserRevoked(userId);
+  rememberLocally(`${REVOKED_KEY_PREFIX}${userId}`, ttlSeconds);
   if (circuitIsOpen()) return;
   try {
     await client.set(`${REVOKED_KEY_PREFIX}${userId}`, '1', 'EX', ttlSeconds);
@@ -126,6 +152,7 @@ export async function revokeUserSessions(userId: string, ttlSeconds: number): Pr
 
 /** Called on reinstatement (setUserStatus back to ACTIVE). */
 export async function clearUserSessionRevocation(userId: string): Promise<void> {
+  localRevocations.delete(`${REVOKED_KEY_PREFIX}${userId}`);
   if (circuitIsOpen()) return;
   try {
     await client.del(`${REVOKED_KEY_PREFIX}${userId}`);
@@ -137,6 +164,7 @@ export async function clearUserSessionRevocation(userId: string): Promise<void> 
 
 /** See the fail-open note on `client` above. */
 export async function isUserSessionRevoked(userId: string): Promise<boolean> {
+  if (revokedLocally(`${REVOKED_KEY_PREFIX}${userId}`)) return true;
   if (circuitIsOpen()) return false;
   try {
     const value = await client.get(`${REVOKED_KEY_PREFIX}${userId}`);
@@ -156,6 +184,7 @@ export async function isUserSessionRevoked(userId: string): Promise<boolean> {
 export async function revokeSessionIds(sessionIds: string[], ttlSeconds: number): Promise<void> {
   if (sessionIds.length === 0) return;
   revocationListener?.onSessionsRevoked(sessionIds);
+  for (const sid of sessionIds) rememberLocally(`${REVOKED_SESSION_KEY_PREFIX}${sid}`, ttlSeconds);
   if (circuitIsOpen()) return;
   try {
     const pipeline = client.pipeline();
@@ -169,6 +198,7 @@ export async function revokeSessionIds(sessionIds: string[], ttlSeconds: number)
 
 /** See the fail-open note on `client` above. */
 export async function isSessionRevoked(sessionId: string): Promise<boolean> {
+  if (revokedLocally(`${REVOKED_SESSION_KEY_PREFIX}${sessionId}`)) return true;
   if (circuitIsOpen()) return false;
   try {
     const value = await client.get(`${REVOKED_SESSION_KEY_PREFIX}${sessionId}`);

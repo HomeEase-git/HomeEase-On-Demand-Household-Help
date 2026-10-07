@@ -55,7 +55,7 @@ export const generateToken = (payload: JwtPayload, expiresInSeconds: number = JW
 };
 
 export const verifyToken = (token: string): JwtPayload => {
-  return jwt.verify(token, JWT_SECRET) as JwtPayload;
+  return jwt.verify(token, JWT_SECRET, { algorithms: ['HS256'] }) as JwtPayload;
 };
 
 export const decodeToken = (token: string): JwtPayload | null => {

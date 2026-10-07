@@ -2,6 +2,7 @@ import request from 'supertest';
 import { authenticator } from 'otplib';
 import app from '@/app';
 import prisma from '@config/database';
+import { sendOtpEmail } from '@utils/emailService';
 import { createTestUser, deleteTestUser } from './helpers';
 
 // Two-step sign-in codes go out by email; nothing is really sent in tests.
@@ -10,10 +11,10 @@ jest.mock('@utils/emailService', () => ({
   sendOtpEmail: jest.fn().mockResolvedValue(undefined),
 }));
 
-/** The code the server just stored for this user (codes are single-use). */
-async function latestCode(userId: string, type: 'LOGIN_2FA' | 'ACCOUNT_ACTION'): Promise<string> {
-  const row = await prisma.authToken.findFirstOrThrow({ where: { userId, type }, orderBy: { createdAt: 'desc' } });
-  return row.token;
+/** The code the server just emailed (codes are stored hashed and single-use). */
+async function latestCode(_userId: string, _type: 'LOGIN_2FA' | 'ACCOUNT_ACTION'): Promise<string> {
+  const calls = jest.mocked(sendOtpEmail).mock.calls;
+  return calls[calls.length - 1][1];
 }
 
 describe('Admin MFA', () => {
@@ -147,6 +148,26 @@ describe('Admin MFA', () => {
         orderBy: { createdAt: 'desc' },
       });
       expect(auditEntry).not.toBeNull();
+    });
+
+    it('refuses the same TOTP code a second time', async () => {
+      const code = authenticator.generate(totpSecret);
+      const login = await request(app).post('/api/auth/login').send({ email: adminEmail, password: adminPassword });
+      const res = await request(app)
+        .post('/api/auth/mfa/challenge')
+        .send({ challengeToken: login.body.data.challengeToken, code });
+
+      // Either this exact code was just used above, or it's a fresh step and
+      // this use spends it; a second use of it must fail either way.
+      if (res.status === 200) {
+        const again = await request(app).post('/api/auth/login').send({ email: adminEmail, password: adminPassword });
+        const replay = await request(app)
+          .post('/api/auth/mfa/challenge')
+          .send({ challengeToken: again.body.data.challengeToken, code });
+        expect(replay.status).toBe(401);
+      } else {
+        expect(res.status).toBe(401);
+      }
     });
 
     it('a backup code works once, then is rejected on reuse', async () => {

@@ -29,7 +29,7 @@ services:
       timeout: 5s
       retries: 5
     ports:
-      - "${POSTGRES_PORT:-5432}:5432"
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432" # localhost only: default password
 
   redis:
     image: redis:7-alpine

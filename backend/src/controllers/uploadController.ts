@@ -4,6 +4,7 @@ import multer from 'multer';
 import { errorResponse } from '@utils/errorResponse';
 import { KYC_DOCUMENT_TYPES } from '@utils/kycDocumentTypes';
 import { normalizeImage, UnsupportedImageError } from '@utils/normalizeImage';
+import { sniffMimeType } from '@utils/sniffMimeType';
 import {
   supabase,
   CHAT_IMAGE_BUCKET,
@@ -22,6 +23,8 @@ interface AuthRequest extends Request {
 const ALLOWED_MIME_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/heic', 'image/heif'];
 const ALLOWED_KYC_MIME_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'application/pdf'];
 const MAX_FILE_SIZE = Number(process.env.MAX_FILE_SIZE) || 5 * 1024 * 1024;
+
+const UNSUPPORTED_IMAGE = 'That file is not a JPG, PNG, WEBP or HEIC image.';
 
 export const chatImageUpload = multer({
   storage: multer.memoryStorage(),
@@ -49,13 +52,18 @@ export const uploadChatImage = async (req: AuthRequest, res: Response) => {
       return res.status(400).json(errorResponse(400, 'No image file provided'));
     }
 
-    const extension = req.file.mimetype.split('/')[1] || 'jpg';
+    const mimeType = sniffMimeType(req.file.buffer);
+    if (!mimeType || !ALLOWED_MIME_TYPES.includes(mimeType)) {
+      return res.status(415).json(errorResponse(415, UNSUPPORTED_IMAGE));
+    }
+
+    const extension = mimeType.split('/')[1] || 'jpg';
     const fileName = `${req.user.userId}/${randomUUID()}.${extension}`;
 
     const { error: uploadError } = await supabase.storage
       .from(CHAT_IMAGE_BUCKET)
       .upload(fileName, req.file.buffer, {
-        contentType: req.file.mimetype,
+        contentType: mimeType,
       });
 
     if (uploadError) {
@@ -103,13 +111,18 @@ export const uploadAvatar = async (req: AuthRequest, res: Response) => {
       return res.status(400).json(errorResponse(400, 'No image file provided'));
     }
 
-    const extension = req.file.mimetype.split('/')[1] || 'jpg';
+    const mimeType = sniffMimeType(req.file.buffer);
+    if (!mimeType || !ALLOWED_MIME_TYPES.includes(mimeType)) {
+      return res.status(415).json(errorResponse(415, UNSUPPORTED_IMAGE));
+    }
+
+    const extension = mimeType.split('/')[1] || 'jpg';
     const fileName = `${req.user.userId}/${randomUUID()}.${extension}`;
 
     const { error: uploadError } = await supabase.storage
       .from(AVATAR_BUCKET)
       .upload(fileName, req.file.buffer, {
-        contentType: req.file.mimetype,
+        contentType: mimeType,
       });
 
     if (uploadError) {
@@ -158,13 +171,18 @@ export const uploadBookingCompletionPhoto = async (req: AuthRequest, res: Respon
       return res.status(400).json(errorResponse(400, 'No image file provided'));
     }
 
-    const extension = req.file.mimetype.split('/')[1] || 'jpg';
+    const mimeType = sniffMimeType(req.file.buffer);
+    if (!mimeType || !ALLOWED_MIME_TYPES.includes(mimeType)) {
+      return res.status(415).json(errorResponse(415, UNSUPPORTED_IMAGE));
+    }
+
+    const extension = mimeType.split('/')[1] || 'jpg';
     const fileName = `${req.user.userId}/${randomUUID()}.${extension}`;
 
     const { error: uploadError } = await supabase.storage
       .from(BOOKING_PHOTO_BUCKET)
       .upload(fileName, req.file.buffer, {
-        contentType: req.file.mimetype,
+        contentType: mimeType,
       });
 
     if (uploadError) {
@@ -202,13 +220,18 @@ export const uploadIssuePhoto = async (req: AuthRequest, res: Response) => {
       return res.status(400).json(errorResponse(400, 'No image file provided'));
     }
 
-    const extension = req.file.mimetype.split('/')[1] || 'jpg';
+    const mimeType = sniffMimeType(req.file.buffer);
+    if (!mimeType || !ALLOWED_MIME_TYPES.includes(mimeType)) {
+      return res.status(415).json(errorResponse(415, UNSUPPORTED_IMAGE));
+    }
+
+    const extension = mimeType.split('/')[1] || 'jpg';
     const fileName = `${req.user.userId}/${randomUUID()}.${extension}`;
 
     const { error: uploadError } = await supabase.storage
       .from(BOOKING_PHOTO_BUCKET)
       .upload(fileName, req.file.buffer, {
-        contentType: req.file.mimetype,
+        contentType: mimeType,
       });
 
     if (uploadError) {
@@ -247,13 +270,18 @@ export const uploadReviewPhoto = async (req: AuthRequest, res: Response) => {
       return res.status(400).json(errorResponse(400, 'No image file provided'));
     }
 
-    const extension = req.file.mimetype.split('/')[1] || 'jpg';
+    const mimeType = sniffMimeType(req.file.buffer);
+    if (!mimeType || !ALLOWED_MIME_TYPES.includes(mimeType)) {
+      return res.status(415).json(errorResponse(415, UNSUPPORTED_IMAGE));
+    }
+
+    const extension = mimeType.split('/')[1] || 'jpg';
     const fileName = `${req.user.userId}/${randomUUID()}.${extension}`;
 
     const { error: uploadError } = await supabase.storage
       .from(BOOKING_PHOTO_BUCKET)
       .upload(fileName, req.file.buffer, {
-        contentType: req.file.mimetype,
+        contentType: mimeType,
       });
 
     if (uploadError) {
@@ -311,15 +339,20 @@ export const uploadKycFile = async (req: AuthRequest, res: Response) => {
       return res.status(400).json(errorResponse(400, 'A valid documentType is required'));
     }
 
+    const sniffed = sniffMimeType(req.file.buffer);
+    if (!sniffed || !ALLOWED_KYC_MIME_TYPES.includes(sniffed)) {
+      return res.status(415).json(errorResponse(415, 'Upload a JPG, PNG, or WEBP photo, or a PDF.'));
+    }
+
     const bucket = documentType === 'RESUME' ? RESUME_BUCKET : KYC_DOCUMENT_BUCKET;
 
     // Normalise images (auto-orient + downscale + JPEG) before storing; leave
     // PDFs untouched. Keeps the KYC bucket and the downstream AI-review payload
     // small and consistently encoded.
     let body: Buffer = req.file.buffer;
-    let contentType = req.file.mimetype;
-    let extension = req.file.mimetype.split('/')[1] || 'bin';
-    if (req.file.mimetype.startsWith('image/')) {
+    let contentType = sniffed;
+    let extension = sniffed.split('/')[1] || 'bin';
+    if (sniffed.startsWith('image/')) {
       try {
         const normalized = await normalizeImage(req.file.buffer);
         body = normalized.buffer;

@@ -7,6 +7,7 @@ import { errorResponse } from '@utils/errorResponse';
 import { formatVerification } from '@utils/formatters';
 import { supabase, KYC_DOCUMENT_BUCKET } from '@config/supabase';
 import { normalizeImage, UnsupportedImageError } from '@utils/normalizeImage';
+import { sniffMimeType } from '@utils/sniffMimeType';
 import { verificationQueue, VERIFICATION_JOB_OPTIONS } from '@queues/verificationQueue';
 import { checkResubmissionCooldown } from '@utils/kycResubmissionCooldown';
 import type { JwtPayload } from '@/types/index';
@@ -52,6 +53,12 @@ export const uploadVerificationDocuments = async (req: AuthRequest, res: Respons
       return res.status(400).json(errorResponse(400, 'At least one document file is required'));
     }
 
+    // The declared Content-Type is the client's claim; store what the bytes are.
+    const fileTypes = files.map((file) => sniffMimeType(file.buffer));
+    if (fileTypes.some((type) => !type || !ALLOWED_MIME_TYPES.has(type))) {
+      return res.status(415).json(errorResponse(415, 'Upload a JPG, PNG or WEBP photo, or a PDF.'));
+    }
+
     const user = await prisma.user.findUnique({ where: { id: req.user.userId } });
 
     if (!user) {
@@ -63,14 +70,14 @@ export const uploadVerificationDocuments = async (req: AuthRequest, res: Respons
     }
 
     const uploadedDocs = await Promise.all(
-      files.map(async (file) => {
+      files.map(async (file, i) => {
         // Normalise images (auto-orient + downscale + JPEG); leave PDFs alone.
         // An UnsupportedImageError bubbles to the handler's catch → 415.
         let body: Buffer = file.buffer;
-        let contentType = file.mimetype;
-        let extension = (file.originalname.split('.').pop() || 'bin').toLowerCase();
+        let contentType = fileTypes[i]!;
+        let extension = 'pdf';
         let size = file.size;
-        if (file.mimetype.startsWith('image/')) {
+        if (contentType.startsWith('image/')) {
           const normalized = await normalizeImage(file.buffer);
           body = normalized.buffer;
           contentType = normalized.mimeType;

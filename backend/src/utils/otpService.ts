@@ -1,9 +1,16 @@
 import crypto from 'crypto';
+import { keyedHash, keyedHashCandidates } from '@utils/fieldEncryption';
 import prisma from '@config/database';
 import { TokenType } from '@prisma/client';
 import { isOtpAttemptLocked, recordFailedOtpAttempt, clearOtpAttempts } from '@utils/otpAttemptLimiter';
 
 const OTP_EXPIRY_MINUTES = 10;
+
+// Codes are stored as a keyed hash (DATA_ENCRYPTION_KEY), so a database copy
+// can't be used, or brute-forced, to sign in or confirm an account action.
+// The user and type are part of it: AuthToken.token is unique across all
+// users, and two people can be sent the same six digits.
+const otpMaterial = (userId: string, type: TokenType, otp: string): string => `${userId}:${type}:${otp}`;
 
 export const generateOtp = (): string => {
   // CSPRNG — Math.random() output is predictable enough to guess codes.
@@ -29,7 +36,7 @@ export const storeOtp = async (
   await prisma.authToken.create({
     data: {
       userId,
-      token: otp,
+      token: keyedHash('otp', otpMaterial(userId, type, otp)),
       type,
       expiresAt,
     },
@@ -52,7 +59,15 @@ export const verifyOtp = async (
   const record = await prisma.authToken.findFirst({
     where: {
       userId,
-      token: otp,
+      // ponytail: plaintext match only for codes issued before hashing
+      // shipped (they expire within OTP_EXPIRY_MINUTES); drop it next
+      // release. Six digits only, so a stored hash can't be replayed as a code.
+      token: {
+        in: [
+          ...keyedHashCandidates('otp', otpMaterial(userId, type, otp)),
+          ...(/^\d{6}$/.test(otp) ? [otp] : []),
+        ],
+      },
       type,
       expiresAt: {
         gt: new Date(),

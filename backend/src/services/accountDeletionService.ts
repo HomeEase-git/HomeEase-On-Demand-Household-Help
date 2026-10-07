@@ -132,6 +132,7 @@ export async function eraseAccount(userId: string, sessionTtlSeconds: number): P
       },
     }),
     prisma.userAddress.deleteMany({ where: { userId } }),
+    prisma.savedPaymentMethod.deleteMany({ where: { clientProfile: { userId } } }),
     prisma.clientProfile.updateMany({
       where: { userId },
       data: { address: null, city: null, state: null, zipCode: null },

@@ -40,6 +40,17 @@ export const buildProvisioningUri = (email: string, secret: string): string =>
 export const generateQrCodeDataUrl = (provisioningUri: string): Promise<string> =>
   toDataURL(provisioningUri);
 
+/** The 30-second step a valid code belongs to (otplib's window allows ±1), or null. */
+const totpStep = (secret: string, code: string): number | null => {
+  if (!/^\d{6}$/.test(code)) return null;
+  try {
+    const delta = authenticator.checkDelta(code, secret);
+    return delta === null ? null : Math.floor(Date.now() / 30_000) + delta;
+  } catch {
+    return null;
+  }
+};
+
 export const verifyTotp = (secret: string, code: string): boolean => {
   if (!/^\d{6}$/.test(code)) return false;
 
@@ -98,9 +109,15 @@ export const verifyMfaCode = async (userId: string, code: string): Promise<boole
   if (trimmed) {
     const secretRecord = await prisma.mfaSecret.findUnique({ where: { userId } });
     if (secretRecord && !secretRecord.pending) {
-      const secret = decryptMfaSecret(secretRecord.secretEncrypted);
-      if (verifyTotp(secret, trimmed)) {
-        matched = true;
+      const step = totpStep(decryptMfaSecret(secretRecord.secretEncrypted), trimmed);
+      if (step !== null) {
+        // Each code works once: a code someone watched being typed (or a
+        // second concurrent request) can't be replayed inside its window.
+        const claim = await prisma.mfaSecret.updateMany({
+          where: { userId, OR: [{ lastTotpStep: null }, { lastTotpStep: { lt: step } }] },
+          data: { lastTotpStep: step },
+        });
+        matched = claim.count === 1;
       }
     }
 
@@ -109,11 +126,12 @@ export const verifyMfaCode = async (userId: string, code: string): Promise<boole
       const unusedCodes = await prisma.mfaBackupCode.findMany({ where: { userId, used: false } });
       for (const backupCode of unusedCodes) {
         if (await comparePassword(normalizedBackupCode, backupCode.codeHash)) {
-          await prisma.mfaBackupCode.update({
-            where: { id: backupCode.id },
+          // Conditional, so two concurrent requests can't both spend one code.
+          const claim = await prisma.mfaBackupCode.updateMany({
+            where: { id: backupCode.id, used: false },
             data: { used: true, usedAt: new Date() },
           });
-          matched = true;
+          matched = claim.count === 1;
           break;
         }
       }

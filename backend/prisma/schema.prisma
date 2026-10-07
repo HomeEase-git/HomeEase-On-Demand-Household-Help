@@ -436,6 +436,7 @@ model MfaSecret {
 
   secretEncrypted String
   pending         Boolean @default(true)
+  lastTotpStep    Int? // 30s step of the last accepted code; a code is never accepted twice
 
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
@@ -1273,9 +1274,9 @@ model Booking {
   // Parties — workerId is nullable to support open/unassigned marketplace
   // requests (web's behavior) that later get claimed or matched to a worker.
   clientId String
-  client   User    @relation("client", fields: [clientId], references: [id], onDelete: Cascade)
+  client   User    @relation("client", fields: [clientId], references: [id], onDelete: Restrict)
   workerId String?
-  worker   User?   @relation("worker", fields: [workerId], references: [id], onDelete: Cascade)
+  worker   User?   @relation("worker", fields: [workerId], references: [id], onDelete: Restrict)
 
   // Auto-matching — set when the system assigned workerId rather than the
   // client picking a specific worker; declinedWorkerIds is the running
@@ -1860,7 +1861,7 @@ model Dispute {
 model Payment {
   id        String  @id @default(cuid())
   bookingId String  @unique
-  booking   Booking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  booking   Booking @relation(fields: [bookingId], references: [id], onDelete: Restrict)
 
   // Amounts
   subtotal Float
@@ -1982,7 +1983,7 @@ model Payment {
 model Payout {
   id        String  @id @default(cuid())
   paymentId String  @unique
-  payment   Payment @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+  payment   Payment @relation(fields: [paymentId], references: [id], onDelete: Restrict)
   bookingId String // denormalized for cheap admin filtering, soft reference like Dispute.raisedById
   workerId  String // soft reference — User.id of the worker being paid
 
@@ -2038,7 +2039,7 @@ enum DebtLedgerEntryType {
 model DebtLedgerEntry {
   id              String        @id @default(cuid())
   workerProfileId String
-  workerProfile   WorkerProfile @relation(fields: [workerProfileId], references: [id], onDelete: Cascade)
+  workerProfile   WorkerProfile @relation(fields: [workerProfileId], references: [id], onDelete: Restrict)
 
   type DebtLedgerEntryType
 
@@ -2476,7 +2477,7 @@ enum RefundRequestSource {
 model RefundRequest {
   id        String  @id @default(cuid())
   paymentId String
-  payment   Payment @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+  payment   Payment @relation(fields: [paymentId], references: [id], onDelete: Restrict)
   bookingId String // soft reference, for listing
   disputeId String? // set when it came from a dispute; its refundStatus follows this request
 

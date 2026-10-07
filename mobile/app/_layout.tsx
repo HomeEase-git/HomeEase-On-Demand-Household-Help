@@ -25,7 +25,6 @@ import {
   setupNotificationReceivedHandler,
   setupNotificationInteractionHandler,
 } from "../utils/notificationHandlers";
-import { initializeOfflineSupport } from "../hooks/useOfflineSupport";
 import { setupGlobalErrorHandler } from "../utils/errorHandling";
 import { colors } from "../constants";
 
@@ -207,9 +206,6 @@ function RootLayout() {
             console.error("[App] Failed to refresh worker KYC status:", error);
           }
         }
-
-        // Initialize offline support
-        initializeOfflineSupport();
 
         // Initialize notifications
         await initializeNotificationService();

@@ -69,6 +69,25 @@ function hashTinWithKey(normalizedTin: string, key: Buffer): string {
 }
 
 /** "••••1234" — the last four digits/characters only. */
+/**
+ * Keyed hash for short secrets stored for lookup (one-time codes): without
+ * DATA_ENCRYPTION_KEY a database copy can't brute-force them. Candidates
+ * cover a key rotation in progress.
+ */
+function deriveLookupHash(purpose: string, value: string, key: Buffer): string {
+  // Use a memory-hard KDF so verification material is expensive to brute-force
+  // if an attacker obtains both DB contents and application secrets.
+  return crypto.scryptSync(`${purpose}:${value}`, key, 32, { N: 16384, r: 8, p: 1 }).toString('hex');
+}
+
+export function keyedHash(purpose: string, value: string): string {
+  return deriveLookupHash(purpose, value, getKey());
+}
+
+export function keyedHashCandidates(purpose: string, value: string): string[] {
+  return getKeyring().map((key) => deriveLookupHash(purpose, value, key));
+}
+
 export function maskLastFour(value: string): string {
   const compact = value.replace(/[\s-]/g, '');
   return `••••${compact.slice(-4)}`;

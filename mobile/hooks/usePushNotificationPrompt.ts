@@ -1,12 +1,18 @@
-import { useEffect, useRef } from 'react';
+import { useEffect } from 'react';
 import { InteractionManager } from 'react-native';
 import { notificationService } from '../services/notificationService';
+import { useAuthStore } from '../store/authStore';
 
-let hasPromptedThisSession = false;
+// Per sign-in, not per app session: logout unregisters the device, so the
+// next sign-in (same account or another) must register its push token again.
+let promptedForUserId: string | null = null;
+useAuthStore.subscribe((state) => {
+  if (!state.user) promptedForUserId = null;
+});
 
 /**
  * Prompts for notification permission (no-ops if already decided) once per
- * app session, and obtains + registers the push token if granted.
+ * sign-in, and obtains + registers the push token if granted.
  *
  * This used to fire from useAuth.ts's login/signup/verifyEmailOtp right
  * after authenticating, deferred with InteractionManager.runAfterInteractions
@@ -24,12 +30,11 @@ let hasPromptedThisSession = false;
  * unmount has been flushed — rather than a guessed wall-clock delay.
  */
 export function usePushNotificationPrompt() {
-  const requested = useRef(false);
+  const userId = useAuthStore((s) => s.user?.id ?? null);
 
   useEffect(() => {
-    if (hasPromptedThisSession || requested.current) return;
-    requested.current = true;
-    hasPromptedThisSession = true;
+    if (!userId || promptedForUserId === userId) return;
+    promptedForUserId = userId;
 
     InteractionManager.runAfterInteractions(() => {
       // The OS permission dialog takes the window's focus away and back,
@@ -49,5 +54,5 @@ export function usePushNotificationPrompt() {
         });
       });
     });
-  }, []);
+  }, [userId]);
 }
