@@ -66,8 +66,15 @@ export default function QuoteReviewScreen() {
   const [showDisputeForm, setShowDisputeForm] = useState(false);
   const [showRefuseForm, setShowRefuseForm] = useState(false);
   const [refuseReason, setRefuseReason] = useState("");
-  // Receipts and materials-in-use photos the worker attached (not kept in the store).
-  const [proof, setProof] = useState<{ receiptUrls: string[]; proofOfUseUrls: string[]; revision: number }>({
+  // Items and their receipt / in-use photos (not kept in the store). Legacy
+  // quotes have no items, only the two aggregate photo lists.
+  const [proof, setProof] = useState<{
+    items: { name: string; price: number; receiptUrls: string[]; proofOfUseUrls: string[] }[];
+    receiptUrls: string[];
+    proofOfUseUrls: string[];
+    revision: number;
+  }>({
+    items: [],
     receiptUrls: [],
     proofOfUseUrls: [],
     revision: 0,
@@ -88,6 +95,7 @@ export default function QuoteReviewScreen() {
         const detail = await getBookingDetail(bookingId);
         if (cancelled) return;
         setProof({
+          items: detail?.quote?.items ?? [],
           receiptUrls: detail?.quote?.receiptUrls ?? [],
           proofOfUseUrls: detail?.quote?.proofOfUseUrls ?? [],
           revision: detail?.quote?.revision ?? 0,
@@ -107,6 +115,17 @@ export default function QuoteReviewScreen() {
       cancelled = true;
     };
   }, [bookingId]);
+
+  const proofGroups =
+    proof.items.length > 0
+      ? proof.items.flatMap((i) => [
+          { title: `${i.name} — receipt`, urls: i.receiptUrls },
+          { title: `${i.name} — in use`, urls: i.proofOfUseUrls },
+        ])
+      : [
+          { title: "Receipts", urls: proof.receiptUrls },
+          { title: "Materials in use", urls: proof.proofOfUseUrls },
+        ];
 
   if (checkingBooking) {
     return (
@@ -319,16 +338,19 @@ export default function QuoteReviewScreen() {
             </Text>
           </View>
 
-          {quote.materialsCost > 0 && (
-            <View className="flex-row justify-between py-2 border-b border-divider">
-              <Text className="text-text-secondary text-sm">
-                Materials
-              </Text>
-              <Text className="text-text-primary font-semibold">
-                ₱{quote.materialsCost.toFixed(2)}
-              </Text>
-            </View>
-          )}
+          {proof.items.length > 0
+            ? proof.items.map((item, index) => (
+                <View key={`${index}-${item.name}`} className="flex-row justify-between py-2 border-b border-divider">
+                  <Text className="text-text-secondary text-sm flex-1 pr-2">{item.name}</Text>
+                  <Text className="text-text-primary font-semibold">₱{item.price.toFixed(2)}</Text>
+                </View>
+              ))
+            : quote.materialsCost > 0 && (
+                <View className="flex-row justify-between py-2 border-b border-divider">
+                  <Text className="text-text-secondary text-sm">Materials</Text>
+                  <Text className="text-text-primary font-semibold">₱{quote.materialsCost.toFixed(2)}</Text>
+                </View>
+              )}
 
           <View className="flex-row justify-between py-3">
             <Text className="text-text-primary font-bold">Total</Text>
@@ -351,18 +373,15 @@ export default function QuoteReviewScreen() {
         </View>
 
         {/* Proof of purchase and use — check the materials price against the receipt */}
-        {(proof.receiptUrls.length > 0 || proof.proofOfUseUrls.length > 0) && (
+        {proofGroups.some((g) => g.urls.length > 0) && (
           <View className="bg-card rounded-2xl p-4 mb-4">
             <Text className="text-text-primary font-bold text-base mb-1">Proof</Text>
             <Text className="text-text-muted text-xs mb-3">
-              Check that the materials price matches the receipt. If it doesn&apos;t, refuse the quote.
+              Check that each price matches its receipt. If it doesn&apos;t, refuse the quote.
             </Text>
-            {[
-              { title: "Receipts", urls: proof.receiptUrls },
-              { title: "Materials in use", urls: proof.proofOfUseUrls },
-            ].map((group) =>
+            {proofGroups.map((group, index) =>
               group.urls.length > 0 ? (
-                <View key={group.title} className="mb-3">
+                <View key={`${index}-${group.title}`} className="mb-3">
                   <Text className="text-text-secondary text-xs font-semibold mb-1.5">{group.title}</Text>
                   <View className="flex-row flex-wrap gap-2">
                     {group.urls.map((url) => (
