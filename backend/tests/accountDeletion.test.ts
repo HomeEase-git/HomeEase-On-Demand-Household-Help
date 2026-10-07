@@ -92,7 +92,7 @@ describe('DELETE /api/users/me', () => {
     expect(relogin.status).not.toBe(200);
   });
 
-  it('removes a client's saved payment methods', async () => {
+  it("removes a client's saved payment methods", async () => {
     const { user: client, plainPassword } = await createTestUser('delete-saved-pm', { role: 'CLIENT' });
     createdUserIds.push(client.id);
     const profile = await prisma.clientProfile.findUniqueOrThrow({ where: { userId: client.id } });
