@@ -560,20 +560,18 @@ export const validateLiveLocation = (
   return next();
 };
 
-const isUrlList = (value: unknown, max: number) =>
-  Array.isArray(value) && value.length <= max && value.every((url) => typeof url === 'string' && url.length <= 2048);
-
 export const validateSubmitQuote = (
   req: Request,
   res: Response,
   next: NextFunction
 ) => {
-  const { materialsCost, laborCost, notes, receiptUrls, proofOfUseUrls } = req.body;
+  const { items, laborCost, notes } = req.body;
 
   // laborCost is only read for a custom-quote job (see
   // bookingController.submitQuote); every other job's labor is its booked price.
-  if (typeof materialsCost !== 'number' || materialsCost < 0) {
-    return res.status(400).json(errorResponse(400, 'materialsCost must be a non-negative number'));
+  // Per-item shape and proof rules live in utils/quoteItems.
+  if (!Array.isArray(items)) {
+    return res.status(400).json(errorResponse(400, 'items must be an array'));
   }
 
   if (laborCost !== undefined && laborCost !== null && (typeof laborCost !== 'number' || laborCost < 0)) {
@@ -582,14 +580,6 @@ export const validateSubmitQuote = (
 
   if (notes !== undefined && typeof notes !== 'string') {
     return res.status(400).json(errorResponse(400, 'notes must be a string'));
-  }
-
-  if (receiptUrls !== undefined && !isUrlList(receiptUrls, 10)) {
-    return res.status(400).json(errorResponse(400, 'receiptUrls must be an array of up to 10 URL strings'));
-  }
-
-  if (proofOfUseUrls !== undefined && !isUrlList(proofOfUseUrls, 10)) {
-    return res.status(400).json(errorResponse(400, 'proofOfUseUrls must be an array of up to 10 URL strings'));
   }
 
   return next();
@@ -659,36 +649,6 @@ export const validateDisputeQuote = (
       !evidenceUrls.every((url) => typeof url === 'string'))
   ) {
     return res.status(400).json(errorResponse(400, 'evidenceUrls must be an array of up to 5 URL strings'));
-  }
-
-  return next();
-};
-
-export const validateAddAddon = (
-  req: Request,
-  res: Response,
-  next: NextFunction
-) => {
-  // Field names match the BookingAddOn schema (name/price) and what
-  // bookingController.addAddon actually reads — this previously validated
-  // title/description/cost, which the controller never read, so every
-  // request that passed validation crashed on the Prisma insert (name/price
-  // are required, non-nullable columns).
-  const { name, price } = req.body;
-
-  if (!name || typeof name !== 'string') {
-    return res.status(400).json(errorResponse(400, 'name is required and must be a string'));
-  }
-
-  // typeof price === 'number' && price > 0 alone lets NaN through (NaN <= 0
-  // is false) and has no upper bound at all — Number.isFinite catches both
-  // NaN and Infinity, and ADDON_MAX_PRICE is a fat-finger/malice backstop
-  // (there's no task-relative bound to check a mid-job addon against). The
-  // real protection is the client-approval gate in bookingController.addAddon
-  // — an unapproved addon never counts toward the bill no matter its price.
-  const ADDON_MAX_PRICE = 500_000;
-  if (typeof price !== 'number' || !Number.isFinite(price) || price <= 0 || price > ADDON_MAX_PRICE) {
-    return res.status(400).json(errorResponse(400, `price must be a positive number up to ₱${ADDON_MAX_PRICE.toLocaleString()}`));
   }
 
   return next();

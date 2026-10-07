@@ -8,6 +8,7 @@ import { formatDisplayId, formatPeso } from '@utils/formatters';
 import { buildPaginationMeta, getPaginationParams } from '@utils/pagination';
 import { createCompletionInvoice, settlePlatformFundedPayment } from '@services/paymentLifecycleService';
 import { requestRefund } from '@services/refundRequestService';
+import { updateBookingIfStatus, isBookingStatusConflict, BookingStatusConflictError } from '@services/bookingStatusWrite';
 import type { JwtPayload } from '@/types/index';
 
 interface AuthRequest extends Request {
@@ -482,30 +483,24 @@ export const resolveDispute = async (req: AuthRequest, res: Response) => {
         if (booking.laborCost == null || booking.materialsCost == null) {
           throw new Error('NO_QUOTE');
         }
-        await tx.booking.update({
-          where: { id: booking.id },
-          data: {
-            status: 'QUOTE_APPROVED',
-            quoteStatus: 'APPROVED',
-            approvedAt: new Date(),
-            finalPrice: booking.laborCost + booking.materialsCost,
-            disputeResolvedById: adminId,
-            disputeResolvedAt: new Date(),
-          },
+        await updateBookingIfStatus(tx, booking.id, booking.status, {
+          status: 'QUOTE_APPROVED',
+          quoteStatus: 'APPROVED',
+          approvedAt: new Date(),
+          finalPrice: booking.laborCost + booking.materialsCost,
+          disputeResolvedById: adminId,
+          disputeResolvedAt: new Date(),
         });
       } else if (action === 'REQUEST_NEW_QUOTE') {
-        await tx.booking.update({
-          where: { id: booking.id },
-          data: {
-            status: 'IN_PROGRESS',
-            quoteStatus: 'PENDING',
-            laborCost: null,
-            materialsCost: null,
-            quoteNotes: null,
-            quotedAt: null,
-            disputeResolvedById: adminId,
-            disputeResolvedAt: new Date(),
-          },
+        await updateBookingIfStatus(tx, booking.id, booking.status, {
+          status: 'IN_PROGRESS',
+          quoteStatus: 'PENDING',
+          laborCost: null,
+          materialsCost: null,
+          quoteNotes: null,
+          quotedAt: null,
+          disputeResolvedById: adminId,
+          disputeResolvedAt: new Date(),
         });
       } else {
         // A dispute raised pre-completion (QUOTE_SUBMITTED -> DISPUTED) still
@@ -525,13 +520,12 @@ export const resolveDispute = async (req: AuthRequest, res: Response) => {
           });
         }
 
-        await tx.booking.update({
-          where: { id: booking.id },
-          data: {
-            ...(cancelKeepsStatus ? {} : { status: 'CANCELLED' }),
-            disputeResolvedById: adminId,
-            disputeResolvedAt: new Date(),
-          },
+        // Status-guarded first so a payment webhook or another admin acting
+        // since the read above makes this whole resolution roll back.
+        await updateBookingIfStatus(tx, booking.id, booking.status, {
+          ...(cancelKeepsStatus ? {} : { status: 'CANCELLED' as const }),
+          disputeResolvedById: adminId,
+          disputeResolvedAt: new Date(),
         });
         if (!cancelKeepsStatus) {
           await tx.cancellation.create({
@@ -545,8 +539,9 @@ export const resolveDispute = async (req: AuthRequest, res: Response) => {
         }
       }
 
-      await tx.dispute.update({
-        where: { id },
+      // Only one admin can resolve a given dispute.
+      const claimed = await tx.dispute.updateMany({
+        where: { id, status: { in: ['OPEN', 'UNDER_REVIEW'] } },
         data: {
           status: resolvedStatus,
           resolution: resolution?.trim() || null,
@@ -554,6 +549,7 @@ export const resolveDispute = async (req: AuthRequest, res: Response) => {
           resolvedAt: new Date(),
         },
       });
+      if (claimed.count === 0) throw new BookingStatusConflictError(booking.id, [booking.status]);
     });
 
     // Refund/void outcome, tracked separately from the dispute's own
@@ -652,6 +648,9 @@ export const resolveDispute = async (req: AuthRequest, res: Response) => {
   } catch (error: any) {
     if (error.message === 'NO_QUOTE') {
       return res.status(400).json(errorResponse(400, 'No quote exists on this booking to approve'));
+    }
+    if (isBookingStatusConflict(error)) {
+      return res.status(409).json(errorResponse(409, 'This dispute or its booking was just updated. Refresh and try again.'));
     }
     console.error('Resolve dispute error:', error);
     return res.status(500).json(errorResponse(500, 'Internal server error'));

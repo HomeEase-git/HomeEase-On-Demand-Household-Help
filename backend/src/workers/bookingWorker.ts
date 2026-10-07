@@ -8,6 +8,7 @@ import { requestRefund } from '@services/refundRequestService';
 import { BOOKING_QUEUE_NAME, JOB_NAMES, type ExpirePendingBookingJobData } from '@queues/bookingQueue';
 import { bookingStartInstant, phTodayStart } from '@services/workerAvailabilityService';
 import { chargePenaltyTx } from '@services/debtLedgerService';
+import { updateBookingIfStatus, isBookingStatusConflict } from '@services/bookingStatusWrite';
 import { getAppSettings } from '@services/appSettingsService';
 import {
   settleCashBooking,
@@ -15,7 +16,7 @@ import {
   reconcilePendingPayment,
   reconcilePendingRefund,
 } from '@services/paymentLifecycleService';
-import { retrievePayout } from '@services/xenditDisbursementService';
+import { retrievePayout, findLivePayoutByReference } from '@services/xenditDisbursementService';
 import { applyXenditPayoutStatus } from '@services/payoutStatusService';
 import { schedulePayout } from '@queues/payoutQueue';
 import { formatDisplayId } from '@utils/formatters';
@@ -71,21 +72,24 @@ export async function expirePendingBooking(data: ExpirePendingBookingJobData): P
   const booking = await prisma.booking.findUnique({ where: { id: data.bookingId } });
   if (!booking || booking.status !== 'PENDING') return; // already resolved by accept/decline/cancel
 
-  await prisma.$transaction(async (tx) => {
-    await tx.booking.update({
-      where: { id: booking.id },
-      data: { status: 'CANCELLED' },
-    });
+  try {
+    await prisma.$transaction(async (tx) => {
+      // Still-PENDING guard: the worker may have accepted since the read above.
+      await updateBookingIfStatus(tx, booking.id, 'PENDING', { status: 'CANCELLED' });
 
-    await tx.cancellation.create({
-      data: {
-        bookingId: booking.id,
-        cancelledBy: 'WORKER',
-        cancelledById: booking.workerId ?? 'system',
-        reason: 'WORKER_NO_RESPONSE',
-      },
+      await tx.cancellation.create({
+        data: {
+          bookingId: booking.id,
+          cancelledBy: 'WORKER',
+          cancelledById: booking.workerId ?? 'system',
+          reason: 'WORKER_NO_RESPONSE',
+        },
+      });
     });
-  });
+  } catch (error) {
+    if (isBookingStatusConflict(error)) return; // accept/decline/cancel won the race
+    throw error;
+  }
 
   await requestRefund({ bookingId: booking.id, reason: 'WORKER_NO_RESPONSE', source: 'BOOKING_CANCELLED' }).catch((error) => {
     console.error(`Failed to void/refund-request payment for expired booking ${booking.id}:`, error);
@@ -345,6 +349,37 @@ export async function remindAndAutoSettleCompletions(): Promise<void> {
     }
   }
 
+  // 5b. PROCESSING payouts with no Xendit id: the process died (deploy, OOM)
+  //     between claiming the payout and saving createPayout's answer. Ask
+  //     Xendit whether it got the request: adopt that payout if so, otherwise
+  //     put the row back to PENDING so step 6 re-enqueues it.
+  const orphanedPayouts = await prisma.payout.findMany({
+    where: { status: 'PROCESSING', processingAt: { lte: reconcileCutoff }, xenditDisbursementId: null },
+    select: { id: true, workerId: true, bookingId: true, amount: true, channel: true, xenditDisbursementId: true },
+  });
+  for (const payout of orphanedPayouts) {
+    try {
+      const remote = await findLivePayoutByReference(payout.id);
+      if (remote) {
+        await applyXenditPayoutStatus(payout, remote.status, { xenditDisbursementId: remote.id });
+      } else {
+        await prisma.payout.updateMany({
+          where: { id: payout.id, status: 'PROCESSING', xenditDisbursementId: null },
+          data: { status: 'PENDING', failureReason: 'Recovered after an interrupted send' },
+        });
+      }
+      await writeAuditLog({
+        action: 'PAYOUT_RECOVERED',
+        category: 'STATUS_CHANGE',
+        level: 'WARN',
+        message: `Payout ${payout.id} was stuck PROCESSING without a Xendit id — ${remote ? `adopted Xendit payout ${remote.id}` : 'reset to PENDING for resend'}`,
+        metadata: { payoutId: payout.id, bookingId: payout.bookingId, xenditDisbursementId: remote?.id ?? null },
+      });
+    } catch (error) {
+      console.error(`Failed to recover orphaned payout ${payout.id}:`, error);
+    }
+  }
+
   // 6. Re-enqueue PENDING payouts whose BullMQ enqueue never landed (jobId
   //    dedup makes a re-add harmless).
   const unqueuedPayouts = await prisma.payout.findMany({
@@ -430,15 +465,25 @@ export async function remindAndAutoApproveQuotes(): Promise<void> {
     const addonsCost = booking.addOns.reduce((sum, addon) => sum + addon.price, 0);
 
     try {
-      await prisma.booking.update({
-        where: { id: booking.id },
-        data: {
-          status: 'QUOTE_APPROVED',
-          quoteStatus: 'APPROVED',
-          approvedAt: new Date(),
-          finalPrice: booking.laborCost! + booking.materialsCost! + addonsCost,
-        },
-      });
+      // Guarded on the same quote revision the client would have seen, so a
+      // client approve/refuse or a worker revision since the read wins.
+      try {
+        await updateBookingIfStatus(
+          prisma,
+          booking.id,
+          'QUOTE_SUBMITTED',
+          {
+            status: 'QUOTE_APPROVED',
+            quoteStatus: 'APPROVED',
+            approvedAt: new Date(),
+            finalPrice: booking.laborCost! + booking.materialsCost! + addonsCost,
+          },
+          { quoteRevision: booking.quoteRevision, quotedAt: booking.quotedAt }
+        );
+      } catch (error) {
+        if (isBookingStatusConflict(error)) continue;
+        throw error;
+      }
 
       if (booking.workerId) {
         await notifyUser({

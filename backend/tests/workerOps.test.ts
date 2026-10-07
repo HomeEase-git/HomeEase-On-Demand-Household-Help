@@ -193,25 +193,25 @@ describe('worker operations overhaul', () => {
   });
 
   describe('quotes need proof and can be refused', () => {
-    it('requires receipt and proof-of-use photos for materials, and goes back to the worker when refused', async () => {
+    it('requires receipt and proof-of-use photos for each item, and goes back to the worker when refused', async () => {
       const booking = await seedBooking({ status: 'IN_PROGRESS', workerArrivedAt: new Date(), workerStartedAt: new Date() });
 
       const noProof = await request(app)
         .post(`/api/bookings/${booking.id}/quote`)
         .set('Authorization', `Bearer ${workerToken}`)
-        .send({ materialsCost: 350 });
+        .send({ items: [{ name: 'Pipe', price: 350, receiptUrls: [], proofOfUseUrls: [] }] });
       expect(noProof.status).toBe(400);
 
       const someoneElses = await request(app)
         .post(`/api/bookings/${booking.id}/quote`)
         .set('Authorization', `Bearer ${workerToken}`)
-        .send({ materialsCost: 350, receiptUrls: [photoUrl(clientId, 'r')], proofOfUseUrls: [photoUrl(workerId, 'u')] });
+        .send({ items: [{ name: 'Pipe', price: 350, receiptUrls: [photoUrl(clientId, 'r')], proofOfUseUrls: [photoUrl(workerId, 'u')] }] });
       expect(someoneElses.status).toBe(400);
 
       const submit = await request(app)
         .post(`/api/bookings/${booking.id}/quote`)
         .set('Authorization', `Bearer ${workerToken}`)
-        .send({ materialsCost: 350, receiptUrls: [photoUrl(workerId, 'r')], proofOfUseUrls: [photoUrl(workerId, 'u')] });
+        .send({ items: [{ name: 'Pipe', price: 350, receiptUrls: [photoUrl(workerId, 'r')], proofOfUseUrls: [photoUrl(workerId, 'u')] }] });
       expect(submit.status).toBe(201);
 
       const reject = await request(app)
@@ -225,7 +225,7 @@ describe('worker operations overhaul', () => {
       const revised = await request(app)
         .post(`/api/bookings/${booking.id}/quote`)
         .set('Authorization', `Bearer ${workerToken}`)
-        .send({ materialsCost: 300, receiptUrls: [photoUrl(workerId, 'r')], proofOfUseUrls: [photoUrl(workerId, 'u')] });
+        .send({ items: [{ name: 'Pipe', price: 300, receiptUrls: [photoUrl(workerId, 'r')], proofOfUseUrls: [photoUrl(workerId, 'u')] }] });
       expect(revised.status).toBe(201);
       expect(revised.body.data.revision).toBe(1);
 

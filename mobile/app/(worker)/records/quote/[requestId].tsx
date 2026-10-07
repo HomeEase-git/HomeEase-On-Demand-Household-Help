@@ -1,5 +1,5 @@
-import React, { useEffect, useState } from "react";
-import { View, Text } from "react-native";
+import React, { useEffect, useRef, useState } from "react";
+import { View, Text, Pressable } from "react-native";
 import { KeyboardAwareScrollView } from "../../../../components/ui/KeyboardAwareScrollView";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
@@ -14,20 +14,33 @@ import { colors } from "../../../../constants";
 import { useAlertModal } from "../../../../contexts/AlertModalContext";
 import ProofPhotosField from "../../../../components/booking/ProofPhotosField";
 
+type QuoteItemDraft = {
+  key: string;
+  name: string;
+  price: string;
+  receiptUrls: string[];
+  proofOfUseUrls: string[];
+};
+
+type QuoteItemServer = { id: string; name: string; price: number; receiptUrls: string[]; proofOfUseUrls: string[] };
+
 type BookingSummary = {
   id: string;
   service: string;
   scheduledDate: string;
   estimatedPrice: number;
-  addOns?: { id: string; name: string; price: number }[];
+  // Legacy on-site add-ons; only the approved ones count toward the total.
+  addOns?: { id: string; name: string; price: number; clientApprovedAt: string | null }[];
   // A custom-quote job has no price until the worker quotes it.
   serviceTaskPricingModel?: string | null;
   quote?: {
     status?: string | null;
     rejectionReason?: string | null;
-    materialsCost?: number;
     laborCost?: number;
+    materialsCost?: number;
     notes?: string | null;
+    items?: QuoteItemServer[];
+    // Aggregate photos; the only record of proof on a quote saved before items.
     receiptUrls?: string[];
     proofOfUseUrls?: string[];
   } | null;
@@ -39,6 +52,19 @@ export default function SubmitQuoteScreen() {
   const [booking, setBooking] = useState<BookingSummary | null>(null);
   const [fetching, setFetching] = useState(true);
   const alertModal = useAlertModal();
+  const [items, setItems] = useState<QuoteItemDraft[]>([]);
+  const [notes, setNotes] = useState("");
+  const [laborInput, setLaborInput] = useState("");
+  const [loading, setLoading] = useState(false);
+  const nextKey = useRef(0);
+  const newItem = (over: Partial<QuoteItemDraft> = {}): QuoteItemDraft => ({
+    key: `item-${nextKey.current++}`,
+    name: "",
+    price: "",
+    receiptUrls: [],
+    proofOfUseUrls: [],
+    ...over,
+  });
 
   useEffect(() => {
     let active = true;
@@ -49,12 +75,28 @@ export default function SubmitQuoteScreen() {
         const detail = await api.getBookingDetail(requestId);
         if (!active) return;
         setBooking(detail);
-        // Revising a refused quote starts from what was sent before.
-        if (detail?.quote?.status === "REJECTED") {
-          setMaterialsCost(detail.quote.materialsCost ? String(detail.quote.materialsCost) : "");
+        // Revising a refused quote, or editing one reopened from the job
+        // screen, starts from what was sent before.
+        if (detail?.quote) {
           setNotes(detail.quote.notes ?? "");
-          setReceiptUrls(detail.quote.receiptUrls ?? []);
-          setProofOfUseUrls(detail.quote.proofOfUseUrls ?? []);
+          const saved: QuoteItemServer[] = detail.quote.items ?? [];
+          // A quote saved before items existed has one lump of materials and
+          // aggregate photos. Carry it over as a single item, or resubmitting
+          // would silently drop it from the bill.
+          setItems(
+            saved.length === 0 && (detail.quote.materialsCost ?? 0) > 0
+              ? [
+                  newItem({
+                    name: "Materials",
+                    price: String(detail.quote.materialsCost),
+                    receiptUrls: detail.quote.receiptUrls ?? [],
+                    proofOfUseUrls: detail.quote.proofOfUseUrls ?? [],
+                  }),
+                ]
+              : saved.map((i) =>
+                  newItem({ name: i.name, price: String(i.price), receiptUrls: i.receiptUrls, proofOfUseUrls: i.proofOfUseUrls }),
+                ),
+          );
           if (detail.serviceTaskPricingModel === "CUSTOM_QUOTE" && detail.quote.laborCost) {
             setLaborInput(String(detail.quote.laborCost));
           }
@@ -71,23 +113,23 @@ export default function SubmitQuoteScreen() {
     };
   }, [requestId]);
 
-  const [materialsCost, setMaterialsCost] = useState("");
-  const [notes, setNotes] = useState("");
-  const [laborInput, setLaborInput] = useState("");
-  const [receiptUrls, setReceiptUrls] = useState<string[]>([]);
-  const [proofOfUseUrls, setProofOfUseUrls] = useState<string[]>([]);
-  const [loading, setLoading] = useState(false);
-
   const isCustomQuote = booking?.serviceTaskPricingModel === "CUSTOM_QUOTE";
   const labor = isCustomQuote ? parseFloat(laborInput) || 0 : (booking?.estimatedPrice ?? 0);
-  const addOns = booking?.addOns ?? [];
-  const addOnsTotal = addOns.reduce((sum, a) => sum + a.price, 0);
-  const materials = parseFloat(materialsCost) || 0;
+  const priceOf = (item: QuoteItemDraft) => parseFloat(item.price) || 0;
+  const materials = items.reduce((sum, i) => sum + priceOf(i), 0);
+  const addOnsTotal = (booking?.addOns ?? []).reduce((sum, a) => (a.clientApprovedAt ? sum + a.price : sum), 0);
   const total = labor + addOnsTotal + materials;
-  // Materials must come with a receipt and a photo of them in use.
-  const needsProof = materials > 0;
-  const proofMissing = needsProof && (receiptUrls.length === 0 || proofOfUseUrls.length === 0);
-  const canSubmit = !proofMissing && (!isCustomQuote || labor > 0);
+  // Every item must come with a receipt and a photo of it in use.
+  const itemIncomplete = (i: QuoteItemDraft) =>
+    !i.name.trim() ||
+    priceOf(i) <= 0 ||
+    Math.abs(priceOf(i) * 100 - Math.round(priceOf(i) * 100)) > 1e-6 ||
+    i.receiptUrls.length === 0 ||
+    i.proofOfUseUrls.length === 0;
+  const hasIncompleteItem = items.some(itemIncomplete);
+  const canSubmit = !hasIncompleteItem && (!isCustomQuote || labor > 0);
+  const updateItem = (key: string, patch: Partial<QuoteItemDraft>) =>
+    setItems((prev) => prev.map((i) => (i.key === key ? { ...i, ...patch } : i)));
 
   if (fetching) {
     return (
@@ -123,11 +165,14 @@ export default function SubmitQuoteScreen() {
     setLoading(true);
     try {
       await api.submitQuote(booking.id, {
-        materialsCost: materials,
+        items: items.map(({ name, price, receiptUrls, proofOfUseUrls }) => ({
+          name: name.trim(),
+          price: parseFloat(price),
+          receiptUrls,
+          proofOfUseUrls,
+        })),
         ...(isCustomQuote ? { laborCost: labor } : {}),
         notes: notes.trim(),
-        receiptUrls: needsProof ? receiptUrls : [],
-        proofOfUseUrls: needsProof ? proofOfUseUrls : [],
       });
 
       alertModal.success(
@@ -176,9 +221,9 @@ export default function SubmitQuoteScreen() {
           <Text className="text-text-secondary text-sm ml-2 flex-1">
             {isCustomQuote
               ? "This job is priced by your quote. Enter your price for the work and any materials."
-              : "Your service is covered by the booking price. Add any materials below."}{" "}
-            Materials need a photo of the receipt and a photo of them used on the job. The client can refuse a quote
-            that doesn&apos;t match the receipt.
+              : "Your service is covered by the booking price. Add any materials or extra items below."}{" "}
+            Each item needs a photo of its receipt and a photo of it used on the job. You can edit or remove items
+            until you submit. The client can refuse a quote that doesn&apos;t match the receipts.
           </Text>
         </View>
 
@@ -204,50 +249,53 @@ export default function SubmitQuoteScreen() {
           </View>
         )}
 
-        {addOns.length > 0 && (
-          <View className="bg-card rounded-xl px-3 py-3 mb-4">
-            <Text className="text-text-secondary text-sm mb-2">
-              Items already added on-site
-            </Text>
-            {addOns.map((item) => (
-              <View key={item.id} className="flex-row justify-between items-center mb-1">
-                <Text className="text-text-primary text-sm">{item.name}</Text>
-                <Text className="text-text-primary font-semibold text-sm">
-                  ₱{item.price.toFixed(2)}
-                </Text>
-              </View>
-            ))}
-          </View>
-        )}
-
-        <InputField
-          label="Materials (₱) — optional"
-          value={materialsCost}
-          onChangeText={setMaterialsCost}
-          placeholder="Exactly what the receipt says"
-          keyboardType="numeric"
-        />
-
-        {needsProof && (
-          <>
+        <Text className="text-text-primary font-semibold mb-2">Items — optional</Text>
+        {items.map((item, index) => (
+          <View key={item.key} className="bg-card rounded-2xl p-4 mb-4">
+            <View className="flex-row items-center justify-between mb-2">
+              <Text className="text-text-secondary text-xs">Item {index + 1}</Text>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={`Remove item ${index + 1}`}
+                onPress={() => setItems((prev) => prev.filter((i) => i.key !== item.key))}
+              >
+                <Text className="text-error text-xs font-semibold">Remove</Text>
+              </Pressable>
+            </View>
+            <InputField
+              label="Item name"
+              value={item.name}
+              onChangeText={(name) => updateItem(item.key, { name })}
+              placeholder="e.g. Replacement faucet"
+            />
+            <InputField
+              label="Price (₱)"
+              value={item.price}
+              onChangeText={(price) => updateItem(item.key, { price })}
+              placeholder="Exactly what the receipt says"
+              keyboardType="numeric"
+            />
             <ProofPhotosField
               bookingId={booking.id}
               label="Receipt photos"
-              hint="The receipt(s) for these materials"
-              urls={receiptUrls}
-              onChange={setReceiptUrls}
+              hint="The receipt(s) for this item"
+              urls={item.receiptUrls}
+              onChange={(receiptUrls) => updateItem(item.key, { receiptUrls })}
               required
             />
             <ProofPhotosField
               bookingId={booking.id}
-              label="Materials in use"
-              hint="The materials installed or used on this job"
-              urls={proofOfUseUrls}
-              onChange={setProofOfUseUrls}
+              label="Item in use"
+              hint="This item installed or used on the job"
+              urls={item.proofOfUseUrls}
+              onChange={(proofOfUseUrls) => updateItem(item.key, { proofOfUseUrls })}
               required
             />
-          </>
-        )}
+          </View>
+        ))}
+        <View className="mb-4">
+          <OutlinedButton label="+ Add Item" onPress={() => setItems((prev) => [...prev, newItem()])} />
+        </View>
 
         <InputField
           label="Notes for client — optional"
@@ -272,15 +320,13 @@ export default function SubmitQuoteScreen() {
             </View>
             {addOnsTotal > 0 && (
               <View className="flex-row justify-between mt-1">
-                <Text className="text-text-muted text-xs">Items added on-site</Text>
-                <Text className="text-text-secondary text-xs">
-                  ₱{addOnsTotal.toFixed(2)}
-                </Text>
+                <Text className="text-text-muted text-xs">Add-ons already approved</Text>
+                <Text className="text-text-secondary text-xs">₱{addOnsTotal.toFixed(2)}</Text>
               </View>
             )}
             {materials > 0 && (
               <View className="flex-row justify-between mt-1">
-                <Text className="text-text-muted text-xs">Materials</Text>
+                <Text className="text-text-muted text-xs">Items</Text>
                 <Text className="text-text-secondary text-xs">
                   ₱{materials.toFixed(2)}
                 </Text>
@@ -299,8 +345,10 @@ export default function SubmitQuoteScreen() {
           </View>
         </View>
 
-        {proofMissing && (
-          <Text className="text-error text-xs mb-3">Add a receipt photo and a photo of the materials in use.</Text>
+        {hasIncompleteItem && (
+          <Text className="text-error text-xs mb-3">
+            Every item needs a name, a price (up to 2 decimals), a receipt photo and a photo of it in use.
+          </Text>
         )}
         <View className="gap-3">
           <PrimaryButton

@@ -14,6 +14,8 @@ describe('booking state machine — valid transitions', () => {
     ['QUOTE_SUBMITTED', 'CANCELLED'],
     ['QUOTE_APPROVED', 'PENDING_COMPLETION'],
     ['QUOTE_APPROVED', 'CANCELLED'],
+    ['QUOTE_APPROVED', 'IN_PROGRESS'],
+    ['QUOTE_SUBMITTED', 'IN_PROGRESS'],
     ['DISPUTED', 'QUOTE_APPROVED'],
     ['DISPUTED', 'IN_PROGRESS'],
     ['DISPUTED', 'CANCELLED'],

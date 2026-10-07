@@ -96,6 +96,11 @@ export default function JobDetailScreen() {
   const [completionPhotoUrl, setCompletionPhotoUrl] = useState<string | null>(null);
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
   const [elapsedMs, setElapsedMs] = useState(0);
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 30000);
+    return () => clearInterval(id);
+  }, []);
   const [focused, setFocused] = useState(false);
   const photoSheetRef = useRef<BottomSheetHandle | null>(null);
   const alertModal = useAlertModal();
@@ -226,8 +231,9 @@ export default function JobDetailScreen() {
   // so it's visible before the worker even accepts the job.
   const tip = job.payment?.tip ?? job.tip ?? 0;
   const hasArrived = !!(job.workerArrivedAt || job.timeline?.workerArrivedAt);
-  // Matches the backend's ADDON_ALLOWED_STATUSES (bookingController.addAddon).
-  const canAddAddon = isInProgress || isQuoteSubmitted || isQuoteApproved;
+  // Items live in the quote; a submitted or approved quote is reopened to edit
+  // them (bookingController.reopenQuote) and the client approves the new total.
+  const canEditQuote = isQuoteSubmitted || isQuoteApproved;
   const canCancelJob = isAccepted || isInProgress || isQuoteSubmitted || isQuoteApproved || isDisputed;
   const hasOpenRescheduleRequest = !!job.rescheduleRequestedAt && !job.rescheduleRequestRespondedAt;
   // The client asked (or an older request from before either side could ask).
@@ -239,7 +245,7 @@ export default function JobDetailScreen() {
   const quoteRefused = isInProgress && job.quote?.status === "REJECTED";
   const startTime = bookingStartTime(job);
   const startsAt = startTime ? startInstant(job.scheduledDate.slice(0, 10), startTime) : null;
-  const startPassed = !!startsAt && Date.now() >= startsAt.getTime();
+  const startPassed = !!startsAt && now >= startsAt.getTime();
   const upcomingVisits = (job.visits ?? []).filter((v) => v.status === "SCHEDULED");
   const requestedWhen = job.requestedScheduledDate
     ? `${new Date(job.requestedScheduledDate).toLocaleDateString("en-PH", { month: "short", day: "numeric", timeZone: "UTC" })}${
@@ -416,6 +422,25 @@ export default function JobDetailScreen() {
             alertModal.error("Error", "Failed to complete this job. Please try again.");
           } finally {
             setSubmitting(false);
+          }
+        },
+      },
+    );
+  };
+
+  const handleEditQuote = () => {
+    alertModal.confirm(
+      "Edit this quote?",
+      "The client will need to approve the new total after you resubmit.",
+      {
+        confirmText: "Edit Quote",
+        onConfirm: async () => {
+          try {
+            await api.reopenQuote(job.id);
+            router.push(`/(worker)/records/quote/${job.id}`);
+          } catch (error) {
+            console.error("Reopen quote error:", error);
+            alertModal.error("Error", "Failed to reopen the quote. Please try again.");
           }
         },
       },
@@ -629,12 +654,6 @@ export default function JobDetailScreen() {
 
         {/* Actions */}
         <View className="gap-3 mt-4">
-          {canAddAddon && (
-            <OutlinedButton
-              label="+ Add Item"
-              onPress={() => router.push(`/(worker)/records/addon/${job.id}`)}
-            />
-          )}
           {isAccepted && !hasArrived && (
             <PrimaryButton
               label="I've Arrived"
@@ -679,6 +698,7 @@ export default function JobDetailScreen() {
               onPress={() => router.push(`/(worker)/records/quote/${job.id}`)}
             />
           )}
+          {canEditQuote && <OutlinedButton label="Edit Quote" fullWidth onPress={handleEditQuote} />}
           {canScheduleVisit && (
             <OutlinedButton
               label="Schedule Follow-up Visit"

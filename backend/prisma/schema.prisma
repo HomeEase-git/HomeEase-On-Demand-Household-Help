@@ -1530,6 +1530,7 @@ model Booking {
   payment             Payment?
   review              Review?
   addOns              BookingAddOn[]
+  quoteItems          BookingQuoteItem[]
   declinedWorkers     DeclinedWorker[]
   arrivalVerification ArrivalVerification?
   cancellation        Cancellation?
@@ -1622,6 +1623,23 @@ model BookingGroup {
   @@unique([clientId, idempotencyKey], name: "client_group_idempotency_key_unique")
   @@index([clientId])
   @@index([workerId])
+}
+
+// A priced line on the worker's quote. Each carries its own proof of purchase
+// and proof of use; Booking.materialsCost is the sum of a booking's items
+// (see bookingController.submitQuote), so pricing code reads that, not this.
+model BookingQuoteItem {
+  id        String  @id @default(cuid())
+  bookingId String
+  booking   Booking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+
+  name           String
+  price          Float
+  receiptUrls    String[] @default([])
+  proofOfUseUrls String[] @default([])
+  createdAt      DateTime @default(now())
+
+  @@index([bookingId])
 }
 
 model BookingAddOn {
@@ -1978,6 +1996,7 @@ model Payout {
   xenditStatus         String? // raw status from Xendit (ACCEPTED/COMPLETED/FAILED/...), for debugging
   failureReason        String?
   attempts             Int          @default(0)
+  retryGeneration      Int          @default(0) // bumped per admin retry — part of the Xendit Idempotency-key (see payoutWorker)
 
   processingAt DateTime?
   paidAt       DateTime?

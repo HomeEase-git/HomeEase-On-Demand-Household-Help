@@ -141,24 +141,35 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
   return proto === Object.prototype || proto === null;
 }
 
-function collectPrivateUrls(value: unknown, out: Set<string>, depth: number): void {
+// Only strings under a URL-named key (fileUrl, imageUrl, photoUrls, url, …)
+// are signed. Free text — chat `content`, notes, descriptions — never is:
+// otherwise pasting another user's KYC object URL into a message would hand
+// back a fresh signed link to it. Write paths for the URL fields themselves
+// go through toOwnedStoredUrl / toOwnedBookingPhotoUrls.
+const URL_KEY_RE = /url/i;
+
+function isUrlKey(key: string | undefined): boolean {
+  return key !== undefined && URL_KEY_RE.test(key);
+}
+
+function collectPrivateUrls(value: unknown, out: Set<string>, depth: number, key?: string): void {
   if (depth > 20) return;
   if (typeof value === 'string') {
-    if (isPrivateStorageUrl(value)) out.add(value);
+    if (isUrlKey(key) && isPrivateStorageUrl(value)) out.add(value);
   } else if (Array.isArray(value)) {
-    for (const item of value) collectPrivateUrls(item, out, depth + 1);
+    for (const item of value) collectPrivateUrls(item, out, depth + 1, key);
   } else if (isPlainObject(value)) {
-    for (const item of Object.values(value)) collectPrivateUrls(item, out, depth + 1);
+    for (const [childKey, item] of Object.entries(value)) collectPrivateUrls(item, out, depth + 1, childKey);
   }
 }
 
-function replaceUrls(value: unknown, signed: Map<string, string>, depth: number): unknown {
+function replaceUrls(value: unknown, signed: Map<string, string>, depth: number, key?: string): unknown {
   if (depth > 20) return value;
-  if (typeof value === 'string') return signed.get(value) ?? value;
-  if (Array.isArray(value)) return value.map((item) => replaceUrls(item, signed, depth + 1));
+  if (typeof value === 'string') return isUrlKey(key) ? (signed.get(value) ?? value) : value;
+  if (Array.isArray(value)) return value.map((item) => replaceUrls(item, signed, depth + 1, key));
   if (isPlainObject(value)) {
     const copy: Record<string, unknown> = {};
-    for (const [key, item] of Object.entries(value)) copy[key] = replaceUrls(item, signed, depth + 1);
+    for (const [childKey, item] of Object.entries(value)) copy[childKey] = replaceUrls(item, signed, depth + 1, childKey);
     return copy;
   }
   // Dates, Prisma Decimals, Buffers etc. — serialize as they always have.

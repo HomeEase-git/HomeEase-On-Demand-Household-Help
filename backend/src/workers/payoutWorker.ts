@@ -6,8 +6,17 @@ import { notifyUser } from '@utils/notify';
 import { sendSmsToUser } from '@utils/smsService';
 import { writeAuditLog } from '@utils/auditLog';
 import { PAYOUT_QUEUE_NAME, PAYOUT_JOB_NAMES, type SendPayoutJobData } from '@queues/payoutQueue';
-import { createPayout, xenditChannelCodeFor } from '@services/xenditDisbursementService';
+import { createPayout, findLivePayoutByReference, xenditChannelCodeFor } from '@services/xenditDisbursementService';
 import { applyXenditPayoutStatus } from '@services/payoutStatusService';
+
+/**
+ * Same key for every BullMQ retry of one send; a new one after each admin
+ * retry, since replaying the key of a payout Xendit already failed would just
+ * return that failure. Generation 0 keeps the bare id (what older rows used).
+ */
+export function payoutIdempotencyKey(payout: { id: string; retryGeneration: number }): string {
+  return payout.retryGeneration > 0 ? `${payout.id}-retry-${payout.retryGeneration}` : payout.id;
+}
 
 export async function processSendPayout(job: Job, data: SendPayoutJobData): Promise<void> {
   const payout = await prisma.payout.findUnique({ where: { id: data.payoutId } });
@@ -40,8 +49,15 @@ export async function processSendPayout(job: Job, data: SendPayoutJobData): Prom
   if (claim.count === 0) return;
 
   try {
-    const xenditPayout = await createPayout({
+    // An earlier attempt may have reached Xendit without its id being saved
+    // (timeout, crash between the call and the write below). Adopt that
+    // payout instead of sending the money a second time.
+    const earlierAttempt = payout.attempts > 0 || payout.retryGeneration > 0;
+    const existing = earlierAttempt ? await findLivePayoutByReference(payout.id) : null;
+
+    const xenditPayout = existing ?? await createPayout({
       referenceId: payout.id,
+      idempotencyKey: payoutIdempotencyKey(payout),
       amountPesos: payout.amount,
       channelCode,
       accountNumber: decryptField(payout.accountNumber),

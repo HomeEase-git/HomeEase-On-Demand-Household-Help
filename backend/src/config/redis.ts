@@ -34,14 +34,16 @@ export const redisHost = baseConnection.host;
 export const redisPort = baseConnection.port;
 
 // For Queue producers (the `.add()` side — bookingQueue/payoutQueue so far).
-// Bounded retries so a Redis outage surfaces as a fast, visible error on
-// the request that tried to schedule a job (e.g. booking creation) instead
-// of hanging indefinitely — ioredis's own defaults retry forever with no
-// cap.
+// maxRetriesPerRequest bounds each command, so a Redis outage surfaces as a
+// fast, visible error on the request that tried to schedule a job (e.g.
+// booking creation) instead of hanging. The connection itself must keep
+// reconnecting: a retryStrategy that returns null makes ioredis give up for
+// good, and since /health doesn't check Redis nothing would restart the
+// process — every later enqueue would fail until the next deploy.
 export const queueConnection = {
   ...baseConnection,
   maxRetriesPerRequest: 3,
-  retryStrategy: (times: number) => (times > 3 ? null : Math.min(times * 200, 2000)),
+  retryStrategy: (times: number) => Math.min(times * 200, 5000),
 };
 
 // For Worker consumers (bookingWorker/payoutWorker so far). BullMQ requires

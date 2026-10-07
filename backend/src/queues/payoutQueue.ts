@@ -28,13 +28,24 @@ payoutQueue.on('error', (err) => {
  * than piling up duplicate jobs for the same payout.
  */
 export async function schedulePayout(payoutId: string): Promise<void> {
+  // BullMQ silently ignores add() for a jobId that still exists — and failed
+  // jobs are kept (removeOnFail: false). Clear a finished job first so an
+  // admin retry or the re-enqueue sweep actually runs again. A waiting,
+  // delayed or active job is left alone: the add below is then a no-op.
+  const jobId = `${PAYOUT_JOB_NAMES.SEND_PAYOUT}-${payoutId}`;
+  const previous = await payoutQueue.getJob(jobId);
+  if (previous) {
+    const state = await previous.getState();
+    if (state === 'failed' || state === 'completed') await previous.remove();
+  }
+
   await payoutQueue.add(
     PAYOUT_JOB_NAMES.SEND_PAYOUT,
     { payoutId } satisfies SendPayoutJobData,
     {
       // BullMQ rejects ':' in custom jobIds (reserved for its own Redis key
       // namespacing) — '-' instead.
-      jobId: `${PAYOUT_JOB_NAMES.SEND_PAYOUT}-${payoutId}`,
+      jobId,
       attempts: 5,
       backoff: { type: 'exponential', delay: 60_000 },
       removeOnComplete: true,

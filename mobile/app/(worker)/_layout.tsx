@@ -14,13 +14,26 @@ import { feedback } from "../../utils/feedback";
 export default function WorkerLayout() {
   const unreadCount = useNotificationStore((s) => s.unreadCount);
   const user = useAuthStore((s) => s.user);
+  const isInitializing = useAuthStore((s) => s.isInitializing);
+  const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
   const triggerRefresh = useTabRefreshStore((s) => s.triggerRefresh);
+
+  // Role gate — runs on every entry into the (worker) group, including deep
+  // links: a signed-out user goes to landing, and a client gets their own tabs
+  // instead of worker screens whose API calls would all be refused.
+  if (isInitializing) return null;
+  if (!isAuthenticated || !user) {
+    return <Redirect href="/landing" />;
+  }
+  if (user.role !== "worker") {
+    return <Redirect href="/(client)/home" />;
+  }
 
   // Gate the worker tabs behind admin approval — this runs on every entry
   // into the (worker) group (deep link, back navigation, resumed session),
   // not just the sign-in redirect, so there's no route into the app for an
   // unverified worker.
-  if (user?.role === "worker" && user.kycStatus !== "APPROVED") {
+  if (user.kycStatus !== "APPROVED") {
     if (user.kycStatus === "REJECTED") {
       return <Redirect href="/(kyc)/rejected" />;
     }

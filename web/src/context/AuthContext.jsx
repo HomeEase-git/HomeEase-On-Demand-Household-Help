@@ -95,6 +95,17 @@ export function AuthProvider({ children }) {
     return () => window.removeEventListener('homeease:session-expired', onSessionExpired);
   }, []);
 
+  // The server refuses admin routes until MFA is set up (ADMIN_MFA_REQUIRED)
+  // — e.g. a session that skipped the setup screen. HashRouter, so a hash
+  // change is a client-side navigation.
+  useEffect(() => {
+    const onMfaRequired = () => {
+      if (window.location.hash !== '#/mfa-setup') window.location.hash = '#/mfa-setup';
+    };
+    window.addEventListener('homeease:mfa-required', onMfaRequired);
+    return () => window.removeEventListener('homeease:mfa-required', onMfaRequired);
+  }, []);
+
   const login = async (email, password) => {
     const data = await loginRequest(email, password);
 

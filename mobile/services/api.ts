@@ -89,7 +89,7 @@ export function refreshSession(): Promise<string | null> {
 
 const createApiClient = (): ApiClient => {
 
-  console.log('[API] baseURL configured as:', `${config.API_URL}/api`);
+  if (__DEV__) console.log('[API] baseURL configured as:', `${config.API_URL}/api`);
 
   // eslint-disable-next-line import/no-named-as-default-member
   const client = axios.create({
@@ -116,23 +116,33 @@ const createApiClient = (): ApiClient => {
     return response.data?.data ?? response.data;
   });
 
-  // Global response error handler: handle 401/403 by clearing local auth
+  // Global response error handler: a 401 clears local auth. A 403 does not —
+  // the backend only sends 401 for a dead session (bad/expired/revoked token)
+  // and uses 403 for ordinary business rules (WORKER_SETUP_INCOMPLETE, not
+  // your booking, wrong role), which the calling screen shows as an error.
   client.interceptors.response.use(
     undefined,
     async (error) => {
 
-      console.log('[API ←] ERROR message:', error.message);
-      console.log('[API ←] ERROR code:', error.code);
-      console.log('[API ←] ERROR url:', (error.config?.baseURL || '') + (error.config?.url || ''));
-      console.log('[API ←] has response:', !!error.response);
-      console.log('[API ←] has request:', !!error.request);
-      console.log('[API ←] ERROR response data:', JSON.stringify(error.response?.data));
+      if (__DEV__) {
+        console.log('[API ←] ERROR message:', error.message);
+        console.log('[API ←] ERROR code:', error.code);
+        console.log('[API ←] ERROR url:', (error.config?.baseURL || '') + (error.config?.url || ''));
+        console.log('[API ←] has response:', !!error.response);
+        console.log('[API ←] has request:', !!error.request);
+        console.log('[API ←] ERROR response data:', JSON.stringify(error.response?.data));
+      }
 
       // Expired access token: refresh once and replay the request. Only for
       // requests that carried a session — a 401 from a wrong password on
       // the login screen has nothing to refresh.
       let keepSession = false;
-      const original = isAxiosError(error) ? (error.config as (typeof error.config & { _retried?: boolean }) | undefined) : undefined;
+      const original = isAxiosError(error)
+        ? (error.config as (typeof error.config & { _retried?: boolean; _refreshed?: boolean }) | undefined)
+        : undefined;
+      // A 401 on the replay (fresh token) is a business rule, e.g. a wrong
+      // password on change-password or delete-account, not a dead session.
+      if (original?._refreshed) keepSession = true;
       if (
         isAxiosError(error) &&
         error.response?.status === 401 &&
@@ -145,6 +155,7 @@ const createApiClient = (): ApiClient => {
           const newToken = await refreshSession();
           if (newToken) {
             original.headers.Authorization = `Bearer ${newToken}`;
+            original._refreshed = true;
             return client.request(original);
           }
         } catch {
@@ -157,7 +168,7 @@ const createApiClient = (): ApiClient => {
       try {
         if (isAxiosError(error)) {
           const status = error.response?.status;
-          if ((status === 401 || status === 403) && !keepSession) {
+          if (status === 401 && !keepSession) {
             // Dynamic import to avoid a circular dependency at module-load
             // time (authStore -> notificationService -> this file). Safe
             // here since it's only ever touched inside this async handler,
@@ -169,7 +180,7 @@ const createApiClient = (): ApiClient => {
             try {
               await authStorage.clearAuth();
             } catch (e) {
-              console.error('Error clearing auth on 401/403:', e);
+              console.error('Error clearing auth on 401:', e);
             }
 
             // authStorage.clearAuth() only wipes AsyncStorage — without also
@@ -608,9 +619,11 @@ export async function cancelBooking(
   }
 }
 
-export async function approveQuote(bookingId: string) {
+// `revision` is the quote revision the client reviewed; the server refuses the
+// approval if the worker has since reopened and resubmitted.
+export async function approveQuote(bookingId: string, revision: number) {
   try {
-    const response = await api.patch(`/bookings/${bookingId}/quote/approve`);
+    const response = await api.patch(`/bookings/${bookingId}/quote/approve`, { revision });
     return response;
   } catch (error) {
     console.error('Approve quote error:', error);
@@ -1648,16 +1661,22 @@ export async function updateWorkerLiveLocation(bookingId: string, lat: number, l
   return response;
 }
 
-// Materials need receipt photos and photos of them in use (uploadJobPhoto).
+export type QuoteItemPayload = {
+  name: string;
+  price: number;
+  receiptUrls: string[];
+  proofOfUseUrls: string[];
+};
+
+// Each item needs its own receipt photos and photos of it in use (uploadJobPhoto).
+// The items replace any earlier set, so editing or deleting one is a resubmit.
 // laborCost only for a custom-quote job.
 export async function submitQuote(
   bookingId: string,
   data: {
-    materialsCost: number;
+    items: QuoteItemPayload[];
     laborCost?: number;
     notes?: string;
-    receiptUrls?: string[];
-    proofOfUseUrls?: string[];
   },
 ) {
   try {
@@ -1669,22 +1688,19 @@ export async function submitQuote(
   }
 }
 
-// Mid-job scope-creep item — worker only, and only while the job is active
-// (IN_PROGRESS/QUOTE_SUBMITTED/QUOTE_APPROVED, enforced server-side). Starts
-// pending — the client must approve it (see respondToBookingAddOn) before it
-// counts toward the price breakdown (see getBookingDetail); it auto-approves
-// after 6h of no response, or auto-rejects if the job completes first.
-export async function addBookingAddOn(bookingId: string, data: { name: string; price: number }) {
+// Takes a submitted/approved quote back to IN_PROGRESS so its items can be
+// edited; the client approves the new total after the worker resubmits.
+export async function reopenQuote(bookingId: string) {
   try {
-    const response = await api.post(`/bookings/${bookingId}/addons`, data);
+    const response = await api.post(`/bookings/${bookingId}/quote/reopen`);
     return response;
   } catch (error) {
-    console.error('Add booking addon error:', error);
+    console.error('Reopen quote error:', error);
     throw error;
   }
 }
 
-// Client approves or rejects a pending addon (see addBookingAddOn).
+// Client approves or rejects a legacy pending addon.
 export async function respondToBookingAddOn(bookingId: string, addonId: string, approve: boolean) {
   try {
     const response = await api.patch(`/bookings/${bookingId}/addons/${addonId}/respond`, { approve });

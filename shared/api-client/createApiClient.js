@@ -77,6 +77,13 @@ export function createApiClient({ getBaseUrl, storage }) {
       }
     }
 
+    // An admin without MFA has a session but is refused admin routes until
+    // setup is done — let the app route them to the setup screen.
+    if (response.status === 403 && typeof window !== 'undefined') {
+      const body = await response.clone().json().catch(() => ({}));
+      if (body.code === 'ADMIN_MFA_REQUIRED') window.dispatchEvent(new Event('homeease:mfa-required'));
+    }
+
     return response;
   }
 

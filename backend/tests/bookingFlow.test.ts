@@ -180,34 +180,32 @@ describe('Booking flow — arrival geofencing, quote submission, dispute resolut
   });
 
   describe('quote submission', () => {
+    const photo = (name: string) =>
+      `${process.env.SUPABASE_URL}/storage/v1/object/public/${BOOKING_PHOTO_BUCKET}/${workerId}/${name}.jpg`;
+    const quoteItem = (over: Record<string, unknown> = {}) => ({
+      name: 'Cleaning supplies',
+      price: 300,
+      receiptUrls: [photo('receipt')],
+      proofOfUseUrls: [photo('in-use')],
+      ...over,
+    });
+    const submit = (bookingId: string, body: Record<string, unknown>, token = workerToken) =>
+      request(app).post(`/api/bookings/${bookingId}/quote`).set('Authorization', `Bearer ${token}`).send(body);
+
     it('rejects a quote submitted before the job has started', async () => {
       const booking = await createTestBooking({ clientId, workerId, status: 'ACCEPTED' });
       createdBookingIds.push(booking.id);
 
-      const res = await request(app)
-        .post(`/api/bookings/${booking.id}/quote`)
-        .set('Authorization', `Bearer ${workerToken}`)
-        .send({ materialsCost: 200, notes: 'Extra materials needed' });
+      const res = await submit(booking.id, { items: [quoteItem()], notes: 'Extra materials needed' });
 
       expect(res.status).toBe(409);
     });
 
-    it('pins laborCost to the settled estimate and moves the booking to QUOTE_SUBMITTED', async () => {
+    it('pins laborCost to the settled estimate, sums the items and moves the booking to QUOTE_SUBMITTED', async () => {
       const booking = await createTestBooking({ clientId, workerId, status: 'IN_PROGRESS', estimatedPrice: 1500 });
       createdBookingIds.push(booking.id);
 
-      // Materials need a receipt photo and a photo of them in use.
-      const photo = (name: string) =>
-        `${process.env.SUPABASE_URL}/storage/v1/object/public/${BOOKING_PHOTO_BUCKET}/${workerId}/${name}.jpg`;
-      const res = await request(app)
-        .post(`/api/bookings/${booking.id}/quote`)
-        .set('Authorization', `Bearer ${workerToken}`)
-        .send({
-          materialsCost: 300,
-          notes: 'Extra cleaning supplies',
-          receiptUrls: [photo('receipt')],
-          proofOfUseUrls: [photo('in-use')],
-        });
+      const res = await submit(booking.id, { items: [quoteItem()], notes: 'Extra cleaning supplies' });
 
       expect(res.status).toBe(201);
       expect(res.body.data.laborCost).toBe(1500);
@@ -217,18 +215,195 @@ describe('Booking flow — arrival geofencing, quote submission, dispute resolut
       const dbBooking = await prisma.booking.findUnique({ where: { id: booking.id } });
       expect(dbBooking?.status).toBe('QUOTE_SUBMITTED');
       expect(dbBooking?.quoteStatus).toBe('SUBMITTED');
+      expect(await prisma.bookingQuoteItem.count({ where: { bookingId: booking.id } })).toBe(1);
+    });
+
+    it('accepts a labor-only quote with no items', async () => {
+      const booking = await createTestBooking({ clientId, workerId, status: 'IN_PROGRESS', estimatedPrice: 1500 });
+      createdBookingIds.push(booking.id);
+
+      const res = await submit(booking.id, { items: [] });
+
+      expect(res.status).toBe(201);
+      expect(res.body.data.materialsCost).toBe(0);
+    });
+
+    it('rejects an item that has no photo of it in use', async () => {
+      const booking = await createTestBooking({ clientId, workerId, status: 'IN_PROGRESS' });
+      createdBookingIds.push(booking.id);
+
+      const res = await submit(booking.id, { items: [quoteItem({ proofOfUseUrls: [] })] });
+
+      expect(res.status).toBe(400);
+      expect(res.body.message).toMatch(/in use/i);
+      const dbBooking = await prisma.booking.findUnique({ where: { id: booking.id } });
+      expect(dbBooking?.status).toBe('IN_PROGRESS');
+    });
+
+    it('rejects photos that belong to another worker', async () => {
+      const booking = await createTestBooking({ clientId, workerId, status: 'IN_PROGRESS' });
+      createdBookingIds.push(booking.id);
+      const foreign = `${process.env.SUPABASE_URL}/storage/v1/object/public/${BOOKING_PHOTO_BUCKET}/someone-else/x.jpg`;
+
+      const res = await submit(booking.id, { items: [quoteItem({ receiptUrls: [foreign] })] });
+
+      expect(res.status).toBe(400);
+    });
+
+    it('replaces the previous items when the quote is resubmitted', async () => {
+      const booking = await createTestBooking({ clientId, workerId, status: 'IN_PROGRESS', estimatedPrice: 1000 });
+      createdBookingIds.push(booking.id);
+      await submit(booking.id, { items: [quoteItem({ name: 'Old', price: 100 }), quoteItem({ name: 'Old 2', price: 50 })] });
+      await prisma.booking.update({ where: { id: booking.id }, data: { status: 'IN_PROGRESS', quoteStatus: 'REJECTED' } });
+
+      const res = await submit(booking.id, { items: [quoteItem({ name: 'New', price: 75 })] });
+
+      expect(res.status).toBe(201);
+      expect(res.body.data.materialsCost).toBe(75);
+      const rows = await prisma.bookingQuoteItem.findMany({ where: { bookingId: booking.id } });
+      expect(rows.map((r) => r.name)).toEqual(['New']);
     });
 
     it('rejects a quote submitted by a client', async () => {
       const booking = await createTestBooking({ clientId, workerId, status: 'IN_PROGRESS' });
       createdBookingIds.push(booking.id);
 
-      const res = await request(app)
-        .post(`/api/bookings/${booking.id}/quote`)
-        .set('Authorization', `Bearer ${clientToken}`)
-        .send({ materialsCost: 100 });
+      const res = await submit(booking.id, { items: [] }, clientToken);
 
       expect(res.status).toBe(403);
+    });
+  });
+
+  describe('editing a submitted quote', () => {
+    const photo = (name: string) =>
+      `${process.env.SUPABASE_URL}/storage/v1/object/public/${BOOKING_PHOTO_BUCKET}/${workerId}/${name}.jpg`;
+    const withQuote = async (status: 'QUOTE_SUBMITTED' | 'QUOTE_APPROVED' | 'PENDING_COMPLETION') => {
+      const booking = await createTestBooking({ clientId, workerId, status, estimatedPrice: 1000 });
+      createdBookingIds.push(booking.id);
+      await prisma.booking.update({
+        where: { id: booking.id },
+        data: {
+          laborCost: 1000,
+          materialsCost: 200,
+          quoteStatus: status === 'QUOTE_SUBMITTED' ? 'SUBMITTED' : 'APPROVED',
+          finalPrice: status === 'QUOTE_SUBMITTED' ? null : 1200,
+          approvedAt: status === 'QUOTE_SUBMITTED' ? null : new Date(),
+        },
+      });
+      await prisma.bookingQuoteItem.create({
+        data: { bookingId: booking.id, name: 'Pipe', price: 200, receiptUrls: [photo('r')], proofOfUseUrls: [photo('u')] },
+      });
+      return booking;
+    };
+    const reopen = (id: string, token = workerToken) =>
+      request(app).post(`/api/bookings/${id}/quote/reopen`).set('Authorization', `Bearer ${token}`);
+
+    it('returns the items in the booking detail', async () => {
+      const booking = await withQuote('QUOTE_SUBMITTED');
+
+      const res = await request(app).get(`/api/bookings/${booking.id}`).set('Authorization', `Bearer ${workerToken}`);
+
+      expect(res.status).toBe(200);
+      expect(res.body.data.quote.items).toHaveLength(1);
+      expect(res.body.data.quote.items[0]).toMatchObject({ name: 'Pipe', price: 200 });
+    });
+
+    it('reopens a submitted quote for editing and keeps its items', async () => {
+      const booking = await withQuote('QUOTE_SUBMITTED');
+
+      const res = await reopen(booking.id);
+
+      expect(res.status).toBe(200);
+      const db = await prisma.booking.findUnique({ where: { id: booking.id } });
+      expect(db?.status).toBe('IN_PROGRESS');
+      expect(db?.quoteStatus).toBeNull();
+      expect(await prisma.bookingQuoteItem.count({ where: { bookingId: booking.id } })).toBe(1);
+    });
+
+    it('reopens an approved quote and clears the approval and final price', async () => {
+      const booking = await withQuote('QUOTE_APPROVED');
+
+      const res = await reopen(booking.id);
+
+      expect(res.status).toBe(200);
+      const db = await prisma.booking.findUnique({ where: { id: booking.id } });
+      expect(db?.status).toBe('IN_PROGRESS');
+      expect(db?.finalPrice).toBeNull();
+      expect(db?.approvedAt).toBeNull();
+      expect(db?.quoteRevision).toBe(1);
+    });
+
+    it('refuses to reopen once the job is pending completion', async () => {
+      const booking = await withQuote('PENDING_COMPLETION');
+
+      expect((await reopen(booking.id)).status).toBe(409);
+    });
+
+    it('refuses a worker who is not assigned', async () => {
+      const booking = await withQuote('QUOTE_SUBMITTED');
+      const { user: other, plainPassword } = await createTestUser('booking-flow-reopen-other', { role: 'WORKER' });
+      createdUserIds.push(other.id);
+      const login = await request(app).post('/api/auth/login').send({ email: other.email, password: plainPassword });
+
+      expect((await reopen(booking.id, login.body.data.token)).status).toBe(403);
+    });
+  });
+
+  describe('approving and completing', () => {
+    const photo = (owner: string, name: string) =>
+      `${process.env.SUPABASE_URL}/storage/v1/object/public/${BOOKING_PHOTO_BUCKET}/${owner}/${name}.jpg`;
+    const approve = (id: string, body: Record<string, unknown>) =>
+      request(app).patch(`/api/bookings/${id}/quote/approve`).set('Authorization', `Bearer ${clientToken}`).send(body);
+
+    const submitted = async () => {
+      const booking = await createTestBooking({ clientId, workerId, status: 'QUOTE_SUBMITTED', estimatedPrice: 1000 });
+      createdBookingIds.push(booking.id);
+      return prisma.booking.update({
+        where: { id: booking.id },
+        data: { laborCost: 1000, materialsCost: 0, quoteStatus: 'SUBMITTED', quotedAt: new Date(), quoteRevision: 2 },
+      });
+    };
+
+    it('refuses an approval that names no revision', async () => {
+      const booking = await submitted();
+
+      expect((await approve(booking.id, {})).status).toBe(400);
+    });
+
+    it('refuses an approval of a revision the client did not see', async () => {
+      const booking = await submitted();
+
+      const res = await approve(booking.id, { revision: 1 });
+
+      expect(res.status).toBe(409);
+      const db = await prisma.booking.findUnique({ where: { id: booking.id } });
+      expect(db?.status).toBe('QUOTE_SUBMITTED');
+    });
+
+    it('approves the revision the client viewed', async () => {
+      const booking = await submitted();
+
+      const res = await approve(booking.id, { revision: 2 });
+
+      expect(res.status).toBe(200);
+      const db = await prisma.booking.findUnique({ where: { id: booking.id } });
+      expect(db?.status).toBe('QUOTE_APPROVED');
+      expect(db?.finalPrice).toBe(1000);
+    });
+
+    it("rejects a completion photo that is not the worker's own booking photo", async () => {
+      const booking = await createTestBooking({ clientId, workerId, status: 'QUOTE_APPROVED' });
+      createdBookingIds.push(booking.id);
+      const complete = (url: string) =>
+        request(app)
+          .patch(`/api/bookings/${booking.id}/complete`)
+          .set('Authorization', `Bearer ${workerToken}`)
+          .send({ completionPhotoUrl: url });
+
+      expect((await complete(photo(clientId, 'x'))).status).toBe(400);
+      expect((await complete('https://example.com/x.jpg')).status).toBe(400);
+      const db = await prisma.booking.findUnique({ where: { id: booking.id } });
+      expect(db?.status).toBe('QUOTE_APPROVED');
     });
   });
 

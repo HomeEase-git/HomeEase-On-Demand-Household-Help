@@ -9,6 +9,21 @@ import { PrismaClient, Role } from '@prisma/client';
 import { PrismaPg } from '@prisma/adapter-pg';
 import bcrypt from 'bcryptjs';
 
+// This creates an ADMIN with a password committed to the repo — it must never
+// run against production. Refuse a production NODE_ENV outright, and any
+// non-local database unless the operator opts in explicitly.
+function assertSandboxDatabase(): void {
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error('Refusing to run the e2e sandbox seed with NODE_ENV=production.');
+  }
+  const host = new URL(process.env.DATABASE_URL ?? '').hostname;
+  const isLocal = ['localhost', '127.0.0.1', '::1', 'postgres', 'db'].includes(host);
+  if (!isLocal && process.env.E2E_SEED_ALLOW_REMOTE !== 'true') {
+    throw new Error(`Refusing to seed an e2e admin into non-local database host "${host}". Set E2E_SEED_ALLOW_REMOTE=true for a throwaway remote DB.`);
+  }
+}
+assertSandboxDatabase();
+
 const adapter = new PrismaPg({ connectionString: process.env.DATABASE_URL });
 const prisma = new PrismaClient({ adapter });
 
