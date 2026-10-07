@@ -20,6 +20,10 @@ import { schedulePayout } from '@queues/payoutQueue';
 import { writeAuditLog } from '@utils/auditLog';
 import { recoverDebtTx, accrueDebtTx, reverseDebtTx, lockDuesTx, restoreSettlementTx } from '@services/debtLedgerService';
 import { roundToCentavo } from '@utils/money';
+import { updateBookingIfStatus, isBookingStatusConflict } from '@services/bookingStatusWrite';
+
+// Statuses a booking may be finalized to COMPLETED from (see bookingStateMachine).
+const COMPLETABLE_STATUSES = ['PENDING_COMPLETION', 'AWAITING_PAYMENT', 'DISPUTED'] as const;
 
 /**
  * PAYMENT MODEL: pay-after-completion, no escrow.
@@ -190,9 +194,11 @@ export async function settleCashBooking(bookingId: string) {
       ? await tx.payment.update({ where: { id: existing.id }, data: paymentData })
       : await tx.payment.create({ data: { bookingId, ...paymentData } });
 
-    await tx.booking.update({
-      where: { id: bookingId },
-      data: { status: 'COMPLETED', finalPrice: priced.subtotal, vatAmount: priced.vatAmount, completionDate: new Date() },
+    await updateBookingIfStatus(tx, bookingId, COMPLETABLE_STATUSES, {
+      status: 'COMPLETED',
+      finalPrice: priced.subtotal,
+      vatAmount: priced.vatAmount,
+      completionDate: new Date(),
     });
 
     if (booking.workerId && platformCut > 0) {
@@ -352,17 +358,16 @@ export async function createCompletionInvoice(bookingId: string): Promise<
     data: { xenditInvoiceId: invoice.id },
   });
 
-  await prisma.booking.update({
-    where: { id: bookingId },
-    // awaitingPaymentSince only set on the first entry into this status —
-    // a retried/resumed checkout (existing PENDING invoice reused above, or
-    // a fresh one minted after a failure) shouldn't push the reminder clock
-    // back out, since the client has been waiting since the original one.
-    data: {
-      status: 'AWAITING_PAYMENT',
-      finalPrice: priced.subtotal,
-      awaitingPaymentSince: booking.awaitingPaymentSince ?? new Date(),
-    },
+  // Status-guarded: a fast invoice-paid webhook may already have moved the
+  // booking to COMPLETED between createInvoice and here — never drag it back.
+  // awaitingPaymentSince only set on the first entry into this status —
+  // a retried/resumed checkout (existing PENDING invoice reused above, or
+  // a fresh one minted after a failure) shouldn't push the reminder clock
+  // back out, since the client has been waiting since the original one.
+  await updateBookingIfStatus(prisma, bookingId, ['PENDING_COMPLETION', 'AWAITING_PAYMENT'], {
+    status: 'AWAITING_PAYMENT',
+    finalPrice: priced.subtotal,
+    awaitingPaymentSince: booking.awaitingPaymentSince ?? new Date(),
   });
 
   return { checkoutUrl: invoice.invoiceUrl, invoiceId: invoice.id, paymentId: payment.id, amount: priced.totalAmount };
@@ -561,39 +566,68 @@ export async function finalizePaidBooking(
     return null;
   }
 
-  const updated = await prisma.$transaction(async (tx) => {
-    const p = await tx.payment.update({
-      where: { id: payment.id },
-      data: {
+  let updated;
+  try {
+    updated = await prisma.$transaction(async (tx) => {
+      // Claim the payment: a concurrent webhook/reconcile for the same invoice
+      // that already marked it COMPLETED makes this one a no-op.
+      const claim = await tx.payment.updateMany({
+        where: { id: payment.id, status: { not: 'COMPLETED' } },
+        data: {
+          status: 'COMPLETED',
+          escrowStatus: 'RELEASED',
+          xenditPaymentId: xenditPaymentRef ?? payment.xenditPaymentId ?? null,
+          capturedAmount: paidAmount ?? payment.totalAmount,
+          capturedAt: paidAt ?? new Date(),
+          releasedAt: new Date(),
+        },
+      });
+      if (claim.count === 0) return null;
+      const p = await tx.payment.findUniqueOrThrow({ where: { id: payment.id } });
+
+      await updateBookingIfStatus(tx, payment.bookingId, COMPLETABLE_STATUSES, {
         status: 'COMPLETED',
-        escrowStatus: 'RELEASED',
-        xenditPaymentId: xenditPaymentRef ?? payment.xenditPaymentId ?? null,
-        capturedAmount: paidAmount ?? payment.totalAmount,
-        capturedAt: paidAt ?? new Date(),
-        releasedAt: new Date(),
-      },
+        finalPrice: payment.subtotal,
+        vatAmount: payment.vatAmount,
+        completionDate: new Date(),
+      });
+
+      await postPaymentCaptured(tx, p, payment.booking.workerId);
+
+      // If the payment-overdue sweep already opened a dispute and the client
+      // then paid, close it out.
+      await tx.dispute.updateMany({
+        where: {
+          bookingId: payment.bookingId,
+          status: { in: ['OPEN', 'UNDER_REVIEW'] },
+          reason: { startsWith: 'Payment overdue' },
+        },
+        data: { status: 'RESOLVED', resolution: 'Client completed payment', resolvedAt: new Date() },
+      });
+
+      return p;
     });
+  } catch (error) {
+    if (isBookingStatusConflict(error)) {
+      // Money arrived for a booking that was cancelled (or otherwise moved
+      // on) in the meantime. Don't mark it completed — leave the payment
+      // PENDING and flag it so an admin refunds or reinstates it.
+      await writeAuditLog({
+        action: 'PAYMENT_FOR_INACTIVE_BOOKING',
+        category: 'SYSTEM_ERROR',
+        level: 'ERROR',
+        message: `Xendit reports payment ${payment.id} paid, but booking ${payment.bookingId} is no longer awaiting payment — review it manually.`,
+        metadata: { paymentId: payment.id, bookingId: payment.bookingId },
+      });
+    }
+    throw error;
+  }
 
-    await tx.booking.update({
-      where: { id: payment.bookingId },
-      data: { status: 'COMPLETED', finalPrice: payment.subtotal, vatAmount: payment.vatAmount, completionDate: new Date() },
-    });
-
-    await postPaymentCaptured(tx, p, payment.booking.workerId);
-
-    // If the payment-overdue sweep already opened a dispute and the client
-    // then paid, close it out.
-    await tx.dispute.updateMany({
-      where: {
-        bookingId: payment.bookingId,
-        status: { in: ['OPEN', 'UNDER_REVIEW'] },
-        reason: { startsWith: 'Payment overdue' },
-      },
-      data: { status: 'RESOLVED', resolution: 'Client completed payment', resolvedAt: new Date() },
-    });
-
-    return p;
-  });
+  if (updated === null) {
+    // Lost the race to another finalizer — it settles; this just self-heals.
+    await settleWorkerEarnings(payment.id);
+    return prisma.payment.findUniqueOrThrow({ where: { id: payment.id } });
+  }
 
   await settleWorkerEarnings(payment.id);
 
@@ -637,6 +671,13 @@ export async function settlePlatformFundedPayment(bookingId: string) {
   }
 
   const updated = await prisma.$transaction(async (tx) => {
+    await updateBookingIfStatus(tx, bookingId, ['AWAITING_PAYMENT', 'DISPUTED'], {
+      status: 'COMPLETED',
+      finalPrice: payment.subtotal,
+      vatAmount: payment.vatAmount,
+      completionDate: new Date(),
+    });
+
     const p = await tx.payment.update({
       where: { id: payment.id },
       data: {
@@ -650,11 +691,7 @@ export async function settlePlatformFundedPayment(bookingId: string) {
       },
     });
 
-    const booked = await tx.booking.update({
-      where: { id: bookingId },
-      data: { status: 'COMPLETED', finalPrice: payment.subtotal, vatAmount: payment.vatAmount, completionDate: new Date() },
-      select: { workerId: true },
-    });
+    const booked = await tx.booking.findUniqueOrThrow({ where: { id: bookingId }, select: { workerId: true } });
     if (booked.workerId) await postPlatformFunded(tx, p, booked.workerId);
 
     return p;

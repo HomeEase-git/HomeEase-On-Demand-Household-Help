@@ -28,7 +28,13 @@ import {
   formatTime12h,
 } from '@services/workerAvailabilityService';
 import { chargePenaltyTx } from '@services/debtLedgerService';
-import { toOwnedBookingPhotoUrls } from '@utils/storageUrls';
+import { toOwnedBookingPhotoUrls, toOwnedStoredUrl } from '@utils/storageUrls';
+import { updateBookingIfStatus, isBookingStatusConflict } from '@services/bookingStatusWrite';
+
+// The booking's status changed between our read and our write (another
+// request or a sweep job won the race) — tell the caller to refresh.
+const bookingConflict = (res: Response) =>
+  res.status(409).json(errorResponse(409, 'This booking was just updated. Refresh and try again.'));
 import {
   calculateWorkerPayout,
   computeBookingFinalTotal,
@@ -1228,16 +1234,15 @@ export const acceptBooking = async (req: AuthRequest, res: Response) => {
           }
         }
 
-        // Update booking status
-        const updated = await tx.booking.update({
-          where: { id },
-          data: {
-            status: 'ACCEPTED',
-            acceptedAt: new Date(),
-            commissionRateSnapshot: commissionRate,
-            withholdingTaxRateSnapshot: withholdingTaxRate,
-          },
+        // Update booking status — only if still PENDING (the expiry job or a
+        // client cancel may have won the race since the read above).
+        await updateBookingIfStatus(tx, id, 'PENDING', {
+          status: 'ACCEPTED',
+          acceptedAt: new Date(),
+          commissionRateSnapshot: commissionRate,
+          withholdingTaxRateSnapshot: withholdingTaxRate,
         });
+        const updated = await tx.booking.findUniqueOrThrow({ where: { id } });
 
         // activeJobCount is informational only now — workers aren't capped.
         await tx.workerProfile.update({
@@ -1303,6 +1308,7 @@ export const acceptBooking = async (req: AuthRequest, res: Response) => {
       throw txError;
     }
   } catch (error) {
+    if (isBookingStatusConflict(error)) return bookingConflict(res);
     console.error('Error accepting booking:', error);
     return res.status(500).json(errorResponse(500, 'Failed to accept booking'));
   }
@@ -1369,13 +1375,11 @@ export const declineBooking = async (req: AuthRequest, res: Response) => {
         });
       }
 
-      return tx.booking.update({
-        where: { id },
-        data: {
-          status: 'REJECTED',
-          declinedWorkerIds: updatedDeclinedWorkerIds,
-        },
+      await updateBookingIfStatus(tx, id, 'PENDING', {
+        status: 'REJECTED',
+        declinedWorkerIds: updatedDeclinedWorkerIds,
       });
+      return tx.booking.findUniqueOrThrow({ where: { id } });
     });
 
     // Best-effort — the decline already committed above (see the
@@ -1432,6 +1436,7 @@ export const declineBooking = async (req: AuthRequest, res: Response) => {
       },
     });
   } catch (error) {
+    if (isBookingStatusConflict(error)) return bookingConflict(res);
     console.error('Error declining booking:', error);
     return res.status(500).json(errorResponse(500, 'Failed to decline booking'));
   }
@@ -1694,10 +1699,8 @@ export const startBooking = async (req: AuthRequest, res: Response) => {
       return res.status(409).json(errorResponse(409, 'You must check in as arrived before starting this job'));
     }
 
-    const updated = await prisma.booking.update({
-      where: { id },
-      data: { status: 'IN_PROGRESS', workerStartedAt: new Date() },
-    });
+    await updateBookingIfStatus(prisma, id, booking.status, { status: 'IN_PROGRESS', workerStartedAt: new Date() });
+    const updated = await prisma.booking.findUniqueOrThrow({ where: { id } });
 
     // Notify client
     await notifyUser({
@@ -1719,6 +1722,7 @@ export const startBooking = async (req: AuthRequest, res: Response) => {
       },
     });
   } catch (error) {
+    if (isBookingStatusConflict(error)) return bookingConflict(res);
     console.error('Error starting booking:', error);
     return res.status(500).json(errorResponse(500, 'Failed to start booking'));
   }
@@ -1970,18 +1974,15 @@ export const requestReschedule = async (req: AuthRequest, res: Response) => {
       }
     }
 
-    await prisma.booking.update({
-      where: { id },
-      data: {
-        requestedScheduledDate: requestedDate,
-        requestedScheduledTime: time,
-        requestedTimeSlot: null,
-        rescheduleRequestedBy: isClient ? 'CLIENT' : 'WORKER',
-        rescheduleRequestedAt: new Date(),
-        rescheduleRequestReminderSentAt: null,
-        rescheduleRequestRespondedAt: null,
-        rescheduleRequestAccepted: null,
-      },
+    await updateBookingIfStatus(prisma, id, 'ACCEPTED', {
+      requestedScheduledDate: requestedDate,
+      requestedScheduledTime: time,
+      requestedTimeSlot: null,
+      rescheduleRequestedBy: isClient ? 'CLIENT' : 'WORKER',
+      rescheduleRequestedAt: new Date(),
+      rescheduleRequestReminderSentAt: null,
+      rescheduleRequestRespondedAt: null,
+      rescheduleRequestAccepted: null,
     });
 
     const when = `${requestedDate.toLocaleDateString('en-PH', { month: 'short', day: 'numeric', timeZone: 'UTC' })} at ${formatTime12h(time)}`;
@@ -2010,6 +2011,7 @@ export const requestReschedule = async (req: AuthRequest, res: Response) => {
       data: { id, requestedScheduledDate: requestedDate, requestedScheduledTime: time },
     });
   } catch (error) {
+    if (isBookingStatusConflict(error)) return bookingConflict(res);
     console.error('Error requesting reschedule:', error);
     return res.status(500).json(errorResponse(500, 'Failed to request reschedule'));
   }
@@ -2096,20 +2098,22 @@ export const respondToRescheduleRequest = async (req: AuthRequest, res: Response
 
     const newTime = bookingStartTime({ scheduledTime: booking.requestedScheduledTime, timeSlot: booking.requestedTimeSlot });
 
-    await prisma.booking.update({
-      where: { id },
-      data: accept
-        ? {
-            scheduledDate: booking.requestedScheduledDate,
-            scheduledTime: newTime,
-            timeSlot: null,
-            // The new start time resets the no-show clock.
-            workerNoShowFlaggedAt: null,
-            rescheduleRequestRespondedAt: new Date(),
-            rescheduleRequestAccepted: true,
-          }
-        : { rescheduleRequestRespondedAt: new Date(), rescheduleRequestAccepted: false },
-    });
+    if (accept) {
+      await updateBookingIfStatus(prisma, id, 'ACCEPTED', {
+        scheduledDate: booking.requestedScheduledDate,
+        scheduledTime: newTime,
+        timeSlot: null,
+        // The new start time resets the no-show clock.
+        workerNoShowFlaggedAt: null,
+        rescheduleRequestRespondedAt: new Date(),
+        rescheduleRequestAccepted: true,
+      });
+    } else {
+      await prisma.booking.update({
+        where: { id },
+        data: { rescheduleRequestRespondedAt: new Date(), rescheduleRequestAccepted: false },
+      });
+    }
 
     const requesterId = requester === 'CLIENT' ? booking.clientId : booking.workerId;
     if (requesterId) {
@@ -2141,6 +2145,7 @@ export const respondToRescheduleRequest = async (req: AuthRequest, res: Response
       data: { id },
     });
   } catch (error) {
+    if (isBookingStatusConflict(error)) return bookingConflict(res);
     console.error('Error responding to reschedule request:', error);
     return res.status(500).json(errorResponse(500, 'Failed to respond to reschedule request'));
   }
@@ -2232,22 +2237,20 @@ export const submitQuote = async (req: AuthRequest, res: Response) => {
     const isRevision = booking.quoteStatus === 'REJECTED';
 
     // Quote fields live directly on Booking — no separate Quote model in schema.
-    const updated = await prisma.booking.update({
-      where: { id },
-      data: {
-        laborCost,
-        materialsCost,
-        quoteNotes: notes,
-        quoteReceiptUrls: receiptUrls,
-        quoteProofOfUseUrls: proofOfUseUrls,
-        quoteStatus: 'SUBMITTED',
-        quotedAt: new Date(),
-        quoteReminderSentAt: null,
-        ...(isRevision ? { quoteRevision: { increment: 1 } } : {}),
-        status: 'QUOTE_SUBMITTED',
-        ...vatUpdate,
-      },
+    await updateBookingIfStatus(prisma, id, booking.status, {
+      laborCost,
+      materialsCost,
+      quoteNotes: notes,
+      quoteReceiptUrls: receiptUrls,
+      quoteProofOfUseUrls: proofOfUseUrls,
+      quoteStatus: 'SUBMITTED',
+      quotedAt: new Date(),
+      quoteReminderSentAt: null,
+      ...(isRevision ? { quoteRevision: { increment: 1 } } : {}),
+      status: 'QUOTE_SUBMITTED',
+      ...vatUpdate,
     });
+    const updated = await prisma.booking.findUniqueOrThrow({ where: { id } });
 
     // Log the revised total (labor + materials) so getBookingDetail's
     // pricingLogs shows the quote stage alongside the original estimate.
@@ -2291,6 +2294,7 @@ export const submitQuote = async (req: AuthRequest, res: Response) => {
       },
     });
   } catch (error) {
+    if (isBookingStatusConflict(error)) return bookingConflict(res);
     console.error('Error submitting quote:', error);
     return res.status(500).json(errorResponse(500, 'Failed to submit quote'));
   }
@@ -2345,15 +2349,21 @@ export const approveQuote = async (req: AuthRequest, res: Response) => {
     // added on-site.
     const addonsCost = booking.addOns.reduce((sum, addon) => sum + addon.price, 0);
 
-    const updated = await prisma.booking.update({
-      where: { id },
-      data: {
+    // Also pinned to the quote revision read above, so a worker revising the
+    // quote mid-request can't get a price approved that the client never saw.
+    await updateBookingIfStatus(
+      prisma,
+      id,
+      booking.status,
+      {
         status: 'QUOTE_APPROVED',
         quoteStatus: 'APPROVED',
         approvedAt: new Date(),
         finalPrice: booking.laborCost! + booking.materialsCost! + addonsCost,
       },
-    });
+      { quoteRevision: booking.quoteRevision, quotedAt: booking.quotedAt }
+    );
+    const updated = await prisma.booking.findUniqueOrThrow({ where: { id } });
 
     // Notify worker (workerId is nullable on Booking — skip if unassigned)
     if (booking.workerId) {
@@ -2376,6 +2386,7 @@ export const approveQuote = async (req: AuthRequest, res: Response) => {
       },
     });
   } catch (error) {
+    if (isBookingStatusConflict(error)) return bookingConflict(res);
     console.error('Error approving quote:', error);
     return res.status(500).json(errorResponse(500, 'Failed to approve quote'));
   }
@@ -2492,25 +2503,24 @@ export const disputeQuote = async (req: AuthRequest, res: Response) => {
       return res.status(409).json(errorResponse(409, `Cannot dispute quote for booking with status ${booking.status}`));
     }
 
-    const [updated, dispute] = await prisma.$transaction([
-      prisma.booking.update({
-        where: { id },
-        data: {
-          status: 'DISPUTED',
-          quoteStatus: 'DISPUTED',
-          disputeReason: reason,
-        },
-      }),
-      prisma.dispute.create({
+    const raisedById = req.user.userId;
+    const { updated, dispute } = await prisma.$transaction(async (tx) => {
+      await updateBookingIfStatus(tx, id, booking.status, {
+        status: 'DISPUTED',
+        quoteStatus: 'DISPUTED',
+        disputeReason: reason,
+      });
+      const dispute = await tx.dispute.create({
         data: {
           bookingId: id,
-          raisedById: req.user.userId,
+          raisedById,
           reason: typeof reason === 'string' ? reason : 'Client disputed the submitted quote',
           status: 'OPEN',
           evidenceUrls: cleanEvidenceUrls,
         },
-      }),
-    ]);
+      });
+      return { updated: await tx.booking.findUniqueOrThrow({ where: { id } }), dispute };
+    });
 
     // Notify worker (workerId is nullable on Booking — skip if unassigned)
     if (booking.workerId) {
@@ -2547,6 +2557,7 @@ export const disputeQuote = async (req: AuthRequest, res: Response) => {
       },
     });
   } catch (error) {
+    if (isBookingStatusConflict(error)) return bookingConflict(res);
     console.error('Error disputing quote:', error);
     return res.status(500).json(errorResponse(500, 'Failed to dispute quote'));
   }
@@ -2588,6 +2599,13 @@ export const completeBooking = async (req: AuthRequest, res: Response) => {
       return res.status(409).json(errorResponse(409, `Cannot complete booking with status ${booking.status}`));
     }
 
+    // Must be a photo this worker uploaded — otherwise the response layer
+    // would hand back a signed URL to someone else's private file.
+    const storedCompletionPhotoUrl = toOwnedStoredUrl(completionPhotoUrl, req.user.userId);
+    if (storedCompletionPhotoUrl === null) {
+      return res.status(400).json(errorResponse(400, 'Upload the completion photo again — it could not be verified'));
+    }
+
     // Add-ons freeze right here — any still-pending one (never approved or
     // rejected) can no longer affect anything after this point, so resolve
     // it as rejected rather than leaving a dangling "Approve/Reject" prompt
@@ -2615,15 +2633,13 @@ export const completeBooking = async (req: AuthRequest, res: Response) => {
     });
 
     const updated = await prisma.$transaction(async (tx) => {
-      const b = await tx.booking.update({
-        where: { id },
-        data: {
-          status: 'PENDING_COMPLETION',
-          completionPhotoUrl,
-          workerCompletedAt: new Date(),
-          finalPrice: lockedFinalPrice,
-        },
+      await updateBookingIfStatus(tx, id, booking.status, {
+        status: 'PENDING_COMPLETION',
+        completionPhotoUrl: storedCompletionPhotoUrl,
+        workerCompletedAt: new Date(),
+        finalPrice: lockedFinalPrice,
       });
+      const b = await tx.booking.findUniqueOrThrow({ where: { id } });
 
       // The worker's side of the job is done — update their active-job
       // count now rather than waiting on the client's confirmation, which may
@@ -2663,6 +2679,7 @@ export const completeBooking = async (req: AuthRequest, res: Response) => {
       },
     });
   } catch (error) {
+    if (isBookingStatusConflict(error)) return bookingConflict(res);
     console.error('Error completing booking:', error);
     return res.status(500).json(errorResponse(500, 'Failed to complete booking'));
   }
@@ -2920,6 +2937,14 @@ export const cancelBooking = async (req: AuthRequest, res: Response) => {
             : null;
 
     const updated = await prisma.$transaction(async (tx) => {
+      // Claim the transition first: if the status moved since the read above
+      // (accept, expiry, completion), nothing below runs. The UPDATE also
+      // holds the row lock until commit.
+      await updateBookingIfStatus(tx, id, booking.status, {
+        status: 'CANCELLED',
+        notes: reason, // schema has no cancelReason; kept as the canceller's own free-text reason
+      });
+
       // Free up the worker's active-job count for any pre-completion status.
       // A DISPUTED booking can also be reached post-completion
       // (AWAITING_PAYMENT -> DISPUTED) where completeBooking already freed
@@ -2991,13 +3016,7 @@ export const cancelBooking = async (req: AuthRequest, res: Response) => {
         });
       }
 
-      return tx.booking.update({
-        where: { id },
-        data: {
-          status: 'CANCELLED',
-          notes: reason, // schema has no cancelReason; kept as the canceller's own free-text reason
-        },
-      });
+      return tx.booking.findUniqueOrThrow({ where: { id } });
     });
 
     // Best-effort — same reasoning as accept/decline above.
@@ -3071,6 +3090,7 @@ export const cancelBooking = async (req: AuthRequest, res: Response) => {
       },
     });
   } catch (error) {
+    if (isBookingStatusConflict(error)) return bookingConflict(res);
     console.error('Error cancelling booking:', error);
     return res.status(500).json(errorResponse(500, 'Failed to cancel booking'));
   }

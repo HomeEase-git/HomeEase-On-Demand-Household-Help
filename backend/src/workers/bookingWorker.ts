@@ -8,6 +8,7 @@ import { requestRefund } from '@services/refundRequestService';
 import { BOOKING_QUEUE_NAME, JOB_NAMES, type ExpirePendingBookingJobData } from '@queues/bookingQueue';
 import { bookingStartInstant, phTodayStart } from '@services/workerAvailabilityService';
 import { chargePenaltyTx } from '@services/debtLedgerService';
+import { updateBookingIfStatus, isBookingStatusConflict } from '@services/bookingStatusWrite';
 import { getAppSettings } from '@services/appSettingsService';
 import {
   settleCashBooking,
@@ -71,21 +72,24 @@ export async function expirePendingBooking(data: ExpirePendingBookingJobData): P
   const booking = await prisma.booking.findUnique({ where: { id: data.bookingId } });
   if (!booking || booking.status !== 'PENDING') return; // already resolved by accept/decline/cancel
 
-  await prisma.$transaction(async (tx) => {
-    await tx.booking.update({
-      where: { id: booking.id },
-      data: { status: 'CANCELLED' },
-    });
+  try {
+    await prisma.$transaction(async (tx) => {
+      // Still-PENDING guard: the worker may have accepted since the read above.
+      await updateBookingIfStatus(tx, booking.id, 'PENDING', { status: 'CANCELLED' });
 
-    await tx.cancellation.create({
-      data: {
-        bookingId: booking.id,
-        cancelledBy: 'WORKER',
-        cancelledById: booking.workerId ?? 'system',
-        reason: 'WORKER_NO_RESPONSE',
-      },
+      await tx.cancellation.create({
+        data: {
+          bookingId: booking.id,
+          cancelledBy: 'WORKER',
+          cancelledById: booking.workerId ?? 'system',
+          reason: 'WORKER_NO_RESPONSE',
+        },
+      });
     });
-  });
+  } catch (error) {
+    if (isBookingStatusConflict(error)) return; // accept/decline/cancel won the race
+    throw error;
+  }
 
   await requestRefund({ bookingId: booking.id, reason: 'WORKER_NO_RESPONSE', source: 'BOOKING_CANCELLED' }).catch((error) => {
     console.error(`Failed to void/refund-request payment for expired booking ${booking.id}:`, error);
@@ -430,15 +434,25 @@ export async function remindAndAutoApproveQuotes(): Promise<void> {
     const addonsCost = booking.addOns.reduce((sum, addon) => sum + addon.price, 0);
 
     try {
-      await prisma.booking.update({
-        where: { id: booking.id },
-        data: {
-          status: 'QUOTE_APPROVED',
-          quoteStatus: 'APPROVED',
-          approvedAt: new Date(),
-          finalPrice: booking.laborCost! + booking.materialsCost! + addonsCost,
-        },
-      });
+      // Guarded on the same quote revision the client would have seen, so a
+      // client approve/refuse or a worker revision since the read wins.
+      try {
+        await updateBookingIfStatus(
+          prisma,
+          booking.id,
+          'QUOTE_SUBMITTED',
+          {
+            status: 'QUOTE_APPROVED',
+            quoteStatus: 'APPROVED',
+            approvedAt: new Date(),
+            finalPrice: booking.laborCost! + booking.materialsCost! + addonsCost,
+          },
+          { quoteRevision: booking.quoteRevision, quotedAt: booking.quotedAt }
+        );
+      } catch (error) {
+        if (isBookingStatusConflict(error)) continue;
+        throw error;
+      }
 
       if (booking.workerId) {
         await notifyUser({

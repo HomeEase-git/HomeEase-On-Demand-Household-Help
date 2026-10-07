@@ -10,6 +10,7 @@ import { writeAuditLog } from '@utils/auditLog';
 import { notifyUser } from '@utils/notify';
 import { sendSmsToUser } from '@utils/smsService';
 import { requestRefund } from '@services/refundRequestService';
+import { updateBookingIfStatus, isBookingStatusConflict } from '@services/bookingStatusWrite';
 import { cancelPendingExpiryJob } from '@queues/bookingQueue';
 import type { JwtPayload } from '@/types/index';
 
@@ -269,10 +270,9 @@ export const cancelBookingAdmin = async (req: AuthRequest, res: Response) => {
         },
       });
 
-      await tx.booking.update({
-        where: { id },
-        data: { status: 'CANCELLED', notes: reason?.trim() || booking.notes },
-      });
+      // Status-guarded: rolls the whole cancel back if the booking moved on
+      // (e.g. completed or paid) since it was read.
+      await updateBookingIfStatus(tx, id, booking.status, { status: 'CANCELLED', notes: reason?.trim() || booking.notes });
     });
 
     // Best-effort — the cancel already committed above, same reasoning as
@@ -318,6 +318,9 @@ export const cancelBookingAdmin = async (req: AuthRequest, res: Response) => {
 
     return res.json({ success: true, data: { id, status: 'CANCELLED' } });
   } catch (error) {
+    if (isBookingStatusConflict(error)) {
+      return res.status(409).json(errorResponse(409, 'This booking was just updated. Refresh and try again.'));
+    }
     console.error('Admin cancel booking error:', error);
     return res.status(500).json(errorResponse(500, 'Internal server error'));
   }
