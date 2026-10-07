@@ -116,7 +116,10 @@ const createApiClient = (): ApiClient => {
     return response.data?.data ?? response.data;
   });
 
-  // Global response error handler: handle 401/403 by clearing local auth
+  // Global response error handler: a 401 clears local auth. A 403 does not —
+  // the backend only sends 401 for a dead session (bad/expired/revoked token)
+  // and uses 403 for ordinary business rules (WORKER_SETUP_INCOMPLETE, not
+  // your booking, wrong role), which the calling screen shows as an error.
   client.interceptors.response.use(
     undefined,
     async (error) => {
@@ -157,7 +160,7 @@ const createApiClient = (): ApiClient => {
       try {
         if (isAxiosError(error)) {
           const status = error.response?.status;
-          if ((status === 401 || status === 403) && !keepSession) {
+          if (status === 401 && !keepSession) {
             // Dynamic import to avoid a circular dependency at module-load
             // time (authStore -> notificationService -> this file). Safe
             // here since it's only ever touched inside this async handler,
@@ -169,7 +172,7 @@ const createApiClient = (): ApiClient => {
             try {
               await authStorage.clearAuth();
             } catch (e) {
-              console.error('Error clearing auth on 401/403:', e);
+              console.error('Error clearing auth on 401:', e);
             }
 
             // authStorage.clearAuth() only wipes AsyncStorage — without also
