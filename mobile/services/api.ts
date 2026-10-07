@@ -89,7 +89,7 @@ export function refreshSession(): Promise<string | null> {
 
 const createApiClient = (): ApiClient => {
 
-  console.log('[API] baseURL configured as:', `${config.API_URL}/api`);
+  if (__DEV__) console.log('[API] baseURL configured as:', `${config.API_URL}/api`);
 
   // eslint-disable-next-line import/no-named-as-default-member
   const client = axios.create({
@@ -124,18 +124,25 @@ const createApiClient = (): ApiClient => {
     undefined,
     async (error) => {
 
-      console.log('[API ←] ERROR message:', error.message);
-      console.log('[API ←] ERROR code:', error.code);
-      console.log('[API ←] ERROR url:', (error.config?.baseURL || '') + (error.config?.url || ''));
-      console.log('[API ←] has response:', !!error.response);
-      console.log('[API ←] has request:', !!error.request);
-      console.log('[API ←] ERROR response data:', JSON.stringify(error.response?.data));
+      if (__DEV__) {
+        console.log('[API ←] ERROR message:', error.message);
+        console.log('[API ←] ERROR code:', error.code);
+        console.log('[API ←] ERROR url:', (error.config?.baseURL || '') + (error.config?.url || ''));
+        console.log('[API ←] has response:', !!error.response);
+        console.log('[API ←] has request:', !!error.request);
+        console.log('[API ←] ERROR response data:', JSON.stringify(error.response?.data));
+      }
 
       // Expired access token: refresh once and replay the request. Only for
       // requests that carried a session — a 401 from a wrong password on
       // the login screen has nothing to refresh.
       let keepSession = false;
-      const original = isAxiosError(error) ? (error.config as (typeof error.config & { _retried?: boolean }) | undefined) : undefined;
+      const original = isAxiosError(error)
+        ? (error.config as (typeof error.config & { _retried?: boolean; _refreshed?: boolean }) | undefined)
+        : undefined;
+      // A 401 on the replay (fresh token) is a business rule, e.g. a wrong
+      // password on change-password or delete-account, not a dead session.
+      if (original?._refreshed) keepSession = true;
       if (
         isAxiosError(error) &&
         error.response?.status === 401 &&
@@ -148,6 +155,7 @@ const createApiClient = (): ApiClient => {
           const newToken = await refreshSession();
           if (newToken) {
             original.headers.Authorization = `Bearer ${newToken}`;
+            original._refreshed = true;
             return client.request(original);
           }
         } catch {

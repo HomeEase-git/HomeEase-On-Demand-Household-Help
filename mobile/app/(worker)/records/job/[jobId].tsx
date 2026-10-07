@@ -96,6 +96,11 @@ export default function JobDetailScreen() {
   const [completionPhotoUrl, setCompletionPhotoUrl] = useState<string | null>(null);
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
   const [elapsedMs, setElapsedMs] = useState(0);
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 30000);
+    return () => clearInterval(id);
+  }, []);
   const [focused, setFocused] = useState(false);
   const photoSheetRef = useRef<BottomSheetHandle | null>(null);
   const alertModal = useAlertModal();
@@ -240,7 +245,7 @@ export default function JobDetailScreen() {
   const quoteRefused = isInProgress && job.quote?.status === "REJECTED";
   const startTime = bookingStartTime(job);
   const startsAt = startTime ? startInstant(job.scheduledDate.slice(0, 10), startTime) : null;
-  const startPassed = !!startsAt && Date.now() >= startsAt.getTime();
+  const startPassed = !!startsAt && now >= startsAt.getTime();
   const upcomingVisits = (job.visits ?? []).filter((v) => v.status === "SCHEDULED");
   const requestedWhen = job.requestedScheduledDate
     ? `${new Date(job.requestedScheduledDate).toLocaleDateString("en-PH", { month: "short", day: "numeric", timeZone: "UTC" })}${
