@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import * as api from '../services/api';
+import { hasMorePages, uniqueNew } from '../utils/pagination';
 
 export type Notification = {
   id: string;
@@ -36,7 +37,11 @@ type NotificationState = {
   notifications: Notification[];
   unreadCount: number;
   loading: boolean;
+  page: number;
+  hasMore: boolean;
+  loadingMore: boolean;
   fetchNotifications: () => Promise<void>;
+  loadMore: () => Promise<void>;
   markAsRead: (id: string) => Promise<void>;
   markAllRead: () => Promise<void>;
   receiveNotification: (notification: Notification) => void;
@@ -46,19 +51,44 @@ export const useNotificationStore = create<NotificationState>((set, get) => ({
   notifications: [],
   unreadCount: 0,
   loading: false,
+  page: 1,
+  hasMore: false,
+  loadingMore: false,
 
+  // Page 1 only; older pages come in through loadMore. The badge count comes
+  // from the server, since unread items can sit on pages not loaded yet.
   fetchNotifications: async () => {
     set({ loading: true });
     try {
-      const notifications = await api.getNotifications();
-      set({
-        notifications,
-        unreadCount: notifications.filter((n: Notification) => !n.isRead).length,
-      });
+      const [{ notifications, pagination }, unreadCount] = await Promise.all([
+        api.getNotifications(1),
+        api.getUnreadNotificationCount(),
+      ]);
+      set({ notifications, unreadCount, page: 1, hasMore: hasMorePages(pagination) });
     } catch (error) {
       console.error('Fetch notifications error:', error);
     } finally {
       set({ loading: false });
+    }
+  },
+
+  loadMore: async () => {
+    const { hasMore, loadingMore, loading, page } = get();
+    if (!hasMore || loadingMore || loading) return;
+    set({ loadingMore: true });
+    try {
+      const { notifications, pagination } = await api.getNotifications(page + 1);
+      // A refresh landed while this was in flight; its page 1 wins.
+      if (get().page !== page) return;
+      set((state) => ({
+        notifications: [...state.notifications, ...uniqueNew(notifications as Notification[], state.notifications)],
+        page: page + 1,
+        hasMore: hasMorePages(pagination),
+      }));
+    } catch (error) {
+      console.error('Load more notifications error:', error);
+    } finally {
+      set({ loadingMore: false });
     }
   },
 

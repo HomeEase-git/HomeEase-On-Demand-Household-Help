@@ -10,6 +10,7 @@ import { formatDisplayId } from '@utils/formatters';
 import { distanceMeters, isWithinRadiusMeters } from '@utils/geo';
 import { resolveDrivingDistanceKm } from '@services/googleDistanceService';
 import { taskBasePrice } from '@services/taskPriceService';
+import { blockedUserIds } from '@services/blockService';
 import { getWorkerSetupStatus, WORKER_SETUP_INCOMPLETE_MESSAGE } from '@services/workerSetupService';
 import { findAutoMatchWorker, LATE_CANCEL_THRESHOLD_HOURS } from '@services/matchingService';
 import {
@@ -338,7 +339,13 @@ export const createBooking = async (req: AuthRequest, res: Response) => {
       select: { workerId: true },
       distinct: ['workerId'],
     });
-    const recentlyDeclinedWorkerIds = recentDeclines.map((d) => d.workerId);
+    // A UserBlock either way keeps the pair apart: no booking a blocked
+    // worker directly, and auto-match skips them like a recent decline.
+    const blockedIds = await blockedUserIds(clientId);
+    if (resolvedWorkerId && blockedIds.includes(resolvedWorkerId)) {
+      return res.status(403).json(errorResponse(403, "You can't book this worker."));
+    }
+    const recentlyDeclinedWorkerIds = [...recentDeclines.map((d) => d.workerId), ...blockedIds];
 
     const autoMatchParams = {
       serviceType: resolvedServiceTypeName,
@@ -1421,7 +1428,7 @@ export const declineBooking = async (req: AuthRequest, res: Response) => {
       serviceTaskId: updated.serviceTaskId,
       date: updated.scheduledDate,
       scopeAnswers: updated.scopeAnswers as Record<string, string | string[]> | null,
-      excludeWorkerIds: updatedDeclinedWorkerIds,
+      excludeWorkerIds: [...updatedDeclinedWorkerIds, ...(await blockedUserIds(updated.clientId))],
       clientLat: updated.clientLat,
       clientLng: updated.clientLng,
     }).catch(() => null);

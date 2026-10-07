@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { View, Text, FlatList, Pressable } from "react-native";
+import { View, Text, FlatList, Pressable, ActivityIndicator } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import ScreenHeader from "../../../../components/ui/ScreenHeader";
@@ -7,6 +7,7 @@ import TransactionItem from "../../../../components/list-items/TransactionItem";
 import EmptyState from "../../../../components/feedback/EmptyState";
 import { SkeletonList, TransactionItemSkeleton } from "../../../../components/ui/Skeleton";
 import * as api from "../../../../services/api";
+import { hasMorePages, uniqueNew } from "../../../../utils/pagination";
 
 const FILTERS = ["All", "This Week", "This Month"] as const;
 
@@ -26,6 +27,9 @@ export default function TransactionsScreen() {
   const [loading, setLoading] = useState(true);
   const [failed, setFailed] = useState(false);
   const [attempt, setAttempt] = useState(0);
+  const [page, setPage] = useState(1);
+  const [hasMore, setHasMore] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -34,9 +38,11 @@ export default function TransactionsScreen() {
       setLoading(true);
       setFailed(false);
       try {
-        const result = await api.getTransactions();
+        const result = await api.getTransactions(1);
         if (!active) return;
         setTransactions(result.data);
+        setPage(1);
+        setHasMore(hasMorePages(result.pagination));
       } catch (error) {
         console.error("Load transactions error:", error);
         if (active) setFailed(true);
@@ -50,6 +56,21 @@ export default function TransactionsScreen() {
       active = false;
     };
   }, [attempt]);
+
+  const loadMore = async () => {
+    if (!hasMore || loadingMore || loading) return;
+    setLoadingMore(true);
+    try {
+      const result = await api.getTransactions(page + 1);
+      setTransactions((prev) => [...prev, ...uniqueNew(result.data, prev)]);
+      setPage(page + 1);
+      setHasMore(hasMorePages(result.pagination));
+    } catch (error) {
+      console.error("Load more transactions error:", error);
+    } finally {
+      setLoadingMore(false);
+    }
+  };
 
   const now = new Date();
 
@@ -121,6 +142,9 @@ export default function TransactionsScreen() {
           data={filtered}
           keyExtractor={(item) => item.id}
           contentContainerStyle={{ padding: 16 }}
+          onEndReached={loadMore}
+          onEndReachedThreshold={0.5}
+          ListFooterComponent={loadingMore ? <ActivityIndicator className="py-4" /> : null}
           renderItem={({ item }) => (
             <TransactionItem
               transaction={item}

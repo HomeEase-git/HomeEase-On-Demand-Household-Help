@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback } from "react";
-import { View, Text, FlatList, TextInput, Pressable, Linking } from "react-native";
+import { View, Text, FlatList, TextInput, Pressable, Linking, ActivityIndicator } from "react-native";
 import { KeyboardAvoidingView } from "react-native-keyboard-controller";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { AppIcon as Ionicons } from "../../../../components/icons/AppIcon";
@@ -13,6 +13,8 @@ import { useMessageStore } from "../../../../store/messageStore";
 import { useAuthStore } from "../../../../store/authStore";
 import { colors } from "../../../../constants";
 import * as api from "../../../../services/api";
+import { useChatSafety } from "../../../../hooks/useChatSafety";
+import { hasMorePages } from "../../../../utils/pagination";
 import { useAlertModal } from "../../../../contexts/AlertModalContext";
 
 function formatTime(iso: string) {
@@ -31,7 +33,16 @@ export default function WorkerChatScreen() {
   const listRef = useRef<FlatList>(null);
   // Keep the newest message in view: on first load, when a message arrives,
   // and when the keyboard opening makes the list shorter.
-  const scrollToLatest = () => listRef.current?.scrollToEnd({ animated: false });
+  // Only while the user is already at the bottom, so reading older pages
+  // isn't yanked back down by an arriving message or a page loading above.
+  const atBottomRef = useRef(true);
+  const scrollToLatest = () => {
+    if (atBottomRef.current) listRef.current?.scrollToEnd({ animated: false });
+  };
+  // GET /messages/conversations/:userId pages newest first; page 1 is on screen.
+  const [page, setPage] = useState(1);
+  const [hasOlder, setHasOlder] = useState(false);
+  const [loadingOlder, setLoadingOlder] = useState(false);
 
   // While this chat is on screen, its incoming messages stay silent.
   const setOpenChatUserId = useMessageStore((s) => s.setOpenChatUserId);
@@ -52,6 +63,23 @@ export default function WorkerChatScreen() {
   );
   const setMessages = useMessageStore((s) => s.setMessages);
   const appendMessage = useMessageStore((s) => s.appendMessage);
+  const prependMessages = useMessageStore((s) => s.prependMessages);
+  const { blockedByMe, setBlockedByMe, reportMessage, openMenu, unblock } = useChatSafety(userId, conversation?.name);
+
+  const loadOlder = async () => {
+    if (!userId || !hasOlder || loadingOlder) return;
+    setLoadingOlder(true);
+    try {
+      const { messages: older, pagination } = await api.getConversationThread(userId, page + 1);
+      prependMessages(userId, older);
+      setPage(page + 1);
+      setHasOlder(hasMorePages(pagination));
+    } catch (error) {
+      console.error("Load older messages error:", error);
+    } finally {
+      setLoadingOlder(false);
+    }
+  };
   const markConversationRead = useMessageStore((s) => s.markConversationRead);
 
   useEffect(() => {
@@ -60,8 +88,12 @@ export default function WorkerChatScreen() {
 
     api
       .getConversationThread(userId)
-      .then((thread) => {
-        if (active) setMessages(userId, thread);
+      .then(({ messages: thread, pagination, blockedByMe: blocked }) => {
+        if (!active) return;
+        setMessages(userId, thread);
+        setBlockedByMe(blocked);
+        setPage(1);
+        setHasOlder(hasMorePages(pagination));
       })
       .catch((error) => console.error("Load conversation thread error:", error));
 
@@ -92,11 +124,12 @@ export default function WorkerChatScreen() {
     setSending(true);
     try {
       const message = await api.sendMessage(userId, text);
+      atBottomRef.current = true;
       appendMessage(userId, message);
     } catch (error) {
       console.error("Send message error:", error);
       setInput(text);
-      alertModal.error("Error", "Failed to send message. Please try again.");
+      alertModal.error("Error", error instanceof Error ? error.message : "Failed to send message. Please try again.");
     } finally {
       setSending(false);
     }
@@ -107,6 +140,7 @@ export default function WorkerChatScreen() {
     try {
       const { url } = await api.uploadChatImage(uri);
       const message = await api.sendMessage(userId, "", url);
+      atBottomRef.current = true;
       appendMessage(userId, message);
     } catch (error) {
       console.error("Send image error:", error);
@@ -141,6 +175,9 @@ export default function WorkerChatScreen() {
         <Pressable accessibilityRole="button" accessibilityLabel="Call" onPress={call}>
           <Ionicons name="call-outline" size={22} color={colors.text.primary} />
         </Pressable>
+        <Pressable accessibilityRole="button" accessibilityLabel="More options" onPress={openMenu} className="ml-4">
+          <Ionicons name="ellipsis-vertical" size={20} color={colors.text.primary} />
+        </Pressable>
       </View>
 
       <KeyboardAvoidingView behavior="padding" style={{ flex: 1 }}>
@@ -149,6 +186,14 @@ export default function WorkerChatScreen() {
           data={messages}
           onContentSizeChange={scrollToLatest}
           onLayout={scrollToLatest}
+          onScroll={({ nativeEvent: e }) => {
+            atBottomRef.current = e.contentOffset.y + e.layoutMeasurement.height >= e.contentSize.height - 80;
+          }}
+          scrollEventThrottle={100}
+          onStartReached={loadOlder}
+          onStartReachedThreshold={0.5}
+          maintainVisibleContentPosition={{ minIndexForVisible: 0 }}
+          ListHeaderComponent={loadingOlder ? <ActivityIndicator className="py-2" /> : null}
           keyExtractor={(item) => item.id}
           contentContainerStyle={{ padding: 16, paddingBottom: 8 }}
           renderItem={({ item }) =>
@@ -163,35 +208,45 @@ export default function WorkerChatScreen() {
                 message={item.content}
                 imageUrl={item.imageUrl}
                 timestamp={formatTime(item.createdAt)}
+                onLongPress={() => reportMessage(item.id)}
               />
             )
           }
         />
 
-        <View className="flex-row items-center p-3 border-t border-divider">
-          <Pressable accessibilityRole="button" accessibilityLabel="Attach a photo"
-            className="p-2 mr-2"
-            onPress={() => imageSheetRef.current?.expand()}
-          >
-            <Ionicons name="attach-outline" size={24} color={colors.text.muted} />
-          </Pressable>
-          <TextInput
-            className="flex-1 bg-card rounded-full px-4 py-2 text-text-primary max-h-24"
-            style={{ includeFontPadding: false }}
-            placeholder="Message..."
-            placeholderTextColor={colors.text.muted}
-            value={input}
-            onChangeText={setInput}
-            multiline
-          />
-          <Pressable accessibilityRole="button" accessibilityLabel="Send message"
-            className={`bg-accent rounded-full p-2 ml-2 ${sending ? "opacity-50" : ""}`}
-            onPress={send}
-            disabled={sending}
-          >
-            <Ionicons name="send" size={20} color={colors.white} />
-          </Pressable>
-        </View>
+        {blockedByMe ? (
+          <View className="flex-row items-center justify-center p-4 border-t border-divider">
+            <Text className="text-text-secondary">You blocked {conversation?.name ?? "this user"}. </Text>
+            <Pressable accessibilityRole="button" onPress={unblock}>
+              <Text className="text-accent font-semibold">Unblock</Text>
+            </Pressable>
+          </View>
+        ) : (
+          <View className="flex-row items-center p-3 border-t border-divider">
+            <Pressable accessibilityRole="button" accessibilityLabel="Attach a photo"
+              className="p-2 mr-2"
+              onPress={() => imageSheetRef.current?.expand()}
+            >
+              <Ionicons name="attach-outline" size={24} color={colors.text.muted} />
+            </Pressable>
+            <TextInput
+              className="flex-1 bg-card rounded-full px-4 py-2 text-text-primary max-h-24"
+              style={{ includeFontPadding: false }}
+              placeholder="Message..."
+              placeholderTextColor={colors.text.muted}
+              value={input}
+              onChangeText={setInput}
+              multiline
+            />
+            <Pressable accessibilityRole="button" accessibilityLabel="Send message"
+              className={`bg-accent rounded-full p-2 ml-2 ${sending ? "opacity-50" : ""}`}
+              onPress={send}
+              disabled={sending}
+            >
+              <Ionicons name="send" size={20} color={colors.white} />
+            </Pressable>
+          </View>
+        )}
       </KeyboardAvoidingView>
       <ImageSourcePickerBottomSheet
         innerRef={imageSheetRef}

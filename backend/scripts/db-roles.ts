@@ -59,7 +59,7 @@ const READ_WRITE = [
   'LedgerReconciliation', 'LedgerState', 'Message', 'MfaBackupCode', 'MfaSecret', 'Notification', 'Payment', 'Payout',
   'PricingRule', 'PromoBanner', 'RefundRequest', 'ResumeParseResult', 'Review', 'SavedPaymentMethod',
   'ServiceScopeField', 'ServiceScopeFieldOption', 'ServiceScopeFieldTask', 'ServiceTask', 'ServiceType',
-  'TaxCertificate', 'TaxRemittance', 'User', 'UserAddress', 'VatCollectionSummary', 'VerificationRequest',
+  'TaxCertificate', 'TaxRemittance', 'User', 'UserAddress', 'UserBlock', 'VatCollectionSummary', 'VerificationRequest',
   'WorkerAvailability', 'WorkerAvailabilityTemplate', 'WorkerDateOverride', 'WorkerPackage', 'WorkerProfile',
   'WorkerScopeFieldCapability', 'WorkerServiceCategory', 'WorkerTaskPrice', 'WorkerTaskSelection', 'WorkerTaskTierPrice',
 ];

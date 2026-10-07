@@ -23,6 +23,8 @@ export default function InboxScreen() {
   const notifications = useNotificationStore((s) => s.notifications);
   const notificationsLoading = useNotificationStore((s) => s.loading);
   const fetchNotifications = useNotificationStore((s) => s.fetchNotifications);
+  const loadMoreNotifications = useNotificationStore((s) => s.loadMore);
+  const notificationsLoadingMore = useNotificationStore((s) => s.loadingMore);
   const markAllRead = useNotificationStore((s) => s.markAllRead);
   const conversations = useMessageStore((s) => s.conversations);
   const setConversations = useMessageStore((s) => s.setConversations);
@@ -168,6 +170,9 @@ export default function InboxScreen() {
           data={notifications}
           keyExtractor={(item) => item.id}
           contentContainerStyle={{ padding: 16 }}
+          onEndReached={loadMoreNotifications}
+          onEndReachedThreshold={0.5}
+          ListFooterComponent={notificationsLoadingMore ? <ActivityIndicator className="py-4" /> : null}
           renderItem={({ item }) => (
             <NotificationItem
               notification={{

@@ -132,6 +132,22 @@ export default function PrivacySettingsScreen() {
         </View>
 
         <Text className="text-text-muted text-xs font-semibold uppercase tracking-wide mt-5 mb-1">
+          Safety
+        </Text>
+        <View className="bg-card rounded-2xl overflow-hidden" style={cardShadow}>
+          <Pressable
+            className="flex-row items-center py-3.5 px-4"
+            onPress={() => router.push("/(client)/profile/blocked-users")}
+          >
+            <View className="w-9 h-9 rounded-full bg-accent/10 items-center justify-center mr-3">
+              <Ionicons name="ban-outline" size={18} color={colors.accent.DEFAULT} />
+            </View>
+            <Text className="text-text-primary flex-1">Blocked Users</Text>
+            <Ionicons name="chevron-forward" size={20} color={colors.text.muted} />
+          </Pressable>
+        </View>
+
+        <Text className="text-text-muted text-xs font-semibold uppercase tracking-wide mt-5 mb-1">
           Danger Zone
         </Text>
         <View className="bg-error/10 rounded-2xl overflow-hidden">

@@ -125,8 +125,7 @@ export async function clearNotificationBadge(): Promise<void> {
  */
 export async function updateNotificationBadge(): Promise<void> {
   try {
-    const { notifications } = useNotificationStore.getState();
-    const unreadCount = notifications.filter((n) => !n.isRead).length;
+    const { unreadCount } = useNotificationStore.getState();
     await notificationService.setNotificationBadgeCount(unreadCount);
   } catch (error) {
     console.error('[NotificationHandler] Failed to update badge:', error);

@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { uniqueNew } from "../utils/pagination";
 
 export type Message = {
   id: string;
@@ -25,6 +26,8 @@ type MessageState = {
   messagesByUser: Record<string, Message[]>;
   setConversations: (conversations: Conversation[]) => void;
   setMessages: (userId: string, messages: Message[]) => void;
+  /** Adds an older page above what is already shown. */
+  prependMessages: (userId: string, older: Message[]) => void;
   appendMessage: (userId: string, message: Message) => void;
   markConversationRead: (userId: string) => void;
   receiveMessage: (currentUserId: string, message: Message) => void;
@@ -46,6 +49,14 @@ export const useMessageStore = create<MessageState>((set) => ({
     set((state) => ({
       messagesByUser: { ...state.messagesByUser, [userId]: messages },
     })),
+
+  prependMessages: (userId, older) =>
+    set((state) => {
+      const existing = state.messagesByUser[userId] ?? [];
+      return {
+        messagesByUser: { ...state.messagesByUser, [userId]: [...uniqueNew(older, existing), ...existing] },
+      };
+    }),
 
   appendMessage: (userId, message) =>
     set((state) => {
