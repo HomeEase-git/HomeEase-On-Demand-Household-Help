@@ -167,7 +167,7 @@ export default function QuoteReviewScreen() {
         onConfirm: async () => {
           setLoading(true);
           try {
-            await apiApproveQuote(booking.id);
+            await apiApproveQuote(booking.id, proof.revision);
             approveQuote(booking.id);
             alertModal.success(
               "Quote Approved",
@@ -179,11 +179,11 @@ export default function QuoteReviewScreen() {
                 },
               ],
             );
-          } catch (error) {
+          } catch (error: any) {
             console.error("Approve quote error:", error);
             alertModal.error(
               "Error",
-              "Failed to approve quote. Please try again.",
+              error?.message || "Failed to approve quote. Please try again.",
             );
           } finally {
             setLoading(false);

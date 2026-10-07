@@ -611,9 +611,11 @@ export async function cancelBooking(
   }
 }
 
-export async function approveQuote(bookingId: string) {
+// `revision` is the quote revision the client reviewed; the server refuses the
+// approval if the worker has since reopened and resubmitted.
+export async function approveQuote(bookingId: string, revision: number) {
   try {
-    const response = await api.patch(`/bookings/${bookingId}/quote/approve`);
+    const response = await api.patch(`/bookings/${bookingId}/quote/approve`, { revision });
     return response;
   } catch (error) {
     console.error('Approve quote error:', error);

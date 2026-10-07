@@ -12,6 +12,10 @@ const MAX_PHOTOS = 5;
 // Fat-finger backstop; the client still approves the total.
 const MAX_PRICE = 500_000;
 
+// Each item is stored and shown to the centavo, so the displayed prices add up
+// to the total the client approves.
+const isCentavos = (n: number) => Math.abs(n * 100 - Math.round(n * 100)) < 1e-6;
+
 type Result = { ok: true; items: QuoteItemInput[] } | { ok: false; error: string };
 
 const isUrlArray = (v: unknown): v is string[] =>
@@ -27,8 +31,8 @@ export function validateQuoteItems(raw: unknown): Result {
     const e = (entry ?? {}) as Record<string, unknown>;
     const name = typeof e.name === 'string' ? e.name.trim() : '';
     if (!name || name.length > 120) return { ok: false, error: 'Each item needs a name (up to 120 characters)' };
-    if (typeof e.price !== 'number' || !Number.isFinite(e.price) || e.price <= 0 || e.price > MAX_PRICE) {
-      return { ok: false, error: `"${name}" needs a price between ₱0.01 and ₱${MAX_PRICE.toLocaleString('en-PH')}` };
+    if (typeof e.price !== 'number' || !Number.isFinite(e.price) || e.price <= 0 || e.price > MAX_PRICE || !isCentavos(e.price)) {
+      return { ok: false, error: `"${name}" needs a price between ₱0.01 and ₱${MAX_PRICE.toLocaleString('en-PH')}, in whole centavos` };
     }
     const receiptUrls = e.receiptUrls ?? [];
     const proofOfUseUrls = e.proofOfUseUrls ?? [];

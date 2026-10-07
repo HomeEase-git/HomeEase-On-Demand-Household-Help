@@ -28,7 +28,7 @@ import {
   formatTime12h,
 } from '@services/workerAvailabilityService';
 import { chargePenaltyTx } from '@services/debtLedgerService';
-import { toOwnedBookingPhotoUrls, toOwnedStoredUrl } from '@utils/storageUrls';
+import { toOwnedBookingPhotoUrls } from '@utils/storageUrls';
 import { validateQuoteItems, sumQuoteItems, type QuoteItemInput } from '@utils/quoteItems';
 import { updateBookingIfStatus, isBookingStatusConflict } from '@services/bookingStatusWrite';
 
@@ -2413,13 +2413,24 @@ export const approveQuote = async (req: AuthRequest, res: Response) => {
       return res.status(409).json(errorResponse(409, `Cannot approve quote for booking with status ${booking.status}`));
     }
 
+    // The client approves the revision they were shown. A worker who reopened
+    // and resubmitted while the screen sat open has bumped it, so the stale
+    // approval is refused instead of locking in a total the client never saw.
+    const viewedRevision = req.body?.revision;
+    if (!Number.isInteger(viewedRevision)) {
+      return res.status(400).json(errorResponse(400, 'revision of the quote you reviewed is required'));
+    }
+    if (viewedRevision !== booking.quoteRevision) {
+      return res.status(409).json(errorResponse(409, 'The quote changed. Review the new total before approving.'));
+    }
+
     // Mirrors getBookingDetail's finalPrice formula (laborCost + materialsCost
     // + addOns) so this stored snapshot doesn't undercount items the worker
     // added on-site.
     const addonsCost = booking.addOns.reduce((sum, addon) => sum + addon.price, 0);
 
-    // Also pinned to the quote revision read above, so a worker revising the
-    // quote mid-request can't get a price approved that the client never saw.
+    // Also pinned to the viewed revision, so a revision racing in between the
+    // read above and this write can't get a price approved that was never seen.
     await updateBookingIfStatus(
       prisma,
       id,
@@ -2430,7 +2441,7 @@ export const approveQuote = async (req: AuthRequest, res: Response) => {
         approvedAt: new Date(),
         finalPrice: booking.laborCost! + booking.materialsCost! + addonsCost,
       },
-      { quoteRevision: booking.quoteRevision, quotedAt: booking.quotedAt }
+      { quoteRevision: viewedRevision, quotedAt: booking.quotedAt }
     );
     const updated = await prisma.booking.findUniqueOrThrow({ where: { id } });
 
@@ -2670,7 +2681,7 @@ export const completeBooking = async (req: AuthRequest, res: Response) => {
 
     // Must be a photo this worker uploaded — otherwise the response layer
     // would hand back a signed URL to someone else's private file.
-    const storedCompletionPhotoUrl = toOwnedStoredUrl(completionPhotoUrl, req.user.userId);
+    const storedCompletionPhotoUrl = toOwnedBookingPhotoUrls([completionPhotoUrl], req.user.userId)?.[0] ?? null;
     if (storedCompletionPhotoUrl === null) {
       return res.status(400).json(errorResponse(400, 'Upload the completion photo again — it could not be verified'));
     }

@@ -349,6 +349,64 @@ describe('Booking flow — arrival geofencing, quote submission, dispute resolut
     });
   });
 
+  describe('approving and completing', () => {
+    const photo = (owner: string, name: string) =>
+      `${process.env.SUPABASE_URL}/storage/v1/object/public/${BOOKING_PHOTO_BUCKET}/${owner}/${name}.jpg`;
+    const approve = (id: string, body: Record<string, unknown>) =>
+      request(app).patch(`/api/bookings/${id}/quote/approve`).set('Authorization', `Bearer ${clientToken}`).send(body);
+
+    const submitted = async () => {
+      const booking = await createTestBooking({ clientId, workerId, status: 'QUOTE_SUBMITTED', estimatedPrice: 1000 });
+      createdBookingIds.push(booking.id);
+      return prisma.booking.update({
+        where: { id: booking.id },
+        data: { laborCost: 1000, materialsCost: 0, quoteStatus: 'SUBMITTED', quotedAt: new Date(), quoteRevision: 2 },
+      });
+    };
+
+    it('refuses an approval that names no revision', async () => {
+      const booking = await submitted();
+
+      expect((await approve(booking.id, {})).status).toBe(400);
+    });
+
+    it('refuses an approval of a revision the client did not see', async () => {
+      const booking = await submitted();
+
+      const res = await approve(booking.id, { revision: 1 });
+
+      expect(res.status).toBe(409);
+      const db = await prisma.booking.findUnique({ where: { id: booking.id } });
+      expect(db?.status).toBe('QUOTE_SUBMITTED');
+    });
+
+    it('approves the revision the client viewed', async () => {
+      const booking = await submitted();
+
+      const res = await approve(booking.id, { revision: 2 });
+
+      expect(res.status).toBe(200);
+      const db = await prisma.booking.findUnique({ where: { id: booking.id } });
+      expect(db?.status).toBe('QUOTE_APPROVED');
+      expect(db?.finalPrice).toBe(1000);
+    });
+
+    it("rejects a completion photo that is not the worker's own booking photo", async () => {
+      const booking = await createTestBooking({ clientId, workerId, status: 'QUOTE_APPROVED' });
+      createdBookingIds.push(booking.id);
+      const complete = (url: string) =>
+        request(app)
+          .patch(`/api/bookings/${booking.id}/complete`)
+          .set('Authorization', `Bearer ${workerToken}`)
+          .send({ completionPhotoUrl: url });
+
+      expect((await complete(photo(clientId, 'x'))).status).toBe(400);
+      expect((await complete('https://example.com/x.jpg')).status).toBe(400);
+      const db = await prisma.booking.findUnique({ where: { id: booking.id } });
+      expect(db?.status).toBe('QUOTE_APPROVED');
+    });
+  });
+
   describe('dispute resolution', () => {
     async function seedDisputedBooking() {
       const booking = await createTestBooking({

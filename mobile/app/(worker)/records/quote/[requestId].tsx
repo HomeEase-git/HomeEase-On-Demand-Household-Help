@@ -29,14 +29,20 @@ type BookingSummary = {
   service: string;
   scheduledDate: string;
   estimatedPrice: number;
+  // Legacy on-site add-ons; only the approved ones count toward the total.
+  addOns?: { id: string; name: string; price: number; clientApprovedAt: string | null }[];
   // A custom-quote job has no price until the worker quotes it.
   serviceTaskPricingModel?: string | null;
   quote?: {
     status?: string | null;
     rejectionReason?: string | null;
     laborCost?: number;
+    materialsCost?: number;
     notes?: string | null;
     items?: QuoteItemServer[];
+    // Aggregate photos; the only record of proof on a quote saved before items.
+    receiptUrls?: string[];
+    proofOfUseUrls?: string[];
   } | null;
 };
 
@@ -73,10 +79,23 @@ export default function SubmitQuoteScreen() {
         // screen, starts from what was sent before.
         if (detail?.quote) {
           setNotes(detail.quote.notes ?? "");
+          const saved: QuoteItemServer[] = detail.quote.items ?? [];
+          // A quote saved before items existed has one lump of materials and
+          // aggregate photos. Carry it over as a single item, or resubmitting
+          // would silently drop it from the bill.
           setItems(
-            (detail.quote.items ?? []).map((i: QuoteItemServer) =>
-              newItem({ name: i.name, price: String(i.price), receiptUrls: i.receiptUrls, proofOfUseUrls: i.proofOfUseUrls }),
-            ),
+            saved.length === 0 && (detail.quote.materialsCost ?? 0) > 0
+              ? [
+                  newItem({
+                    name: "Materials",
+                    price: String(detail.quote.materialsCost),
+                    receiptUrls: detail.quote.receiptUrls ?? [],
+                    proofOfUseUrls: detail.quote.proofOfUseUrls ?? [],
+                  }),
+                ]
+              : saved.map((i) =>
+                  newItem({ name: i.name, price: String(i.price), receiptUrls: i.receiptUrls, proofOfUseUrls: i.proofOfUseUrls }),
+                ),
           );
           if (detail.serviceTaskPricingModel === "CUSTOM_QUOTE" && detail.quote.laborCost) {
             setLaborInput(String(detail.quote.laborCost));
@@ -98,10 +117,15 @@ export default function SubmitQuoteScreen() {
   const labor = isCustomQuote ? parseFloat(laborInput) || 0 : (booking?.estimatedPrice ?? 0);
   const priceOf = (item: QuoteItemDraft) => parseFloat(item.price) || 0;
   const materials = items.reduce((sum, i) => sum + priceOf(i), 0);
-  const total = labor + materials;
+  const addOnsTotal = (booking?.addOns ?? []).reduce((sum, a) => (a.clientApprovedAt ? sum + a.price : sum), 0);
+  const total = labor + addOnsTotal + materials;
   // Every item must come with a receipt and a photo of it in use.
   const itemIncomplete = (i: QuoteItemDraft) =>
-    !i.name.trim() || priceOf(i) <= 0 || i.receiptUrls.length === 0 || i.proofOfUseUrls.length === 0;
+    !i.name.trim() ||
+    priceOf(i) <= 0 ||
+    Math.abs(priceOf(i) * 100 - Math.round(priceOf(i) * 100)) > 1e-6 ||
+    i.receiptUrls.length === 0 ||
+    i.proofOfUseUrls.length === 0;
   const hasIncompleteItem = items.some(itemIncomplete);
   const canSubmit = !hasIncompleteItem && (!isCustomQuote || labor > 0);
   const updateItem = (key: string, patch: Partial<QuoteItemDraft>) =>
@@ -294,6 +318,12 @@ export default function SubmitQuoteScreen() {
                 ₱{labor.toFixed(2)}
               </Text>
             </View>
+            {addOnsTotal > 0 && (
+              <View className="flex-row justify-between mt-1">
+                <Text className="text-text-muted text-xs">Add-ons already approved</Text>
+                <Text className="text-text-secondary text-xs">₱{addOnsTotal.toFixed(2)}</Text>
+              </View>
+            )}
             {materials > 0 && (
               <View className="flex-row justify-between mt-1">
                 <Text className="text-text-muted text-xs">Items</Text>
@@ -317,7 +347,7 @@ export default function SubmitQuoteScreen() {
 
         {hasIncompleteItem && (
           <Text className="text-error text-xs mb-3">
-            Every item needs a name, a price, a receipt photo and a photo of it in use.
+            Every item needs a name, a price (up to 2 decimals), a receipt photo and a photo of it in use.
           </Text>
         )}
         <View className="gap-3">

@@ -38,6 +38,13 @@ describe('validateQuoteItems', () => {
     expect(validateQuoteItems([item({ price: 500_000 })]).ok).toBe(true);
   });
 
+  it('rejects fractions of a centavo but accepts whole centavos', () => {
+    expect(validateQuoteItems([item({ price: 0.004 })]).ok).toBe(false);
+    expect(validateQuoteItems([item({ price: 12.345 })]).ok).toBe(false);
+    expect(validateQuoteItems([item({ price: 12.34 })]).ok).toBe(true);
+    expect(validateQuoteItems([item({ price: 0.1 + 0.2 })]).ok).toBe(true);
+  });
+
   it('rejects a blank name', () => {
     expect(validateQuoteItems([item({ name: '  ' })]).ok).toBe(false);
   });
