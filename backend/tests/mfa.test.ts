@@ -175,6 +175,31 @@ describe('Admin MFA', () => {
     });
   });
 
+  describe('server-side admin MFA gate', () => {
+    const previous = process.env.ADMIN_MFA_ENFORCEMENT;
+    beforeAll(() => {
+      process.env.ADMIN_MFA_ENFORCEMENT = 'on';
+    });
+    afterAll(() => {
+      process.env.ADMIN_MFA_ENFORCEMENT = previous;
+    });
+
+    it('refuses admin-only routes to an admin session without MFA, but allows MFA setup', async () => {
+      const { user, plainPassword } = await createTestUser('mfa-gate-admin', { role: 'ADMIN' });
+      createdUserIds.push(user.id);
+      const login = await request(app).post('/api/auth/login').send({ email: user.email, password: plainPassword });
+      expect(login.status).toBe(200);
+      const token = login.body.data.token;
+
+      const admin = await request(app).get('/api/admin/users').set('Authorization', `Bearer ${token}`);
+      expect(admin.status).toBe(403);
+      expect(admin.body.code).toBe('ADMIN_MFA_REQUIRED');
+
+      const setup = await request(app).post('/api/auth/mfa/setup').set('Authorization', `Bearer ${token}`);
+      expect(setup.status).toBe(200);
+    });
+  });
+
   describe('CLIENT/WORKER login is unaffected by admin MFA', () => {
     it('never returns mfaRequired for a non-admin login', async () => {
       const { user, plainPassword } = await createTestUser('mfa-client', { role: 'CLIENT' });
