@@ -69,6 +69,19 @@ function hashTinWithKey(normalizedTin: string, key: Buffer): string {
 }
 
 /** "••••1234" — the last four digits/characters only. */
+/**
+ * Keyed hash for short secrets stored for lookup (one-time codes): without
+ * DATA_ENCRYPTION_KEY a database copy can't brute-force them. Candidates
+ * cover a key rotation in progress.
+ */
+export function keyedHash(purpose: string, value: string): string {
+  return crypto.createHmac('sha256', getKey()).update(`${purpose}:${value}`).digest('hex');
+}
+
+export function keyedHashCandidates(purpose: string, value: string): string[] {
+  return getKeyring().map((key) => crypto.createHmac('sha256', key).update(`${purpose}:${value}`).digest('hex'));
+}
+
 export function maskLastFour(value: string): string {
   const compact = value.replace(/[\s-]/g, '');
   return `••••${compact.slice(-4)}`;
