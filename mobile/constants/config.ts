@@ -3,8 +3,13 @@
  */
 export const config = {
   // ===== API CONFIGURATION =====
-  // API_URL: process.env.EXPO_PUBLIC_API_URL ?? 'https://api.homeease.com',
-  API_URL: process.env.EXPO_PUBLIC_API_URL ?? 'http://10.0.2.2:3000', // Localhost for Android emulator
+  // The emulator fallback is dev-only. A release bundle (EAS build or `eas
+  // update`) published without EXPO_PUBLIC_API_URL used to bake in
+  // http://10.0.2.2:3000, which Android refuses over cleartext, so every
+  // request failed with "Unable to connect" from the second launch on.
+  API_URL:
+    process.env.EXPO_PUBLIC_API_URL ??
+    (__DEV__ ? 'http://10.0.2.2:3000' : 'https://homeease-on-demand-household-help.onrender.com'),
   // The production backend (Render free tier) sleeps after ~15min idle and
   // cold-starts a fresh container on the next request. Render's own stated
   // worst case is "50 seconds or more"; a genuinely cold instance (idle long
