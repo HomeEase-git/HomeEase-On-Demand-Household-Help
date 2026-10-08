@@ -1542,7 +1542,9 @@ export const arriveBooking = async (req: AuthRequest, res: Response) => {
     const clientLocation = { lat: booking.clientLat, lng: booking.clientLng };
     const workerLocation = { lat, lng };
     const distance = distanceMeters(clientLocation, workerLocation);
-    const isVerified = isWithinRadiusMeters(clientLocation, workerLocation, geofenceRadiusMeters);
+    // 0 = admin turned the distance check off; distance is still recorded.
+    const isVerified =
+      geofenceRadiusMeters === 0 || isWithinRadiusMeters(clientLocation, workerLocation, geofenceRadiusMeters);
 
     if (!isVerified) {
       return res.status(409).json(

@@ -17,7 +17,7 @@ const NUMERIC_FIELDS = {
   commissionRate: [0, 1],
   withholdingTaxRate: [0, 1],
   pendingExpiryMinutes: [5, 10080],
-  geofenceRadiusMeters: [10, 5000],
+  geofenceRadiusMeters: [0, 5000],
   maxDeclinesBeforeCooldown: [1, 20],
   declineWindowHours: [1, 720],
   declineCooldownHours: [1, 720],
