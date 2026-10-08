@@ -1,4 +1,5 @@
 import crypto from 'crypto';
+import { promisify } from 'util';
 import { decryptWithKeyring, deriveKey, deriveKeyring, encryptWithKey } from '@utils/encryption';
 
 // Field-level encryption for worker payout account numbers and TINs
@@ -74,20 +75,26 @@ function hashTinWithKey(normalizedTin: string, key: Buffer): string {
  * DATA_ENCRYPTION_KEY a database copy can't brute-force them. Candidates
  * cover a key rotation in progress.
  */
-function deriveLookupHash(purpose: string, value: string, key: Buffer): string {
-  // HMAC, not a memory-hard KDF: scryptSync blocked the shared event loop
-  // (~40ms per call, workers and sockets included), and a 6-digit code that
-  // expires in minutes behind a 5-try lockout gains nothing from it — anyone
-  // holding the key can try all 10^6 codes either way.
-  return crypto.createHmac('sha256', key).update(`${purpose}:${value}`).digest('hex');
+// Memory-hard so a stolen key plus DB copy still costs real work per guess.
+// Async on purpose: scryptSync held the shared event loop (~40ms per call,
+// workers and sockets included); crypto.scrypt runs on libuv's threadpool.
+const scryptAsync = promisify(crypto.scrypt) as (
+  password: string,
+  salt: Buffer,
+  keylen: number,
+  options: crypto.ScryptOptions,
+) => Promise<Buffer>;
+
+async function deriveLookupHash(purpose: string, value: string, key: Buffer): Promise<string> {
+  return (await scryptAsync(`${purpose}:${value}`, key, 32, { N: 16384, r: 8, p: 1 })).toString('hex');
 }
 
-export function keyedHash(purpose: string, value: string): string {
+export function keyedHash(purpose: string, value: string): Promise<string> {
   return deriveLookupHash(purpose, value, getKey());
 }
 
-export function keyedHashCandidates(purpose: string, value: string): string[] {
-  return getKeyring().map((key) => deriveLookupHash(purpose, value, key));
+export function keyedHashCandidates(purpose: string, value: string): Promise<string[]> {
+  return Promise.all(getKeyring().map((key) => deriveLookupHash(purpose, value, key)));
 }
 
 export function maskLastFour(value: string): string {
