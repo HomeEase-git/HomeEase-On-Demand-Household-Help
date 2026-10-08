@@ -1,6 +1,7 @@
 import request from 'supertest';
 import app from '@/app';
 import prisma from '@config/database';
+import { invalidateAppSettingsCache } from '@services/appSettingsService';
 import { BOOKING_PHOTO_BUCKET } from '@config/supabase';
 import { createTestUser, deleteTestUser, createTestBooking, deleteTestBooking } from './helpers';
 
@@ -92,6 +93,32 @@ describe('Booking flow — arrival geofencing, quote submission, dispute resolut
 
       const verification = await prisma.arrivalVerification.findUnique({ where: { bookingId: booking.id } });
       expect(verification?.isVerified).toBe(true);
+    });
+
+    it('skips the distance check when geofenceRadiusMeters is 0', async () => {
+      const settings = await prisma.appSettings.upsert({ where: { id: 'singleton' }, update: {}, create: { id: 'singleton' } });
+      await prisma.appSettings.update({ where: { id: 'singleton' }, data: { geofenceRadiusMeters: 0 } });
+      invalidateAppSettingsCache();
+      try {
+        const booking = await createTestBooking({
+          clientId,
+          workerId,
+          status: 'ACCEPTED',
+          clientLat: CLIENT_LOCATION.lat,
+          clientLng: CLIENT_LOCATION.lng,
+        });
+        createdBookingIds.push(booking.id);
+
+        const res = await request(app)
+          .patch(`/api/bookings/${booking.id}/arrive`)
+          .set('Authorization', `Bearer ${workerToken}`)
+          .send({ lat: FAR_WORKER_LOCATION.lat, lng: FAR_WORKER_LOCATION.lng });
+
+        expect(res.status).toBe(200);
+      } finally {
+        await prisma.appSettings.update({ where: { id: 'singleton' }, data: { geofenceRadiusMeters: settings.geofenceRadiusMeters } });
+        invalidateAppSettingsCache();
+      }
     });
 
     it('rejects check-in when the reported GPS accuracy radius is too imprecise, even inside the geofence', async () => {

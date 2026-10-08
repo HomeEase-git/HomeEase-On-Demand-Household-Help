@@ -2218,7 +2218,7 @@ paths:
                 withholdingTaxRate: { type: number, minimum: 0, maximum: 1 }
                 maxSlotsPerDay: { type: integer, minimum: 1, maximum: 24 }
                 pendingExpiryMinutes: { type: integer, minimum: 5, maximum: 10080 }
-                geofenceRadiusMeters: { type: integer, minimum: 10, maximum: 5000 }
+                geofenceRadiusMeters: { type: integer, minimum: 0, maximum: 5000, description: "0 disables the arrival distance check" }
       responses:
         '200': { description: Updated }
         '400': { $ref: '#/components/responses/BadRequest' }

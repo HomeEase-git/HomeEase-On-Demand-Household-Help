@@ -13,7 +13,7 @@ import {
 // booking-operation rules.
 const NUMBER_FIELD_BOUNDS = {
   pendingExpiryMinutes: [5, 10080],
-  geofenceRadiusMeters: [10, 5000],
+  geofenceRadiusMeters: [0, 5000],
   maxDeclinesBeforeCooldown: [1, 20],
   declineWindowHours: [1, 720],
   declineCooldownHours: [1, 720],
@@ -145,8 +145,9 @@ export default function Settings() {
               <AdornedNumberField
                 id="settings-geofence-radius"
                 label="Arrival Geofence Radius"
+                hint="0 turns the distance check off: workers can check in from anywhere."
                 suffix="m"
-                min={10}
+                min={0}
                 max={5000}
                 value={current.geofenceRadiusMeters}
                 onChange={updateNumberField('geofenceRadiusMeters')}
