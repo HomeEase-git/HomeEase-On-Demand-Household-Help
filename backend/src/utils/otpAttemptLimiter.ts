@@ -78,6 +78,9 @@ function attemptKey(userId: string, type: string): string {
 /**
  * Failed attempts are also counted in this process's memory, so a Redis
  * outage doesn't reopen unlimited per-account guessing on this instance.
+ * Only consulted while Redis is unreachable: when it is up, Redis is the
+ * one shared truth, so a clear (successful code, password reset) on one
+ * instance isn't undone by a stale count held by another.
  */
 // ponytail: per-process counter — covers the single Render instance; with
 // several instances, each one allows MAX_OTP_ATTEMPTS during an outage.
@@ -114,15 +117,15 @@ export const MAX_OTP_ATTEMPTS = 5;
  * or while the circuit breaker is open.
  */
 export async function isOtpAttemptLocked(userId: string, type: string, maxAttempts: number = MAX_OTP_ATTEMPTS): Promise<boolean> {
-  if (localCount(attemptKey(userId, type)) >= maxAttempts) return true;
-  if (circuitIsOpen()) return false;
+  const lockedLocally = localCount(attemptKey(userId, type)) >= maxAttempts;
+  if (circuitIsOpen()) return lockedLocally;
   try {
     const raw = await client.get(attemptKey(userId, type));
     recordSuccess();
     return raw !== null && Number(raw) >= maxAttempts;
   } catch (error) {
     recordFailure('isOtpAttemptLocked', error);
-    return false;
+    return lockedLocally;
   }
 }
 
@@ -145,7 +148,10 @@ export async function recordFailedOtpAttempt(userId: string, type: string, ttlSe
       await client.expire(key, ttlSeconds);
     }
     recordSuccess();
-    return Math.max(attempts, local);
+    // Redis's count alone: it steps by exactly one, so callers comparing
+    // `=== MAX` see the lockout exactly once. Mixing in `local` let it jump
+    // past MAX and skip the alert.
+    return attempts;
   } catch (error) {
     recordFailure('recordFailedOtpAttempt', error);
     return local;

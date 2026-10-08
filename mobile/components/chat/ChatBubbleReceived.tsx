@@ -20,7 +20,8 @@ export const ChatBubbleReceived: React.FC<Props> = ({ message, imageUrl, timesta
         accessibilityHint={onLongPress ? "Long press to report" : undefined}
       >
         {imageUrl && (
-          <Pressable onPress={() => onImagePress?.(imageUrl)}>
+          // The inner Pressable takes the touch, so it needs the report gesture too.
+          <Pressable onPress={() => onImagePress?.(imageUrl)} onLongPress={onLongPress}>
             <RemoteImage
               source={{ uri: imageUrl }}
               className="w-48 h-48 rounded-xl mb-1"

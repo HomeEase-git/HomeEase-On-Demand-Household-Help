@@ -75,7 +75,7 @@ export const uploadVerificationDocuments = async (req: AuthRequest, res: Respons
         // An UnsupportedImageError bubbles to the handler's catch → 415.
         let body: Buffer = file.buffer;
         let contentType = fileTypes[i]!;
-        let extension = 'pdf';
+        let extension = contentType.split('/')[1] || 'bin';
         let size = file.size;
         if (contentType.startsWith('image/')) {
           const normalized = await normalizeImage(file.buffer);

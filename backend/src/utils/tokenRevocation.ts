@@ -102,12 +102,15 @@ function recordSuccess(): void {
 }
 
 /**
- * Every revocation is also kept in this process's memory, so a Redis outage
- * doesn't let a banned or logged-out session back in on this instance.
+ * Revocations that could not be written to Redis are kept in this process's
+ * memory, so a Redis outage doesn't let a banned or logged-out session back
+ * in on this instance. Ones Redis did receive are not mirrored: Redis is the
+ * shared truth, and a stale local copy would outlive a reinstatement made on
+ * another instance.
  */
 // ponytail: per-process mirror — covers the single Render instance; with
 // several instances, revocations made during an outage only reach the one
-// that handled them.
+// that handled them, and a reinstatement elsewhere doesn't clear them.
 const localRevocations = new Map<string, number>(); // key -> expiry (ms)
 
 function rememberLocally(key: string, ttlSeconds: number): void {
@@ -140,13 +143,14 @@ function revokedLocally(key: string): boolean {
  */
 export async function revokeUserSessions(userId: string, ttlSeconds: number): Promise<void> {
   revocationListener?.onUserRevoked(userId);
-  rememberLocally(`${REVOKED_KEY_PREFIX}${userId}`, ttlSeconds);
-  if (circuitIsOpen()) return;
+  const key = `${REVOKED_KEY_PREFIX}${userId}`;
+  if (circuitIsOpen()) return rememberLocally(key, ttlSeconds);
   try {
-    await client.set(`${REVOKED_KEY_PREFIX}${userId}`, '1', 'EX', ttlSeconds);
+    await client.set(key, '1', 'EX', ttlSeconds);
     recordSuccess();
   } catch (error) {
     recordFailure('revokeUserSessions', error);
+    rememberLocally(key, ttlSeconds);
   }
 }
 
@@ -184,15 +188,19 @@ export async function isUserSessionRevoked(userId: string): Promise<boolean> {
 export async function revokeSessionIds(sessionIds: string[], ttlSeconds: number): Promise<void> {
   if (sessionIds.length === 0) return;
   revocationListener?.onSessionsRevoked(sessionIds);
-  for (const sid of sessionIds) rememberLocally(`${REVOKED_SESSION_KEY_PREFIX}${sid}`, ttlSeconds);
-  if (circuitIsOpen()) return;
+  const rememberAll = () => {
+    for (const sid of sessionIds) rememberLocally(`${REVOKED_SESSION_KEY_PREFIX}${sid}`, ttlSeconds);
+  };
+  if (circuitIsOpen()) return rememberAll();
   try {
     const pipeline = client.pipeline();
     for (const sid of sessionIds) pipeline.set(`${REVOKED_SESSION_KEY_PREFIX}${sid}`, '1', 'EX', ttlSeconds);
-    await pipeline.exec();
+    const results = await pipeline.exec();
+    if (results?.some(([err]) => err)) throw results.find(([err]) => err)![0];
     recordSuccess();
   } catch (error) {
     recordFailure('revokeSessionIds', error);
+    rememberAll();
   }
 }
 

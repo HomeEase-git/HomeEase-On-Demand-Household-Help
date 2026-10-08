@@ -41,25 +41,13 @@ export const generateQrCodeDataUrl = (provisioningUri: string): Promise<string> 
   toDataURL(provisioningUri);
 
 /** The 30-second step a valid code belongs to (otplib's window allows ±1), or null. */
-const totpStep = (secret: string, code: string): number | null => {
+export const totpStep = (secret: string, code: string): number | null => {
   if (!/^\d{6}$/.test(code)) return null;
   try {
     const delta = authenticator.checkDelta(code, secret);
     return delta === null ? null : Math.floor(Date.now() / 30_000) + delta;
   } catch {
     return null;
-  }
-};
-
-export const verifyTotp = (secret: string, code: string): boolean => {
-  if (!/^\d{6}$/.test(code)) return false;
-
-  try {
-    return authenticator.check(code, secret);
-  } catch {
-    // otplib throws on a malformed secret/token rather than returning
-    // false — treat that the same as "doesn't match".
-    return false;
   }
 };
 

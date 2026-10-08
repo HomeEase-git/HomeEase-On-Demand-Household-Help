@@ -35,6 +35,11 @@ export function useTrackingRoute(destination: LatLng | null) {
             setRouteFailed(true);
           }
         })
+        .catch(() => {
+          // Network/server error: same as an empty route, and retry next position.
+          lastRef.current = { at: now, from: null };
+          setRouteFailed(true);
+        })
         .finally(() => {
           inFlightRef.current = false;
         });

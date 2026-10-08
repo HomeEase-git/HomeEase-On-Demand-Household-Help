@@ -31,6 +31,12 @@ export default function XenditCheckoutModal({
   // Offline or a dead page leaves a blank sheet; show a retry instead.
   const [failed, setFailed] = useState(false);
   const [attempt, setAttempt] = useState(0);
+  // A new checkout (reopened, or another booking's URL) starts clean.
+  const [shownFor, setShownFor] = useState({ visible, checkoutUrl });
+  if (shownFor.visible !== visible || shownFor.checkoutUrl !== checkoutUrl) {
+    setShownFor({ visible, checkoutUrl });
+    setFailed(false);
+  }
 
   const handleShouldStartLoad = (request: WebViewNavigation) => {
     if (request.url.startsWith(REDIRECT_SUCCESS_PREFIX)) {

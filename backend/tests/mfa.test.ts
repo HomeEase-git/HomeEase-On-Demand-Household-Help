@@ -88,6 +88,10 @@ describe('Admin MFA', () => {
 
       const updated = await prisma.user.findUnique({ where: { id: adminId } });
       expect(updated?.mfaEnabled).toBe(true);
+
+      // The setup code is spent, so it can't also be used to sign in.
+      const secret = await prisma.mfaSecret.findUnique({ where: { userId: adminId } });
+      expect(secret?.lastTotpStep).toEqual(expect.any(Number));
     });
 
     it('login for an MFA-enabled admin returns mfaRequired, not a session token', async () => {
@@ -134,7 +138,9 @@ describe('Admin MFA', () => {
         .send({ email: adminEmail, password: adminPassword });
       const challengeToken = login.body.data.challengeToken;
 
-      const code = authenticator.generate(totpSecret);
+      // Next step's code (accepted within the ±1 window): the current one may
+      // be the very code verify-setup just spent.
+      const code = authenticator.clone({ epoch: Date.now() + 30_000 }).generate(totpSecret);
       const res = await request(app)
         .post('/api/auth/mfa/challenge')
         .send({ challengeToken, code });

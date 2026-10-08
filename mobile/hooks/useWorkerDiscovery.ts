@@ -28,6 +28,9 @@ export function useWorkerDiscovery(filters: DiscoverWorkersFilters, enabled: boo
   const [error, setError] = useState<string | null>(null);
   const [refetchToken, setRefetchToken] = useState(0);
   const key = filtersKey(filters);
+  // Filters the current results belong to. Until the debounced fetch for new
+  // filters settles, the old results are stale, so report loading.
+  const [settledKey, setSettledKey] = useState<string | null>(null);
 
   useEffect(() => {
     if (!enabled) return;
@@ -50,7 +53,10 @@ export function useWorkerDiscovery(filters: DiscoverWorkersFilters, enabled: boo
         setWorkers([]);
         setTotal(0);
       } finally {
-        if (!cancelled) setLoading(false);
+        if (!cancelled) {
+          setLoading(false);
+          setSettledKey(key);
+        }
       }
     }, DEBOUNCE_MS);
 
@@ -65,7 +71,7 @@ export function useWorkerDiscovery(filters: DiscoverWorkersFilters, enabled: boo
   return {
     workers: enabled ? workers : [],
     total: enabled ? total : 0,
-    loading: enabled && loading,
+    loading: enabled && (loading || settledKey !== key),
     error: enabled ? error : null,
     refetch: () => setRefetchToken((t) => t + 1),
   };
@@ -83,6 +89,7 @@ export function useDateAvailabilityCount(
   const [count, setCount] = useState<number | null>(null);
   const [loading, setLoading] = useState(true); // true: the first fetch is debounced, so "empty" isn't known yet
   const key = filtersKey(baseFilters);
+  const [settledKey, setSettledKey] = useState<string | null>(null);
   const requestId = useRef(0);
 
   useEffect(() => {
@@ -100,7 +107,10 @@ export function useDateAvailabilityCount(
       } catch {
         if (!cancelled && requestId.current === thisRequest) setCount(null); // unknown, not "no pros"
       } finally {
-        if (!cancelled && requestId.current === thisRequest) setLoading(false);
+        if (!cancelled && requestId.current === thisRequest) {
+          setLoading(false);
+          setSettledKey(key);
+        }
       }
     }, DEBOUNCE_MS);
 
@@ -111,5 +121,7 @@ export function useDateAvailabilityCount(
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key, enabled]);
 
-  return { count: enabled ? count : null, loading: enabled && loading };
+  // A count for other filters is not a count for these: hide it until settled.
+  const settled = settledKey === key;
+  return { count: enabled && settled ? count : null, loading: enabled && (loading || !settled) };
 }

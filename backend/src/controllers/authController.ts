@@ -33,7 +33,7 @@ import {
   generateMfaSecret,
   buildProvisioningUri,
   generateQrCodeDataUrl,
-  verifyTotp,
+  totpStep,
   encryptMfaSecret,
   decryptMfaSecret,
   generateBackupCodes,
@@ -452,7 +452,9 @@ export const mfaVerifySetup = async (req: Request, res: Response) => {
 
     const secret = decryptMfaSecret(pendingSecret.secretEncrypted);
 
-    if (!verifyTotp(secret, code)) {
+    // Recorded as used, so the code typed here can't sign in a second time.
+    const step = totpStep(secret, code);
+    if (step === null) {
       return res.status(400).json(errorResponse(400, 'Invalid code. Please try again.'));
     }
 
@@ -462,7 +464,7 @@ export const mfaVerifySetup = async (req: Request, res: Response) => {
     await prisma.$transaction(async (tx) => {
       await tx.mfaSecret.update({
         where: { userId: user.id },
-        data: { pending: false, confirmedAt: new Date() },
+        data: { pending: false, confirmedAt: new Date(), lastTotpStep: step },
       });
       // Clears any leftover codes from a prior setup attempt that was
       // abandoned mid-way and restarted — verify-setup always mints a

@@ -75,9 +75,11 @@ function hashTinWithKey(normalizedTin: string, key: Buffer): string {
  * cover a key rotation in progress.
  */
 function deriveLookupHash(purpose: string, value: string, key: Buffer): string {
-  // Use a memory-hard KDF so verification material is expensive to brute-force
-  // if an attacker obtains both DB contents and application secrets.
-  return crypto.scryptSync(`${purpose}:${value}`, key, 32, { N: 16384, r: 8, p: 1 }).toString('hex');
+  // HMAC, not a memory-hard KDF: scryptSync blocked the shared event loop
+  // (~40ms per call, workers and sockets included), and a 6-digit code that
+  // expires in minutes behind a 5-try lockout gains nothing from it — anyone
+  // holding the key can try all 10^6 codes either way.
+  return crypto.createHmac('sha256', key).update(`${purpose}:${value}`).digest('hex');
 }
 
 export function keyedHash(purpose: string, value: string): string {
