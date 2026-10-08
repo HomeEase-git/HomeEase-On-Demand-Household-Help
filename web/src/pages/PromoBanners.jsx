@@ -15,7 +15,17 @@ import {
 
 const TITLE_MAX = 60
 const SUBTITLE_MAX = 120
-const EMPTY_FORM = { title: '', subtitle: '', imageUrl: '', linkServiceTypeId: '', startsAt: '', endsAt: '', isActive: true }
+const EMPTY_FORM = { title: '', subtitle: '', imageUrl: '', linkServiceTypeId: '', textColor: '', fontFamily: '', startsAt: '', endsAt: '', isActive: true }
+
+// Mirrors BANNER_FONTS in the backend; the app maps these to Android system fonts.
+const FONT_OPTIONS = [
+  { value: '', label: 'Default', css: 'inherit' },
+  { value: 'SERIF', label: 'Serif', css: 'serif' },
+  { value: 'MONOSPACE', label: 'Monospace', css: 'monospace' },
+  { value: 'CONDENSED', label: 'Condensed', css: '"Arial Narrow", sans-serif-condensed, sans-serif' },
+  { value: 'CASUAL', label: 'Casual', css: '"Comic Sans MS", cursive' },
+]
+const DEFAULT_TEXT_COLOR = '#FFFFFF'
 
 // What the client app does with a banner right now.
 function bannerStatus(banner, now = new Date()) {
@@ -39,11 +49,15 @@ function formatWhen(iso) {
 }
 
 /** How the banner will look on the client home screen (same text-over-image style). */
-function BannerPreview({ imageUrl, title, subtitle }) {
+function BannerPreview({ imageUrl, title, subtitle, textColor, fontFamily }) {
+  const textStyle = {
+    color: textColor || DEFAULT_TEXT_COLOR,
+    fontFamily: FONT_OPTIONS.find((f) => f.value === (fontFamily || ''))?.css,
+  }
   return (
     <div className="promo-preview" style={imageUrl ? { backgroundImage: `url(${imageUrl})` } : undefined}>
       {!imageUrl && <span className="promo-preview__placeholder"><i className="fas fa-image" /> Upload an image</span>}
-      <div className="promo-preview__text">
+      <div className="promo-preview__text" style={textStyle}>
         <div className="promo-preview__title">{title || 'Banner title'}</div>
         {subtitle && <div className="promo-preview__subtitle">{subtitle}</div>}
       </div>
@@ -60,6 +74,8 @@ function BannerForm({ initial, serviceTypes, onCancel, onSaved }) {
           subtitle: initial.subtitle ?? '',
           imageUrl: initial.imageUrl,
           linkServiceTypeId: initial.linkServiceTypeId ?? '',
+          textColor: initial.textColor ?? '',
+          fontFamily: initial.fontFamily ?? '',
           startsAt: toLocalInput(initial.startsAt),
           endsAt: toLocalInput(initial.endsAt),
           isActive: initial.isActive,
@@ -94,6 +110,8 @@ function BannerForm({ initial, serviceTypes, onCancel, onSaved }) {
         subtitle: form.subtitle || null,
         imageUrl: form.imageUrl,
         linkServiceTypeId: form.linkServiceTypeId || null,
+        textColor: form.textColor || null,
+        fontFamily: form.fontFamily || null,
         startsAt: fromLocalInput(form.startsAt),
         endsAt: fromLocalInput(form.endsAt),
         isActive: form.isActive,
@@ -114,7 +132,7 @@ function BannerForm({ initial, serviceTypes, onCancel, onSaved }) {
       <form className="modal modal--landscape promo-form" onClick={(e) => e.stopPropagation()} onSubmit={handleSubmit} role="dialog" aria-modal="true" aria-labelledby="promo-form-title">
         <h2 className="modal-title" id="promo-form-title">{initial ? 'Edit banner' : 'New banner'}</h2>
 
-        <BannerPreview imageUrl={form.imageUrl} title={form.title} subtitle={form.subtitle} />
+        <BannerPreview imageUrl={form.imageUrl} title={form.title} subtitle={form.subtitle} textColor={form.textColor} fontFamily={form.fontFamily} />
         <label className="btn btn-outline btn-sm promo-form__upload">
           <i className={`fas ${uploading ? 'fa-spinner fa-spin' : 'fa-upload'}`} />
           {uploading ? 'Uploading…' : form.imageUrl ? 'Replace image' : 'Upload image'}
@@ -139,6 +157,23 @@ function BannerForm({ initial, serviceTypes, onCancel, onSaved }) {
                 <option key={st.id} value={st.id}>{st.name}</option>
               ))}
             </select>
+          </div>
+          <div className="form-field">
+            <label htmlFor="promo-font">Font</label>
+            <select id="promo-font" value={form.fontFamily} onChange={set('fontFamily')}>
+              {FONT_OPTIONS.map((f) => (
+                <option key={f.value} value={f.value}>{f.label}</option>
+              ))}
+            </select>
+          </div>
+          <div className="form-field">
+            <label htmlFor="promo-color">Text color</label>
+            <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+              <input id="promo-color" type="color" value={form.textColor || DEFAULT_TEXT_COLOR} onChange={set('textColor')} />
+              {form.textColor && (
+                <button type="button" className="btn btn-outline btn-sm" onClick={() => setForm((f) => ({ ...f, textColor: '' }))}>Reset</button>
+              )}
+            </div>
           </div>
           <label className="promo-form__toggle">
             <input type="checkbox" checked={form.isActive} onChange={set('isActive')} />

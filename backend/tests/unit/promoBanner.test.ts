@@ -43,12 +43,20 @@ describe('validatePromoBannerInput', () => {
     [{ title: 'Hi', imageUrl: IMG, startsAt: 'not a date' }, 'startsAt is not a valid date.'],
     [{ title: 'Hi', imageUrl: IMG, startsAt: '2026-10-02', endsAt: '2026-10-01' }, 'The end date must be after the start date.'],
     [{ title: 'Hi', imageUrl: IMG, isActive: 'yes' }, 'isActive must be true or false.'],
+    [{ title: 'Hi', imageUrl: IMG, textColor: 'red' }, 'Text color must be a hex color like #FFFFFF.'],
+    [{ title: 'Hi', imageUrl: IMG, fontFamily: 'COMIC' }, 'Font must be one of SERIF, MONOSPACE, CONDENSED, CASUAL.'],
   ])('rejects %o', (body, error) => {
     expect(validatePromoBannerInput(body)).toEqual({ error });
   });
 
   it('only checks sent fields on a partial update', () => {
     expect(validatePromoBannerInput({ isActive: false }, { partial: true })).toEqual({ data: { isActive: false } });
+  });
+
+  it('normalises text color and accepts a known font', () => {
+    const r = validatePromoBannerInput({ textColor: '#ffcc00', fontFamily: 'SERIF' }, { partial: true });
+    expect(r).toEqual({ data: { textColor: '#FFCC00', fontFamily: 'SERIF' } });
+    expect(validatePromoBannerInput({ textColor: '', fontFamily: null }, { partial: true })).toEqual({ data: { textColor: null, fontFamily: null } });
   });
 
   it('clears optional fields with null or empty', () => {

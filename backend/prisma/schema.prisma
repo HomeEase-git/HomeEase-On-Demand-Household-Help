@@ -2464,6 +2464,11 @@ model PromoBanner {
   // Plain id rather than a relation so deleting a category never blocks on
   // (or cascades into) banners; the app ignores an id it can't find.
   linkServiceTypeId String?
+  // Text styling in the app; null = white, default font. fontFamily is one of
+  // BANNER_FONTS (promoBannerController); the app has no bundled fonts, so
+  // these map to Android system families.
+  textColor         String?
+  fontFamily        String?
   sortOrder         Int       @default(0)
   isActive          Boolean   @default(true)
   startsAt          DateTime?

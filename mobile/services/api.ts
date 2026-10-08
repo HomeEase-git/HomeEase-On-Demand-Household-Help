@@ -2826,6 +2826,10 @@ export type PromoBannerItem = {
   imageUrl: string;
   /** Service category to open when tapped, or null for display-only. */
   linkServiceTypeId: string | null;
+  /** Hex like "#FFFFFF"; null = white. */
+  textColor?: string | null;
+  /** SERIF | MONOSPACE | CONDENSED | CASUAL; null = app default. */
+  fontFamily?: string | null;
 };
 
 /** Live home-screen banners, managed by admins (Catalog & Pricing → Promo Banners). */
