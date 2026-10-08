@@ -43,12 +43,19 @@ export const apiLimiter: RequestHandler = disabled
  * OTP, password reset) — the brute-force / enumeration targets, so the
  * ceiling is low and the window long. Only failed attempts count, so a
  * user legitimately logging in repeatedly is unaffected.
+ *
+ * The per-IP ceiling is a backstop only — the real brute-force guards are
+ * account-scoped (utils/loginAttemptLimiter.ts, utils/otpAttemptLimiter.ts)
+ * and an attacker rotating IPs walks straight past this one anyway. It is
+ * set with room for one confused person on a shared IP: a mistyped OTP plus
+ * a resend plus a retried sign-in is already ~6 failures, and 10 locked out
+ * everyone behind that IP (CGNAT, office Wi-Fi) for 15 minutes.
  */
 export const authLimiter: RequestHandler = disabled
   ? passthrough
   : rateLimit({
       windowMs: num('RATE_LIMIT_AUTH_WINDOW_MS', 15 * 60_000),
-      limit: num('RATE_LIMIT_AUTH_MAX', 10),
+      limit: num('RATE_LIMIT_AUTH_MAX', 25),
       standardHeaders: 'draft-7',
       legacyHeaders: false,
       skipSuccessfulRequests: true,

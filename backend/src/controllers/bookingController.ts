@@ -183,7 +183,8 @@ export const createBooking = async (req: AuthRequest, res: Response) => {
 
     // Refuse a blocked pair before any other validation, so the answer never
     // depends on how the rest of the request happens to look.
-    if (requestedWorkerId && (await blockedUserIds(clientId)).includes(requestedWorkerId)) {
+    const blockedIds = await blockedUserIds(clientId);
+    if (requestedWorkerId && blockedIds.includes(requestedWorkerId)) {
       return res.status(403).json(errorResponse(403, "You can't book this worker."));
     }
 
@@ -347,7 +348,6 @@ export const createBooking = async (req: AuthRequest, res: Response) => {
     });
     // A UserBlock either way keeps the pair apart: no booking a blocked
     // worker directly, and auto-match skips them like a recent decline.
-    const blockedIds = await blockedUserIds(clientId);
     if (resolvedWorkerId && blockedIds.includes(resolvedWorkerId)) {
       return res.status(403).json(errorResponse(403, "You can't book this worker."));
     }

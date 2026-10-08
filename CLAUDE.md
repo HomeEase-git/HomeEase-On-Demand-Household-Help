@@ -61,10 +61,10 @@ npm run dev / npm run build  # Vite; no tests or lint configured
 - **External services:** Supabase storage (buckets created on boot by `utils/ensureStorageBuckets.ts`), Google Places/Routes (server key only; the backend is the only map data provider), Brevo/SMTP/Gmail-API email (`EMAIL_PROVIDER`), PhilSMS, Anthropic (resume parsing + KYC review in `verificationAiService.ts`, which degrades to a heuristic when there's no key), and Expo push.
 - **Auth:** short-lived JWT (`JWT_EXPIRY` is plain **seconds**, not `"15m"`) plus a refresh flow (`/auth/refresh`, `sessionService.ts`). Admins have TOTP MFA (secrets encrypted with `MFA_ENCRYPTION_KEY`).
 - **DB:** schema is in `prisma/schema.prisma`, and migrations are applied by `docker-entrypoint.sh` (`prisma migrate deploy`) on every deploy. Production runs as a restricted role that cannot alter the schema or edit audit-log/ledger rows. Tests clean those up through `DIRECT_URL` (`tests/ownerDb.ts`). Test users get `e2etest` in their email (`tests/helpers.ts`).
-- `backend/openapi.yaml` documents the REST API. The `_probe*.js` / `_fix_*.js` files at the backend root are ad-hoc scripts, not part of the app.
+- `backend/openapi.yaml` documents the REST API.
 
 ## Mobile architecture
 
 - expo-router route groups in `app/`: `(auth)`, `(onboarding)`, `(kyc)` (worker verification flow), `(client)`, `(worker)`. Root `_layout.tsx` / `index.tsx` route by auth state and role.
-- `services/api.ts` is the axios instance (base `${API_URL}/api`, with token refresh in an interceptor). `services/socket.ts` handles realtime, and `offline-sync.ts` / `notificationService.ts` handle offline sync and push. State lives in Zustand stores in `store/` (`authStore`, `bookingStore`, `messageStore`).
+- `services/api.ts` is the axios instance (base `${API_URL}/api`, with token refresh in an interceptor). `services/socket.ts` handles realtime, and `notificationService.ts` handles push. State lives in Zustand stores in `store/` (`authStore`, `bookingStore`, `messageStore`).
 - The map display uses a separate Android-restricted Google key, read at build time in `app.config.ts`.

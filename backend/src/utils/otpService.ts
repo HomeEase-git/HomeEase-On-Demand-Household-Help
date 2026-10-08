@@ -36,7 +36,7 @@ export const storeOtp = async (
   await prisma.authToken.create({
     data: {
       userId,
-      token: keyedHash('otp', otpMaterial(userId, type, otp)),
+      token: await keyedHash('otp', otpMaterial(userId, type, otp)),
       type,
       expiresAt,
     },
@@ -64,7 +64,7 @@ export const verifyOtp = async (
       // release. Six digits only, so a stored hash can't be replayed as a code.
       token: {
         in: [
-          ...keyedHashCandidates('otp', otpMaterial(userId, type, otp)),
+          ...(await keyedHashCandidates('otp', otpMaterial(userId, type, otp))),
           ...(/^\d{6}$/.test(otp) ? [otp] : []),
         ],
       },

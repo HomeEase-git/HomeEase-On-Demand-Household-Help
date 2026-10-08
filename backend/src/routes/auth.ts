@@ -37,7 +37,12 @@ router.post('/verify-otp', authLimiter, verifyOtpHandler);
 router.post('/resend-otp', authLimiter, resendOtp);
 router.post('/forgot-password', authLimiter, forgotPassword);
 router.post('/reset-password', authLimiter, resetPassword);
-router.post('/refresh', authLimiter, refreshToken);
+// NOT behind authLimiter: a refresh token is 40 random bytes, so there is
+// nothing to guess, but a 401 here (rotated token, expiry, app relaunch) is
+// routine and used to spend the shared per-IP credential budget — which then
+// 429'd /auth/login for every account on that IP. The global apiLimiter
+// (300/min per IP, app.ts) still covers it.
+router.post('/refresh', refreshToken);
 router.post('/suspension-review', authLimiter, requestSuspensionReview);
 router.post('/reactivate', authLimiter, reactivateAccount);
 

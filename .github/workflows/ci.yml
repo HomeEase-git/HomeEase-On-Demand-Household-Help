@@ -193,14 +193,19 @@ jobs:
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
-          # Added or edited migrations; each file is flattened to one line so a
-          # statement split across lines still matches.
-          files=$(git diff --name-only --diff-filter=AM "$BASE_SHA"...HEAD -- 'backend/prisma/migrations/*/migration.sql')
+          # Added, edited or renamed migrations. Each file is split into one
+          # clause per line (on ; and ,) so a statement spread across lines
+          # still matches, and a NOT NULL column is judged on its own clause.
+          # DROP CONSTRAINT is allowed: it only loosens, and Prisma emits it
+          # for every foreign-key rewrite.
           status=0
-          for f in $files; do
-            if tr -s '[:space:]' ' ' < "$f" | grep -qEi 'DROP (TABLE|COLUMN)|RENAME|ALTER COLUMN [^;]* TYPE '; then
-              echo "::error file=$f::Drops, renames or retypes a table or column. Split it into expand/contract releases, or label the PR contract-migration."
+          while IFS= read -r f; do
+            [ -n "$f" ] || continue
+            clauses=$(tr -s '[:space:]' ' ' < "$f" | tr ';,' '\n\n')
+            if echo "$clauses" | grep -qEi 'DROP (TABLE|COLUMN)|RENAME|ALTER COLUMN .* TYPE |SET NOT NULL|TRUNCATE' \
+              || echo "$clauses" | grep -Ei 'ADD COLUMN .*NOT NULL' | grep -qvi 'DEFAULT'; then
+              echo "::error file=$f::Drops, renames, retypes or truncates, or adds a NOT NULL column without a default. The old instance still serving can break. Split it into expand/contract releases, or label the PR contract-migration."
               status=1
             fi
-          done
+          done <<< "$(git diff --name-only --diff-filter=AMR "$BASE_SHA"...HEAD -- 'backend/prisma/migrations/*/migration.sql')"
           exit $status

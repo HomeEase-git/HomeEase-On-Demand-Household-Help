@@ -48,7 +48,7 @@ services:
       - key: RATE_LIMIT_AUTH_WINDOW_MS
         value: "900000"
       - key: RATE_LIMIT_AUTH_MAX
-        value: "10"
+        value: "25" # per-IP backstop only; the real guards are account-scoped
 
       # --- Database: Neon (production branch), not Render Postgres ---
       - key: DATABASE_URL
