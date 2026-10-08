@@ -15,6 +15,8 @@ interface AuthRequest extends Request {
 
 const TITLE_MAX = 60;
 const SUBTITLE_MAX = 120;
+export const BANNER_FONTS = ['SERIF', 'MONOSPACE', 'CONDENSED', 'CASUAL'] as const;
+const HEX_COLOR = /^#[0-9a-fA-F]{6}$/;
 const ALLOWED_IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
 const MAX_IMAGE_BYTES = Number(process.env.MAX_FILE_SIZE) || 5 * 1024 * 1024;
 
@@ -23,6 +25,8 @@ export type PromoBannerInput = {
   subtitle?: unknown;
   imageUrl?: unknown;
   linkServiceTypeId?: unknown;
+  textColor?: unknown;
+  fontFamily?: unknown;
   isActive?: unknown;
   startsAt?: unknown;
   endsAt?: unknown;
@@ -33,6 +37,8 @@ type CleanBanner = {
   subtitle?: string | null;
   imageUrl?: string;
   linkServiceTypeId?: string | null;
+  textColor?: string | null;
+  fontFamily?: string | null;
   isActive?: boolean;
   startsAt?: Date | null;
   endsAt?: Date | null;
@@ -78,6 +84,18 @@ export function validatePromoBannerInput(
     }
     data.linkServiceTypeId = (body.linkServiceTypeId as string | null) || null;
   }
+  if (body.textColor !== undefined) {
+    if (body.textColor !== null && body.textColor !== '' && (typeof body.textColor !== 'string' || !HEX_COLOR.test(body.textColor))) {
+      return { error: 'Text color must be a hex color like #FFFFFF.' };
+    }
+    data.textColor = body.textColor ? (body.textColor as string).toUpperCase() : null;
+  }
+  if (body.fontFamily !== undefined) {
+    if (body.fontFamily !== null && body.fontFamily !== '' && !BANNER_FONTS.includes(body.fontFamily as never)) {
+      return { error: `Font must be one of ${BANNER_FONTS.join(', ')}.` };
+    }
+    data.fontFamily = (body.fontFamily as string | null) || null;
+  }
   if (body.isActive !== undefined) {
     if (typeof body.isActive !== 'boolean') return { error: 'isActive must be true or false.' };
     data.isActive = body.isActive;
@@ -112,7 +130,7 @@ export const listActivePromoBanners = async (_req: Request, res: Response) => {
         ],
       },
       orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }],
-      select: { id: true, title: true, subtitle: true, imageUrl: true, linkServiceTypeId: true },
+      select: { id: true, title: true, subtitle: true, imageUrl: true, linkServiceTypeId: true, textColor: true, fontFamily: true },
     });
     return res.json({ success: true, data: banners });
   } catch (error) {

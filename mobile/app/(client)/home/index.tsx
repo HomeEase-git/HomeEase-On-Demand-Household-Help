@@ -257,6 +257,8 @@ export default function ClientHomeScreen() {
                     title: banner.title,
                     subtitle: banner.subtitle,
                     image: banner.imageUrl,
+                    textColor: banner.textColor,
+                    fontFamily: banner.fontFamily,
                     onPress: banner.categorySlug
                       ? () => router.push(`/(client)/category/${banner.categorySlug}`)
                       : undefined,

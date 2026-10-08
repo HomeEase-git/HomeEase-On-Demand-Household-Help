@@ -14,6 +14,9 @@ type Banner = {
   title: string;
   subtitle?: string | null;
   color?: string;
+  /** Admin-chosen title/subtitle styling; see BANNER_FONTS in the backend. */
+  textColor?: string | null;
+  fontFamily?: string | null;
   /** A bundled image, or a remote URL (admin-managed banners). */
   image?: ImageSourcePropType | string;
   /** Tapping the banner; omitted for display-only banners. */
@@ -27,11 +30,23 @@ type Props = {
 const { width } = Dimensions.get("window");
 const CARD_WIDTH = width - 48;
 const AUTO_SCROLL_INTERVAL = 4000;
+// No bundled fonts, so these are Android system families.
+const FONT_FAMILIES: Record<string, string> = {
+  SERIF: "serif",
+  MONOSPACE: "monospace",
+  CONDENSED: "sans-serif-condensed",
+  CASUAL: "casual",
+};
 const TEXT_SHADOW = {
   textShadowColor: "rgba(0,0,0,0.6)",
   textShadowOffset: { width: 0, height: 1 },
   textShadowRadius: 4,
 };
+
+const textStyle = (b: Banner) => ({
+  ...(b.textColor ? { color: b.textColor } : null),
+  ...(b.fontFamily && FONT_FAMILIES[b.fontFamily] ? { fontFamily: FONT_FAMILIES[b.fontFamily] } : null),
+});
 
 export const PromoBanner: React.FC<Props> = ({ banners }) => {
   const [index, setIndex] = useState(0);
@@ -90,14 +105,14 @@ export const PromoBanner: React.FC<Props> = ({ banners }) => {
                 />
                 <Text
                   className="text-white font-extrabold text-2xl"
-                  style={TEXT_SHADOW}
+                  style={[TEXT_SHADOW, textStyle(item)]}
                 >
                   {item.title}
                 </Text>
                 {item.subtitle && (
                   <Text
                     className="text-white font-semibold text-sm mt-1"
-                    style={TEXT_SHADOW}
+                    style={[TEXT_SHADOW, textStyle(item)]}
                   >
                     {item.subtitle}
                   </Text>
