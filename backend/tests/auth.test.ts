@@ -1,7 +1,13 @@
 import request from 'supertest';
 import app from '@/app';
 import prisma from '@config/database';
+import { sendOtpEmail } from '@utils/emailService';
 import { createTestUser, deleteTestUser } from './helpers';
+
+jest.mock('@utils/emailService', () => ({
+  ...jest.requireActual('@utils/emailService'),
+  sendOtpEmail: jest.fn().mockResolvedValue(undefined),
+}));
 
 describe('Auth', () => {
   const createdUserIds: string[] = [];
@@ -48,6 +54,21 @@ describe('Auth', () => {
       expect(res.body.data.token).toEqual(expect.any(String));
       expect(res.body.data.role).toBe('ADMIN');
       expect(res.body.data.email).toBe(user.email);
+    });
+
+    it('blocks an unverified client until the OTP is entered, and sends a new code', async () => {
+      const { user, plainPassword } = await createTestUser('login-unverified', { role: 'CLIENT' });
+      createdUserIds.push(user.id);
+      await prisma.user.update({ where: { id: user.id }, data: { isVerified: false } });
+
+      const res = await request(app)
+        .post('/api/auth/login')
+        .send({ email: user.email, password: plainPassword });
+
+      expect(res.status).toBe(403);
+      expect(res.body.code).toBe('EMAIL_NOT_VERIFIED');
+      expect(res.body.data?.token).toBeUndefined();
+      expect(sendOtpEmail).toHaveBeenCalledWith(user.email, expect.stringMatching(/^\d{6}$/));
     });
 
     it('rejects login for a suspended account', async () => {

@@ -323,6 +323,24 @@ export const login = async (req: Request, res: Response) => {
       return res.status(403).json({ ...errorResponse(403, message), ...(code ? { code } : {}) });
     }
 
+    // Signup issues a session before the email OTP is entered, but sign-in
+    // must not — an unverified client/worker gets a fresh code and is sent
+    // back to the verification step. Admins are provisioned out of band and
+    // gated by MFA instead.
+    if (user.role !== 'ADMIN' && !user.isVerified) {
+      const otp = generateOtp();
+      await storeOtp(user.id, otp);
+      try {
+        await sendOtpEmail(user.email, otp);
+      } catch (emailError) {
+        console.error('Failed to send OTP email at login:', emailError);
+      }
+      return res.status(403).json({
+        ...errorResponse(403, 'Please verify your email. We sent you a new code.'),
+        code: 'EMAIL_NOT_VERIFIED',
+      });
+    }
+
     // MFA — mandatory for admins (closes the "no MFA on admin accounts"
     // security-audit finding), opt-in for clients/workers (see
     // mfaSetupRequired below, which only force-nudges admins). Either way,
