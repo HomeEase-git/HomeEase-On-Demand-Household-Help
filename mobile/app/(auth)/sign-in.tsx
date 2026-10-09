@@ -132,6 +132,14 @@ export default function SignInScreen() {
       // this email" and "wrong password" (prevents attackers from using this
       // form to discover which emails are registered), so show one combined,
       // human message here rather than whatever reason it gives.
+      if (err?.code === "EMAIL_NOT_VERIFIED") {
+        toast.info(err.message);
+        router.push({
+          pathname: "/(auth)/otp-verification",
+          params: { email: email.trim().toLowerCase() },
+        });
+        return;
+      }
       if (err?.code === "ACCOUNT_SUSPENDED" || err?.code === "ACCOUNT_BANNED") {
         setAccountBlocked(true);
       }

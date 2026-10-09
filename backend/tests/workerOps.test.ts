@@ -131,6 +131,39 @@ describe('worker operations overhaul', () => {
       }
     });
 
+    it('ignores client-supplied prices and rejects a negative tip', async () => {
+      const honest = await request(app)
+        .post('/api/bookings')
+        .set('Authorization', `Bearer ${clientToken}`)
+        .send(bookingBody(isoDay(addDays(phTodayStart(), 11)), '10:00'));
+      expect(honest.status).toBe(201);
+
+      const tampered = await request(app)
+        .post('/api/bookings')
+        .set('Authorization', `Bearer ${clientToken}`)
+        .send(
+          bookingBody(isoDay(addDays(phTodayStart(), 12)), '10:00', {
+            estimatedPrice: 1,
+            finalPrice: 1,
+            totalPrice: 1,
+            total: 1,
+            addOns: [{ name: 'Free discount', price: -500 }],
+          }),
+        );
+      expect(tampered.status).toBe(201);
+      expect(tampered.body.data.estimatedPrice).toBe(honest.body.data.estimatedPrice);
+      const stored = await prisma.booking.findUniqueOrThrow({ where: { id: tampered.body.data.id } });
+      expect(stored.estimatedPrice).toBe(honest.body.data.estimatedPrice);
+      expect(stored.finalPrice).toBeNull();
+      expect(stored.addOnsSnapshot).toEqual([{ name: 'Free discount', price: 0 }]);
+
+      const negativeTip = await request(app)
+        .post('/api/bookings')
+        .set('Authorization', `Bearer ${clientToken}`)
+        .send(bookingBody(isoDay(addDays(phTodayStart(), 13)), '10:00', { tip: -100 }));
+      expect(negativeTip.status).toBe(400);
+    });
+
     it('rejects times outside 7:00-18:00 and dates the worker has closed', async () => {
       const date = isoDay(addDays(phTodayStart(), 5));
       const early = await request(app)
