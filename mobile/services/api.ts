@@ -799,7 +799,7 @@ function normalizeWorkerListItem(worker: any): NormalizedWorkerListItem {
       ? worker.serviceTypeNames
       : [],
     rating: Number(worker.rating ?? 0),
-    reviews: Number(worker.reviews ?? worker.reviewCount ?? 0),
+    reviews: Number(worker.reviews ?? worker.reviewCount ?? worker.totalReviews ?? 0),
     basePrice:
       typeof worker.basePrice === "number"
         ? worker.basePrice
@@ -2545,7 +2545,8 @@ export async function updateUserProfile(data: {
       email: response.email,
       phone: response.phone,
       avatar: response.avatar,
-      role: response.role?.toLowerCase() || 'client',
+      // PATCH /users/me doesn't return role; callers spread this over the store user.
+      ...(response.role && { role: response.role.toLowerCase() }),
       bio: response.bio,
       yearsOfExperience: response.yearsOfExperience,
       serviceArea: response.serviceArea,

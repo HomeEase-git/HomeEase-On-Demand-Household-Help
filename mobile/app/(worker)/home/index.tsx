@@ -49,7 +49,11 @@ export default function WorkerHomeScreen() {
   const todayJobs = jobs.filter((j) => j.scheduledDate?.slice(0, 10) === today);
   const nextJob = pickNextJob(jobs);
   const todayEarnings = jobs
-    .filter((j) => j.status === "Completed" && j.scheduledDate?.slice(0, 10) === today)
+    .filter(
+      (j) =>
+        j.status === "Completed" &&
+        (j.completedAt ? phTodayIso(new Date(j.completedAt)) : j.scheduledDate?.slice(0, 10)) === today,
+    )
     .reduce((sum, j) => sum + getWorkerNetAmount(j), 0);
 
   const userId = user?.id;

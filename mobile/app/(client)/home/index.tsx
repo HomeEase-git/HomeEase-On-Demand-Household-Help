@@ -1,4 +1,4 @@
-import React, { useRef, useState, useEffect, useCallback } from "react";
+import React, { useRef, useState, useCallback } from "react";
 import {
   View,
   Text,
@@ -8,7 +8,7 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { AppIcon as Ionicons } from "../../../components/icons/AppIcon";
-import { useRouter } from "expo-router";
+import { useRouter, useFocusEffect } from "expo-router";
 import { SectionHeader } from "../../../components/ui/SectionHeader";
 import { PromoBanner } from "../../../components/ui/PromoBanner";
 import { CategoryCard } from "../../../components/cards/CategoryCard";
@@ -98,8 +98,10 @@ export default function ClientHomeScreen() {
 
   const firstName = user?.name?.split(" ")[0] ?? "there";
 
+  // No setLoading(true) here: this also runs on every tab focus (so newly
+  // approved workers show up), and a spinner flash each visit is worse than a
+  // quiet refresh. `loading` starts true for the first load.
   const loadHomeData = useCallback(async () => {
-    setLoading(true);
     setError(null);
     try {
       const [serviceTypes, workersResponse, promoBanners, bookings] = await Promise.all([
@@ -150,12 +152,11 @@ export default function ClientHomeScreen() {
     }
   }, [filters]);
 
-  useEffect(() => {
-    async function run() {
-      await loadHomeData();
-    }
-    run();
-  }, [loadHomeData]);
+  useFocusEffect(
+    useCallback(() => {
+      loadHomeData();
+    }, [loadHomeData]),
+  );
 
   useTabRefresh("client:home", loadHomeData);
   const refreshControl = usePullToRefresh(loadHomeData);

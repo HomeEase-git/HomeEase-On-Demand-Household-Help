@@ -35,7 +35,7 @@ const POLL_INTERVAL_MS = 25000;
 
 type BookingDetail = {
   id: string;
-  client: { fullName: string; phone?: string | null };
+  client: { id: string; fullName: string; phone?: string | null };
   service: string;
   status: string;
   scheduledDate: string;
@@ -448,7 +448,7 @@ export default function JobDetailScreen() {
   };
 
   const handleMessageClient = () => {
-    router.push("/(worker)/inbox");
+    router.push(`/(worker)/inbox/chat/${job.client.id}`);
   };
 
   const handleShareReceipt = () => {

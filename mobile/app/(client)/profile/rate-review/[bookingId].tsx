@@ -140,6 +140,9 @@ export default function RateBookingScreen() {
     }
 
     prefillFromBooking(booking);
+    // Booking lives in another tab; pop this one back to its root first so
+    // returning to Profile after booking doesn't land back on this screen.
+    router.dismissAll();
     router.push("/(client)/booking/new/step-1");
   };
 

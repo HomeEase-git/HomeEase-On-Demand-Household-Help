@@ -16,6 +16,7 @@ export type WorkerJob = {
   estimatedPrice: number;
   finalPrice: number | null;
   rating: number | null;
+  completedAt?: string | null;
   // Exact start time "HH:mm" (older bookings: their old slot's start).
   time: string | null;
   isRush: boolean;
@@ -48,6 +49,7 @@ export type ApiWorkerBooking = {
   estimatedPrice: number;
   finalPrice: number | null;
   rating: number | null;
+  completedAt?: string | null;
   scheduledTime?: string | null;
   timeSlot?: TimeSlot | null;
   isRush?: boolean;
@@ -78,6 +80,7 @@ export function mapApiJob(b: ApiWorkerBooking): WorkerJob {
     estimatedPrice: b.estimatedPrice,
     finalPrice: b.finalPrice ?? null,
     rating: b.rating ?? null,
+    completedAt: b.completedAt ?? null,
     time: bookingStartTime(b),
     isRush: b.isRush ?? false,
     parentBookingId: b.parentBookingId ?? null,

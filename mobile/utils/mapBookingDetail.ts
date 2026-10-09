@@ -105,6 +105,7 @@ export type ApiBookingDetail = {
     reason?: string | null;
     compensationStatus?: string;
     compensationAmount?: number | null;
+    cancelledBy?: string;
   } | null;
 };
 
