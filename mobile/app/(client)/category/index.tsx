@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useState } from "react";
 import {
   View,
   Text,
@@ -7,7 +7,7 @@ import {
   ActivityIndicator,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { useRouter } from "expo-router";
+import { useRouter, useFocusEffect } from "expo-router";
 import SearchBar from "../../../components/ui/SearchBar";
 import CategoryCard from "../../../components/cards/CategoryCard";
 import { getServiceTypes } from "../../../services/api";
@@ -29,8 +29,9 @@ export default function CategoryIndexScreen() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  // Runs on every tab focus (new workers change the counts); `loading` starts
+  // true so only the first load shows the spinner.
   const loadCategories = useCallback(async () => {
-    setLoading(true);
     setError(null);
     try {
       const serviceTypes = await getServiceTypes();
@@ -48,12 +49,11 @@ export default function CategoryIndexScreen() {
     }
   }, []);
 
-  useEffect(() => {
-    async function run() {
-      await loadCategories();
-    }
-    run();
-  }, [loadCategories]);
+  useFocusEffect(
+    useCallback(() => {
+      loadCategories();
+    }, [loadCategories]),
+  );
 
   useTabRefresh("client:category", loadCategories);
   const refreshControl = usePullToRefresh(loadCategories);

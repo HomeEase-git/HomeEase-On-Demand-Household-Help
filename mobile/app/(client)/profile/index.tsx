@@ -124,6 +124,11 @@ export default function ClientProfileScreen() {
               <Text className="text-text-secondary text-sm">
                 {displayEmail}
               </Text>
+              {!!user?.phone && (
+                <Text className="text-text-secondary text-sm">
+                  {user.phone}
+                </Text>
+              )}
               <Pressable
                 className="mt-2"
                 onPress={() => router.push("/(client)/profile/edit")}

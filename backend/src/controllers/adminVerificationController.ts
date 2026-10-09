@@ -223,7 +223,6 @@ export const approveVerification = async (req: AuthRequest, res: Response) => {
             select: { addressLat: true, addressLng: true, birthDate: true, yearsExperience: true },
           })
         : null;
-      const missingAddress = record.user.role === 'WORKER' && (workerProfile?.addressLat == null || workerProfile?.addressLng == null);
 
       // Outside the accepted age range (AppSettings.workerMinAge/MaxAge) is a
       // hard stop — no override. A missing date of birth (older
@@ -241,7 +240,6 @@ export const approveVerification = async (req: AuthRequest, res: Response) => {
 
       const missingRequirements = [
         ...missingTypes,
-        ...(missingAddress ? ['geocoded address'] : []),
         ...(missingBirthDate ? ['date of birth (confirm the age from the ID)'] : []),
         ...(missingExperience ? ['years of experience'] : []),
       ];

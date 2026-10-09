@@ -99,6 +99,9 @@ export default function InboxScreen() {
             >
               Notifications
             </Text>
+            {notifications.some((n) => !n.isRead) && (
+              <View className="absolute top-1 right-1 w-2.5 h-2.5 rounded-full bg-red-500" />
+            )}
           </Pressable>
         </View>
         {tab === "notifications" && notifications.some((n) => !n.isRead) && (

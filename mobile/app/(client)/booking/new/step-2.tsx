@@ -126,10 +126,14 @@ export default function BookingStep2Screen() {
   };
 
   // Start from the default saved address so a repeat booking is one tap less.
+  // "Book again" brings the old address text but no coordinates, so a shown
+  // address without a pin is re-resolved from the matching saved address.
   const defaultTried = useRef(false);
   useEffect(() => {
-    if (defaultTried.current || address) return;
-    const preferred = addresses.find((a) => a.isDefault);
+    if (defaultTried.current || (address && lat != null && lng != null)) return;
+    const preferred =
+      addresses.find((a) => !!address && displayAddress(a) === address) ??
+      addresses.find((a) => a.isDefault);
     if (!preferred) return;
     // Deferred: selecting sets state, which the effect rule disallows synchronously.
     const timer = setTimeout(() => {

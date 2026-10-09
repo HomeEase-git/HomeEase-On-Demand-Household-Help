@@ -3,6 +3,7 @@ import { View, Text, ScrollView, Pressable, Linking } from "react-native";
 import { RemoteImage } from "../../../../components/ui/RemoteImage";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useFocusEffect, useRouter, useLocalSearchParams } from "expo-router";
+import { usePolling } from "../../../../hooks/usePolling";
 import { Ionicons } from "@expo/vector-icons";
 import ScreenHeader from "../../../../components/ui/ScreenHeader";
 import StatusBadge from "../../../../components/ui/StatusBadge";
@@ -61,6 +62,7 @@ export default function BookingDetailScreen() {
   const [processingPayment, setProcessingPayment] = useState(false);
   const [checkoutUrl, setCheckoutUrl] = useState<string | null>(null);
   const [checkoutVisible, setCheckoutVisible] = useState(false);
+  const [focused, setFocused] = useState(false);
 
   const refreshBookingDetail = React.useCallback(async () => {
     const data: ApiBookingDetail = await getBookingDetail(bookingId);
@@ -75,6 +77,7 @@ export default function BookingDetailScreen() {
   useFocusEffect(
     React.useCallback(() => {
       let cancelled = false;
+      setFocused(true);
       (async () => {
         setLoading(true);
         try {
@@ -87,9 +90,17 @@ export default function BookingDetailScreen() {
       })();
       return () => {
         cancelled = true;
+        setFocused(false);
       };
     }, [refreshBookingDetail]),
   );
+
+  // Picks up the worker's quote, arrival and completion without a manual
+  // refresh. Paused while the client is mid-action so a refresh can't
+  // disturb the payment or confirmation flow.
+  usePolling(() => refreshBookingDetail().catch(() => {}), 10000, {
+    paused: !focused || confirmingCompletion || processingPayment || checkoutVisible,
+  });
 
   // Declared before the early returns below so the hook order stays the
   // same between the loading render and the loaded one.
@@ -730,6 +741,19 @@ export default function BookingDetailScreen() {
             </Text>
           </View>
         )}
+
+        {/* Worker cancelled — show their reason (the on-site CLIENT-fault case has its own banner above) */}
+        {rawDetail?.cancellation?.cancelledBy === "WORKER" &&
+          rawDetail.cancellation.fault !== "CLIENT" &&
+          !!rawDetail.cancellation.reason &&
+          !/^[A-Z_]+$/.test(rawDetail.cancellation.reason) && (
+            <View className="bg-warning/10 border border-warning/30 rounded-2xl p-4 mb-4">
+              <Text className="text-warning font-bold text-sm">Cancelled by your pro</Text>
+              <Text className="text-text-secondary text-xs mt-1">
+                Reason: &ldquo;{rawDetail.cancellation.reason}&rdquo;
+              </Text>
+            </View>
+          )}
 
         {/* This is a follow-up job after an inspection */}
         {rawDetail?.parentBooking && (

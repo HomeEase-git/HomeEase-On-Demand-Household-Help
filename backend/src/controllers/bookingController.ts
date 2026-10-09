@@ -767,6 +767,7 @@ export const listBookings = async (req: AuthRequest, res: Response) => {
           },
           serviceTask: { select: { id: true, name: true, serviceType: { select: { name: true } } } },
           review: { select: { rating: true } },
+          payment: { select: { capturedAt: true } },
           // Multi-day upfront booking (see createMultiDayBooking) — lets the
           // list show "Day 2 of 3" instead of three unrelated-looking jobs.
           // Ordered by date (not insertion order) so dayIndex below always
@@ -833,6 +834,8 @@ export const listBookings = async (req: AuthRequest, res: Response) => {
       // settled at capture time (see paymentLifecycleService).
       workerPayoutEstimate: calculateWorkerPayout(b.finalPrice ?? b.estimatedPrice, b.tip ?? 0, commissionRate, withholdingTaxRate),
       rating: b.review?.rating ?? null,
+      // When the job was settled — the worker's "Earned Today" counts this, not the scheduled date.
+      completedAt: b.status === 'COMPLETED' ? (b.payment?.capturedAt ?? b.updatedAt) : null,
       groupId: b.groupId ?? null,
       groupTotalDays: b.group?.totalDays ?? null,
       groupDayIndex: b.group ? b.group.bookings.findIndex((gb: { id: string }) => gb.id === b.id) + 1 : null,
