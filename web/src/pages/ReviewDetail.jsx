@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { useParams } from 'react-router-dom'
 import { Link } from 'react-router-dom'
 import PageHeader from '../components/common/PageHeader'
@@ -14,38 +15,46 @@ const SUB_NAV = [
   { to: '/reviews/flagged', label: 'Flagged Reviews' },
 ]
 
+const MIN_WARN_REASON_LENGTH = 10
+
 export default function ReviewDetail() {
   const { id } = useParams()
   const { data: review, loading, error, reload } = useDetailQuery(fetchReviewById, id)
   const { showSuccess, showError } = useToast()
+  const [warnModalOpen, setWarnModalOpen] = useState(false)
+  const [warnReason, setWarnReason] = useState('')
+  const [warnSubmitting, setWarnSubmitting] = useState(false)
 
-  const keepPublic = async () => {
+  const dismissFlag = async () => {
     try {
-      await updateReview(id, { flagged: false, status: 'VISIBLE', flagReason: null })
+      // Clears the flag only — no change to status/visibility. For a report
+      // that turns out to be nothing; anything serious enough to act on
+      // goes through Warn User instead.
+      await updateReview(id, { flagged: false })
       await reload()
-      showSuccess('Review kept public.')
+      showSuccess('Flag dismissed.')
     } catch (err) {
       showError(err.message || 'Failed to update review')
     }
   }
 
-  const hideReview = async () => {
-    try {
-      await updateReview(id, { flagged: false, status: 'HIDDEN' })
-      await reload()
-      showSuccess('Review hidden from the worker profile.')
-    } catch (err) {
-      showError(err.message || 'Failed to update review')
-    }
+  const closeWarnModal = () => {
+    setWarnModalOpen(false)
+    setWarnReason('')
   }
 
-  const warnUser = async () => {
+  const confirmWarnUser = async () => {
+    if (warnReason.trim().length < MIN_WARN_REASON_LENGTH) return
+    setWarnSubmitting(true)
     try {
-      await updateReview(id, { flagged: false, status: 'WARNED' })
+      await updateReview(id, { flagged: false, status: 'WARNED', flagReason: warnReason.trim() })
       await reload()
       showSuccess('Review hidden and user warned.')
+      closeWarnModal()
     } catch (err) {
       showError(err.message || 'Failed to update review')
+    } finally {
+      setWarnSubmitting(false)
     }
   }
 
@@ -72,29 +81,22 @@ export default function ReviewDetail() {
         subtitle={`Review ${review.displayId}`}
         actions={
           <>
-            <button
-              type="button"
-              className="btn btn-outline"
-              style={{ marginRight: '0.5rem' }}
-              onClick={keepPublic}
-              title="Keep Public (dismiss flag)"
-            >
-              Keep Public
-            </button>
-            <button
-              type="button"
-              className="btn btn-outline"
-              style={{ marginRight: '0.5rem' }}
-              onClick={hideReview}
-              title="Hide review from worker profile"
-            >
-              Hide Review
-            </button>
+            {review.flagged && (
+              <button
+                type="button"
+                className="btn btn-outline"
+                style={{ marginRight: '0.5rem' }}
+                onClick={dismissFlag}
+                title="Dismiss flag (no change to the review)"
+              >
+                Dismiss Flag
+              </button>
+            )}
             <button
               type="button"
               className="btn btn-danger"
               style={{ marginRight: '0.5rem' }}
-              onClick={warnUser}
+              onClick={() => setWarnModalOpen(true)}
               title="Hide and warn user"
             >
               Warn User
@@ -164,6 +166,42 @@ export default function ReviewDetail() {
         </div>
       </SectionCard>
       <SubNav items={SUB_NAV} />
+
+      {warnModalOpen && (
+        <div className="modal-backdrop" onClick={closeWarnModal} role="presentation">
+          <div className="modal" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true">
+            <h2 className="modal-title">Warn User — {review.displayId}</h2>
+            <p className="modal-body" style={{ marginBottom: '0.75rem' }}>
+              This hides the review and records why the user is being warned. The reason below is kept as the
+              review's flag reason.
+            </p>
+            <label htmlFor="warn-reason" style={{ display: 'block', marginBottom: '0.35rem', fontWeight: 600 }}>
+              Reason for warning (required, at least {MIN_WARN_REASON_LENGTH} characters)
+            </label>
+            <textarea
+              id="warn-reason"
+              className="form-input field-full field-textarea"
+              rows={3}
+              value={warnReason}
+              onChange={(e) => setWarnReason(e.target.value)}
+              placeholder="Explain why this user is being warned..."
+            />
+            <div className="modal-actions" style={{ justifyContent: 'flex-end', marginTop: '1rem' }}>
+              <button type="button" className="btn btn-outline" onClick={closeWarnModal} disabled={warnSubmitting}>
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="btn btn-danger"
+                onClick={confirmWarnUser}
+                disabled={warnReason.trim().length < MIN_WARN_REASON_LENGTH || warnSubmitting}
+              >
+                {warnSubmitting ? 'Submitting...' : 'Confirm Warning'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   )
 }

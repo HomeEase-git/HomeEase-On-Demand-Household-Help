@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import type { BookingStatus, ConditionType, PaymentMethodType, RoomType, WorkerCancellationReason } from '@prisma/client';
 import prisma from '@config/database';
 import { errorResponse } from '@utils/errorResponse';
+import { maskProfanity } from '@utils/profanityFilter';
 import { notifyUser } from '@utils/notify';
 import { sendSmsToUser } from '@utils/smsService';
 import { writeAuditLog } from '@utils/auditLog';
@@ -3350,7 +3351,7 @@ export const submitReview = async (req: AuthRequest, res: Response) => {
       data: {
         id: review.id,
         rating: review.rating,
-        comment: review.comment,
+        comment: maskProfanity(review.comment),
         photoUrls: review.photoUrls,
         workerNewRating: avgRating,
       },

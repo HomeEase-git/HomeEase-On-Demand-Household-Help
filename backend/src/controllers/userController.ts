@@ -4,6 +4,7 @@ import * as bcrypt from 'bcryptjs';
 import prisma from '@config/database';
 import { errorResponse } from '@utils/errorResponse';
 import { toOwnedStoredUrl } from '@utils/storageUrls';
+import { maskProfanity } from '@utils/profanityFilter';
 import { ageInYears, workerAgeError } from '@utils/age';
 import { getAppSettings } from '@services/appSettingsService';
 import { eraseAccount, findDeletionBlockers } from '@services/accountDeletionService';
@@ -1199,7 +1200,7 @@ export const getMyReviews = async (req: AuthRequest, res: Response) => {
       workerAvatar: review.booking.worker?.avatar ?? null,
       serviceType: review.booking.serviceTask?.name ?? 'Service',
       rating: review.rating,
-      comment: review.comment,
+      comment: maskProfanity(review.comment),
       photoUrls: review.photoUrls,
       createdAt: review.createdAt,
     }));

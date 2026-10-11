@@ -16,9 +16,14 @@ const SUB_NAV = [
 
 const PAGE_SIZE = 10
 
+const MIN_WARN_REASON_LENGTH = 10
+
 export default function ReviewsFlagged() {
   const [selected, setSelected] = useState(null)
   const [page, setPage] = useState(1)
+  const [warnTarget, setWarnTarget] = useState(null)
+  const [warnReason, setWarnReason] = useState('')
+  const [warnSubmitting, setWarnSubmitting] = useState(false)
   const { showSuccess, showError } = useToast()
 
   const fetchFn = useCallback(() => fetchReviews({ flagged: 'true', page: 1, limit: 50 }), [])
@@ -38,43 +43,40 @@ export default function ReviewsFlagged() {
     }
   }
 
-  const keepPublic = async (id) => {
+  const dismissFlag = async (id) => {
     try {
-      const updated = await updateReview(id, {
-        flagged: false,
-        status: 'VISIBLE',
-        flagReason: null,
-      })
+      // Clears the flag only — no change to status/visibility. For a report
+      // that turns out to be nothing; anything serious enough to act on
+      // goes through Warn User instead.
+      const updated = await updateReview(id, { flagged: false })
       updateLocalReview(updated)
-      showSuccess('Review kept public.')
+      showSuccess('Flag dismissed.')
     } catch (err) {
       showError(err.message || 'Failed to update review')
     }
   }
 
-  const hideReview = async (id) => {
-    try {
-      const updated = await updateReview(id, {
-        flagged: false,
-        status: 'HIDDEN',
-      })
-      updateLocalReview(updated)
-      showSuccess('Review hidden from the worker profile.')
-    } catch (err) {
-      showError(err.message || 'Failed to update review')
-    }
+  const closeWarnModal = () => {
+    setWarnTarget(null)
+    setWarnReason('')
   }
 
-  const warnUser = async (id) => {
+  const confirmWarnUser = async () => {
+    if (!warnTarget || warnReason.trim().length < MIN_WARN_REASON_LENGTH) return
+    setWarnSubmitting(true)
     try {
-      const updated = await updateReview(id, {
+      const updated = await updateReview(warnTarget.id, {
         flagged: false,
         status: 'WARNED',
+        flagReason: warnReason.trim(),
       })
       updateLocalReview(updated)
       showSuccess('Review hidden and user warned.')
+      closeWarnModal()
     } catch (err) {
       showError(err.message || 'Failed to update review')
+    } finally {
+      setWarnSubmitting(false)
     }
   }
 
@@ -126,25 +128,16 @@ export default function ReviewsFlagged() {
                           type="button"
                           className="btn btn-outline"
                           style={{ padding: '0.25rem 0.5rem', marginRight: '0.5rem' }}
-                          onClick={() => keepPublic(review.id)}
-                          title="Keep Public (dismiss flag)"
+                          onClick={() => dismissFlag(review.id)}
+                          title="Dismiss flag (no change to the review)"
                         >
-                          Keep Public
-                        </button>
-                        <button
-                          type="button"
-                          className="btn btn-outline"
-                          style={{ padding: '0.25rem 0.5rem', marginRight: '0.5rem' }}
-                          onClick={() => hideReview(review.id)}
-                          title="Hide review from worker profile"
-                        >
-                          Hide Review
+                          Dismiss
                         </button>
                         <button
                           type="button"
                           className="btn btn-danger"
                           style={{ padding: '0.25rem 0.5rem' }}
-                          onClick={() => warnUser(review.id)}
+                          onClick={() => setWarnTarget(review)}
                           title="Hide and warn user"
                         >
                           Warn User
@@ -229,6 +222,42 @@ export default function ReviewsFlagged() {
                 onClick={() => setSelected(null)}
               >
                 Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {warnTarget && (
+        <div className="modal-backdrop" onClick={closeWarnModal} role="presentation">
+          <div className="modal" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true">
+            <h2 className="modal-title">Warn User — {warnTarget.displayId}</h2>
+            <p className="modal-body" style={{ marginBottom: '0.75rem' }}>
+              This hides the review and records why the user is being warned. The reason below is kept as the
+              review's flag reason.
+            </p>
+            <label htmlFor="warn-reason" style={{ display: 'block', marginBottom: '0.35rem', fontWeight: 600 }}>
+              Reason for warning (required, at least {MIN_WARN_REASON_LENGTH} characters)
+            </label>
+            <textarea
+              id="warn-reason"
+              className="form-input field-full field-textarea"
+              rows={3}
+              value={warnReason}
+              onChange={(e) => setWarnReason(e.target.value)}
+              placeholder="Explain why this user is being warned..."
+            />
+            <div className="modal-actions" style={{ justifyContent: 'flex-end', marginTop: '1rem' }}>
+              <button type="button" className="btn btn-outline" onClick={closeWarnModal} disabled={warnSubmitting}>
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="btn btn-danger"
+                onClick={confirmWarnUser}
+                disabled={warnReason.trim().length < MIN_WARN_REASON_LENGTH || warnSubmitting}
+              >
+                {warnSubmitting ? 'Submitting...' : 'Confirm Warning'}
               </button>
             </div>
           </div>
