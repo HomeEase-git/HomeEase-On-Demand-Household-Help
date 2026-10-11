@@ -71,6 +71,17 @@ export function formatDispute(record: DisputeRecord) {
     clientId: booking.client?.id ?? null,
     worker: booking.worker?.fullName ?? '—',
     workerId: booking.worker?.id ?? null,
+    raisedById: record.raisedById,
+    // Which side of the booking filed this — 'raisedById' is only a soft
+    // reference (see schema), so this is derived by comparison rather than
+    // a relation. Lets the admin UI show/filter by who it came from without
+    // guessing from `reason` text.
+    raisedByRole:
+      record.raisedById === booking.client?.id
+        ? 'CLIENT'
+        : record.raisedById === booking.worker?.id
+          ? 'WORKER'
+          : null,
     amount: amount != null ? formatPeso(amount) : '—',
     reason: record.reason,
     evidenceUrls: record.evidenceUrls,
