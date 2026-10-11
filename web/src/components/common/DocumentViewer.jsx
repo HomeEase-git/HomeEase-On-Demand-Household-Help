@@ -12,6 +12,22 @@ export default function DocumentViewer({ documents = [], onApproveDocument, onRe
   const [rejectingId, setRejectingId] = useState(null)
   const [rejectReason, setRejectReason] = useState('')
   const [busyId, setBusyId] = useState(null)
+  // Per-document "has an admin actually opened this" gate — an admin
+  // shouldn't be able to approve/reject a KYC document sight-unseen just
+  // because it uploaded fine. Deliberately client-side/session-only (not
+  // persisted): a page refresh re-hiding everything is the conservative
+  // failure mode, forcing a fresh look rather than silently trusting a
+  // stale "already viewed" flag from a different review session.
+  const [viewedIds, setViewedIds] = useState(() => new Set())
+
+  const markViewed = (docId) => {
+    setViewedIds((prev) => {
+      if (prev.has(docId)) return prev
+      const next = new Set(prev)
+      next.add(docId)
+      return next
+    })
+  }
 
   if (!documents.length) {
     return (
@@ -69,23 +85,39 @@ export default function DocumentViewer({ documents = [], onApproveDocument, onRe
               {doc.status && (
                 <Badge variant={STATUS_BADGE_VARIANT[doc.status] ?? 'pending'}>{doc.status}</Badge>
               )}
-              <a href={doc.url} target="_blank" rel="noreferrer" className="btn btn-outline btn-sm">
+              <a
+                href={doc.url}
+                target="_blank"
+                rel="noreferrer"
+                className="btn btn-outline btn-sm"
+                onClick={() => markViewed(doc.id)}
+              >
                 Open
               </a>
             </div>
-            {isImage && (
-              <img src={doc.url} alt={doc.name} className="document-viewer__preview" />
-            )}
-            {isPdf && (
-              <iframe
-                src={doc.url}
-                title={doc.name}
-                className="document-viewer__iframe"
-              />
-            )}
-            {!isImage && !isPdf && (
+            {viewedIds.has(doc.id) ? (
+              <>
+                {isImage && (
+                  <img src={doc.url} alt={doc.name} className="document-viewer__preview" />
+                )}
+                {isPdf && (
+                  <iframe
+                    src={doc.url}
+                    title={doc.name}
+                    className="document-viewer__iframe"
+                  />
+                )}
+                {!isImage && !isPdf && (
+                  <div className="document-viewer__fallback">
+                    Preview not available for this file type.
+                  </div>
+                )}
+              </>
+            ) : (
               <div className="document-viewer__fallback">
-                Preview not available for this file type.
+                <button type="button" className="btn btn-outline btn-sm" onClick={() => markViewed(doc.id)}>
+                  View Document
+                </button>
               </div>
             )}
             {doc.status === 'REJECTED' && doc.rejectionReason && (
@@ -104,7 +136,8 @@ export default function DocumentViewer({ documents = [], onApproveDocument, onRe
                   type="button"
                   className="btn btn-success btn-sm"
                   onClick={() => handleApprove(doc)}
-                  disabled={busyId === doc.id}
+                  disabled={busyId === doc.id || !viewedIds.has(doc.id)}
+                  title={viewedIds.has(doc.id) ? undefined : 'View the document before approving it'}
                 >
                   Approve Document
                 </button>
@@ -112,10 +145,16 @@ export default function DocumentViewer({ documents = [], onApproveDocument, onRe
                   type="button"
                   className="btn btn-danger btn-sm"
                   onClick={() => startReject(doc)}
-                  disabled={busyId === doc.id}
+                  disabled={busyId === doc.id || !viewedIds.has(doc.id)}
+                  title={viewedIds.has(doc.id) ? undefined : 'View the document before rejecting it'}
                 >
                   Reject Document
                 </button>
+                {!viewedIds.has(doc.id) && (
+                  <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                    View the document first
+                  </span>
+                )}
               </div>
             )}
             {rejectingId === doc.id && (
