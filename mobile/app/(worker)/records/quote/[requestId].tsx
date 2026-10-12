@@ -119,13 +119,13 @@ export default function SubmitQuoteScreen() {
   const materials = items.reduce((sum, i) => sum + priceOf(i), 0);
   const addOnsTotal = (booking?.addOns ?? []).reduce((sum, a) => (a.clientApprovedAt ? sum + a.price : sum), 0);
   const total = labor + addOnsTotal + materials;
-  // Every item must come with a receipt and a photo of it in use.
+  // Every item must come with a photo of its receipt — the quote is sent
+  // before the job starts, so there's no in-use photo yet.
   const itemIncomplete = (i: QuoteItemDraft) =>
     !i.name.trim() ||
     priceOf(i) <= 0 ||
     Math.abs(priceOf(i) * 100 - Math.round(priceOf(i) * 100)) > 1e-6 ||
-    i.receiptUrls.length === 0 ||
-    i.proofOfUseUrls.length === 0;
+    i.receiptUrls.length === 0;
   const hasIncompleteItem = items.some(itemIncomplete);
   const canSubmit = !hasIncompleteItem && (!isCustomQuote || labor > 0);
   const updateItem = (key: string, patch: Partial<QuoteItemDraft>) =>
@@ -222,8 +222,9 @@ export default function SubmitQuoteScreen() {
             {isCustomQuote
               ? "This job is priced by your quote. Enter your price for the work and any materials."
               : "Your service is covered by the booking price. Add any materials or extra items below."}{" "}
-            Each item needs a photo of its receipt and a photo of it used on the job. You can edit or remove items
-            until you submit. The client can refuse a quote that doesn&apos;t match the receipts.
+            Assess the job first. For anything you had to buy, enter the real amount and attach the receipt photo.
+            You can edit or remove items until you submit. The client approves the quote before you start the job,
+            and can refuse one that doesn&apos;t match the receipts.
           </Text>
         </View>
 
@@ -281,14 +282,6 @@ export default function SubmitQuoteScreen() {
               hint="The receipt(s) for this item"
               urls={item.receiptUrls}
               onChange={(receiptUrls) => updateItem(item.key, { receiptUrls })}
-              required
-            />
-            <ProofPhotosField
-              bookingId={booking.id}
-              label="Item in use"
-              hint="This item installed or used on the job"
-              urls={item.proofOfUseUrls}
-              onChange={(proofOfUseUrls) => updateItem(item.key, { proofOfUseUrls })}
               required
             />
           </View>

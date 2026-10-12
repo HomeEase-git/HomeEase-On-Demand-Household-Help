@@ -28,12 +28,12 @@ export default function ProofPhotosField({ bookingId, label, hint, urls, onChang
   const alertModal = useAlertModal();
   const [uploading, setUploading] = useState(false);
 
-  const upload = async (uri: string) => {
+  const upload = async (asset: ImagePicker.ImagePickerAsset) => {
     setUploading(true);
     try {
-      let uploadUri = uri;
+      let uploadUri = asset.uri;
       try {
-        uploadUri = (await compressImage(uri)).uri;
+        uploadUri = (await compressImage(asset.uri, 1600, 0.7, asset)).uri;
       } catch {
         // Upload the original if compression fails.
       }
@@ -59,7 +59,7 @@ export default function ProofPhotosField({ bookingId, label, hint, urls, onChang
       const options: ImagePicker.ImagePickerOptions = { mediaTypes: ImagePicker.MediaTypeOptions.Images, quality: 0.8 };
       const result =
         source === "camera" ? await ImagePicker.launchCameraAsync(options) : await ImagePicker.launchImageLibraryAsync(options);
-      if (!result.canceled && result.assets[0]) await upload(result.assets[0].uri);
+      if (!result.canceled && result.assets[0]) await upload(result.assets[0]);
     } catch {
       alertModal.error("Error", "Something went wrong while opening the camera or gallery. Please try again.");
     }

@@ -48,10 +48,10 @@ export function getBookingTimeline(
         current: 2,
         tone: "action",
         headline: "Review the quote",
-        detail: `${who} sent a price for this job. Approve it or raise a concern.`,
+        detail: `${who} assessed the job and sent a price. Work only starts after you approve it.`,
       };
     case "QuoteApproved":
-      return { current: 2, tone: "normal", headline: "Quote approved", detail: `${who} can go ahead with the work.` };
+      return { current: 2, tone: "normal", headline: "Quote approved", detail: `${who} can start the job now.` };
     case "PendingCompletion":
       return {
         current: 3,
@@ -80,7 +80,14 @@ export function getBookingTimeline(
         current: 0,
         tone: "stopped",
         headline: "Booking cancelled",
-        detail: "This booking was cancelled or declined and won't go ahead.",
+        detail: "This booking was cancelled and won't go ahead.",
+      };
+    case "Declined":
+      return {
+        current: 0,
+        tone: "stopped",
+        headline: `${who} declined this booking`,
+        detail: "They can't take this job. Your details are saved, so you can pick another pro.",
       };
     default:
       return { current: 1, tone: "normal", headline: "Booking received", detail: "" };

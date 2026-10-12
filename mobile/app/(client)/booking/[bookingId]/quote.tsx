@@ -201,7 +201,7 @@ export default function QuoteReviewScreen() {
     try {
       await apiRejectQuote(booking.id, refuseReason.trim());
       useBookingStore.setState((s) => ({
-        bookings: s.bookings.map((b) => (b.id === booking.id ? { ...b, status: "InProgress" as const, quote: undefined } : b)),
+        bookings: s.bookings.map((b) => (b.id === booking.id ? { ...b, status: "Accepted" as const, quote: undefined } : b)),
       }));
       alertModal.success("Quote Refused", "Your pro will revise the quote and send it again.", [
         { text: "OK", onPress: () => router.back() },

@@ -67,6 +67,7 @@ interface CreateTestBookingOptions {
   scheduledTime?: string;
   scheduledDate?: Date;
   estimatedPrice?: number;
+  workerArrivedAt?: Date | null;
   clientLat?: number;
   clientLng?: number;
 }
@@ -87,6 +88,7 @@ export async function createTestBooking(options: CreateTestBookingOptions) {
       scheduledTime: options.scheduledTime ?? '09:00',
       estimatedPrice: options.estimatedPrice ?? 1000,
       status: options.status ?? 'PENDING',
+      workerArrivedAt: options.workerArrivedAt ?? null,
       clientLat: options.clientLat,
       clientLng: options.clientLng,
     },

@@ -107,6 +107,9 @@ export type ApiBookingDetail = {
     compensationAmount?: number | null;
     cancelledBy?: string;
   } | null;
+  // Set when a worker declined (status REJECTED): their stated reason.
+  declineReason?: string | null;
+  declinedAt?: string | null;
 };
 
 export function mapApiBookingDetail(d: ApiBookingDetail): Booking {

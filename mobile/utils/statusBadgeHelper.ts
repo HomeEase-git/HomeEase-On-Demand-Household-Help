@@ -22,6 +22,7 @@ export function getStatusColor(status: StatusType): string {
     case 'Verified':
       return colors.success;
     case 'Cancelled':
+    case 'Declined':
       return colors.error;
     default:
       return colors.text.muted;

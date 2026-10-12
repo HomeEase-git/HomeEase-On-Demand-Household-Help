@@ -19,6 +19,20 @@ export default function DocumentViewer({ documents = [], onApproveDocument, onRe
   // failure mode, forcing a fresh look rather than silently trusting a
   // stale "already viewed" flag from a different review session.
   const [viewedIds, setViewedIds] = useState(() => new Set())
+  // Which single document is expanded inline. Separate from viewedIds: that
+  // is the approve/reject gate (stays set once seen), this is just the
+  // preview, which is collapsed by default, toggled per document and never
+  // more than one at a time.
+  const [previewKey, setPreviewKey] = useState(null)
+
+  // Unique per document; never undefined, so one doc can't alias the rest.
+  const keyOf = (doc) => doc.id ?? doc.url ?? doc.name
+
+  const togglePreview = (doc) => {
+    const key = keyOf(doc)
+    markViewed(key)
+    setPreviewKey((prev) => (prev === key ? null : key))
+  }
 
   const markViewed = (docId) => {
     setViewedIds((prev) => {
@@ -43,6 +57,7 @@ export default function DocumentViewer({ documents = [], onApproveDocument, onRe
     setBusyId(doc.id)
     try {
       await onApproveDocument(doc.id)
+      setPreviewKey(null)
     } finally {
       setBusyId(null)
     }
@@ -60,6 +75,7 @@ export default function DocumentViewer({ documents = [], onApproveDocument, onRe
       await onRejectDocument(doc.id, rejectReason.trim())
       setRejectingId(null)
       setRejectReason('')
+      setPreviewKey(null)
     } finally {
       setBusyId(null)
     }
@@ -70,9 +86,12 @@ export default function DocumentViewer({ documents = [], onApproveDocument, onRe
       {documents.map((doc) => {
         const isImage = doc.mimeType?.startsWith('image/')
         const isPdf = doc.mimeType === 'application/pdf'
+        const key = keyOf(doc)
+        const isViewed = viewedIds.has(key)
+        const isPreviewing = previewKey === key
 
         return (
-          <div key={doc.id || doc.name} className="document-viewer__item">
+          <div key={key} className="document-viewer__item">
             <div className="document-viewer__header">
               <span className="document-viewer__name">
                 {humanizeEnum(doc.documentType)}
@@ -90,12 +109,12 @@ export default function DocumentViewer({ documents = [], onApproveDocument, onRe
                 target="_blank"
                 rel="noreferrer"
                 className="btn btn-outline btn-sm"
-                onClick={() => markViewed(doc.id)}
+                onClick={() => markViewed(key)}
               >
                 Open
               </a>
             </div>
-            {viewedIds.has(doc.id) ? (
+            {isPreviewing ? (
               <>
                 {isImage && (
                   <img src={doc.url} alt={doc.name} className="document-viewer__preview" />
@@ -112,10 +131,15 @@ export default function DocumentViewer({ documents = [], onApproveDocument, onRe
                     Preview not available for this file type.
                   </div>
                 )}
+                <div className="document-viewer__fallback">
+                  <button type="button" className="btn btn-outline btn-sm" onClick={() => togglePreview(doc)}>
+                    Hide Document
+                  </button>
+                </div>
               </>
             ) : (
               <div className="document-viewer__fallback">
-                <button type="button" className="btn btn-outline btn-sm" onClick={() => markViewed(doc.id)}>
+                <button type="button" className="btn btn-outline btn-sm" onClick={() => togglePreview(doc)}>
                   View Document
                 </button>
               </div>
@@ -136,8 +160,8 @@ export default function DocumentViewer({ documents = [], onApproveDocument, onRe
                   type="button"
                   className="btn btn-success btn-sm"
                   onClick={() => handleApprove(doc)}
-                  disabled={busyId === doc.id || !viewedIds.has(doc.id)}
-                  title={viewedIds.has(doc.id) ? undefined : 'View the document before approving it'}
+                  disabled={busyId === doc.id || !isViewed}
+                  title={isViewed ? undefined : 'View the document before approving it'}
                 >
                   Approve Document
                 </button>
@@ -145,12 +169,12 @@ export default function DocumentViewer({ documents = [], onApproveDocument, onRe
                   type="button"
                   className="btn btn-danger btn-sm"
                   onClick={() => startReject(doc)}
-                  disabled={busyId === doc.id || !viewedIds.has(doc.id)}
-                  title={viewedIds.has(doc.id) ? undefined : 'View the document before rejecting it'}
+                  disabled={busyId === doc.id || !isViewed}
+                  title={isViewed ? undefined : 'View the document before rejecting it'}
                 >
                   Reject Document
                 </button>
-                {!viewedIds.has(doc.id) && (
+                {!isViewed && (
                   <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
                     View the document first
                   </span>

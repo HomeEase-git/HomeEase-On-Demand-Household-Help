@@ -105,6 +105,22 @@ describe('Image Compression', () => {
       expect(manipulateAsync).toHaveBeenCalled();
     });
 
+    it('shrinks only the longer side, keeping the aspect ratio', async () => {
+      const { manipulateAsync } = require('expo-image-manipulator');
+
+      await imageCompressor.compressImage('file:///image.jpg', 1600, 0.7, { width: 3000, height: 4000 });
+
+      expect(manipulateAsync.mock.calls[0][1]).toEqual([{ resize: { height: 1600 } }]);
+    });
+
+    it('never enlarges a small image', async () => {
+      const { manipulateAsync } = require('expo-image-manipulator');
+
+      await imageCompressor.compressImage('file:///image.jpg', 1600, 0.7, { width: 800, height: 600 });
+
+      expect(manipulateAsync.mock.calls[0][1]).toEqual([]);
+    });
+
     it('should handle compression errors', async () => {
       const { manipulateAsync } = require('expo-image-manipulator');
       manipulateAsync.mockRejectedValueOnce(new Error('Compression failed'));

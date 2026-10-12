@@ -9,7 +9,6 @@ const REASONS = [
   "Schedule conflict",
   "Too far from my service area",
   "Not equipped for this job",
-  "Rate too low",
   "Other",
 ];
 

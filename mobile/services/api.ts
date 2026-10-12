@@ -2726,6 +2726,8 @@ export async function getUserProfile() {
       // Set (non-null) only for a worker whose account is on hold for
       // outstanding platform dues — see debtLedgerService.ts on the backend.
       accountHold: response.accountHold as { since: string; amountOwed: number } | null | undefined,
+      // Worker only: outstanding platform dues (commission on cash jobs, penalties).
+      platformDues: response.platformDues as number | undefined,
       bio: response.bio,
       yearsOfExperience: response.yearsOfExperience,
       serviceArea: response.serviceArea,

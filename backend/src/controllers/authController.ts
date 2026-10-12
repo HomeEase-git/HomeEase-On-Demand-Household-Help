@@ -26,6 +26,8 @@ import {
   generateOtp,
   storeOtp,
   verifyOtp,
+  respondIfOtpLocked,
+  OtpLockedError,
   consumeRefreshToken,
   revokeRefreshToken,
 } from '@utils/otpService';
@@ -387,6 +389,7 @@ export const login = async (req: Request, res: Response) => {
 
     return res.json({ success: true, message: 'Login successful', data: await loginPayload(user) });
   } catch (error) {
+    if (respondIfOtpLocked(res, error)) return;
     console.error('Login error:', error);
     return res.status(500).json(errorResponse(500, 'Internal server error'));
   }
@@ -750,6 +753,7 @@ export const sendOtp = async (req: Request, res: Response) => {
 
     return res.json({ success: true, message: 'OTP sent to your email' });
   } catch (error) {
+    if (respondIfOtpLocked(res, error)) return;
     console.error('Send OTP error:', error);
     return res.status(500).json(errorResponse(500, 'Internal server error'));
   }
@@ -816,6 +820,7 @@ export const verifyOtpHandler = async (req: Request, res: Response) => {
       data: { token },
     });
   } catch (error) {
+    if (respondIfOtpLocked(res, error)) return;
     console.error('Verify OTP error:', error);
     return res.status(500).json(errorResponse(500, 'Internal server error'));
   }
@@ -845,6 +850,7 @@ export const resendOtp = async (req: Request, res: Response) => {
 
     return res.json({ success: true, message: 'OTP resent to your email' });
   } catch (error) {
+    if (respondIfOtpLocked(res, error)) return;
     console.error('Resend OTP error:', error);
     return res.status(500).json(errorResponse(500, 'Internal server error'));
   }
@@ -888,6 +894,11 @@ export const forgotPassword = async (req: Request, res: Response) => {
       message: 'If that email is registered, a reset code has been sent',
     });
   } catch (error) {
+    // Same reply as an unknown email, so the response never hints whether the
+    // account exists (a locked account is one that does).
+    if (error instanceof OtpLockedError) {
+      return res.json({ success: true, message: 'If that email is registered, a reset code has been sent' });
+    }
     console.error('Forgot password error:', error);
     return res.status(500).json(errorResponse(500, 'Internal server error'));
   }
@@ -940,6 +951,7 @@ export const resetPassword = async (req: Request, res: Response) => {
 
     return res.json({ success: true, message: 'Password reset successfully' });
   } catch (error) {
+    if (respondIfOtpLocked(res, error)) return;
     console.error('Reset password error:', error);
     return res.status(500).json(errorResponse(500, 'Internal server error'));
   }
@@ -1293,6 +1305,7 @@ export const verifyLoginCode = async (req: Request, res: Response) => {
 
     return res.json({ success: true, message: 'Login successful', data: await loginPayload(user) });
   } catch (error) {
+    if (respondIfOtpLocked(res, error)) return;
     console.error('Verify login code error:', error);
     return res.status(500).json(errorResponse(500, 'Internal server error'));
   }
@@ -1312,6 +1325,7 @@ export const resendLoginCode = async (req: Request, res: Response) => {
     const sent = await deliverCode(user, user.twoFactorMethod, TokenType.LOGIN_2FA);
     return res.json({ success: true, message: 'Code sent', data: sent });
   } catch (error) {
+    if (respondIfOtpLocked(res, error)) return;
     console.error('Resend login code error:', error);
     return res.status(500).json(errorResponse(500, 'Failed to send the code'));
   }
@@ -1347,6 +1361,7 @@ export const sendTwoFactorCode = async (req: Request, res: Response) => {
     await sendOtpEmail(user.email, code);
     return res.json({ success: true, message: 'Code sent', data: { method, destination: maskEmail(user.email) } });
   } catch (error) {
+    if (respondIfOtpLocked(res, error)) return;
     console.error('Send two-factor code error:', error);
     return res.status(500).json(errorResponse(500, 'Failed to send the code'));
   }
@@ -1380,6 +1395,7 @@ export const enableTwoFactor = async (req: Request, res: Response) => {
     });
     return res.json({ success: true, message: 'Two-step sign-in is on', data: { twoFactorMethod: method } });
   } catch (error) {
+    if (respondIfOtpLocked(res, error)) return;
     console.error('Enable two-factor error:', error);
     return res.status(500).json(errorResponse(500, 'Internal server error'));
   }
@@ -1416,6 +1432,7 @@ export const disableTwoFactor = async (req: Request, res: Response) => {
     });
     return res.json({ success: true, message: 'Two-step sign-in is off', data: { twoFactorMethod: null } });
   } catch (error) {
+    if (respondIfOtpLocked(res, error)) return;
     console.error('Disable two-factor error:', error);
     return res.status(500).json(errorResponse(500, 'Internal server error'));
   }

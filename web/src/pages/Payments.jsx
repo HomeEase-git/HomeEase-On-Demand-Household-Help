@@ -9,6 +9,9 @@ import SectionCard from '../components/common/SectionCard'
 import Pagination from '../components/common/Pagination'
 import SortableTh from '../components/common/SortableTh'
 import { exportListToCsv, csvDateStamp } from '../utils/exportList'
+import { exportListToPdf } from '../utils/exportPdf'
+import ExportMenu from '../components/common/ExportMenu'
+import { useAuth } from '../context/AuthContext'
 import { useToast } from '../context/ToastContext'
 import Badge from '../components/common/Badge'
 import { getPaymentStatusVariant } from '../utils/statusBadge'
@@ -74,13 +77,18 @@ export default function Payments() {
   }, [meta])
 
   const { showSuccess, showError } = useToast()
+  const { user } = useAuth()
   const [exporting, setExporting] = useState(false)
-  const handleExport = async () => {
+  const handleExport = async (format) => {
     setExporting(true)
     try {
-      const { count, total, truncated } = await exportListToCsv({
+      const exportFn = format === 'pdf' ? exportListToPdf : exportListToCsv
+      const { count, total, truncated } = await exportFn({
         fetchPage: ({ page, limit }) => fetchPayments({ page, limit, ...toApiParams(params) }),
-        filename: `payments-${csvDateStamp()}.csv`,
+        filename: `payments-${csvDateStamp()}.${format}`,
+        title: 'Payment Management Report',
+        subtitle: `Status: ${params.statusTab || 'All'}`,
+        generatedBy: user?.name || user?.email,
         mapRow: (t) => ({
           'Transaction ID': t.displayId || t.id,
           Booking: t.booking,
@@ -109,9 +117,11 @@ export default function Payments() {
     <>
       <PageHeader
         actions={
-          <button type="button" className="btn btn-outline" onClick={handleExport} disabled={exporting}>
-            <i className={`fas ${exporting ? 'fa-spinner fa-spin' : 'fa-file-csv'}`} /> {exporting ? 'Exporting…' : 'Export CSV'}
-          </button>
+          <ExportMenu
+            exporting={exporting}
+            onExportCsv={() => handleExport('csv')}
+            onExportPdf={() => handleExport('pdf')}
+          />
         }
         title="Payment Management" subtitle="All transactions" />
       <SubNav items={PAYMENTS_SUB_NAV} />

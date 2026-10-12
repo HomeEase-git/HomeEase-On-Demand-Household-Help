@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { View, Text, FlatList, Pressable, ActivityIndicator } from "react-native";
+import { View, Text, FlatList, Pressable, ActivityIndicator, ScrollView } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useFocusEffect, useRouter } from "expo-router";
 import { AppIcon as Ionicons } from "../../../components/icons/AppIcon";
@@ -12,15 +12,18 @@ import { useAlertModal } from "../../../contexts/AlertModalContext";
 import { useTabRefresh } from "../../../hooks/useTabRefresh";
 import { usePullToRefresh } from "../../../hooks/usePullToRefresh";
 
-const TABS = ["Pending", "Active", "Completed", "Cancelled"] as const;
+const TABS = ["Pending", "Active", "Completed", "Cancelled", "Declined"] as const;
 
-// Buckets the granular status into one of the four tabs shown on this screen
+// Buckets the granular status into one of the tabs shown on this screen
 const TAB_STATUS_MAP: Record<(typeof TABS)[number], BookingStatus[]> = {
   Pending: ["Pending", "QuoteSubmitted"],
   // Disputed is a live job under review, not a cancelled one.
   Active: ["Accepted", "InProgress", "QuoteApproved", "PendingCompletion", "AwaitingPayment", "Disputed"],
   Completed: ["Completed"],
   Cancelled: ["Cancelled"],
+  // The worker turned the request down — kept apart from Cancelled so it's
+  // not mistaken for something the client (or an admin) cancelled.
+  Declined: ["Declined"],
 };
 
 function tabForStatus(status: BookingStatus): (typeof TABS)[number] {
@@ -83,7 +86,7 @@ export default function MyBookingsScreen() {
     <SafeAreaView className="flex-1 bg-white">
       <View className="px-4 pt-4 pb-2">
         <Text className="text-text-primary text-2xl font-bold">My Bookings</Text>
-        <View className="flex-row mt-3 gap-2">
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} className="mt-3" contentContainerStyle={{ gap: 8 }}>
           {TABS.map((tab) => (
             <Pressable
               key={tab}
@@ -103,7 +106,7 @@ export default function MyBookingsScreen() {
               </Text>
             </Pressable>
           ))}
-        </View>
+        </ScrollView>
       </View>
 
       {/* Skeleton only on the first load; a refresh keeps the list (and its spinner). */}

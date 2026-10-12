@@ -9,6 +9,10 @@ import LoadingState from '../components/common/LoadingState'
 import ErrorState from '../components/common/ErrorState'
 import { useListQuery } from '../hooks/useListQuery'
 import { fetchPayouts, downloadPayoutsCsv, retryPayout } from '../services/payments'
+import { exportListToPdf } from '../utils/exportPdf'
+import { csvDateStamp } from '../utils/exportList'
+import ExportMenu from '../components/common/ExportMenu'
+import { useAuth } from '../context/AuthContext'
 import { formatPeso } from '../data/payments'
 import { useToast } from '../context/ToastContext'
 import Badge from '../components/common/Badge'
@@ -25,6 +29,7 @@ const STATUS_BADGE_VARIANT = {
 
 export default function Payouts() {
   const { showError, showSuccess } = useToast()
+  const { user } = useAuth()
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo] = useState('')
   const [exporting, setExporting] = useState(false)
@@ -62,10 +67,36 @@ export default function Payouts() {
     setFilter('dateTo', '')
   }
 
-  const handleExport = async () => {
+  const handleExport = async (format) => {
     setExporting(true)
     try {
-      await downloadPayoutsCsv({ search: params.search || '', dateFrom: params.dateFrom || '', dateTo: params.dateTo || '' })
+      const filters = { search: params.search || '', dateFrom: params.dateFrom || '', dateTo: params.dateTo || '' }
+      if (format === 'pdf') {
+        const range = filters.dateFrom || filters.dateTo ? `${filters.dateFrom || '...'} to ${filters.dateTo || '...'}` : 'All dates'
+        const { count, total, truncated } = await exportListToPdf({
+          fetchPage: ({ page, limit }) => fetchPayouts({ page, limit, ...filters }),
+          filename: `payouts-${csvDateStamp()}.pdf`,
+          title: 'Payout Distribution Report',
+          subtitle: range,
+          generatedBy: user?.name || user?.email,
+          mapRow: (p) => ({
+            'Payout ID': p.displayId,
+            Booking: p.booking,
+            Worker: p.worker,
+            Client: p.client,
+            'Payout Amount': p.payoutAmount,
+            Commission: p.commissionAmount ?? '',
+            Method: p.method,
+            Status: p.status,
+            Released: p.releasedDate,
+          }),
+        })
+        if (!count) showError('Nothing to export for these filters')
+        else if (truncated) showSuccess(`Exported the first ${count} of ${total} payouts. Narrow the filters to get the rest.`)
+        else showSuccess(`Exported ${count} payouts`)
+      } else {
+        await downloadPayoutsCsv(filters)
+      }
     } catch (err) {
       showError(err.message || 'Failed to export payouts')
     } finally {
@@ -92,9 +123,11 @@ export default function Payouts() {
         title="Payout Distribution"
         subtitle="Worker earnings released from escrow on job completion"
         actions={(
-          <button type="button" className="btn btn-outline" onClick={handleExport} disabled={exporting}>
-            {exporting ? 'Exporting...' : 'Export CSV'}
-          </button>
+          <ExportMenu
+            exporting={exporting}
+            onExportCsv={() => handleExport('csv')}
+            onExportPdf={() => handleExport('pdf')}
+          />
         )}
       />
       <SubNav items={PAYMENTS_SUB_NAV} />

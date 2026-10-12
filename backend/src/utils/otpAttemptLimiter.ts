@@ -100,7 +100,9 @@ function countLocally(key: string, ttlSeconds: number): number {
     for (const [k, entry] of localAttempts) if (entry.expiresAt <= now) localAttempts.delete(k);
   }
   const count = localCount(key) + 1;
-  const expiresAt = count === 1 ? now + ttlSeconds * 1000 : localAttempts.get(key)!.expiresAt;
+  let expiresAt = count === 1 ? now + ttlSeconds * 1000 : localAttempts.get(key)!.expiresAt;
+  // The lockout window starts at the attempt that trips it.
+  if (count === MAX_OTP_ATTEMPTS) expiresAt = now + OTP_LOCKOUT_SECONDS * 1000;
   localAttempts.set(key, { count, expiresAt });
   return count;
 }
@@ -110,6 +112,13 @@ function countLocally(key: string, ttlSeconds: number): number {
  * attempts are locked out for the rest of the counter's TTL window.
  */
 export const MAX_OTP_ATTEMPTS = 5;
+
+/**
+ * How long a userId+type stays locked once MAX_OTP_ATTEMPTS wrong codes have
+ * been entered. Counted from the lockout itself (the 5th wrong code), not from
+ * the first wrong guess, so the user always waits the full period.
+ */
+export const OTP_LOCKOUT_SECONDS = 10 * 60;
 
 /**
  * True if this userId+type has already hit MAX_OTP_ATTEMPTS wrong guesses
@@ -147,6 +156,9 @@ export async function recordFailedOtpAttempt(userId: string, type: string, ttlSe
     if (attempts === 1) {
       await client.expire(key, ttlSeconds);
     }
+    if (attempts === MAX_OTP_ATTEMPTS) {
+      await client.expire(key, OTP_LOCKOUT_SECONDS);
+    }
     recordSuccess();
     // Redis's count alone: it steps by exactly one, so callers comparing
     // `=== MAX` see the lockout exactly once. Mixing in `local` let it jump
@@ -155,6 +167,35 @@ export async function recordFailedOtpAttempt(userId: string, type: string, ttlSe
   } catch (error) {
     recordFailure('recordFailedOtpAttempt', error);
     return local;
+  }
+}
+
+/**
+ * Seconds left on this userId+type's lockout, or 0 when not locked. Fails open
+ * (0) on a Redis error or while the circuit breaker is open.
+ */
+export async function otpLockRemainingSeconds(
+  userId: string,
+  type: string,
+  maxAttempts: number = MAX_OTP_ATTEMPTS
+): Promise<number> {
+  const key = attemptKey(userId, type);
+  const local = localAttempts.get(key);
+  const localRemaining =
+    local && local.count >= maxAttempts ? Math.max(0, Math.ceil((local.expiresAt - Date.now()) / 1000)) : 0;
+  if (circuitIsOpen()) return localRemaining;
+  try {
+    const raw = await client.get(key);
+    if (raw === null || Number(raw) < maxAttempts) {
+      recordSuccess();
+      return 0;
+    }
+    const ttl = await client.ttl(key);
+    recordSuccess();
+    return ttl > 0 ? ttl : OTP_LOCKOUT_SECONDS;
+  } catch (error) {
+    recordFailure('otpLockRemainingSeconds', error);
+    return localRemaining;
   }
 }
 

@@ -208,7 +208,7 @@ export default function BookingDispute() {
     'Raised By': d.raisedByRole ?? '',
     Reason: d.reason,
     Amount: d.amount,
-    'Age (hours)': d.ageHours,
+    'Time Open (hours)': d.ageHours,
     Status: d.status,
     'Refund Status': d.refundStatus ?? '',
   })
@@ -333,7 +333,7 @@ export default function BookingDispute() {
                   <th>Worker</th>
                   <th>Reason</th>
                   <th>Amount</th>
-                  <th>Age</th>
+                  <th>Time Open</th>
                   <th>Status</th>
                   <th>Actions</th>
                 </tr>

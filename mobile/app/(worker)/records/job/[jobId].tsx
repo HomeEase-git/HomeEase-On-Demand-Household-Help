@@ -242,7 +242,8 @@ export default function JobDetailScreen() {
   const canRequestReschedule = isAccepted && !hasArrived && !hasOpenRescheduleRequest;
   // Work under way — another visit can be planned for a job that needs more days.
   const canScheduleVisit = isInProgress || isQuoteSubmitted || isQuoteApproved;
-  const quoteRefused = isInProgress && job.quote?.status === "REJECTED";
+  // A refused (or reopened) quote returns the job to Accepted, where it is revised.
+  const quoteRefused = isAccepted && job.quote?.status === "REJECTED";
   const startTime = bookingStartTime(job);
   const startsAt = startTime ? startInstant(job.scheduledDate.slice(0, 10), startTime) : null;
   const startPassed = !!startsAt && now >= startsAt.getTime();
@@ -268,16 +269,22 @@ export default function JobDetailScreen() {
       timestamp: "",
       status: hasArrived ? ("done" as const) : isAccepted ? ("active" as const) : ("pending" as const),
     },
+    // The quote comes right after arriving, before the job starts.
+    {
+      label: "Quote",
+      timestamp: "",
+      status:
+        isQuoteApproved || isInProgress || isPendingCompletion || isAwaitingPayment || isCompleted
+          ? ("done" as const)
+          : hasArrived && (isAccepted || isQuoteSubmitted || isDisputed)
+            ? ("active" as const)
+            : ("pending" as const),
+    },
     {
       label: "In Progress",
       timestamp: "",
       status:
-        isQuoteApproved ||
-        isPendingCompletion ||
-        isAwaitingPayment ||
-        isCompleted ||
-        isQuoteSubmitted ||
-        isDisputed
+        isPendingCompletion || isAwaitingPayment || isCompleted
           ? ("done" as const)
           : isInProgress
             ? ("active" as const)
@@ -317,7 +324,7 @@ export default function JobDetailScreen() {
     setSubmitting(true);
     try {
       await api.startBooking(job.id);
-      alertModal.success("Job Started", "You've started this job.");
+      alertModal.success("Job Started", "You've started this job. Mark it complete with a photo when you're done.");
       load();
     } catch (error) {
       console.error("Start booking error:", error);
@@ -663,18 +670,22 @@ export default function JobDetailScreen() {
               loading={arriving}
             />
           )}
+          {/* Arrived: assess the job, then send the quote — the job starts once the client approves it. */}
           {isAccepted && hasArrived && (
-            <PrimaryButton
-              label="Start Job"
-              fullWidth
-              onPress={handleStart}
-              disabled={submitting}
-              loading={submitting}
-            />
+            <>
+              <PrimaryButton
+                label={quoteRefused ? "Revise Quote" : "Send Quote"}
+                fullWidth
+                onPress={() => router.push(`/(worker)/records/quote/${job.id}`)}
+              />
+              <Text className="text-text-muted text-xs text-center -mt-1">
+                The client reviews your quote first. You can start the job once they approve it.
+              </Text>
+            </>
           )}
           {isAccepted && !hasArrived && (
             <Text className="text-text-muted text-xs text-center -mt-1">
-              Check in within 100 m of the job site to start.
+              Check in within 100 m of the job site, then send your quote.
             </Text>
           )}
           {canRequestReschedule && (
@@ -691,11 +702,13 @@ export default function JobDetailScreen() {
               </Text>
             </View>
           )}
-          {isInProgress && (
+          {isQuoteApproved && (
             <PrimaryButton
-              label={quoteRefused ? "Revise Quote" : "Submit Quote"}
+              label="Start Job"
               fullWidth
-              onPress={() => router.push(`/(worker)/records/quote/${job.id}`)}
+              onPress={handleStart}
+              disabled={submitting}
+              loading={submitting}
             />
           )}
           {canEditQuote && <OutlinedButton label="Edit Quote" fullWidth onPress={handleEditQuote} />}
@@ -721,7 +734,7 @@ export default function JobDetailScreen() {
               </Text>
             </View>
           )}
-          {isQuoteApproved && (
+          {isInProgress && (
             <View className="gap-3">
               {completionPhotoUri ? (
                 <View>

@@ -2,9 +2,48 @@ import crypto from 'crypto';
 import { keyedHash, keyedHashCandidates } from '@utils/fieldEncryption';
 import prisma from '@config/database';
 import { TokenType } from '@prisma/client';
+import type { Response } from 'express';
+import * as otpLimiter from '@utils/otpAttemptLimiter';
 import { isOtpAttemptLocked, recordFailedOtpAttempt, clearOtpAttempts } from '@utils/otpAttemptLimiter';
+import { errorResponse } from '@utils/errorResponse';
 
 const OTP_EXPIRY_MINUTES = 10;
+
+/**
+ * Thrown when a user has entered too many wrong codes: no code can be checked
+ * or re-sent until the lockout ends (see utils/otpAttemptLimiter.ts).
+ */
+export class OtpLockedError extends Error {
+  constructor(public retryAfterSeconds: number) {
+    super('Too many wrong codes');
+    this.name = 'OtpLockedError';
+  }
+}
+
+async function lockSecondsLeft(userId: string, type: TokenType): Promise<number> {
+  // Guarded: the limiter is replaced by a partial stub in some test suites.
+  const remaining = await otpLimiter.otpLockRemainingSeconds?.(userId, type);
+  return remaining && remaining > 0 ? remaining : (otpLimiter.OTP_LOCKOUT_SECONDS ?? 600);
+}
+
+/**
+ * Replies 429 "try again in N minutes" when `error` is an OtpLockedError.
+ * Returns true if it responded, so a catch block can `return` early.
+ */
+export function respondIfOtpLocked(res: Response, error: unknown): boolean {
+  if (!(error instanceof OtpLockedError)) return false;
+  const minutes = Math.max(1, Math.ceil(error.retryAfterSeconds / 60));
+  res.setHeader('Retry-After', String(error.retryAfterSeconds));
+  res.status(429).json({
+    ...errorResponse(
+      429,
+      `Too many wrong codes. For your security you can't enter or request a new code for ${minutes} minute${minutes === 1 ? '' : 's'}.`
+    ),
+    code: 'OTP_LOCKED',
+    retryAfterSeconds: error.retryAfterSeconds,
+  });
+  return true;
+}
 
 // Codes are stored as a keyed hash (DATA_ENCRYPTION_KEY), so a database copy
 // can't be used, or brute-forced, to sign in or confirm an account action.
@@ -22,6 +61,13 @@ export const storeOtp = async (
   otp: string,
   type: TokenType = TokenType.EMAIL_VERIFICATION,
 ): Promise<void> => {
+  // A locked user can't get a fresh code to try again either: re-sending
+  // doesn't reset the wrong-code counter, so the new code couldn't be used
+  // until the lockout ends anyway — and would just flood their inbox.
+  if (await isOtpAttemptLocked(userId, type)) {
+    throw new OtpLockedError(await lockSecondsLeft(userId, type));
+  }
+
   // Invalidate any existing OTPs of this type for this user
   await prisma.authToken.deleteMany({
     where: {
@@ -53,7 +99,7 @@ export const verifyOtp = async (
   // guesses against a single account within the OTP's validity window.
   // See utils/otpAttemptLimiter.ts.
   if (await isOtpAttemptLocked(userId, type)) {
-    return false;
+    throw new OtpLockedError(await lockSecondsLeft(userId, type));
   }
 
   const record = await prisma.authToken.findFirst({
@@ -76,7 +122,11 @@ export const verifyOtp = async (
   });
 
   if (!record) {
-    await recordFailedOtpAttempt(userId, type, OTP_EXPIRY_MINUTES * 60);
+    const attempts = await recordFailedOtpAttempt(userId, type, OTP_EXPIRY_MINUTES * 60);
+    // This was the wrong code that tripped the lockout: tell the user now.
+    if (attempts >= otpLimiter.MAX_OTP_ATTEMPTS) {
+      throw new OtpLockedError(otpLimiter.OTP_LOCKOUT_SECONDS ?? 600);
+    }
     return false;
   }
 

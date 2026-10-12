@@ -24,6 +24,9 @@ export default function EarningsScreen() {
   const router = useRouter();
   const [transactions, setTransactions] = useState<TransactionListItem[]>([]);
   const [loading, setLoading] = useState(true);
+  // What the worker owes HomeEase — commission on cash jobs (the client pays
+  // the worker directly) plus any penalties. Netted from the next online payout.
+  const [platformDues, setPlatformDues] = useState(0);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -32,6 +35,13 @@ export default function EarningsScreen() {
       setTransactions(result.data);
     } catch (error) {
       console.error("Load earnings error:", error);
+    }
+    // Separate so a failure here doesn't blank the transactions.
+    try {
+      const profile = await api.getUserProfile();
+      setPlatformDues(profile.platformDues ?? 0);
+    } catch (error) {
+      console.error("Load platform dues error:", error);
     } finally {
       setLoading(false);
     }
@@ -105,6 +115,20 @@ export default function EarningsScreen() {
               </View>
             </View>
           </View>
+
+          {platformDues > 0 && (
+            <View className="bg-warning/10 border border-warning/30 rounded-2xl p-4 mx-4 mt-4">
+              <View className="flex-row items-center">
+                <Ionicons name="alert-circle-outline" size={20} color={colors.warning} />
+                <Text className="text-warning font-bold text-sm ml-2 flex-1">Amount you owe HomeEase</Text>
+              </View>
+              <Text className="text-text-primary font-bold text-2xl mt-2">₱{platformDues.toFixed(2)}</Text>
+              <Text className="text-text-secondary text-xs mt-1">
+                This is HomeEase&apos;s platform fee for jobs the client paid you in cash, plus any penalties. It&apos;s
+                taken out of your next online payout automatically, or you can settle it through Support.
+              </Text>
+            </View>
+          )}
 
           <WeeklyEarningsChart days={weeklyEarnings(transactions)} />
 

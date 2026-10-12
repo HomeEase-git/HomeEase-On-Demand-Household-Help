@@ -82,6 +82,37 @@ export default function EarningsTransactionScreen() {
             +₱{transaction.amount?.toFixed(2)}
           </Text>
         </View>
+        {transaction.breakdown && (
+          <View className="bg-card rounded-2xl p-4 mb-4">
+            <Text className="text-text-primary font-bold mb-2">Payout Breakdown</Text>
+            <Row label="Service amount" value={peso(transaction.breakdown.subtotal)} />
+            {!!transaction.breakdown.vatApplicable && !!transaction.breakdown.vatAmount && (
+              <Row
+                label={`VAT collected${
+                  transaction.breakdown.vatRate ? ` (${Math.round(transaction.breakdown.vatRate * 100)}%)` : ""
+                }`}
+                value={`+${peso(transaction.breakdown.vatAmount)}`}
+              />
+            )}
+            {!!transaction.breakdown.tip && (
+              <Row label="Tip" value={`+${peso(transaction.breakdown.tip)}`} />
+            )}
+            {!!transaction.breakdown.commissionAmount && (
+              <Row
+                label={`Platform commission${
+                  transaction.breakdown.commissionPercentage
+                    ? ` (${Math.round(transaction.breakdown.commissionPercentage)}%)`
+                    : ""
+                }`}
+                value={`-${peso(transaction.breakdown.commissionAmount)}`}
+              />
+            )}
+            {!!transaction.breakdown.withholdingTaxAmount && (
+              <Row label="Withholding tax" value={`-${peso(transaction.breakdown.withholdingTaxAmount)}`} />
+            )}
+            <Row label="You receive" value={peso(transaction.breakdown.workerPayout ?? transaction.amount ?? 0)} />
+          </View>
+        )}
         <View className="bg-card rounded-2xl p-4">
           <Row label="Reference" value={transaction.transactionId ?? transaction.id} />
           <Row label="Booking" value={transaction.bookingId} />
@@ -95,6 +126,8 @@ export default function EarningsTransactionScreen() {
     </SafeAreaView>
   );
 }
+
+const peso = (n: number) => `₱${(n ?? 0).toFixed(2)}`;
 
 function Row({ label, value }: { label: string; value: string }) {
   return (
