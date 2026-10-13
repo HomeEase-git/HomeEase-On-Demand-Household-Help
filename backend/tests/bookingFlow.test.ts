@@ -433,8 +433,23 @@ describe('Booking flow — arrival geofencing, quote submission, dispute resolut
       expect(db?.finalPrice).toBe(1000);
     });
 
-    it("rejects a completion photo that is not the worker's own booking photo", async () => {
+    it('cannot complete a job that has not been started', async () => {
       const booking = await createTestBooking({ clientId, workerId, status: 'QUOTE_APPROVED' });
+      createdBookingIds.push(booking.id);
+
+      const res = await request(app)
+        .patch(`/api/bookings/${booking.id}/complete`)
+        .set('Authorization', `Bearer ${workerToken}`)
+        .send({ completionPhotoUrl: photo(workerId, 'done') });
+
+      expect(res.status).toBe(409);
+      const db = await prisma.booking.findUnique({ where: { id: booking.id } });
+      expect(db?.status).toBe('QUOTE_APPROVED');
+    });
+
+    it("rejects a completion photo that is not the worker's own booking photo", async () => {
+      // IN_PROGRESS: the job is started (after the client approved the quote).
+      const booking = await createTestBooking({ clientId, workerId, status: 'IN_PROGRESS' });
       createdBookingIds.push(booking.id);
       const complete = (url: string) =>
         request(app)
@@ -445,7 +460,7 @@ describe('Booking flow — arrival geofencing, quote submission, dispute resolut
       expect((await complete(photo(clientId, 'x'))).status).toBe(400);
       expect((await complete('https://example.com/x.jpg')).status).toBe(400);
       const db = await prisma.booking.findUnique({ where: { id: booking.id } });
-      expect(db?.status).toBe('QUOTE_APPROVED');
+      expect(db?.status).toBe('IN_PROGRESS');
     });
   });
 
