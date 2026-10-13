@@ -15,6 +15,8 @@ import { fetchPayments } from '../services/payments'
 import { fetchClients } from '../services/users'
 import { fetchReviews } from '../services/reviews'
 import { downloadCsv } from '../utils/csvExport'
+import { downloadPdf } from '../utils/exportPdf'
+import { useAuth } from '../context/AuthContext'
 import { useListQuery } from '../hooks/useListQuery'
 
 const SUB_NAV = [
@@ -40,7 +42,21 @@ const EXPORT_FETCHERS = {
   Reviews: fetchReviews,
 }
 
+// API rows can carry nested objects/arrays, which print as "[object Object]" in
+// a CSV and break a PDF table. Keep one readable value per column.
+function flattenRow(row) {
+  const out = {}
+  for (const [key, value] of Object.entries(row ?? {})) {
+    if (value === null || value === undefined) out[key] = ''
+    else if (Array.isArray(value)) out[key] = value.map((v) => (typeof v === 'object' ? JSON.stringify(v) : v)).join('; ')
+    else if (typeof value === 'object') out[key] = JSON.stringify(value)
+    else out[key] = value
+  }
+  return out
+}
+
 export default function Reports() {
+  const { user } = useAuth()
   const { pathname } = useLocation()
   const path = pathname.replace(/^\//, '') || 'reports'
   // Each of the 4 report views is its own <Route> entry pointing at this same
@@ -51,6 +67,7 @@ export default function Reports() {
   const [title, subtitle] = TITLES[view] || TITLES.logs
 
   const [exportType, setExportType] = useState('Bookings')
+  const [exportFormat, setExportFormat] = useState('csv')
   const [exporting, setExporting] = useState(false)
   const [exportError, setExportError] = useState(null)
 
@@ -80,7 +97,26 @@ export default function Reports() {
         rowsAcc.push(...response.data)
         if (!response.meta?.hasNext) break
       }
-      downloadCsv(`${exportType.toLowerCase()}-export.csv`, rowsAcc)
+      if (!rowsAcc.length) {
+        setExportError('Nothing to export for this report type')
+        return
+      }
+      const flat = rowsAcc.map(flattenRow)
+      const filename = `${exportType.toLowerCase()}-export-${new Date().toISOString().slice(0, 10)}.${exportFormat}`
+      if (exportFormat === 'pdf') {
+        const columns = Object.keys(flat[0])
+        await downloadPdf({
+          filename,
+          title: `${exportType} Report`,
+          subtitle: `${flat.length} record${flat.length === 1 ? '' : 's'}`,
+          generatedBy: user?.name || user?.email,
+          columns,
+          rows: flat.map((row) => columns.map((key) => row[key] ?? '')),
+          orientation: 'landscape',
+        })
+      } else {
+        downloadCsv(filename, flat)
+      }
     } catch (err) {
       setExportError(err.message || 'Failed to generate export')
     } finally {
@@ -120,13 +156,18 @@ export default function Reports() {
               </div>
               <div className="detail-block">
                 <label>Format</label>
-                <select style={{ width: '100%', padding: '0.5rem', border: '1px solid var(--border)', borderRadius: 8 }}>
-                  <option>CSV</option>
+                <select
+                  value={exportFormat}
+                  onChange={(e) => setExportFormat(e.target.value)}
+                  style={{ width: '100%', padding: '0.5rem', border: '1px solid var(--border)', borderRadius: 8 }}
+                >
+                  <option value="csv">CSV</option>
+                  <option value="pdf">PDF</option>
                 </select>
               </div>
             </div>
             <p className="page-subtitle" style={{ marginBottom: '1rem' }}>
-              Export returns all available rows for the selected type, capped at 500. For a date-filtered export, use
+              Export returns all available rows for the selected type, capped at 500, in the format you choose. For a date-filtered export, use
               the Payout Distribution page instead.
             </p>
             {exportError && <div className="form-error" style={{ marginBottom: '1rem' }}>{exportError}</div>}

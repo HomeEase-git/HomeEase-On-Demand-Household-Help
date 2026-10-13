@@ -40,7 +40,6 @@ export function validateQuoteItems(raw: unknown): Result {
       return { ok: false, error: `"${name}" has invalid photos (up to ${MAX_PHOTOS} each)` };
     }
     if (receiptUrls.length === 0) return { ok: false, error: `"${name}" needs a photo of the receipt` };
-    if (proofOfUseUrls.length === 0) return { ok: false, error: `"${name}" needs a photo of it in use on the job` };
     items.push({ name, price: e.price, receiptUrls, proofOfUseUrls });
   }
   return { ok: true, items };

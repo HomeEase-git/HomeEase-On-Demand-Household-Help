@@ -17,7 +17,11 @@ export type BookingStatus =
   | 'PendingCompletion'
   | 'AwaitingPayment'
   | 'Completed'
-  | 'Cancelled';
+  | 'Cancelled'
+  // A worker turned the request down (backend REJECTED). Only the client's
+  // list maps to this — see mapApiBooking; the worker store keeps REJECTED as
+  // 'Cancelled' in its own Cancelled tab.
+  | 'Declined';
 
 // Backend BookingStatus enum -> store's friendly status values
 export const API_STATUS_MAP: Record<string, BookingStatus> = {
@@ -244,7 +248,7 @@ export function mapApiBooking(b: ApiBookingListItem): Booking {
     date: b.scheduledDate,
     time: bookingStartTime(b) ?? undefined,
     isRush: b.isRush ?? false,
-    status: API_STATUS_MAP[b.status] ?? 'Pending',
+    status: b.status === 'REJECTED' ? 'Declined' : (API_STATUS_MAP[b.status] ?? 'Pending'),
     amount: b.finalPrice ?? b.estimatedPrice,
     rating: b.rating ?? undefined,
     groupId: b.groupId ?? undefined,

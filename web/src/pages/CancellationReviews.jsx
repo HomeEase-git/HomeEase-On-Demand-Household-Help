@@ -9,7 +9,12 @@ import Badge from '../components/common/Badge'
 import LoadingState from '../components/common/LoadingState'
 import ErrorState from '../components/common/ErrorState'
 import { fetchCancellationReviews, reviewCancellation } from '../services/cancellations'
+import { downloadCsv } from '../utils/csvExport'
+import { csvDateStamp } from '../utils/exportList'
+import { downloadPdf } from '../utils/exportPdf'
+import ExportMenu from '../components/common/ExportMenu'
 import { useToast } from '../context/ToastContext'
+import { useAuth } from '../context/AuthContext'
 import { useListQuery } from '../hooks/useListQuery'
 
 const POLL_INTERVAL_MS = 15000
@@ -62,6 +67,7 @@ export default function CancellationReviews() {
   const [note, setNote] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const { showSuccess, showError } = useToast()
+  const { user } = useAuth()
 
   const fetchFn = useCallback(async (params) => {
     const rows = await fetchCancellationReviews(STATUS_TABS[params.statusTab])
@@ -83,6 +89,50 @@ export default function CancellationReviews() {
   })
 
   const selected = useMemo(() => rows.find((r) => r.bookingId === selectedId) || null, [rows, selectedId])
+
+  // `fetchCancellationReviews` isn't paginated — `rows` already holds every
+  // on-site cancellation for the current status tab, so the export just
+  // writes what's already loaded instead of re-fetching page by page.
+  const mapCancellationRow = (r) => ({
+    'Booking ID': r.displayId,
+    Service: r.service,
+    Scheduled: formatWhen(r.scheduledDate, r.scheduledTime),
+    Client: r.client?.fullName ?? '',
+    Worker: r.worker?.fullName ?? '',
+    Fee: r.compensationAmount ?? '',
+    Status: r.compensationStatus,
+    'Review Note': r.reviewNote ?? '',
+  })
+
+  const [exporting, setExporting] = useState(false)
+  const handleExport = async (format) => {
+    if (!rows.length) {
+      showError('Nothing to export for this filter')
+      return
+    }
+    setExporting(true)
+    try {
+      const mapped = rows.map(mapCancellationRow)
+      if (format === 'pdf') {
+        const columns = Object.keys(mapped[0])
+        await downloadPdf({
+          filename: `cancellation-reviews-${csvDateStamp()}.pdf`,
+          title: 'Cancellation Review Report',
+          subtitle: `Status: ${params.statusTab}`,
+          generatedBy: user?.name || user?.email,
+          columns,
+          rows: mapped.map((row) => columns.map((key) => row[key])),
+        })
+      } else {
+        downloadCsv(`cancellation-reviews-${csvDateStamp()}.csv`, mapped)
+      }
+      showSuccess(`Exported ${rows.length} cancellation review(s)`)
+    } catch (err) {
+      showError(err.message || 'Export failed')
+    } finally {
+      setExporting(false)
+    }
+  }
 
   const closeModal = () => {
     setSelectedId(null)
@@ -120,6 +170,9 @@ export default function CancellationReviews() {
   return (
     <>
       <PageHeader
+        actions={
+          <ExportMenu exporting={exporting} onExportCsv={() => handleExport('csv')} onExportPdf={() => handleExport('pdf')} />
+        }
         title="Cancellation Reviews"
         subtitle="Workers who cancelled on site and say the client was at fault — check their proof"
       />

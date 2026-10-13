@@ -182,6 +182,8 @@ export default function TrackBookingScreen() {
         return "Service completed";
       case "Cancelled":
         return "Booking cancelled";
+      case "Declined":
+        return `${booking.worker} declined this booking`;
       default:
         return "Status: " + booking.status;
     }
@@ -207,7 +209,7 @@ export default function TrackBookingScreen() {
   const statusColor =
     booking.status === "Completed"
       ? colors.success
-      : booking.status === "Cancelled" || booking.status === "Disputed"
+      : booking.status === "Cancelled" || booking.status === "Declined" || booking.status === "Disputed"
         ? colors.error
         : colors.warning;
 

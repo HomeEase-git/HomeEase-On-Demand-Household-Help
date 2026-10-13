@@ -14,7 +14,7 @@ export type ImageUploadState = {
 export type UseImageUploadOptions = {
   maxSizeBytes?: number; // Default: 5MB
   quality?: number; // Default: 0.7 (0-1)
-  maxDimension?: number; // Default: 1200px
+  maxDimension?: number; // Default: 1600px
 };
 
 /**
@@ -41,7 +41,7 @@ export function useImageUpload(options: UseImageUploadOptions = {}) {
 
   const maxSizeBytes = options.maxSizeBytes || 5 * 1024 * 1024; // 5MB
   const quality = options.quality || 0.7;
-  const maxDimension = options.maxDimension || 1200;
+  const maxDimension = options.maxDimension || 1600;
 
   /**
    * Process selected image: validate, compress, return result
@@ -51,21 +51,12 @@ export function useImageUpload(options: UseImageUploadOptions = {}) {
       setState((prev) => ({ ...prev, loading: true, error: null }));
 
       try {
-        // Step 1: Validate file size before compression
-        const sizeValidation = await validateImageSize(imageUri, maxSizeBytes);
-        if (!sizeValidation.valid) {
-          setState((prev) => ({
-            ...prev,
-            loading: false,
-            error: sizeValidation.message || 'Image is too large',
-          }));
-          return null;
-        }
-
-        // Step 2: Compress image
+        // Step 1: Compress image. No size check before this — a full-quality
+        // phone photo is routinely over the limit, and compressing is what
+        // brings it under.
         const compressed = await compressImage(imageUri, maxDimension, quality);
 
-        // Step 3: Validate compressed size (should be smaller)
+        // Step 2: Validate compressed size (should be smaller)
         const finalValidation = await validateImageSize(compressed.uri, maxSizeBytes);
         if (!finalValidation.valid) {
           setState((prev) => ({

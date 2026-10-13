@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import type { BookingStatus, ConditionType, PaymentMethodType, RoomType, WorkerCancellationReason } from '@prisma/client';
 import prisma from '@config/database';
 import { errorResponse } from '@utils/errorResponse';
+import { maskProfanity } from '@utils/profanityFilter';
 import { notifyUser } from '@utils/notify';
 import { sendSmsToUser } from '@utils/smsService';
 import { writeAuditLog } from '@utils/auditLog';
@@ -921,6 +922,16 @@ export const getBookingDetail = async (req: AuthRequest, res: Response) => {
       return res.status(403).json(errorResponse(403, 'You do not have permission to view this booking'));
     }
 
+    // Why the worker turned the request down (REJECTED only), so the client
+    // can see it — transparency over a bare "declined".
+    const declineRecord =
+      booking.status === 'REJECTED' && booking.workerId
+        ? await prisma.declinedWorker.findUnique({
+            where: { bookingId_workerId: { bookingId: booking.id, workerId: booking.workerId } },
+            select: { reason: true, declinedAt: true },
+          })
+        : null;
+
     // addOns use `price` field (not `cost`) per schema. Only approved
     // add-ons count toward the displayed total — the full list (including
     // any still-pending ones) is still returned below (`addOns:
@@ -940,6 +951,13 @@ export const getBookingDetail = async (req: AuthRequest, res: Response) => {
     // is only filled in at settlement, see schema) over the pre-settlement 0.
     const latestPricingLog = booking.pricingLogs[booking.pricingLogs.length - 1] ?? null;
     const breakdownTip = booking.payment?.tip ?? booking.tip ?? 0;
+    // Before the payment row exists (it's created at completion), project the
+    // VAT the same way settlement will (see computeBookingFinalTotal) so the
+    // client's price breakdown and total include it instead of showing the
+    // pre-VAT amount and then jumping at payment time.
+    const breakdownVat =
+      booking.payment?.vatAmount ??
+      (booking.vatApplicable ? round2(finalPrice * (booking.vatRate ?? VAT_RATE)) : (booking.vatAmount ?? 0));
     // The first (booking-time) log carries the fee split; later logs are
     // quote stages.
     const bookingPricingLog = booking.pricingLogs[0] ?? null;
@@ -954,9 +972,9 @@ export const getBookingDetail = async (req: AuthRequest, res: Response) => {
       subtotal: finalPrice,
       vatApplicable: booking.vatApplicable,
       vatRate: booking.vatRate,
-      vatAmount: booking.payment?.vatAmount ?? booking.vatAmount ?? 0,
+      vatAmount: breakdownVat,
       tip: breakdownTip,
-      total: booking.payment?.totalAmount ?? round2(finalPrice + breakdownTip),
+      total: booking.payment?.totalAmount ?? round2(finalPrice + breakdownVat + breakdownTip),
     };
 
     // Heads-up for the worker before accepting (or while planning the day):
@@ -1161,6 +1179,8 @@ export const getBookingDetail = async (req: AuthRequest, res: Response) => {
         disputes: booking.disputes,
         arrivalVerification: booking.arrivalVerification,
         cancellation: booking.cancellation,
+        declineReason: declineRecord?.reason ?? null,
+        declinedAt: declineRecord?.declinedAt ?? null,
         createdAt: booking.createdAt,
         updatedAt: booking.updatedAt,
       },
@@ -1442,12 +1462,18 @@ export const declineBooking = async (req: AuthRequest, res: Response) => {
       clientLng: updated.clientLng,
     }).catch(() => null);
 
-    // Notify client
+    // Notify client — with the worker's name and reason so it's clear who
+    // turned the request down and why (also returned by GET /bookings/:id).
+    const declineReason = typeof reason === 'string' ? reason.trim().slice(0, 300) : '';
+    const decliner = await prisma.user.findUnique({ where: { id: workerId }, select: { fullName: true } });
+    const declinerName = decliner?.fullName || 'The worker';
     await notifyUser({
       userId: updated.clientId,
       type: 'BOOKING_REJECTED',
       title: 'Booking Declined',
-      message: 'The worker has declined your booking request',
+      message: declineReason
+        ? `${declinerName} declined your booking request. Reason: ${declineReason}`
+        : `${declinerName} declined your booking request`,
       relatedId: id,
     });
 
@@ -1696,7 +1722,8 @@ export const updateWorkerLiveLocation = async (req: AuthRequest, res: Response) 
 
 /**
  * PATCH /api/bookings/:id/start
- * Worker marks booking as in progress — requires a prior verified arrival.
+ * Worker starts the job — requires a prior verified arrival and the client's
+ * approved quote (QUOTE_APPROVED).
  */
 export const startBooking = async (req: AuthRequest, res: Response) => {
   try {
@@ -1718,8 +1745,16 @@ export const startBooking = async (req: AuthRequest, res: Response) => {
       return res.status(403).json(errorResponse(403, 'This booking is not assigned to you'));
     }
 
+    // The job can only start once the client has approved the quote.
     if (!isValidTransition(booking.status, 'IN_PROGRESS')) {
-      return res.status(409).json(errorResponse(409, `Cannot start booking with status ${booking.status}`));
+      return res.status(409).json(
+        errorResponse(
+          409,
+          booking.status === 'ACCEPTED' || booking.status === 'QUOTE_SUBMITTED'
+            ? 'The client must approve your quote before you can start the job'
+            : `Cannot start booking with status ${booking.status}`
+        )
+      );
     }
 
     if (!booking.workerArrivedAt) {
@@ -2217,6 +2252,12 @@ export const submitQuote = async (req: AuthRequest, res: Response) => {
       return res.status(409).json(errorResponse(409, `Cannot submit quote for booking with status ${booking.status}`));
     }
 
+    // The quote comes after the worker has arrived and assessed the job, and
+    // before the job starts.
+    if (!booking.workerArrivedAt) {
+      return res.status(409).json(errorResponse(409, 'Check in as arrived before sending your quote'));
+    }
+
     // Each item carries its own proof of purchase + proof of use. Only booking
     // photos this worker uploaded count (see utils/storageUrls).
     const parsed = validateQuoteItems(req.body.items);
@@ -2339,8 +2380,8 @@ export const submitQuote = async (req: AuthRequest, res: Response) => {
 
 /**
  * POST /api/bookings/:id/quote/reopen
- * Worker takes a submitted or approved quote back to IN_PROGRESS to edit its
- * items. Items are kept; the worker resubmits (submitQuote), and the client
+ * Worker takes a submitted or approved quote back to ACCEPTED (before the job
+ * starts) to edit its items. Items are kept; the worker resubmits (submitQuote), and the client
  * approves the new total. Bumps quoteRevision so the client can't approve the
  * version they saw before the edit (approveQuote pins the revision).
  */
@@ -2358,12 +2399,12 @@ export const reopenQuote = async (req: AuthRequest, res: Response) => {
     if (booking.workerId !== req.user.userId) {
       return res.status(403).json(errorResponse(403, 'This booking is not assigned to you'));
     }
-    if (!['QUOTE_SUBMITTED', 'QUOTE_APPROVED'].includes(booking.status) || !isValidTransition(booking.status, 'IN_PROGRESS')) {
+    if (!['QUOTE_SUBMITTED', 'QUOTE_APPROVED'].includes(booking.status) || !isValidTransition(booking.status, 'ACCEPTED')) {
       return res.status(409).json(errorResponse(409, `Cannot edit the quote of a booking with status ${booking.status}`));
     }
 
     await updateBookingIfStatus(prisma, id, booking.status, {
-      status: 'IN_PROGRESS',
+      status: 'ACCEPTED',
       quoteStatus: null,
       approvedAt: null,
       finalPrice: null,
@@ -2493,7 +2534,7 @@ export const approveQuote = async (req: AuthRequest, res: Response) => {
 /**
  * PATCH /api/bookings/:id/quote/reject
  * Client refuses a submitted quote — e.g. the materials price doesn't match
- * the receipt. The booking goes back to IN_PROGRESS and the worker revises
+ * the receipt. The booking goes back to ACCEPTED and the worker revises
  * and resubmits (submitQuote); nothing is charged for the refused version.
  * Distinct from disputeQuote, which asks an admin to step in.
  */
@@ -2521,7 +2562,7 @@ export const rejectQuote = async (req: AuthRequest, res: Response) => {
     const result = await prisma.booking.updateMany({
       where: { id, status: 'QUOTE_SUBMITTED' },
       data: {
-        status: 'IN_PROGRESS',
+        status: 'ACCEPTED',
         quoteStatus: 'REJECTED',
         quoteRejectedAt: new Date(),
         quoteRejectionReason: reason,
@@ -2551,7 +2592,7 @@ export const rejectQuote = async (req: AuthRequest, res: Response) => {
       metadata: { bookingId: id },
     });
 
-    return res.status(200).json({ success: true, message: 'Quote refused — your pro will revise it', data: { id, status: 'IN_PROGRESS' } });
+    return res.status(200).json({ success: true, message: 'Quote refused — your pro will revise it', data: { id, status: 'ACCEPTED' } });
   } catch (error) {
     console.error('Error refusing quote:', error);
     return res.status(500).json(errorResponse(500, 'Failed to refuse quote'));
@@ -3350,7 +3391,7 @@ export const submitReview = async (req: AuthRequest, res: Response) => {
       data: {
         id: review.id,
         rating: review.rating,
-        comment: review.comment,
+        comment: maskProfanity(review.comment),
         photoUrls: review.photoUrls,
         workerNewRating: avgRating,
       },

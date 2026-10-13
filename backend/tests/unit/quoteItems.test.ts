@@ -23,10 +23,9 @@ describe('validateQuoteItems', () => {
     if (!r.ok) expect(r.error).toMatch(/receipt/i);
   });
 
-  it('requires an in-use photo', () => {
-    const r = validateQuoteItems([item({ proofOfUseUrls: [] })]);
-    expect(r.ok).toBe(false);
-    if (!r.ok) expect(r.error).toMatch(/in use/i);
+  // The quote now comes before the job starts, so there's nothing in use yet.
+  it('does not require an in-use photo', () => {
+    expect(validateQuoteItems([item({ proofOfUseUrls: [] })]).ok).toBe(true);
   });
 
   it.each([0, -1, NaN, '5'])('rejects price %p', (price) => {

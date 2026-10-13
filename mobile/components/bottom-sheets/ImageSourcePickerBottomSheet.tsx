@@ -6,11 +6,23 @@ import BottomSheetWrapper, { BottomSheetHandle } from "./BottomSheetWrapper";
 import OutlinedButton from "../ui/OutlinedButton";
 import { useAlertModal } from "../../contexts/AlertModalContext";
 import { colors, cardShadow } from "../../constants";
+import { compressImage } from "../../utils/imageCompressor";
 
 type Props = {
   innerRef: React.RefObject<BottomSheetHandle | null>;
   onSelect: (uri: string) => void;
 };
+
+// Phone photos are 3-12 MB (often HEIC on iPhone); the upload endpoints take
+// JPEG/PNG/WebP up to 5 MB. Every photo picked here is shrunk to 1600px and
+// re-encoded as JPEG first, so it uploads fast and isn't rejected.
+async function prepareForUpload(asset: ImagePicker.ImagePickerAsset): Promise<string> {
+  try {
+    return (await compressImage(asset.uri, 1600, 0.7, asset)).uri;
+  } catch {
+    return asset.uri; // Compression failed — let the upload try the original.
+  }
+}
 
 export const ImageSourcePickerBottomSheet: React.FC<Props> = ({
   innerRef,
@@ -36,7 +48,7 @@ export const ImageSourcePickerBottomSheet: React.FC<Props> = ({
         allowsEditing: true,
       });
       if (!result.canceled && result.assets[0]) {
-        onSelect(result.assets[0].uri);
+        onSelect(await prepareForUpload(result.assets[0]));
         innerRef.current?.close();
       }
     } catch {
@@ -58,7 +70,7 @@ export const ImageSourcePickerBottomSheet: React.FC<Props> = ({
         allowsEditing: true,
       });
       if (!result.canceled && result.assets[0]) {
-        onSelect(result.assets[0].uri);
+        onSelect(await prepareForUpload(result.assets[0]));
         innerRef.current?.close();
       }
     } catch {

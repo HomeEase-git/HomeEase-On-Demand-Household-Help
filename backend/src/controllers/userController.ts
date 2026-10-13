@@ -4,6 +4,7 @@ import * as bcrypt from 'bcryptjs';
 import prisma from '@config/database';
 import { errorResponse } from '@utils/errorResponse';
 import { toOwnedStoredUrl } from '@utils/storageUrls';
+import { maskProfanity } from '@utils/profanityFilter';
 import { ageInYears, workerAgeError } from '@utils/age';
 import { getAppSettings } from '@services/appSettingsService';
 import { eraseAccount, findDeletionBlockers } from '@services/accountDeletionService';
@@ -12,7 +13,7 @@ import { mimeTypeFromUrl, storagePathFromUrl } from '@utils/kycFileMeta';
 import { verificationQueue, VERIFICATION_JOB_OPTIONS } from '@queues/verificationQueue';
 import { checkResubmissionCooldown } from '@utils/kycResubmissionCooldown';
 import { TIER_1_REQUIRED_DOCUMENT_TYPES } from '@/constants/kycRequirements';
-import { revokeAllRefreshTokens, generateOtp, storeOtp, verifyOtp } from '@utils/otpService';
+import { revokeAllRefreshTokens, generateOtp, storeOtp, verifyOtp, respondIfOtpLocked } from '@utils/otpService';
 import { sendOtpEmail } from '@utils/emailService';
 import { revokeUserSessions } from '@utils/tokenRevocation';
 import { writeAuditLog } from '@utils/auditLog';
@@ -90,6 +91,9 @@ export const getUserProfile = async (req: AuthRequest, res: Response) => {
         // Drives the mobile app's account-hold banner — undefined for
         // clients, null for a worker in good standing (see
         // debtLedgerService.ts for how/why this gets set).
+        // What the worker currently owes HomeEase (platform commission on cash
+        // jobs, penalties) — shown on the earnings page; undefined for clients.
+        platformDues: user.role === 'WORKER' ? Math.max(0, workerProfile?.commissionOwed ?? 0) : undefined,
         accountHold:
           user.role === 'WORKER' && workerProfile?.debtHoldAt
             ? { since: workerProfile.debtHoldAt, amountOwed: workerProfile.commissionOwed }
@@ -372,6 +376,7 @@ export const sendDeletionCode = async (req: AuthRequest, res: Response) => {
     await sendOtpEmail(user.email, code);
     return res.status(200).json({ success: true, message: 'We emailed you a code to confirm the deletion' });
   } catch (error) {
+    if (respondIfOtpLocked(res, error)) return;
     console.error('Error sending deletion code:', error);
     return res.status(500).json(errorResponse(500, 'Failed to send the code'));
   }
@@ -1151,6 +1156,7 @@ export const deleteAccount = async (req: AuthRequest, res: Response) => {
       message: 'Your account and personal data have been deleted. Booking, payment and tax records are kept as required by law.',
     });
   } catch (error) {
+    if (respondIfOtpLocked(res, error)) return;
     console.error('Error deleting account:', error);
     return res.status(500).json(errorResponse(500, 'Failed to delete account'));
   }
@@ -1199,7 +1205,7 @@ export const getMyReviews = async (req: AuthRequest, res: Response) => {
       workerAvatar: review.booking.worker?.avatar ?? null,
       serviceType: review.booking.serviceTask?.name ?? 'Service',
       rating: review.rating,
-      comment: review.comment,
+      comment: maskProfanity(review.comment),
       photoUrls: review.photoUrls,
       createdAt: review.createdAt,
     }));

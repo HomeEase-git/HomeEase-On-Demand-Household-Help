@@ -5,6 +5,7 @@ import { errorResponse } from '@utils/errorResponse';
 import { toOwnedStoredUrl } from '@utils/storageUrls';
 import { parseWorkerBirthDate } from '@utils/age';
 import { decryptField, decryptOptionalField, encryptField, encryptOptionalField, hashTin, maskLastFour, tinHashCandidates } from '@utils/fieldEncryption';
+import { maskProfanity } from '@utils/profanityFilter';
 import {
   toDayStart,
   isoDay,
@@ -653,7 +654,7 @@ export const getWorkerReviews = async (req: AuthRequest, res: Response) => {
     const formattedReviews = reviews.map((review) => ({
       id: review.id,
       rating: review.rating,
-      comment: review.comment,
+      comment: maskProfanity(review.comment),
       photoUrls: review.photoUrls,
       reviewer: {
         id: review.client.id,

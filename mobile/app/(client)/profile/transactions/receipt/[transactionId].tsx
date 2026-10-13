@@ -95,6 +95,9 @@ export default function ReceiptScreen() {
     day: "numeric",
   });
 
+  const b = transaction.breakdown;
+  const showVat = !!b?.vatApplicable && !!b?.vatAmount;
+
   const handleShare = () => {
     Share.share({
       message:
@@ -104,6 +107,11 @@ export default function ReceiptScreen() {
         `Date: ${formattedDate}\n` +
         `Payment Method: ${transaction.method ?? "—"}\n` +
         `Status: ${transaction.status}\n` +
+        (b ? `Subtotal: ₱${b.subtotal.toFixed(2)}\n` : "") +
+        (showVat
+          ? `VAT${b.vatRate ? ` (${Math.round(b.vatRate * 100)}%)` : ""}: ₱${b.vatAmount.toFixed(2)}\n`
+          : "") +
+        (b?.tip > 0 ? `Tip: ₱${b.tip.toFixed(2)}\n` : "") +
         `Total Paid: ₱${transaction.amount?.toFixed(2)}`,
     }).catch((error) => console.error("Share receipt error:", error));
   };

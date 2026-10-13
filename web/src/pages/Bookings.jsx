@@ -9,12 +9,15 @@ import SectionCard from '../components/common/SectionCard'
 import Pagination from '../components/common/Pagination'
 import SortableTh from '../components/common/SortableTh'
 import { exportListToCsv, csvDateStamp } from '../utils/exportList'
+import { exportListToPdf } from '../utils/exportPdf'
+import ExportMenu from '../components/common/ExportMenu'
 import Badge from '../components/common/Badge'
 import LoadingState from '../components/common/LoadingState'
 import ErrorState from '../components/common/ErrorState'
 import { useListQuery } from '../hooks/useListQuery'
 import { fetchBookings, cancelBookingAdmin } from '../services/bookings'
 import { useToast } from '../context/ToastContext'
+import { useAuth } from '../context/AuthContext'
 import { getBookingStatusVariant } from '../utils/statusBadge'
 
 
@@ -42,6 +45,7 @@ function toApiParams(params) {
 
 export default function Bookings() {
   const { showSuccess, showError } = useToast()
+  const { user } = useAuth()
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo] = useState('')
   const [cancelTarget, setCancelTarget] = useState(null)
@@ -103,22 +107,28 @@ export default function Bookings() {
     }
   }
 
+  const mapBookingRow = (b) => ({
+    'Booking ID': b.displayId,
+    Client: b.client,
+    Worker: b.worker,
+    Service: b.service,
+    Date: b.date,
+    Amount: b.amount,
+    Status: b.status,
+  })
+
   const [exporting, setExporting] = useState(false)
-  const handleExport = async () => {
+  const handleExport = async (format) => {
     setExporting(true)
     try {
-      const { count, total, truncated } = await exportListToCsv({
+      const exportFn = format === 'pdf' ? exportListToPdf : exportListToCsv
+      const { count, total, truncated } = await exportFn({
         fetchPage: ({ page, limit }) => fetchBookings({ page, limit, ...toApiParams(params) }),
-        filename: `bookings-${csvDateStamp()}.csv`,
-        mapRow: (b) => ({
-          'Booking ID': b.displayId,
-          Client: b.client,
-          Worker: b.worker,
-          Service: b.service,
-          Date: b.date,
-          Amount: b.amount,
-          Status: b.status,
-        }),
+        filename: `bookings-${csvDateStamp()}.${format}`,
+        title: 'Booking Management Report',
+        subtitle: `Status: ${params.statusTab || 'All'}`,
+        generatedBy: user?.name || user?.email,
+        mapRow: mapBookingRow,
       })
       if (!count) showError('Nothing to export for these filters')
       else if (truncated) showSuccess(`Exported the first ${count} of ${total} bookings. Narrow the filters to get the rest.`)
@@ -134,9 +144,11 @@ export default function Bookings() {
     <>
       <PageHeader
         actions={
-          <button type="button" className="btn btn-outline" onClick={handleExport} disabled={exporting}>
-            <i className={`fas ${exporting ? 'fa-spinner fa-spin' : 'fa-file-csv'}`} /> {exporting ? 'Exporting…' : 'Export CSV'}
-          </button>
+          <ExportMenu
+            exporting={exporting}
+            onExportCsv={() => handleExport('csv')}
+            onExportPdf={() => handleExport('pdf')}
+          />
         }
         title="Booking Management" subtitle="All bookings" />
       <SubNav items={BOOKINGS_SUB_NAV} />

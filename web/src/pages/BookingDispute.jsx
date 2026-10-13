@@ -10,13 +10,18 @@ import Badge from '../components/common/Badge'
 import LoadingState from '../components/common/LoadingState'
 import ErrorState from '../components/common/ErrorState'
 import { fetchDisputes, fetchDisputeById, fetchDisputeHistory, resolveDispute } from '../services/disputes'
+import { exportListToCsv, csvDateStamp } from '../utils/exportList'
+import { exportListToPdf } from '../utils/exportPdf'
+import ExportMenu from '../components/common/ExportMenu'
 import { useToast } from '../context/ToastContext'
+import { useAuth } from '../context/AuthContext'
 import { useListQuery } from '../hooks/useListQuery'
 
 const POLL_INTERVAL_MS = 5000
 
 
 const STATUS_TABS = ['Open', 'Resolved', 'Refund Failed']
+const RAISED_BY_TABS = ['All', 'Client', 'Worker']
 
 function formatAge(ageHours) {
   if (ageHours == null) return '—'
@@ -138,6 +143,7 @@ export default function BookingDispute() {
   // dispute reviewed.
   const [history, setHistory] = useState({})
   const { showSuccess, showError } = useToast()
+  const { user } = useAuth()
 
   // The backend filters on an exact status match; "Resolved" spans 3
   // possible values (RESOLVED_APPROVED/RESOLVED_NEW_QUOTE_REQUESTED/
@@ -147,25 +153,33 @@ export default function BookingDispute() {
   // for a CANCEL_BOOKING resolution whose refund/void to Xendit failed and
   // needs a manual clawback; these disputes are otherwise already RESOLVED
   // and would be easy to lose track of buried in that tab.
-  const fetchFn = useCallback(async (params) => {
+  // Shared by the table loader and the CSV export so an export always
+  // matches what's on screen for the current status/raised-by/search filters.
+  const fetchFilteredDisputes = useCallback(async ({ search, statusTab, raisedByTab, page, limit }) => {
     const statusParam =
-      params.statusTab === 'Open'
+      statusTab === 'Open'
         ? 'OPEN'
-        : params.statusTab === 'Refund Failed'
+        : statusTab === 'Refund Failed'
           ? 'NEEDS_REFUND_REVIEW'
           : 'all'
     const response = await fetchDisputes({
-      search: params.search || '',
-      page: params.page,
-      limit: 20,
+      search: search || '',
+      page,
+      limit,
       status: statusParam,
     })
-    const rows =
-      params.statusTab === 'Resolved'
-        ? response.data.filter((d) => d.status.startsWith('RESOLVED'))
-        : response.data
+    let rows = statusTab === 'Resolved' ? response.data.filter((d) => d.status.startsWith('RESOLVED')) : response.data
+    // `raisedByRole` is derived server-side (raisedById isn't a real FK, so
+    // it can't be filtered in the DB query above) — filtered here client
+    // -side on the same page of rows, same tradeoff the Resolved filter
+    // above already makes: `meta.total` reflects the unfiltered status
+    // count, not the raised-by-filtered count.
+    if (raisedByTab === 'Client') rows = rows.filter((d) => d.raisedByRole === 'CLIENT')
+    if (raisedByTab === 'Worker') rows = rows.filter((d) => d.raisedByRole === 'WORKER')
     return { data: rows, meta: response.meta }
   }, [])
+
+  const fetchFn = useCallback((params) => fetchFilteredDisputes({ ...params, limit: 20 }), [fetchFilteredDisputes])
 
   const {
     data: disputes,
@@ -179,13 +193,48 @@ export default function BookingDispute() {
     setFilter,
     goToPage,
   } = useListQuery(fetchFn, {
-    initialParams: { search: '', statusTab: 'Open', page: 1 },
+    initialParams: { search: '', statusTab: 'Open', raisedByTab: 'All', page: 1 },
     pollIntervalMs: POLL_INTERVAL_MS,
     // Keep the queue current for other admins working disputes concurrently —
     // paused while a dispute is open so a background refresh can't disrupt an
     // in-progress review/resolution.
     pausePolling: !!selectedId,
   })
+
+  const mapDisputeRow = (d) => ({
+    'Dispute ID': d.displayId,
+    Client: d.client,
+    Worker: d.worker,
+    'Raised By': d.raisedByRole ?? '',
+    Reason: d.reason,
+    Amount: d.amount,
+    'Time Open (hours)': d.ageHours,
+    Status: d.status,
+    'Refund Status': d.refundStatus ?? '',
+  })
+
+  const [exporting, setExporting] = useState(false)
+  const handleExport = async (format) => {
+    setExporting(true)
+    try {
+      const exportFn = format === 'pdf' ? exportListToPdf : exportListToCsv
+      const { count, total, truncated } = await exportFn({
+        fetchPage: ({ page, limit }) => fetchFilteredDisputes({ ...params, page, limit }),
+        filename: `disputes-${csvDateStamp()}.${format}`,
+        title: 'Dispute Resolution Report',
+        subtitle: `Status: ${params.statusTab} · Raised by: ${params.raisedByTab}`,
+        generatedBy: user?.name || user?.email,
+        mapRow: mapDisputeRow,
+      })
+      if (!count) showError('Nothing to export for these filters')
+      else if (truncated) showSuccess(`Exported the first ${count} of ${total} disputes. Narrow the filters to get the rest.`)
+      else showSuccess(`Exported ${count} disputes`)
+    } catch (err) {
+      showError(err.message || 'Export failed')
+    } finally {
+      setExporting(false)
+    }
+  }
 
   const selected = useMemo(() => disputes.find((d) => d.id === selectedId) || null, [disputes, selectedId])
 
@@ -253,11 +302,23 @@ export default function BookingDispute() {
 
   return (
     <>
-      <PageHeader title="Dispute Resolution Center" subtitle="Review and resolve disputed bookings" />
+      <PageHeader
+        actions={
+          <ExportMenu
+            exporting={exporting}
+            onExportCsv={() => handleExport('csv')}
+            onExportPdf={() => handleExport('pdf')}
+          />
+        }
+        title="Dispute Resolution Center" subtitle="Review and resolve disputed bookings" />
       <SubNav items={BOOKINGS_SUB_NAV} />
       <div className="toolbar">
         <SearchBar placeholder="Search disputes..." value={params.search || ''} onChange={setSearch} />
         <FilterTabs tabs={STATUS_TABS} activeTab={params.statusTab} onTabChange={(tab) => setFilter('statusTab', tab)} />
+      </div>
+      <div className="toolbar" style={{ alignItems: 'center' }}>
+        <label style={{ fontSize: '0.8125rem', color: 'var(--text-muted)' }}>Raised by</label>
+        <FilterTabs tabs={RAISED_BY_TABS} activeTab={params.raisedByTab} onTabChange={(tab) => setFilter('raisedByTab', tab)} />
       </div>
       <SectionCard>
         {loading && <LoadingState message="Loading disputes..." />}
@@ -272,7 +333,7 @@ export default function BookingDispute() {
                   <th>Worker</th>
                   <th>Reason</th>
                   <th>Amount</th>
-                  <th>Age</th>
+                  <th>Time Open</th>
                   <th>Status</th>
                   <th>Actions</th>
                 </tr>
@@ -281,15 +342,26 @@ export default function BookingDispute() {
                 {disputes.length === 0 ? (
                   <tr>
                     <td colSpan={8} className="table-empty">
-                      No {params.statusTab.toLowerCase()} disputes found.
+                      No {params.statusTab.toLowerCase()} disputes
+                      {params.raisedByTab !== 'All' ? ` raised by a ${params.raisedByTab.toLowerCase()}` : ''} found.
                     </td>
                   </tr>
                 ) : (
                   disputes.map((d) => (
                     <tr key={d.id}>
                       <td>{d.displayId}</td>
-                      <td>{d.client}</td>
-                      <td>{d.worker}</td>
+                      <td>
+                        {d.client}
+                        {d.raisedByRole === 'CLIENT' && (
+                          <span style={{ display: 'block', fontSize: '0.7rem', color: 'var(--text-muted)' }}>Filed this dispute</span>
+                        )}
+                      </td>
+                      <td>
+                        {d.worker}
+                        {d.raisedByRole === 'WORKER' && (
+                          <span style={{ display: 'block', fontSize: '0.7rem', color: 'var(--text-muted)' }}>Filed this dispute</span>
+                        )}
+                      </td>
                       <td>{d.reason}</td>
                       <td>{d.amount}</td>
                       <td style={d.ageHours >= 48 && (d.status === 'OPEN' || d.status === 'UNDER_REVIEW') ? { color: 'var(--danger)', fontWeight: 600 } : undefined}>
@@ -362,14 +434,14 @@ export default function BookingDispute() {
             )}
             <div className="modal-detail-grid--2col">
               <div className="detail-block">
-                <label>Client</label>
+                <label>Client{selected.raisedByRole === 'CLIENT' ? ' — filed this dispute' : ''}</label>
                 <div className="value">
                   {selected.client}
                   <DisputeHistoryNote history={history[selected.clientId]} />
                 </div>
               </div>
               <div className="detail-block">
-                <label>Worker</label>
+                <label>Worker{selected.raisedByRole === 'WORKER' ? ' — filed this dispute' : ''}</label>
                 <div className="value">
                   {selected.worker}
                   <DisputeHistoryNote history={history[selected.workerId]} />

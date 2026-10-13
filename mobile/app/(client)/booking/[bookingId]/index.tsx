@@ -200,11 +200,10 @@ export default function BookingDetailScreen() {
   const isPendingCompletion = booking.status === "PendingCompletion";
   const isAwaitingPayment = booking.status === "AwaitingPayment";
   const hasQuote = booking.status === "QuoteSubmitted" && booking.quote;
-  // Distinct from a client-initiated cancel — both collapse to the same
-  // "Cancelled" bucket in booking.status (see API_STATUS_MAP), so this
-  // checks the raw backend status instead, to only offer "Find Another
-  // Pro" when a worker actually declined the request.
-  const isDeclined = rawDetail?.status === "REJECTED";
+  // Distinct from a client-initiated cancel: a worker declining is its own
+  // "Declined" status, and only then do we offer "Find Another Pro". The raw
+  // status covers the moment before the list status has refreshed.
+  const isDeclined = booking.status === "Declined" || rawDetail?.status === "REJECTED";
 
   // A different job's spillover (see backend extendBooking) moved this
   // booking to a new date — resolved once the client explicitly keeps it,
@@ -792,8 +791,13 @@ export default function BookingDetailScreen() {
               <Ionicons name="close-circle" size={24} color={colors.error} />
               <View className="ml-3 flex-1">
                 <Text className="text-error font-bold text-sm">
-                  This pro declined the request
+                  {workerName && workerName !== "Unassigned" ? `${workerName} declined this booking` : "This pro declined the booking"}
                 </Text>
+                {!!rawDetail?.declineReason && (
+                  <Text className="text-text-primary text-xs mt-1">
+                    Reason: &ldquo;{rawDetail.declineReason}&rdquo;
+                  </Text>
+                )}
                 <Text className="text-text-secondary text-xs mt-0.5">
                   Your booking details are saved. Pick another pro to continue.
                 </Text>

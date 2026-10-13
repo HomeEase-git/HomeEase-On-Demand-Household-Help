@@ -286,7 +286,7 @@ function statusLabel(status: string): string {
     PENDING_COMPLETION: "Awaiting your confirmation",
     COMPLETED: "Completed",
     CANCELLED: "Cancelled",
-    REJECTED: "Cancelled",
+    REJECTED: "Declined by the pro",
     DISPUTED: "Under review",
   };
   return labels[status] ?? "Request submitted";

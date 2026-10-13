@@ -226,8 +226,8 @@ describe('worker operations overhaul', () => {
   });
 
   describe('quotes need proof and can be refused', () => {
-    it('requires receipt and proof-of-use photos for each item, and goes back to the worker when refused', async () => {
-      const booking = await seedBooking({ status: 'IN_PROGRESS', workerArrivedAt: new Date(), workerStartedAt: new Date() });
+    it('requires a receipt photo for each item, and goes back to the worker when refused', async () => {
+      const booking = await seedBooking({ status: 'ACCEPTED', workerArrivedAt: new Date() });
 
       const noProof = await request(app)
         .post(`/api/bookings/${booking.id}/quote`)
@@ -253,7 +253,7 @@ describe('worker operations overhaul', () => {
         .send({ reason: 'The receipt says ₱300, not ₱350' });
       expect(reject.status).toBe(200);
       const refused = await prisma.booking.findUniqueOrThrow({ where: { id: booking.id } });
-      expect(refused).toMatchObject({ status: 'IN_PROGRESS', quoteStatus: 'REJECTED' });
+      expect(refused).toMatchObject({ status: 'ACCEPTED', quoteStatus: 'REJECTED' });
 
       const revised = await request(app)
         .post(`/api/bookings/${booking.id}/quote`)

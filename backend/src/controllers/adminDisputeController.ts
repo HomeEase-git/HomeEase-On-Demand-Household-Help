@@ -71,6 +71,17 @@ export function formatDispute(record: DisputeRecord) {
     clientId: booking.client?.id ?? null,
     worker: booking.worker?.fullName ?? '—',
     workerId: booking.worker?.id ?? null,
+    raisedById: record.raisedById,
+    // Which side of the booking filed this — 'raisedById' is only a soft
+    // reference (see schema), so this is derived by comparison rather than
+    // a relation. Lets the admin UI show/filter by who it came from without
+    // guessing from `reason` text.
+    raisedByRole:
+      record.raisedById === booking.client?.id
+        ? 'CLIENT'
+        : record.raisedById === booking.worker?.id
+          ? 'WORKER'
+          : null,
     amount: amount != null ? formatPeso(amount) : '—',
     reason: record.reason,
     evidenceUrls: record.evidenceUrls,
@@ -380,7 +391,7 @@ async function resolveNonPaymentDispute(
  *    capture still happens at confirm-completion, matching the normal
  *    non-disputed quote-approval flow.
  *  - REQUEST_NEW_QUOTE: resets quoteStatus to PENDING and sends the booking
- *    back to IN_PROGRESS so the worker can resubmit via POST .../quote.
+ *    back to ACCEPTED so the worker can resubmit via POST .../quote.
  *  - CANCEL_BOOKING: cancels the booking, writes a Cancellation record, and
  *    releases/refunds the held escrow.
  *  - RESOLVE_FOR_WORKER: for a completed job the client never paid for
@@ -493,7 +504,7 @@ export const resolveDispute = async (req: AuthRequest, res: Response) => {
         });
       } else if (action === 'REQUEST_NEW_QUOTE') {
         await updateBookingIfStatus(tx, booking.id, booking.status, {
-          status: 'IN_PROGRESS',
+          status: 'ACCEPTED',
           quoteStatus: 'PENDING',
           laborCost: null,
           materialsCost: null,

@@ -1,4 +1,5 @@
 import * as ImageManipulator from 'expo-image-manipulator';
+import { Image } from 'react-native';
 import { File } from 'expo-file-system';
 
 export type CompressionResult = {
@@ -21,26 +22,25 @@ export type CompressionResult = {
  * @param uri - Image URI (file:// or content://)
  * @param maxDimension - Maximum width or height (default 1600)
  * @param quality - Compression quality 0-1 (default 0.7)
+ * @param size - The image's pixel size if already known (the picker reports
+ *   it); otherwise it's read from the file
  * @returns Compressed image URI and size info
  */
 export async function compressImage(
   uri: string,
   maxDimension: number = 1600,
-  quality: number = 0.7
+  quality: number = 0.7,
+  size?: { width?: number; height?: number }
 ): Promise<CompressionResult> {
   try {
     // Get original file size
     const originalSize = await getFileSizeFromUri(uri);
 
-    // Manipulate image: resize and compress
-    const manipulatedImage = await ImageManipulator.manipulateAsync(uri, [
-      {
-        resize: {
-          width: maxDimension,
-          height: maxDimension,
-        },
-      },
-    ], {
+    // Shrink only the longer side, and only when it's over the limit. Passing
+    // both width and height to resize would stretch every photo into a
+    // maxDimension x maxDimension square (and blow small ones up).
+    const resize = await resizeAction(uri, maxDimension, size);
+    const manipulatedImage = await ImageManipulator.manipulateAsync(uri, resize ? [resize] : [], {
       compress: quality,
       format: ImageManipulator.SaveFormat.JPEG,
     });
@@ -58,6 +58,27 @@ export async function compressImage(
     console.error('Image compression failed:', error);
     throw new Error('Failed to compress image. Please try again.');
   }
+}
+
+async function resizeAction(
+  uri: string,
+  maxDimension: number,
+  size?: { width?: number; height?: number }
+): Promise<ImageManipulator.Action | null> {
+  let width = size?.width ?? 0;
+  let height = size?.height ?? 0;
+  if (!width || !height) {
+    try {
+      ({ width, height } = await new Promise<{ width: number; height: number }>((resolve, reject) =>
+        Image.getSize(uri, (w, h) => resolve({ width: w, height: h }), reject)
+      ));
+    } catch {
+      // Size unknown: cap the width, which keeps the aspect ratio.
+      return { resize: { width: maxDimension } };
+    }
+  }
+  if (Math.max(width, height) <= maxDimension) return null;
+  return width >= height ? { resize: { width: maxDimension } } : { resize: { height: maxDimension } };
 }
 
 /**
