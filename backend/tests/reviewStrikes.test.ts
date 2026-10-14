@@ -88,6 +88,25 @@ describe('Review reports and warning strikes', () => {
     await prisma.user.update({ where: { id: clientId }, data: { warningCount: 0 } });
   });
 
+  it('treats a flag with no target as a report on the review', async () => {
+    const review = await seedReview('rude reply');
+    await prisma.review.update({ where: { id: review.id }, data: { flagged: true, flagTarget: null } });
+
+    const byClient = await request(app)
+      .post(`/api/bookings/${review.bookingId}/review/report`)
+      .set('Authorization', `Bearer ${clientToken}`)
+      .send({ reason: 'Insulting reply' });
+    expect(byClient.status).toBe(409);
+
+    const warned = await request(app)
+      .post(`/api/admin/reviews/${review.id}/warn`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ reason: 'Abusive language in review', target: 'REVIEW' });
+    expect(warned.status).toBe(200);
+    expect(await prisma.review.findUnique({ where: { id: review.id } })).toMatchObject({ flagged: false });
+    await prisma.user.update({ where: { id: clientId }, data: { warningCount: 0 } });
+  });
+
   it('warns the author and suspends on the 3rd strike', async () => {
     const warn = async () => {
       const review = await seedReview();

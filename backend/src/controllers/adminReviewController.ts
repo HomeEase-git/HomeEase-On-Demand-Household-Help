@@ -189,9 +189,13 @@ export const warnReviewAuthor = async (req: AuthRequest, res: Response) => {
         });
         if (claimed.count === 0) throw new AlreadyWarnedError();
         // Close the report only if it is about this part; a pending report
-        // on the other part stays in the queue.
+        // on the other part stays in the queue. A null target (older flags,
+        // admin-set flags) means the review, as everywhere else.
         await tx.review.updateMany({
-          where: { id, OR: [{ flagTarget: target }, { flagged: false }] },
+          where: {
+            id,
+            OR: [{ flagTarget: target }, ...(isResponse ? [] : [{ flagTarget: null }]), { flagged: false }],
+          },
           data: { flagged: false, flagReason: reason },
         });
         const user = await tx.user.update({

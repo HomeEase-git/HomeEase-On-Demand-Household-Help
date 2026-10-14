@@ -3535,7 +3535,8 @@ export const reportReview = async (req: AuthRequest, res: Response) => {
     // One pending report per review: overwriting the other side's report
     // would drop it from the admin queue. They can report once it's handled.
     const flagTarget = isWorker ? 'REVIEW' : 'RESPONSE';
-    if (review.flagged && review.flagTarget && review.flagTarget !== flagTarget) {
+    // A null target (older flags, admin-set flags) means the review.
+    if (review.flagged && (review.flagTarget ?? 'REVIEW') !== flagTarget) {
       return res.status(409).json(errorResponse(409, 'HomeEase is already checking a report on this review. Try again once it is handled.'));
     }
 
