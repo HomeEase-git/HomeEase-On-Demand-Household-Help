@@ -53,6 +53,7 @@ export type ApiBookingDetail = {
   priceBreakdown?: {
     basePrice: number | null;
     distanceFee: number;
+    distanceFeeNote?: string | null;
     tierFee: number;
     rushFee?: number;
     addOns: { name: string; price: number }[];
@@ -64,6 +65,9 @@ export type ApiBookingDetail = {
     total: number;
   };
   completionPhotoUrl?: string | null;
+  beforePhotoUrls?: string[];
+  progressPhotoUrls?: string[];
+  timeline?: { workerArrivedAt?: string | null; workerStartedAt?: string | null; workerCompletedAt?: string | null } | null;
   // Settled at booking time — used to auto-process payment after completion
   // is confirmed, without asking the client to pick a method again.
   paymentMethodType?: string | null;
@@ -92,7 +96,7 @@ export type ApiBookingDetail = {
     rejectionReason?: string | null;
     revision?: number;
   } | null;
-  review: { rating: number; comment: string | null } | null;
+  review: { rating: number; comment: string | null; workerResponse?: string | null } | null;
   // Follow-up jobs: this booking's inspection (parent), and follow-up jobs
   // requested after it. allowsFollowUp = this is an inspection/diagnosis job.
   parentBooking?: { id: string; scheduledDate: string; service: string } | null;

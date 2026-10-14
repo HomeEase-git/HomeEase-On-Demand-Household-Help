@@ -1,5 +1,5 @@
 import React, { useCallback, useState } from "react";
-import { View, Text, ScrollView } from "react-native";
+import { View, Text, ScrollView, Modal, ActivityIndicator } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { isAxiosError } from "axios";
@@ -56,6 +56,8 @@ export default function RequestDetailScreen() {
   const [booking, setBooking] = useState<BookingDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
+  // Full-screen "waiting" state while accept/decline is in flight.
+  const [waitingLabel, setWaitingLabel] = useState<string | null>(null);
   const [declineVisible, setDeclineVisible] = useState(false);
   const alertModal = useAlertModal();
 
@@ -128,8 +130,10 @@ export default function RequestDetailScreen() {
   const acceptNow = async () => {
     if (submitting) return;
     setSubmitting(true);
+    setWaitingLabel("Accepting job…");
     try {
       const result = await api.acceptBooking(booking.id, isFollowUp ? { confirmFollowUp: true } : undefined);
+      setWaitingLabel(null);
       updateJobStatus(booking.id, "Accepted");
       alertModal.success(
         "Job Accepted!",
@@ -145,6 +149,7 @@ export default function RequestDetailScreen() {
         ],
       );
     } catch (error) {
+      setWaitingLabel(null);
       console.error("Accept booking error:", error);
       if (isAxiosError(error) && error.response?.status === 402) {
         alertModal.error(
@@ -194,12 +199,15 @@ export default function RequestDetailScreen() {
 
   const handleDeclineConfirm = async (reason: string) => {
     setSubmitting(true);
+    setDeclineVisible(false);
+    setWaitingLabel("Declining job…");
     try {
       await api.declineBooking(booking.id, reason);
-      setDeclineVisible(false);
+      setWaitingLabel(null);
       alertModal.success("Declined", "The job request has been declined.");
       router.back();
     } catch (error) {
+      setWaitingLabel(null);
       console.error("Decline booking error:", error);
       alertModal.error("Error", "Failed to decline this job. Please try again.");
     } finally {
@@ -410,6 +418,15 @@ export default function RequestDetailScreen() {
         onConfirm={handleDeclineConfirm}
         onCancel={() => setDeclineVisible(false)}
       />
+
+      <Modal visible={!!waitingLabel} transparent animationType="fade" statusBarTranslucent>
+        <View className="flex-1 items-center justify-center bg-black/50">
+          <View className="bg-white rounded-2xl px-8 py-6 items-center">
+            <ActivityIndicator size="large" color={colors.brand.DEFAULT} />
+            <Text className="text-text-primary font-semibold mt-3">{waitingLabel}</Text>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }

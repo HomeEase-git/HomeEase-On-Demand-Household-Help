@@ -1765,6 +1765,178 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorEnvelope' }
 
+  /bookings/{id}/addons:
+    post:
+      tags: [Bookings]
+      summary: Worker adds priced extra work to the same booking (arrived through IN_PROGRESS). Billed only after the client approves via /addons/{addonId}/respond; never auto-approved.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, price]
+              properties:
+                name: { type: string, maxLength: 100 }
+                price: { type: number, minimum: 1, maximum: 100000 }
+      responses:
+        '201': { description: Added, pending client approval }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: Worker has not arrived yet, or the job is already marked done
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+
+  /bookings/{id}/addons/request:
+    post:
+      tags: [Bookings]
+      summary: Client asks the worker for extra work on this visit; the worker is notified and prices it with POST /bookings/{id}/addons.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [description]
+              properties:
+                description: { type: string, minLength: 3, maxLength: 300 }
+      responses:
+        '200': { description: Sent to the worker }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: Worker has not arrived yet, or the job is already marked done
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+
+  /app/version:
+    get:
+      tags: [App]
+      summary: Public. Admin-set Android latest/minimum version and update link for the in-app update prompt (nulls mean no prompt)
+      security: []
+      responses:
+        '200': { description: '{ latest, minimum, storeUrl }' }
+
+  /bookings/{id}/progress-photos:
+    post:
+      tags: [Bookings]
+      summary: Worker posts "ongoing" proof photos while IN_PROGRESS (at least one is required before /complete). /start now requires beforePhotoUrls (1-5 of the worker's own job photos).
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [photoUrls]
+              properties:
+                photoUrls: { type: array, items: { type: string }, minItems: 1, maxItems: 5 }
+      responses:
+        '201': { description: Posted }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: Job not in progress, or the 20-photo cap was reached
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+
+  /bookings/{id}/review/report:
+    post:
+      tags: [Bookings]
+      summary: Report the review (worker) or the worker's reply (client); sends it to the admin Flagged queue
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason: { type: string, minLength: 5, maxLength: 500 }
+      responses:
+        '200': { description: Reported }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: Client tried to report a reply that doesn't exist
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+
+  /admin/reviews/{id}/warn:
+    post:
+      tags: [Admin Reviews]
+      summary: Warn the author of the reported part; 3rd warning suspends the account
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason: { type: string, minLength: 10 }
+      responses:
+        '200': { description: Warned; data includes warningCount and suspended }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /admin/bookings/{id}/archive:
+    patch:
+      tags: [Admin Bookings]
+      summary: Archive or restore a finished booking (hidden from the list except with status=archived)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [archived]
+              properties:
+                archived: { type: boolean }
+      responses:
+        '200': { description: Updated }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: Booking is not completed, cancelled or rejected
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+
   /admin/users/workers:
     get:
       tags: [Admin Users]

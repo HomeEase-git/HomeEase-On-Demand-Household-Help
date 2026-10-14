@@ -5,7 +5,7 @@ import { authLimiter } from '@middleware/rateLimit';
 import {
   remindAndAutoSettleCompletions,
   remindAndAutoApproveQuotes,
-  remindAndAutoApproveAddons,
+  remindPendingAddons,
   cancelWorkerNoShows,
   escalateStaleDisputes,
   remindAndAutoConfirmReschedules,
@@ -24,7 +24,8 @@ const router = Router();
 const TASKS = {
   'settle-completions': remindAndAutoSettleCompletions,
   'approve-quotes': remindAndAutoApproveQuotes,
-  'approve-addons': remindAndAutoApproveAddons,
+  // Key kept for the existing cron caller; it only sends reminders now.
+  'approve-addons': remindPendingAddons,
   'flag-no-shows': cancelWorkerNoShows,
   'escalate-stale-disputes': escalateStaleDisputes,
   'expire-pending': expireOverduePendingBookings,

@@ -54,6 +54,7 @@ export type CatalogBody = {
   description?: string | null;
   basePrice?: number;
   icon?: string | null;
+  backgroundImageUrl?: string | null;
   requiresCertification?: boolean;
   tasks?: CatalogTaskInput[];
   scopeFields?: CatalogFieldInput[];
@@ -72,6 +73,9 @@ export function validateCatalog(
   }
   if (body.icon != null && !VALID_SERVICE_ICONS.includes(body.icon as (typeof VALID_SERVICE_ICONS)[number])) {
     return `icon must be one of the curated set: ${VALID_SERVICE_ICONS.join(', ')}.`;
+  }
+  if (body.backgroundImageUrl != null && (typeof body.backgroundImageUrl !== 'string' || !/^https:\/\//.test(body.backgroundImageUrl))) {
+    return 'backgroundImageUrl must be an https URL.';
   }
   if (body.requiresCertification !== undefined && typeof body.requiresCertification !== 'boolean') {
     return 'requiresCertification must be a boolean.';
@@ -216,6 +220,8 @@ export async function writeCatalog(
     description: body.description?.trim() || null,
     basePrice: body.basePrice!,
     icon: body.icon || null,
+    // Undefined (scripts/seeds) leaves it unchanged; null clears it.
+    ...(body.backgroundImageUrl !== undefined ? { backgroundImageUrl: body.backgroundImageUrl || null } : {}),
     requiresCertification: body.requiresCertification ?? false,
   };
 

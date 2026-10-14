@@ -16,6 +16,8 @@ interface PriceBreakdownCardProps {
   // into one "Service" number. Omit to fall back to the old collapsed view.
   basePrice?: number | null;
   distanceFee?: number | null;
+  // How the distance fee was computed (server-built, see describeDistanceFee).
+  distanceFeeNote?: string | null;
   tierFee?: number | null;
   // Same-day booking surcharge.
   rushFee?: number | null;
@@ -40,6 +42,7 @@ export default function PriceBreakdownCard({
   subtotal,
   basePrice = null,
   distanceFee = null,
+  distanceFeeNote = null,
   tierFee = null,
   rushFee = null,
   addOns = [],
@@ -85,9 +88,12 @@ export default function PriceBreakdownCard({
             <Text className="text-brand font-semibold">{formatPrice(basePrice)}</Text>
           </View>
           {!!distanceFee && (
-            <View className="flex-row items-center justify-between mb-2">
-              <Text className="text-text-secondary text-sm">Distance fee</Text>
-              <Text className="text-brand font-semibold">{formatPrice(distanceFee)}</Text>
+            <View className="mb-2">
+              <View className="flex-row items-center justify-between">
+                <Text className="text-text-secondary text-sm">Distance fee</Text>
+                <Text className="text-brand font-semibold">{formatPrice(distanceFee)}</Text>
+              </View>
+              {!!distanceFeeNote && <Text className="text-text-muted text-xs mt-0.5">{distanceFeeNote}</Text>}
             </View>
           )}
           {!!tierFee && (

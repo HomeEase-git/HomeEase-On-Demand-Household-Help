@@ -1215,6 +1215,7 @@ async function loginPayload(user: {
   fullName: string;
   email: string;
   phone: string | null;
+  avatar?: string | null;
   role: Role;
   isVerified: boolean;
   mfaEnabled: boolean;
@@ -1237,6 +1238,9 @@ async function loginPayload(user: {
     name: user.fullName,
     email: user.email,
     phone: user.phone,
+    // Without this the app's Profile tab showed no photo after every fresh
+    // login, though other screens (read from the DB) still showed it.
+    avatar: user.avatar ?? null,
     role: user.role,
     isVerified: user.isVerified,
     kycStatus: user.role === 'WORKER' ? (user.workerProfile?.kycStatus ?? 'PENDING') : undefined,

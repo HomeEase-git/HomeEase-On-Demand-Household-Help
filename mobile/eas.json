@@ -12,6 +12,7 @@
       }
     },
     "preview": {
+      "channel": "preview",
       "distribution": "internal",
       "environment": "preview",
       "android": {

@@ -100,6 +100,31 @@ export default function BookingDetail() {
       ),
     },
     { label: 'Amount', value: booking.amount },
+    // Booking-time estimate split — kept for cancelled bookings too.
+    ...(booking.pricing
+      ? [
+          {
+            label: 'Price Breakdown (at booking)',
+            value: (
+              <div>
+                <div>Base rate: {peso(booking.pricing.basePrice)}</div>
+                {booking.pricing.distanceFee > 0 && (
+                  <div>
+                    Distance fee: {peso(booking.pricing.distanceFee)}
+                    {booking.pricing.distanceFeeNote && (
+                      <div className="text-muted text-small">{booking.pricing.distanceFeeNote}</div>
+                    )}
+                  </div>
+                )}
+                {booking.pricing.tierFee > 0 && <div>Pro tier surcharge: {peso(booking.pricing.tierFee)}</div>}
+                {booking.pricing.rushFee > 0 && <div>Same-day fee: {peso(booking.pricing.rushFee)}</div>}
+                {booking.pricing.addOnsTotal > 0 && <div>Add-ons: {peso(booking.pricing.addOnsTotal)}</div>}
+                <div><strong>Estimate: {peso(booking.pricing.estimate)}</strong></div>
+              </div>
+            ),
+          },
+        ]
+      : []),
     ...(booking.parentBookingId
       ? [
           {
@@ -125,6 +150,7 @@ export default function BookingDetail() {
   return (
     <>
       <PageHeader
+        backTo="/bookings"
         title="Booking Detail"
         subtitle={`Booking ${booking.displayId}`}
         actions={
@@ -134,7 +160,6 @@ export default function BookingDetail() {
                 Force Cancel
               </button>
             )}
-            <Link to="/bookings" className="btn btn-outline">Back</Link>
           </div>
         }
       />
@@ -214,6 +239,25 @@ export default function BookingDetail() {
                 <PhotoRow urls={booking.quote.proofOfUseUrls} alt="Materials in use" />
               </div>
             </div>
+          </div>
+        </SectionCard>
+      )}
+
+      {(booking.beforePhotoUrls?.length > 0 || booking.progressPhotoUrls?.length > 0 || booking.completionPhotoUrl) && (
+        <SectionCard title="Job Photos">
+          <div className="detail-grid">
+            {[
+              ['Before', booking.beforePhotoUrls],
+              ['Progress', booking.progressPhotoUrls],
+              ['After', booking.completionPhotoUrl ? [booking.completionPhotoUrl] : []],
+            ].map(([label, urls]) => (
+              <div key={label} className="detail-block detail-block--full">
+                <label>{label}</label>
+                <div className="value">
+                  {urls?.length ? <PhotoRow urls={urls} alt={`${label} photo`} /> : 'None'}
+                </div>
+              </div>
+            ))}
           </div>
         </SectionCard>
       )}

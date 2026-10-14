@@ -188,6 +188,8 @@ enum NotificationType {
   DISPUTE_STALE_REMINDER
   KYC_REVERIFICATION_REQUIRED
   ACCOUNT_AUTO_SUSPENDED
+  // Review-moderation strike (adminReviewController.warnReviewAuthor).
+  ACCOUNT_WARNING
   SUSPENSION_REVIEW_REQUESTED
   REVIEW_RESPONSE_ADDED
   CERTIFICATION_APPROVED
@@ -308,6 +310,10 @@ model User {
   isDeleted Boolean    @default(false)
   deletedAt DateTime?
   status    UserStatus @default(ACTIVE)
+
+  // Review-moderation strikes (adminReviewController.warnReviewAuthor): 1 =
+  // warning, 2 = final warning, 3 = auto-suspended.
+  warningCount Int @default(0)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -511,7 +517,7 @@ model WorkerProfile {
   user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   bio          String?
-  rating       Float   @default(5.0)
+  rating       Float   @default(0) // average of VISIBLE reviews; 0 until the first one
   totalReviews Int     @default(0)
 
   // Digital ID card fields — shown to clients in person (digital-id.tsx).
@@ -924,6 +930,9 @@ model ServiceType {
   // was never assigned one; mobile falls back to its static name-based guess
   // (utils/categoryIcons.ts) in that case.
   icon String?
+  // Optional photo shown blurred behind the service's worker list in the app
+  // (public promo-banners bucket, uploaded from the admin Service Catalog).
+  backgroundImageUrl String?
 
   // A "licensed trade" (e.g. electrical, plumbing) an admin has flagged as
   // requiring proof of licensing before a worker can offer it — previously
@@ -1296,6 +1305,10 @@ model Booking {
   // shared household phone is a plausible false positive).
   selfDealingFlag Boolean @default(false)
 
+  // Admin housekeeping: hides a finished booking from the admin Bookings list
+  // (shown under its Archived tab instead). Nothing else reads it.
+  archivedAt DateTime?
+
   // Client-generated key (one per booking-draft submission attempt) so a
   // retried POST /bookings — app backgrounded mid-request, network timeout
   // + user taps Submit again — returns the already-created booking instead
@@ -1472,6 +1485,11 @@ model Booking {
 
   // Completion — worker-submitted proof photo, awaiting client confirmation
   completionPhotoUrl String?
+  // Worker proof photos (adviser note): "before" is required to start the
+  // job, at least one "progress" photo is required to mark it done, and the
+  // "after" photo is completionPhotoUrl. Booking-photos bucket, worker-owned.
+  beforePhotoUrls   String[] @default([])
+  progressPhotoUrls String[] @default([])
 
   // Job execution timeline — discrete milestones distinct from completionDate
   // (client-confirmed) and workerArrivedAt (see ArrivalVerification for the
@@ -1659,20 +1677,19 @@ model BookingAddOn {
   // Excluded from every finalPrice/settlement computation
   // (bookingController.getBookingDetail/approveQuote/completeBooking,
   // paymentLifecycleService.loadBooking) until clientApprovedAt is set —
-  // either explicitly (respondToAddon) or by the reminder/auto-approve
-  // sweep (bookingWorker.remindAndAutoApproveAddons) if the client never
-  // responds. Any addon still pending when the job is marked complete
+  // only by the client (respondToAddon) — there is no auto-approve, so an
+  // extra is billed only with the client's explicit OK. Any addon still pending when the job is marked complete
   // (bookingController.completeBooking) gets clientRejectedAt stamped
   // automatically — add-ons freeze at completion, so a still-open
   // approve/reject prompt afterward could never affect the already-locked
   // finalPrice anyway, and would just confuse the client.
   clientApprovedAt DateTime?
   clientRejectedAt DateTime?
-  // Needed for the reminder/auto-approve sweep to know how long an addon
+  // Needed for the reminder sweep (bookingWorker.remindPendingAddons) to know how long an addon
   // has been pending — nothing else on this model was ever timestamped.
   createdAt        DateTime  @default(now())
   // Set once the 2h "please approve/reject this addon" reminder fires (see
-  // bookingWorker.remindAndAutoApproveAddons) — prevents re-sending it on
+  // bookingWorker.remindPendingAddons) — prevents re-sending it on
   // every hourly sweep tick, same convention as
   // Booking.quoteReminderSentAt.
   reminderSentAt   DateTime?
@@ -2101,6 +2118,9 @@ model Review {
   // Moderation — admin-side flagging/hiding, see ReviewStatus
   flagged    Boolean      @default(false)
   flagReason String?
+  // Which part was reported: 'REVIEW' (the client's comment, reported by the
+  // worker) or 'RESPONSE' (the worker's reply, reported by the client).
+  flagTarget String?
   status     ReviewStatus @default(VISIBLE)
 
   // The worker's one-time public reply to this review — previously there
@@ -2269,6 +2289,8 @@ model AppSettings {
   // is goods-suppliers-at-1%, not this. One code covers every worker
   // regardless of VAT registration: none of this platform's trades are
   // PRC-licensed professions, so the VAT-status-split article never applied.
+  // Ignored since 2026-10-13: atcCode and withholdingTaxRate are now fixed in
+  // appSettingsService (FIXED_TAX) and no longer admin-editable.
   atcCode              String?
   pendingExpiryMinutes Int     @default(60)
   geofenceRadiusMeters Int     @default(100)
@@ -2302,7 +2324,7 @@ model AppSettings {
 
   // Threshold on WorkerProfile.commissionOwed (see debtLedgerService.ts) —
   // crossing this puts the worker's account on hold until an admin clears it.
-  workerDebtHoldLimit Float @default(500)
+  workerDebtHoldLimit Float @default(2500)
 
   // Retired: replaced by noShowGraceMinutes.
   noShowGraceHours Int @default(2)
@@ -2324,6 +2346,14 @@ model AppSettings {
   autoSuspendRatingThreshold        Float?
   autoSuspendDisputeCountThreshold  Int?
   autoSuspendDisputeCountWindowDays Int?
+
+  // In-app update prompt (GET /api/app/version). Null = no prompt. An
+  // installed app below androidMinVersion is blocked until it updates; below
+  // androidLatestVersion it gets a dismissible prompt. androidStoreUrl is
+  // where the Update button goes (Play Store listing or a direct APK link).
+  androidLatestVersion String?
+  androidMinVersion    String?
+  androidStoreUrl      String?
 
   updatedAt DateTime @updatedAt
 }

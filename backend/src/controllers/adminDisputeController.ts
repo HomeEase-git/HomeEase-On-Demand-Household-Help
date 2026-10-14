@@ -133,6 +133,9 @@ function buildDisputeWhere(search: string, status: string): Prisma.DisputeWhereI
     // a dispute would silently vanish from the queue the moment an admin
     // viewed it, well before anyone actually resolved anything.
     where.status = { in: ['OPEN', 'UNDER_REVIEW'] };
+  } else if (status === 'RESOLVED') {
+    // Every RESOLVED_* outcome.
+    where.status = { startsWith: 'RESOLVED' };
   } else if (status && status !== 'all') {
     where.status = status.toUpperCase();
   }
@@ -159,6 +162,22 @@ export const listDisputes = async (req: Request, res: Response) => {
     const status = typeof req.query.status === 'string' ? req.query.status : 'all';
 
     const where = buildDisputeWhere(search, status);
+
+    // raisedById is a soft reference, so "who filed it" is a column-to-column
+    // compare against the booking that Prisma can't express — resolved to ids
+    // here so the filter (and the page total) stays server-side.
+    // ponytail: loads every matching id; fine at this dispute volume, move to a
+    // stored raisedByRole column if the table grows large.
+    const raisedBy = req.query.raisedBy;
+    if (raisedBy === 'CLIENT' || raisedBy === 'WORKER') {
+      const rows =
+        raisedBy === 'CLIENT'
+          ? await prisma.$queryRaw<{ id: string }[]>`
+              SELECT d."id" FROM "Dispute" d JOIN "Booking" b ON b."id" = d."bookingId" WHERE d."raisedById" = b."clientId"`
+          : await prisma.$queryRaw<{ id: string }[]>`
+              SELECT d."id" FROM "Dispute" d JOIN "Booking" b ON b."id" = d."bookingId" WHERE d."raisedById" = b."workerId"`;
+      where.id = { in: rows.map((r) => r.id) };
+    }
 
     // The OPEN queue is a worklist, not a browsing history — oldest-first
     // so an admin naturally clears the longest-waiting dispute first

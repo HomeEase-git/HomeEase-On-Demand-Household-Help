@@ -1,11 +1,12 @@
 import React, { useRef, useState, useEffect } from "react";
-import { View, Text, FlatList, ActivityIndicator } from "react-native";
+import { View, Text, FlatList, ActivityIndicator, StyleSheet } from "react-native";
+import { Image } from "expo-image";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter, useLocalSearchParams } from "expo-router";
 import ScreenHeader from "../../../components/ui/ScreenHeader";
 import WorkerCard from "../../../components/cards/WorkerCard";
 import EmptyState from "../../../components/feedback/EmptyState";
-import { searchWorkers } from "../../../services/api";
+import { getServiceTypes, searchWorkers } from "../../../services/api";
 import FilterSortBottomSheet, {
   SearchFilters,
 } from "../../../components/bottom-sheets/FilterSortBottomSheet";
@@ -60,6 +61,18 @@ export default function CategoryDetailScreen() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [filters, setFilters] = useState<SearchFilters>(DEFAULT_FILTERS);
+  // Admin-uploaded photo for this service (Service Catalog), shown blurred.
+  const [backgroundUrl, setBackgroundUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    // Cached list, same slug the services grid builds the route from.
+    getServiceTypes()
+      .then((types: any[]) => {
+        const match = types.find((t) => t.name.toLowerCase().replace(/\s+/g, "-") === categoryId);
+        setBackgroundUrl(match?.backgroundImageUrl ?? null);
+      })
+      .catch(() => setBackgroundUrl(null));
+  }, [categoryId]);
 
   const categoryName = categoryId ? categoryId.replace(/-/g, " ") : "Category";
   const title = categoryId ? formatCategoryTitle(categoryId) : "Category";
@@ -99,6 +112,12 @@ export default function CategoryDetailScreen() {
 
   return (
     <SafeAreaView className="flex-1 bg-white">
+      {backgroundUrl && (
+        <View style={StyleSheet.absoluteFill} pointerEvents="none">
+          <Image source={{ uri: backgroundUrl }} style={StyleSheet.absoluteFill} contentFit="cover" blurRadius={6} cachePolicy="memory-disk" />
+          <View style={StyleSheet.absoluteFill} className="bg-white/75" />
+        </View>
+      )}
       <ScreenHeader
         title={title}
         showBack

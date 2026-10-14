@@ -4,7 +4,7 @@ import PageHeader from '../components/common/PageHeader'
 import LoadingState from '../components/common/LoadingState'
 import ErrorState from '../components/common/ErrorState'
 import IconPicker from '../components/common/IconPicker'
-import { fetchServiceTypes, saveServiceCatalog } from '../services/serviceTypes'
+import { fetchServiceTypes, saveServiceCatalog, uploadServiceBackground } from '../services/serviceTypes'
 import { useToast } from '../context/ToastContext'
 import { getHighestDoleWageReference } from '../constants/doleWageReference'
 import ClientPreview from '../components/serviceCatalog/ClientPreview'
@@ -42,7 +42,8 @@ export default function ServiceCatalogEditor() {
   const { id } = useParams()
   const isNew = !id
   const navigate = useNavigate()
-  const { showSuccess } = useToast()
+  const { showSuccess, showError } = useToast()
+  const [uploadingBg, setUploadingBg] = useState(false)
 
   const [services, setServices] = useState([])
   const [loading, setLoading] = useState(true)
@@ -530,6 +531,41 @@ export default function ServiceCatalogEditor() {
               <div className="sce-field">
                 <span>Icon</span>
                 <IconPicker value={d.icon} onChange={(icon) => change((x) => { x.details.icon = icon })} />
+              </div>
+              <div className="sce-field sce-span">
+                <span>Background photo (optional)</span>
+                {d.backgroundImageUrl && (
+                  <img src={d.backgroundImageUrl} alt="Service background" style={{ width: 240, height: 120, objectFit: 'cover', borderRadius: 8, filter: 'blur(2px)' }} />
+                )}
+                <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                  <input
+                    type="file"
+                    accept="image/jpeg,image/png,image/webp"
+                    disabled={uploadingBg}
+                    onChange={async (e) => {
+                      const file = e.target.files?.[0]
+                      e.target.value = ''
+                      if (!file) return
+                      setUploadingBg(true)
+                      try {
+                        const url = await uploadServiceBackground(file)
+                        change((x) => { x.details.backgroundImageUrl = url })
+                      } catch (err) {
+                        showError(err.message || 'Upload failed')
+                      } finally {
+                        setUploadingBg(false)
+                      }
+                    }}
+                  />
+                  {d.backgroundImageUrl && (
+                    <button type="button" className="btn btn-outline" onClick={() => change((x) => { x.details.backgroundImageUrl = null })}>
+                      Remove
+                    </button>
+                  )}
+                </div>
+                <small style={{ color: 'var(--text-muted)', fontSize: '0.75rem' }}>
+                  {uploadingBg ? 'Uploading...' : 'A photo related to this service. The app shows it slightly blurred behind the list of pros. Saved when you save the service.'}
+                </small>
               </div>
               <label className="sce-check sce-span">
                 <input type="checkbox" checked={d.requiresCertification} onChange={(e) => change((x) => { x.details.requiresCertification = e.target.checked })} />

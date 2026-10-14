@@ -212,7 +212,9 @@ export default function Refunds() {
         {!loading && !error && requests.length > 0 && (
           <Pagination
             info={`Showing ${requests.length} of ${meta.total} refunds`}
-            hasPrev={meta.hasPrev}
+            page={meta.page}
+              totalPages={meta.totalPages}
+              hasPrev={meta.hasPrev}
             hasNext={meta.hasNext}
             onPrev={() => goToPage(meta.page - 1)}
             onNext={() => goToPage(meta.page + 1)}

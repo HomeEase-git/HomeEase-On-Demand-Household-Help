@@ -23,7 +23,11 @@ import {
   confirmCompletion,
   cancelBooking,
   respondToAddon,
+  addAddon,
+  requestExtraWork,
   submitReview,
+  reportReview,
+  addProgressPhotos,
 } from '../controllers/bookingController';
 import { bookingPhotoUpload, uploadBookingCompletionPhoto, uploadIssuePhoto, uploadReviewPhoto } from '../controllers/uploadController';
 import { authMiddleware } from '../middleware/auth';
@@ -109,6 +113,9 @@ router.post('/:id/completion-photo/upload', restrictTo('WORKER'), bookingPhotoUp
 // in use, and proof for a cancellation after arriving.
 router.post('/:id/job-photo/upload', restrictTo('WORKER'), bookingPhotoUpload, uploadBookingCompletionPhoto);
 
+// Worker posts an "ongoing" proof photo update (worker only)
+router.post('/:id/progress-photos', restrictTo('WORKER'), addProgressPhotos);
+
 // Complete booking — worker submits completion photo, awaits client confirmation (worker only)
 router.patch('/:id/complete', restrictTo('WORKER'), completeBooking);
 
@@ -118,7 +125,10 @@ router.patch('/:id/confirm-completion', restrictTo('CLIENT'), confirmCompletion)
 // Cancel booking (client or worker)
 router.patch('/:id/cancel', validateBookingStatusUpdate, cancelBooking);
 
-// Add addon (worker only)
+// Extra work on the same visit: the worker adds a priced extra, the client
+// can ask for one, and only the client's approval bills it.
+router.post('/:id/addons', restrictTo('WORKER'), addAddon);
+router.post('/:id/addons/request', restrictTo('CLIENT'), requestExtraWork);
 router.patch('/:id/addons/:addonId/respond', restrictTo('CLIENT'), respondToAddon);
 
 // Upload a review photo (client only) — no reviewId yet, returned URL is
@@ -127,6 +137,9 @@ router.post('/:id/review-photo/upload', restrictTo('CLIENT'), bookingPhotoUpload
 
 // Submit review (client only)
 router.post('/:id/review', restrictTo('CLIENT'), validateAddReview, submitReview);
+
+// Report the review (worker) or the worker's reply to it (client)
+router.post('/:id/review/report', restrictTo('CLIENT', 'WORKER'), reportReview);
 
 
 export default router;

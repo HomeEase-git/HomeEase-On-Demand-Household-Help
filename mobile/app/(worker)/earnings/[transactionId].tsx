@@ -108,7 +108,10 @@ export default function EarningsTransactionScreen() {
               />
             )}
             {!!transaction.breakdown.withholdingTaxAmount && (
-              <Row label="Withholding tax" value={`-${peso(transaction.breakdown.withholdingTaxAmount)}`} />
+              <Row
+                label={`Withholding tax${transaction.breakdown.withholdingTaxQuarter ? ` (${transaction.breakdown.withholdingTaxQuarter})` : ""}`}
+                value={`-${peso(transaction.breakdown.withholdingTaxAmount)}`}
+              />
             )}
             <Row label="You receive" value={peso(transaction.breakdown.workerPayout ?? transaction.amount ?? 0)} />
           </View>

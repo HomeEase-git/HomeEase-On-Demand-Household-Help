@@ -1,8 +1,6 @@
 import { useEffect, useState } from 'react'
-import { NavLink, useLocation, useNavigate } from 'react-router-dom'
+import { NavLink, useLocation } from 'react-router-dom'
 import homeEaseLogo from '../Assets/home-ease-icon.png'
-import { useAuth } from '../../context/AuthContext'
-import LogoutConfirmModal from '../common/LogoutConfirmModal'
 import { NAV_STRUCTURE } from '../../constants/navigation'
 
 
@@ -16,10 +14,7 @@ function activeGroupKey(pathname) {
 }
 
 export default function Sidebar({ isOpen, onClose }) {
-  const navigate = useNavigate()
-  const { logout } = useAuth()
   const { pathname } = useLocation()
-  const [showLogoutModal, setShowLogoutModal] = useState(false)
   // Accordion: at most one group is open, so the sidebar never fills up with
   // expanded dropdowns and has to scroll. Starts on the group holding the
   // current page, if any.
@@ -34,20 +29,6 @@ export default function Sidebar({ isOpen, onClose }) {
 
   const toggleGroup = (key) => {
     setOpenGroup((current) => (current === key ? null : key))
-  }
-
-  const handleLogoutClick = () => {
-    setShowLogoutModal(true)
-  }
-
-  const handleConfirmLogout = () => {
-    setShowLogoutModal(false)
-    logout()
-    navigate('/login')
-  }
-
-  const handleCancelLogout = () => {
-    setShowLogoutModal(false)
   }
 
   const handleNavClick = () => {
@@ -131,20 +112,8 @@ export default function Sidebar({ isOpen, onClose }) {
               </div>
             )
           })}
-          <button
-            type="button"
-            onClick={handleLogoutClick}
-            className="nav-item nav-item--logout"
-            data-page="logout"
-          >
-            <i className="fas fa-right-from-bracket" />
-            <span>Logout</span>
-          </button>
         </nav>
       </aside>
-      {showLogoutModal && (
-        <LogoutConfirmModal onCancel={handleCancelLogout} onConfirm={handleConfirmLogout} />
-      )}
     </>
   )
 }

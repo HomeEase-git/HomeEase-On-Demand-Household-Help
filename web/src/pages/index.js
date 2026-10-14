@@ -1,5 +1,4 @@
 export { default as Dashboard } from './Dashboard'
-export { default as Analytics } from './Analytics'
 export { default as Users } from './Users'
 export { default as ClientDetail } from './ClientDetail'
 export { default as WorkerDetail } from './WorkerDetail'

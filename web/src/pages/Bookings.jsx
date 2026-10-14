@@ -15,7 +15,7 @@ import Badge from '../components/common/Badge'
 import LoadingState from '../components/common/LoadingState'
 import ErrorState from '../components/common/ErrorState'
 import { useListQuery } from '../hooks/useListQuery'
-import { fetchBookings, cancelBookingAdmin } from '../services/bookings'
+import { fetchBookings, cancelBookingAdmin, setBookingArchived } from '../services/bookings'
 import { useToast } from '../context/ToastContext'
 import { useAuth } from '../context/AuthContext'
 import { getBookingStatusVariant } from '../utils/statusBadge'
@@ -26,6 +26,7 @@ const STATUS_MAP = {
   Pending: 'pending',
   Completed: 'completed',
   Cancelled: 'cancelled',
+  Archived: 'archived',
 }
 
 const TERMINAL_STATUSES = ['Completed', 'Cancelled', 'Rejected']
@@ -46,8 +47,6 @@ function toApiParams(params) {
 export default function Bookings() {
   const { showSuccess, showError } = useToast()
   const { user } = useAuth()
-  const [dateFrom, setDateFrom] = useState('')
-  const [dateTo, setDateTo] = useState('')
   const [cancelTarget, setCancelTarget] = useState(null)
   const [reason, setReason] = useState('')
   const [submitting, setSubmitting] = useState(false)
@@ -75,16 +74,18 @@ export default function Bookings() {
     pollIntervalMs: cancelTarget ? null : 25000,
   })
 
+  // Seeded from the URL so a restored filter shows in the date inputs too.
+  const [dateFrom, setDateFrom] = useState(params.dateFrom || '')
+  const [dateTo, setDateTo] = useState(params.dateTo || '')
+
   const applyDateRange = () => {
-    setFilter('dateFrom', dateFrom)
-    setFilter('dateTo', dateTo)
+    setFilter({ dateFrom, dateTo })
   }
 
   const clearDateRange = () => {
     setDateFrom('')
     setDateTo('')
-    setFilter('dateFrom', '')
-    setFilter('dateTo', '')
+    setFilter({ dateFrom: '', dateTo: '' })
   }
 
   const closeCancelModal = () => {
@@ -104,6 +105,16 @@ export default function Bookings() {
       showError(err.message || 'Failed to cancel booking')
     } finally {
       setSubmitting(false)
+    }
+  }
+
+  const toggleArchived = async (b) => {
+    try {
+      await setBookingArchived(b.id, !b.archived)
+      showSuccess(`Booking ${b.displayId} ${b.archived ? 'restored' : 'archived'}.`)
+      reload()
+    } catch (err) {
+      showError(err.message || 'Failed to update booking')
     }
   }
 
@@ -155,7 +166,7 @@ export default function Bookings() {
       <div className="toolbar">
         <SearchBar placeholder="Search bookings..." value={params.search || ''} onChange={setSearch} />
         <FilterTabs
-          tabs={['All', 'Pending', 'Completed', 'Cancelled']}
+          tabs={Object.keys(STATUS_MAP)}
           activeTab={params.statusTab || 'All'}
           onTabChange={(tab) => setFilter('statusTab', tab)}
         />
@@ -252,6 +263,17 @@ export default function Bookings() {
                                 <i className="fas fa-ban" />
                               </button>
                             )}
+                            {TERMINAL_STATUSES.includes(b.status) && (
+                              <button
+                                type="button"
+                                className="action-btn view"
+                                title={b.archived ? 'Restore from archive' : 'Archive'}
+                                aria-label={`${b.archived ? 'Restore' : 'Archive'} booking ${b.displayId}`}
+                                onClick={() => toggleArchived(b)}
+                              >
+                                <i className={`fas ${b.archived ? 'fa-box-open' : 'fa-box-archive'}`} />
+                              </button>
+                            )}
                           </div>
                         </td>
                       </tr>
@@ -262,6 +284,8 @@ export default function Bookings() {
             </div>
             <Pagination
               info={`Showing ${bookings.length} of ${meta.total} bookings`}
+              page={meta.page}
+              totalPages={meta.totalPages}
               hasPrev={meta.hasPrev}
               hasNext={meta.hasNext}
               onPrev={() => goToPage(meta.page - 1)}

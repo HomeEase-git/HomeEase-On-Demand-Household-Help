@@ -13,6 +13,8 @@ import DangerButton from "../../../../components/ui/DangerButton";
 import UploadCard from "../../../../components/ui/UploadCard";
 import StarRating from "../../../../components/ui/StarRating";
 import ImageSourcePickerBottomSheet from "../../../../components/bottom-sheets/ImageSourcePickerBottomSheet";
+import ProofPhotosField from "../../../../components/booking/ProofPhotosField";
+import AddExtraWorkModal from "../../../../components/modals/AddExtraWorkModal";
 import type { BottomSheetHandle } from "../../../../components/bottom-sheets/BottomSheetWrapper";
 import { Skeleton } from "../../../../components/ui/Skeleton";
 import { API_STATUS_MAP } from "../../../../store/bookingStore";
@@ -23,6 +25,7 @@ import { useAlertModal } from "../../../../contexts/AlertModalContext";
 import { usePolling } from "../../../../hooks/usePolling";
 import { colors } from "../../../../constants";
 import { bookingStartTime, formatTime12h, startInstant } from "../../../../utils/bookingTime";
+import { formatJobTime } from "../../../../utils/bookingTimeline";
 
 // Mirrors AppSettings.noShowGraceMinutes / noShowPenaltyAmount defaults —
 // only used for the on-screen warning; the server decides.
@@ -46,8 +49,11 @@ type BookingDetail = {
   finalPrice: number | null;
   tip?: number | null;
   completionPhotoUrl?: string | null;
+  beforePhotoUrls?: string[];
+  progressPhotoUrls?: string[];
+  addOns?: { id: string; name: string; price: number; clientApprovedAt: string | null; clientRejectedAt: string | null }[];
   workerArrivedAt?: string | null;
-  timeline?: { workerArrivedAt?: string | null; workerStartedAt?: string | null } | null;
+  timeline?: { workerArrivedAt?: string | null; workerStartedAt?: string | null; workerCompletedAt?: string | null } | null;
   // Set when a no-show cancelled this job (see backend
   // bookingWorker.cancelWorkerNoShows).
   workerNoShowFlaggedAt?: string | null;
@@ -95,6 +101,12 @@ export default function JobDetailScreen() {
   const [completionPhotoUri, setCompletionPhotoUri] = useState<string | null>(null);
   const [completionPhotoUrl, setCompletionPhotoUrl] = useState<string | null>(null);
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
+  // Proof photos: before (needed to start) and progress (needed to finish).
+  const [beforePhotoUrls, setBeforePhotoUrls] = useState<string[]>([]);
+  const [progressDraft, setProgressDraft] = useState<string[]>([]);
+  const [postingProgress, setPostingProgress] = useState(false);
+  const [addExtraVisible, setAddExtraVisible] = useState(false);
+  const [addingExtra, setAddingExtra] = useState(false);
   const [elapsedMs, setElapsedMs] = useState(0);
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
@@ -145,6 +157,7 @@ export default function JobDetailScreen() {
     return () => clearInterval(interval);
   }, [workerStartedAt]);
   const displayedElapsedMs = workerStartedAt ? elapsedMs : 0;
+  const jobTime = formatJobTime(workerStartedAt, job?.timeline?.workerCompletedAt);
 
   // Streams live GPS to the client while en route (ACCEPTED, not yet checked
   // in) so their "Track Service" map can show a moving marker. Stops as soon
@@ -234,6 +247,8 @@ export default function JobDetailScreen() {
   // Items live in the quote; a submitted or approved quote is reopened to edit
   // them (bookingController.reopenQuote) and the client approves the new total.
   const canEditQuote = isQuoteSubmitted || isQuoteApproved;
+  // Same window the backend allows (bookingController.canAddExtraWork).
+  const canAddExtra = (isAccepted && hasArrived) || isQuoteSubmitted || isQuoteApproved || isInProgress;
   const canCancelJob = isAccepted || isInProgress || isQuoteSubmitted || isQuoteApproved || isDisputed;
   const hasOpenRescheduleRequest = !!job.rescheduleRequestedAt && !job.rescheduleRequestRespondedAt;
   // The client asked (or an older request from before either side could ask).
@@ -323,14 +338,47 @@ export default function JobDetailScreen() {
   const handleStart = async () => {
     setSubmitting(true);
     try {
-      await api.startBooking(job.id);
-      alertModal.success("Job Started", "You've started this job. Mark it complete with a photo when you're done.");
+      await api.startBooking(job.id, beforePhotoUrls);
+      setBeforePhotoUrls([]);
+      alertModal.success(
+        "Job Started",
+        "Post at least one progress photo while you work, then mark it complete with a photo of the finished job.",
+      );
       load();
     } catch (error) {
       console.error("Start booking error:", error);
       alertModal.error("Error", "Failed to start this job. Please try again.");
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  const handleAddExtra = async (name: string, price: number) => {
+    setAddingExtra(true);
+    try {
+      await api.addBookingAddOn(job.id, name, price);
+      setAddExtraVisible(false);
+      alertModal.success("Sent to client", "It's added to the bill once the client approves it.");
+      load(true);
+    } catch (error: any) {
+      console.error("Add extra work error:", error);
+      alertModal.error("Error", error?.message || "Failed to add the extra work. Please try again.");
+    } finally {
+      setAddingExtra(false);
+    }
+  };
+
+  const handlePostProgress = async () => {
+    setPostingProgress(true);
+    try {
+      await api.addProgressPhotos(job.id, progressDraft);
+      setProgressDraft([]);
+      load(true);
+    } catch (error) {
+      console.error("Post progress photos error:", error);
+      alertModal.error("Error", "Failed to post the update. Please try again.");
+    } finally {
+      setPostingProgress(false);
     }
   };
 
@@ -583,6 +631,12 @@ export default function JobDetailScreen() {
             </Text>
           </View>
         )}
+        {!isInProgress && jobTime && (
+          <View className="bg-card rounded-2xl p-4 mb-3">
+            <Text className="text-text-secondary text-xs mb-1">Job time</Text>
+            <Text className="text-text-primary font-semibold">{jobTime}</Text>
+          </View>
+        )}
 
         {/* Earnings */}
         <View className="bg-card rounded-2xl p-4 mb-3">
@@ -703,15 +757,43 @@ export default function JobDetailScreen() {
             </View>
           )}
           {isQuoteApproved && (
-            <PrimaryButton
-              label="Start Job"
-              fullWidth
-              onPress={handleStart}
-              disabled={submitting}
-              loading={submitting}
-            />
+            <View>
+              <ProofPhotosField
+                bookingId={job.id}
+                label="Photos of the job before you start"
+                hint="Required. Show the area or item as you found it."
+                urls={beforePhotoUrls}
+                onChange={setBeforePhotoUrls}
+                required
+              />
+              <PrimaryButton
+                label="Start Job"
+                fullWidth
+                onPress={handleStart}
+                disabled={submitting || beforePhotoUrls.length === 0}
+                loading={submitting}
+              />
+            </View>
           )}
           {canEditQuote && <OutlinedButton label="Edit Quote" fullWidth onPress={handleEditQuote} />}
+          {!!job.addOns?.length && (
+            <View className="bg-card rounded-2xl p-4">
+              <Text className="text-text-primary font-bold mb-2">Extra work</Text>
+              {job.addOns.map((a) => (
+                <View key={a.id} className="flex-row justify-between py-1">
+                  <Text className="text-text-secondary text-sm flex-1">
+                    {a.name} · ₱{a.price}
+                  </Text>
+                  <Text
+                    className={`text-xs font-semibold ${a.clientApprovedAt ? "text-success" : a.clientRejectedAt ? "text-error" : "text-warning"}`}
+                  >
+                    {a.clientApprovedAt ? "Approved" : a.clientRejectedAt ? "Declined" : "Waiting for client"}
+                  </Text>
+                </View>
+              ))}
+            </View>
+          )}
+          {canAddExtra && <OutlinedButton label="Add Extra Work" fullWidth onPress={() => setAddExtraVisible(true)} />}
           {canScheduleVisit && (
             <OutlinedButton
               label="Schedule Follow-up Visit"
@@ -736,6 +818,34 @@ export default function JobDetailScreen() {
           )}
           {isInProgress && (
             <View className="gap-3">
+              <View className="bg-card rounded-2xl p-4">
+                <Text className="text-text-primary font-bold mb-1">Progress updates</Text>
+                <Text className="text-text-muted text-xs mb-3">
+                  Post at least one photo while you work. The client sees these.
+                </Text>
+                {!!job.progressPhotoUrls?.length && (
+                  <View className="flex-row flex-wrap gap-2 mb-3">
+                    {job.progressPhotoUrls.map((url) => (
+                      <RemoteImage key={url} source={{ uri: url }} className="w-16 h-16 rounded-lg bg-card-dark" />
+                    ))}
+                  </View>
+                )}
+                <ProofPhotosField
+                  bookingId={job.id}
+                  label="New progress photo"
+                  urls={progressDraft}
+                  onChange={setProgressDraft}
+                />
+                {progressDraft.length > 0 && (
+                  <PrimaryButton
+                    label="Post Update"
+                    fullWidth
+                    onPress={handlePostProgress}
+                    disabled={postingProgress}
+                    loading={postingProgress}
+                  />
+                )}
+              </View>
               {completionPhotoUri ? (
                 <View>
                   <Image
@@ -762,9 +872,12 @@ export default function JobDetailScreen() {
                 label="Complete Job"
                 fullWidth
                 onPress={handleMarkComplete}
-                disabled={submitting || uploadingPhoto || !completionPhotoUrl}
+                disabled={submitting || uploadingPhoto || !completionPhotoUrl || !job.progressPhotoUrls?.length}
                 loading={submitting}
               />
+              {!job.progressPhotoUrls?.length && (
+                <Text className="text-text-muted text-xs text-center">Post a progress update first.</Text>
+              )}
             </View>
           )}
           {isPendingCompletion && (
@@ -812,6 +925,12 @@ export default function JobDetailScreen() {
           )}
         </View>
       </ScrollView>
+      <AddExtraWorkModal
+        visible={addExtraVisible}
+        loading={addingExtra}
+        onConfirm={handleAddExtra}
+        onCancel={() => setAddExtraVisible(false)}
+      />
       <ImageSourcePickerBottomSheet
         innerRef={photoSheetRef}
         onSelect={handleSelectCompletionPhoto}

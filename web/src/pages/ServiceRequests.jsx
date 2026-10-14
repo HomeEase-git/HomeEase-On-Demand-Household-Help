@@ -5,10 +5,14 @@ import SectionCard from '../components/common/SectionCard'
 import LoadingState from '../components/common/LoadingState'
 import ErrorState from '../components/common/ErrorState'
 import Badge from '../components/common/Badge'
+import FilterTabs from '../components/common/FilterTabs'
+import SearchBar from '../components/common/SearchBar'
 import { useListQuery } from '../hooks/useListQuery'
 import { fetchServiceRequests, approveServiceRequest, rejectServiceRequest } from '../services/serviceRequests'
 import { useToast } from '../context/ToastContext'
 
+// Same All / Pending / Approved / Rejected tabs as the other admin lists.
+const TAB_STATUS = { All: 'ALL', Pending: 'PENDING_VERIFICATION', Approved: 'VERIFIED', Rejected: 'REJECTED' }
 const STATUS_LABEL = { PENDING_VERIFICATION: 'Pending', VERIFIED: 'Approved', REJECTED: 'Rejected' }
 const STATUS_BADGE_VARIANT = { PENDING_VERIFICATION: 'pending', VERIFIED: 'active', REJECTED: 'suspended' }
 const DOC_BADGE_VARIANT = { PENDING: 'pending', APPROVED: 'active', REJECTED: 'suspended' }
@@ -25,20 +29,34 @@ function formatDate(value) {
  */
 export default function ServiceRequests() {
   const { showError, showSuccess } = useToast()
-  const [statusFilter, setStatusFilter] = useState('PENDING_VERIFICATION')
+  const [tab, setTab] = useState('Pending')
+  const [search, setSearch] = useState('')
+  const statusFilter = TAB_STATUS[tab]
   const [actioningId, setActioningId] = useState(null)
   const [rejecting, setRejecting] = useState(null)
   const [rejectReason, setRejectReason] = useState('')
   const [submittingReject, setSubmittingReject] = useState(false)
 
   const fetchFn = useCallback(() => fetchServiceRequests(statusFilter), [statusFilter])
-  const { data: requests, loading, error, reload, setData } = useListQuery(fetchFn)
+  const { data: allRequests, loading, error, reload, setData } = useListQuery(fetchFn)
+  // The list endpoint isn't paged, so search filters what's loaded.
+  const q = search.trim().toLowerCase()
+  const requests = q
+    ? allRequests.filter((r) =>
+        [r.worker.fullName, r.worker.email, r.serviceType.name].some((v) => v?.toLowerCase().includes(q))
+      )
+    : allRequests
+
+  // On a status tab the decided request leaves the list; on All it stays
+  // with its new status.
+  const settle = (id, status) =>
+    setData((prev) => (tab === 'All' ? prev.map((r) => (r.id === id ? { ...r, status } : r)) : prev.filter((r) => r.id !== id)))
 
   const handleApprove = async (request) => {
     setActioningId(request.id)
     try {
       await approveServiceRequest(request.id)
-      setData((prev) => prev.filter((r) => r.id !== request.id))
+      settle(request.id, 'VERIFIED')
       showSuccess(`${request.worker.fullName} can now offer ${request.serviceType.name}.`)
     } catch (err) {
       showError(err.message || 'Failed to approve')
@@ -52,7 +70,7 @@ export default function ServiceRequests() {
     setSubmittingReject(true)
     try {
       await rejectServiceRequest(rejecting.id, rejectReason.trim())
-      setData((prev) => prev.filter((r) => r.id !== rejecting.id))
+      settle(rejecting.id, 'REJECTED')
       showSuccess('Request rejected. The worker has been notified.')
       setRejecting(null)
     } catch (err) {
@@ -68,19 +86,9 @@ export default function ServiceRequests() {
         title="Service Requests"
         subtitle="Workers asking to offer another service, with the documents that prove their skills"
       />
-      <div className="toolbar">
-        <select
-          className="form-input"
-          value={statusFilter}
-          onChange={(e) => setStatusFilter(e.target.value)}
-          style={{ maxWidth: '160px' }}
-          aria-label="Filter by status"
-        >
-          <option value="PENDING_VERIFICATION">Pending</option>
-          <option value="VERIFIED">Approved</option>
-          <option value="REJECTED">Rejected</option>
-          <option value="ALL">All</option>
-        </select>
+      <div className="toolbar" style={{ marginBottom: '1rem' }}>
+        <SearchBar placeholder="Search by worker, email or service..." value={search} onChange={setSearch} />
+        <FilterTabs tabs={Object.keys(TAB_STATUS)} activeTab={tab} onTabChange={setTab} />
       </div>
       <SectionCard title="Requests">
         {loading && <LoadingState message="Loading requests..." />}
@@ -97,7 +105,7 @@ export default function ServiceRequests() {
                 {requests.length === 0 ? (
                   <tr>
                     <td colSpan={6} className="table-empty">
-                      No {statusFilter !== 'ALL' ? STATUS_LABEL[statusFilter].toLowerCase() : ''} requests.
+                      {q ? 'No requests match your search.' : `No ${statusFilter !== 'ALL' ? STATUS_LABEL[statusFilter].toLowerCase() : ''} requests.`}
                     </td>
                   </tr>
                 ) : (

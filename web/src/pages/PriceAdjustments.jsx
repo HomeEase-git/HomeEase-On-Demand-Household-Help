@@ -10,8 +10,9 @@ import {
 // Everything that can move a booking's price away from its Price List price.
 // Commission and worker debt aren't here on purpose: they come off the
 // worker's side and never change what the client pays (Payments → Commission
-// & Debt). Same-day minimum notice stays a booking rule in Settings.
+// & Debt).
 const NUMBER_FIELD_BOUNDS = {
+  rushMinLeadHours: [0, 24],
   freeDistanceKm: [0, 50],
   perKmFee: [0, 500],
   tierProMinRating: [0, 5],
@@ -35,7 +36,7 @@ export default function PriceAdjustments() {
   return (
     <SettingsFormPage
       title="Price Adjustments"
-      subtitle="What can change a booking's price after the job price is set. Job prices themselves are on the Price List."
+      subtitle="What can change a booking's price after the job price is set. Job prices themselves are on the Price List. Changes apply to new bookings only; existing bookings keep the prices they were booked at."
       form={form}
     >
       {current && (
@@ -43,12 +44,7 @@ export default function PriceAdjustments() {
           <SettingsSection
             icon="fa-bolt"
             title="Same-Day Fee"
-            description={
-              <>
-                Added when a client books for today. How much notice a same-day booking needs is set in{' '}
-                <Link to="/settings">Settings → Booking Rules</Link>.
-              </>
-            }
+            description="Added when a client books for today, and how much notice a same-day booking needs."
           >
             <div className="detail-grid" style={{ marginBottom: 0 }}>
               <AdornedNumberField
@@ -62,6 +58,17 @@ export default function PriceAdjustments() {
                 onChange={updatePercentField('rushFeeRate')}
                 error={fieldErrors.rushFeeRate}
                 hint="Percent of the job price only. Not add-ons, materials or distance."
+              />
+              <AdornedNumberField
+                id="settings-rush-lead"
+                label="Same-Day Minimum Notice"
+                suffix="hrs"
+                min={0}
+                max={24}
+                value={current.rushMinLeadHours}
+                onChange={updateNumberField('rushMinLeadHours')}
+                error={fieldErrors.rushMinLeadHours}
+                hint="How far ahead a same-day booking must start."
               />
             </div>
           </SettingsSection>
@@ -194,7 +201,7 @@ export default function PriceAdjustments() {
           <SettingsSection
             icon="fa-scale-balanced"
             title="Penalties & Compensation"
-            description="Fixed amounts charged when a booking goes wrong on site. They aren't part of the job price and are only charged in these cases."
+            description="Fixed amounts charged when a booking goes wrong on site. They aren't part of the job price and are only charged in these cases. The default ₱200 is roughly a pro's round-trip fare and lost time for a wasted visit, and it is the same both ways so neither side is favored."
           >
             <div className="detail-grid" style={{ marginBottom: 0 }}>
               <AdornedNumberField

@@ -64,7 +64,7 @@ export function emptyQuestion() {
 
 export function emptyDraft() {
   return {
-    details: { name: '', description: '', basePrice: '', icon: null, requiresCertification: false },
+    details: { name: '', description: '', basePrice: '', icon: null, backgroundImageUrl: null, requiresCertification: false },
     common: [],
     jobs: [],
     splitCount: 0,
@@ -134,6 +134,7 @@ export function serviceToDraft(service) {
       description: service.description || '',
       basePrice: String(service.basePrice ?? ''),
       icon: service.icon || null,
+      backgroundImageUrl: service.backgroundImageUrl || null,
       requiresCertification: !!service.requiresCertification,
     },
     common,
@@ -165,6 +166,7 @@ export function draftToPayload(draft) {
     description: details.description.trim() || null,
     basePrice: Number(details.basePrice),
     icon: details.icon,
+    backgroundImageUrl: details.backgroundImageUrl || null,
     requiresCertification: details.requiresCertification,
     tasks: draft.jobs.map((j) => {
       const quote = j.model === 'CUSTOM_QUOTE'

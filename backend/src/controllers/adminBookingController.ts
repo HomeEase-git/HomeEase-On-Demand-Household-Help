@@ -12,6 +12,8 @@ import { sendSmsToUser } from '@utils/smsService';
 import { requestRefund } from '@services/refundRequestService';
 import { updateBookingIfStatus, isBookingStatusConflict } from '@services/bookingStatusWrite';
 import { cancelPendingExpiryJob } from '@queues/bookingQueue';
+import { describeDistanceFee } from '@utils/pricing';
+import { getAppSettings } from '@services/appSettingsService';
 import type { JwtPayload } from '@/types/index';
 
 interface AuthRequest extends Request {
@@ -19,9 +21,10 @@ interface AuthRequest extends Request {
 }
 
 function buildBookingWhere(search: string, status?: string, dateFrom?: string, dateTo?: string): Prisma.BookingWhereInput {
-  const where: Prisma.BookingWhereInput = {};
+  // Archived bookings only show under their own tab.
+  const where: Prisma.BookingWhereInput = { archivedAt: status === 'archived' ? { not: null } : null };
 
-  if (status && status !== 'all') {
+  if (status && status !== 'all' && status !== 'archived') {
     where.status = status.toUpperCase() as Prisma.BookingWhereInput['status'];
   }
 
@@ -55,6 +58,7 @@ function formatBooking(record: {
   status: string;
   urgencyLevel?: string;
   selfDealingFlag?: boolean;
+  archivedAt?: Date | null;
 }) {
   const amount = record.finalPrice ?? record.estimatedPrice ?? null;
 
@@ -81,6 +85,7 @@ function formatBooking(record: {
     // Client and assigned worker share a phone number — see
     // Booking.selfDealingFlag's schema comment. Advisory only.
     selfDealingFlag: record.selfDealingFlag ?? false,
+    archived: record.archivedAt != null,
   };
 }
 
@@ -175,8 +180,23 @@ export const getBookingById = async (req: Request, res: Response) => {
         startTime: bookingStartTime(booking),
         isRush: booking.isRush,
         rushFee: bookingLog?.rushFee ?? 0,
+        // Booking-time price split, shown for every status (cancelled too).
+        pricing: bookingLog
+          ? {
+              basePrice: bookingLog.basePrice,
+              distanceFee: bookingLog.distanceFee ?? 0,
+              distanceFeeNote: describeDistanceFee(bookingLog, await getAppSettings()),
+              tierFee: bookingLog.tierFee ?? 0,
+              rushFee: bookingLog.rushFee ?? 0,
+              addOnsTotal: bookingLog.addOnsTotal ?? 0,
+              estimate: bookingLog.finalEstimate,
+            }
+          : null,
         parentBookingId: booking.parentBookingId,
         workerArrivedAt: booking.workerArrivedAt,
+        beforePhotoUrls: booking.beforePhotoUrls,
+        progressPhotoUrls: booking.progressPhotoUrls,
+        completionPhotoUrl: booking.completionPhotoUrl,
         visits: booking.visits.map((v) => ({
           id: v.id,
           date: v.scheduledDate.toISOString().slice(0, 10),
@@ -218,6 +238,45 @@ export const getBookingById = async (req: Request, res: Response) => {
 };
 
 const TERMINAL_STATUSES = ['COMPLETED', 'CANCELLED', 'REJECTED'];
+
+/**
+ * PATCH /api/admin/bookings/:id/archive  { archived: boolean }
+ * Hides (or restores) a finished booking in the admin list. Active bookings
+ * can't be archived, so nothing in progress drops out of view.
+ */
+export const setBookingArchived = async (req: AuthRequest, res: Response) => {
+  try {
+    const id = req.params.id as string;
+    const { archived } = req.body as { archived?: unknown };
+    if (typeof archived !== 'boolean') {
+      return res.status(400).json(errorResponse(400, 'archived must be true or false'));
+    }
+
+    const booking = await prisma.booking.findUnique({ where: { id }, select: { status: true } });
+    if (!booking) {
+      return res.status(404).json(errorResponse(404, 'Booking not found'));
+    }
+    if (archived && !TERMINAL_STATUSES.includes(booking.status)) {
+      return res.status(409).json(errorResponse(409, 'Only completed, cancelled or rejected bookings can be archived'));
+    }
+
+    await prisma.booking.update({ where: { id }, data: { archivedAt: archived ? new Date() : null } });
+
+    await writeAuditLog({
+      actorId: req.user?.userId,
+      actorName: req.user?.email,
+      actorRole: req.user?.role,
+      action: archived ? 'BOOKING_ARCHIVED' : 'BOOKING_UNARCHIVED',
+      category: 'ADMIN_ACTION',
+      message: `Booking ${formatDisplayId(id)} ${archived ? 'archived' : 'restored from archive'}`,
+    });
+
+    return res.json({ success: true, data: { id, archived } });
+  } catch (error) {
+    console.error('Archive booking error:', error);
+    return res.status(500).json(errorResponse(500, 'Internal server error'));
+  }
+};
 
 /**
  * PATCH /api/admin/bookings/:id/cancel

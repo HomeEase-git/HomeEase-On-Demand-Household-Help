@@ -144,6 +144,8 @@ export default function TaxCertificates() {
             </div>
             <Pagination
               info={`Showing ${certificates.length} of ${meta.total} certificates`}
+              page={meta.page}
+              totalPages={meta.totalPages}
               hasPrev={meta.hasPrev}
               hasNext={meta.hasNext}
               onPrev={() => goToPage(meta.page - 1)}

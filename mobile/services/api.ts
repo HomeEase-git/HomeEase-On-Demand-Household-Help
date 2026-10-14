@@ -285,6 +285,7 @@ export async function postSignUp(userData: {
       email: response.email,
       phone: response.phone,
       role: response.role.toLowerCase(),
+      avatar: response.avatar ?? undefined,
       kycStatus: response.kycStatus,
       hasAcceptedTerms: response.hasAcceptedTerms,
       token: response.token,
@@ -334,6 +335,7 @@ export async function postLogin(email: string, password: string) {
       email: response.email,
       phone: response.phone,
       role: response.role.toLowerCase(),
+      avatar: response.avatar ?? undefined,
       kycStatus: response.kycStatus,
       hasAcceptedTerms: response.hasAcceptedTerms,
       token: response.token,
@@ -357,6 +359,7 @@ export async function postMfaChallenge(challengeToken: string, code: string) {
       email: response.email,
       phone: response.phone,
       role: response.role.toLowerCase(),
+      avatar: response.avatar ?? undefined,
       kycStatus: response.kycStatus,
       hasAcceptedTerms: response.hasAcceptedTerms,
       token: response.token,
@@ -378,6 +381,7 @@ export async function postLoginCode(challengeToken: string, code: string) {
     email: response.email,
     phone: response.phone,
     role: response.role.toLowerCase(),
+    avatar: response.avatar ?? undefined,
     kycStatus: response.kycStatus,
     hasAcceptedTerms: response.hasAcceptedTerms,
     token: response.token,
@@ -1005,6 +1009,16 @@ export async function respondToReview(reviewId: string, response: string) {
   }
 }
 
+/** Worker reports the client's review; client reports the worker's reply. */
+export async function reportReview(bookingId: string, reason: string) {
+  try {
+    return await api.post(`/bookings/${bookingId}/review/report`, { reason });
+  } catch (error) {
+    console.error('Report review error:', error);
+    throw error;
+  }
+}
+
 // ============================================================================
 // PAYMENT METHODS - CLIENT
 // ============================================================================
@@ -1368,6 +1382,7 @@ export async function getMyReviews(page?: number) {
         comment: r.comment ?? "",
         bookingId: r.bookingId,
         date: r.createdAt,
+        photoUrls: Array.isArray(r.photoUrls) ? (r.photoUrls as string[]) : [],
       })),
       total: response.pagination?.total ?? reviews.length,
       page: response.pagination?.page ?? page ?? 1,
@@ -1592,14 +1607,19 @@ export async function declineBooking(bookingId: string, reason?: string) {
   }
 }
 
-export async function startBooking(bookingId: string) {
+export async function startBooking(bookingId: string, beforePhotoUrls: string[]) {
   try {
-    const response = await api.patch(`/bookings/${bookingId}/start`);
+    const response = await api.patch(`/bookings/${bookingId}/start`, { beforePhotoUrls });
     return response;
   } catch (error) {
     console.error('Start booking error:', error);
     throw error;
   }
+}
+
+// Worker's "ongoing" proof photos while the job is IN_PROGRESS.
+export async function addProgressPhotos(bookingId: string, photoUrls: string[]) {
+  return api.post(`/bookings/${bookingId}/progress-photos`, { photoUrls });
 }
 
 export interface BookingVisit {
@@ -1757,6 +1777,16 @@ export async function reopenQuote(bookingId: string) {
 }
 
 // Client approves or rejects a legacy pending addon.
+/** Worker adds priced extra work to the same booking; billed only if the client approves. */
+export async function addBookingAddOn(bookingId: string, name: string, price: number) {
+  return api.post(`/bookings/${bookingId}/addons`, { name, price });
+}
+
+/** Client asks the worker for extra work on this visit; the worker replies with a price. */
+export async function requestExtraWork(bookingId: string, description: string) {
+  return api.post(`/bookings/${bookingId}/addons/request`, { description });
+}
+
 export async function respondToBookingAddOn(bookingId: string, addonId: string, approve: boolean) {
   try {
     const response = await api.patch(`/bookings/${bookingId}/addons/${addonId}/respond`, { approve });
@@ -2799,6 +2829,11 @@ const SERVICE_TYPES_TTL_MS = 5 * 60 * 1000; // 5 minutes
 let cachedServiceTypes: any[] | null = null;
 let cachedServiceTypesAt = 0;
 let servicesPromise: Promise<any[]> | null = null;
+
+/** Public: the admin's latest/minimum Android version and where to get it (in-app update prompt). */
+export async function getAppVersionInfo(): Promise<{ latest: string | null; minimum: string | null; storeUrl: string | null }> {
+  return api.get('/app/version');
+}
 
 export async function getServiceTypes() {
   if (cachedServiceTypes && Date.now() - cachedServiceTypesAt < SERVICE_TYPES_TTL_MS) {

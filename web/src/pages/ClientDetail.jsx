@@ -109,11 +109,11 @@ export default function ClientDetail() {
   return (
     <>
       <PageHeader
+        backTo="/users"
         title="Client Detail"
         subtitle="View and manage client information"
         actions={(
           <>
-            <Link to="/users" className="btn btn-outline">Back to Users</Link>
             <button
               type="button"
               className={isSuspended ? 'btn btn-success' : 'btn btn-danger'}

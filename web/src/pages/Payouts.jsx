@@ -30,8 +30,6 @@ const STATUS_BADGE_VARIANT = {
 export default function Payouts() {
   const { showError, showSuccess } = useToast()
   const { user } = useAuth()
-  const [dateFrom, setDateFrom] = useState('')
-  const [dateTo, setDateTo] = useState('')
   const [exporting, setExporting] = useState(false)
   const [retryingId, setRetryingId] = useState(null)
   const [selectedId, setSelectedId] = useState(null)
@@ -53,18 +51,20 @@ export default function Payouts() {
     { initialParams: { page: 1, dateFrom: '', dateTo: '' }, pollIntervalMs: 25000 }
   )
 
+  // Seeded from the URL so a restored filter shows in the date inputs too.
+  const [dateFrom, setDateFrom] = useState(params.dateFrom || '')
+  const [dateTo, setDateTo] = useState(params.dateTo || '')
+
   const selected = useMemo(() => payouts.find((p) => p.id === selectedId) || null, [payouts, selectedId])
 
   const applyDateRange = () => {
-    setFilter('dateFrom', dateFrom)
-    setFilter('dateTo', dateTo)
+    setFilter({ dateFrom, dateTo })
   }
 
   const clearDateRange = () => {
     setDateFrom('')
     setDateTo('')
-    setFilter('dateFrom', '')
-    setFilter('dateTo', '')
+    setFilter({ dateFrom: '', dateTo: '' })
   }
 
   const handleExport = async (format) => {
@@ -231,6 +231,8 @@ export default function Payouts() {
             </div>
             <Pagination
               info={`Showing ${payouts.length} of ${meta.total} payouts`}
+              page={meta.page}
+              totalPages={meta.totalPages}
               hasPrev={meta.hasPrev}
               hasNext={meta.hasNext}
               onPrev={() => goToPage(meta.page - 1)}

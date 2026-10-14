@@ -55,9 +55,9 @@ export default function TransactionDetail() {
   return (
     <>
       <PageHeader
+        backTo="/payments"
         title="Transaction Detail"
         subtitle={`Transaction ${tx.id}`}
-        actions={<Link to="/payments" className="btn btn-outline">Back</Link>}
       />
       <div className="detail-grid">
         {details.map(({ label, value }) => (

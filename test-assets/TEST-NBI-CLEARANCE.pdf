@@ -1,0 +1,73 @@
+%PDF-1.4
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [3 0 R] /Count 1 >>
+endobj
+3 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 5 0 R /F2 6 0 R >> >> >>
+endobj
+4 0 obj
+<< /Length 2499 >>
+stream
+BT /F2 64 Tf 0.85 g 0.866 0.5 -0.5 0.866 110 250 Tm (SAMPLE - TEST ONLY) Tj ET
+0.6 G 30 30 552 732 re S
+BT /F2 11 Tf 0 g 1 0 0 1 150 735 Tm (REPUBLIC OF THE PHILIPPINES) Tj ET
+BT /F2 10 Tf 0 g 1 0 0 1 120 718 Tm (DEPARTMENT OF JUSTICE - NATIONAL BUREAU OF INVESTIGATION) Tj ET
+BT /F2 20 Tf 0 g 1 0 0 1 215 695 Tm (NBI CLEARANCE) Tj ET
+BT /F1 8 Tf 0.4 g 1 0 0 1 150 678 Tm ((Sample specimen for HomeEase app testing - not valid)) Tj ET
+0 G 40 668 m 572 668 l S
+BT /F1 10 Tf 0 g 1 0 0 1 50 645 Tm (Clearance No.: 000-TEST-0000) Tj ET
+BT /F1 10 Tf 0 g 1 0 0 1 380 645 Tm (Date Issued: 01 OCT 2026) Tj ET
+BT /F1 10 Tf 0 g 1 0 0 1 50 628 Tm (Valid Until: 01 OCT 2027) Tj ET
+BT /F1 10 Tf 0 g 1 0 0 1 380 628 Tm (Purpose: EMPLOYMENT (LOCAL)) Tj ET
+0.6 G 50 470 120 140 re S
+BT /F1 10 Tf 0.5 g 1 0 0 1 78 535 Tm (PHOTO) Tj ET
+BT /F2 9 Tf 0 g 1 0 0 1 190 600 Tm (Last Name:) Tj ET
+BT /F1 10 Tf 0 g 1 0 0 1 310 600 Tm (DELA CRUZ) Tj ET
+BT /F2 9 Tf 0 g 1 0 0 1 190 582 Tm (First Name:) Tj ET
+BT /F1 10 Tf 0 g 1 0 0 1 310 582 Tm (JUAN) Tj ET
+BT /F2 9 Tf 0 g 1 0 0 1 190 564 Tm (Middle Name:) Tj ET
+BT /F1 10 Tf 0 g 1 0 0 1 310 564 Tm (SANTOS) Tj ET
+BT /F2 9 Tf 0 g 1 0 0 1 190 546 Tm (Date of Birth:) Tj ET
+BT /F1 10 Tf 0 g 1 0 0 1 310 546 Tm (15 JUNE 1995) Tj ET
+BT /F2 9 Tf 0 g 1 0 0 1 190 528 Tm (Place of Birth:) Tj ET
+BT /F1 10 Tf 0 g 1 0 0 1 310 528 Tm (QUEZON CITY) Tj ET
+BT /F2 9 Tf 0 g 1 0 0 1 190 510 Tm (Sex / Civil Status:) Tj ET
+BT /F1 10 Tf 0 g 1 0 0 1 310 510 Tm (MALE / SINGLE) Tj ET
+BT /F2 9 Tf 0 g 1 0 0 1 190 492 Tm (Citizenship:) Tj ET
+BT /F1 10 Tf 0 g 1 0 0 1 310 492 Tm (FILIPINO) Tj ET
+BT /F2 9 Tf 0 g 1 0 0 1 190 474 Tm (Address:) Tj ET
+BT /F1 10 Tf 0 g 1 0 0 1 310 474 Tm (123 SAMPLE ST., BRGY. TEST, QUEZON CITY) Tj ET
+0 G 40 440 m 572 440 l S
+BT /F2 14 Tf 0 g 1 0 0 1 50 415 Tm (*** NO RECORD ON FILE ***) Tj ET
+BT /F1 9 Tf 0 g 1 0 0 1 50 392 Tm (This is to certify that the person whose name, photo and signature appear herein has no pending) Tj ET
+BT /F1 9 Tf 0 g 1 0 0 1 50 379 Tm (criminal record or derogatory information on file with this Bureau as of the date issued.) Tj ET
+BT /F1 10 Tf 0 g 1 0 0 1 50 330 Tm (____________________) Tj ET
+BT /F1 10 Tf 0 g 1 0 0 1 380 330 Tm (____________________) Tj ET
+BT /F1 8 Tf 0 g 1 0 0 1 50 316 Tm (Holder Signature (sample)) Tj ET
+BT /F1 8 Tf 0 g 1 0 0 1 380 316 Tm (Authorized Signatory (sample)) Tj ET
+BT /F1 8 Tf 0.4 g 1 0 0 1 50 60 Tm (SPECIMEN - generated for software testing only. Fictional person. Not issued by the NBI.) Tj ET
+endstream
+endobj
+5 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>
+endobj
+6 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>
+endobj
+xref
+0 7
+0000000000 65535 f 
+0000000009 00000 n 
+0000000058 00000 n 
+0000000115 00000 n 
+0000000251 00000 n 
+0000002801 00000 n 
+0000002871 00000 n 
+trailer
+<< /Size 7 /Root 1 0 R >>
+startxref
+2946
+%%EOF

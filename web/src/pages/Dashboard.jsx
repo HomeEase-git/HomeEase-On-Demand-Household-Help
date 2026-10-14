@@ -5,9 +5,12 @@ import SectionCard from '../components/common/SectionCard'
 import LoadingState from '../components/common/LoadingState'
 import ErrorState from '../components/common/ErrorState'
 import BookingsTrendChart from '../components/charts/BookingsTrendChart'
+import CategoryBreakdownChart from '../components/charts/CategoryBreakdownChart'
 import { fetchDashboardStats } from '../services/dashboard'
+import { fetchAnalytics } from '../services/analytics'
 import { useDetailQuery } from '../hooks/useListQuery'
 import { useAdminNotifications } from '../hooks/useAdminNotifications'
+import { useAuth } from '../context/AuthContext'
 
 const RANGES = [7, 30, 90]
 
@@ -16,6 +19,26 @@ const pesoFormatter = new Intl.NumberFormat('en-PH', {
   currency: 'PHP',
   maximumFractionDigits: 0,
 })
+
+const formatCount = (n) => (n == null ? '—' : Number(n).toLocaleString('en-PH'))
+
+// Keyed by the category label the API sends with each activity row.
+const ACTIVITY_ICON = {
+  'Admin Actions': 'fa-user-shield',
+  'Login History': 'fa-right-to-bracket',
+  'System Errors': 'fa-triangle-exclamation',
+  'Status Changes': 'fa-arrows-rotate',
+}
+
+function getGreeting() {
+  const hour = new Date().getHours()
+  if (hour < 12) return 'Good morning'
+  if (hour < 17) return 'Good afternoon'
+  return 'Good evening'
+}
+
+const todayLabel = () =>
+  new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })
 
 // "+12 in 7 days" plus a % change against the previous period of the same
 // length. Only used on running totals — a % on a live queue (pending
@@ -44,6 +67,10 @@ export default function Dashboard() {
   // One cache slot per range, so switching back to a range is instant.
   const { data, loading, error, reload } = useDetailQuery(fetchDashboardStats, String(days))
   const { items: attentionItems, loading: attentionLoading } = useAdminNotifications()
+  // All-time completion rate, rating and category mix (what the old Analytics page showed).
+  const { data: analytics } = useDetailQuery(fetchAnalytics, 'snapshot')
+  const { user } = useAuth()
+  const firstName = user?.name?.split(' ')[0] || 'Admin'
 
   // useDetailQuery keeps the previous range's data while a new range loads,
   // so the page stays put (dimmed) instead of flashing back to placeholders.
@@ -55,12 +82,13 @@ export default function Dashboard() {
   const { stats, recentActivity, topWorkers, bookingsTrend, trends, rangeDays = days } = data
 
   const statCards = [
-    { label: 'Total Clients', value: String(stats.totalClients), icon: 'fa-users', color: 'blue', to: '/users', trend: describeTrend(trends?.clients, rangeDays) },
-    { label: 'Total Workers', value: String(stats.totalWorkers), icon: 'fa-user-cog', color: 'purple', to: '/workers', trend: describeTrend(trends?.workers, rangeDays) },
-    { label: 'Bookings', value: String(trends?.bookings?.current ?? '—'), sublabel: `Last ${rangeDays} days`, icon: 'fa-calendar-plus', color: 'blue', to: '/bookings', trend: describeTrend(trends?.bookings, rangeDays, String, { compareOnly: true }) },
-    { label: 'Active Bookings', value: String(stats.activeBookings), icon: 'fa-calendar-check', color: 'blue', to: '/bookings' },
-    { label: 'Pending Approvals', value: String(stats.pendingApprovals), icon: 'fa-id-card', color: 'orange', to: '/verification' },
-    { label: 'Open Disputes', value: String(stats.openDisputes), icon: 'fa-triangle-exclamation', color: 'pink', to: '/bookings/dispute' },
+    { label: 'Total Clients', value: formatCount(stats.totalClients), icon: 'fa-users', color: 'blue', to: '/users', trend: describeTrend(trends?.clients, rangeDays, formatCount) },
+    { label: 'Total Workers', value: formatCount(stats.totalWorkers), icon: 'fa-user-cog', color: 'purple', to: '/workers', trend: describeTrend(trends?.workers, rangeDays, formatCount) },
+    { label: 'Bookings', value: formatCount(trends?.bookings?.current), sublabel: `Last ${rangeDays} days`, icon: 'fa-calendar-plus', color: 'blue', to: '/bookings', trend: describeTrend(trends?.bookings, rangeDays, formatCount, { compareOnly: true }) },
+    { label: 'Active Bookings', value: formatCount(stats.activeBookings), icon: 'fa-calendar-check', color: 'blue' },
+    // Pending approvals and open disputes live in the "Needs attention" strip above.
+    { label: 'Completion Rate', sublabel: 'All bookings', value: analytics ? `${Math.round(analytics.completionRate * 100)}%` : '—', icon: 'fa-chart-line', color: 'green' },
+    { label: 'Avg. Rating', sublabel: 'All reviews', value: analytics ? analytics.avgRating.toFixed(1) : '—', icon: 'fa-star', color: 'purple', to: '/reviews' },
     // Revenue is the platform's commission (not what clients paid); payouts
     // are money actually sent to workers.
     { label: 'Platform Revenue', sublabel: stats.revenueFromCashJobs && stats.revenueFromCashJobs !== '₱0.00' ? `Commission · ${stats.revenueFromCashJobs} owed from cash jobs` : 'Commission earned', value: stats.totalRevenue, icon: 'fa-peso-sign', color: 'green', to: '/payments', trend: describeTrend(trends?.revenue, rangeDays, (n) => pesoFormatter.format(n)) },
@@ -91,8 +119,8 @@ export default function Dashboard() {
     <div className={refreshing ? 'dashboard is-refreshing' : 'dashboard'}>
       <div className="dashboard-header">
         <div>
-          <h1 className="page-title">Dashboard</h1>
-          <p className="page-subtitle">Activity across HomeEase</p>
+          <h1 className="page-title">{getGreeting()}, {firstName}</h1>
+          <p className="page-subtitle">{todayLabel()}</p>
         </div>
         <div className="segmented" role="group" aria-label="Time range">
           {RANGES.map((range) => (
@@ -140,37 +168,53 @@ export default function Dashboard() {
       <SectionCard title={`Bookings Trend (Last ${rangeDays} Days)`}>
         <BookingsTrendChart data={bookingsTrend} />
       </SectionCard>
+      {analytics && (
+        <SectionCard title="Bookings by Category">
+          <CategoryBreakdownChart data={analytics.bookingsByCategory} />
+        </SectionCard>
+      )}
       <div className="two-col">
         <SectionCard title="Recent Activities">
           <div className="activity-list">
             {recentActivity.length === 0 && <p className="page-subtitle">No recent activity yet.</p>}
-            {recentActivity.map((item) => (
-              <div key={item.id} className="activity-item">
-                <div className="icon">
-                  <i className="fas fa-file-alt" />
-                </div>
-                <div>
-                  <div>{item.text}</div>
-                  <div className="time">{item.time}</div>
-                </div>
-              </div>
-            ))}
+            {recentActivity.map((item) => {
+              const body = (
+                <>
+                  <div className="icon">
+                    <i className={`fas ${ACTIVITY_ICON[item.category] || 'fa-file-alt'}`} />
+                  </div>
+                  <div>
+                    <div>{item.text}</div>
+                    <div className="time">{item.time}</div>
+                  </div>
+                </>
+              )
+              return item.bookingId ? (
+                <Link key={item.id} to={`/bookings/detail/${item.bookingId}`} className="activity-item activity-item--link">
+                  {body}
+                </Link>
+              ) : (
+                <div key={item.id} className="activity-item">{body}</div>
+              )
+            })}
           </div>
+          <Link to="/reports/logs" className="section-card__more">View all activity</Link>
         </SectionCard>
         <SectionCard title="Top Performing Workers">
           <div className="rank-list">
-            {topWorkers.length === 0 && <p className="page-subtitle">No workers yet.</p>}
+            {topWorkers.length === 0 && <p className="page-subtitle">No reviewed workers yet.</p>}
             {topWorkers.map((worker, i) => (
-              <div key={worker.id} className="rank-item">
+              <Link key={worker.id} to={`/workers/${worker.id}`} className="rank-item">
                 <div className="rank-num">{i + 1}</div>
                 <div>
                   <div><strong>{worker.name}</strong></div>
                   <div className="meta">{worker.services}</div>
                 </div>
                 <div className="stars">
-                  ★ {worker.rating} <span className="meta">({worker.reviews} reviews)</span>
+                  ★ {worker.rating}{' '}
+                  <span className="meta">({worker.reviews} {worker.reviews === 1 ? 'review' : 'reviews'})</span>
                 </div>
-              </div>
+              </Link>
             ))}
           </div>
         </SectionCard>

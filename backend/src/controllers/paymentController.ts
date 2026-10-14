@@ -14,6 +14,7 @@ import {
 } from '@services/paymentLifecycleService';
 import { translateXenditFailureReason } from '@utils/xenditFailureMessages';
 import { applyXenditPayoutStatus } from '@services/payoutStatusService';
+import { manilaQuarterLabel } from '@utils/manilaTime';
 import { retrieveInvoice } from '@services/xenditService';
 
 interface AuthRequest extends Request {
@@ -91,6 +92,8 @@ export const getPaymentDetail = async (req: AuthRequest, res: Response) => {
       commissionPercentage: payment.commissionRate * 100,
       withholdingTaxAmount: payment.withholdingTaxAmount,
       withholdingTaxPercentage: payment.withholdingTaxRate * 100,
+      // Which BIR quarter this withholding is reported in (2307 / remittance).
+      withholdingTaxQuarter: manilaQuarterLabel(payment.capturedAt ?? payment.createdAt),
       platformFee: 0,
       tip: payment.tip,
       total: payment.totalAmount,

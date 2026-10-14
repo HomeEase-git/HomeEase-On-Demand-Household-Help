@@ -5,22 +5,6 @@ import { useAdminNotifications } from '../../hooks/useAdminNotifications'
 import LogoutConfirmModal from '../common/LogoutConfirmModal'
 import { OPEN_COMMAND_PALETTE_EVENT } from './CommandPalette'
 
-function getGreeting() {
-  const hour = new Date().getHours()
-  if (hour < 12) return 'Good morning'
-  if (hour < 17) return 'Good afternoon'
-  return 'Good evening'
-}
-
-function getFormattedDate() {
-  return new Date().toLocaleDateString('en-US', {
-    weekday: 'long',
-    month: 'long',
-    day: 'numeric',
-    year: 'numeric',
-  })
-}
-
 function getInitials(name) {
   if (!name) return 'A'
   return name
@@ -34,7 +18,6 @@ function getInitials(name) {
 export default function Header({ onMenuClick }) {
   const { user, logout } = useAuth()
   const navigate = useNavigate()
-  const displayName = user?.name?.split(' ')[0] || 'Admin'
   const { items: notifItems, total: notifTotal } = useAdminNotifications()
 
   const [notifOpen, setNotifOpen] = useState(false)
@@ -70,10 +53,6 @@ export default function Header({ onMenuClick }) {
           >
             <i className="fas fa-bars" />
           </button>
-          <div className="header-left-text">
-            <div className="header-greeting">{getGreeting()}, {displayName}</div>
-            <div className="header-date">{getFormattedDate()}</div>
-          </div>
         </div>
         <div className="header-right">
           <button
@@ -135,9 +114,9 @@ export default function Header({ onMenuClick }) {
             </button>
             {userMenuOpen && (
               <div className="header-dropdown header-dropdown--user">
-                <Link to="/settings" className="header-dropdown__item" onClick={() => setUserMenuOpen(false)}>
-                  <i className="fas fa-cog" />
-                  <span className="header-dropdown__item-label">Settings</span>
+                <Link to="/mfa-setup" className="header-dropdown__item" onClick={() => setUserMenuOpen(false)}>
+                  <i className="fas fa-shield-halved" />
+                  <span className="header-dropdown__item-label">Two-factor authentication</span>
                 </Link>
                 <button
                   type="button"

@@ -4,6 +4,7 @@ import prisma from '@config/database';
 import { invalidateAppSettingsCache } from '@services/appSettingsService';
 import { BOOKING_PHOTO_BUCKET } from '@config/supabase';
 import { createTestUser, deleteTestUser, createTestBooking, deleteTestBooking } from './helpers';
+import { remindPendingAddons } from '@/workers/bookingWorker';
 
 // Manila coordinates, mirroring tests/unit/geo.test.ts's known-good deltas:
 // ~55m away is inside the default 100m geofence, ~1.2km away is outside it.
@@ -461,6 +462,85 @@ describe('Booking flow — arrival geofencing, quote submission, dispute resolut
       expect((await complete('https://example.com/x.jpg')).status).toBe(400);
       const db = await prisma.booking.findUnique({ where: { id: booking.id } });
       expect(db?.status).toBe('IN_PROGRESS');
+    });
+
+    it('needs a before photo to start the job', async () => {
+      const booking = await createTestBooking({ clientId, workerId, status: 'QUOTE_APPROVED', workerArrivedAt: new Date() });
+      createdBookingIds.push(booking.id);
+      const start = (body: Record<string, unknown>) =>
+        request(app).patch(`/api/bookings/${booking.id}/start`).set('Authorization', `Bearer ${workerToken}`).send(body);
+
+      expect((await start({})).status).toBe(400);
+      expect((await start({ beforePhotoUrls: [photo(clientId, 'x')] })).status).toBe(400);
+      expect((await start({ beforePhotoUrls: [photo(workerId, 'before')] })).status).toBe(200);
+      const db = await prisma.booking.findUnique({ where: { id: booking.id } });
+      expect(db?.status).toBe('IN_PROGRESS');
+      expect(db?.beforePhotoUrls).toHaveLength(1);
+    });
+
+    it('needs a progress photo before the job can be marked done', async () => {
+      const booking = await createTestBooking({ clientId, workerId, status: 'IN_PROGRESS' });
+      createdBookingIds.push(booking.id);
+      const complete = () =>
+        request(app)
+          .patch(`/api/bookings/${booking.id}/complete`)
+          .set('Authorization', `Bearer ${workerToken}`)
+          .send({ completionPhotoUrl: photo(workerId, 'after') });
+
+      expect((await complete()).status).toBe(409);
+
+      const progress = await request(app)
+        .post(`/api/bookings/${booking.id}/progress-photos`)
+        .set('Authorization', `Bearer ${workerToken}`)
+        .send({ photoUrls: [photo(workerId, 'midway')] });
+      expect(progress.status).toBe(201);
+
+      expect((await complete()).status).toBe(200);
+      const db = await prisma.booking.findUnique({ where: { id: booking.id } });
+      expect(db?.status).toBe('PENDING_COMPLETION');
+    });
+  });
+
+  describe('extra work on the same visit', () => {
+    const addExtra = (id: string) =>
+      request(app)
+        .post(`/api/bookings/${id}/addons`)
+        .set('Authorization', `Bearer ${workerToken}`)
+        .send({ name: 'Faucet repair', price: 1500 });
+
+    it('worker adds a pending extra only once on site', async () => {
+      const pending = await createTestBooking({ clientId, workerId, status: 'PENDING' });
+      const working = await createTestBooking({ clientId, workerId, status: 'IN_PROGRESS' });
+      createdBookingIds.push(pending.id, working.id);
+
+      expect((await addExtra(pending.id)).status).toBe(409);
+      const res = await addExtra(working.id);
+      expect(res.status).toBe(201);
+      expect(res.body.data).toMatchObject({ price: 1500, clientApprovedAt: null });
+    });
+
+    it('client can ask for extra work', async () => {
+      const booking = await createTestBooking({ clientId, workerId, status: 'IN_PROGRESS' });
+      createdBookingIds.push(booking.id);
+      const res = await request(app)
+        .post(`/api/bookings/${booking.id}/addons/request`)
+        .set('Authorization', `Bearer ${clientToken}`)
+        .send({ description: 'Please also fix the leaking faucet' });
+      expect(res.status).toBe(200);
+    });
+
+    it('never auto-approves an extra the client has not answered', async () => {
+      const booking = await createTestBooking({ clientId, workerId, status: 'IN_PROGRESS' });
+      createdBookingIds.push(booking.id);
+      const addon = await prisma.bookingAddOn.create({
+        data: { bookingId: booking.id, name: 'Old extra', price: 300, createdAt: new Date(Date.now() - 24 * 3600 * 1000) },
+      });
+
+      await remindPendingAddons();
+
+      const db = await prisma.bookingAddOn.findUniqueOrThrow({ where: { id: addon.id } });
+      expect(db.clientApprovedAt).toBeNull();
+      expect(db.reminderSentAt).not.toBeNull();
     });
   });
 

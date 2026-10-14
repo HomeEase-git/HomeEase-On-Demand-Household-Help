@@ -9,7 +9,7 @@ import ScreenHeader from "../../../../components/ui/ScreenHeader";
 import StatusBadge from "../../../../components/ui/StatusBadge";
 import { BookingStatusHero } from "../../../../components/booking-detail/BookingStatusHero";
 import { BookingWorkerCard } from "../../../../components/booking-detail/BookingWorkerCard";
-import { getBookingTimeline } from "../../../../utils/bookingTimeline";
+import { formatJobTime, getBookingTimeline } from "../../../../utils/bookingTimeline";
 import PrimaryButton from "../../../../components/ui/PrimaryButton";
 import OutlinedButton from "../../../../components/ui/OutlinedButton";
 import DangerButton from "../../../../components/ui/DangerButton";
@@ -27,10 +27,13 @@ import {
   respondToRescheduleRequest,
   respondToBookingAddOn,
   cancelBooking as cancelBookingApi,
+  reportReview,
+  requestExtraWork,
 } from "../../../../services/api";
 import { formatTime12h } from "../../../../utils/bookingTime";
 import { colors } from "../../../../constants";
 import { useAlertModal } from "../../../../contexts/AlertModalContext";
+import ReportModal from "../../../../components/modals/ReportModal";
 import { mapApiBookingDetail, type ApiBookingDetail } from "../../../../utils/mapBookingDetail";
 
 function formatScheduledDate(date: string): string {
@@ -57,6 +60,10 @@ export default function BookingDetailScreen() {
   // separately here so the price breakdown card can render the actual
   // backend-persisted charge instead of recomputing an invented one.
   const [rawDetail, setRawDetail] = useState<ApiBookingDetail | null>(null);
+  const [reportVisible, setReportVisible] = useState(false);
+  const [extraVisible, setExtraVisible] = useState(false);
+  const [requestingExtra, setRequestingExtra] = useState(false);
+  const [reporting, setReporting] = useState(false);
   const [loading, setLoading] = useState(true);
   const [confirmingCompletion, setConfirmingCompletion] = useState(false);
   const [processingPayment, setProcessingPayment] = useState(false);
@@ -191,6 +198,11 @@ export default function BookingDetailScreen() {
     !!booking.workerId &&
     ["PENDING_COMPLETION", "AWAITING_PAYMENT", "COMPLETED"].includes(rawDetail?.status ?? "");
   const upcomingVisits = (rawDetail?.visits ?? []).filter((v) => v.status === "SCHEDULED");
+  // Same window the backend allows (bookingController.canAddExtraWork).
+  const canRequestExtra =
+    (rawDetail?.status === "ACCEPTED" && !!rawDetail?.timeline?.workerArrivedAt) ||
+    ["QUOTE_SUBMITTED", "QUOTE_APPROVED", "IN_PROGRESS"].includes(rawDetail?.status ?? "");
+  const jobTime = formatJobTime(rawDetail?.timeline?.workerStartedAt, rawDetail?.timeline?.workerCompletedAt);
   const requestedWhen = rawDetail?.requestedScheduledDate
     ? `${new Date(rawDetail.requestedScheduledDate).toLocaleDateString("en-PH", { month: "short", day: "numeric", timeZone: "UTC" })}${
         rawDetail.requestedScheduledTime ? ` at ${formatTime12h(rawDetail.requestedScheduledTime)}` : ""
@@ -733,9 +745,9 @@ export default function BookingDetailScreen() {
               Your pro cancelled at your location and reported it was caused on your side
               {rawDetail.cancellation.reason ? `: "${rawDetail.cancellation.reason}"` : ""}.{" "}
               {rawDetail.cancellation.compensationStatus === "PENDING_REVIEW"
-                ? `HomeEase is reviewing their photo proof. A ₱${rawDetail.cancellation.compensationAmount ?? 0} cancellation fee applies only if it's confirmed.`
+                ? `HomeEase is reviewing their photo proof. A ₱${rawDetail.cancellation.compensationAmount ?? 0} visit fee (it pays your pro for the trip) applies only if it's confirmed.`
                 : rawDetail.cancellation.compensationStatus === "APPROVED"
-                  ? `HomeEase confirmed it, so a ₱${rawDetail.cancellation.compensationAmount ?? 0} cancellation fee applies.`
+                  ? `HomeEase confirmed it, so a ₱${rawDetail.cancellation.compensationAmount ?? 0} visit fee applies. It pays your pro for the wasted trip.`
                   : "HomeEase couldn't confirm it, so no fee applies."}
             </Text>
           </View>
@@ -918,12 +930,22 @@ export default function BookingDetailScreen() {
           </View>
         )}
 
+        {canRequestExtra && (
+          <View className="mb-3">
+            <OutlinedButton label="Request Extra Work" fullWidth onPress={() => setExtraVisible(true)} />
+            <Text className="text-text-muted text-xs mt-1 text-center">
+              Need more done on this visit? Your pro sends a price here for you to approve.
+            </Text>
+          </View>
+        )}
+
         {/* Price Breakdown */}
         <View className="mb-3">
           <PriceBreakdownCard
             subtotal={priceBreakdown.subtotal}
             basePrice={priceBreakdown.basePrice}
             distanceFee={priceBreakdown.distanceFee}
+            distanceFeeNote={"distanceFeeNote" in priceBreakdown ? priceBreakdown.distanceFeeNote : null}
             tierFee={priceBreakdown.tierFee}
             rushFee={priceBreakdown.rushFee}
             addOns={priceBreakdown.addOns}
@@ -959,6 +981,34 @@ export default function BookingDetailScreen() {
           </View>
         </View>
 
+        {/* Worker's before / progress proof photos */}
+        {(!!rawDetail?.beforePhotoUrls?.length || !!rawDetail?.progressPhotoUrls?.length) && (
+          <View className="bg-card rounded-2xl p-4 mb-3">
+            {[
+              ["Before the work", rawDetail?.beforePhotoUrls ?? []],
+              ["Progress updates", rawDetail?.progressPhotoUrls ?? []],
+            ].map(([label, urls]) =>
+              (urls as string[]).length ? (
+                <View key={label as string} className="mb-2">
+                  <Text className="text-text-primary font-bold mb-2">{label as string}</Text>
+                  <View className="flex-row flex-wrap gap-2">
+                    {(urls as string[]).map((url) => (
+                      <Pressable
+                        key={url}
+                        onPress={() => router.push({ pathname: "/(client)/inbox/image-viewer", params: { imageUrl: url } })}
+                        accessibilityRole="imagebutton"
+                        accessibilityLabel={`Open ${label} photo`}
+                      >
+                        <RemoteImage source={{ uri: url }} className="w-20 h-20 rounded-xl bg-card-dark" />
+                      </Pressable>
+                    ))}
+                  </View>
+                </View>
+              ) : null,
+            )}
+          </View>
+        )}
+
         {/* Completion photo — worker's proof of finished work */}
         {booking.completionPhotoUrl && (
           <View className="bg-card rounded-2xl p-4 mb-3">
@@ -975,6 +1025,13 @@ export default function BookingDetailScreen() {
                 Happy with the work? Confirm completion below.
               </Text>
             )}
+          </View>
+        )}
+
+        {jobTime && (
+          <View className="bg-card rounded-2xl p-4 mb-3">
+            <Text className="text-text-secondary text-xs mb-1">Job time</Text>
+            <Text className="text-text-primary font-semibold">{jobTime}</Text>
           </View>
         )}
 
@@ -1000,6 +1057,18 @@ export default function BookingDetailScreen() {
                   <Text className="text-text-primary text-sm mt-1">
                     {`"${booking.reviewText}"`}
                   </Text>
+                )}
+                {!!rawDetail?.review?.workerResponse && (
+                  <View className="bg-background rounded-xl p-3 mt-3">
+                    <Text className="text-text-primary font-semibold text-xs mb-1">{booking.worker}&apos;s reply</Text>
+                    <Text className="text-text-secondary text-sm">{rawDetail.review.workerResponse}</Text>
+                    <Text
+                      className="text-text-muted text-xs font-medium mt-2 self-end"
+                      onPress={() => setReportVisible(true)}
+                    >
+                      Report reply
+                    </Text>
+                  </View>
                 )}
               </View>
             ) : (
@@ -1116,6 +1185,45 @@ export default function BookingDetailScreen() {
         onSuccess={handleCheckoutSuccess}
         onFailed={handleCheckoutFailed}
         onCancel={handleCheckoutCancel}
+      />
+      <ReportModal
+        visible={extraVisible}
+        title="Request extra work"
+        message="Describe what else you need done on this visit. Your pro will send a price for you to approve; nothing is billed until you do."
+        placeholder="e.g. Please also fix the leaking faucet"
+        confirmLabel="Send Request"
+        loading={requestingExtra}
+        onConfirm={async (description) => {
+          setRequestingExtra(true);
+          try {
+            await requestExtraWork(booking.id, description);
+            setExtraVisible(false);
+            alertModal.success("Request sent", "Your pro will send a price for you to approve.");
+          } catch (error: any) {
+            alertModal.error("Error", error?.message || "Could not send the request. Please try again.");
+          } finally {
+            setRequestingExtra(false);
+          }
+        }}
+        onCancel={() => setExtraVisible(false)}
+      />
+      <ReportModal
+        visible={reportVisible}
+        title="Report this reply"
+        loading={reporting}
+        onConfirm={async (reason) => {
+          setReporting(true);
+          try {
+            await reportReview(booking.id, reason);
+            setReportVisible(false);
+            alertModal.success("Reported", "Thanks. An admin will look at it.");
+          } catch (error: any) {
+            alertModal.error("Error", error?.message || "Could not send the report. Please try again.");
+          } finally {
+            setReporting(false);
+          }
+        }}
+        onCancel={() => setReportVisible(false)}
       />
     </SafeAreaView>
   );

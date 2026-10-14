@@ -2,7 +2,7 @@ import { Request, Response } from 'express';
 import prisma from '@config/database';
 import { platformRevenue, workerPayoutsPaid } from '@services/financeReportService';
 import { errorResponse } from '@utils/errorResponse';
-import { formatPeso } from '@utils/formatters';
+import { formatDisplayId, formatPeso } from '@utils/formatters';
 import { getBookingsOverTime } from './adminAnalyticsController';
 
 const ACTIVE_BOOKING_STATUSES = [
@@ -28,6 +28,17 @@ function parseRangeDays(raw: unknown): number {
 }
 
 type PeriodTrend = { current: number; previous: number };
+
+// Must match tests/helpers.ts TEST_EMAIL_MARKER: e2e accounts stay off the leaderboard.
+const TEST_EMAIL_MARKER = 'e2etest';
+
+// Audit messages are written for the log, not for people: some carry a raw
+// booking cuid or an action code like CANCEL_BOOKING. Show the booking's
+// display ID and plain words instead.
+function activityText(message: string, bookingId: string | undefined): string {
+  const withDisplayId = bookingId ? message.split(bookingId).join(formatDisplayId(bookingId)) : message;
+  return withDisplayId.replace(/\b[A-Z]+(?:_[A-Z]+)+\b/g, (code) => code.toLowerCase().replace(/_/g, ' '));
+}
 
 const CATEGORY_LABEL: Record<string, string> = {
   ADMIN_ACTION: 'Admin Actions',
@@ -73,8 +84,10 @@ export const getDashboardStats = async (req: Request, res: Response) => {
       // workers. See financeReportService for the exact definitions.
       platformRevenue(),
       workerPayoutsPaid(),
-      prisma.auditLog.findMany({ orderBy: { createdAt: 'desc' }, take: 8 }),
+      prisma.auditLog.findMany({ orderBy: { createdAt: 'desc' }, take: 5 }),
+      // Unreviewed workers (rating 0) aren't ranked.
       prisma.workerProfile.findMany({
+        where: { totalReviews: { gt: 0 }, user: { email: { not: { contains: TEST_EMAIL_MARKER } } } },
         orderBy: [{ rating: 'desc' }, { totalReviews: 'desc' }],
         take: 5,
         include: {
@@ -149,20 +162,26 @@ export const getDashboardStats = async (req: Request, res: Response) => {
           workersOnHoldCount,
           overduePayments: overduePaymentCount,
         },
-        recentActivity: recentActivityRecords.map((record) => ({
-          id: record.id,
-          text: record.message,
-          category: CATEGORY_LABEL[record.category] ?? record.category,
-          time: record.createdAt.toLocaleString('en-US', {
-            month: 'short',
-            day: 'numeric',
-            year: 'numeric',
-            hour: 'numeric',
-            minute: '2-digit',
-          }),
-        })),
+        recentActivity: recentActivityRecords.map((record) => {
+          const bookingId = (record.metadata as { bookingId?: unknown } | null)?.bookingId;
+          const linkedBookingId = typeof bookingId === 'string' ? bookingId : undefined;
+          return {
+            id: record.id,
+            bookingId: linkedBookingId ?? null,
+            text: activityText(record.message, linkedBookingId),
+            category: CATEGORY_LABEL[record.category] ?? record.category,
+            time: record.createdAt.toLocaleString('en-US', {
+              month: 'short',
+              day: 'numeric',
+              year: 'numeric',
+              hour: 'numeric',
+              minute: '2-digit',
+            }),
+          };
+        }),
         topWorkers: topWorkerRecords.map((worker) => ({
-          id: worker.id,
+          // User id: the admin worker detail page is keyed by it.
+          id: worker.userId,
           name: worker.user.fullName,
           services: worker.serviceCategories.map((c) => c.serviceType.name).join(', ') || '—',
           rating: worker.rating.toFixed(1),

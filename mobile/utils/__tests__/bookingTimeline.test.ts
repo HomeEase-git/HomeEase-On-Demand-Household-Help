@@ -1,5 +1,17 @@
-import { getBookingTimeline, TIMELINE_STEPS } from "../bookingTimeline";
+import { formatJobTime, getBookingTimeline, TIMELINE_STEPS } from "../bookingTimeline";
 import type { BookingStatus } from "../../store/bookingStore";
+
+describe("formatJobTime", () => {
+  it("shows PH start/end and the duration", () => {
+    // 06:10 UTC = 2:10 PM Manila
+    expect(formatJobTime("2026-10-13T06:10:00Z", "2026-10-13T08:35:00Z")).toMatch(/2:10.*4:35.*\(2h 25m\)$/);
+    expect(formatJobTime("2026-10-13T06:10:00Z", "2026-10-13T06:50:00Z")).toMatch(/\(40m\)$/);
+  });
+
+  it("is null until both stamps exist", () => {
+    expect(formatJobTime("2026-10-13T06:10:00Z", null)).toBeNull();
+  });
+});
 
 describe("getBookingTimeline", () => {
   it.each<[BookingStatus, number, string]>([

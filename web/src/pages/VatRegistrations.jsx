@@ -112,7 +112,7 @@ export default function VatRegistrations() {
       <p className="form-hint">
         Approving here is the only thing that makes VAT apply to a worker's future bookings — submitting a document
         alone does nothing. None of this platform's trades are BIR-licensed professions, so one ATC code covers
-        every worker regardless of VAT status (see Settings for the code on file).
+        every worker regardless of VAT status (WI120).
       </p>
       <div className="toolbar">
         <select
@@ -208,7 +208,7 @@ export default function VatRegistrations() {
 
       <PageHeader
         title="VAT Collection Summary"
-        subtitle="Informational only — this is VAT workers collected on their own bookings, for their own 2550Q/2551Q filing. The platform never remits this (see Tax Remittance for the platform's actual withholding-tax obligation)."
+        subtitle="Informational only — this is VAT workers collected on their own bookings, for their own 2550Q/2551Q filing. The platform never remits this."
       />
       <SectionCard title="Generate Summary for a Period">
         <div className="toolbar" style={{ alignItems: 'center' }}>
@@ -273,6 +273,8 @@ export default function VatRegistrations() {
             </div>
             <Pagination
               info={`Showing ${summaries.length} of ${summaryMeta.total} summaries`}
+              page={summaryMeta.page}
+              totalPages={summaryMeta.totalPages}
               hasPrev={summaryMeta.hasPrev}
               hasNext={summaryMeta.hasNext}
               onPrev={() => goToSummaryPage(summaryMeta.page - 1)}

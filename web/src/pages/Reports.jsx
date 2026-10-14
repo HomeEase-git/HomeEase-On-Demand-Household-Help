@@ -229,7 +229,9 @@ export default function Reports() {
                 </div>
                 <Pagination
                   info={`Showing ${rows.length} of ${meta.total ?? rows.length} log entries`}
-                  hasPrev={meta.hasPrev}
+                  page={meta.page}
+              totalPages={meta.totalPages}
+              hasPrev={meta.hasPrev}
                   hasNext={meta.hasNext}
                   onPrev={() => goToPage(Math.max(1, params.page - 1))}
                   onNext={() => goToPage(params.page + 1)}

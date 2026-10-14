@@ -4,6 +4,8 @@ import { KeyboardAwareScrollView } from "../../../components/ui/KeyboardAwareScr
 import { SafeAreaView } from "react-native-safe-area-context";
 import ScreenHeader from "../../../components/ui/ScreenHeader";
 import ReviewCard from "../../../components/cards/ReviewCard";
+import ReportModal from "../../../components/modals/ReportModal";
+import { useAlertModal } from "../../../contexts/AlertModalContext";
 import EmptyState from "../../../components/feedback/EmptyState";
 import StarRating from "../../../components/ui/StarRating";
 import { SkeletonList, ReviewCardSkeleton } from "../../../components/ui/Skeleton";
@@ -19,12 +21,17 @@ type ReviewItem = {
   comment: string;
   date: string;
   workerResponse: string | null;
+  bookingId: string;
+  photoUrls: string[];
 };
 
 export default function WorkerReviewsScreen() {
   const user = useAuthStore((s) => s.user);
   const [reviews, setReviews] = useState<ReviewItem[]>([]);
   const [loading, setLoading] = useState(true);
+  const [reportBookingId, setReportBookingId] = useState<string | null>(null);
+  const [reporting, setReporting] = useState(false);
+  const alertModal = useAlertModal();
 
   useEffect(() => {
     let active = true;
@@ -43,6 +50,8 @@ export default function WorkerReviewsScreen() {
             comment: r.comment,
             date: r.date,
             workerResponse: r.workerResponse ?? null,
+            bookingId: r.bookingId,
+            photoUrls: r.photoUrls,
           })),
         );
       } catch (error) {
@@ -56,6 +65,20 @@ export default function WorkerReviewsScreen() {
       active = false;
     };
   }, [user?.id]);
+
+  const handleReport = async (reason: string) => {
+    if (!reportBookingId) return;
+    setReporting(true);
+    try {
+      await api.reportReview(reportBookingId, reason);
+      setReportBookingId(null);
+      alertModal.success("Reported", "Thanks. An admin will look at it.");
+    } catch (error: any) {
+      alertModal.error("Error", error?.message || "Could not send the report. Please try again.");
+    } finally {
+      setReporting(false);
+    }
+  };
 
   const handleRespond = async (reviewId: string, response: string) => {
     await api.respondToReview(reviewId, response);
@@ -115,9 +138,18 @@ export default function WorkerReviewsScreen() {
             </Text>
           </View>
         }
-        renderItem={({ item }) => <ReviewCard review={item} onRespond={handleRespond} />}
+        renderItem={({ item }) => (
+          <ReviewCard review={item} onRespond={handleRespond} onReport={() => setReportBookingId(item.bookingId)} />
+        )}
         // Keeps a review's reply box above the keyboard while typing.
         renderScrollComponent={(props) => <KeyboardAwareScrollView {...props} />}
+      />
+      <ReportModal
+        visible={!!reportBookingId}
+        title="Report this review"
+        loading={reporting}
+        onConfirm={handleReport}
+        onCancel={() => setReportBookingId(null)}
       />
     </SafeAreaView>
   );

@@ -6,19 +6,14 @@ import {
   useSettingsForm,
 } from '../components/settings/SettingsForm'
 
-// Price changes (same-day fee, distance fee, expertise tiers, no-show penalty,
-// client-fault compensation) live on Price Adjustments, commission and worker
-// debt on Payments → Commission & Debt, and withholding tax/ATC on Tax
-// Settings — this page keeps site identity, admin account/alert settings, and
-// booking-operation rules.
+// Price changes (same-day fee and notice, distance fee, expertise tiers,
+// no-show penalty, client-fault compensation) live on Price Adjustments,
+// commission and worker debt on Payments → Commission & Debt, and
+// booking/decline rules on Bookings → Booking Rules. Withholding tax and the
+// ATC code are fixed (appSettingsService). This page keeps site identity, admin account/alert settings, and
+// trust & safety.
 const NUMBER_FIELD_BOUNDS = {
-  pendingExpiryMinutes: [5, 10080],
-  geofenceRadiusMeters: [0, 5000],
-  maxDeclinesBeforeCooldown: [1, 20],
-  declineWindowHours: [1, 720],
-  declineCooldownHours: [1, 720],
   noShowGraceMinutes: [15, 480],
-  rushMinLeadHours: [0, 24],
   workerMinAge: [18, 100],
   workerMaxAge: [18, 100],
   disputeEscalationHours: [1, 720],
@@ -36,6 +31,9 @@ const FIELDS = [
   'siteName',
   'supportEmail',
   'notificationsEnabled',
+  'androidLatestVersion',
+  'androidMinVersion',
+  'androidStoreUrl',
   ...Object.keys(NUMBER_FIELD_BOUNDS),
   ...Object.keys(NULLABLE_NUMBER_FIELD_BOUNDS),
 ]
@@ -79,6 +77,48 @@ export default function Settings() {
           </SettingsSection>
 
           <SettingsSection
+            icon="fa-mobile-screen"
+            title="App Updates"
+            description="Android app version check. Over-the-air updates (eas update) prompt users on their own; these settings are for new APK builds. Current build: see version in app.json."
+          >
+            <div className="detail-grid" style={{ marginBottom: 0 }}>
+              <div className="detail-block">
+                <label htmlFor="settings-androidLatestVersion">Latest Version</label>
+                <input
+                  id="settings-androidLatestVersion"
+                  value={current.androidLatestVersion ?? ''}
+                  onChange={(e) => updateField('androidLatestVersion')(e.target.value)}
+                  className="input"
+                  placeholder="e.g. 1.0.2"
+                />
+                <small className="toggle-row__hint">Installed apps below this get a prompt they can dismiss. Leave blank for no prompt.</small>
+              </div>
+              <div className="detail-block">
+                <label htmlFor="settings-androidMinVersion">Minimum Version</label>
+                <input
+                  id="settings-androidMinVersion"
+                  value={current.androidMinVersion ?? ''}
+                  onChange={(e) => updateField('androidMinVersion')(e.target.value)}
+                  className="input"
+                  placeholder="e.g. 1.0.1"
+                />
+                <small className="toggle-row__hint">Installed apps below this are blocked until they update. Raise it only after most users have the new build.</small>
+              </div>
+              <div className="detail-block">
+                <label htmlFor="settings-androidStoreUrl">Update Link</label>
+                <input
+                  id="settings-androidStoreUrl"
+                  value={current.androidStoreUrl ?? ''}
+                  onChange={(e) => updateField('androidStoreUrl')(e.target.value)}
+                  className="input"
+                  placeholder="https://..."
+                />
+                <small className="toggle-row__hint">Where the Update button goes: the Play Store listing or a direct APK download.</small>
+              </div>
+            </div>
+          </SettingsSection>
+
+          <SettingsSection
             icon="fa-shield-halved"
             title="Security"
             description="Admins sign in with an authenticator app (required). Clients and workers can turn on email or text-message codes from the app."
@@ -115,110 +155,6 @@ export default function Settings() {
           </SettingsSection>
 
           <SettingsSection
-            icon="fa-calendar-check"
-            title="Booking Rules"
-            description="Live rules enforced by the booking and worker-availability flows."
-          >
-            <p className="settings-group__label" style={{ marginTop: 0 }}>Booking &amp; Availability</p>
-            <div className="detail-grid" style={{ marginBottom: 0 }}>
-              <AdornedNumberField
-                id="settings-rush-lead"
-                label="Same-Day Minimum Notice"
-                suffix="hrs"
-                min={0}
-                max={24}
-                value={current.rushMinLeadHours}
-                onChange={updateNumberField('rushMinLeadHours')}
-                error={fieldErrors.rushMinLeadHours}
-                hint="How far ahead a same-day booking must start. The same-day fee is in Price Adjustments."
-              />
-              <AdornedNumberField
-                id="settings-pending-expiry"
-                label="Pending Booking Hold Timeout"
-                suffix="min"
-                min={5}
-                max={10080}
-                value={current.pendingExpiryMinutes}
-                onChange={updateNumberField('pendingExpiryMinutes')}
-                error={fieldErrors.pendingExpiryMinutes}
-              />
-              <AdornedNumberField
-                id="settings-geofence-radius"
-                label="Arrival Geofence Radius"
-                hint="0 turns the distance check off: workers can check in from anywhere."
-                suffix="m"
-                min={0}
-                max={5000}
-                value={current.geofenceRadiusMeters}
-                onChange={updateNumberField('geofenceRadiusMeters')}
-                error={fieldErrors.geofenceRadiusMeters}
-              />
-            </div>
-
-            <div className="settings-group">
-              <p className="settings-group__label">Worker Decline Policy</p>
-              <div className="detail-grid" style={{ marginBottom: 0 }}>
-                <AdornedNumberField
-                  id="settings-max-declines"
-                  label="Max Declines Before Cooldown"
-                  min={1}
-                  max={20}
-                  value={current.maxDeclinesBeforeCooldown}
-                  onChange={updateNumberField('maxDeclinesBeforeCooldown')}
-                  error={fieldErrors.maxDeclinesBeforeCooldown}
-                />
-                <AdornedNumberField
-                  id="settings-decline-window"
-                  label="Decline Rolling Window"
-                  suffix="hrs"
-                  min={1}
-                  max={720}
-                  value={current.declineWindowHours}
-                  onChange={updateNumberField('declineWindowHours')}
-                  error={fieldErrors.declineWindowHours}
-                />
-                <AdornedNumberField
-                  id="settings-decline-cooldown"
-                  label="Decline Cooldown Duration"
-                  suffix="hrs"
-                  min={1}
-                  max={720}
-                  value={current.declineCooldownHours}
-                  onChange={updateNumberField('declineCooldownHours')}
-                  error={fieldErrors.declineCooldownHours}
-                />
-              </div>
-            </div>
-
-            <div className="settings-group">
-              <p className="settings-group__label">Worker Age</p>
-              <div className="detail-grid" style={{ marginBottom: 0 }}>
-                <AdornedNumberField
-                  id="settings-worker-min-age"
-                  label="Minimum Age"
-                  suffix="yrs"
-                  min={18}
-                  max={100}
-                  value={current.workerMinAge}
-                  onChange={updateNumberField('workerMinAge')}
-                  error={fieldErrors.workerMinAge}
-                  hint="Checked at sign-up and again at KYC approval. Never below 18."
-                />
-                <AdornedNumberField
-                  id="settings-worker-max-age"
-                  label="Maximum Age"
-                  suffix="yrs"
-                  min={18}
-                  max={100}
-                  value={current.workerMaxAge}
-                  onChange={updateNumberField('workerMaxAge')}
-                  error={fieldErrors.workerMaxAge}
-                />
-              </div>
-            </div>
-          </SettingsSection>
-
-          <SettingsSection
             icon="fa-shield-halved"
             title="Trust & Safety"
             description="No-show/dispute handling and automatic suspension. The auto-suspend thresholds are OFF (leave blank) until you set both a rating floor and a dispute-count/window — suspension is reversible, never a ban."
@@ -251,6 +187,33 @@ export default function Settings() {
                 error={fieldErrors.disputeEscalationHours}
                 hint="How long a dispute can sit unresolved before admins are re-notified."
               />
+            </div>
+
+            <div className="settings-group">
+              <p className="settings-group__label">Worker Eligibility</p>
+              <div className="detail-grid" style={{ marginBottom: 0 }}>
+                <AdornedNumberField
+                  id="settings-worker-min-age"
+                  label="Minimum Age"
+                  suffix="yrs"
+                  min={18}
+                  max={100}
+                  value={current.workerMinAge}
+                  onChange={updateNumberField('workerMinAge')}
+                  error={fieldErrors.workerMinAge}
+                  hint="Checked at sign-up and again at KYC approval. Never below 18."
+                />
+                <AdornedNumberField
+                  id="settings-worker-max-age"
+                  label="Maximum Age"
+                  suffix="yrs"
+                  min={18}
+                  max={100}
+                  value={current.workerMaxAge}
+                  onChange={updateNumberField('workerMaxAge')}
+                  error={fieldErrors.workerMaxAge}
+                />
+              </div>
             </div>
 
             <div className="settings-group">
@@ -294,9 +257,10 @@ export default function Settings() {
 
           <p className="toggle-row__hint" style={{ marginTop: '0.5rem' }}>
             Looking for job prices or fees? Job prices are on the <Link to="/price-list">Price List</Link>; the same-day
-            fee, distance fee and expertise tiers are in <Link to="/price-adjustments">Price Adjustments</Link>; commission
-            is in <Link to="/payments/commission">Payments → Commission &amp; Debt</Link>. Withholding tax and the BIR ATC code are in{' '}
-            <Link to="/tax/settings">Tax Settings</Link>.
+            fee, same-day notice, distance fee and expertise tiers are in <Link to="/price-adjustments">Price Adjustments</Link>;
+            hold timeout, arrival radius and the decline policy are in <Link to="/bookings/rules">Bookings → Booking Rules</Link>; commission
+            is in <Link to="/payments/commission">Payments → Commission &amp; Debt</Link>. Withholding tax (2%) and the BIR
+            ATC code (WI120) are fixed.
           </p>
         </>
       )}

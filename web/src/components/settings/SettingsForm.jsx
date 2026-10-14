@@ -120,6 +120,15 @@ export function useSettingsForm({ fields, numberBounds = {}, percentFields = [],
     [loaded, settings, fields]
   )
 
+  // Browser warning on reload/close with unsaved edits. In-app navigation
+  // isn't blocked: useBlocker needs a data router and this app uses HashRouter.
+  useEffect(() => {
+    if (!isDirty) return undefined
+    const warn = (e) => e.preventDefault()
+    window.addEventListener('beforeunload', warn)
+    return () => window.removeEventListener('beforeunload', warn)
+  }, [isDirty])
+
   const updateField = (field) => (value) => setSettings((prev) => ({ ...prev, [field]: value }))
 
   const updateNumberField = (field) => (e) => {
