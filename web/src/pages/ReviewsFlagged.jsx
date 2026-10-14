@@ -65,7 +65,7 @@ export default function ReviewsFlagged() {
     if (!warnTarget || warnReason.trim().length < MIN_WARN_REASON_LENGTH) return
     setWarnSubmitting(true)
     try {
-      const updated = await warnReviewAuthor(warnTarget.id, warnReason.trim())
+      const updated = await warnReviewAuthor(warnTarget, warnReason.trim())
       updateLocalReview(updated)
       showSuccess(
         updated.suspended

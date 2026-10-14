@@ -23,6 +23,18 @@ export function isBookingStatusConflict(error: unknown): error is BookingStatusC
 }
 
 /**
+ * Row-locks the booking until the surrounding transaction ends, then returns
+ * its current state. For check-then-write flows that touch rows other than the
+ * booking (add-ons, photo arrays): every such flow takes this lock first, so
+ * e.g. adding an extra can't slip in between completion reading the extras and
+ * locking the bill.
+ */
+export async function lockBooking(tx: Prisma.TransactionClient, id: string) {
+  await tx.$queryRaw`SELECT "id" FROM "Booking" WHERE "id" = ${id} FOR UPDATE`;
+  return tx.booking.findUnique({ where: { id }, include: { addOns: true } });
+}
+
+/**
  * Compare-and-set booking write: applies `data` only while the row is still
  * in one of the `expected` statuses, in a single UPDATE … WHERE status IN (…).
  * A plain update({ where: { id } }) after an earlier status read lets two

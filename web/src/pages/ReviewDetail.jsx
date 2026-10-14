@@ -47,7 +47,7 @@ export default function ReviewDetail() {
     if (warnReason.trim().length < MIN_WARN_REASON_LENGTH) return
     setWarnSubmitting(true)
     try {
-      const result = await warnReviewAuthor(id, warnReason.trim())
+      const result = await warnReviewAuthor(review, warnReason.trim())
       await reload()
       showSuccess(
         result.suspended

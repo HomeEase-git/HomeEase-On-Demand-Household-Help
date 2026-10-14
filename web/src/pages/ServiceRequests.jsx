@@ -29,16 +29,19 @@ function formatDate(value) {
  */
 export default function ServiceRequests() {
   const { showError, showSuccess } = useToast()
-  const [tab, setTab] = useState('Pending')
-  const [search, setSearch] = useState('')
-  const statusFilter = TAB_STATUS[tab]
   const [actioningId, setActioningId] = useState(null)
   const [rejecting, setRejecting] = useState(null)
   const [rejectReason, setRejectReason] = useState('')
   const [submittingReject, setSubmittingReject] = useState(false)
 
-  const fetchFn = useCallback(() => fetchServiceRequests(statusFilter), [statusFilter])
-  const { data: allRequests, loading, error, reload, setData } = useListQuery(fetchFn)
+  const fetchFn = useCallback((p) => fetchServiceRequests(TAB_STATUS[p.tab] ?? TAB_STATUS.Pending), [])
+  // Tab and search live in the URL like the other admin lists.
+  const { data: allRequests, params, loading, error, reload, setData, setSearch, setFilter } = useListQuery(fetchFn, {
+    initialParams: { tab: 'Pending' },
+  })
+  const tab = TAB_STATUS[params.tab] ? params.tab : 'Pending'
+  const search = params.search || ''
+  const statusFilter = TAB_STATUS[tab]
   // The list endpoint isn't paged, so search filters what's loaded.
   const q = search.trim().toLowerCase()
   const requests = q
@@ -88,7 +91,7 @@ export default function ServiceRequests() {
       />
       <div className="toolbar" style={{ marginBottom: '1rem' }}>
         <SearchBar placeholder="Search by worker, email or service..." value={search} onChange={setSearch} />
-        <FilterTabs tabs={Object.keys(TAB_STATUS)} activeTab={tab} onTabChange={setTab} />
+        <FilterTabs tabs={Object.keys(TAB_STATUS)} activeTab={tab} onTabChange={(next) => setFilter('tab', next)} />
       </div>
       <SectionCard title="Requests">
         {loading && <LoadingState message="Loading requests..." />}

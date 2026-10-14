@@ -2122,6 +2122,9 @@ model Review {
   // worker) or 'RESPONSE' (the worker's reply, reported by the client).
   flagTarget String?
   status     ReviewStatus @default(VISIBLE)
+  // Set when the worker was warned for their reply (the review part uses
+  // status WARNED), so one reply can't earn more than one strike.
+  responseWarnedAt DateTime?
 
   // The worker's one-time public reply to this review — previously there
   // was no way for a worker to respond to a review at all, even an unfair

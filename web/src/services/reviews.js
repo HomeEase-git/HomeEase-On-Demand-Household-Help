@@ -21,10 +21,14 @@ export async function fetchReviewById(id) {
 }
 
 /** POST /admin/reviews/:id/warn — strikes the author of the reported part (3rd strike suspends). */
-export async function warnReviewAuthor(id, reason) {
-  const response = await apiRequest(`/admin/reviews/${id}/warn`, {
+// The part being warned about, exactly as the modal showed it (warnedParty),
+// so a report that lands while the modal is open can't redirect the warning.
+export const warnTargetOf = (review) => (review.flagTarget === 'RESPONSE' ? 'RESPONSE' : 'REVIEW')
+
+export async function warnReviewAuthor(review, reason) {
+  const response = await apiRequest(`/admin/reviews/${review.id}/warn`, {
     method: 'POST',
-    body: JSON.stringify({ reason }),
+    body: JSON.stringify({ reason, target: warnTargetOf(review) }),
   });
   return response.data;
 }

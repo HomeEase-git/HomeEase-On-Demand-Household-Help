@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { AppState } from "react-native";
+import { AppState, Platform } from "react-native";
 import * as Updates from "expo-updates";
 import Constants from "expo-constants";
 import { getAppVersionInfo } from "../services/api";
@@ -26,6 +26,8 @@ export function useAppUpdate() {
         // Offline or update server down; try again next foreground.
       }
     }
+    // The admin's version settings are Android ones (APK / Play link).
+    if (Platform.OS !== "android") return;
     try {
       const info = await getAppVersionInfo();
       const need = storeUpdateNeed(Constants.expoConfig?.version, info);
