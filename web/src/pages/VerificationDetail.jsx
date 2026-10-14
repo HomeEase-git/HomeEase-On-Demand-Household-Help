@@ -168,18 +168,24 @@ export default function VerificationDetail() {
   return (
     <>
       <PageHeader
+        backTo="/verification"
         title="Verification Detail Review"
         subtitle="Review documents and approve or reject"
-        actions={<Link to="/verification" className="btn btn-outline">Back to Pending</Link>}
       />
-      <div className="detail-grid">
-        {details.map(({ label, value }) => (
-          <div key={label} className="detail-block">
-            <label>{label}</label>
-            <div className="value">{value}</div>
-          </div>
-        ))}
-      </div>
+      {/* Personal data stays collapsed until the admin opens it (adviser note). */}
+      <details className="section-card" style={{ marginBottom: '1rem' }}>
+        <summary style={{ cursor: 'pointer', fontWeight: 600 }}>
+          Applicant details: {verification.name} ({verification.status})
+        </summary>
+        <div className="detail-grid" style={{ marginTop: '1rem' }}>
+          {details.map(({ label, value }) => (
+            <div key={label} className="detail-block">
+              <label>{label}</label>
+              <div className="value">{value}</div>
+            </div>
+          ))}
+        </div>
+      </details>
       <SectionCard title="AI Review Summary">
         {verification.aiSummary ? (
           <div className="detail-block">

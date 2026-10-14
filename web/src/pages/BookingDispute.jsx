@@ -161,22 +161,17 @@ export default function BookingDispute() {
         ? 'OPEN'
         : statusTab === 'Refund Failed'
           ? 'NEEDS_REFUND_REVIEW'
-          : 'all'
-    const response = await fetchDisputes({
+          : statusTab === 'Resolved'
+            ? 'RESOLVED'
+            : 'all'
+    // Both filters run server-side, so meta.total matches the rows shown.
+    return fetchDisputes({
       search: search || '',
       page,
       limit,
       status: statusParam,
+      raisedBy: raisedByTab === 'Client' ? 'CLIENT' : raisedByTab === 'Worker' ? 'WORKER' : '',
     })
-    let rows = statusTab === 'Resolved' ? response.data.filter((d) => d.status.startsWith('RESOLVED')) : response.data
-    // `raisedByRole` is derived server-side (raisedById isn't a real FK, so
-    // it can't be filtered in the DB query above) — filtered here client
-    // -side on the same page of rows, same tradeoff the Resolved filter
-    // above already makes: `meta.total` reflects the unfiltered status
-    // count, not the raised-by-filtered count.
-    if (raisedByTab === 'Client') rows = rows.filter((d) => d.raisedByRole === 'CLIENT')
-    if (raisedByTab === 'Worker') rows = rows.filter((d) => d.raisedByRole === 'WORKER')
-    return { data: rows, meta: response.meta }
   }, [])
 
   const fetchFn = useCallback((params) => fetchFilteredDisputes({ ...params, limit: 20 }), [fetchFilteredDisputes])
@@ -402,6 +397,8 @@ export default function BookingDispute() {
         )}
         <Pagination
           info={`Showing ${disputes.length} of ${meta.total ?? disputes.length} ${params.statusTab.toLowerCase()} dispute(s)`}
+          page={meta.page}
+          totalPages={meta.totalPages}
           hasPrev={meta.page > 1}
           hasNext={meta.page < meta.totalPages}
           onPrev={() => goToPage(Math.max(1, params.page - 1))}

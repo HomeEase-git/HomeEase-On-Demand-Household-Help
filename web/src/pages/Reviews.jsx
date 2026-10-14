@@ -69,20 +69,22 @@ export default function Reviews() {
               <table className="table">
                 <thead>
                   <tr>
-                    <th>Review ID</th><th>Booking</th><th>Client</th><th>Worker</th><th>Rating</th><th>Comment</th><th>Date</th><th>Actions</th>
+                    <th>Review ID</th><th>Booking</th><th>Client</th><th>Worker</th><th>Rating</th><th>Comment</th><th>Date</th>
                   </tr>
                 </thead>
                 <tbody>
                   {filteredReviews.length === 0 ? (
                     <tr>
-                      <td colSpan={8} className="table-empty">
+                      <td colSpan={7} className="table-empty">
                         No reviews found.
                       </td>
                     </tr>
                   ) : (
                     filteredReviews.map((r) => (
                       <tr key={r.id}>
-                        <td>{r.displayId}</td>
+                        <td>
+                          <Link to={`/reviews/detail/${r.id}`} className="table-link">{r.displayId}</Link>
+                        </td>
                         <td>{r.booking}</td>
                         <td>{r.client}</td>
                         <td>{r.worker}</td>
@@ -98,16 +100,6 @@ export default function Reviews() {
                           )}
                         </td>
                         <td>{r.createdAt}</td>
-                        <td>
-                          <Link
-                            to={`/reviews/detail/${r.id}`}
-                            className="action-btn view"
-                            title="View"
-                            aria-label={`View review ${r.displayId}`}
-                          >
-                            <i className="fas fa-eye" />
-                          </Link>
-                        </td>
                       </tr>
                     ))
                   )}
@@ -116,6 +108,8 @@ export default function Reviews() {
             </div>
             <Pagination
               info={`Showing ${filteredReviews.length} of ${meta.total} reviews`}
+              page={meta.page}
+              totalPages={meta.totalPages}
               hasPrev={meta.hasPrev}
               hasNext={meta.hasNext}
               onPrev={() => goToPage(meta.page - 1)}

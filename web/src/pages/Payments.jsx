@@ -189,20 +189,21 @@ export default function Payments() {
                     <th>Method</th>
                     <SortableTh label="Date" sortKey="date" params={params} onSort={setSort} firstDir="desc" />
                     <th>Status</th>
-                    <th>Actions</th>
                   </tr>
                 </thead>
                 <tbody>
                   {transactions.length === 0 ? (
                     <tr>
-                      <td colSpan={11} className="table-empty">
+                      <td colSpan={10} className="table-empty">
                         No payments found.
                       </td>
                     </tr>
                   ) : (
                     transactions.map((t) => (
                       <tr key={t.id}>
-                        <td>{t.displayId || t.id}</td>
+                        <td>
+                          <Link to={`/payments/transaction/${t.id}`} className="table-link">{t.displayId || t.id}</Link>
+                        </td>
                         <td>{t.booking}</td>
                         <td>{t.client}</td>
                         <td>{t.worker}</td>
@@ -216,18 +217,6 @@ export default function Payments() {
                             {t.status}
                           </Badge>
                         </td>
-                        <td>
-                          <div className="row-actions">
-                            <Link
-                              to={`/payments/transaction/${t.id}`}
-                              className="action-btn view"
-                              title="View"
-                              aria-label={`View transaction ${t.displayId || t.id}`}
-                            >
-                              <i className="fas fa-eye" />
-                            </Link>
-                          </div>
-                        </td>
                       </tr>
                     ))
                   )}
@@ -236,6 +225,8 @@ export default function Payments() {
             </div>
             <Pagination
               info={`Showing ${transactions.length} of ${meta.total} transactions`}
+              page={meta.page}
+              totalPages={meta.totalPages}
               hasPrev={meta.hasPrev}
               hasNext={meta.hasNext}
               onPrev={() => goToPage(meta.page - 1)}

@@ -5,7 +5,7 @@ import SectionCard from '../components/common/SectionCard'
 import LoadingState from '../components/common/LoadingState'
 import ErrorState from '../components/common/ErrorState'
 import Pagination from '../components/common/Pagination'
-import { fetchReviews, updateReview } from '../services/reviews'
+import { fetchReviews, updateReview, warnReviewAuthor, warnedParty } from '../services/reviews'
 import { useToast } from '../context/ToastContext'
 import { useListQuery } from '../hooks/useListQuery'
 
@@ -65,13 +65,13 @@ export default function ReviewsFlagged() {
     if (!warnTarget || warnReason.trim().length < MIN_WARN_REASON_LENGTH) return
     setWarnSubmitting(true)
     try {
-      const updated = await updateReview(warnTarget.id, {
-        flagged: false,
-        status: 'WARNED',
-        flagReason: warnReason.trim(),
-      })
+      const updated = await warnReviewAuthor(warnTarget, warnReason.trim())
       updateLocalReview(updated)
-      showSuccess('Review hidden and user warned.')
+      showSuccess(
+        updated.suspended
+          ? `Warning ${updated.warningCount}: account suspended.`
+          : `User warned (${updated.warningCount} of 3).`,
+      )
       closeWarnModal()
     } catch (err) {
       showError(err.message || 'Failed to update review')
@@ -113,7 +113,10 @@ export default function ReviewsFlagged() {
                       <td>{review.displayId}</td>
                       <td>{review.worker}</td>
                       <td>★ {review.rating}</td>
-                      <td>{review.flagReason || 'No reason provided'}</td>
+                      <td>
+                        {review.flagTarget === 'RESPONSE' ? 'Reply: ' : 'Review: '}
+                        {review.flagReason || 'No reason provided'}
+                      </td>
                       <td>{review.status}</td>
                       <td>
                         <button
@@ -155,6 +158,8 @@ export default function ReviewsFlagged() {
             info={`Showing ${pagedFlagged.length ? (currentPage - 1) * PAGE_SIZE + 1 : 0}-${
               (currentPage - 1) * PAGE_SIZE + pagedFlagged.length
             } of ${flagged.length} flagged reviews`}
+            page={currentPage}
+            totalPages={totalPages}
             hasPrev={currentPage > 1}
             hasNext={currentPage < totalPages}
             onPrev={() => setPage((p) => Math.max(1, p - 1))}
@@ -197,6 +202,12 @@ export default function ReviewsFlagged() {
                 <label>Review Comment</label>
                 <div className="value">{selected.comment}</div>
               </div>
+              {selected.workerResponse && (
+                <div className="detail-block detail-block--full">
+                  <label>Worker&apos;s Reply</label>
+                  <div className="value">{selected.workerResponse}</div>
+                </div>
+              )}
               {selected.photoUrls?.length > 0 && (
                 <div className="detail-block detail-block--full">
                   <label>Photos</label>
@@ -233,8 +244,8 @@ export default function ReviewsFlagged() {
           <div className="modal" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true">
             <h2 className="modal-title">Warn User — {warnTarget.displayId}</h2>
             <p className="modal-body" style={{ marginBottom: '0.75rem' }}>
-              This hides the review and records why the user is being warned. The reason below is kept as the
-              review's flag reason.
+              Warns <strong>{warnedParty(warnTarget)}</strong>. They get a notification with this reason. 1st warning,
+              2nd final warning, 3rd suspends the account. A warned review is taken off the worker&apos;s profile.
             </p>
             <label htmlFor="warn-reason" style={{ display: 'block', marginBottom: '0.35rem', fontWeight: 600 }}>
               Reason for warning (required, at least {MIN_WARN_REASON_LENGTH} characters)

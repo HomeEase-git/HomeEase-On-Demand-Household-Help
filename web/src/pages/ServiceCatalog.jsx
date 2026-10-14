@@ -168,6 +168,8 @@ export default function ServiceCatalog() {
             info={`Showing ${pagedServices.length ? (currentPage - 1) * PAGE_SIZE + 1 : 0}-${
               (currentPage - 1) * PAGE_SIZE + pagedServices.length
             } of ${filteredServices.length} services`}
+            page={currentPage}
+            totalPages={totalPages}
             hasPrev={currentPage > 1}
             hasNext={currentPage < totalPages}
             onPrev={() => setPage((p) => Math.max(1, p - 1))}

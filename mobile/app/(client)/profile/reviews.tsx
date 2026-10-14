@@ -72,6 +72,7 @@ export default function ReviewsScreen() {
                 rating: item.rating,
                 comment: item.comment,
                 date: item.date,
+                photoUrls: item.photoUrls,
               }}
             />
           )}

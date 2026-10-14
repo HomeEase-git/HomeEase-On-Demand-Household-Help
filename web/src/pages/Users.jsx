@@ -67,28 +67,28 @@ export default function Users() {
               <table className="table">
                 <thead>
                   <tr>
-                    <th>User ID</th>
                     <SortableTh label="Name" sortKey="name" params={params} onSort={setSort} />
                     <SortableTh label="Email" sortKey="email" params={params} onSort={setSort} />
                     <th>Phone</th>
                     <th>Status</th>
                     <th>Bookings</th>
                     <th>Total Spent</th>
-                    <th>Actions</th>
                   </tr>
                 </thead>
                 <tbody>
                   {clients.length === 0 ? (
                     <tr>
-                      <td colSpan={8} className="table-empty">
+                      <td colSpan={6} className="table-empty">
                         No clients found.
                       </td>
                     </tr>
                   ) : (
                     clients.map((user) => (
                       <tr key={user.id}>
-                        <td>{user.displayId}</td>
-                        <td>{user.name}</td>
+                        <td>
+                          <Link to={`/users/client/${user.id}`} className="table-link">{user.name}</Link>
+                          <span className="table-sub">{user.displayId}</span>
+                        </td>
                         <td>{user.email}</td>
                         <td>{user.phone}</td>
                         <td>
@@ -98,18 +98,6 @@ export default function Users() {
                         </td>
                         <td>{user.bookings}</td>
                         <td>{user.spent}</td>
-                        <td>
-                          <div className="row-actions">
-                            <Link
-                              to={`/users/client/${user.id}`}
-                              className="action-btn view"
-                              title="View"
-                              aria-label={`View client ${user.name}`}
-                            >
-                              <i className="fas fa-eye" />
-                            </Link>
-                          </div>
-                        </td>
                       </tr>
                     ))
                   )}
@@ -118,6 +106,8 @@ export default function Users() {
             </div>
             <Pagination
               info={`Showing ${clients.length} of ${meta.total} clients`}
+              page={meta.page}
+              totalPages={meta.totalPages}
               hasPrev={meta.hasPrev}
               hasNext={meta.hasNext}
               onPrev={() => goToPage(meta.page - 1)}

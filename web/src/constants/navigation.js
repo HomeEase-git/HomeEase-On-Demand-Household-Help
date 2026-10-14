@@ -41,22 +41,11 @@ export const NAV_STRUCTURE = [
     label: 'Tax & Compliance',
     children: [
       { to: '/tax/certificates', page: 'tax-certificates', icon: 'fa-file-invoice', label: 'Tax Certificates' },
-      { to: '/tax/remittance', page: 'tax-remittance', icon: 'fa-building-columns', label: 'Tax Remittance' },
       { to: '/tax/vat-registrations', page: 'vat-registrations', icon: 'fa-receipt', label: 'VAT Registrations' },
-      { to: '/tax/settings', page: 'tax-settings', icon: 'fa-gear', label: 'Tax Settings' },
     ],
   },
   { type: 'link', to: '/reviews', page: 'reviews', icon: 'fa-star', label: 'Reviews' },
-  {
-    type: 'group',
-    key: 'insights',
-    icon: 'fa-chart-line',
-    label: 'Insights',
-    children: [
-      { to: '/reports/logs', page: 'reports', icon: 'fa-chart-bar', label: 'Reports' },
-      { to: '/analytics', page: 'analytics', icon: 'fa-chart-line', label: 'Analytics' },
-    ],
-  },
+  { type: 'link', to: '/reports/logs', page: 'reports', icon: 'fa-chart-bar', label: 'Reports' },
   { type: 'link', to: '/promo-banners', page: 'promo-banners', icon: 'fa-images', label: 'Promo Banners' },
   { type: 'link', to: '/settings', page: 'settings', icon: 'fa-cog', label: 'Settings' },
 ]

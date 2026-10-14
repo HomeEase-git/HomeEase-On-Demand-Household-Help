@@ -21,8 +21,9 @@ const VALID_STATUSES: WorkerServiceCategoryStatus[] = ['PENDING_VERIFICATION', '
 
 /**
  * GET /api/admin/service-requests?status=PENDING_VERIFICATION
- * Defaults to the review queue. status=ALL lists every request that went
- * through review (documents are optional unless the service requires them).
+ * Defaults to the review queue. status=ALL lists every status — the union
+ * of the Pending / Approved / Rejected tabs. (It used to require a gating
+ * document, which hid approved requests filed without one.)
  */
 export const listServiceRequests = async (req: Request, res: Response) => {
   try {
@@ -33,9 +34,7 @@ export const listServiceRequests = async (req: Request, res: Response) => {
 
     const requests = await prisma.workerServiceCategory.findMany({
       where: {
-        ...(raw === 'ALL'
-          ? { OR: [{ gatingCertificationId: { not: null } }, { status: { in: ['PENDING_VERIFICATION', 'REJECTED'] } }] }
-          : { status: raw as WorkerServiceCategoryStatus }),
+        ...(raw === 'ALL' ? {} : { status: raw as WorkerServiceCategoryStatus }),
       },
       include: {
         serviceType: { select: { id: true, name: true, requiresCertification: true } },

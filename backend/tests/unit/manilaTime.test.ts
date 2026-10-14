@@ -5,6 +5,7 @@ import {
   isManilaQuarter,
   formatManilaPeriod,
   manilaDateKey,
+  manilaQuarterLabel,
 } from '@utils/manilaTime';
 
 describe('Manila tax-period time', () => {
@@ -53,5 +54,11 @@ describe('Manila tax-period time', () => {
     expect(formatManilaPeriod(parseManilaDate('2026-07-01')!, parseManilaDate('2026-10-01')!)).toBe(
       'July 1, 2026 to September 30, 2026'
     );
+  });
+
+  it('labels the Manila quarter, not the UTC one', () => {
+    // Sep 30 18:00 UTC = Oct 1, 2 AM Manila -> Q4
+    expect(manilaQuarterLabel(new Date('2026-09-30T18:00:00Z'))).toBe('Q4 2026');
+    expect(manilaQuarterLabel(new Date('2026-09-30T15:00:00Z'))).toBe('Q3 2026');
   });
 });

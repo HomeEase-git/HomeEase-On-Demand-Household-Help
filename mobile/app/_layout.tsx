@@ -12,6 +12,7 @@ import { SafeAreaProvider } from "react-native-safe-area-context";
 import { KeyboardProvider } from "react-native-keyboard-controller";
 import { ToastProvider } from "../contexts/ToastContext";
 import { AlertModalProvider } from "../contexts/AlertModalContext";
+import UpdateAvailableModal from "../components/UpdateAvailableModal";
 import { useAuthStore } from "../store/authStore";
 import { useBookingStore } from "../store/bookingStore";
 import { useMessageStore } from "../store/messageStore";
@@ -247,6 +248,7 @@ function RootLayout() {
                   headerShadowVisible: false,
                 }}
               />
+              <UpdateAvailableModal />
             </AlertModalProvider>
           </ToastProvider>
         </SafeAreaProvider>

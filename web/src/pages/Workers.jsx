@@ -63,27 +63,27 @@ export default function Workers() {
               <table className="table">
                 <thead>
                   <tr>
-                    <th>Worker ID</th>
                     <SortableTh label="Name" sortKey="name" params={params} onSort={setSort} />
                     <th>Services</th>
                     <SortableTh label="Rating" sortKey="rating" params={params} onSort={setSort} firstDir="desc" />
                     <th>Status</th>
                     <th>Earnings</th>
-                    <th>Actions</th>
                   </tr>
                 </thead>
                 <tbody>
                   {workers.length === 0 ? (
                     <tr>
-                      <td colSpan={7} className="table-empty">
+                      <td colSpan={5} className="table-empty">
                         No workers found.
                       </td>
                     </tr>
                   ) : (
                     workers.map((worker) => (
                       <tr key={worker.id}>
-                        <td>{worker.displayId}</td>
-                        <td>{worker.name}</td>
+                        <td>
+                          <Link to={`/workers/${worker.id}`} className="table-link">{worker.name}</Link>
+                          <span className="table-sub">{worker.displayId}</span>
+                        </td>
                         <td>{worker.services}</td>
                         <td>★ {worker.rating}</td>
                         <td>
@@ -102,18 +102,6 @@ export default function Workers() {
                           )}
                         </td>
                         <td>{worker.earnings}</td>
-                        <td>
-                          <div className="row-actions">
-                            <Link
-                              to={`/workers/${worker.id}`}
-                              className="action-btn view"
-                              title="View"
-                              aria-label={`View worker ${worker.name}`}
-                            >
-                              <i className="fas fa-eye" />
-                            </Link>
-                          </div>
-                        </td>
                       </tr>
                     ))
                   )}
@@ -122,6 +110,8 @@ export default function Workers() {
             </div>
             <Pagination
               info={`Showing ${workers.length} of ${meta.total} workers`}
+              page={meta.page}
+              totalPages={meta.totalPages}
               hasPrev={meta.hasPrev}
               hasNext={meta.hasNext}
               onPrev={() => goToPage(meta.page - 1)}

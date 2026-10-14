@@ -666,7 +666,7 @@ export const getWorkerReviews = async (req: AuthRequest, res: Response) => {
       // fabricating an id — booking was already fetched above, just wasn't
       // surfaced in the formatted output.
       bookingId: review.booking?.id ?? null,
-      workerResponse: review.workerResponse,
+      workerResponse: maskProfanity(review.workerResponse),
       createdAt: review.createdAt,
     }));
 

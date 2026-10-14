@@ -21,6 +21,18 @@ export type BookingTimeline = {
   tone: TimelineTone;
 };
 
+/** "2:10 PM – 4:35 PM (2h 25m)" from the worker's start/finish stamps; null until both exist. */
+export function formatJobTime(startIso?: string | null, endIso?: string | null): string | null {
+  if (!startIso || !endIso) return null;
+  const start = new Date(startIso);
+  const end = new Date(endIso);
+  const mins = Math.max(0, Math.round((end.getTime() - start.getTime()) / 60000));
+  const time = (d: Date) =>
+    d.toLocaleTimeString("en-PH", { hour: "numeric", minute: "2-digit", timeZone: "Asia/Manila" });
+  const duration = mins >= 60 ? `${Math.floor(mins / 60)}h ${mins % 60}m` : `${mins}m`;
+  return `${time(start)} – ${time(end)} (${duration})`;
+}
+
 export function getBookingTimeline(
   status: BookingStatus,
   { scheduledDate, workerName }: { scheduledDate?: string; workerName?: string } = {},

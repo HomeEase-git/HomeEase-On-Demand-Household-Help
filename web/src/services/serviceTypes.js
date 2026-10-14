@@ -38,3 +38,11 @@ export async function saveServiceCatalog(id, payload) {
   });
   return response.data;
 }
+
+// Background photo for a service (shown blurred in the app). Returns its public URL.
+export async function uploadServiceBackground(file) {
+  const body = new FormData();
+  body.append('image', file);
+  const response = await apiRequest('/admin/service-types/upload-image', { method: 'POST', body });
+  return response.data.url;
+}

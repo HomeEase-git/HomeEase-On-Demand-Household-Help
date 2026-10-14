@@ -5,6 +5,10 @@ import { errorResponse } from '@utils/errorResponse';
 import { formatDisplayId } from '@utils/formatters';
 import { buildPaginationMeta, getPaginationParams } from '@utils/pagination';
 import { writeAuditLog } from '@utils/auditLog';
+import { notifyUser } from '@utils/notify';
+import { revokeUserSessions } from '@utils/tokenRevocation';
+import { revokeAllRefreshTokens } from '@utils/otpService';
+import { JWT_EXPIRY } from '@utils/jwt';
 import type { JwtPayload } from '@/types/index';
 
 interface AuthRequest extends Request {
@@ -34,6 +38,7 @@ function formatReview(record: ReviewRecord) {
     photoUrls: record.photoUrls,
     flagged: record.flagged,
     flagReason: record.flagReason,
+    flagTarget: record.flagTarget ?? 'REVIEW',
     status: record.status,
     workerResponse: record.workerResponse,
     createdAt: record.createdAt.toLocaleDateString('en-US', {
@@ -114,6 +119,142 @@ export const getReviewById = async (req: Request, res: Response) => {
   }
 };
 
+// Both the rating value and the VISIBLE/HIDDEN/WARNED status can change from
+// here, and WorkerProfile.rating/totalReviews were previously only ever
+// recomputed at review-submission time — hiding a fake 5-star review (or a
+// rating edit) left the worker's public rating permanently wrong until their
+// next real review happened to trigger a recompute.
+async function recomputeWorkerRating(workerId: string) {
+  const ratingStats = await prisma.review.aggregate({
+    where: { workerId, status: 'VISIBLE' },
+    _avg: { rating: true },
+    _count: true,
+  });
+  await prisma.workerProfile.update({
+    where: { id: workerId },
+    data: {
+      rating: Math.round((ratingStats._avg.rating ?? 0) * 10) / 10,
+      totalReviews: ratingStats._count,
+    },
+  });
+}
+
+const MAX_WARNINGS = 3;
+
+class AlreadyWarnedError extends Error {}
+
+/**
+ * POST /api/admin/reviews/:id/warn  { reason, target }
+ * Warns whoever wrote `target`: 'REVIEW' (the client's comment) or
+ * 'RESPONSE' (the worker's reply). The admin UI sends the part it showed,
+ * not whatever Review.flagTarget says now, since a newer report can change
+ * that while the modal is open. Strike 1 is a warning, 2 a final warning,
+ * 3 suspends the account. Each part can earn one strike only.
+ */
+export const warnReviewAuthor = async (req: AuthRequest, res: Response) => {
+  try {
+    const id = req.params.id as string;
+    const reason = typeof req.body?.reason === 'string' ? req.body.reason.trim() : '';
+    if (reason.length < 10) {
+      return res.status(400).json(errorResponse(400, 'Give the user a reason (at least 10 characters)'));
+    }
+    const target = req.body?.target;
+    if (target !== 'REVIEW' && target !== 'RESPONSE') {
+      return res.status(400).json(errorResponse(400, 'target must be REVIEW or RESPONSE'));
+    }
+    const isResponse = target === 'RESPONSE';
+
+    const review = await prisma.review.findUnique({ where: { id }, include: reviewInclude });
+    if (!review) {
+      return res.status(404).json(errorResponse(404, 'Review not found'));
+    }
+    if (isResponse && !review.workerResponse) {
+      return res.status(409).json(errorResponse(409, 'This review has no reply to warn about'));
+    }
+    const targetUserId = isResponse ? review.worker.user.id : review.clientId;
+    const what = isResponse ? 'your reply to a review' : 'your review';
+
+    // Claiming the part, adding the strike and suspending all commit together:
+    // a repeated or retried request gets a 409 instead of a second strike, and
+    // a 3rd strike can't be saved without the suspension.
+    let strike: number;
+    let fullName: string;
+    try {
+      ({ strike, fullName } = await prisma.$transaction(async (tx) => {
+        const claimed = await tx.review.updateMany({
+          // A warned review drops off the worker's public profile (and
+          // rating); a warned reply stays, already profanity-masked.
+          where: isResponse ? { id, responseWarnedAt: null } : { id, status: { not: 'WARNED' } },
+          data: isResponse ? { responseWarnedAt: new Date() } : { status: 'WARNED' },
+        });
+        if (claimed.count === 0) throw new AlreadyWarnedError();
+        // Close the report only if it is about this part; a pending report
+        // on the other part stays in the queue. A null target (older flags,
+        // admin-set flags) means the review, as everywhere else.
+        await tx.review.updateMany({
+          where: {
+            id,
+            OR: [{ flagTarget: target }, ...(isResponse ? [] : [{ flagTarget: null }]), { flagged: false }],
+          },
+          data: { flagged: false, flagReason: reason },
+        });
+        const user = await tx.user.update({
+          where: { id: targetUserId },
+          data: { warningCount: { increment: 1 } },
+          select: { warningCount: true, fullName: true },
+        });
+        if (user.warningCount >= MAX_WARNINGS) {
+          await tx.user.update({ where: { id: targetUserId }, data: { status: 'SUSPENDED' } });
+        }
+        return { strike: user.warningCount, fullName: user.fullName };
+      }));
+    } catch (error) {
+      if (error instanceof AlreadyWarnedError) {
+        return res.status(409).json(errorResponse(409, `This user was already warned for ${what.replace('your ', 'their ')}`));
+      }
+      throw error;
+    }
+    const suspend = strike >= MAX_WARNINGS;
+
+    if (!isResponse) await recomputeWorkerRating(review.workerId);
+    if (suspend) {
+      // Same immediate-effect logout as adminUserController.setUserStatus.
+      await revokeUserSessions(targetUserId, JWT_EXPIRY);
+      await revokeAllRefreshTokens(targetUserId);
+    }
+
+    try {
+      await notifyUser({
+        userId: targetUserId,
+        type: suspend ? 'ACCOUNT_AUTO_SUSPENDED' : 'ACCOUNT_WARNING',
+        title: suspend ? 'Account suspended' : strike === MAX_WARNINGS - 1 ? 'Final warning' : 'Warning',
+        message: suspend
+          ? `${what[0].toUpperCase()}${what.slice(1)} broke the community rules: ${reason}. This is warning ${strike} of ${MAX_WARNINGS}, so your account is suspended. Contact support to appeal.`
+          : `${what[0].toUpperCase()}${what.slice(1)} broke the community rules: ${reason}. This is warning ${strike} of ${MAX_WARNINGS}. At ${MAX_WARNINGS} warnings your account is suspended.`,
+        relatedId: review.bookingId,
+      });
+    } catch (error) {
+      // The strike is already saved; a lost notification must not fail it.
+      console.error('Warn review author: notification failed:', error);
+    }
+
+    await writeAuditLog({
+      actorId: req.user?.userId,
+      actorName: req.user?.email,
+      actorRole: req.user?.role,
+      action: suspend ? 'USER_SUSPENDED_FOR_WARNINGS' : 'USER_WARNED',
+      category: 'ADMIN_ACTION',
+      message: `${fullName} warned (${strike}/${MAX_WARNINGS}) for ${what.replace('your ', 'their ')} on review ${formatDisplayId(id)}: ${reason}${suspend ? ' — suspended' : ''}`,
+    });
+
+    const updated = await prisma.review.findUniqueOrThrow({ where: { id }, include: reviewInclude });
+    return res.json({ success: true, data: { ...formatReview(updated), warningCount: strike, suspended: suspend } });
+  } catch (error) {
+    console.error('Warn review author error:', error);
+    return res.status(500).json(errorResponse(500, 'Internal server error'));
+  }
+};
+
 export const updateReview = async (req: AuthRequest, res: Response) => {
   try {
     const id = req.params.id as string;
@@ -146,23 +287,7 @@ export const updateReview = async (req: AuthRequest, res: Response) => {
       include: reviewInclude,
     });
 
-    // Both the rating value and the VISIBLE/HIDDEN status can change here,
-    // and WorkerProfile.rating/totalReviews were previously only ever
-    // recomputed at review-submission time — hiding a fake 5-star review
-    // (or a rating edit) left the worker's public rating permanently wrong
-    // until their next real review happened to trigger a recompute.
-    const ratingStats = await prisma.review.aggregate({
-      where: { workerId: updated.workerId, status: 'VISIBLE' },
-      _avg: { rating: true },
-      _count: true,
-    });
-    await prisma.workerProfile.update({
-      where: { id: updated.workerId },
-      data: {
-        rating: Math.round((ratingStats._avg.rating ?? 0) * 10) / 10,
-        totalReviews: ratingStats._count,
-      },
-    });
+    await recomputeWorkerRating(updated.workerId);
 
     await writeAuditLog({
       actorId: req.user?.userId,

@@ -119,6 +119,8 @@ export default function Verification() {
             info={`Showing ${pagedRecords.length ? (currentPage - 1) * PAGE_SIZE + 1 : 0}-${
               (currentPage - 1) * PAGE_SIZE + pagedRecords.length
             } of ${records.length} verifications`}
+            page={currentPage}
+            totalPages={totalPages}
             hasPrev={currentPage > 1}
             hasNext={currentPage < totalPages}
             onPrev={() => setPage((p) => Math.max(1, p - 1))}

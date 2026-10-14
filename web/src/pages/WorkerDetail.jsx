@@ -235,11 +235,11 @@ export default function WorkerDetail() {
   return (
     <>
       <PageHeader
+        backTo="/workers"
         title="Worker Detail"
         subtitle="View and manage worker profile"
         actions={(
           <>
-            <Link to="/workers" className="btn btn-outline">Back to Workers</Link>
             {!isDeactivated && (
               <button
                 type="button"

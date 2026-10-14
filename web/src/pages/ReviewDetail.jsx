@@ -7,7 +7,7 @@ import SectionCard from '../components/common/SectionCard'
 import LoadingState from '../components/common/LoadingState'
 import ErrorState from '../components/common/ErrorState'
 import { useDetailQuery } from '../hooks/useListQuery'
-import { fetchReviewById, updateReview } from '../services/reviews'
+import { fetchReviewById, updateReview, warnReviewAuthor, warnedParty } from '../services/reviews'
 import { useToast } from '../context/ToastContext'
 
 const SUB_NAV = [
@@ -47,9 +47,13 @@ export default function ReviewDetail() {
     if (warnReason.trim().length < MIN_WARN_REASON_LENGTH) return
     setWarnSubmitting(true)
     try {
-      await updateReview(id, { flagged: false, status: 'WARNED', flagReason: warnReason.trim() })
+      const result = await warnReviewAuthor(review, warnReason.trim())
       await reload()
-      showSuccess('Review hidden and user warned.')
+      showSuccess(
+        result.suspended
+          ? `Warning ${result.warningCount}: account suspended.`
+          : `User warned (${result.warningCount} of 3).`,
+      )
       closeWarnModal()
     } catch (err) {
       showError(err.message || 'Failed to update review')
@@ -77,6 +81,7 @@ export default function ReviewDetail() {
   return (
     <>
       <PageHeader
+        backTo="/reviews"
         title="Review Detail"
         subtitle={`Review ${review.displayId}`}
         actions={
@@ -101,7 +106,6 @@ export default function ReviewDetail() {
             >
               Warn User
             </button>
-            <Link to="/reviews" className="btn btn-outline">Back</Link>
           </>
         }
       />
@@ -153,7 +157,7 @@ export default function ReviewDetail() {
           )}
           {review.flagged && (
             <div className="detail-block detail-block--full">
-              <label>Flag Reason</label>
+              <label>Flag Reason ({review.flagTarget === 'RESPONSE' ? "worker's reply" : 'review'} reported)</label>
               <div className="value">{review.flagReason || 'No reason provided'}</div>
             </div>
           )}
@@ -172,8 +176,8 @@ export default function ReviewDetail() {
           <div className="modal" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true">
             <h2 className="modal-title">Warn User — {review.displayId}</h2>
             <p className="modal-body" style={{ marginBottom: '0.75rem' }}>
-              This hides the review and records why the user is being warned. The reason below is kept as the
-              review's flag reason.
+              Warns <strong>{warnedParty(review)}</strong>. They get a notification with this reason. 1st warning,
+              2nd final warning, 3rd suspends the account. A warned review is taken off the worker&apos;s profile.
             </p>
             <label htmlFor="warn-reason" style={{ display: 'block', marginBottom: '0.35rem', fontWeight: 600 }}>
               Reason for warning (required, at least {MIN_WARN_REASON_LENGTH} characters)

@@ -392,7 +392,9 @@ export default function Books() {
                 {journal.meta && journal.data.length > 0 && (
                   <Pagination
                     info={`Page ${journal.meta.page} of ${journal.meta.totalPages}`}
-                    hasPrev={journal.meta.hasPrev}
+                    page={journal.meta.page}
+              totalPages={journal.meta.totalPages}
+              hasPrev={journal.meta.hasPrev}
                     hasNext={journal.meta.hasNext}
                     onPrev={() => setJournalPage((p) => p - 1)}
                     onNext={() => setJournalPage((p) => p + 1)}

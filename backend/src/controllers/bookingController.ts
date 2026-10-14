@@ -32,7 +32,7 @@ import {
 import { chargePenaltyTx } from '@services/debtLedgerService';
 import { toOwnedBookingPhotoUrls } from '@utils/storageUrls';
 import { validateQuoteItems, sumQuoteItems, type QuoteItemInput } from '@utils/quoteItems';
-import { updateBookingIfStatus, isBookingStatusConflict } from '@services/bookingStatusWrite';
+import { updateBookingIfStatus, isBookingStatusConflict, lockBooking } from '@services/bookingStatusWrite';
 
 // The booking's status changed between our read and our write (another
 // request or a sweep job won the race) — tell the caller to refresh.
@@ -44,6 +44,7 @@ import {
   computeJobPricing,
   calculateCommission,
   calculateWithholdingTax,
+  describeDistanceFee,
   VAT_RATE,
 } from '@utils/pricing';
 import { roundToCentavo } from '@utils/money';
@@ -642,6 +643,9 @@ export const createBooking = async (req: AuthRequest, res: Response) => {
                 rushFeeRate: isRush ? appSettings.rushFeeRate : 0,
                 workerTier,
                 distanceKm: workerDistanceKm,
+                // Rates in force at booking time, for describeDistanceFee.
+                freeDistanceKm: appSettings.freeDistanceKm,
+                perKmFee: appSettings.perKmFee,
                 isAutoMatched,
               },
             },
@@ -964,6 +968,7 @@ export const getBookingDetail = async (req: AuthRequest, res: Response) => {
     const priceBreakdown = {
       basePrice: latestPricingLog?.basePrice ?? null,
       distanceFee: bookingPricingLog?.distanceFee ?? 0,
+      distanceFeeNote: describeDistanceFee(bookingPricingLog, await getAppSettings()),
       tierFee: bookingPricingLog?.tierFee ?? 0,
       rushFee: bookingPricingLog?.rushFee ?? 0,
       addOns: (booking.addOns || [])
@@ -1109,6 +1114,8 @@ export const getBookingDetail = async (req: AuthRequest, res: Response) => {
         // Payment row exists (pre-completion: Pending/Accepted/InProgress).
         tip: booking.tip,
         completionPhotoUrl: booking.completionPhotoUrl,
+        beforePhotoUrls: booking.beforePhotoUrls,
+        progressPhotoUrls: booking.progressPhotoUrls,
         estimatedDurationHours: booking.estimatedDurationHours,
         inspectionFeeCharged: booking.inspectionFeeCharged,
         inspectionFeeAmount: booking.inspectionFeeAmount,
@@ -1171,6 +1178,7 @@ export const getBookingDetail = async (req: AuthRequest, res: Response) => {
           acceptedAt: booking.acceptedAt,
           workerArrivedAt: booking.workerArrivedAt,
           workerStartedAt: booking.workerStartedAt,
+          workerCompletedAt: booking.workerCompletedAt,
           quotedAt: booking.quotedAt,
           approvedAt: booking.approvedAt,
           completionDate: booking.completionDate,
@@ -1761,7 +1769,20 @@ export const startBooking = async (req: AuthRequest, res: Response) => {
       return res.status(409).json(errorResponse(409, 'You must check in as arrived before starting this job'));
     }
 
-    await updateBookingIfStatus(prisma, id, booking.status, { status: 'IN_PROGRESS', workerStartedAt: new Date() });
+    // Proof of the job before any work: 1 to MAX_PROOF_PHOTOS of the worker's own uploads.
+    const beforePhotoUrls = toOwnedBookingPhotoUrls(req.body?.beforePhotoUrls ?? [], req.user.userId);
+    if (!beforePhotoUrls) {
+      return res.status(400).json(errorResponse(400, 'Upload the before photos again — one of them could not be verified'));
+    }
+    if (beforePhotoUrls.length === 0 || beforePhotoUrls.length > MAX_PROOF_PHOTOS) {
+      return res.status(400).json(errorResponse(400, `Add 1 to ${MAX_PROOF_PHOTOS} photos of the job before you start`));
+    }
+
+    await updateBookingIfStatus(prisma, id, booking.status, {
+      status: 'IN_PROGRESS',
+      workerStartedAt: new Date(),
+      beforePhotoUrls,
+    });
     const updated = await prisma.booking.findUniqueOrThrow({ where: { id } });
 
     // Notify client
@@ -2702,6 +2723,68 @@ export const disputeQuote = async (req: AuthRequest, res: Response) => {
   }
 };
 
+const MAX_PROOF_PHOTOS = 5;
+const MAX_PROGRESS_PHOTOS = 20;
+
+/**
+ * POST /api/bookings/:id/progress-photos  { photoUrls }
+ * Worker posts an "ongoing" update while the job is IN_PROGRESS. At least one
+ * is required before completeBooking. The client sees them on the booking.
+ */
+export const addProgressPhotos = async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user || req.user.role !== 'WORKER') {
+      return res.status(403).json(errorResponse(403, 'Only workers can post progress photos'));
+    }
+    const id = req.params.id as string;
+    const workerId = req.user.userId;
+    const photoUrls = toOwnedBookingPhotoUrls(req.body?.photoUrls, workerId);
+    if (!photoUrls) {
+      return res.status(400).json(errorResponse(400, 'Upload the photos again — one of them could not be verified'));
+    }
+    if (photoUrls.length === 0 || photoUrls.length > MAX_PROOF_PHOTOS) {
+      return res.status(400).json(errorResponse(400, `Add 1 to ${MAX_PROOF_PHOTOS} photos`));
+    }
+
+    // Status and the photo cap are checked under the booking lock, so two
+    // uploads can't both pass the cap and none can land after completion.
+    const result = await prisma.$transaction(async (tx) => {
+      const booking = await lockBooking(tx, id);
+      if (!booking || booking.workerId !== workerId) return { status: 404, message: 'Booking not found' } as const;
+      if (booking.status !== 'IN_PROGRESS') {
+        return { status: 409, message: 'Progress photos can only be posted while the job is in progress' } as const;
+      }
+      if (booking.progressPhotoUrls.length + photoUrls.length > MAX_PROGRESS_PHOTOS) {
+        return { status: 409, message: `A job can have at most ${MAX_PROGRESS_PHOTOS} progress photos` } as const;
+      }
+      const updated = await tx.booking.update({
+        where: { id },
+        data: { progressPhotoUrls: { push: photoUrls } },
+        select: { progressPhotoUrls: true },
+      });
+      return { status: 201, updated, clientId: booking.clientId } as const;
+    });
+    if (result.status !== 201) {
+      return res.status(result.status).json(errorResponse(result.status, result.message));
+    }
+    const { updated, clientId } = result;
+
+    await notifyUser({
+      userId: clientId,
+      // No dedicated type; same choice as startBooking's "Service Started".
+      type: 'BOOKING_ACCEPTED',
+      title: 'Job update',
+      message: 'Your pro posted a progress photo of the job.',
+      relatedId: id,
+    });
+
+    return res.status(201).json({ success: true, data: updated });
+  } catch (error) {
+    console.error('Error adding progress photos:', error);
+    return res.status(500).json(errorResponse(500, 'Failed to post progress photos'));
+  }
+};
+
 /**
  * PATCH /api/bookings/:id/complete
  * Worker submits proof of completed work (a required photo). This does NOT
@@ -2745,33 +2828,43 @@ export const completeBooking = async (req: AuthRequest, res: Response) => {
       return res.status(400).json(errorResponse(400, 'Upload the completion photo again — it could not be verified'));
     }
 
-    // Add-ons freeze right here — any still-pending one (never approved or
-    // rejected) can no longer affect anything after this point, so resolve
-    // it as rejected rather than leaving a dangling "Approve/Reject" prompt
-    // the client could still tap on a job that's already done and billed.
-    const stillPendingAddonIds = booking.addOns
-      .filter((addon) => addon.clientApprovedAt == null && addon.clientRejectedAt == null)
-      .map((addon) => addon.id);
-    if (stillPendingAddonIds.length > 0) {
-      await prisma.bookingAddOn.updateMany({
-        where: { id: { in: stillPendingAddonIds } },
-        data: { clientRejectedAt: new Date() },
-      });
+    if (booking.progressPhotoUrls.length === 0) {
+      return res.status(409).json(errorResponse(409, 'Post at least one progress photo before marking the job done'));
     }
 
-    // Lock in the final billable subtotal now — only approved add-ons count
-    // (see BookingAddOn.clientApprovedAt's schema comment) — this is what
-    // the client pays at confirmation.
-    const approvedAddOns = booking.addOns.filter((addon) => addon.clientApprovedAt != null);
-    const { subtotal: lockedFinalPrice } = computeBookingFinalTotal({
-      estimatedPrice: booking.estimatedPrice,
-      laborCost: booking.laborCost,
-      materialsCost: booking.materialsCost,
-      tip: booking.tip,
-      addOns: approvedAddOns,
-    });
-
     const updated = await prisma.$transaction(async (tx) => {
+      // Under the booking lock (shared with addAddon/respondToAddon), the
+      // add-ons read here are final: no new extra or approval can land
+      // between this read and the bill being locked below.
+      const locked = await lockBooking(tx, id);
+      const addOns = locked?.addOns ?? [];
+
+      // Add-ons freeze right here — any still-pending one (never approved or
+      // rejected) can no longer affect anything after this point, so resolve
+      // it as rejected rather than leaving a dangling "Approve/Reject" prompt
+      // the client could still tap on a job that's already done and billed.
+      const stillPendingAddonIds = addOns
+        .filter((addon) => addon.clientApprovedAt == null && addon.clientRejectedAt == null)
+        .map((addon) => addon.id);
+      if (stillPendingAddonIds.length > 0) {
+        await tx.bookingAddOn.updateMany({
+          where: { id: { in: stillPendingAddonIds } },
+          data: { clientRejectedAt: new Date() },
+        });
+      }
+
+      // Lock in the final billable subtotal now — only approved add-ons count
+      // (see BookingAddOn.clientApprovedAt's schema comment) — this is what
+      // the client pays at confirmation.
+      const approvedAddOns = addOns.filter((addon) => addon.clientApprovedAt != null);
+      const { subtotal: lockedFinalPrice } = computeBookingFinalTotal({
+        estimatedPrice: booking.estimatedPrice,
+        laborCost: booking.laborCost,
+        materialsCost: booking.materialsCost,
+        tip: booking.tip,
+        addOns: approvedAddOns,
+      });
+
       await updateBookingIfStatus(tx, id, booking.status, {
         status: 'PENDING_COMPLETION',
         completionPhotoUrl: storedCompletionPhotoUrl,
@@ -3235,12 +3328,117 @@ export const cancelBooking = async (req: AuthRequest, res: Response) => {
   }
 };
 
+// From arrival until the worker marks the job done — the window where extra
+// work can be agreed on the same visit (e.g. inspection -> repair now).
+function canAddExtraWork(booking: { status: string; workerArrivedAt: Date | null }) {
+  return (
+    (booking.status === 'ACCEPTED' && booking.workerArrivedAt != null) ||
+    ['QUOTE_SUBMITTED', 'QUOTE_APPROVED', 'IN_PROGRESS'].includes(booking.status)
+  );
+}
+
+/**
+ * POST /api/bookings/:id/addons  { name, price }
+ * Worker adds extra work to the same booking (restored from before PR #147).
+ * It starts pending and is billed only if the client approves it
+ * (respondToAddon) — there is no auto-approve.
+ */
+export const addAddon = async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      return res.status(401).json(errorResponse(401, 'Not authenticated'));
+    }
+    const id = req.params.id as string;
+    const name = typeof req.body?.name === 'string' ? req.body.name.trim() : '';
+    const price = Number(req.body?.price);
+    if (!name || name.length > 100) {
+      return res.status(400).json(errorResponse(400, 'Name the extra work (up to 100 characters)'));
+    }
+    if (!Number.isFinite(price) || price <= 0 || price > 100000) {
+      return res.status(400).json(errorResponse(400, 'Enter a price between ₱1 and ₱100,000'));
+    }
+
+    const workerId = req.user.userId;
+    // Checked and inserted under the booking lock completeBooking also takes,
+    // so an extra can't be added after completion has frozen the bill.
+    const result = await prisma.$transaction(async (tx) => {
+      const booking = await lockBooking(tx, id);
+      if (!booking || booking.workerId !== workerId) return { status: 404, message: 'Booking not found' } as const;
+      if (!canAddExtraWork(booking)) {
+        return { status: 409, message: 'Extra work can be added from arrival until you mark the job done' } as const;
+      }
+      const addon = await tx.bookingAddOn.create({
+        data: { bookingId: id, name, price: roundToCentavo(price) },
+      });
+      return { status: 201, addon, booking } as const;
+    });
+    if (result.status !== 201) {
+      return res.status(result.status).json(errorResponse(result.status, result.message));
+    }
+    const { addon, booking } = result;
+
+    await notifyUser({
+      userId: booking.clientId,
+      type: 'ADDON_ADDED',
+      title: 'Approve extra work?',
+      message: `Your pro added "${addon.name}" (₱${addon.price}) to this job. It is only billed if you approve it.`,
+      relatedId: id,
+    });
+
+    return res.status(201).json({ success: true, message: 'Extra work added. Waiting for the client.', data: addon });
+  } catch (error) {
+    console.error('Error adding addon:', error);
+    return res.status(500).json(errorResponse(500, 'Failed to add extra work'));
+  }
+};
+
+/**
+ * POST /api/bookings/:id/addons/request  { description }
+ * Client asks the worker for extra work on the same visit. The worker gets a
+ * notification and prices it with addAddon; the client then approves it.
+ */
+export const requestExtraWork = async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      return res.status(401).json(errorResponse(401, 'Not authenticated'));
+    }
+    const id = req.params.id as string;
+    const description = typeof req.body?.description === 'string' ? req.body.description.trim() : '';
+    if (description.length < 3 || description.length > 300) {
+      return res.status(400).json(errorResponse(400, 'Describe the extra work (3 to 300 characters)'));
+    }
+
+    const booking = await prisma.booking.findUnique({ where: { id } });
+    if (!booking || booking.clientId !== req.user.userId || !booking.workerId) {
+      return res.status(404).json(errorResponse(404, 'Booking not found'));
+    }
+    if (!canAddExtraWork(booking)) {
+      return res.status(409).json(errorResponse(409, 'You can ask for extra work once your pro has arrived, until the job is done'));
+    }
+
+    // ponytail: the request lives only in the worker's notification; persist it
+    // on BookingAddOn if workers start missing requests.
+    await notifyUser({
+      userId: booking.workerId,
+      type: 'ADDON_ADDED',
+      title: 'Client asked for extra work',
+      message: `"${description}" — open the job and use Add Extra Work to send a price.`,
+      relatedId: id,
+    });
+
+    return res.json({ success: true, message: 'Sent. Your pro will send a price for you to approve.' });
+  } catch (error) {
+    console.error('Error requesting extra work:', error);
+    return res.status(500).json(errorResponse(500, 'Failed to send the request'));
+  }
+};
+
 /**
  * PATCH /api/bookings/:id/addons/:addonId/respond
  * Client approves or rejects a pending mid-job addon (see addAddon /
  * BookingAddOn.clientApprovedAt). Only the pending state is actionable —
- * once resolved (by the client here, or by the reminder/auto-approve sweep,
- * or automatically at completion) it can't be re-answered.
+ * once resolved (by the client here, or rejected automatically at completion)
+ * it can't be re-answered.
  */
 export const respondToAddon = async (req: AuthRequest, res: Response) => {
   try {
@@ -3265,14 +3463,28 @@ export const respondToAddon = async (req: AuthRequest, res: Response) => {
     if (addon.booking.clientId !== req.user.userId) {
       return res.status(403).json(errorResponse(403, 'This booking is not yours'));
     }
-    if (addon.clientApprovedAt || addon.clientRejectedAt) {
-      return res.status(409).json(errorResponse(409, 'This addon has already been resolved'));
-    }
-
-    const updated = await prisma.bookingAddOn.update({
-      where: { id: addonId },
-      data: approve ? { clientApprovedAt: new Date() } : { clientRejectedAt: new Date() },
+    // Re-read under the booking lock: completion may have frozen the bill
+    // (rejecting pending extras) since the read above.
+    const result = await prisma.$transaction(async (tx) => {
+      const booking = await lockBooking(tx, id);
+      const current = booking?.addOns.find((a) => a.id === addonId);
+      if (!booking || !current) return { status: 404, message: 'Addon not found' } as const;
+      if (current.clientApprovedAt || current.clientRejectedAt) {
+        return { status: 409, message: 'This addon has already been resolved' } as const;
+      }
+      if (!canAddExtraWork(booking)) {
+        return { status: 409, message: 'This job is already done, so its extras can no longer change' } as const;
+      }
+      const updated = await tx.bookingAddOn.update({
+        where: { id: addonId },
+        data: approve ? { clientApprovedAt: new Date() } : { clientRejectedAt: new Date() },
+      });
+      return { status: 200, updated } as const;
     });
+    if (result.status !== 200) {
+      return res.status(result.status).json(errorResponse(result.status, result.message));
+    }
+    const { updated } = result;
 
     if (addon.booking.workerId) {
       await notifyUser({
@@ -3290,6 +3502,61 @@ export const respondToAddon = async (req: AuthRequest, res: Response) => {
   } catch (error) {
     console.error('Error responding to addon:', error);
     return res.status(500).json(errorResponse(500, 'Failed to respond to addon'));
+  }
+};
+
+/**
+ * POST /api/bookings/:id/review/report  { reason }
+ * The worker reports the client's review; the client reports the worker's
+ * reply. Puts the review in the admin Flagged queue (adminReviewController).
+ */
+export const reportReview = async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      return res.status(401).json(errorResponse(401, 'Not authenticated'));
+    }
+    const reason = typeof req.body?.reason === 'string' ? req.body.reason.trim() : '';
+    if (reason.length < 5 || reason.length > 500) {
+      return res.status(400).json(errorResponse(400, 'Say what is wrong (5 to 500 characters)'));
+    }
+
+    const review = await prisma.review.findUnique({
+      where: { bookingId: req.params.id as string },
+      include: { worker: { select: { userId: true } } },
+    });
+    const isWorker = review?.worker.userId === req.user.userId;
+    const isClient = review?.clientId === req.user.userId;
+    if (!review || (!isWorker && !isClient)) {
+      return res.status(404).json(errorResponse(404, 'Review not found'));
+    }
+    if (isClient && !review.workerResponse) {
+      return res.status(409).json(errorResponse(409, 'There is no reply to report'));
+    }
+    // One pending report per review: overwriting the other side's report
+    // would drop it from the admin queue. They can report once it's handled.
+    // The check is part of the write, so two reports sent at the same moment
+    // can't both pass it. A null target (older flags, admin-set flags) means
+    // the review.
+    const flagTarget = isWorker ? 'REVIEW' : 'RESPONSE';
+    const { count } = await prisma.review.updateMany({
+      where: {
+        id: review.id,
+        OR: [{ flagged: false }, { flagTarget }, ...(isWorker ? [{ flagTarget: null }] : [])],
+      },
+      data: {
+        flagged: true,
+        flagTarget,
+        flagReason: `Reported by the ${isWorker ? 'worker' : 'client'}: ${reason}`,
+      },
+    });
+    if (count === 0) {
+      return res.status(409).json(errorResponse(409, 'HomeEase is already checking a report on this review. Try again once it is handled.'));
+    }
+
+    return res.json({ success: true, message: 'Thanks. An admin will look at it.' });
+  } catch (error) {
+    console.error('Error reporting review:', error);
+    return res.status(500).json(errorResponse(500, 'Failed to report'));
   }
 };
 

@@ -145,6 +145,12 @@ describe('Worker services, packages and setup', () => {
       const docs = await prisma.certification.findMany({ where: { workerProfileId, serviceTypeId: secondServiceId } });
       expect(docs.every((d) => d.verificationStatus === 'APPROVED')).toBe(true);
 
+      // Still listed under All once approved.
+      const all = await request(app)
+        .get('/api/admin/service-requests?status=ALL')
+        .set('Authorization', `Bearer ${adminToken}`);
+      expect(all.body.data.some((r: { id: string; status: string }) => r.id === category.id && r.status === 'VERIFIED')).toBe(true);
+
       const select = await request(app)
         .put(`/api/workers/me/task-selections/${secondTaskId}`)
         .set('Authorization', `Bearer ${workerToken}`);

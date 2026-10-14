@@ -345,6 +345,7 @@ export default function WorkerProfileScreen() {
                   comment: r.comment,
                   date: r.date,
                   workerResponse: r.workerResponse,
+                  photoUrls: r.photoUrls,
                 }}
               />
             ))

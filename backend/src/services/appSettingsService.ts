@@ -34,6 +34,9 @@ export interface AppSettingsConfig {
   autoSuspendRatingThreshold: number | null;
   autoSuspendDisputeCountThreshold: number | null;
   autoSuspendDisputeCountWindowDays: number | null;
+  androidLatestVersion: string | null;
+  androidMinVersion: string | null;
+  androidStoreUrl: string | null;
 }
 
 // Mirrors the AppSettings model's own @default values — used only if the
@@ -61,7 +64,7 @@ const FALLBACK_DEFAULTS: AppSettingsConfig = {
   tierExpertMultiplier: 1.3,
   freeDistanceKm: 5,
   perKmFee: 10,
-  workerDebtHoldLimit: 500,
+  workerDebtHoldLimit: 2500,
   atcCode: null,
   workerMinAge: 18,
   workerMaxAge: 60,
@@ -74,6 +77,9 @@ const FALLBACK_DEFAULTS: AppSettingsConfig = {
   autoSuspendRatingThreshold: null,
   autoSuspendDisputeCountThreshold: null,
   autoSuspendDisputeCountWindowDays: null,
+  androidLatestVersion: null,
+  androidMinVersion: null,
+  androidStoreUrl: null,
 };
 
 // getAppSettings is called on nearly every request path (search, booking,
@@ -85,6 +91,11 @@ const FALLBACK_DEFAULTS: AppSettingsConfig = {
 const CACHE_TTL_MS = 60_000;
 let cached: AppSettingsConfig | null = null;
 let cachedAt = 0;
+
+// Fixed by the business, not admin-editable: 2% expanded withholding tax and
+// BIR ATC WI120 ("income payments to certain contractors"). The DB columns
+// stay for history but are ignored. Change here (and redeploy) if BIR rules do.
+const FIXED_TAX = { withholdingTaxRate: 0.02, atcCode: 'WI120' } as const;
 
 /**
  * Reads the singleton AppSettings row, creating it with schema defaults on
@@ -104,12 +115,12 @@ export async function getAppSettings(): Promise<AppSettingsConfig> {
       update: {},
       create: { id: 'singleton' },
     });
-    cached = record;
+    cached = { ...record, ...FIXED_TAX };
     cachedAt = Date.now();
-    return record;
+    return cached;
   } catch (error) {
     console.error('getAppSettings failed (pending migration?) — using static defaults:', error);
-    return cached ?? FALLBACK_DEFAULTS;
+    return cached ?? { ...FALLBACK_DEFAULTS, ...FIXED_TAX };
   }
 }
 

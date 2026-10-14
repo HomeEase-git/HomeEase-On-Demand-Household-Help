@@ -67,6 +67,12 @@ export function manilaMonthsIn(start: Date, end: Date): string[] {
   return months;
 }
 
+/** "Q4 2026" — the BIR quarter (Manila calendar) an instant falls in. */
+export function manilaQuarterLabel(date: Date): string {
+  const { year, month } = manilaParts(date);
+  return `Q${Math.ceil(month / 3)} ${year}`;
+}
+
 /** True when [start, end) is exactly one calendar quarter in Manila time. */
 export function isManilaQuarter(start: Date, end: Date): boolean {
   const { year, month, day } = manilaParts(start);

@@ -1,7 +1,8 @@
 import React, { useState } from "react";
-import { View, Text, Pressable, TextInput, ActivityIndicator } from "react-native";
+import { View, Text, Pressable, TextInput, ActivityIndicator, Modal, ScrollView } from "react-native";
 import Avatar from "../ui/Avatar";
 import StarRating from "../ui/StarRating";
+import RemoteImage from "../ui/RemoteImage";
 import { cardShadow, colors } from "../../constants";
 
 type Review = {
@@ -12,19 +13,32 @@ type Review = {
   comment: string;
   date: string;
   workerResponse?: string | null;
+  // The client's proof photos, shown on the review itself.
+  photoUrls?: string[];
 };
+
+// API dates arrive as ISO strings ("2026-10-13T11:11:20.852Z").
+function formatReviewDate(date: string): string {
+  const d = new Date(date);
+  return Number.isNaN(d.getTime())
+    ? date
+    : d.toLocaleDateString("en-PH", { month: "short", day: "numeric", year: "numeric", timeZone: "Asia/Manila" });
+}
 
 type Props = {
   review: Review;
   // Worker-only: lets the worker post a one-time public reply. Omitted
   // entirely on the client-facing worker-profile reviews list.
   onRespond?: (reviewId: string, response: string) => Promise<void>;
+  // Worker-only: report the review to an admin.
+  onReport?: () => void;
 };
 
-export const ReviewCard: React.FC<Props> = ({ review, onRespond }) => {
+export const ReviewCard: React.FC<Props> = ({ review, onRespond, onReport }) => {
   const [responding, setResponding] = useState(false);
   const [draft, setDraft] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [openPhoto, setOpenPhoto] = useState<string | null>(null);
 
   const handleSubmit = async () => {
     if (!onRespond || !draft.trim()) return;
@@ -47,11 +61,33 @@ export const ReviewCard: React.FC<Props> = ({ review, onRespond }) => {
           <Text className="text-text-primary font-semibold">
             {review.authorName}
           </Text>
-          <Text className="text-text-muted text-xs">{review.date}</Text>
+          <Text className="text-text-muted text-xs">{formatReviewDate(review.date)}</Text>
         </View>
         <StarRating rating={review.rating} size={14} />
       </View>
       <Text className="text-text-secondary text-sm mt-2">{review.comment}</Text>
+
+      {!!review.photoUrls?.length && (
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }} className="mt-3">
+          {review.photoUrls.map((url) => (
+            <Pressable
+              key={url}
+              onPress={() => setOpenPhoto(url)}
+              accessibilityRole="imagebutton"
+              accessibilityLabel="Open review photo"
+            >
+              <RemoteImage source={{ uri: url }} className="w-20 h-20 rounded-xl bg-card-dark" />
+            </Pressable>
+          ))}
+        </ScrollView>
+      )}
+
+      <Modal visible={!!openPhoto} transparent animationType="fade" onRequestClose={() => setOpenPhoto(null)}>
+        <Pressable className="flex-1 bg-black/90 items-center justify-center" onPress={() => setOpenPhoto(null)}>
+          <RemoteImage source={{ uri: openPhoto }} resizeMode="contain" style={{ width: "100%", height: "80%" }} />
+          <Text className="text-white/70 text-xs mt-3">Tap anywhere to close</Text>
+        </Pressable>
+      </Modal>
 
       {review.workerResponse ? (
         <View className="bg-background rounded-xl p-3 mt-3">
@@ -89,6 +125,12 @@ export const ReviewCard: React.FC<Props> = ({ review, onRespond }) => {
           </Pressable>
         )
       ) : null}
+
+      {onReport && (
+        <Pressable onPress={onReport} className="mt-3 self-end">
+          <Text className="text-text-muted text-xs font-medium">Report review</Text>
+        </Pressable>
+      )}
     </View>
   );
 };

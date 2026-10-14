@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useState } from 'react';
-import { useLocation } from 'react-router-dom';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useLocation, useSearchParams } from 'react-router-dom';
 import { usePolling } from './usePolling';
 
 // Module-level, in-memory, cleared on a full page reload. Keyed by route +
@@ -17,7 +17,28 @@ export function useListQuery(
   { initialParams = {}, deps = [], pollIntervalMs = null, pausePolling = false } = {}
 ) {
   const { pathname } = useLocation();
-  const [params, setParams] = useState(initialParams);
+  const [searchParams, setSearchParams] = useSearchParams();
+  // Lists with filters/paging keep them in the URL, so a refresh, Back from a
+  // detail page, or a shared link lands on the same view. Only values that
+  // differ from initialParams are written, to keep URLs short. Lists without
+  // initialParams stay out of the URL (VatRegistrations has two lists on one
+  // route; only the paged one owns the query string).
+  const syncUrl = Object.keys(initialParams).length > 0;
+  const search = syncUrl ? searchParams.toString() : '';
+  const params = useMemo(() => {
+    const fromUrl = Object.fromEntries(new URLSearchParams(search));
+    if (fromUrl.page) fromUrl.page = Number(fromUrl.page) || 1;
+    return { ...initialParams, ...fromUrl };
+    // initialParams is an inline literal at every call site; only the URL changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [search]);
+  const setParams = (updater) => {
+    const next = updater(params);
+    const kept = Object.entries(next).filter(
+      ([key, value]) => value !== '' && value != null && String(value) !== String(initialParams[key] ?? '')
+    );
+    setSearchParams(new URLSearchParams(kept.map(([key, value]) => [key, String(value)])), { replace: true });
+  };
   const cacheKey = `${pathname}?${JSON.stringify(params)}`;
 
   const cachedEntry = listCache.get(cacheKey);
@@ -67,7 +88,11 @@ export function useListQuery(
   usePolling(() => load(true), pollIntervalMs || 0, { paused: !pollIntervalMs || pausePolling });
 
   const setSearch = (search) => setParams((prev) => ({ ...prev, search, page: 1 }));
-  const setFilter = (key, value) => setParams((prev) => ({ ...prev, [key]: value, page: 1 }));
+  // Takes one key/value, or an object to set several at once (each call
+  // rewrites the URL from the current params, so two calls in a row would
+  // drop the first).
+  const setFilter = (key, value) =>
+    setParams((prev) => ({ ...prev, ...(typeof key === 'object' ? key : { [key]: value }), page: 1 }));
   const goToPage = (page) => setParams((prev) => ({ ...prev, page }));
   // Clicking a column sorts by it; clicking the same column again flips the
   // direction. Dates/amounts usually read best newest/largest first, so

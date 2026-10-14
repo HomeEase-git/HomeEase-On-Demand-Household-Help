@@ -37,6 +37,7 @@ export function useAuth() {
         name: response.name,
         email: response.email,
         role: response.role,
+        avatar: response.avatar,
         kycStatus: response.kycStatus,
         hasAcceptedTerms: response.hasAcceptedTerms,
       });
@@ -66,6 +67,7 @@ export function useAuth() {
         name: response.name,
         email: response.email,
         role: response.role,
+        avatar: response.avatar,
         kycStatus: response.kycStatus,
         hasAcceptedTerms: response.hasAcceptedTerms,
       });
@@ -94,6 +96,7 @@ export function useAuth() {
         name: response.name,
         email: response.email,
         role: response.role,
+        avatar: response.avatar,
         kycStatus: response.kycStatus,
         hasAcceptedTerms: response.hasAcceptedTerms,
       });
@@ -129,6 +132,7 @@ export function useAuth() {
         email: response.email,
         phone: response.phone,
         role: response.role,
+        avatar: response.avatar,
         kycStatus: response.kycStatus,
         hasAcceptedTerms: response.hasAcceptedTerms,
       });
