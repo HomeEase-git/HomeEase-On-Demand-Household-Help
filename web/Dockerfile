@@ -20,7 +20,7 @@ RUN cd web && npm run build
 # Current stable nginx line — rebuilt upstream with Alpine security fixes.
 # 1.27 stopped getting rebuilds in 2025 and carried critical OpenSSL CVEs
 # (found by the Trivy scan, security.yml). Dependabot proposes newer tags.
-FROM nginx:1.30-alpine AS runtime
+FROM nginx:1.31-alpine AS runtime
 # Alpine security fixes released since the tag was last rebuilt.
 RUN apk upgrade --no-cache
 # Upstream for the /api proxy; overridden per environment.
