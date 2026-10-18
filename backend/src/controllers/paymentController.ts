@@ -14,8 +14,10 @@ import {
 } from '@services/paymentLifecycleService';
 import { translateXenditFailureReason } from '@utils/xenditFailureMessages';
 import { applyXenditPayoutStatus } from '@services/payoutStatusService';
+import { itemizeBookingPrice } from '@utils/pricing';
 import { manilaQuarterLabel } from '@utils/manilaTime';
 import { retrieveInvoice } from '@services/xenditService';
+import { createDebtPaymentInvoice, finalizeDebtPayment, failDebtPayment, DebtPaymentError } from '@services/debtPaymentService';
 
 interface AuthRequest extends Request {
   user?: JwtPayload;
@@ -50,7 +52,7 @@ export const getPaymentDetail = async (req: AuthRequest, res: Response) => {
             client: true,
             worker: true,
             serviceTask: true,
-            pricingLogs: { orderBy: { createdAt: 'desc' }, take: 1 },
+            pricingLogs: { orderBy: { createdAt: 'asc' }, take: 1 },
           },
         },
       },
@@ -75,13 +77,11 @@ export const getPaymentDetail = async (req: AuthRequest, res: Response) => {
     // the platform's cut, deducted from the worker's payout, never charged
     // to the client — kept here only because the worker-earnings screen
     // (mobile/app/(worker)/earnings) reuses this same response shape.
-    const latestPricingLog = payment.booking.pricingLogs[0] ?? null;
+    // The booking-time log (oldest first) — later logs are quote stages.
+    const bookingPricingLog = payment.booking.pricingLogs[0] ?? null;
     const breakdown = {
       subtotal: payment.subtotal,
-      basePrice: latestPricingLog?.basePrice ?? null,
-      distanceFee: latestPricingLog?.distanceFee ?? 0,
-      tierFee: latestPricingLog?.tierFee ?? 0,
-      rushFee: latestPricingLog?.rushFee ?? 0,
+      ...itemizeBookingPrice(bookingPricingLog, payment.booking),
       addOns: payment.booking.addOns
         .filter((addon) => addon.clientApprovedAt != null)
         .map((addon) => ({ name: addon.name, price: addon.price })),
@@ -340,6 +340,47 @@ export const refundPayment = async (req: AuthRequest, res: Response) => {
 };
 
 /**
+ * POST /api/payments/dues  { amount? }
+ * A worker pays down the platform dues they owe through a Xendit invoice.
+ * `amount` omitted means the full balance. Returns the hosted checkout URL
+ * (an already-open invoice is reused, not duplicated).
+ */
+export const createDuesCheckout = async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user || req.user.role !== 'WORKER') {
+      return res.status(403).json(errorResponse(403, 'Only workers can pay platform dues'));
+    }
+    const { amount } = (req.body ?? {}) as { amount?: unknown };
+    if (amount !== undefined && typeof amount !== 'number') {
+      return res.status(400).json(errorResponse(400, 'amount must be a number'));
+    }
+
+    const result = await createDebtPaymentInvoice(req.user.userId, amount);
+    if ('alreadyPaid' in result) {
+      return res.status(200).json({ success: true, message: 'Payment already completed', data: { alreadyPaid: true } });
+    }
+    return res.status(200).json({
+      success: true,
+      message: 'Checkout ready',
+      data: { checkoutUrl: result.checkoutUrl, debtPaymentId: result.debtPaymentId, amount: result.amount },
+    });
+  } catch (error) {
+    if (error instanceof DebtPaymentError) {
+      return res.status(400).json(errorResponse(400, error.message));
+    }
+    console.error('Error creating dues checkout:', error);
+    await writeAuditLog({
+      actorId: req.user?.userId,
+      action: 'DUES_CHECKOUT_ERROR',
+      category: 'SYSTEM_ERROR',
+      level: 'ERROR',
+      message: `Dues checkout failed: ${error instanceof Error ? error.message : 'unknown error'}`,
+    });
+    return res.status(500).json(errorResponse(500, 'Failed to start payment'));
+  }
+};
+
+/**
  * POST /api/payments/:bookingId/xendit/checkout
  * Resume payment for a GCash/Maya booking that is AWAITING_PAYMENT (the client
  * abandoned or failed an earlier checkout). Returns the live hosted invoice
@@ -451,7 +492,17 @@ async function handleInvoicePaid(invoice: any) {
     include: { booking: true },
   });
 
-  if (!payment || payment.status !== 'PENDING') return;
+  if (!payment) {
+    // Not a booking payment — it may be a worker paying their platform dues.
+    const debtPayment = await prisma.debtPayment.findUnique({ where: { xenditInvoiceId: invoiceId } });
+    if (!debtPayment || debtPayment.status !== 'PENDING') return;
+    const remote = await retrieveInvoice(invoiceId);
+    const remoteStatus = (remote?.status as string | undefined)?.toUpperCase();
+    if (remoteStatus !== 'PAID' && remoteStatus !== 'SETTLED') return;
+    await finalizeDebtPayment(debtPayment.id, remote.paid_amount ?? null, remote.paid_at ? new Date(remote.paid_at) : null);
+    return;
+  }
+  if (payment.status !== 'PENDING') return;
 
   // The callback token is one static shared secret, so the body only tells
   // us which invoice to look at — what was actually paid comes from Xendit
@@ -494,7 +545,10 @@ async function handleInvoiceFailed(invoice: any) {
     where: { xenditInvoiceId: invoiceId, status: 'PENDING' },
     include: { booking: { select: { clientId: true } } },
   });
-  if (!payment) return;
+  if (!payment) {
+    await failDebtPayment(invoiceId, (invoice?.status as string | undefined)?.toUpperCase() ?? 'FAILED');
+    return;
+  }
 
   // The booking stays in AWAITING_PAYMENT — the client can retry, which mints
   // a fresh invoice (createCompletionInvoice / resumeCompletionPayment).

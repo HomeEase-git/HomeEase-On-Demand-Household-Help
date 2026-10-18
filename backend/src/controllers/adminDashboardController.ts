@@ -3,7 +3,7 @@ import prisma from '@config/database';
 import { platformRevenue, workerPayoutsPaid } from '@services/financeReportService';
 import { errorResponse } from '@utils/errorResponse';
 import { formatDisplayId, formatPeso } from '@utils/formatters';
-import { getBookingsOverTime } from './adminAnalyticsController';
+import { getBookingsOverTime, getBookingsByCategory, getBookingsForMonth, monthRange } from './adminAnalyticsController';
 
 const ACTIVE_BOOKING_STATUSES = [
   'PENDING',
@@ -45,6 +45,28 @@ const CATEGORY_LABEL: Record<string, string> = {
   LOGIN: 'Login History',
   SYSTEM_ERROR: 'System Errors',
   STATUS_CHANGE: 'Status Changes',
+};
+
+/**
+ * GET /api/admin/dashboard/charts?month=YYYY-MM
+ * The dashboard's charts for one calendar month (Manila time): bookings per
+ * day, and bookings per service category.
+ */
+export const getDashboardCharts = async (req: Request, res: Response) => {
+  try {
+    const range = monthRange(req.query.month);
+    if (!range) {
+      return res.status(400).json(errorResponse(400, 'month must look like 2026-10'));
+    }
+    const [bookingsTrend, bookingsByCategory] = await Promise.all([
+      getBookingsForMonth(range),
+      getBookingsByCategory(range),
+    ]);
+    return res.json({ success: true, data: { month: req.query.month, bookingsTrend, bookingsByCategory } });
+  } catch (error) {
+    console.error('Get dashboard charts error:', error);
+    return res.status(500).json(errorResponse(500, 'Internal server error'));
+  }
 };
 
 export const getDashboardStats = async (req: Request, res: Response) => {

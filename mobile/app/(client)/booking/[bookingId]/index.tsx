@@ -948,6 +948,7 @@ export default function BookingDetailScreen() {
             distanceFeeNote={"distanceFeeNote" in priceBreakdown ? priceBreakdown.distanceFeeNote : null}
             tierFee={priceBreakdown.tierFee}
             rushFee={priceBreakdown.rushFee}
+            materialsCost={"materialsCost" in priceBreakdown ? (priceBreakdown.materialsCost as number | null) : null}
             addOns={priceBreakdown.addOns}
             vatApplicable={priceBreakdown.vatApplicable}
             vatRate={priceBreakdown.vatRate}

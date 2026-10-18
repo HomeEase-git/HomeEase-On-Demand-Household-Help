@@ -357,6 +357,21 @@ export function postAdminAdjustment(client: Client, workerId: string, owedDeltaP
   });
 }
 
+/** A worker paid some of what they owe through Xendit: cash in, dues down. */
+export function postDebtPayment(client: Client, workerId: string, amountPesos: number, debtPaymentId: string, occurredAt?: Date) {
+  const amount = toCentavos(amountPesos);
+  return postLedger(client, {
+    type: 'DEBT_PAYMENT',
+    key: `debt-payment:${debtPaymentId}`,
+    occurredAt,
+    memo: 'Worker paid platform dues online',
+    lines: [
+      { account: 'XENDIT_CASH', amountCentavos: amount },
+      { account: 'WORKER_BALANCE', amountCentavos: -amount, workerId },
+    ],
+  });
+}
+
 /** A fee Xendit charged on one of its transactions (it hits the balance). */
 export function postXenditFee(
   client: Client,

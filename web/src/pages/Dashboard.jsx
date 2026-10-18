@@ -6,7 +6,7 @@ import LoadingState from '../components/common/LoadingState'
 import ErrorState from '../components/common/ErrorState'
 import BookingsTrendChart from '../components/charts/BookingsTrendChart'
 import CategoryBreakdownChart from '../components/charts/CategoryBreakdownChart'
-import { fetchDashboardStats } from '../services/dashboard'
+import { fetchDashboardStats, fetchDashboardCharts } from '../services/dashboard'
 import { fetchAnalytics } from '../services/analytics'
 import { useDetailQuery } from '../hooks/useListQuery'
 import { useAdminNotifications } from '../hooks/useAdminNotifications'
@@ -19,6 +19,29 @@ const pesoFormatter = new Intl.NumberFormat('en-PH', {
   currency: 'PHP',
   maximumFractionDigits: 0,
 })
+
+// The last 12 calendar months (this one first), as "2026-10" values, for the
+// charts' month picker. Manila time, like the rest of the admin's dates.
+function recentMonths(count = 12) {
+  const manilaNow = new Date(Date.now() + 8 * 60 * 60 * 1000)
+  let year = manilaNow.getUTCFullYear()
+  let month = manilaNow.getUTCMonth()
+  const months = []
+  for (let i = 0; i < count; i++) {
+    months.push({
+      value: `${year}-${String(month + 1).padStart(2, '0')}`,
+      label: new Date(Date.UTC(year, month, 1)).toLocaleDateString('en-US', { month: 'long', year: 'numeric', timeZone: 'UTC' }),
+    })
+    month -= 1
+    if (month < 0) {
+      month = 11
+      year -= 1
+    }
+  }
+  return months
+}
+
+const MONTH_OPTIONS = recentMonths()
 
 const formatCount = (n) => (n == null ? '—' : Number(n).toLocaleString('en-PH'))
 
@@ -64,11 +87,15 @@ function describeTrend(trend, days, format = String, { compareOnly = false } = {
 
 export default function Dashboard() {
   const [days, setDays] = useState(7)
+  // '' = charts follow the range above; otherwise one calendar month (YYYY-MM).
+  const [chartMonth, setChartMonth] = useState('')
   // One cache slot per range, so switching back to a range is instant.
   const { data, loading, error, reload } = useDetailQuery(fetchDashboardStats, String(days))
   const { items: attentionItems, loading: attentionLoading } = useAdminNotifications()
   // All-time completion rate, rating and category mix (what the old Analytics page showed).
   const { data: analytics } = useDetailQuery(fetchAnalytics, 'snapshot')
+  // Only fetched once a month is picked; the hook ignores an empty key.
+  const { data: monthCharts, error: monthError } = useDetailQuery(fetchDashboardCharts, chartMonth)
   const { user } = useAuth()
   const firstName = user?.name?.split(' ')[0] || 'Admin'
 
@@ -78,6 +105,10 @@ export default function Dashboard() {
 
   if (!data && loading) return <LoadingState variant="dashboard" message="Loading dashboard..." />
   if (!data && error) return <ErrorState message={error} onRetry={reload} />
+
+  // The hook keeps the previous month's data while a new one loads; don't show it under the new title.
+  const monthData = monthCharts?.month === chartMonth ? monthCharts : null
+  const monthLabel = MONTH_OPTIONS.find((m) => m.value === chartMonth)?.label ?? chartMonth
 
   const { stats, recentActivity, topWorkers, bookingsTrend, trends, rangeDays = days } = data
 
@@ -165,12 +196,27 @@ export default function Dashboard() {
           <StatCard key={stat.label} {...stat} />
         ))}
       </div>
-      <SectionCard title={`Bookings Trend (Last ${rangeDays} Days)`}>
-        <BookingsTrendChart data={bookingsTrend} />
+      <div className="chart-filter">
+        <label htmlFor="chart-month">Charts</label>
+        <select id="chart-month" className="input" value={chartMonth} onChange={(e) => setChartMonth(e.target.value)}>
+          <option value="">Follow the range above</option>
+          {MONTH_OPTIONS.map((m) => (
+            <option key={m.value} value={m.value}>{m.label}</option>
+          ))}
+        </select>
+      </div>
+      <SectionCard title={chartMonth ? `Bookings Trend (${monthLabel})` : `Bookings Trend (Last ${rangeDays} Days)`}>
+        {chartMonth && !monthData && !monthError ? (
+          <div className="chart-placeholder">Loading {monthLabel}…</div>
+        ) : chartMonth && !monthData ? (
+          <div className="chart-placeholder">Couldn't load {monthLabel}.</div>
+        ) : (
+          <BookingsTrendChart data={chartMonth ? monthData?.bookingsTrend : bookingsTrend} />
+        )}
       </SectionCard>
-      {analytics && (
-        <SectionCard title="Bookings by Category">
-          <CategoryBreakdownChart data={analytics.bookingsByCategory} />
+      {(chartMonth ? monthData : analytics) && (
+        <SectionCard title={chartMonth ? `Bookings by Category (${monthLabel})` : 'Bookings by Category'}>
+          <CategoryBreakdownChart data={chartMonth ? monthData.bookingsByCategory : analytics.bookingsByCategory} />
         </SectionCard>
       )}
       <div className="two-col">

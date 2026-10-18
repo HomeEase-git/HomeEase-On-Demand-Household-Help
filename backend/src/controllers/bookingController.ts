@@ -45,6 +45,7 @@ import {
   calculateCommission,
   calculateWithholdingTax,
   describeDistanceFee,
+  itemizeBookingPrice,
   VAT_RATE,
 } from '@utils/pricing';
 import { roundToCentavo } from '@utils/money';
@@ -953,7 +954,6 @@ export const getBookingDetail = async (req: AuthRequest, res: Response) => {
     // from the most recent PricingLog row (append-only, one per pricing
     // computation); vatAmount prefers the settled Payment row (Booking.vatAmount
     // is only filled in at settlement, see schema) over the pre-settlement 0.
-    const latestPricingLog = booking.pricingLogs[booking.pricingLogs.length - 1] ?? null;
     const breakdownTip = booking.payment?.tip ?? booking.tip ?? 0;
     // Before the payment row exists (it's created at completion), project the
     // VAT the same way settlement will (see computeBookingFinalTotal) so the
@@ -966,11 +966,8 @@ export const getBookingDetail = async (req: AuthRequest, res: Response) => {
     // quote stages.
     const bookingPricingLog = booking.pricingLogs[0] ?? null;
     const priceBreakdown = {
-      basePrice: latestPricingLog?.basePrice ?? null,
-      distanceFee: bookingPricingLog?.distanceFee ?? 0,
+      ...itemizeBookingPrice(bookingPricingLog, booking),
       distanceFeeNote: describeDistanceFee(bookingPricingLog, await getAppSettings()),
-      tierFee: bookingPricingLog?.tierFee ?? 0,
-      rushFee: bookingPricingLog?.rushFee ?? 0,
       addOns: (booking.addOns || [])
         .filter((addon: any) => addon.clientApprovedAt != null)
         .map((addon: any) => ({ name: addon.name, price: addon.price })),

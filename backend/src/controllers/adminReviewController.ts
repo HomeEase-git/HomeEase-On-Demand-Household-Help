@@ -60,9 +60,10 @@ function buildReviewWhere(search: string, flagged?: string): Prisma.ReviewWhereI
 
   if (search) {
     where.OR = [
-      { booking: { id: { contains: search } } },
-      { client: { fullName: { contains: search } } },
-      { comment: { contains: search } },
+      { booking: { id: { contains: search, mode: 'insensitive' } } },
+      { client: { fullName: { contains: search, mode: 'insensitive' } } },
+      { worker: { user: { fullName: { contains: search, mode: 'insensitive' } } } },
+      { comment: { contains: search, mode: 'insensitive' } },
     ];
   }
 

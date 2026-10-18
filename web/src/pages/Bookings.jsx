@@ -10,6 +10,7 @@ import Pagination from '../components/common/Pagination'
 import SortableTh from '../components/common/SortableTh'
 import { exportListToCsv, csvDateStamp } from '../utils/exportList'
 import { exportListToPdf } from '../utils/exportPdf'
+import { prettyStatus } from '../utils/exportFormat'
 import ExportMenu from '../components/common/ExportMenu'
 import Badge from '../components/common/Badge'
 import LoadingState from '../components/common/LoadingState'
@@ -125,7 +126,7 @@ export default function Bookings() {
     Service: b.service,
     Date: b.date,
     Amount: b.amount,
-    Status: b.status,
+    Status: prettyStatus(b.status),
   })
 
   const [exporting, setExporting] = useState(false)

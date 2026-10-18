@@ -3,7 +3,7 @@ import { getAppSettings } from '@services/appSettingsService';
 import { notifyUser } from '@utils/notify';
 import { roundToCentavo } from '@utils/money';
 import type { DebtLedgerEntryType, Prisma } from '@prisma/client';
-import { postPenalty, postAdminAdjustment } from '@services/ledgerService';
+import { postPenalty, postAdminAdjustment, postDebtPayment } from '@services/ledgerService';
 
 type TxClient = Prisma.TransactionClient;
 
@@ -245,6 +245,37 @@ export async function creditCompensationTx(
     overflow: 'credit',
   });
   return { againstDebt: applied, credited };
+}
+
+/**
+ * A worker paid down their dues through a Xendit invoice. Applies up to what
+ * they still owe — a payout may have netted the debt while they were checking
+ * out, in which case the rest becomes payout credit rather than being lost —
+ * and books the cash. The hold is lifted only once the balance is back to 0:
+ * a partial payment alone shouldn't restore access.
+ */
+export async function applyDebtPaymentTx(
+  client: TxClient,
+  workerProfileId: string,
+  amount: number,
+  debtPaymentId: string,
+  paidAt?: Date
+) {
+  const result = await creditDebtTx(client, workerProfileId, amount, 'DEBT_PAYMENT', {
+    note: 'Paid online',
+    overflow: 'credit',
+  });
+  await postDebtPayment(client, result.workerProfile.userId, amount, debtPaymentId, paidAt);
+
+  let holdReleased = false;
+  if (result.workerProfile.commissionOwed <= 0 && result.workerProfile.debtHoldAt) {
+    await client.workerProfile.update({
+      where: { id: workerProfileId },
+      data: { debtHoldAt: null, debtHoldNote: 'Cleared automatically — dues paid in full' },
+    });
+    holdReleased = true;
+  }
+  return { ...result, holdReleased };
 }
 
 /** Admin manual correction — always requires a reason, logged either direction. */

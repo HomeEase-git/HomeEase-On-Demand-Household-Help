@@ -1,4 +1,5 @@
 import React from "react";
+import { formatDate } from "../../utils/formatDate";
 import { View, Text } from "react-native";
 import { PressableScale } from "../ui/PressableScale";
 import { AppIcon as Ionicons } from "../icons/AppIcon";
@@ -53,7 +54,7 @@ export const BookingCard: React.FC<Props> = ({ booking, onPress }) => {
         </View>
         <Text className="text-text-secondary text-xs">{booking.worker}</Text>
         <Text className="text-text-secondary text-xs">
-          {booking.date}
+          {booking.date ? formatDate(booking.date.slice(0, 10)) : ""}
           {booking.payment?.methodType
             ? ` · ${booking.payment.methodType}`
             : ""}

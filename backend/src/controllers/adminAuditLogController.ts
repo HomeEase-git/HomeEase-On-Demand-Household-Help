@@ -71,9 +71,9 @@ function buildAuditLogWhere(search: string, category: string): Prisma.AuditLogWh
 
   if (search) {
     where.OR = [
-      { message: { contains: search } },
-      { actorName: { contains: search } },
-      { action: { contains: search } },
+      { message: { contains: search, mode: 'insensitive' } },
+      { actorName: { contains: search, mode: 'insensitive' } },
+      { action: { contains: search, mode: 'insensitive' } },
     ];
   }
 

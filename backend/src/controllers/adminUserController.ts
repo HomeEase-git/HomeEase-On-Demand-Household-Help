@@ -31,9 +31,9 @@ function buildClientSearchWhere(search: string, status?: string): Prisma.UserWhe
 
   if (search) {
     where.OR = [
-      { fullName: { contains: search } },
-      { email: { contains: search } },
-      { phone: { contains: search } },
+      { fullName: { contains: search, mode: 'insensitive' } },
+      { email: { contains: search, mode: 'insensitive' } },
+      { phone: { contains: search, mode: 'insensitive' } },
     ];
   }
 
@@ -210,9 +210,9 @@ function buildWorkerSearchWhere(search: string, status?: string): Prisma.UserWhe
 
   if (search) {
     where.OR = [
-      { fullName: { contains: search } },
-      { email: { contains: search } },
-      { workerProfile: { bio: { contains: search } } },
+      { fullName: { contains: search, mode: 'insensitive' } },
+      { email: { contains: search, mode: 'insensitive' } },
+      { workerProfile: { bio: { contains: search, mode: 'insensitive' } } },
     ];
   }
 

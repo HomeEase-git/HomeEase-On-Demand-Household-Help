@@ -1,4 +1,5 @@
 import React from "react";
+import { formatDate } from "../../utils/formatDate";
 import { View, Text } from "react-native";
 import { PressableScale } from "../ui/PressableScale";
 import Avatar from "../ui/Avatar";
@@ -37,7 +38,7 @@ export const RecordCard: React.FC<Props> = ({ record, onPress }) => {
       <View className="flex-1">
         <Text className="text-text-primary font-bold">{record.client}</Text>
         <Text className="text-text-secondary text-xs">{record.service}</Text>
-        <Text className="text-text-muted text-xs">{record.date}</Text>
+        <Text className="text-text-muted text-xs">{record.date ? formatDate(record.date.slice(0, 10)) : ""}</Text>
       </View>
       <View className="items-end">
         <Text

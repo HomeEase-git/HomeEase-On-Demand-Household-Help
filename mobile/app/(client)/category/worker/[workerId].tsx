@@ -10,6 +10,7 @@ import StarRating from "../../../../components/ui/StarRating";
 import ReviewCard from "../../../../components/cards/ReviewCard";
 import PrimaryButton from "../../../../components/ui/PrimaryButton";
 import * as api from "../../../../services/api";
+import { formatDate } from "../../../../utils/formatDate";
 import type { WorkerDetail, WorkerReview } from "../../../../types/api.types";
 import { useBookingStore } from "../../../../store/bookingStore";
 import { mapServiceToCategory } from "../../../../utils/categoryMapping";
@@ -385,7 +386,7 @@ export default function WorkerProfileScreen() {
                     />
                   </View>
                   <Text className="text-text-muted text-xs">
-                    {cert.issuer} · {cert.issueDate}
+                    {cert.issuer} · {cert.issueDate ? formatDate(cert.issueDate) : ""}
                   </Text>
                 </View>
               </View>

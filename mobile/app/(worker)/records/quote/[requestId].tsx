@@ -197,7 +197,15 @@ export default function SubmitQuoteScreen() {
           <Text className="text-text-secondary text-xs mb-1">Booking</Text>
           <Text className="text-text-primary font-bold">{booking.service}</Text>
           <Text className="text-text-secondary text-sm mt-1">
-            {booking.scheduledDate}
+            {booking.scheduledDate
+              ? new Date(booking.scheduledDate).toLocaleDateString("en-PH", {
+                  weekday: "long",
+                  month: "long",
+                  day: "numeric",
+                  year: "numeric",
+                  timeZone: "UTC",
+                })
+              : ""}
           </Text>
         </View>
 

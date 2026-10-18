@@ -4,6 +4,7 @@ import {
   listMyPayments,
   refundPayment,
   createXenditCheckout,
+  createDuesCheckout,
   handleXenditInvoiceWebhook,
   handleXenditPayoutWebhook,
 } from '../controllers/paymentController';
@@ -24,6 +25,9 @@ router.use(authMiddleware);
 
 // List my payments (client: payments made, worker: payouts)
 router.get('/', listMyPayments);
+
+// Worker pays down their platform dues (commission owed) via Xendit
+router.post('/dues', restrictTo('WORKER'), createDuesCheckout);
 
 // Get payment detail
 router.get('/:bookingId', getPaymentDetail);

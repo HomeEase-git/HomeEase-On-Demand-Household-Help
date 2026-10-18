@@ -30,9 +30,9 @@ function buildBookingWhere(search: string, status?: string, dateFrom?: string, d
 
   if (search) {
     where.OR = [
-      { serviceTask: { name: { contains: search } } },
-      { client: { fullName: { contains: search } } },
-      { worker: { fullName: { contains: search } } },
+      { serviceTask: { name: { contains: search, mode: 'insensitive' } } },
+      { client: { fullName: { contains: search, mode: 'insensitive' } } },
+      { worker: { fullName: { contains: search, mode: 'insensitive' } } },
     ];
   }
 

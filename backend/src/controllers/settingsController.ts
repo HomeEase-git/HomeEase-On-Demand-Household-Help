@@ -49,15 +49,6 @@ const NULLABLE_NUMERIC_FIELDS = {
   autoSuspendDisputeCountWindowDays: [1, 3650],
 } as const satisfies Partial<Record<keyof AppSettings, readonly [number, number]>>;
 
-// In-app update prompt values (see AppSettings.androidLatestVersion). Empty
-// or null clears one, which turns that part of the prompt off.
-const VERSION_PATTERN = /^\d+(\.\d+){0,2}$/;
-const APP_UPDATE_FIELDS = {
-  androidLatestVersion: (v: string) => VERSION_PATTERN.test(v),
-  androidMinVersion: (v: string) => VERSION_PATTERN.test(v),
-  androidStoreUrl: (v: string) => /^https:\/\/\S+$/.test(v),
-} as const;
-
 type NumericField = keyof typeof NUMERIC_FIELDS;
 type NullableNumericField = keyof typeof NULLABLE_NUMERIC_FIELDS;
 
@@ -66,9 +57,6 @@ function formatSettings(record: AppSettings) {
     siteName: record.siteName,
     supportEmail: record.supportEmail,
     notificationsEnabled: record.notificationsEnabled,
-    androidLatestVersion: record.androidLatestVersion,
-    androidMinVersion: record.androidMinVersion,
-    androidStoreUrl: record.androidStoreUrl,
   };
   for (const field of Object.keys(NUMERIC_FIELDS) as NumericField[]) out[field] = record[field];
   for (const field of Object.keys(NULLABLE_NUMERIC_FIELDS) as NullableNumericField[]) out[field] = record[field];
@@ -122,18 +110,6 @@ export const updateSettings = async (req: AuthRequest, res: Response) => {
         return res.status(400).json(errorResponse(400, `${field} must be null or a number between ${min} and ${max}`));
       }
       data[field] = value ?? null;
-    }
-
-    for (const [field, isValid] of Object.entries(APP_UPDATE_FIELDS)) {
-      if (!(field in body)) continue;
-      const raw = body[field];
-      const value = typeof raw === 'string' ? raw.trim() : raw;
-      if (value != null && value !== '' && (typeof value !== 'string' || !isValid(value))) {
-        return res
-          .status(400)
-          .json(errorResponse(400, field === 'androidStoreUrl' ? 'The update link must be an https URL' : `${field} must look like 1.0.2`));
-      }
-      data[field] = value || null;
     }
 
     if (siteName !== undefined) data.siteName = siteName.trim();

@@ -1,4 +1,5 @@
 import React from "react";
+import { formatDate } from "../../utils/formatDate";
 import { View, Text } from "react-native";
 import { PressableScale } from "../ui/PressableScale";
 import { AppIcon as Ionicons } from "../icons/AppIcon";
@@ -59,7 +60,7 @@ export const RequestCard: React.FC<Props> = ({ request, onPress }) => {
           <Text className="text-text-secondary text-xs" numberOfLines={1}>
             {request.service}
           </Text>
-          <Text className="text-text-muted text-xs">{request.date}</Text>
+          <Text className="text-text-muted text-xs">{request.date ? formatDate(request.date.slice(0, 10)) : ""}</Text>
         </View>
         <View className="items-end">
           <Text className="text-accent font-bold">₱{request.amount}</Text>

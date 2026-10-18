@@ -16,6 +16,7 @@ import { fetchClients } from '../services/users'
 import { fetchReviews } from '../services/reviews'
 import { downloadCsv } from '../utils/csvExport'
 import { downloadPdf } from '../utils/exportPdf'
+import { friendlyExportRow } from '../utils/exportFormat'
 import { useAuth } from '../context/AuthContext'
 import { useListQuery } from '../hooks/useListQuery'
 
@@ -101,7 +102,7 @@ export default function Reports() {
         setExportError('Nothing to export for this report type')
         return
       }
-      const flat = rowsAcc.map(flattenRow)
+      const flat = rowsAcc.map((row) => friendlyExportRow(flattenRow(row)))
       const filename = `${exportType.toLowerCase()}-export-${new Date().toISOString().slice(0, 10)}.${exportFormat}`
       if (exportFormat === 'pdf') {
         const columns = Object.keys(flat[0])

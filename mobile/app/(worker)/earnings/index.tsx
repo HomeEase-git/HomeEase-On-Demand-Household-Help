@@ -1,5 +1,5 @@
 import React, { useCallback, useState } from "react";
-import { View, Text, ScrollView, Pressable, ActivityIndicator } from "react-native";
+import { View, Text, ScrollView, Pressable, ActivityIndicator, Modal, TextInput, Alert } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useFocusEffect, useRouter } from "expo-router";
 import { AppIcon as Ionicons } from "../../../components/icons/AppIcon";
@@ -10,6 +10,7 @@ import { useTabRefresh } from "../../../hooks/useTabRefresh";
 import { usePullToRefresh } from "../../../hooks/usePullToRefresh";
 import { WeeklyEarningsChart } from "../../../components/worker-home/WeeklyEarningsChart";
 import { weeklyEarnings } from "../../../utils/workerHome";
+import XenditCheckoutModal from "../../../components/payment/XenditCheckoutModal";
 
 type TransactionListItem = {
   id: string;
@@ -27,6 +28,10 @@ export default function EarningsScreen() {
   // What the worker owes HomeEase — commission on cash jobs (the client pays
   // the worker directly) plus any penalties. Netted from the next online payout.
   const [platformDues, setPlatformDues] = useState(0);
+  const [payVisible, setPayVisible] = useState(false);
+  const [payAmount, setPayAmount] = useState("");
+  const [paying, setPaying] = useState(false);
+  const [checkoutUrl, setCheckoutUrl] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -55,6 +60,38 @@ export default function EarningsScreen() {
 
   useTabRefresh("worker:earnings", load);
   const refreshControl = usePullToRefresh(load);
+
+  const startPayment = async (amount?: number) => {
+    if (paying) return;
+    setPaying(true);
+    try {
+      const result = await api.payPlatformDues(amount);
+      setPayVisible(false);
+      if (result.alreadyPaid) {
+        await load();
+        return;
+      }
+      setCheckoutUrl(result.checkoutUrl);
+    } catch (error: any) {
+      Alert.alert("Couldn't start payment", error?.message || "Please try again.");
+    } finally {
+      setPaying(false);
+    }
+  };
+
+  const submitCustomAmount = () => {
+    const amount = Number(payAmount);
+    if (!payAmount.trim() || !Number.isFinite(amount) || amount <= 0) {
+      Alert.alert("Enter an amount", "Type how much you want to pay.");
+      return;
+    }
+    startPayment(amount);
+  };
+
+  const closeCheckout = () => {
+    setCheckoutUrl(null);
+    load();
+  };
 
   const completed = transactions.filter((t) => t.status === "Completed");
   const pending = transactions.filter((t) => t.status === "Pending");
@@ -125,8 +162,26 @@ export default function EarningsScreen() {
               <Text className="text-text-primary font-bold text-2xl mt-2">₱{platformDues.toFixed(2)}</Text>
               <Text className="text-text-secondary text-xs mt-1">
                 This is HomeEase&apos;s platform fee for jobs the client paid you in cash, plus any penalties. It&apos;s
-                taken out of your next online payout automatically, or you can settle it through Support.
+                taken out of your next online payout automatically, or you can pay it now.
               </Text>
+              <Pressable
+                onPress={() => startPayment()}
+                disabled={paying}
+                className="bg-accent rounded-xl py-3 mt-3 items-center"
+              >
+                <Text className="text-white font-semibold">
+                  {paying ? "Opening..." : `Pay ₱${platformDues.toFixed(2)} now`}
+                </Text>
+              </Pressable>
+              <Pressable
+                onPress={() => {
+                  setPayAmount("");
+                  setPayVisible(true);
+                }}
+                className="py-2 mt-1 items-center"
+              >
+                <Text className="text-accent font-semibold text-sm">Pay a different amount</Text>
+              </Pressable>
             </View>
           )}
 
@@ -148,6 +203,42 @@ export default function EarningsScreen() {
           </View>
         </ScrollView>
       )}
+      <Modal visible={payVisible} transparent animationType="fade" onRequestClose={() => setPayVisible(false)}>
+        <View className="flex-1 bg-black/50 justify-center px-6">
+          <View className="bg-white rounded-2xl p-5">
+            <Text className="text-text-primary font-bold text-lg">Pay HomeEase</Text>
+            <Text className="text-text-secondary text-sm mt-1">
+              You owe ₱{platformDues.toFixed(2)}. You can pay any amount from ₱{Math.min(platformDues, Math.max(platformDues / 2, 20)).toFixed(2)} (half of what you owe) up to the full amount.
+            </Text>
+            <TextInput
+              value={payAmount}
+              onChangeText={setPayAmount}
+              keyboardType="decimal-pad"
+              placeholder="Amount in ₱"
+              className="border border-gray-300 rounded-xl px-4 py-3 mt-3 text-text-primary"
+            />
+            <View className="flex-row gap-2 mt-4">
+              <Pressable onPress={() => setPayVisible(false)} className="flex-1 py-3 items-center rounded-xl bg-card">
+                <Text className="text-text-primary font-semibold">Cancel</Text>
+              </Pressable>
+              <Pressable
+                onPress={submitCustomAmount}
+                disabled={paying}
+                className="flex-1 py-3 items-center rounded-xl bg-accent"
+              >
+                <Text className="text-white font-semibold">{paying ? "Opening..." : "Continue"}</Text>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
+      <XenditCheckoutModal
+        visible={checkoutUrl !== null}
+        checkoutUrl={checkoutUrl}
+        onSuccess={closeCheckout}
+        onFailed={closeCheckout}
+        onCancel={closeCheckout}
+      />
     </SafeAreaView>
   );
 }

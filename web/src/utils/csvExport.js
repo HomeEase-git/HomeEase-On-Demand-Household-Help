@@ -6,6 +6,7 @@ function escapeCsvValue(value) {
   return str
 }
 
+// The BOM makes Excel read the file as UTF-8 (otherwise ₱ and — turn into "â±" and "â€”").
 export function downloadCsv(filename, rows) {
   if (!rows || rows.length === 0) return
 
@@ -15,7 +16,7 @@ export function downloadCsv(filename, rows) {
     ...rows.map((row) => headers.map((key) => escapeCsvValue(row[key])).join(',')),
   ]
 
-  const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8;' })
+  const blob = new Blob([String.fromCharCode(0xfeff) + lines.join('\r\n')], { type: 'text/csv;charset=utf-8;' })
   const url = URL.createObjectURL(blob)
   const link = document.createElement('a')
   link.href = url

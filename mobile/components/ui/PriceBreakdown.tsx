@@ -21,6 +21,8 @@ interface PriceBreakdownCardProps {
   tierFee?: number | null;
   // Same-day booking surcharge.
   rushFee?: number | null;
+  // Materials the pro quoted on top of the agreed price (receipt-backed).
+  materialsCost?: number | null;
   addOns?: PriceBreakdownAddOn[];
   vatApplicable?: boolean | null;
   vatRate?: number | null;
@@ -45,6 +47,7 @@ export default function PriceBreakdownCard({
   distanceFeeNote = null,
   tierFee = null,
   rushFee = null,
+  materialsCost = null,
   addOns = [],
   vatApplicable = false,
   vatRate = null,
@@ -106,6 +109,12 @@ export default function PriceBreakdownCard({
             <View className="flex-row items-center justify-between mb-2">
               <Text className="text-text-secondary text-sm">Same-day rush fee</Text>
               <Text className="text-brand font-semibold">{formatPrice(rushFee)}</Text>
+            </View>
+          )}
+          {!!materialsCost && (
+            <View className="flex-row items-center justify-between mb-2">
+              <Text className="text-text-secondary text-sm">Materials</Text>
+              <Text className="text-brand font-semibold">{formatPrice(materialsCost)}</Text>
             </View>
           )}
         </>

@@ -256,3 +256,30 @@ export function describeDistanceFee(
   const km = b.distanceKm != null ? `${b.distanceKm.toFixed(1)} km from the pro; ` : '';
   return `${km}first ${b.freeDistanceKm ?? live.freeDistanceKm} km free, then ₱${b.perKmFee ?? live.perKmFee}/km`;
 }
+
+/**
+ * The itemized lines of a booking's price, so base rate + fees + materials
+ * (+ add-ons) add up to the subtotal the client is billed.
+ *
+ * `firstLog` must be the booking-time PricingLog, never a later quote-stage
+ * one: a quote's own log stores laborCost (the WHOLE agreed estimate, fees
+ * included) in `basePrice`, which made the base rate show the subtotal and
+ * count the distance fee twice. After a quote, the bill is the estimate plus
+ * materials, so materials get their own line. A CUSTOM_QUOTE job has no
+ * upfront estimate: the worker's labor price is its base rate and the
+ * estimate's fee lines don't apply.
+ */
+export function itemizeBookingPrice(
+  firstLog: { basePrice: number; distanceFee?: number | null; tierFee?: number | null; rushFee?: number | null } | null,
+  booking: { estimatedPrice: number; laborCost?: number | null; materialsCost?: number | null }
+) {
+  const hasQuote = booking.laborCost != null && booking.materialsCost != null;
+  const isCustomQuote = hasQuote && booking.estimatedPrice === 0;
+  return {
+    basePrice: isCustomQuote ? (booking.laborCost ?? 0) : (firstLog?.basePrice ?? null),
+    distanceFee: isCustomQuote ? 0 : (firstLog?.distanceFee ?? 0),
+    tierFee: isCustomQuote ? 0 : (firstLog?.tierFee ?? 0),
+    rushFee: isCustomQuote ? 0 : (firstLog?.rushFee ?? 0),
+    materialsCost: hasQuote ? (booking.materialsCost ?? 0) : 0,
+  };
+}

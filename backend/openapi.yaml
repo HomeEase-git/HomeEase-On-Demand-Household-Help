@@ -1457,6 +1457,42 @@ paths:
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
 
+  /payments/dues:
+    post:
+      tags: [Payments]
+      summary: Worker pays down their platform dues (commission owed) through a Xendit invoice
+      description: >
+        Worker only. `amount` omitted means the full balance; otherwise it must be at least half of
+        what is owed (never below Xendit's minimum invoice) and no more than what is owed. One open
+        invoice per worker: if one is still live its checkout URL is returned instead of a new one.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                amount: { type: number, description: Pesos to pay; omit for the full balance }
+      responses:
+        '200':
+          description: OK — returns the Xendit hosted checkout URL, or `alreadyPaid` if it was already settled
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          checkoutUrl: { type: string, format: uri }
+                          debtPaymentId: { type: string }
+                          amount: { type: number }
+                          alreadyPaid: { type: boolean }
+        '400': { description: Nothing owed, or the amount is out of range }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
   /messages/unread-count:
     get:
       tags: [Messages]
@@ -1821,14 +1857,6 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorEnvelope' }
-
-  /app/version:
-    get:
-      tags: [App]
-      summary: Public. Admin-set Android latest/minimum version and update link for the in-app update prompt (nulls mean no prompt)
-      security: []
-      responses:
-        '200': { description: '{ latest, minimum, storeUrl }' }
 
   /bookings/{id}/progress-photos:
     post:
@@ -2365,6 +2393,16 @@ paths:
       summary: Dashboard summary stats (headline KPIs)
       responses:
         '200': { description: OK }
+
+  /admin/dashboard/charts:
+    get:
+      tags: [Admin Analytics]
+      summary: Dashboard charts for one calendar month (Manila time) - bookings per day and per service category
+      parameters:
+        - { name: month, in: query, required: true, schema: { type: string, example: '2026-10' } }
+      responses:
+        '200': { description: OK }
+        '400': { description: month is not YYYY-MM }
 
   /admin/settings:
     get:

@@ -90,6 +90,10 @@ function formatElapsed(ms: number): string {
   return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
 }
 
+// Dates arrive as UTC-midnight ISO strings; show them as "Oct 18, 2026".
+const formatJobDate = (iso: string) =>
+  iso ? new Date(iso).toLocaleDateString("en-PH", { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" }) : "";
+
 export default function JobDetailScreen() {
   const router = useRouter();
   const { jobId } = useLocalSearchParams<{ jobId: string }>();
@@ -278,7 +282,7 @@ export default function JobDetailScreen() {
   const taxEstimate = job.payment?.withholdingTaxAmount ?? 0;
 
   const steps = [
-    { label: "Accepted", timestamp: job.scheduledDate, status: "done" as const },
+    { label: "Accepted", timestamp: formatJobDate(job.scheduledDate), status: "done" as const },
     {
       label: "Arrived",
       timestamp: "",
@@ -347,7 +351,10 @@ export default function JobDetailScreen() {
       load();
     } catch (error) {
       console.error("Start booking error:", error);
-      alertModal.error("Error", "Failed to start this job. Please try again.");
+      // Show the server's reason (no before photo, quote not approved yet…);
+      // the generic text hid what the worker needs to do.
+      const message = error instanceof Error && error.message ? error.message : "Failed to start this job. Please try again.";
+      alertModal.error("Can't start this job", message);
     } finally {
       setSubmitting(false);
     }
@@ -512,7 +519,7 @@ export default function JobDetailScreen() {
       `Reference: ${job.id}`,
       `Service: ${job.service}`,
       `Client: ${job.client.fullName}`,
-      `Date: ${job.scheduledDate}`,
+      `Date: ${formatJobDate(job.scheduledDate)}`,
       ``,
       `Subtotal: ₱${(job.payment?.subtotal ?? amount).toFixed(2)}`,
       `Commission: -₱${commissionEstimate.toFixed(2)}`,
