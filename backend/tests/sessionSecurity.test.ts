@@ -6,7 +6,7 @@ import app from '@/app';
 import prisma from '@config/database';
 import { TokenType } from '@prisma/client';
 import { generateToken } from '@utils/jwt';
-import { generateOtp, hashRefreshToken } from '@utils/otpService';
+import { generateOtp, hashRefreshToken, storeOtp } from '@utils/otpService';
 import {
   checkNewPassword,
   isPasswordBreached,
@@ -298,6 +298,32 @@ describe('Session & login hardening', () => {
       });
       expect(res.status).toBe(400);
       expect(res.body.message).toBe(PERSONAL_INFO_PASSWORD_MESSAGE);
+    });
+
+    it('applies the personal-info rule on reset without using up the code or revealing accounts', async () => {
+      const { user } = await createTestUser('reset-personal', { role: 'CLIENT', fullName: 'Marites Villanueva' });
+      createdUserIds.push(user.id);
+      await storeOtp(user.id, '123456', TokenType.PASSWORD_RESET);
+      const reset = (email: string, newPassword: string, otp = '123456') =>
+        request(app).post('/api/auth/reset-password').send({ email, otp, newPassword });
+
+      // Right code, password with their surname: refused, code still usable.
+      const refused = await reset(user.email, 'Villanueva2025!');
+      expect(refused.status).toBe(400);
+      expect(refused.body.message).toBe(PERSONAL_INFO_PASSWORD_MESSAGE);
+      expect(await prisma.authToken.count({ where: { userId: user.id, type: TokenType.PASSWORD_RESET } })).toBe(1);
+
+      // Wrong code: the same generic answer as for an unknown account, never the personal-info one.
+      const wrongCode = await reset(user.email, 'Villanueva2025!', '000000');
+      expect(wrongCode.status).toBe(400);
+      expect(wrongCode.body.message).toBe('Invalid or expired OTP');
+      const unknown = await reset('e2etest.nobody@homeease.invalid', 'Villanueva2025!');
+      expect(unknown.body.message).toBe('Invalid or expired OTP');
+
+      // A good password with the same code goes through and uses the code up.
+      const ok = await reset(user.email, 'Tr4mpoline-Kettle-92');
+      expect(ok.status).toBe(200);
+      expect(await prisma.authToken.count({ where: { userId: user.id, type: TokenType.PASSWORD_RESET } })).toBe(0);
     });
 
     it('change-password keeps this device signed in and signs out the others', async () => {
