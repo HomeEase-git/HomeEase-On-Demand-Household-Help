@@ -132,7 +132,7 @@ export const signup = async (req: Request, res: Response) => {
       return res.status(400).json(errorResponse(400, 'Invalid email format'));
     }
 
-    const passwordError = await checkNewPassword(password);
+    const passwordError = await checkNewPassword(password, { fullName, email, phone });
     if (passwordError) {
       return res.status(400).json(errorResponse(400, passwordError));
     }

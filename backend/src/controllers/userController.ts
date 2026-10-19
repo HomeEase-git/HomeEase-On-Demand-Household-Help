@@ -162,19 +162,19 @@ export const changePassword = async (req: AuthRequest, res: Response) => {
     
     const user = await prisma.user.findUnique({
       where: { id: req.user.userId },
-      select: { id: true, email: true, role: true, fullName: true, password: true },
+      select: { id: true, email: true, role: true, fullName: true, phone: true, password: true },
     });
-    
+
     if (!user) {
       return res.status(404).json(errorResponse(404, 'User not found'));
     }
-    
+
     const isPasswordValid = await bcrypt.compare(currentPassword, user.password);
     if (!isPasswordValid) {
       return res.status(401).json(errorResponse(401, 'Current password is incorrect'));
     }
 
-    const passwordError = await checkNewPassword(newPassword);
+    const passwordError = await checkNewPassword(newPassword, user);
     if (passwordError) {
       return res.status(400).json(errorResponse(400, passwordError));
     }
@@ -1001,6 +1001,52 @@ export const acceptContract = async (req: AuthRequest, res: Response) => {
       return res.status(400).json(errorResponse(400, `${contractType} does not apply to this account`));
     }
 
+    // Accepting the Service Agreement is what submits a worker's application,
+    // so the application has to be complete BEFORE the acceptance is recorded.
+    // A worker with no open request at all (nothing uploaded yet) is treated
+    // as missing everything — the checks must not depend on a request existing.
+    // A worker who is already submitted/approved is just re-accepting.
+    let submittingRequestId: string | null = null;
+    if (req.user.role === 'WORKER' && contractType === 'WORKER_SERVICE_AGREEMENT') {
+      const profile = await prisma.workerProfile.findUnique({
+        where: { userId: req.user.userId },
+        select: { kycStatus: true, birthDate: true, yearsExperience: true },
+      });
+      const alreadyPastSubmission = profile?.kycStatus === 'SUBMITTED' || profile?.kycStatus === 'APPROVED';
+
+      if (!alreadyPastSubmission) {
+        const verificationRequest = await prisma.verificationRequest.findFirst({
+          where: { userId: req.user.userId, status: 'PENDING' },
+          orderBy: { submittedAt: 'desc' },
+          include: { documents: { select: { documentType: true } } },
+        });
+
+        const submittedTypes = new Set((verificationRequest?.documents ?? []).map((d) => d.documentType));
+        const missingTypes = TIER_1_REQUIRED_DOCUMENT_TYPES.filter((t) => !submittedTypes.has(t));
+        if (missingTypes.length > 0) {
+          return res.status(400).json(
+            errorResponse(
+              400,
+              `Please upload the following before submitting for review: ${missingTypes.join(', ')}.`
+            )
+          );
+        }
+
+        if (!profile?.birthDate) {
+          return res.status(400).json(errorResponse(400, 'Please add your date of birth before submitting.'));
+        }
+        const ageError = workerAgeError(ageInYears(profile.birthDate), await getAppSettings());
+        if (ageError) {
+          return res.status(400).json(errorResponse(400, `${ageError}.`));
+        }
+        if (profile.yearsExperience == null) {
+          return res.status(400).json(errorResponse(400, 'Please enter your years of experience on the resume step before submitting.'));
+        }
+
+        submittingRequestId = verificationRequest?.id ?? null;
+      }
+    }
+
     // Evidence of acceptance (E-Commerce Act, RA 8792): the server's own
     // timestamp, the exact document version shown, and where it came from.
     // Requires TRUST_PROXY behind Render so req.ip is the client, not the proxy.
@@ -1018,60 +1064,19 @@ export const acceptContract = async (req: AuthRequest, res: Response) => {
     // Contract acceptance is the last step of worker onboarding — flip the
     // open verification request (and the denormalized WorkerProfile status)
     // to SUBMITTED so it surfaces for admin review and the app can gate the
-    // worker into the waiting screen instead of the tabs.
-    if (req.user.role === 'WORKER' && contractType === 'WORKER_SERVICE_AGREEMENT') {
-      const verificationRequest = await prisma.verificationRequest.findFirst({
-        where: { userId: req.user.userId, status: 'PENDING' },
-        orderBy: { submittedAt: 'desc' },
-        include: { documents: { select: { documentType: true } } },
-      });
-
-      if (verificationRequest) {
-        // Previously ANY document set — even zero documents — could reach
-        // the admin review queue as long as the worker got through the
-        // contract-acceptance step, since approveVerification's document
-        // check only ever gated APPROVAL, not entry into the queue itself.
-        // That left every incomplete application sitting in front of an
-        // admin who'd just reject it, instead of telling the worker what's
-        // actually missing right when they could still fix it.
-        const submittedTypes = new Set(verificationRequest.documents.map((d) => d.documentType));
-        const missingTypes = TIER_1_REQUIRED_DOCUMENT_TYPES.filter((t) => !submittedTypes.has(t));
-
-        if (missingTypes.length > 0) {
-          return res.status(400).json(
-            errorResponse(
-              400,
-              `Please upload the following before submitting for review: ${missingTypes.join(', ')}.`
-            )
-          );
-        }
-
-        const profile = await prisma.workerProfile.findUnique({
+    // worker into the waiting screen instead of the tabs. The application was
+    // validated as complete above.
+    if (submittingRequestId) {
+      await prisma.$transaction([
+        prisma.verificationRequest.update({
+          where: { id: submittingRequestId },
+          data: { status: 'SUBMITTED' },
+        }),
+        prisma.workerProfile.updateMany({
           where: { userId: req.user.userId },
-          select: { birthDate: true, yearsExperience: true },
-        });
-        if (!profile?.birthDate) {
-          return res.status(400).json(errorResponse(400, 'Please add your date of birth before submitting.'));
-        }
-        const ageError = workerAgeError(ageInYears(profile.birthDate), await getAppSettings());
-        if (ageError) {
-          return res.status(400).json(errorResponse(400, `${ageError}.`));
-        }
-        if (profile.yearsExperience == null) {
-          return res.status(400).json(errorResponse(400, 'Please enter your years of experience on the resume step before submitting.'));
-        }
-
-        await prisma.$transaction([
-          prisma.verificationRequest.update({
-            where: { id: verificationRequest.id },
-            data: { status: 'SUBMITTED' },
-          }),
-          prisma.workerProfile.updateMany({
-            where: { userId: req.user.userId },
-            data: { kycStatus: 'SUBMITTED', kycSubmittedAt: new Date() },
-          }),
-        ]);
-      }
+          data: { kycStatus: 'SUBMITTED', kycSubmittedAt: new Date() },
+        }),
+      ]);
     }
 
     return res.status(201).json({

@@ -15,7 +15,7 @@ export function validateEmail(email: string): { valid: boolean; error?: string }
 }
 
 // Password validation — keep in step with backend/src/utils/passwordPolicy.ts
-// (the server also rejects passwords found in known data breaches).
+// (the server also rejects passwords that are too common or easy to guess).
 export const PASSWORD_MIN_LENGTH = 10;
 
 export function isValidPassword(password: string): boolean {

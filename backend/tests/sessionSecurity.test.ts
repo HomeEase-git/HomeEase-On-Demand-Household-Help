@@ -7,7 +7,12 @@ import prisma from '@config/database';
 import { TokenType } from '@prisma/client';
 import { generateToken } from '@utils/jwt';
 import { generateOtp, hashRefreshToken } from '@utils/otpService';
-import { checkNewPassword, isPasswordBreached, BREACHED_PASSWORD_MESSAGE } from '@utils/passwordPolicy';
+import {
+  checkNewPassword,
+  isPasswordBreached,
+  BREACHED_PASSWORD_MESSAGE,
+  PERSONAL_INFO_PASSWORD_MESSAGE,
+} from '@utils/passwordPolicy';
 import { MAX_LOGIN_ATTEMPTS } from '@utils/loginAttemptLimiter';
 import { revokeSessionIds, revokeUserSessions } from '@utils/tokenRevocation';
 import { authenticateSocket, initSocket } from '../src/socket';
@@ -264,6 +269,35 @@ describe('Session & login hardening', () => {
 
     it('rejects passwords longer than bcrypt can use', async () => {
       expect(await checkNewPassword(`A1${'x'.repeat(80)}`)).toMatch(/at most 72/);
+    });
+
+    it('rejects common passwords offline, including look-alike spellings', async () => {
+      for (const weak of ['Password123', 'P@ssw0rd2024', 'Qwerty12345', 'Welcome12345', 'Homeease2025']) {
+        expect(await checkNewPassword(weak)).toBe(BREACHED_PASSWORD_MESSAGE);
+      }
+      // A common word buried in something longer is not a common password.
+      expect(await checkNewPassword('Tr4mpoline-Kettle-92')).toBeNull();
+    });
+
+    it('rejects a password that contains the name, email or phone number', async () => {
+      const info = { fullName: 'Juan Dela Cruz', email: 'juan.delacruz88@gmail.com', phone: '09171234567' };
+      expect(await checkNewPassword('Delacruz2025x!', info)).toBe(PERSONAL_INFO_PASSWORD_MESSAGE);
+      expect(await checkNewPassword('Zq8delacruz88Wp', info)).toBe(PERSONAL_INFO_PASSWORD_MESSAGE);
+      expect(await checkNewPassword('Xk1171234567Qz', info)).toBe(PERSONAL_INFO_PASSWORD_MESSAGE);
+      // Short name parts ("Juan", "Dela") alone are not enough to trip it.
+      expect(await checkNewPassword('Juan-Kettle-Orbit-71', info)).toBeNull();
+    });
+
+    it('applies the personal-info rule at sign-up', async () => {
+      const res = await request(app).post('/api/auth/signup').send({
+        fullName: 'Marites Villanueva',
+        email: `e2etest.pi.${Date.now()}@homeease.invalid`,
+        phone: '09171234567',
+        password: 'Villanueva2025!',
+        role: 'CLIENT',
+      });
+      expect(res.status).toBe(400);
+      expect(res.body.message).toBe(PERSONAL_INFO_PASSWORD_MESSAGE);
     });
 
     it('change-password keeps this device signed in and signs out the others', async () => {

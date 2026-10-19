@@ -51,25 +51,35 @@ describe('Booking flow — arrival geofencing, quote submission, dispute resolut
 
   describe('arrival geofencing', () => {
     it('rejects check-in when the worker is outside the geofence radius', async () => {
-      const booking = await createTestBooking({
-        clientId,
-        workerId,
-        status: 'ACCEPTED',
-        clientLat: CLIENT_LOCATION.lat,
-        clientLng: CLIENT_LOCATION.lng,
-      });
-      createdBookingIds.push(booking.id);
+      // The radius is an admin setting (0 turns the check off), so pin it here
+      // instead of relying on whatever the database currently holds.
+      const settings = await prisma.appSettings.upsert({ where: { id: 'singleton' }, update: {}, create: { id: 'singleton' } });
+      await prisma.appSettings.update({ where: { id: 'singleton' }, data: { geofenceRadiusMeters: 150 } });
+      invalidateAppSettingsCache();
+      try {
+        const booking = await createTestBooking({
+          clientId,
+          workerId,
+          status: 'ACCEPTED',
+          clientLat: CLIENT_LOCATION.lat,
+          clientLng: CLIENT_LOCATION.lng,
+        });
+        createdBookingIds.push(booking.id);
 
-      const res = await request(app)
-        .patch(`/api/bookings/${booking.id}/arrive`)
-        .set('Authorization', `Bearer ${workerToken}`)
-        .send({ lat: FAR_WORKER_LOCATION.lat, lng: FAR_WORKER_LOCATION.lng });
+        const res = await request(app)
+          .patch(`/api/bookings/${booking.id}/arrive`)
+          .set('Authorization', `Bearer ${workerToken}`)
+          .send({ lat: FAR_WORKER_LOCATION.lat, lng: FAR_WORKER_LOCATION.lng });
 
-      expect(res.status).toBe(409);
-      expect(res.body.message).toMatch(/must be within/i);
+        expect(res.status).toBe(409);
+        expect(res.body.message).toMatch(/must be within/i);
 
-      const dbBooking = await prisma.booking.findUnique({ where: { id: booking.id } });
-      expect(dbBooking?.workerArrivedAt).toBeNull();
+        const dbBooking = await prisma.booking.findUnique({ where: { id: booking.id } });
+        expect(dbBooking?.workerArrivedAt).toBeNull();
+      } finally {
+        await prisma.appSettings.update({ where: { id: 'singleton' }, data: { geofenceRadiusMeters: settings.geofenceRadiusMeters } });
+        invalidateAppSettingsCache();
+      }
     });
 
     it('accepts check-in when the worker is within the geofence radius', async () => {

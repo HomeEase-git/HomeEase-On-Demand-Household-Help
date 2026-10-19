@@ -214,6 +214,22 @@ describe('worker operations overhaul', () => {
       expect(close.status).toBe(409);
     });
 
+    it('refuses to accept a second job that starts at the same time as an accepted one', async () => {
+      const date = addDays(phTodayStart(), 7);
+      await seedBooking({ scheduledDate: date, scheduledTime: '13:00' });
+      const clash = await seedBooking({ scheduledDate: date, scheduledTime: '13:00', status: 'PENDING' });
+      const other = await seedBooking({ scheduledDate: date, scheduledTime: '14:00', status: 'PENDING' });
+
+      const refused = await request(app).patch(`/api/bookings/${clash.id}/accept`).set('Authorization', `Bearer ${workerToken}`);
+      expect(refused.status).toBe(409);
+      expect(refused.body.code).toBe('START_TIME_CLASH');
+      expect((await prisma.booking.findUniqueOrThrow({ where: { id: clash.id } })).status).toBe('PENDING');
+
+      // A different start time the same day is fine.
+      const ok = await request(app).patch(`/api/bookings/${other.id}/accept`).set('Authorization', `Bearer ${workerToken}`);
+      expect(ok.status).toBe(200);
+    });
+
     it('saves the weekly schedule as days of the week', async () => {
       const res = await request(app)
         .put('/api/workers/me/weekly-schedule')
@@ -420,6 +436,92 @@ describe('worker operations overhaul', () => {
       const moved = await prisma.booking.findUniqueOrThrow({ where: { id: booking.id } });
       expect(isoDay(moved.scheduledDate)).toBe(date);
       expect(moved.scheduledTime).toBe('14:00');
+    });
+
+    const askAs = (token: string, bookingId: string, date: string, time = '14:00') =>
+      request(app)
+        .patch(`/api/bookings/${bookingId}/request-reschedule`)
+        .set('Authorization', `Bearer ${token}`)
+        .send({ date, time });
+    const respondAs = (token: string, bookingId: string, accept: boolean) =>
+      request(app)
+        .patch(`/api/bookings/${bookingId}/reschedule-request/respond`)
+        .set('Authorization', `Bearer ${token}`)
+        .send({ accept });
+    const withdrawAs = (token: string, bookingId: string) =>
+      request(app).patch(`/api/bookings/${bookingId}/reschedule-request/withdraw`).set('Authorization', `Bearer ${token}`);
+
+    it('refuses a request from either side once the worker has arrived', async () => {
+      const booking = await seedBooking({ workerArrivedAt: new Date() });
+      const date = isoDay(addDays(phTodayStart(), 9));
+
+      expect((await askAs(clientToken, booking.id, date)).status).toBe(409);
+      expect((await askAs(workerToken, booking.id, date)).status).toBe(409);
+    });
+
+    it('refuses a second request while one is still open', async () => {
+      const booking = await seedBooking({});
+      const date = isoDay(addDays(phTodayStart(), 9));
+
+      expect((await askAs(workerToken, booking.id, date)).status).toBe(200);
+      expect((await askAs(clientToken, booking.id, date, '15:00')).status).toBe(409);
+      const row = await prisma.booking.findUniqueOrThrow({ where: { id: booking.id } });
+      expect(row.rescheduleRequestedBy).toBe('WORKER');
+      expect(row.requestedScheduledTime).toBe('14:00');
+    });
+
+    it("won't accept a proposal whose time has already passed, and leaves the booking alone", async () => {
+      const yesterday = addDays(phTodayStart(), -1);
+      const booking = await seedBooking({
+        rescheduleRequestedBy: 'WORKER',
+        rescheduleRequestedAt: new Date(),
+        requestedScheduledDate: yesterday,
+        requestedScheduledTime: '10:00',
+      });
+
+      const res = await respondAs(clientToken, booking.id, true);
+      expect(res.status).toBe(409);
+
+      const row = await prisma.booking.findUniqueOrThrow({ where: { id: booking.id } });
+      expect(isoDay(row.scheduledDate)).toBe(isoDay(booking.scheduledDate));
+      expect(row.scheduledTime).toBe('09:00');
+      // Still open, so the client can decline it.
+      expect(row.rescheduleRequestRespondedAt).toBeNull();
+      expect((await respondAs(clientToken, booking.id, false)).status).toBe(200);
+    });
+
+    it("won't accept a proposal once the worker has arrived", async () => {
+      const booking = await seedBooking({
+        workerArrivedAt: new Date(),
+        rescheduleRequestedBy: 'WORKER',
+        rescheduleRequestedAt: new Date(),
+        requestedScheduledDate: addDays(phTodayStart(), 9),
+        requestedScheduledTime: '14:00',
+      });
+
+      expect((await respondAs(clientToken, booking.id, true)).status).toBe(409);
+      const row = await prisma.booking.findUniqueOrThrow({ where: { id: booking.id } });
+      expect(row.scheduledTime).toBe('09:00');
+    });
+
+    it('lets only the requester withdraw, tells the other side, and only once', async () => {
+      const booking = await seedBooking({});
+      const date = isoDay(addDays(phTodayStart(), 9));
+      expect((await askAs(workerToken, booking.id, date)).status).toBe(200);
+
+      expect((await withdrawAs(clientToken, booking.id)).status).toBe(403);
+      expect((await withdrawAs(workerToken, booking.id)).status).toBe(200);
+
+      const row = await prisma.booking.findUniqueOrThrow({ where: { id: booking.id } });
+      expect(row.rescheduleRequestRespondedAt).not.toBeNull();
+      expect(row.rescheduleRequestAccepted).toBeNull();
+      expect(
+        await prisma.notification.count({
+          where: { userId: clientId, relatedId: booking.id, title: 'Reschedule Request Withdrawn' },
+        })
+      ).toBe(1);
+
+      expect((await withdrawAs(workerToken, booking.id)).status).toBe(409);
     });
   });
 
