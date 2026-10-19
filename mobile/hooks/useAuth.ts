@@ -36,6 +36,9 @@ export function useAuth() {
         id: response.id,
         name: response.name,
         email: response.email,
+        // The Profile tab reads the phone from here; without it an edited
+        // phone looked lost after every fresh sign-in.
+        phone: response.phone ?? undefined,
         role: response.role,
         avatar: response.avatar,
         kycStatus: response.kycStatus,
@@ -66,6 +69,9 @@ export function useAuth() {
         id: response.id,
         name: response.name,
         email: response.email,
+        // The Profile tab reads the phone from here; without it an edited
+        // phone looked lost after every fresh sign-in.
+        phone: response.phone ?? undefined,
         role: response.role,
         avatar: response.avatar,
         kycStatus: response.kycStatus,
@@ -95,6 +101,9 @@ export function useAuth() {
         id: response.id,
         name: response.name,
         email: response.email,
+        // The Profile tab reads the phone from here; without it an edited
+        // phone looked lost after every fresh sign-in.
+        phone: response.phone ?? undefined,
         role: response.role,
         avatar: response.avatar,
         kycStatus: response.kycStatus,
