@@ -2,19 +2,22 @@ jest.mock('@services/xenditService', () => ({
   ...jest.requireActual('@services/xenditService'),
   createInvoice: jest.fn(),
   retrieveInvoice: jest.fn(),
+  findInvoiceByExternalId: jest.fn(),
 }));
 
 import prisma from '@config/database';
 import {
   createDebtPaymentInvoice,
   finalizeDebtPayment,
+  reconcilePendingDebtPayment,
+  reconcileStalePendingDebtPayments,
   resolveAmount,
   DebtPaymentError,
 } from '@services/debtPaymentService';
 import { createTestUser, deleteTestUser } from './helpers';
 import { ownerDb } from './ownerDb';
 
-const { createInvoice, retrieveInvoice } = require('@services/xenditService');
+const { createInvoice, retrieveInvoice, findInvoiceByExternalId } = require('@services/xenditService');
 
 describe('Worker pays platform dues through Xendit', () => {
   let userId: string;
@@ -36,6 +39,8 @@ describe('Worker pays platform dues through Xendit', () => {
   beforeEach(async () => {
     (createInvoice as jest.Mock).mockReset();
     (retrieveInvoice as jest.Mock).mockReset();
+    // Unless a test says otherwise, Xendit can't be asked, so nothing is retired by accident.
+    (findInvoiceByExternalId as jest.Mock).mockReset().mockRejectedValue(new Error('xendit unreachable'));
     let n = 0;
     (createInvoice as jest.Mock).mockImplementation(async () => ({
       id: `inv_${Date.now()}_${n++}`,
@@ -161,6 +166,129 @@ describe('Worker pays platform dues through Xendit', () => {
       const p = await profile();
       expect(p.commissionOwed).toBe(0);
       expect(p.compensationCredit).toBe(250);
+    });
+  });
+
+  describe('an interrupted checkout (row saved, invoice id never saved)', () => {
+    const MIN = 60 * 1000;
+    /** A PENDING row with no invoice id, as left behind by a server that stopped mid-checkout. */
+    const stuckRow = (ageMinutes: number, amount = 150) =>
+      ownerDb.debtPayment.create({
+        data: { workerProfileId, amount, createdAt: new Date(Date.now() - ageMinutes * MIN) },
+      });
+
+    it('leaves a recent row alone because another request may still be talking to Xendit', async () => {
+      await setOwed(300);
+      await stuckRow(1);
+      await expect(createDebtPaymentInvoice(userId, 150)).rejects.toThrow(/already being set up/);
+      expect(findInvoiceByExternalId).not.toHaveBeenCalled();
+      expect(createInvoice).not.toHaveBeenCalled();
+    });
+
+    it('attaches the invoice Xendit already created, so it is paid once and credited', async () => {
+      await setOwed(300);
+      const row = await stuckRow(10);
+      (findInvoiceByExternalId as jest.Mock).mockResolvedValue({
+        id: 'inv_orphan_1',
+        status: 'PENDING',
+        invoice_url: 'https://checkout.xendit.co/web/orphan',
+      });
+      (retrieveInvoice as jest.Mock).mockResolvedValue({ status: 'PENDING', invoice_url: 'https://checkout.xendit.co/web/orphan' });
+
+      const result = await createDebtPaymentInvoice(userId, 150);
+
+      expect(result).toMatchObject({ debtPaymentId: row.id, checkoutUrl: 'https://checkout.xendit.co/web/orphan' });
+      expect(createInvoice).not.toHaveBeenCalled();
+      expect((await prisma.debtPayment.findUniqueOrThrow({ where: { id: row.id } })).xenditInvoiceId).toBe('inv_orphan_1');
+    });
+
+    it('retires the row when Xendit has no invoice for it, then starts a fresh one', async () => {
+      await setOwed(300);
+      const row = await stuckRow(10);
+      (findInvoiceByExternalId as jest.Mock).mockResolvedValue(null);
+
+      const result = (await createDebtPaymentInvoice(userId, 150)) as { debtPaymentId: string };
+
+      const old = await prisma.debtPayment.findUniqueOrThrow({ where: { id: row.id } });
+      expect(old.status).toBe('FAILED');
+      expect(old.failureReason).toMatch(/interrupted/);
+      expect(result.debtPaymentId).not.toBe(row.id);
+      expect(createInvoice).toHaveBeenCalledTimes(1);
+    });
+
+    it('does not retire the row when Xendit cannot be asked', async () => {
+      await setOwed(300);
+      const row = await stuckRow(10);
+      // beforeEach already makes the lookup reject.
+      await expect(createDebtPaymentInvoice(userId, 150)).rejects.toThrow(/unreachable/);
+      expect((await prisma.debtPayment.findUniqueOrThrow({ where: { id: row.id } })).status).toBe('PENDING');
+      expect(createInvoice).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('a missed Xendit webhook', () => {
+    async function openInvoice(owed: number, amount: number) {
+      await setOwed(owed);
+      return ((await createDebtPaymentInvoice(userId, amount)) as { debtPaymentId: string }).debtPaymentId;
+    }
+    const paidNow = (amount: number) => ({ status: 'PAID', paid_amount: amount, paid_at: new Date().toISOString() });
+
+    it('books a payment Xendit says is paid, once', async () => {
+      const id = await openInvoice(300, 150);
+      (retrieveInvoice as jest.Mock).mockResolvedValue(paidNow(150));
+
+      expect(await reconcilePendingDebtPayment(id)).toBe('paid');
+      expect((await profile()).commissionOwed).toBe(150);
+      expect((await prisma.debtPayment.findUniqueOrThrow({ where: { id } })).status).toBe('PAID');
+
+      // Running it again changes nothing.
+      expect(await reconcilePendingDebtPayment(id)).toBe('pending');
+      expect((await profile()).commissionOwed).toBe(150);
+      expect(await prisma.debtLedgerEntry.count({ where: { workerProfileId, type: 'DEBT_PAYMENT' } })).toBe(1);
+    });
+
+    it('retires an invoice that expired, so a new one can be started', async () => {
+      const id = await openInvoice(300, 150);
+      (retrieveInvoice as jest.Mock).mockResolvedValue({ status: 'EXPIRED' });
+
+      expect(await reconcilePendingDebtPayment(id)).toBe('failed');
+      expect((await prisma.debtPayment.findUniqueOrThrow({ where: { id } })).status).toBe('EXPIRED');
+      expect((await profile()).commissionOwed).toBe(300);
+    });
+
+    it('leaves a still-open invoice alone', async () => {
+      const id = await openInvoice(300, 150);
+      (retrieveInvoice as jest.Mock).mockResolvedValue({ status: 'PENDING' });
+
+      expect(await reconcilePendingDebtPayment(id)).toBe('pending');
+      expect((await prisma.debtPayment.findUniqueOrThrow({ where: { id } })).status).toBe('PENDING');
+    });
+
+    it('credits a payment made on an invoice whose id was never saved', async () => {
+      await setOwed(300);
+      const row = await ownerDb.debtPayment.create({
+        data: { workerProfileId, amount: 150, createdAt: new Date(Date.now() - 10 * 60 * 1000) },
+      });
+      (findInvoiceByExternalId as jest.Mock).mockResolvedValue({ id: 'inv_orphan_paid', status: 'PAID' });
+      (retrieveInvoice as jest.Mock).mockResolvedValue(paidNow(150));
+
+      expect(await reconcilePendingDebtPayment(row.id)).toBe('paid');
+      expect((await profile()).commissionOwed).toBe(150);
+    });
+
+    it('the sweep step reconciles only payments older than the cutoff', async () => {
+      const oldId = await openInvoice(300, 150);
+      await ownerDb.debtPayment.update({ where: { id: oldId }, data: { createdAt: new Date(Date.now() - 2 * 60 * 60 * 1000) } });
+      (retrieveInvoice as jest.Mock).mockResolvedValue(paidNow(150));
+      const cutoff = () => new Date(Date.now() - 60 * 60 * 1000);
+
+      expect(await reconcileStalePendingDebtPayments(cutoff())).toContainEqual({ debtPaymentId: oldId, result: 'paid' });
+
+      // A fresh row is newer than the cutoff and is not touched.
+      const freshId = await openInvoice(300, 150);
+      const again = await reconcileStalePendingDebtPayments(cutoff());
+      expect(again.find((c) => c.debtPaymentId === freshId)).toBeUndefined();
+      expect((await prisma.debtPayment.findUniqueOrThrow({ where: { id: freshId } })).status).toBe('PENDING');
     });
   });
 });

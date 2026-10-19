@@ -59,6 +59,26 @@ export async function retrieveInvoice(invoiceId: string) {
   return res.data;
 }
 
+/**
+ * The invoice created for one of our rows, found by the external_id it was
+ * created with — for a row whose invoice id was never saved (the server stopped
+ * between createInvoice and saving it). Returns null when Xendit has none.
+ *
+ * UNCONFIRMED against a live response: this uses Xendit's list-invoices
+ * `external_id` filter and tolerates both a bare array and a `{ data: [...] }`
+ * wrapper. Try it in test mode before relying on it.
+ */
+export async function findInvoiceByExternalId(externalId: string): Promise<{ id: string; status?: string; invoice_url?: string } | null> {
+  const res = await secretClient().get('/v2/invoices', { params: { external_id: externalId } });
+  const list: Array<{ id?: string; external_id?: string; status?: string; invoice_url?: string }> = Array.isArray(res.data)
+    ? res.data
+    : Array.isArray(res.data?.data)
+      ? res.data.data
+      : [];
+  const match = list.find((invoice) => invoice.id && (!invoice.external_id || invoice.external_id === externalId));
+  return match ? { id: match.id as string, status: match.status, invoice_url: match.invoice_url } : null;
+}
+
 // Xendit's fixed reason enum for the Refunds API — arbitrary client-supplied
 // text (e.g. a client's free-text cancellation reason) does not fit here and
 // must be mapped to 'OTHERS'; the free text itself still belongs in our own
