@@ -27,6 +27,7 @@ import {
 import { avatarUpload, uploadAvatar, kycFileUpload, uploadKycFile } from '../controllers/uploadController';
 import { authMiddleware } from '../middleware/auth';
 import { restrictTo } from '../middleware/role';
+import { requireVerifiedEmail } from '../middleware/verifiedEmail';
 import {
   validateUpdateUserProfile,
   validateChangePassword,
@@ -86,13 +87,14 @@ router.post('/me/avatar', avatarUpload, uploadAvatar);
 // existing role gate; previously any authenticated role (including ADMIN)
 // could create a bogus WORKER_ONBOARDING verification request for themselves.
 router.get('/me/kyc-documents', getKYCDocuments);
-router.post('/me/kyc-documents', restrictTo('CLIENT', 'WORKER'), validateSubmitKYCDocument, submitKYCDocument);
-router.post('/me/kyc-documents/upload', restrictTo('CLIENT', 'WORKER'), kycFileUpload, uploadKycFile);
+router.post('/me/kyc-documents', restrictTo('CLIENT', 'WORKER'), requireVerifiedEmail, validateSubmitKYCDocument, submitKYCDocument);
+router.post('/me/kyc-documents/upload', restrictTo('CLIENT', 'WORKER'), requireVerifiedEmail, kycFileUpload, uploadKycFile);
 
 // Contract acceptance
 router.post(
   '/me/contract-acceptance',
   restrictTo('CLIENT', 'WORKER'),
+  requireVerifiedEmail,
   validateSubmitContractAcceptance,
   acceptContract
 );
