@@ -74,12 +74,18 @@ const COMMON_PASSWORD_STEMS = new Set([
  * letters, then everything that isn't a letter is dropped.
  */
 function commonStem(password: string): string {
-  return password
-    .toLowerCase()
-    // Trailing/leading digits and symbols ("…2024!") go first so they aren't
-    // mistaken for look-alike letters below.
-    .replace(/^[^a-z@$]*/, '')
-    .replace(/[^a-z@$]*$/, '')
+  // Leading/trailing digits and symbols ("…2024!") go first so they aren't
+  // mistaken for look-alike letters below. Trimmed with a loop rather than an
+  // end-anchored regex, which backtracks badly on long untrusted input.
+  const isLetterOrLookalike = (ch: string) => (ch >= 'a' && ch <= 'z') || ch === '@' || ch === '$';
+  const lowered = password.toLowerCase();
+  let start = 0;
+  let end = lowered.length;
+  while (start < end && !isLetterOrLookalike(lowered[start])) start++;
+  while (end > start && !isLetterOrLookalike(lowered[end - 1])) end--;
+
+  return lowered
+    .slice(start, end)
     .replace(/[@4]/g, 'a')
     .replace(/0/g, 'o')
     .replace(/3/g, 'e')
@@ -98,6 +104,12 @@ export interface PasswordPersonalInfo {
 const MIN_PERSONAL_TOKEN_LENGTH = 5;
 const MIN_PHONE_DIGITS = 7;
 
+function withoutTrailingDigits(value: string): string {
+  let end = value.length;
+  while (end > 0 && value[end - 1] >= '0' && value[end - 1] <= '9') end--;
+  return value.slice(0, end);
+}
+
 /** True when the password contains a real chunk of the person's own name, email or phone. */
 export function containsPersonalInfo(password: string, info: PasswordPersonalInfo): boolean {
   const lowered = password.toLowerCase();
@@ -110,7 +122,7 @@ export function containsPersonalInfo(password: string, info: PasswordPersonalInf
     emailParts.join(''),
   ]
     // "delacruz88" should also catch "delacruz2025".
-    .flatMap((t) => [t, t.replace(/\d+$/, '')])
+    .flatMap((t) => [t, withoutTrailingDigits(t)])
     .filter((t) => t.length >= MIN_PERSONAL_TOKEN_LENGTH);
   if (tokens.some((t) => lowered.includes(t))) return true;
 
