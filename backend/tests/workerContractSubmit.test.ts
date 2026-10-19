@@ -93,6 +93,23 @@ describe('POST /api/users/me/contract-acceptance (worker submission)', () => {
     expect(updated?.status).toBe('SUBMITTED');
   });
 
+  it('does not treat a worker merely marked SUBMITTED as exempt from the checks', async () => {
+    // The old upload endpoint used to set SUBMITTED after a single file.
+    const { userId, token } = await newWorker('contract-legacy-submitted');
+    const legacy = await prisma.verificationRequest.create({
+      data: { userId, type: 'WORKER_ONBOARDING', status: 'PENDING' },
+    });
+    await prisma.kycDocument.create({
+      data: { verificationRequestId: legacy.id, documentType: 'GOVERNMENT_ID_FRONT', fileUrl: 'https://example.invalid/id.jpg', status: 'PENDING' },
+    });
+    await prisma.workerProfile.update({ where: { userId }, data: { kycStatus: 'SUBMITTED' } });
+
+    const res = await accept(token);
+
+    expect(res.status).toBe(400);
+    expect(res.body.message).toContain('SELFIE');
+  });
+
   it('lets an already-approved worker re-accept without re-running the checks', async () => {
     const { userId, token } = await newWorker('contract-approved');
     await prisma.workerProfile.update({ where: { userId }, data: { kycStatus: 'APPROVED' } });

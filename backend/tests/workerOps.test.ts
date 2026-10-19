@@ -230,6 +230,20 @@ describe('worker operations overhaul', () => {
       expect(ok.status).toBe(200);
     });
 
+    it('lets only one of two same-start jobs be accepted when both are sent at once', async () => {
+      const date = addDays(phTodayStart(), 8);
+      const a = await seedBooking({ scheduledDate: date, scheduledTime: '16:00', status: 'PENDING' });
+      const b = await seedBooking({ scheduledDate: date, scheduledTime: '16:00', status: 'PENDING' });
+
+      const [ra, rb] = await Promise.all(
+        [a, b].map((x) => request(app).patch(`/api/bookings/${x.id}/accept`).set('Authorization', `Bearer ${workerToken}`)),
+      );
+
+      expect([ra.status, rb.status].sort()).toEqual([200, 409]);
+      const accepted = await prisma.booking.count({ where: { id: { in: [a.id, b.id] }, status: 'ACCEPTED' } });
+      expect(accepted).toBe(1);
+    });
+
     it('saves the weekly schedule as days of the week', async () => {
       const res = await request(app)
         .put('/api/workers/me/weekly-schedule')
@@ -502,6 +516,30 @@ describe('worker operations overhaul', () => {
       expect((await respondAs(clientToken, booking.id, true)).status).toBe(409);
       const row = await prisma.booking.findUniqueOrThrow({ where: { id: booking.id } });
       expect(row.scheduledTime).toBe('09:00');
+    });
+
+    it('does not move the booking if the worker arrives while the client is accepting', async () => {
+      const booking = await seedBooking({
+        rescheduleRequestedBy: 'WORKER',
+        rescheduleRequestedAt: new Date(),
+        requestedScheduledDate: addDays(phTodayStart(), 9),
+        requestedScheduledTime: '14:00',
+      });
+
+      const [answer] = await Promise.all([
+        respondAs(clientToken, booking.id, true),
+        prisma.booking.update({ where: { id: booking.id }, data: { workerArrivedAt: new Date() } }),
+      ]);
+
+      const row = await prisma.booking.findUniqueOrThrow({ where: { id: booking.id } });
+      // Either the accept won (moved before the arrival) or it was refused —
+      // but never both "moved" and "arrived".
+      if (answer.status === 200) {
+        expect(row.scheduledTime).toBe('14:00');
+      } else {
+        expect(answer.status).toBe(409);
+        expect(row.scheduledTime).toBe('09:00');
+      }
     });
 
     it('lets only the requester withdraw, tells the other side, and only once', async () => {

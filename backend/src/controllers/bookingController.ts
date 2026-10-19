@@ -1243,6 +1243,10 @@ export const acceptBooking = async (req: AuthRequest, res: Response) => {
     // Wrap in transaction to prevent double-counting
     try {
       const result = await prisma.$transaction(async (tx) => {
+        // Serialise this worker's accepts: two jobs accepted at the same moment
+        // must not both pass the same-start-time check below.
+        await tx.$queryRaw`SELECT "id" FROM "WorkerProfile" WHERE "userId" = ${currentUserId} FOR UPDATE`;
+
         // Check current capacity
         const workerProfile = await tx.workerProfile.findUnique({
           where: { userId: currentUserId },
@@ -2255,6 +2259,12 @@ export const respondToRescheduleRequest = async (req: AuthRequest, res: Response
         workerNoShowFlaggedAt: null,
         rescheduleRequestRespondedAt: new Date(),
         rescheduleRequestAccepted: true,
+      }, {
+        // Only move it if the worker still hasn't arrived and this is still the
+        // same open request (not withdrawn or auto-declined since the read).
+        workerArrivedAt: null,
+        rescheduleRequestedAt: booking.rescheduleRequestedAt,
+        rescheduleRequestRespondedAt: null,
       });
     } else {
       await prisma.booking.update({

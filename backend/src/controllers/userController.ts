@@ -1005,18 +1005,20 @@ export const acceptContract = async (req: AuthRequest, res: Response) => {
     // so the application has to be complete BEFORE the acceptance is recorded.
     // A worker with no open request at all (nothing uploaded yet) is treated
     // as missing everything — the checks must not depend on a request existing.
-    // A worker who is already submitted/approved is just re-accepting.
-    let submittingRequestId: string | null = null;
+    // Only an already-approved worker is just re-accepting. A worker who is
+    // merely marked SUBMITTED is not exempt: the old upload endpoint used to set
+    // that after a single file, so it can't be taken as proof of a complete
+    // application — the documents themselves are checked.
+    let submittingRequest: { id: string; needsFlip: boolean } | null = null;
     if (req.user.role === 'WORKER' && contractType === 'WORKER_SERVICE_AGREEMENT') {
       const profile = await prisma.workerProfile.findUnique({
         where: { userId: req.user.userId },
         select: { kycStatus: true, birthDate: true, yearsExperience: true },
       });
-      const alreadyPastSubmission = profile?.kycStatus === 'SUBMITTED' || profile?.kycStatus === 'APPROVED';
 
-      if (!alreadyPastSubmission) {
+      if (profile?.kycStatus !== 'APPROVED') {
         const verificationRequest = await prisma.verificationRequest.findFirst({
-          where: { userId: req.user.userId, status: 'PENDING' },
+          where: { userId: req.user.userId, status: { in: ['PENDING', 'SUBMITTED'] } },
           orderBy: { submittedAt: 'desc' },
           include: { documents: { select: { documentType: true } } },
         });
@@ -1043,7 +1045,14 @@ export const acceptContract = async (req: AuthRequest, res: Response) => {
           return res.status(400).json(errorResponse(400, 'Please enter your years of experience on the resume step before submitting.'));
         }
 
-        submittingRequestId = verificationRequest?.id ?? null;
+        // missingTypes was empty, so a request exists. Re-accepting while
+        // already submitted changes nothing (and keeps kycSubmittedAt).
+        if (verificationRequest) {
+          submittingRequest = {
+            id: verificationRequest.id,
+            needsFlip: verificationRequest.status !== 'SUBMITTED' || profile.kycStatus !== 'SUBMITTED',
+          };
+        }
       }
     }
 
@@ -1066,10 +1075,10 @@ export const acceptContract = async (req: AuthRequest, res: Response) => {
     // to SUBMITTED so it surfaces for admin review and the app can gate the
     // worker into the waiting screen instead of the tabs. The application was
     // validated as complete above.
-    if (submittingRequestId) {
+    if (submittingRequest?.needsFlip) {
       await prisma.$transaction([
         prisma.verificationRequest.update({
-          where: { id: submittingRequestId },
+          where: { id: submittingRequest.id },
           data: { status: 'SUBMITTED' },
         }),
         prisma.workerProfile.updateMany({
