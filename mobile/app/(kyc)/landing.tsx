@@ -49,7 +49,7 @@ export default function KycLandingScreen() {
     } catch (err: any) {
       // Sign-up logs the worker in before the email code is entered, so someone
       // who quit at that step comes back here unverified.
-      if (err?.code === "EMAIL_NOT_VERIFIED" && email) {
+      if (err?.response?.data?.code === "EMAIL_NOT_VERIFIED" && email) {
         toast.info("Please verify your email first.");
         router.push({ pathname: "/(auth)/otp-verification", params: { email } });
         return;
