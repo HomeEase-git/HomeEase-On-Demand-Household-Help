@@ -14,7 +14,7 @@ export const PASSWORD_RULES_MESSAGE =
   `Password must be at least ${PASSWORD_MIN_LENGTH} characters with 1 uppercase letter and 1 number`;
 
 export const BREACHED_PASSWORD_MESSAGE =
-  'This password has appeared in a known data breach. Please choose a different one.';
+  'This password is commonly used or has been leaked online. Please choose a different one.';
 
 const BREACH_CHECK_TIMEOUT_MS = 3000;
 
