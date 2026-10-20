@@ -17,7 +17,6 @@ const KEYWORDS = {
   '/users': 'customers users',
   '/verification': 'kyc approve documents',
   '/service-catalog': 'services categories jobs tasks',
-  '/tax/certificates': 'bir 2307',
   '/reports/logs': 'audit logs export csv',
   '/promo-banners': 'carousel home ads',
   '/service-requests': 'add category skills certification approve',
