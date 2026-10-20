@@ -2,6 +2,8 @@ import React from "react";
 import { View, Text, Pressable } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
+import { AppIcon as Ionicons } from "../components/icons/AppIcon";
+import { colors } from "../constants";
 import {
   ClientRoleIllustration,
   WorkerRoleIllustration,
@@ -19,9 +21,22 @@ export default function RoleSelectionScreen() {
   return (
     <SafeAreaView className="flex-1 bg-white" edges={["top", "bottom"]}>
       <View className="flex-1 px-6 pt-6 pb-6">
-        <Text className="text-text-primary text-3xl font-bold text-center mb-6">
-          Select Your Role
-        </Text>
+        {/* Back to the landing screen, where "I already have an account" is. */}
+        <View className="flex-row items-center mb-6">
+          <Pressable
+            className="w-10 h-10 rounded-full items-center justify-center bg-card-light"
+            onPress={() => (router.canGoBack() ? router.back() : router.replace("/landing"))}
+            hitSlop={8}
+            accessibilityRole="button"
+            accessibilityLabel="Go back"
+          >
+            <Ionicons name="chevron-back" size={22} color={colors.text.primary} />
+          </Pressable>
+          <Text className="flex-1 text-text-primary text-3xl font-bold text-center">
+            Select Your Role
+          </Text>
+          <View className="w-10" />
+        </View>
 
         <View className="flex-1">
           {/* Client Option */}
