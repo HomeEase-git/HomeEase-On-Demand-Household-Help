@@ -31,18 +31,21 @@ export async function syncXenditFees(): Promise<{ posted: number; unmatched: num
 
   const candidates = transactions.filter((t) => t.status === 'SUCCESSFUL' && LABEL[t.type] && feeCentavos(t) > 0);
   const refs = [...new Set(candidates.map((t) => t.referenceId))];
-  const [payments, payouts] = await Promise.all([
+  const [payments, debtPayments, payouts] = await Promise.all([
     prisma.payment.findMany({ where: { id: { in: refs } }, select: { id: true } }),
+    prisma.debtPayment.findMany({ where: { id: { in: refs } }, select: { id: true } }),
     prisma.payout.findMany({ where: { id: { in: refs } }, select: { id: true } }),
   ]);
   const paymentIds = new Set(payments.map((p) => p.id));
+  const debtPaymentIds = new Set(debtPayments.map((p) => p.id));
   const payoutIds = new Set(payouts.map((p) => p.id));
 
   let posted = 0;
   let unmatched = 0;
   for (const t of candidates) {
     const isPayout = t.type === 'DISBURSEMENT';
-    const known = isPayout ? payoutIds.has(t.referenceId) : paymentIds.has(t.referenceId);
+    const isDues = !isPayout && debtPaymentIds.has(t.referenceId);
+    const known = isPayout ? payoutIds.has(t.referenceId) : paymentIds.has(t.referenceId) || isDues;
     if (!known) {
       unmatched++;
       continue;
@@ -51,8 +54,8 @@ export async function syncXenditFees(): Promise<{ posted: number; unmatched: num
       xenditTransactionId: t.id,
       centavos: feeCentavos(t),
       occurredAt: t.created,
-      memo: `Xendit fee on ${LABEL[t.type]}`,
-      paymentId: isPayout ? null : t.referenceId,
+      memo: `Xendit fee on ${isDues ? 'dues payment' : LABEL[t.type]}`,
+      paymentId: isPayout || isDues ? null : t.referenceId,
       payoutId: isPayout ? t.referenceId : null,
     });
     if (didPost) posted++;

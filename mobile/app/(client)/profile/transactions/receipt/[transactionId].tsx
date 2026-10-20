@@ -157,6 +157,7 @@ export default function ReceiptScreen() {
                 distanceFee={transaction.breakdown.distanceFee}
                 tierFee={transaction.breakdown.tierFee}
                 rushFee={transaction.breakdown.rushFee}
+                materialsCost={transaction.breakdown.materialsCost}
                 addOns={transaction.breakdown.addOns}
                 vatApplicable={transaction.breakdown.vatApplicable}
                 vatRate={transaction.breakdown.vatRate}

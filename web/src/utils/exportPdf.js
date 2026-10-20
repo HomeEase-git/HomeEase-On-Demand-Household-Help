@@ -1,5 +1,6 @@
 import { jsPDF } from 'jspdf'
 import autoTable from 'jspdf-autotable'
+import { pdfSafeText } from './exportFormat'
 import homeEaseLogo from '../components/Assets/home-ease-logo.png'
 
 const PAGE_SIZE = 50 // the admin API's maximum page size
@@ -99,8 +100,8 @@ export async function downloadPdf({ filename, title, subtitle, generatedBy, colu
 
   autoTable(doc, {
     startY,
-    head: [columns],
-    body: rows,
+    head: [columns.map(pdfSafeText)],
+    body: rows.map((row) => row.map(pdfSafeText)),
     styles: { fontSize: 8, cellPadding: 3 },
     headStyles: { fillColor: [37, 99, 235], textColor: 255, fontStyle: 'bold' },
     alternateRowStyles: { fillColor: [248, 250, 252] },

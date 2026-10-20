@@ -34,9 +34,6 @@ export interface AppSettingsConfig {
   autoSuspendRatingThreshold: number | null;
   autoSuspendDisputeCountThreshold: number | null;
   autoSuspendDisputeCountWindowDays: number | null;
-  androidLatestVersion: string | null;
-  androidMinVersion: string | null;
-  androidStoreUrl: string | null;
 }
 
 // Mirrors the AppSettings model's own @default values — used only if the
@@ -77,9 +74,6 @@ const FALLBACK_DEFAULTS: AppSettingsConfig = {
   autoSuspendRatingThreshold: null,
   autoSuspendDisputeCountThreshold: null,
   autoSuspendDisputeCountWindowDays: null,
-  androidLatestVersion: null,
-  androidMinVersion: null,
-  androidStoreUrl: null,
 };
 
 // getAppSettings is called on nearly every request path (search, booking,

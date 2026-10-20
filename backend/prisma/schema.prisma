@@ -678,6 +678,7 @@ model WorkerProfile {
   taskPrices           WorkerTaskPrice[]
   tierPrices           WorkerTaskTierPrice[]
   debtLedger           DebtLedgerEntry[]
+  debtPayments         DebtPayment[]
 
   @@index([userId])
   @@index([kycStatus])
@@ -2051,6 +2052,9 @@ enum DebtLedgerEntryType {
   // refunded (the client's money went back, so the dues weren't really
   // paid). Increases commissionOwed.
   RECOVERY_REVERSED
+  // The worker paid some or all of what they owe through a Xendit invoice
+  // (DebtPayment). Decreases commissionOwed.
+  DEBT_PAYMENT
 }
 
 // Audit trail for WorkerProfile.commissionOwed — a running tab of platform
@@ -2079,6 +2083,35 @@ model DebtLedgerEntry {
 
   @@index([workerProfileId])
   @@index([bookingId])
+}
+
+enum DebtPaymentStatus {
+  PENDING
+  PAID
+  FAILED
+  EXPIRED
+}
+
+// A worker paying down WorkerProfile.commissionOwed through a Xendit invoice.
+// Separate from Payment, which is tied to a booking. The invoice's
+// external_id is this row's id.
+model DebtPayment {
+  id              String        @id @default(cuid())
+  workerProfileId String
+  workerProfile   WorkerProfile @relation(fields: [workerProfileId], references: [id], onDelete: Restrict)
+
+  amount          Float // pesos the worker asked to pay (the invoice amount)
+  status          DebtPaymentStatus @default(PENDING)
+  xenditInvoiceId String?           @unique
+  checkoutUrl     String?
+  paidAmount      Float?
+  paidAt          DateTime?
+  failureReason   String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([workerProfileId, status])
 }
 
 model SavedPaymentMethod {
@@ -2350,14 +2383,6 @@ model AppSettings {
   autoSuspendDisputeCountThreshold  Int?
   autoSuspendDisputeCountWindowDays Int?
 
-  // In-app update prompt (GET /api/app/version). Null = no prompt. An
-  // installed app below androidMinVersion is blocked until it updates; below
-  // androidLatestVersion it gets a dismissible prompt. androidStoreUrl is
-  // where the Update button goes (Play Store listing or a direct APK link).
-  androidLatestVersion String?
-  androidMinVersion    String?
-  androidStoreUrl      String?
-
   updatedAt DateTime @updatedAt
 }
 
@@ -2593,6 +2618,7 @@ enum LedgerEventType {
   ADMIN_ADJUSTMENT
   XENDIT_FEE
   TAX_REMITTED
+  DEBT_PAYMENT
 }
 
 model LedgerTransaction {

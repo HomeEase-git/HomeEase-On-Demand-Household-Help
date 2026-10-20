@@ -142,10 +142,10 @@ function buildDisputeWhere(search: string, status: string): Prisma.DisputeWhereI
 
   if (search) {
     where.OR = [
-      { bookingId: { contains: search } },
-      { reason: { contains: search } },
-      { booking: { client: { fullName: { contains: search } } } },
-      { booking: { worker: { fullName: { contains: search } } } },
+      { bookingId: { contains: search, mode: 'insensitive' } },
+      { reason: { contains: search, mode: 'insensitive' } },
+      { booking: { client: { fullName: { contains: search, mode: 'insensitive' } } } },
+      { booking: { worker: { fullName: { contains: search, mode: 'insensitive' } } } },
     ];
   }
 

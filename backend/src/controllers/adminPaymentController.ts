@@ -69,9 +69,9 @@ function buildPaymentWhere(search: string, status?: string): Prisma.PaymentWhere
 
   if (search) {
     where.OR = [
-      { booking: { id: { contains: search } } },
-      { booking: { worker: { fullName: { contains: search } } } },
-      { booking: { client: { fullName: { contains: search } } } },
+      { booking: { id: { contains: search, mode: 'insensitive' } } },
+      { booking: { worker: { fullName: { contains: search, mode: 'insensitive' } } } },
+      { booking: { client: { fullName: { contains: search, mode: 'insensitive' } } } },
     ];
   }
 
@@ -193,7 +193,7 @@ function buildPayoutWhere(search: string, workerId?: string, status?: string, da
   }
 
   if (search) {
-    where.payment = { booking: { worker: { fullName: { contains: search } } } };
+    where.payment = { booking: { worker: { fullName: { contains: search, mode: 'insensitive' } } } };
   }
 
   if (dateFrom || dateTo) {

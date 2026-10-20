@@ -31,9 +31,6 @@ const FIELDS = [
   'siteName',
   'supportEmail',
   'notificationsEnabled',
-  'androidLatestVersion',
-  'androidMinVersion',
-  'androidStoreUrl',
   ...Object.keys(NUMBER_FIELD_BOUNDS),
   ...Object.keys(NULLABLE_NUMBER_FIELD_BOUNDS),
 ]
@@ -72,48 +69,6 @@ export default function Settings() {
                   className="input"
                   required
                 />
-              </div>
-            </div>
-          </SettingsSection>
-
-          <SettingsSection
-            icon="fa-mobile-screen"
-            title="App Updates"
-            description="Android app version check. Over-the-air updates (eas update) prompt users on their own; these settings are for new APK builds. Current build: see version in app.json."
-          >
-            <div className="detail-grid" style={{ marginBottom: 0 }}>
-              <div className="detail-block">
-                <label htmlFor="settings-androidLatestVersion">Latest Version</label>
-                <input
-                  id="settings-androidLatestVersion"
-                  value={current.androidLatestVersion ?? ''}
-                  onChange={(e) => updateField('androidLatestVersion')(e.target.value)}
-                  className="input"
-                  placeholder="e.g. 1.0.2"
-                />
-                <small className="toggle-row__hint">Installed apps below this get a prompt they can dismiss. Leave blank for no prompt.</small>
-              </div>
-              <div className="detail-block">
-                <label htmlFor="settings-androidMinVersion">Minimum Version</label>
-                <input
-                  id="settings-androidMinVersion"
-                  value={current.androidMinVersion ?? ''}
-                  onChange={(e) => updateField('androidMinVersion')(e.target.value)}
-                  className="input"
-                  placeholder="e.g. 1.0.1"
-                />
-                <small className="toggle-row__hint">Installed apps below this are blocked until they update. Raise it only after most users have the new build.</small>
-              </div>
-              <div className="detail-block">
-                <label htmlFor="settings-androidStoreUrl">Update Link</label>
-                <input
-                  id="settings-androidStoreUrl"
-                  value={current.androidStoreUrl ?? ''}
-                  onChange={(e) => updateField('androidStoreUrl')(e.target.value)}
-                  className="input"
-                  placeholder="https://..."
-                />
-                <small className="toggle-row__hint">Where the Update button goes: the Play Store listing or a direct APK download.</small>
               </div>
             </div>
           </SettingsSection>

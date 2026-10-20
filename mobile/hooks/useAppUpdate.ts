@@ -1,20 +1,13 @@
 import { useCallback, useEffect, useState } from "react";
-import { AppState, Platform } from "react-native";
+import { AppState } from "react-native";
 import * as Updates from "expo-updates";
-import Constants from "expo-constants";
-import { getAppVersionInfo } from "../services/api";
-import { storeUpdateNeed } from "../utils/appVersion";
 
 /**
- * Two kinds of update, checked on launch and whenever the app comes back to
- * the foreground. Failures are swallowed: a check must never block the app.
- * - OTA (eas update): a new JS bundle is available for this build.
- * - Store: the installed build is below the admin's latest/minimum version
- *   (GET /api/app/version) and needs a new APK.
+ * Checks for an OTA (eas update) bundle on launch and whenever the app comes
+ * back to the foreground. Failures are swallowed: a check must never block the app.
  */
 export function useAppUpdate() {
   const [otaAvailable, setOtaAvailable] = useState(false);
-  const [store, setStore] = useState<{ need: "required" | "optional"; url: string | null } | null>(null);
 
   const check = useCallback(async () => {
     if (__DEV__) return;
@@ -25,15 +18,6 @@ export function useAppUpdate() {
       } catch {
         // Offline or update server down; try again next foreground.
       }
-    }
-    // The admin's version settings are Android ones (APK / Play link).
-    if (Platform.OS !== "android") return;
-    try {
-      const info = await getAppVersionInfo();
-      const need = storeUpdateNeed(Constants.expoConfig?.version, info);
-      setStore(need ? { need, url: info.storeUrl } : null);
-    } catch {
-      // Same: never block on a failed check.
     }
   }, []);
 
@@ -50,5 +34,5 @@ export function useAppUpdate() {
     await Updates.reloadAsync();
   }, []);
 
-  return { otaAvailable, store, installOta };
+  return { otaAvailable, installOta };
 }

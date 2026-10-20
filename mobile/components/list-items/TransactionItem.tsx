@@ -1,5 +1,6 @@
 import React from "react";
 import { View, Text, Pressable } from "react-native";
+import { formatDate } from "../../utils/formatDate";
 import StatusBadge from "../ui/StatusBadge";
 import type { StatusType } from "../ui/StatusBadge";
 
@@ -25,10 +26,11 @@ export const TransactionItem: React.FC<Props> = ({ transaction, onPress }) => {
     >
       <View className="flex-1">
         <Text className="text-text-muted text-xs">
-          {transaction.id} · {transaction.date}
+          {formatDate(transaction.date, "MMM D, YYYY h:mm A")}
+          {transaction.method ? ` · ${transaction.method}` : ""}
         </Text>
         <Text className="text-text-primary font-semibold mt-0.5">
-          Booking {transaction.bookingId}
+          Booking #{transaction.bookingId.slice(-6).toUpperCase()}
         </Text>
       </View>
       <Text className="text-success font-bold mr-2">

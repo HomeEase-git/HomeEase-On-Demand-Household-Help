@@ -1343,6 +1343,15 @@ export async function createXenditCheckout(bookingId: string) {
   }
 }
 
+// A worker paying down the platform dues they owe. `amount` omitted = the full
+// balance. Opens the same hosted Xendit checkout as a booking payment.
+export async function payPlatformDues(amount?: number) {
+  const response = await api.post("/payments/dues", amount === undefined ? {} : { amount });
+  return response as
+    | { checkoutUrl: string; debtPaymentId: string; amount: number; alreadyPaid?: undefined }
+    | { alreadyPaid: true; checkoutUrl?: undefined };
+}
+
 // ============================================================================
 // REVIEWS - CLIENT
 // ============================================================================
@@ -2829,11 +2838,6 @@ const SERVICE_TYPES_TTL_MS = 5 * 60 * 1000; // 5 minutes
 let cachedServiceTypes: any[] | null = null;
 let cachedServiceTypesAt = 0;
 let servicesPromise: Promise<any[]> | null = null;
-
-/** Public: the admin's latest/minimum Android version and where to get it (in-app update prompt). */
-export async function getAppVersionInfo(): Promise<{ latest: string | null; minimum: string | null; storeUrl: string | null }> {
-  return api.get('/app/version');
-}
 
 export async function getServiceTypes() {
   if (cachedServiceTypes && Date.now() - cachedServiceTypesAt < SERVICE_TYPES_TTL_MS) {

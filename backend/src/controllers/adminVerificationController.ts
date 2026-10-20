@@ -104,7 +104,7 @@ export const listVerifications = async (req: Request, res: Response) => {
         ...(type === 'client' ? { user: { role: 'CLIENT' } } : {}),
         ...(search
           ? {
-              OR: [{ user: { fullName: { contains: search } } }, { user: { email: { contains: search } } }],
+              OR: [{ user: { fullName: { contains: search, mode: 'insensitive' } } }, { user: { email: { contains: search, mode: 'insensitive' } } }],
             }
           : {}),
       },

@@ -1,5 +1,6 @@
 import React from "react";
 import { View, Text, Pressable } from "react-native";
+import dayjs from "dayjs";
 import Avatar from "../ui/Avatar";
 
 type Conversation = {
@@ -14,6 +15,13 @@ type Conversation = {
 type Props = {
   conversation: Conversation;
   onPress: () => void;
+};
+
+// "3:45 PM" for today, "Oct 12" for any other day, "" if it isn't a date.
+const formatTime = (value: string) => {
+  const d = dayjs(value);
+  if (!value || !d.isValid()) return "";
+  return d.isSame(dayjs(), "day") ? d.format("h:mm A") : d.format("MMM D");
 };
 
 export const ConversationItem: React.FC<Props> = ({
@@ -35,7 +43,7 @@ export const ConversationItem: React.FC<Props> = ({
         </Text>
       </View>
       <View className="items-end">
-        <Text className="text-text-muted text-xs">{conversation.time}</Text>
+        <Text className="text-text-muted text-xs">{formatTime(conversation.time)}</Text>
         {conversation.unread > 0 && (
           <View className="min-w-[20] h-5 rounded-full bg-accent items-center justify-center mt-1 px-1.5">
             <Text className="text-white text-xs font-bold">

@@ -5,6 +5,7 @@ import { useLocalSearchParams } from "expo-router";
 import ScreenHeader from "../../../components/ui/ScreenHeader";
 import { Skeleton } from "../../../components/ui/Skeleton";
 import * as api from "../../../services/api";
+import { formatDate } from "../../../utils/formatDate";
 
 type TransactionDetail = Awaited<ReturnType<typeof api.getTransactionDetail>>;
 
@@ -121,7 +122,7 @@ export default function EarningsTransactionScreen() {
           <Row label="Booking" value={transaction.bookingId} />
           <Row label="Service" value={transaction.serviceName} />
           <Row label="Client" value={transaction.clientName ?? "—"} />
-          <Row label="Date" value={transaction.date} />
+          <Row label="Date" value={formatDate(transaction.date, "MMM D, YYYY h:mm A")} />
           <Row label="Method" value={transaction.method ?? "—"} />
           <Row label="Status" value={transaction.status} />
         </View>

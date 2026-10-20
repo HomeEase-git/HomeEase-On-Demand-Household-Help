@@ -57,7 +57,7 @@ export default function Reviews() {
       <PageHeader title="Ratings & Reviews Management" subtitle="All reviews" />
       <SubNav items={SUB_NAV} />
       <div className="toolbar">
-        <SearchBar placeholder="Search reviews..." value={params.search || ''} onChange={setSearch} />
+        <SearchBar placeholder="Search by client, worker, comment or booking ID..." value={params.search || ''} onChange={setSearch} />
         <FilterTabs tabs={['All', '5 Star', '1-2 Star']} activeTab={filterTab} onTabChange={setFilterTab} />
       </div>
       <SectionCard>

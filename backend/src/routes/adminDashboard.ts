@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { getDashboardStats } from '../controllers/adminDashboardController';
+import { getDashboardStats, getDashboardCharts } from '../controllers/adminDashboardController';
 import { authMiddleware } from '../middleware/auth';
 import { restrictTo } from '../middleware/role';
 
@@ -8,5 +8,6 @@ const router = Router();
 router.use(authMiddleware, restrictTo('ADMIN'));
 
 router.get('/stats', getDashboardStats);
+router.get('/charts', getDashboardCharts);
 
 export default router;
