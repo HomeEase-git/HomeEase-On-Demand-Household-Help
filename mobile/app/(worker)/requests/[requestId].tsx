@@ -11,6 +11,8 @@ import PrimaryButton from "../../../components/ui/PrimaryButton";
 import OutlinedButton from "../../../components/ui/OutlinedButton";
 import DeclineReasonModal from "../../../components/modals/DeclineReasonModal";
 import { Skeleton } from "../../../components/ui/Skeleton";
+import JobAcceptedCelebration from "../../../components/ui/JobAcceptedCelebration";
+import { feedback } from "../../../utils/feedback";
 import { useWorkerStore } from "../../../store/workerStore";
 import { API_STATUS_MAP } from "../../../store/bookingStore";
 import * as api from "../../../services/api";
@@ -59,6 +61,10 @@ export default function RequestDetailScreen() {
   // Full-screen "waiting" state while accept/decline is in flight.
   const [waitingLabel, setWaitingLabel] = useState<string | null>(null);
   const [declineVisible, setDeclineVisible] = useState(false);
+  // Plays right after a successful accept; `accepted` holds what the prompt
+  // that follows it needs.
+  const [celebrating, setCelebrating] = useState(false);
+  const [accepted, setAccepted] = useState<{ debtWarning: string | null } | null>(null);
   const alertModal = useAlertModal();
 
   const load = useCallback(async () => {
@@ -135,19 +141,9 @@ export default function RequestDetailScreen() {
       const result = await api.acceptBooking(booking.id, isFollowUp ? { confirmFollowUp: true } : undefined);
       setWaitingLabel(null);
       updateJobStatus(booking.id, "Accepted");
-      alertModal.success(
-        "Job Accepted!",
-        result?.debtWarning
-          ? `The client has been notified.\n\n⚠️ ${result.debtWarning}`
-          : "The client has been notified.",
-        [
-          {
-            text: "View",
-            onPress: () => router.replace(`/(worker)/records/job/${booking.id}`),
-          },
-          { text: "Back", onPress: () => router.back() },
-        ],
-      );
+      feedback.success();
+      setAccepted({ debtWarning: result?.debtWarning ?? null });
+      setCelebrating(true);
     } catch (error) {
       setWaitingLabel(null);
       console.error("Accept booking error:", error);
@@ -171,6 +167,25 @@ export default function RequestDetailScreen() {
     } finally {
       setSubmitting(false);
     }
+  };
+
+  // The celebration ran; now the usual prompt (with any dues warning) and the
+  // choice of where to go next.
+  const handleCelebrationFinish = () => {
+    setCelebrating(false);
+    alertModal.success(
+      "Job Accepted!",
+      accepted?.debtWarning
+        ? `The client has been notified.\n\n⚠️ ${accepted.debtWarning}`
+        : "The client has been notified.",
+      [
+        {
+          text: "View",
+          onPress: () => router.replace(`/(worker)/records/job/${booking.id}`),
+        },
+        { text: "Back", onPress: () => router.back() },
+      ],
+    );
   };
 
   // A follow-up job asks twice: once to accept, then to confirm it's a new,
@@ -418,6 +433,8 @@ export default function RequestDetailScreen() {
         onConfirm={handleDeclineConfirm}
         onCancel={() => setDeclineVisible(false)}
       />
+
+      <JobAcceptedCelebration visible={celebrating} onFinish={handleCelebrationFinish} />
 
       <Modal visible={!!waitingLabel} transparent animationType="fade" statusBarTranslucent>
         <View className="flex-1 items-center justify-center bg-black/50">
