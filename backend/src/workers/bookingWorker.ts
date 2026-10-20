@@ -8,6 +8,7 @@ import { requestRefund } from '@services/refundRequestService';
 import { BOOKING_QUEUE_NAME, JOB_NAMES, type ExpirePendingBookingJobData } from '@queues/bookingQueue';
 import { bookingStartInstant, phTodayStart } from '@services/workerAvailabilityService';
 import { chargePenaltyTx } from '@services/debtLedgerService';
+import { reconcileStalePendingDebtPayments } from '@services/debtPaymentService';
 import { updateBookingIfStatus, isBookingStatusConflict } from '@services/bookingStatusWrite';
 import { getAppSettings } from '@services/appSettingsService';
 import {
@@ -318,6 +319,18 @@ export async function remindAndAutoSettleCompletions(): Promise<void> {
     } catch (error) {
       console.error(`Failed to reconcile pending payment ${payment.id}:`, error);
     }
+  }
+
+  // 4a. The same safety net for a worker's platform-dues invoices: a missed
+  //     invoice-paid webhook, or an invoice whose id was never saved because the
+  //     server stopped mid-checkout (see debtPaymentService).
+  for (const { debtPaymentId, result } of await reconcileStalePendingDebtPayments(reconcileCutoff)) {
+    await writeAuditLog({
+      action: 'DUES_PAYMENT_RECONCILED',
+      category: 'STATUS_CHANGE',
+      message: `Dues payment ${debtPaymentId} reconciled from Xendit as ${result} (webhook likely missed)`,
+      metadata: { debtPaymentId, result },
+    });
   }
 
   // 4b. Follow up refunds Xendit accepted but hadn't finished (e-wallet
