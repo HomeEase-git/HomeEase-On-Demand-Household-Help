@@ -542,6 +542,42 @@ describe('worker operations overhaul', () => {
       }
     });
 
+    it("won't accept a proposal onto the start time of another job the pro already has", async () => {
+      const day = addDays(phTodayStart(), 20);
+      await seedBooking({ scheduledDate: day, scheduledTime: '14:00' });
+      const booking = await seedBooking({
+        rescheduleRequestedBy: 'WORKER',
+        rescheduleRequestedAt: new Date(),
+        requestedScheduledDate: day,
+        requestedScheduledTime: '14:00',
+      });
+
+      const res = await respondAs(clientToken, booking.id, true);
+      expect(res.status).toBe(409);
+      expect(res.body.code).toBe('START_TIME_CLASH');
+
+      const row = await prisma.booking.findUniqueOrThrow({ where: { id: booking.id } });
+      expect(row.scheduledTime).toBe('09:00');
+      // Still open, so it can be declined.
+      expect(row.rescheduleRequestRespondedAt).toBeNull();
+      expect((await respondAs(clientToken, booking.id, false)).status).toBe(200);
+    });
+
+    it('lets a proposal through when the other job starts at a different time', async () => {
+      const day = addDays(phTodayStart(), 21);
+      await seedBooking({ scheduledDate: day, scheduledTime: '13:00' });
+      const booking = await seedBooking({
+        rescheduleRequestedBy: 'WORKER',
+        rescheduleRequestedAt: new Date(),
+        requestedScheduledDate: day,
+        requestedScheduledTime: '14:00',
+      });
+
+      expect((await respondAs(clientToken, booking.id, true)).status).toBe(200);
+      const row = await prisma.booking.findUniqueOrThrow({ where: { id: booking.id } });
+      expect(row.scheduledTime).toBe('14:00');
+    });
+
     it('lets only the requester withdraw, tells the other side, and only once', async () => {
       const booking = await seedBooking({});
       const date = isoDay(addDays(phTodayStart(), 9));
