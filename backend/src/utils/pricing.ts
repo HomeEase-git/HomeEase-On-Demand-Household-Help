@@ -66,6 +66,38 @@ export const calculateWorkerPayout = (
 };
 
 /**
+ * What a worker takes home, itemised — the same arithmetic settlement uses
+ * (paymentLifecycleService.priceBooking), so an estimate shown before payment
+ * lines up with the payment that is later created. VAT, when the booking
+ * carries it, is passed through to the worker and never commissioned or taxed.
+ */
+export const computeWorkerEarnings = (input: {
+  subtotal: number;
+  tip?: number;
+  commissionRate?: number;
+  withholdingTaxRate?: number;
+  vatApplicable?: boolean | null;
+  vatRate?: number | null;
+}) => {
+  const tip = input.tip ?? 0;
+  const commissionRate = input.commissionRate ?? COMMISSION_RATE;
+  const withholdingTaxRate = input.withholdingTaxRate ?? WITHHOLDING_TAX_RATE;
+  const commissionAmount = calculateCommission(input.subtotal, commissionRate);
+  const withholdingTaxAmount = calculateWithholdingTax(input.subtotal, commissionRate, withholdingTaxRate);
+  const vatAmount = input.vatApplicable ? roundToCentavo(input.subtotal * (input.vatRate ?? VAT_RATE)) : 0;
+  const workerPayout = roundToCentavo(input.subtotal - commissionAmount - withholdingTaxAmount + tip + vatAmount);
+  return {
+    subtotal: roundToCentavo(input.subtotal),
+    tip: roundToCentavo(tip),
+    commissionRate,
+    commissionAmount,
+    withholdingTaxAmount,
+    vatAmount,
+    workerPayout,
+  };
+};
+
+/**
  * Calculate platform profit
  * Platform keeps: commission + (tax goes to government, but we collect it)
  */

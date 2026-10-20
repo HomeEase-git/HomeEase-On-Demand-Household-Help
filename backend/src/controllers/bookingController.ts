@@ -42,6 +42,7 @@ import {
   calculateWorkerPayout,
   computeBookingFinalTotal,
   computeJobPricing,
+  computeWorkerEarnings,
   calculateCommission,
   calculateWithholdingTax,
   describeDistanceFee,
@@ -609,11 +610,17 @@ export const createBooking = async (req: AuthRequest, res: Response) => {
           });
 
           if (addOnsList.length > 0) {
+            // These are what the client chose at checkout (packages and job
+            // preferences), so choosing them is the consent: they start
+            // approved and count toward the bill. Only extras the worker adds
+            // mid-job (addAddon) wait for the client's approval.
+            const chosenAt = new Date();
             await tx.bookingAddOn.createMany({
               data: addOnsList.map((a) => ({
                 bookingId: created.id,
                 name: a.name,
                 price: typeof a.price === 'number' ? a.price : 0,
+                clientApprovedAt: chosenAt,
               })),
             });
           }
@@ -774,6 +781,9 @@ export const listBookings = async (req: AuthRequest, res: Response) => {
           serviceTask: { select: { id: true, name: true, serviceType: { select: { name: true } } } },
           review: { select: { rating: true } },
           payment: { select: { capturedAt: true } },
+          // Approved add-ons (chosen packages) are part of the job's price, so
+          // the worker's payout estimate has to include them.
+          addOns: { where: { clientApprovedAt: { not: null } }, select: { price: true } },
           // Multi-day upfront booking (see createMultiDayBooking) — lets the
           // list show "Day 2 of 3" instead of three unrelated-looking jobs.
           // Ordered by date (not insertion order) so dayIndex below always
@@ -838,7 +848,12 @@ export const listBookings = async (req: AuthRequest, res: Response) => {
       tip: b.tip ?? 0,
       // Estimate only — the authoritative payout is on the Payment row,
       // settled at capture time (see paymentLifecycleService).
-      workerPayoutEstimate: calculateWorkerPayout(b.finalPrice ?? b.estimatedPrice, b.tip ?? 0, commissionRate, withholdingTaxRate),
+      workerPayoutEstimate: calculateWorkerPayout(
+        b.finalPrice ?? round2(b.estimatedPrice + (b.addOns ?? []).reduce((sum: number, a: { price: number }) => sum + a.price, 0)),
+        b.tip ?? 0,
+        commissionRate,
+        withholdingTaxRate
+      ),
       rating: b.review?.rating ?? null,
       // When the job was settled — the worker's "Earned Today" counts this, not the scheduled date.
       completedAt: b.status === 'COMPLETED' ? (b.payment?.capturedAt ?? b.updatedAt) : null,
@@ -987,11 +1002,54 @@ export const getBookingDetail = async (req: AuthRequest, res: Response) => {
         ? await findNearbyJobs(prisma, booking.workerId!, booking.scheduledDate, bookingStartTime(booking), booking.id)
         : [];
 
+    // The assigned worker's own take-home, itemised on one basis. Once a payment
+    // exists these are its settled values; before that they are estimated the
+    // way settlement will compute them (rates frozen at accept, live before).
+    let earnings: {
+      isEstimate: boolean;
+      subtotal: number;
+      tip: number;
+      commissionRate: number | null;
+      commissionAmount: number;
+      withholdingTaxAmount: number;
+      vatAmount: number;
+      workerPayout: number;
+    } | null = null;
+    if (isAssignedWorker) {
+      const p = booking.payment;
+      if (p && p.workerPayout != null) {
+        earnings = {
+          isEstimate: false,
+          subtotal: p.subtotal ?? finalPrice,
+          tip: p.tip ?? 0,
+          commissionRate: p.commissionRate ?? null,
+          commissionAmount: p.commissionAmount ?? 0,
+          withholdingTaxAmount: p.withholdingTaxAmount ?? 0,
+          vatAmount: p.vatAmount ?? 0,
+          workerPayout: p.workerPayout,
+        };
+      } else {
+        const live = await getAppSettings();
+        earnings = {
+          isEstimate: true,
+          ...computeWorkerEarnings({
+            subtotal: finalPrice,
+            tip: breakdownTip,
+            commissionRate: booking.commissionRateSnapshot ?? live.commissionRate,
+            withholdingTaxRate: booking.withholdingTaxRateSnapshot ?? live.withholdingTaxRate,
+            vatApplicable: booking.vatApplicable,
+            vatRate: booking.vatRate,
+          }),
+        };
+      }
+    }
+
     return res.status(200).json({
       success: true,
       message: 'Booking details retrieved successfully',
       data: {
         id: booking.id,
+        earnings,
         // Follow-up jobs (see createBooking's parentBookingId).
         parentBooking: booking.parentBooking
           ? {
