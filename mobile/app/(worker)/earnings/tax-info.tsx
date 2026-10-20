@@ -207,7 +207,11 @@ export default function TaxInfoScreen() {
           ) : (
             <Text className="text-text-muted text-sm mb-3">Not submitted</Text>
           )}
-          {vatRegistration?.vatVerificationStatus !== "PENDING" && (
+          {/* Only a worker with no claim yet, or a rejected one, can submit — an approved
+              registration can't be swapped for a new document (the server refuses it too). */}
+          {!vatRegistration?.vatRegistered &&
+            vatRegistration?.vatVerificationStatus !== "PENDING" &&
+            vatRegistration?.vatVerificationStatus !== "APPROVED" && (
             <PrimaryButton
               label={vatRegistration?.vatVerificationStatus === "REJECTED" ? "Resubmit Document" : "Submit Document"}
               fullWidth
