@@ -45,6 +45,18 @@ type BookingDetail = {
   scopeAnswers?: Record<string, string | string[]> | null;
   distanceMeters?: number | null;
   payment?: { commissionAmount?: number; workerPayout?: number } | null;
+  // The worker's own take-home, itemised on one basis (settled once a payment
+  // exists, an estimate before that). Sent only to the assigned worker.
+  earnings?: {
+    isEstimate: boolean;
+    subtotal: number;
+    tip: number;
+    commissionRate: number | null;
+    commissionAmount: number;
+    withholdingTaxAmount: number;
+    vatAmount: number;
+    workerPayout: number;
+  } | null;
   // Multi-day upfront booking (see backend createMultiDayBooking) — null for
   // an ordinary single-day job. Sibling list is date-ordered.
   groupId?: string | null;
@@ -362,34 +374,49 @@ export default function RequestDetailScreen() {
         <View className="bg-card rounded-2xl p-4 mb-3 items-center">
           <Text className="text-text-secondary text-sm">Offered Price</Text>
           <Text className="text-accent font-bold text-4xl mt-1">
-            ₱{booking.estimatedPrice}.00
+            ₱{(booking.earnings?.subtotal ?? booking.estimatedPrice).toFixed(2)}
           </Text>
-          <View className="mt-3 bg-card-dark rounded-xl p-3 w-full">
-            <Text className="text-text-secondary text-xs font-semibold mb-2">
-              Your Earnings Breakdown
-            </Text>
-            <View className="flex-row justify-between py-1">
-              <Text className="text-text-muted text-xs">Client Pays</Text>
-              <Text className="text-text-secondary text-xs">
-                ₱{booking.estimatedPrice}.00
+          {booking.earnings && (
+            <View className="mt-3 bg-card-dark rounded-xl p-3 w-full">
+              <Text className="text-text-secondary text-xs font-semibold mb-2">
+                Your Earnings Breakdown{booking.earnings.isEstimate ? " (estimate)" : ""}
               </Text>
+              <View className="flex-row justify-between py-1">
+                <Text className="text-text-muted text-xs">Job subtotal</Text>
+                <Text className="text-text-secondary text-xs">₱{booking.earnings.subtotal.toFixed(2)}</Text>
+              </View>
+              <View className="flex-row justify-between py-1">
+                <Text className="text-text-muted text-xs">
+                  Platform commission
+                  {booking.earnings.commissionRate != null
+                    ? ` (${Number((booking.earnings.commissionRate * 100).toFixed(2))}%)`
+                    : ""}
+                </Text>
+                <Text className="text-text-secondary text-xs">-₱{booking.earnings.commissionAmount.toFixed(2)}</Text>
+              </View>
+              <View className="flex-row justify-between py-1">
+                <Text className="text-text-muted text-xs">Withholding tax</Text>
+                <Text className="text-text-secondary text-xs">-₱{booking.earnings.withholdingTaxAmount.toFixed(2)}</Text>
+              </View>
+              {booking.earnings.vatAmount > 0 && (
+                <View className="flex-row justify-between py-1">
+                  <Text className="text-text-muted text-xs">VAT collected for you</Text>
+                  <Text className="text-text-secondary text-xs">+₱{booking.earnings.vatAmount.toFixed(2)}</Text>
+                </View>
+              )}
+              {booking.earnings.tip > 0 && (
+                <View className="flex-row justify-between py-1">
+                  <Text className="text-text-muted text-xs">Tip</Text>
+                  <Text className="text-text-secondary text-xs">+₱{booking.earnings.tip.toFixed(2)}</Text>
+                </View>
+              )}
+              <View className="border-b border-divider my-1" />
+              <View className="flex-row justify-between py-1">
+                <Text className="text-text-muted text-xs">You Receive</Text>
+                <Text className="text-success text-xs font-bold">₱{booking.earnings.workerPayout.toFixed(2)}</Text>
+              </View>
             </View>
-            <View className="flex-row justify-between py-1">
-              <Text className="text-text-muted text-xs">
-                Platform Fee & Tax
-              </Text>
-              <Text className="text-text-secondary text-xs">
-                -₱{(booking.payment?.commissionAmount ?? booking.estimatedPrice * 0.1).toFixed(2)}
-              </Text>
-            </View>
-            <View className="border-b border-divider my-1" />
-            <View className="flex-row justify-between py-1">
-              <Text className="text-text-muted text-xs">You Receive</Text>
-              <Text className="text-success text-xs font-bold">
-                ₱{(booking.payment?.workerPayout ?? booking.estimatedPrice * 0.9).toFixed(2)}
-              </Text>
-            </View>
-          </View>
+          )}
         </View>
 
         {/* Action buttons */}

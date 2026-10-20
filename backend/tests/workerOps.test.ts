@@ -131,6 +131,53 @@ describe('worker operations overhaul', () => {
       }
     });
 
+    it('bills a package the client chose at checkout without a second approval, and itemises the worker take-home', async () => {
+      const task = await prisma.serviceTask.findUniqueOrThrow({ where: { id: serviceTaskId } });
+      const pkg = await prisma.workerPackage.create({
+        data: {
+          workerProfileId,
+          serviceTypeId: task.serviceTypeId,
+          name: 'Deep Clean Package',
+          price: 1600,
+          isActive: true,
+          status: 'APPROVED',
+        },
+      });
+
+      const res = await request(app)
+        .post('/api/bookings')
+        .set('Authorization', `Bearer ${clientToken}`)
+        .send(bookingBody(isoDay(addDays(phTodayStart(), 22)), '10:00', { packageIds: [pkg.id] }));
+      expect(res.status).toBe(201);
+
+      // The client's choice is the consent: the row starts approved, not pending.
+      const rows = await prisma.bookingAddOn.findMany({ where: { bookingId: res.body.data.id } });
+      expect(rows).toHaveLength(1);
+      expect(rows[0]).toMatchObject({ name: 'Deep Clean Package', price: 1600 });
+      expect(rows[0].clientApprovedAt).not.toBeNull();
+      expect(rows[0].clientRejectedAt).toBeNull();
+
+      const estimated = res.body.data.estimatedPrice as number;
+
+      // Client's breakdown already includes it.
+      const asClient = await request(app)
+        .get(`/api/bookings/${res.body.data.id}`)
+        .set('Authorization', `Bearer ${clientToken}`);
+      expect(asClient.status).toBe(200);
+      expect(asClient.body.data.priceBreakdown.addOns).toEqual([{ name: 'Deep Clean Package', price: 1600 }]);
+      expect(asClient.body.data.priceBreakdown.subtotal).toBe(estimated + 1600);
+      expect(asClient.body.data.earnings).toBeNull(); // worker-only
+
+      // Worker's card is built on that same subtotal, and its lines add up.
+      const asWorker = await request(app)
+        .get(`/api/bookings/${res.body.data.id}`)
+        .set('Authorization', `Bearer ${workerToken}`);
+      const e = asWorker.body.data.earnings;
+      expect(e.isEstimate).toBe(true);
+      expect(e.subtotal).toBe(estimated + 1600);
+      expect(e.subtotal - e.commissionAmount - e.withholdingTaxAmount + e.tip + e.vatAmount).toBeCloseTo(e.workerPayout, 2);
+    });
+
     it('ignores client-supplied prices and rejects a negative tip', async () => {
       const honest = await request(app)
         .post('/api/bookings')
