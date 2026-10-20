@@ -2576,8 +2576,17 @@ export const submitVatRegistration = async (req: AuthRequest, res: Response) => 
       return res.status(400).json(errorResponse(400, 'That file does not belong to your account. Please upload it again.'));
     }
 
-    const updated = await prisma.workerProfile.update({
-      where: { userId: req.user.userId },
+    // Only a worker with no claim yet, or a rejected one, can submit. An approved
+    // registration must not be reopened with a new document: a later rejection
+    // leaves vatRegistered on (see adminVatController.rejectVatRegistration), so
+    // a swapped-in fake would keep VAT applied. The conditional write also stops
+    // two simultaneous submissions from both going through.
+    const claimed = await prisma.workerProfile.updateMany({
+      where: {
+        userId: req.user.userId,
+        vatRegistered: false,
+        OR: [{ vatVerificationStatus: null }, { vatVerificationStatus: 'REJECTED' }],
+      },
       data: {
         vatDocumentUrl: storedDocumentUrl,
         vatVerificationStatus: 'PENDING',
@@ -2586,6 +2595,29 @@ export const submitVatRegistration = async (req: AuthRequest, res: Response) => 
         vatReviewedAt: null,
         vatReviewedById: null,
       },
+    });
+    if (claimed.count === 0) {
+      const current = await prisma.workerProfile.findUnique({
+        where: { userId: req.user.userId },
+        select: { vatRegistered: true, vatVerificationStatus: true },
+      });
+      if (!current) {
+        return res.status(404).json(errorResponse(404, 'Worker profile not found'));
+      }
+      return res
+        .status(409)
+        .json(
+          errorResponse(
+            409,
+            current.vatRegistered || current.vatVerificationStatus === 'APPROVED'
+              ? 'Your VAT registration is already approved.'
+              : 'Your VAT registration is already awaiting review.'
+          )
+        );
+    }
+
+    const updated = await prisma.workerProfile.findUniqueOrThrow({
+      where: { userId: req.user.userId },
       select: {
         vatRegistered: true,
         vatDocumentUrl: true,
