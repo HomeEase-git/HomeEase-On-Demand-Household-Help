@@ -102,7 +102,7 @@ describe('KYC document upload', () => {
     expect(mockUpload).not.toHaveBeenCalled();
   });
 
-  it('accepts a valid upload, stores it via Supabase, and flips kycStatus to SUBMITTED', async () => {
+  it('accepts a valid upload and stores it via Supabase without submitting the application', async () => {
     const res = await attachFile(
       request(app)
         .post(UPLOAD_PATH)
@@ -116,7 +116,7 @@ describe('KYC document upload', () => {
     expect(res.body.data.documentType).toBe('government_id_front');
 
     const worker = await prisma.workerProfile.findUnique({ where: { userId: workerUserId } });
-    expect(worker?.kycStatus).toBe('SUBMITTED');
+    expect(worker?.kycStatus).not.toBe('SUBMITTED');
 
     const mine = await request(app).get('/api/verification/mine').set('Authorization', `Bearer ${workerToken}`);
     expect(mine.status).toBe(200);

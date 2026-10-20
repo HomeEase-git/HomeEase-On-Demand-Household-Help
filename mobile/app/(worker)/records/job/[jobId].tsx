@@ -404,9 +404,10 @@ export default function JobDetailScreen() {
             await api.respondToRescheduleRequest(job.id, accept);
             alertModal.success(accept ? "Reschedule Accepted" : "Reschedule Declined", "The client has been notified.");
             load();
-          } catch (error) {
+          } catch (error: any) {
             console.error("Respond to reschedule request error:", error);
-            alertModal.error("Error", "Failed to respond to the reschedule request. Please try again.");
+            alertModal.error("Error", error?.message || "Failed to respond to the reschedule request. Please try again.");
+            load();
           } finally {
             setRespondingToReschedule(false);
           }
@@ -422,9 +423,10 @@ export default function JobDetailScreen() {
         try {
           await api.withdrawRescheduleRequest(job.id);
           load();
-        } catch (error) {
+        } catch (error: any) {
           console.error("Withdraw reschedule request error:", error);
-          alertModal.error("Error", "Failed to withdraw the request. Please try again.");
+          alertModal.error("Error", error?.message || "Failed to withdraw the request. Please try again.");
+          load();
         }
       },
     });

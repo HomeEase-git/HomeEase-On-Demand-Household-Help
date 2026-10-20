@@ -189,12 +189,9 @@ export const uploadVerificationDocuments = async (req: AuthRequest, res: Respons
         console.error(`Failed to queue AI review for verification ${verification.id}:`, error);
       });
 
-    if (user.role === 'WORKER') {
-      await prisma.workerProfile.updateMany({
-        where: { userId: user.id },
-        data: { kycStatus: 'SUBMITTED' },
-      });
-    }
+    // Uploading documents does not submit the application: kycStatus moves to
+    // SUBMITTED only when the worker accepts the Service Agreement and the
+    // completeness checks pass (userController.acceptContract).
 
     return res.status(201).json({
       success: true,
