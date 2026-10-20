@@ -206,10 +206,23 @@ export default function OnboardingScreen() {
       </View>
 
       <View className="flex-row justify-between items-center px-6 pt-4">
-        <View className="flex-row gap-1.5">
-          {slides.map((s, i) => (
-            <Dot key={s.id} index={i} scrollX={scrollX} tint={s.tint} />
-          ))}
+        <View className="flex-row items-center">
+          {/* For someone who tapped "Get Started" by mistake (e.g. they already
+              have an account) — back to the landing screen. */}
+          <Pressable
+            className="w-10 h-10 rounded-full items-center justify-center mr-2 bg-card-light"
+            onPress={() => (router.canGoBack() ? router.back() : router.replace("/landing"))}
+            hitSlop={8}
+            accessibilityRole="button"
+            accessibilityLabel="Go back"
+          >
+            <Ionicons name="chevron-back" size={22} color={colors.text.primary} />
+          </Pressable>
+          <View className="flex-row gap-1.5">
+            {slides.map((s, i) => (
+              <Dot key={s.id} index={i} scrollX={scrollX} tint={s.tint} />
+            ))}
+          </View>
         </View>
         <Pressable
           className="py-2 px-4 rounded-full bg-card-light"
