@@ -9,6 +9,7 @@ import { colors } from "../../constants";
 import { KycVerifyIllustration } from "../../components/illustrations/Illustrations";
 import { useToastContext } from "../../contexts/ToastContext";
 import { acceptContract } from "../../services/api";
+import { useAuthStore } from "../../store/authStore";
 
 // Short-form privacy notice shown at the point the most sensitive data is
 // collected (Data Privacy Act §16(b)): what, why, who sees it, how long.
@@ -35,6 +36,7 @@ const KYC_NOTICE = [
 export default function KycLandingScreen() {
   const router = useRouter();
   const toast = useToastContext();
+  const email = useAuthStore((s) => s.user?.email);
   const [consented, setConsented] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
@@ -44,7 +46,14 @@ export default function KycLandingScreen() {
     try {
       await acceptContract("KYC_CONSENT");
       router.push("/(kyc)/upload-id");
-    } catch {
+    } catch (err: any) {
+      // Sign-up logs the worker in before the email code is entered, so someone
+      // who quit at that step comes back here unverified.
+      if (err?.response?.data?.code === "EMAIL_NOT_VERIFIED" && email) {
+        toast.info("Please verify your email first.");
+        router.push({ pathname: "/(auth)/otp-verification", params: { email } });
+        return;
+      }
       toast.error("Couldn't save your consent. Please try again.");
     } finally {
       setSubmitting(false);

@@ -4,7 +4,7 @@ import { TokenType, type Role, type TwoFactorMethod } from '@prisma/client';
 import { hashPassword, comparePassword } from '@utils/passwordHash';
 import { generateToken, verifyToken } from '@utils/jwt';
 import { validateEmail, validatePhone, validateOtp } from '@utils/validators';
-import { checkNewPassword } from '@utils/passwordPolicy';
+import { checkNewPassword, containsPersonalInfo, PERSONAL_INFO_PASSWORD_MESSAGE } from '@utils/passwordPolicy';
 import {
   isLoginLocked,
   recordFailedLogin,
@@ -132,7 +132,7 @@ export const signup = async (req: Request, res: Response) => {
       return res.status(400).json(errorResponse(400, 'Invalid email format'));
     }
 
-    const passwordError = await checkNewPassword(password);
+    const passwordError = await checkNewPassword(password, { fullName, email, phone });
     if (passwordError) {
       return res.status(400).json(errorResponse(400, passwordError));
     }
@@ -927,6 +927,19 @@ export const resetPassword = async (req: Request, res: Response) => {
 
     if (!user) {
       return res.status(400).json(errorResponse(400, 'Invalid or expired OTP'));
+    }
+
+    // Prove the code first without using it up. Only the real owner gets past
+    // this, so only they can learn the password contained their own details —
+    // and a rejected password leaves the code valid for another try.
+    const codeIsValid = await verifyOtp(user.id, otp, TokenType.PASSWORD_RESET, { consume: false });
+
+    if (!codeIsValid) {
+      return res.status(400).json(errorResponse(400, 'Invalid or expired OTP'));
+    }
+
+    if (containsPersonalInfo(newPassword, user)) {
+      return res.status(400).json(errorResponse(400, PERSONAL_INFO_PASSWORD_MESSAGE));
     }
 
     const isValid = await verifyOtp(user.id, otp, TokenType.PASSWORD_RESET);

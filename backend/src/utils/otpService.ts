@@ -93,6 +93,9 @@ export const verifyOtp = async (
   userId: string,
   otp: string,
   type: TokenType = TokenType.EMAIL_VERIFICATION,
+  // false = only check the code, leave it valid (and the attempt counter as is)
+  // so the caller can still reject the request and let the user retry.
+  { consume = true }: { consume?: boolean } = {},
 ): Promise<boolean> => {
   // Per-account brute-force guard, independent of the IP-keyed authLimiter
   // middleware — an attacker rotating IPs would otherwise get unlimited
@@ -129,6 +132,8 @@ export const verifyOtp = async (
     }
     return false;
   }
+
+  if (!consume) return true;
 
   // Delete used OTP
   await prisma.authToken.delete({

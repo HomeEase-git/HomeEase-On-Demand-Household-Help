@@ -1243,6 +1243,10 @@ export const acceptBooking = async (req: AuthRequest, res: Response) => {
     // Wrap in transaction to prevent double-counting
     try {
       const result = await prisma.$transaction(async (tx) => {
+        // Serialise this worker's accepts: two jobs accepted at the same moment
+        // must not both pass the same-start-time check below.
+        await tx.$queryRaw`SELECT "id" FROM "WorkerProfile" WHERE "userId" = ${currentUserId} FOR UPDATE`;
+
         // Check current capacity
         const workerProfile = await tx.workerProfile.findUnique({
           where: { userId: currentUserId },
@@ -1257,6 +1261,23 @@ export const acceptBooking = async (req: AuthRequest, res: Response) => {
         // bookings are never affected by this.
         if (workerProfile.debtHoldAt) {
           throw new Error('ACCOUNT_ON_HOLD');
+        }
+
+        // A worker can take several jobs a day, but not two that start at the
+        // same time. Bookings carry a start time only (no duration), so an
+        // identical start is the one clash that is certain.
+        const sameDayJobs = await tx.booking.findMany({
+          where: {
+            workerId: currentUserId,
+            id: { not: id },
+            scheduledDate: booking.scheduledDate,
+            status: { in: ['ACCEPTED', 'IN_PROGRESS', 'QUOTE_SUBMITTED', 'QUOTE_APPROVED'] },
+          },
+          select: { scheduledTime: true, timeSlot: true },
+        });
+        const myStart = bookingStartTime(booking);
+        if (sameDayJobs.some((job) => bookingStartTime(job) === myStart)) {
+          throw new Error('START_TIME_CLASH');
         }
 
         // Pin the platform's current commission/withholding-tax rate onto
@@ -1354,6 +1375,13 @@ export const acceptBooking = async (req: AuthRequest, res: Response) => {
             'Your account is on hold due to outstanding platform dues. Please contact support to continue accepting jobs.'
           )
         );
+      }
+      if (txError.message === 'START_TIME_CLASH') {
+        // 409, not 403, for the same logout reason as above.
+        return res.status(409).json({
+          ...errorResponse(409, `You already have a job starting at ${formatTime12h(bookingStartTime(booking))} that day. Decline this one, or ask that client to reschedule first.`),
+          code: 'START_TIME_CLASH',
+        });
       }
       throw txError;
     }
@@ -2023,6 +2051,9 @@ export const requestReschedule = async (req: AuthRequest, res: Response) => {
     if (!booking.workerId) {
       return res.status(409).json(errorResponse(409, 'This booking has no assigned worker'));
     }
+    if (booking.workerArrivedAt != null) {
+      return res.status(409).json(errorResponse(409, 'The pro has already arrived, so this booking can no longer be rescheduled'));
+    }
     if (booking.rescheduleRequestedAt != null && booking.rescheduleRequestRespondedAt == null) {
       return res.status(409).json(errorResponse(409, 'There is already a pending reschedule request for this booking'));
     }
@@ -2063,6 +2094,11 @@ export const requestReschedule = async (req: AuthRequest, res: Response) => {
       rescheduleRequestReminderSentAt: null,
       rescheduleRequestRespondedAt: null,
       rescheduleRequestAccepted: null,
+    }, {
+      // Closes the check-then-write gap: a request from the other side (or an
+      // arrival) that landed since the read above makes this write a no-op.
+      workerArrivedAt: null,
+      OR: [{ rescheduleRequestedAt: null }, { rescheduleRequestRespondedAt: { not: null } }],
     });
 
     const when = `${requestedDate.toLocaleDateString('en-PH', { month: 'short', day: 'numeric', timeZone: 'UTC' })} at ${formatTime12h(time)}`;
@@ -2128,10 +2164,28 @@ export const withdrawRescheduleRequest = async (req: AuthRequest, res: Response)
       return res.status(403).json(errorResponse(403, 'Only the side that asked can withdraw this request'));
     }
 
-    await prisma.booking.update({
-      where: { id },
+    // Only a still-open request can be withdrawn; if the other side answered
+    // (or the sweep declined it) since the read above, leave that outcome alone.
+    const { count } = await prisma.booking.updateMany({
+      // Match the request that was read, not just "any open one": a delayed
+      // withdrawal must not close a newer proposal made in the meantime.
+      where: { id, rescheduleRequestedAt: booking.rescheduleRequestedAt, rescheduleRequestRespondedAt: null },
       data: { rescheduleRequestRespondedAt: new Date(), rescheduleRequestAccepted: null },
     });
+    if (count === 0) {
+      return res.status(409).json(errorResponse(409, 'There is no pending reschedule request to withdraw'));
+    }
+
+    const otherId = requesterId === booking.clientId ? booking.workerId : booking.clientId;
+    if (otherId) {
+      await notifyUser({
+        userId: otherId,
+        type: 'BOOKING_RESCHEDULE_REQUEST_DECLINED',
+        title: 'Reschedule Request Withdrawn',
+        message: 'The reschedule request was withdrawn — the booking stays as originally scheduled.',
+        relatedId: id,
+      });
+    }
 
     return res.status(200).json({ success: true, message: 'Reschedule request withdrawn', data: { id } });
   } catch (error) {
@@ -2179,20 +2233,73 @@ export const respondToRescheduleRequest = async (req: AuthRequest, res: Response
     const newTime = bookingStartTime({ scheduledTime: booking.requestedScheduledTime, timeSlot: booking.requestedTimeSlot });
 
     if (accept) {
-      await updateBookingIfStatus(prisma, id, 'ACCEPTED', {
-        scheduledDate: booking.requestedScheduledDate,
-        scheduledTime: newTime,
-        timeSlot: null,
-        // The new start time resets the no-show clock.
-        workerNoShowFlaggedAt: null,
-        rescheduleRequestRespondedAt: new Date(),
-        rescheduleRequestAccepted: true,
+      if (booking.workerArrivedAt != null) {
+        return res.status(409).json(errorResponse(409, 'The pro has already arrived, so this booking can no longer be moved'));
+      }
+      // The proposal may be days old: re-run the start rules and, for a
+      // client's proposal, the pro's availability on the proposed day.
+      const { rushMinLeadHours } = await getAppSettings();
+      const startCheck = checkBookingStart(isoDay(booking.requestedScheduledDate), newTime, rushMinLeadHours);
+      if (!startCheck.ok) {
+        return res.status(409).json(errorResponse(409, 'The proposed time has already passed or is too soon. Please decline and ask for a new time.'));
+      }
+      if (requester === 'CLIENT' && booking.workerId) {
+        const workerProfile = await prisma.workerProfile.findUnique({
+          where: { userId: booking.workerId },
+          select: { id: true, availableDays: true },
+        });
+        if (!workerProfile || !(await isWorkerAvailableOn(prisma, workerProfile, booking.requestedScheduledDate))) {
+          return res.status(409).json(errorResponse(409, "You're no longer available on the proposed date. Please decline this request."));
+        }
+      }
+
+      // Same rule as acceptBooking: a pro can't hold two jobs with the same
+      // start time. The worker row is locked so this check and the move can't
+      // interleave with another accept or reschedule for the same pro.
+      const requestedDate = booking.requestedScheduledDate;
+      await prisma.$transaction(async (tx) => {
+        if (booking.workerId) {
+          await tx.$queryRaw`SELECT "id" FROM "WorkerProfile" WHERE "userId" = ${booking.workerId} FOR UPDATE`;
+          const sameDayJobs = await tx.booking.findMany({
+            where: {
+              workerId: booking.workerId,
+              id: { not: id },
+              scheduledDate: requestedDate,
+              status: { in: ['ACCEPTED', 'IN_PROGRESS', 'QUOTE_SUBMITTED', 'QUOTE_APPROVED'] },
+            },
+            select: { scheduledTime: true, timeSlot: true },
+          });
+          if (sameDayJobs.some((job) => bookingStartTime(job) === newTime)) {
+            throw new Error('START_TIME_CLASH');
+          }
+        }
+
+        await updateBookingIfStatus(tx, id, 'ACCEPTED', {
+          scheduledDate: requestedDate,
+          scheduledTime: newTime,
+          timeSlot: null,
+          // The new start time resets the no-show clock.
+          workerNoShowFlaggedAt: null,
+          rescheduleRequestRespondedAt: new Date(),
+          rescheduleRequestAccepted: true,
+        }, {
+          // Only move it if the worker still hasn't arrived and this is still the
+          // same open request (not withdrawn or auto-declined since the read).
+          workerArrivedAt: null,
+          rescheduleRequestedAt: booking.rescheduleRequestedAt,
+          rescheduleRequestRespondedAt: null,
+        });
       });
     } else {
-      await prisma.booking.update({
-        where: { id },
+      // Close only the request that was read; a newer proposal made since
+      // (after this one was withdrawn or timed out) must stay open.
+      const { count } = await prisma.booking.updateMany({
+        where: { id, rescheduleRequestedAt: booking.rescheduleRequestedAt, rescheduleRequestRespondedAt: null },
         data: { rescheduleRequestRespondedAt: new Date(), rescheduleRequestAccepted: false },
       });
+      if (count === 0) {
+        return res.status(409).json(errorResponse(409, 'There is no pending reschedule request to respond to'));
+      }
     }
 
     const requesterId = requester === 'CLIENT' ? booking.clientId : booking.workerId;
@@ -2226,6 +2333,17 @@ export const respondToRescheduleRequest = async (req: AuthRequest, res: Response
     });
   } catch (error) {
     if (isBookingStatusConflict(error)) return bookingConflict(res);
+    if (error instanceof Error && error.message === 'START_TIME_CLASH') {
+      return res.status(409).json({
+        ...errorResponse(
+          409,
+          req.user?.role === 'WORKER'
+            ? 'You already have a job starting at that time on that day. Decline this request, or ask the client for a different time.'
+            : 'Your pro already has another job starting at that time. Decline this request and suggest a different time.'
+        ),
+        code: 'START_TIME_CLASH',
+      });
+    }
     console.error('Error responding to reschedule request:', error);
     return res.status(500).json(errorResponse(500, 'Failed to respond to reschedule request'));
   }

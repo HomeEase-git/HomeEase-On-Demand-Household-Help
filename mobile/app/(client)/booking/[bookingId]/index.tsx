@@ -191,7 +191,8 @@ export default function BookingDetailScreen() {
     !!rawDetail?.rescheduleRequestedAt && !rawDetail?.rescheduleRequestRespondedAt;
   const workerAskedToReschedule = hasOpenRescheduleRequest && rawDetail?.rescheduleRequestedBy === "WORKER";
   const hasPendingRescheduleRequest = hasOpenRescheduleRequest && !workerAskedToReschedule;
-  const canRequestReschedule = rawDetail?.status === "ACCEPTED" && !hasOpenRescheduleRequest;
+  const workerHasArrived = !!rawDetail?.timeline?.workerArrivedAt;
+  const canRequestReschedule = rawDetail?.status === "ACCEPTED" && !workerHasArrived && !hasOpenRescheduleRequest;
   // Follow-up job after an inspection/diagnosis (same pro), once its work is done.
   const canRequestFollowUp =
     !!rawDetail?.allowsFollowUp &&
