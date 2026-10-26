@@ -70,7 +70,7 @@ async function collectStoredFiles(userId: string): Promise<string[]> {
     prisma.user.findUnique({ where: { id: userId }, select: { avatar: true } }),
     prisma.workerProfile.findUnique({
       where: { userId },
-      select: { resumeUrl: true, vatDocumentUrl: true, certifications: { select: { documentUrl: true } } },
+      select: { resumeUrl: true, certifications: { select: { documentUrl: true } } },
     }),
     prisma.kycDocument.findMany({ where: { verificationRequest: { userId } }, select: { fileUrl: true } }),
     prisma.message.findMany({ where: { senderId: userId, imageUrl: { not: null } }, select: { imageUrl: true } }),
@@ -79,7 +79,6 @@ async function collectStoredFiles(userId: string): Promise<string[]> {
   return [
     user?.avatar,
     workerProfile?.resumeUrl,
-    workerProfile?.vatDocumentUrl,
     ...(workerProfile?.certifications.map((c) => c.documentUrl) ?? []),
     ...kycDocuments.map((d) => d.fileUrl),
     ...sentImages.map((m) => m.imageUrl),
@@ -153,12 +152,9 @@ export async function eraseAccount(userId: string, sessionTtlSeconds: number): P
         resumeUrl: null,
         payoutAccountName: null,
         payoutAccountNumber: null,
-        tin: null,
-        tinHash: null,
         licenseNumber: null,
         digitalIdTrade: null,
         digitalIdServiceArea: null,
-        vatDocumentUrl: null,
       },
     }),
     ...(workerProfile

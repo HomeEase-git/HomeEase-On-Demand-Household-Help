@@ -115,14 +115,14 @@ export type WorkerCard = {
   yearsExperience?: number | null;
 };
 
-export const TASK_PRICING_MODELS = ['FIXED', 'PER_UNIT', 'TIERED', 'CUSTOM_QUOTE'] as const;
+// TIERED is retired (charged like PER_UNIT); custom quotes are gone.
+export const TASK_PRICING_MODELS = ['FIXED', 'PER_UNIT', 'TIERED'] as const;
 export type TaskPricingModel = (typeof TASK_PRICING_MODELS)[number];
 
 // A specific bookable job within a category (e.g. "Toilet Repair" under
 // "Plumbing Repair"), priced by the admin — basePrice is the same at every
-// pro (before their tier surcharge and distance fee). minPrice/maxPrice both
-// carry that price for the estimate preview; both null for CUSTOM_QUOTE
-// (worker quotes on-site, no upfront price at all).
+// worker (before their tier surcharge and distance fee). minPrice/maxPrice
+// both carry that price for the estimate preview.
 export type ServiceTaskOption = {
   id: string;
   name: string;
@@ -198,32 +198,7 @@ export type CreateBookingResponse = {
 
 // The only booking "priority" the backend acts on: any priority string
 // containing "pet" flips the auto-match filter to pet-friendly workers
-// (see bookingController `hasPets`). Step 4 collects this as a single
+// (see bookingController `hasPets`). Step 1 collects this as a single
 // toggle and submits this constant when it's on.
 export const PET_FRIENDLY_PRIORITY = 'Pet-friendly';
 
-export type AddOnToggleKey = 'eco_friendly' | 'client_supplies' | 'call_before_arrival';
-
-export const ADD_ON_TOGGLES: Array<{ key: AddOnToggleKey; label: string; description: string }> = [
-  {
-    key: 'eco_friendly',
-    label: 'Eco-Friendly Products',
-    description: 'Worker uses non-toxic, environmentally-friendly cleaning products',
-  },
-  {
-    key: 'client_supplies',
-    label: 'Client-Provided Supplies',
-    description: "I'll provide my own cleaning supplies and equipment",
-  },
-  {
-    key: 'call_before_arrival',
-    label: 'Call Before Arrival',
-    description: 'Worker calls 15-30 minutes before arriving',
-  },
-];
-
-export const ADD_ON_TOGGLE_LABELS: Record<AddOnToggleKey, string> = {
-  eco_friendly: 'Eco-Friendly Products',
-  client_supplies: 'Client-Provided Supplies',
-  call_before_arrival: 'Call Before Arrival',
-};

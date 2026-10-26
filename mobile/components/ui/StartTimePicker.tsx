@@ -19,7 +19,7 @@ type Props = {
   // Earliest allowed "HH:mm" (e.g. later for a same-day booking); null when
   // no time is left on that day. Defaults to FIRST_START_TIME.
   minTime?: string | null;
-  // Start times already taken on that day (e.g. the pro's other jobs) —
+  // Start times already taken on that day (e.g. the worker's other jobs) —
   // still pickable, just listed as a heads-up.
   busyTimes?: string[];
 };
@@ -125,7 +125,7 @@ export default function StartTimePicker({ value, onChange, minTime = FIRST_START
     message = {
       text:
         minTime === FIRST_START_TIME
-          ? `Pros start at ${formatTime12h(FIRST_START_TIME)} at the earliest.`
+          ? `Workers start at ${formatTime12h(FIRST_START_TIME)} at the earliest.`
           : `The earliest start on this day is ${formatTime12h(minTime)}.`,
       tone: "error",
     };
@@ -189,8 +189,8 @@ export default function StartTimePicker({ value, onChange, minTime = FIRST_START
       {busyTimes.length > 0 && (
         <Text className={`text-xs mt-1 ${clash ? "text-warning" : "text-text-muted"}`}>
           {clash
-            ? "Your pro already has another job at this time."
-            : `Your pro has other jobs at ${busyTimes.map((t) => formatTime12h(t)).join(", ")} on this day.`}
+            ? "Your worker already has another job at this time."
+            : `Your worker has other jobs at ${busyTimes.map((t) => formatTime12h(t)).join(", ")} on this day.`}
         </Text>
       )}
     </View>

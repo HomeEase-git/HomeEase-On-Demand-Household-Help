@@ -18,8 +18,7 @@ const ROUNDING = [1, 5, 10, 50]
 const parsePrice = (raw) => (raw === '' || raw == null ? NaN : Number(raw))
 
 function chargedAs(task) {
-  if (task.pricingModel === 'CUSTOM_QUOTE') return 'Custom quote'
-  if (task.pricingModel === 'PER_UNIT') return `Per ${task.unitLabel || 'unit'}`
+  if (task.pricingModel === 'PER_UNIT' || task.pricingModel === 'TIERED') return `Per ${task.unitLabel || 'piece'}`
   return task.unitLabel ? `Flat, per ${task.unitLabel}` : 'Flat'
 }
 
@@ -96,10 +95,7 @@ export default function PriceList() {
 
   const bulkNumber = Number(bulkValue)
   const bulkReady = bulkValue !== '' && Number.isFinite(bulkNumber) && bulkNumber !== 0
-  const bulkTargetCount = visible.reduce(
-    (n, c) => n + c.tasks.filter((t) => t.pricingModel !== 'CUSTOM_QUOTE').length,
-    0
-  )
+  const bulkTargetCount = visible.reduce((n, c) => n + c.tasks.length, 0)
 
   const applyBulk = () => {
     if (!bulkReady) return
@@ -114,7 +110,6 @@ export default function PriceList() {
     const nextCats = { ...categoryDraft }
     for (const c of visible) {
       for (const t of c.tasks) {
-        if (t.pricingModel === 'CUSTOM_QUOTE') continue
         nextTasks[t.id] = adjust(shownValue(t.id, t.basePrice, taskDraft))
       }
       if (bulkIncludeStarting) nextCats[c.id] = adjust(shownValue(c.id, c.basePrice, categoryDraft))
@@ -243,7 +238,7 @@ export default function PriceList() {
           </button>
         </div>
         <p className="pl-note">
-          Applies to the jobs the filters above are showing, not custom-quote jobs. Nothing is saved until you review and save.
+          Applies to the jobs the filters above are showing. Nothing is saved until you review and save.
         </p>
       </SectionCard>
 
@@ -292,19 +287,6 @@ export default function PriceList() {
                     <td>{catChanged && <ChangeNote from={c.basePrice} to={catNum} />}</td>
                   </tr>,
                   ...c.tasks.map((t) => {
-                    if (t.pricingModel === 'CUSTOM_QUOTE') {
-                      return (
-                        <tr key={t.id}>
-                          <td className="pl-job">
-                            {t.name}
-                            {!t.isActive && <Badge variant="suspended">Hidden</Badge>}
-                          </td>
-                          <td>{chargedAs(t)}</td>
-                          <td className="pl-num pl-muted">Worker quotes on site</td>
-                          <td />
-                        </tr>
-                      )
-                    }
                     const value = shownValue(t.id, t.basePrice, taskDraft)
                     const num = parsePrice(value)
                     const changed = value !== String(t.basePrice)

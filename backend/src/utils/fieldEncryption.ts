@@ -2,9 +2,8 @@ import crypto from 'crypto';
 import { promisify } from 'util';
 import { decryptWithKeyring, deriveKey, deriveKeyring, encryptWithKey } from '@utils/encryption';
 
-// Field-level encryption for worker payout account numbers and TINs
-// (WorkerProfile.payoutAccountNumber/tin, Payout.accountNumber,
-// TaxCertificate.workerTin). Encrypted values carry an `enc:v1:` prefix, so
+// Field-level encryption for worker payout account numbers
+// (WorkerProfile.payoutAccountNumber, Payout.accountNumber). Encrypted values carry an `enc:v1:` prefix, so
 // rows written before encryption existed (plaintext) still read correctly
 // until scripts/encrypt-sensitive-fields.ts has backfilled them.
 //
@@ -46,27 +45,6 @@ export function isUnderPreviousDataKey(stored: string): boolean {
 
 export function decryptOptionalField(stored: string | null | undefined): string | null | undefined {
   return stored ? decryptField(stored) : stored;
-}
-
-/**
- * Deterministic keyed hash of a normalized TIN. WorkerProfile.tinHash carries
- * the uniqueness constraint that the encrypted `tin` column can't (the same
- * TIN encrypts differently every time).
- */
-export function hashTin(normalizedTin: string): string {
-  return hashTinWithKey(normalizedTin, getKey());
-}
-
-/**
- * Every hash this TIN could be stored under — one per key while a rotation
- * is in progress — so a duplicate check still finds rows not yet rehashed.
- */
-export function tinHashCandidates(normalizedTin: string): string[] {
-  return getKeyring().map((key) => hashTinWithKey(normalizedTin, key));
-}
-
-function hashTinWithKey(normalizedTin: string, key: Buffer): string {
-  return crypto.createHmac('sha256', key).update(`tin:${normalizedTin}`).digest('hex');
 }
 
 /** "••••1234" — the last four digits/characters only. */
@@ -136,7 +114,7 @@ function maskDeep(value: unknown, depth: number): unknown {
 
 /**
  * Replaces every encrypted field value in `value` with its masked form, so
- * an endpoint returning a full WorkerProfile/Payout/TaxCertificate row never
+ * an endpoint returning a full WorkerProfile/Payout row never
  * leaks either ciphertext or the full number. Endpoints that legitimately
  * need the full number (the worker's own payout settings) decrypt explicitly.
  */

@@ -19,7 +19,7 @@ import { useToast } from '../context/ToastContext'
 import WorkerDocuments from '../components/workers/WorkerDocuments'
 
 const DEBT_TYPE_LABELS = {
-  COMMISSION_DEBIT: 'Commission Accrued (cash job)',
+  COMMISSION_DEBIT: 'Service Fee Accrued (cash job)',
   DEBT_RECOVERY: 'Recovered from Payout',
   ADMIN_ADJUSTMENT: 'Admin Adjustment',
   REVERSAL: 'Reversed (refund)',

@@ -47,7 +47,6 @@ flowchart LR
 | Government ID, selfie, clearances, health certificate, certifications | Workers | File storage (private buckets); review results in database | **Yes** (ID numbers, health, clearances) | Files while active, erased on account deletion |
 | Resume and its AI summary | Workers | File storage; summary in database | No | While active |
 | Date of birth, home address, years of experience | Workers | Database | No | While active |
-| TIN | Workers | Database, **encrypted** | **Yes** | While active; as issued on tax certificates for the legal period |
 | GCash/Maya payout account | Workers | Database, **encrypted** | No, but enables fraud | While active; on payout records for the legal period |
 | Live location, check-in location, fake-GPS flag | Workers | Database | No | Live location at most 2 hours; check-in with the booking |
 | Chat messages and photos, reviews, disputes | Clients, workers | Database; photos in file storage | No | Kept (the other person's record too) |

@@ -39,7 +39,7 @@ function jobsCaption(field: CatalogField, category: ScopeServiceType): string | 
 
 // The admin's price, read-only for the worker.
 function priceLabel(task: CatalogTask): string {
-  if (task.pricingModel === "CUSTOM_QUOTE" || task.price == null) return "Quoted on-site";
+  if (task.price == null) return "No price yet";
   const amount = `₱${task.price.toLocaleString("en-PH")}`;
   const perUnit = task.pricingModel === "PER_UNIT" || task.pricingModel === "TIERED";
   return perUnit && task.unitLabel ? `${amount} / ${task.unitLabel}` : amount;
@@ -213,7 +213,7 @@ export default function SkillsScreen() {
       <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 120 }}>
         <Text className="text-text-primary font-bold mb-1">Services You Offer</Text>
         <Text className="text-text-muted text-sm mb-4">
-          Tick the tasks you do. Prices are set by HomeEase and are the same for every pro.
+          Tick the tasks you do. Prices are set by HomeEase and are the same for every worker.
         </Text>
 
         {loading && (
@@ -324,7 +324,7 @@ export default function SkillsScreen() {
           <>
             <Text className="text-text-primary font-bold mb-1 mt-8">Your Specialization</Text>
             <Text className="text-text-muted text-sm mb-3">
-              Check off exactly what you handle. Clients who ask for something specific only see pros
+              Check off exactly what you handle. Clients who ask for something specific only see workers
               who&apos;ve checked it.
             </Text>
 

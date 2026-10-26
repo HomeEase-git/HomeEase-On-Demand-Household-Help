@@ -28,12 +28,12 @@ const COMPLETABLE_STATUSES = ['PENDING_COMPLETION', 'AWAITING_PAYMENT', 'DISPUTE
 /**
  * PAYMENT MODEL: pay-after-completion, no escrow.
  *
- * No Payment row exists until the client confirms the finished job. At that
- * point (bookingController.confirmCompletion):
+ * No Payment row exists until the worker sends the invoice at the end of the
+ * job (bookingController.completeBooking). Then:
  *
- *   CASH   -> settleCashBooking: the client already paid the worker in person,
- *             so the booking is finalized immediately and the platform's
- *             commission + withholding tax are accrued onto the worker's
+ *   CASH   -> settleCashBooking, once the worker taps "Cash received"
+ *             (bookingController.markCashReceived): the booking is finalized
+ *             and the platform's service fee is accrued onto the worker's
  *             commissionOwed tab (netted from their next online payout).
  *
  *   GCASH  -> createCompletionInvoice: a Xendit invoice for the full final
@@ -102,9 +102,7 @@ function resolveRates(
 
 /**
  * vatApplicable/vatRate are always read from the booking's own frozen
- * snapshot (see Booking.vatApplicable/vatRate) — never re-derived from the
- * worker's live WorkerProfile.vatRegistered — so a worker becoming
- * VAT-registered mid-job can't shift a price the client already agreed to.
+ * snapshot (see Booking.vatApplicable/vatRate); new bookings carry none.
  */
 function priceBooking(booking: BookingWithAddOns, commissionRate: number, withholdingTaxRate: number) {
   const { subtotal, tip, vatAmount, totalAmount } = computeBookingFinalTotal({
@@ -142,7 +140,7 @@ function priceBooking(booking: BookingWithAddOns, commissionRate: number, withho
  */
 function cashJobDuesMessage(collected: number, platformCut: number, coveredByCredit: number): string {
   const owed = roundToCentavo(platformCut - coveredByCredit);
-  const intro = `You collected ₱${collected.toFixed(2)} in cash. The ₱${platformCut.toFixed(2)} commission + tax`;
+  const intro = `You collected ₱${collected.toFixed(2)} in cash. The ₱${platformCut.toFixed(2)} service fee`;
   if (owed <= 0) return `${intro} was covered by your payout credit — nothing to pay.`;
   if (coveredByCredit > 0) {
     return (
@@ -153,7 +151,15 @@ function cashJobDuesMessage(collected: number, platformCut: number, coveredByCre
   return `${intro} will be deducted from your next online-job payout.`;
 }
 
-export async function settleCashBooking(bookingId: string) {
+/**
+ * `fromStatuses` narrows which statuses may complete: the worker's "Cash
+ * received" passes PENDING_COMPLETION only, so a client report that lands in
+ * between (DISPUTED) wins instead of being settled over.
+ */
+export async function settleCashBooking(
+  bookingId: string,
+  fromStatuses: readonly (typeof COMPLETABLE_STATUSES)[number][] = COMPLETABLE_STATUSES
+) {
   const booking = await loadBooking(bookingId);
   const { commissionRate, withholdingTaxRate } = resolveRates(booking, await getAppSettings());
   const priced = priceBooking(booking, commissionRate, withholdingTaxRate);
@@ -194,7 +200,7 @@ export async function settleCashBooking(bookingId: string) {
       ? await tx.payment.update({ where: { id: existing.id }, data: paymentData })
       : await tx.payment.create({ data: { bookingId, ...paymentData } });
 
-    await updateBookingIfStatus(tx, bookingId, COMPLETABLE_STATUSES, {
+    await updateBookingIfStatus(tx, bookingId, fromStatuses, {
       status: 'COMPLETED',
       finalPrice: priced.subtotal,
       vatAmount: priced.vatAmount,
@@ -730,73 +736,6 @@ export async function voidUnpaidPayment(bookingId: string, reason: string) {
  *                                     accrual; the worker returns the cash
  *                                     out-of-band.
  */
-/**
- * Called after a COMPLETED payment is refunded — taxCertificateService/
- * taxRemittanceService/vatSummaryService all aggregate Payment rows by
- * `capturedAt` falling in a period at generation time only, with no later
- * reconciliation if one of those payments is subsequently refunded. Left
- * unchecked, an already-ISSUED 2307 or already-REMITTED period keeps
- * overstating real income/tax withheld forever, and a worker's VAT-
- * collected summary keeps counting VAT that was never actually kept.
- * Flags (never silently corrects — the real remediation is a human
- * decision) any record whose stored period contains this payment's
- * capturedAt, and notifies admins once if anything was flagged.
- */
-export async function flagTaxRecordsForRefundedPayment(payment: {
-  id: string;
-  bookingId: string;
-  capturedAt: Date | null;
-  vatAmount: number;
-  booking: { workerId: string | null };
-}): Promise<void> {
-  if (!payment.capturedAt || !payment.booking.workerId) return;
-  const workerId = payment.booking.workerId;
-  const capturedAt = payment.capturedAt;
-
-  const [certificates, remittances, vatSummaries] = await Promise.all([
-    prisma.taxCertificate.findMany({
-      where: { workerId, status: 'ISSUED', periodStart: { lte: capturedAt }, periodEnd: { gt: capturedAt } },
-    }),
-    prisma.taxRemittance.findMany({
-      where: { status: 'REMITTED', periodStart: { lte: capturedAt }, periodEnd: { gt: capturedAt } },
-    }),
-    payment.vatAmount > 0
-      ? prisma.vatCollectionSummary.findMany({
-          where: { workerId, needsReview: false, periodStart: { lte: capturedAt }, periodEnd: { gt: capturedAt } },
-        })
-      : Promise.resolve([]),
-  ]);
-
-  if (certificates.length === 0 && remittances.length === 0 && vatSummaries.length === 0) return;
-
-  await Promise.all([
-    ...certificates.map((c) => prisma.taxCertificate.update({ where: { id: c.id }, data: { status: 'NEEDS_REVIEW' } })),
-    ...remittances.map((r) => prisma.taxRemittance.update({ where: { id: r.id }, data: { status: 'NEEDS_REVIEW' } })),
-    ...vatSummaries.map((v) => prisma.vatCollectionSummary.update({ where: { id: v.id }, data: { needsReview: true } })),
-  ]);
-
-  await writeAuditLog({
-    action: 'TAX_RECORDS_FLAGGED_FOR_REVIEW',
-    category: 'SYSTEM_ERROR',
-    level: 'WARN',
-    message: `Payment ${payment.id} (booking ${payment.bookingId}) was refunded after being counted in ${certificates.length} tax certificate(s), ${remittances.length} remittance period(s), and ${vatSummaries.length} VAT summary(ies) — flagged for admin review.`,
-    metadata: { paymentId: payment.id, bookingId: payment.bookingId, workerId },
-  });
-
-  const admins = await prisma.user.findMany({ where: { role: 'ADMIN', isDeleted: false }, select: { id: true } });
-  await Promise.all(
-    admins.map((admin) =>
-      notifyUser({
-        userId: admin.id,
-        type: 'TAX_RECORDS_NEED_REVIEW',
-        title: 'Tax records need review after refund',
-        message: `A refunded payment (booking ${payment.bookingId}) was already counted in issued tax records — review and correct before the next filing.`,
-        relatedId: payment.bookingId,
-      })
-    )
-  );
-}
-
 /** The worker's payout already left — the refund has to be settled manually. */
 export class PayoutAlreadySentError extends Error {
   constructor(bookingId: string) {
@@ -1069,8 +1008,6 @@ export async function refundOrVoidPayment(bookingId: string, reason: string) {
       ...(refund ? { xenditRefundId: refund.id, xenditRefundStatus: refund.status } : {}),
     },
   });
-
-  await flagTaxRecordsForRefundedPayment(payment);
 
   return refunded;
 }

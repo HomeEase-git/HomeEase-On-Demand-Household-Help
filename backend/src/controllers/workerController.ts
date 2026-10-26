@@ -1,10 +1,9 @@
 import { Request, Response } from 'express';
 import prisma from '@config/database';
-import { formatManilaPeriod } from '@utils/manilaTime';
 import { errorResponse } from '@utils/errorResponse';
 import { toOwnedStoredUrl } from '@utils/storageUrls';
 import { parseWorkerBirthDate } from '@utils/age';
-import { decryptField, decryptOptionalField, encryptField, encryptOptionalField, hashTin, maskLastFour, tinHashCandidates } from '@utils/fieldEncryption';
+import { decryptField, decryptOptionalField, encryptOptionalField, maskLastFour } from '@utils/fieldEncryption';
 import { maskProfanity } from '@utils/profanityFilter';
 import {
   toDayStart,
@@ -22,8 +21,6 @@ import { computeWorkerTier, tierMultiplier } from '@utils/workerTier';
 import { computeJobPricing } from '@utils/pricing';
 import { resolveDrivingDistancesKm } from '@services/googleDistanceService';
 import { buildCapabilityFilters } from '@services/matchingService';
-import { normalizeTin, maskTin } from '@utils/taxId';
-import { getCertificateDownloadUrl } from '@services/taxCertificateService';
 import { isPerUnitModel, offersTaskFilter } from '@services/taskPriceService';
 import { getWorkerSetupStatus, workerSetupCompleteWhere } from '@services/workerSetupService';
 import { comparePassword } from '@utils/passwordHash';
@@ -297,9 +294,9 @@ export const searchWorkers = async (req: AuthRequest, res: Response) => {
       // spread across the admin prices of the tasks THIS worker offers, at
       // THIS worker's own tier. Distance isn't factored in here (unlike
       // estimatedTotal above) since browsing lists don't scope to one client
-      // address/booking yet. Custom-quote jobs have no upfront price.
+      // address/booking yet. Unpriced (switched-off) jobs are skipped.
       const matchedTaskPrices = (matchedServiceType?.tasks ?? [])
-        .filter((t) => selectedTaskIds.has(t.id) && t.pricingModel !== 'CUSTOM_QUOTE')
+        .filter((t) => selectedTaskIds.has(t.id) && t.basePrice > 0)
         .map((t) => t.basePrice);
       if (matchedTaskPrices.length === 0 && basePrice != null) matchedTaskPrices.push(basePrice);
       const priceRangeMin = matchedTaskPrices.length ? Math.round(Math.min(...matchedTaskPrices) * multiplier) : null;
@@ -480,9 +477,9 @@ export const getWorkerDetail = async (req: AuthRequest, res: Response) => {
     // worker offers, at this worker's own tier — mirrors serviceController's
     // marketplace-wide range but narrowed to just this one worker. A client
     // shouldn't see a price for a task the worker never agreed to perform,
-    // and custom-quote jobs have no upfront price.
+    // and unpriced (switched-off) jobs are skipped.
     const services = categories.map((st) => {
-      const pricedTasks = st.tasks.filter((t) => selectedTaskIds.has(t.id) && t.pricingModel !== 'CUSTOM_QUOTE');
+      const pricedTasks = st.tasks.filter((t) => selectedTaskIds.has(t.id) && t.basePrice > 0);
       const taskPrices = pricedTasks.length ? pricedTasks.map((t) => t.basePrice) : [st.basePrice];
       return {
         id: st.id,
@@ -736,8 +733,8 @@ export const respondToReview = async (req: AuthRequest, res: Response) => {
     await notifyUser({
       userId: review.clientId,
       type: 'REVIEW_RESPONSE_ADDED',
-      title: 'Your pro responded to your review',
-      message: 'The pro you reviewed has posted a public response.',
+      title: 'Your worker responded to your review',
+      message: 'The worker you reviewed has posted a public response.',
       relatedId: review.bookingId,
     });
 
@@ -1489,7 +1486,7 @@ export const getMyTaskCatalog = async (req: AuthRequest, res: Response) => {
             name: task.name,
             description: task.description,
             pricingModel: task.pricingModel,
-            price: task.pricingModel === 'CUSTOM_QUOTE' ? null : task.basePrice,
+            price: task.basePrice > 0 ? task.basePrice : null,
             unitLabel: task.unitLabel,
           },
           mySelection: selectionByTaskId.get(task.id) ?? null,
@@ -2427,291 +2424,6 @@ export const updatePayoutMethod = async (req: AuthRequest, res: Response) => {
   } catch (error) {
     console.error('Error updating payout method:', error);
     return res.status(500).json(errorResponse(500, 'Failed to update payout method'));
-  }
-};
-
-/**
- * GET /api/workers/me/tax-info
- * Get the authenticated worker's TIN-on-file, masked (worker only). Masked
- * because this is echoed back to the same screen the worker just typed it
- * into — full plaintext isn't needed for a "yes I have one saved" check.
- */
-export const getTaxInfo = async (req: AuthRequest, res: Response) => {
-  try {
-    if (!req.user) {
-      return res.status(401).json(errorResponse(401, 'Not authenticated'));
-    }
-
-    const worker = await prisma.workerProfile.findUnique({
-      where: { userId: req.user.userId },
-      select: { tin: true, tinVerifiedAt: true },
-    });
-
-    if (!worker) {
-      return res.status(404).json(errorResponse(404, 'Worker profile not found'));
-    }
-
-    return res.status(200).json({
-      success: true,
-      message: 'Tax info retrieved successfully',
-      data: {
-        tinOnFile: !!worker.tin,
-        maskedTin: worker.tin ? maskTin(decryptField(worker.tin)) : null,
-        tinVerifiedAt: worker.tinVerifiedAt,
-      },
-    });
-  } catch (error) {
-    console.error('Error fetching tax info:', error);
-    return res.status(500).json(errorResponse(500, 'Failed to fetch tax info'));
-  }
-};
-
-/**
- * PATCH /api/workers/me/tax-info
- * Set the authenticated worker's TIN (worker only). Format validated by
- * validateUpdateTaxInfo before this runs. A worker's TIN is not required to
- * use the app — it's only required before a 2307 certificate can be
- * generated for them (see taxCertificateService.generateQuarterlyCertificates).
- */
-export const updateTaxInfo = async (req: AuthRequest, res: Response) => {
-  try {
-    if (!req.user) {
-      return res.status(401).json(errorResponse(401, 'Not authenticated'));
-    }
-
-    const { tin } = req.body as { tin: string };
-    const normalized = normalizeTin(tin);
-
-    // The unique index only sees hashes under the current key; during a key
-    // rotation another worker's copy may still be under the previous one.
-    const duplicate = await prisma.workerProfile.findFirst({
-      where: { tinHash: { in: tinHashCandidates(normalized) }, NOT: { userId: req.user.userId } },
-      select: { id: true },
-    });
-    if (duplicate) {
-      return res.status(409).json(errorResponse(409, 'This TIN is already on file for another worker'));
-    }
-
-    const updated = await prisma.workerProfile.update({
-      where: { userId: req.user.userId },
-      data: { tin: encryptField(normalized), tinHash: hashTin(normalized), tinVerifiedAt: null },
-      select: { tin: true, tinVerifiedAt: true },
-    });
-
-    return res.status(200).json({
-      success: true,
-      message: 'Tax info updated successfully',
-      data: { tinOnFile: true, maskedTin: maskTin(normalized), tinVerifiedAt: updated.tinVerifiedAt },
-    });
-  } catch (error: any) {
-    if (error?.code === 'P2002') {
-      return res.status(409).json(errorResponse(409, 'This TIN is already on file for another worker'));
-    }
-    console.error('Error updating tax info:', error);
-    return res.status(500).json(errorResponse(500, 'Failed to update tax info'));
-  }
-};
-
-/**
- * GET /api/workers/me/vat-registration
- * A worker is legally required to register for VAT once their gross annual
- * receipts cross BIR's threshold, regardless of trade — unrelated to TIN.
- * `vatRegistered` (the only field pricing logic reads) only ever flips true
- * via admin approval below, never from submission alone.
- */
-export const getMyVatRegistration = async (req: AuthRequest, res: Response) => {
-  try {
-    if (!req.user) {
-      return res.status(401).json(errorResponse(401, 'Not authenticated'));
-    }
-
-    const worker = await prisma.workerProfile.findUnique({
-      where: { userId: req.user.userId },
-      select: {
-        vatRegistered: true,
-        vatDocumentUrl: true,
-        vatVerificationStatus: true,
-        vatRejectionReason: true,
-        vatSubmittedAt: true,
-        vatReviewedAt: true,
-      },
-    });
-
-    if (!worker) {
-      return res.status(404).json(errorResponse(404, 'Worker profile not found'));
-    }
-
-    return res.status(200).json({
-      success: true,
-      message: 'VAT registration status retrieved successfully',
-      data: worker,
-    });
-  } catch (error) {
-    console.error('Error fetching VAT registration status:', error);
-    return res.status(500).json(errorResponse(500, 'Failed to fetch VAT registration status'));
-  }
-};
-
-/**
- * POST /api/workers/me/vat-registration
- * Worker submits (or resubmits) proof of VAT registration — a document
- * already uploaded via POST /api/users/me/kyc-documents/upload with
- * documentType VAT_REGISTRATION. Moves to PENDING for admin review; does NOT
- * touch vatRegistered itself. Resubmission (e.g. after a rejection) simply
- * overwrites the previous claim and clears the old rejection reason.
- */
-export const submitVatRegistration = async (req: AuthRequest, res: Response) => {
-  try {
-    if (!req.user) {
-      return res.status(401).json(errorResponse(401, 'Not authenticated'));
-    }
-
-    const { documentUrl } = req.body as { documentUrl?: string };
-    if (!documentUrl || typeof documentUrl !== 'string') {
-      return res.status(400).json(errorResponse(400, 'documentUrl is required'));
-    }
-
-    const storedDocumentUrl = toOwnedStoredUrl(documentUrl, req.user.userId);
-    if (!storedDocumentUrl) {
-      return res.status(400).json(errorResponse(400, 'That file does not belong to your account. Please upload it again.'));
-    }
-
-    // Only a worker with no claim yet, or a rejected one, can submit. An approved
-    // registration must not be reopened with a new document: a later rejection
-    // leaves vatRegistered on (see adminVatController.rejectVatRegistration), so
-    // a swapped-in fake would keep VAT applied. The conditional write also stops
-    // two simultaneous submissions from both going through.
-    const claimed = await prisma.workerProfile.updateMany({
-      where: {
-        userId: req.user.userId,
-        vatRegistered: false,
-        OR: [{ vatVerificationStatus: null }, { vatVerificationStatus: 'REJECTED' }],
-      },
-      data: {
-        vatDocumentUrl: storedDocumentUrl,
-        vatVerificationStatus: 'PENDING',
-        vatRejectionReason: null,
-        vatSubmittedAt: new Date(),
-        vatReviewedAt: null,
-        vatReviewedById: null,
-      },
-    });
-    if (claimed.count === 0) {
-      const current = await prisma.workerProfile.findUnique({
-        where: { userId: req.user.userId },
-        select: { vatRegistered: true, vatVerificationStatus: true },
-      });
-      if (!current) {
-        return res.status(404).json(errorResponse(404, 'Worker profile not found'));
-      }
-      return res
-        .status(409)
-        .json(
-          errorResponse(
-            409,
-            current.vatRegistered || current.vatVerificationStatus === 'APPROVED'
-              ? 'Your VAT registration is already approved.'
-              : 'Your VAT registration is already awaiting review.'
-          )
-        );
-    }
-
-    const updated = await prisma.workerProfile.findUniqueOrThrow({
-      where: { userId: req.user.userId },
-      select: {
-        vatRegistered: true,
-        vatDocumentUrl: true,
-        vatVerificationStatus: true,
-        vatRejectionReason: true,
-        vatSubmittedAt: true,
-        vatReviewedAt: true,
-      },
-    });
-
-    return res.status(200).json({
-      success: true,
-      message: 'VAT registration submitted for review',
-      data: updated,
-    });
-  } catch (error) {
-    console.error('Error submitting VAT registration:', error);
-    return res.status(500).json(errorResponse(500, 'Failed to submit VAT registration'));
-  }
-};
-
-/**
- * GET /api/workers/me/tax-certificates
- * Lists the authenticated worker's ISSUED Form 2307 certificates with a
- * fresh short-lived signed download URL per certificate (worker only). Draft
- * certificates (generated but not yet issued) are never returned here.
- */
-export const getMyTaxCertificates = async (req: AuthRequest, res: Response) => {
-  try {
-    if (!req.user) {
-      return res.status(401).json(errorResponse(401, 'Not authenticated'));
-    }
-
-    const certificates = await prisma.taxCertificate.findMany({
-      where: { workerId: req.user.userId, status: 'ISSUED' },
-      orderBy: { periodStart: 'desc' },
-    });
-
-    const data = await Promise.all(
-      certificates.map(async (cert) => ({
-        id: cert.id,
-        periodStart: cert.periodStart,
-        periodEnd: cert.periodEnd,
-        periodLabel: formatManilaPeriod(cert.periodStart, cert.periodEnd, 'short'),
-        monthlyBreakdown: cert.monthlyBreakdown,
-        totalIncomePayments: cert.totalIncomePayments,
-        totalTaxWithheld: cert.totalTaxWithheld,
-        issuedAt: cert.issuedAt,
-        downloadUrl: await getCertificateDownloadUrl(cert.pdfPath),
-      }))
-    );
-
-    return res.status(200).json({
-      success: true,
-      message: 'Tax certificates retrieved successfully',
-      data,
-    });
-  } catch (error) {
-    console.error('Error fetching tax certificates:', error);
-    return res.status(500).json(errorResponse(500, 'Failed to fetch tax certificates'));
-  }
-};
-
-/**
- * GET /api/workers/me/vat-summary
- * The worker's own generated VAT-collected summaries (per period) — for
- * their own 2550Q/2551Q filing. Informational only: this is never remitted
- * by the platform (see VatCollectionSummary's schema comment).
- */
-export const getMyVatSummary = async (req: AuthRequest, res: Response) => {
-  try {
-    if (!req.user) {
-      return res.status(401).json(errorResponse(401, 'Not authenticated'));
-    }
-
-    const summaries = await prisma.vatCollectionSummary.findMany({
-      where: { workerId: req.user.userId },
-      orderBy: { periodStart: 'desc' },
-    });
-
-    return res.status(200).json({
-      success: true,
-      message: 'VAT summaries retrieved successfully',
-      data: summaries.map((s) => ({
-        id: s.id,
-        periodStart: s.periodStart,
-        periodEnd: s.periodEnd,
-        periodLabel: formatManilaPeriod(s.periodStart, s.periodEnd, 'short'),
-        totalVatCollected: s.totalVatCollected,
-      })),
-    });
-  } catch (error) {
-    console.error('Error fetching VAT summaries:', error);
-    return res.status(500).json(errorResponse(500, 'Failed to fetch VAT summaries'));
   }
 };
 

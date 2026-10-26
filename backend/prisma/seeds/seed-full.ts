@@ -565,8 +565,6 @@ async function createBookingsAndPayments(
     BookingStatus.ACCEPTED,
     BookingStatus.REJECTED,
     BookingStatus.IN_PROGRESS,
-    BookingStatus.QUOTE_SUBMITTED,
-    BookingStatus.QUOTE_APPROVED,
     BookingStatus.DISPUTED,
     BookingStatus.DISPUTED, // second one gets resolved, to cover both states
     BookingStatus.COMPLETED,

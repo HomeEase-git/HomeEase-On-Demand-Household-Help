@@ -1,16 +1,15 @@
 import React from "react";
-import { View, Text, ScrollView, ActivityIndicator, Pressable } from "react-native";
+import { View, Text, ScrollView, ActivityIndicator } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { AppIcon as Ionicons } from "../../../../components/icons/AppIcon";
 import ScreenHeader from "../../../../components/ui/ScreenHeader";
-import Avatar from "../../../../components/ui/Avatar";
-import StepperHorizontal from "../../../../components/steppers/StepperHorizontal";
 import { BookingFooterBar } from "../../../../components/booking4step/BookingFooterBar";
 import { useDraftPriceEstimate } from "../../../../hooks/useBookingPriceEstimate";
 import DiscoveredWorkerCard from "../../../../components/booking4step/DiscoveredWorkerCard";
 import SurpriseMeButton from "../../../../components/booking4step/SurpriseMeButton";
 import HoldTimerBadge from "../../../../components/booking4step/HoldTimerBadge";
+import PackageSelector from "../../../../components/booking4step/PackageSelector";
 import { useBookingStore } from "../../../../store/bookingStore";
 import { useWorkerDiscovery } from "../../../../hooks/useWorkerDiscovery";
 import { colors } from "../../../../constants";
@@ -18,11 +17,14 @@ import { useAlertModal } from "../../../../contexts/AlertModalContext";
 import { now } from "../../../../utils/now";
 import type { WorkerCard } from "../../../../types/booking4step.types";
 
-const BOOKING_STEPS = ["Scope", "Schedule", "Who", "Confirm"];
-
+/**
+ * Optional: the client books with the best available worker by default
+ * (step 2 goes straight to the review screen). This picker opens only from
+ * the review screen's "Choose a worker" and returns there.
+ */
 export default function BookingStep3Screen() {
   const router = useRouter();
-  // Same estimate as Step 4, from what Step 1 saved (null for custom-quote jobs).
+  // Same estimate as the review screen, from what Step 1 saved.
   const draftEstimate = useDraftPriceEstimate();
   const alertModal = useAlertModal();
   const draft = useBookingStore((s) => s.draft);
@@ -40,7 +42,7 @@ export default function BookingStep3Screen() {
       lng: draft.lng,
       limit: 20,
     },
-    readyToSearch && !draft.workerLocked
+    readyToSearch
   );
 
   const selectWorker = (worker: WorkerCard) => {
@@ -54,7 +56,9 @@ export default function BookingStep3Screen() {
       workerAvatar: worker.avatar,
       workerRating: worker.rating,
       serviceTypeId: worker.matchedServiceTypeId,
-      selectedPackageIds: [],
+      // Packages belong to a worker, so picking another one clears them.
+      selectedPackageIds: draft.workerId === worker.id ? draft.selectedPackageIds : [],
+      selectedPackagesTotal: draft.workerId === worker.id ? draft.selectedPackagesTotal : 0,
       isAutoMatched: false,
       holdStartedAt: now(),
     });
@@ -72,82 +76,32 @@ export default function BookingStep3Screen() {
       workerRating: null,
       isAutoMatched: true,
       holdStartedAt: null,
+      selectedPackageIds: [],
+      selectedPackagesTotal: 0,
     });
-    router.push("/(client)/booking/new/step-4");
+    router.back();
   };
 
-  const canNext = !!draft.workerId || !!draft.isAutoMatched;
-
-  const handleNext = () => {
-    if (!canNext) {
-      alertModal.warning("Pick a pro", "Select a worker or tap Auto-Match Me to continue.");
+  const handleDone = () => {
+    if (!draft.workerId) {
+      alertModal.warning("Pick a worker", "Tap a worker, or let us find one for you.");
       return;
     }
-    router.push("/(client)/booking/new/step-4");
+    router.back();
   };
-
-  // Worker was locked in from a profile/"book again" entry point — skip
-  // discovery entirely and go straight to confirming that worker.
-  if (draft.workerLocked && draft.workerId) {
-    return (
-      <SafeAreaView className="flex-1 bg-white">
-        <ScreenHeader title="Your pro" showBack />
-        <ScrollView className="flex-1" contentContainerStyle={{ padding: 24, paddingBottom: 40 }}>
-          <StepperHorizontal steps={BOOKING_STEPS} currentStep={2} />
-          <View className="bg-card rounded-2xl p-4 mt-4 flex-row items-center">
-            <View className="mr-3">
-              <Avatar uri={draft.workerAvatar} size="lg" />
-            </View>
-            <View className="flex-1">
-              <Text className="text-text-primary font-bold text-base">{draft.workerName}</Text>
-              <Text className="text-text-secondary text-xs mt-0.5">Locked in for this booking</Text>
-            </View>
-            <Ionicons name="lock-closed" size={18} color={colors.text.muted} />
-          </View>
-        </ScrollView>
-        <BookingFooterBar
-          estimate={draftEstimate}
-          noPriceText="Quote after inspection"
-          buttonLabel="Next"
-          onPress={() => router.push("/(client)/booking/new/step-4")}
-        />
-      </SafeAreaView>
-    );
-  }
 
   return (
     <SafeAreaView className="flex-1 bg-white">
-      <ScreenHeader title="Choose your pro" showBack />
+      <ScreenHeader title="Choose a worker" showBack />
       <ScrollView className="flex-1" contentContainerStyle={{ padding: 24, paddingBottom: 40 }}>
-        <StepperHorizontal steps={BOOKING_STEPS} currentStep={2} />
-
-        {draft.isAutoMatched ? (
-          <View className="bg-accent/10 rounded-2xl p-4 mb-4 flex-row items-center">
-            <Ionicons name="flash" size={22} color={colors.accent.DEFAULT} style={{ marginRight: 12 }} />
-            <View className="flex-1">
-              <Text className="text-accent font-bold text-sm">Pro auto-assigned</Text>
-              <Text className="text-text-secondary text-xs mt-0.5">
-                The best available pro is assigned when you submit.
-              </Text>
-            </View>
-            <Pressable
-              accessibilityRole="button"
-              hitSlop={8}
-              onPress={() => setDraft({ isAutoMatched: false })}
-            >
-              <Text className="text-accent font-semibold text-xs">Choose a pro</Text>
-            </Pressable>
-          </View>
-        ) : (
-          <SurpriseMeButton onPress={chooseSurpriseMe} />
-        )}
+        <SurpriseMeButton onPress={chooseSurpriseMe} />
 
         <HoldTimerBadge holdStartedAt={draft.holdStartedAt} workerName={draft.workerName} />
 
         {loading && (
           <View className="py-10 items-center">
             <ActivityIndicator size="small" />
-            <Text className="text-text-secondary mt-2 text-sm">Finding available pros...</Text>
+            <Text className="text-text-secondary mt-2 text-sm">Finding available workers...</Text>
           </View>
         )}
 
@@ -157,28 +111,49 @@ export default function BookingStep3Screen() {
           </View>
         )}
 
-        {!loading && !error && !draft.isAutoMatched && workers.length === 0 && (
+        {!loading && !error && workers.length === 0 && (
           <View className="py-10 items-center">
             <Ionicons name="sad-outline" size={32} color={colors.text.muted} />
             <Text className="text-text-secondary text-sm mt-2 text-center">
-              No pros are available on this date. Try another date or tap Auto-Match Me.
+              No workers are available on this date. Try another date or let us find one for you.
             </Text>
           </View>
         )}
 
-        {!draft.isAutoMatched &&
-          workers.map((worker) => (
-            <DiscoveredWorkerCard
-              key={worker.id}
-              worker={worker}
-              selected={draft.workerId === worker.id}
-              onSelect={() => selectWorker(worker)}
-              unitLabel={draft.selectedTaskUnitLabel}
-            />
-          ))}
-
+        {workers.map((worker) => {
+          const selected = !draft.isAutoMatched && draft.workerId === worker.id;
+          return (
+            <View key={worker.id}>
+              <DiscoveredWorkerCard
+                worker={worker}
+                selected={selected}
+                onSelect={() => selectWorker(worker)}
+                unitLabel={draft.selectedTaskUnitLabel}
+              />
+              {/* The chosen worker's own packages (optional add-ons with a price). */}
+              {selected && (
+                <View className="mb-4 -mt-1">
+                  <Text className="text-text-primary font-bold text-base mb-2">
+                    {worker.fullName}&apos;s packages (optional)
+                  </Text>
+                  <PackageSelector
+                    workerId={worker.id}
+                    serviceTypeId={draft.serviceTypeId}
+                    selected={draft.selectedPackageIds ?? []}
+                    onChange={(ids) => setDraft({ selectedPackageIds: ids })}
+                    onSelectedTotalChange={(total) => setDraft({ selectedPackagesTotal: total })}
+                  />
+                </View>
+              )}
+            </View>
+          );
+        })}
       </ScrollView>
-      <BookingFooterBar estimate={draftEstimate} noPriceText="Quote after inspection" buttonLabel="Next" onPress={handleNext} />
+      <BookingFooterBar
+        estimate={draftEstimate}
+        buttonLabel="Use This Worker"
+        onPress={handleDone}
+      />
     </SafeAreaView>
   );
 }

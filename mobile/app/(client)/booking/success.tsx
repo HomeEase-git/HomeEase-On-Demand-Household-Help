@@ -78,7 +78,7 @@ export default function BookingSuccessScreen() {
         if (cancelled) return;
         setDetail(data);
         // The server lets a client cancel only while the request is still
-        // PENDING; once a pro accepts, the window is closed.
+        // PENDING; once a worker accepts, the window is closed.
         setCanCancel(data.status === "PENDING");
         if (TERMINAL_STATUSES.includes(data.status) && pollRef.current) {
           clearInterval(pollRef.current);
@@ -106,7 +106,7 @@ export default function BookingSuccessScreen() {
   const handleMessageWorker = () => {
     const workerId = detail?.worker?.id;
     if (!workerId) {
-      alertModal.info("Not yet available", "We'll let you know as soon as a pro is confirmed for this booking.");
+      alertModal.info("Not yet available", "We'll let you know as soon as a worker is confirmed for this booking.");
       return;
     }
     router.push(`/(client)/inbox/chat/${workerId}`);
@@ -136,7 +136,7 @@ export default function BookingSuccessScreen() {
 
   const handleAddToCalendar = () => {
     if (!detail?.scheduledDate) {
-      alertModal.info("Not scheduled yet", "We'll have your exact date/time once your pro is confirmed.");
+      alertModal.info("Not scheduled yet", "We'll have your exact date/time once your worker is confirmed.");
       return;
     }
     // No native calendar module is wired into this app (no expo-calendar
@@ -183,7 +183,7 @@ export default function BookingSuccessScreen() {
 
         <Animated.View style={{ opacity: opacityAnim, width: "100%" }}>
           <Text className="text-text-primary text-3xl font-bold text-center mb-2">
-            {/* Only "confirmed" once a pro has actually accepted; until then it's a request. */}
+            {/* Only "confirmed" once a worker has actually accepted; until then it's a request. */}
             {detail?.status === "ACCEPTED" ? "Booking confirmed!" : "Request sent!"}
           </Text>
           <Text className="text-text-secondary text-center text-base mb-8">
@@ -240,7 +240,7 @@ export default function BookingSuccessScreen() {
           )}
 
           <View className="flex-row gap-2 mb-6">
-            <QuickAction icon="chatbubble-ellipses-outline" label="Message Pro" onPress={handleMessageWorker} />
+            <QuickAction icon="chatbubble-ellipses-outline" label="Message Worker" onPress={handleMessageWorker} />
             <QuickAction icon="calendar-outline" label="Add to Calendar" onPress={handleAddToCalendar} />
             <QuickAction
               icon="close-circle-outline"
@@ -252,12 +252,12 @@ export default function BookingSuccessScreen() {
           </View>
           {!canCancel && detail && !TERMINAL_STATUSES.includes(detail.status) && (
             <Text className="text-text-muted text-xs text-center mb-4 -mt-4">
-              Your pro has accepted, so this can no longer be cancelled here. Message them or contact support.
+              Your worker has accepted, so this can no longer be cancelled here. Message them or contact support.
             </Text>
           )}
 
           <Text className="text-text-secondary text-center text-sm mb-8">
-            You&apos;ll get a notification once your pro accepts the booking.
+            You&apos;ll get a notification once your worker accepts the booking.
           </Text>
         </Animated.View>
 
@@ -278,15 +278,15 @@ export default function BookingSuccessScreen() {
 
 function statusLabel(status: string): string {
   const labels: Record<string, string> = {
-    PENDING: "Waiting for a pro to accept",
-    ACCEPTED: "Accepted — pro is on the way",
+    PENDING: "Waiting for a worker to accept",
+    ACCEPTED: "Accepted — worker is on the way",
     IN_PROGRESS: "Job in progress",
     QUOTE_SUBMITTED: "Quote submitted — review needed",
     QUOTE_APPROVED: "Quote approved",
     PENDING_COMPLETION: "Awaiting your confirmation",
     COMPLETED: "Completed",
     CANCELLED: "Cancelled",
-    REJECTED: "Declined by the pro",
+    REJECTED: "Declined by the worker",
     DISPUTED: "Under review",
   };
   return labels[status] ?? "Request submitted";

@@ -25,7 +25,7 @@ type Props = {
 
 /**
  * Propose a new date + start time for an accepted booking. A client can only
- * pick days the pro works; a worker (e.g. two jobs overlap) sees their own
+ * pick days the worker works; a worker (e.g. two jobs overlap) sees their own
  * jobs that day. The booking keeps its current time until the other side
  * accepts.
  */
@@ -35,7 +35,7 @@ export default function RescheduleRequestForm({ bookingId, as }: Props) {
 
   const [loading, setLoading] = useState(true);
   const [workerId, setWorkerId] = useState<string | null>(null);
-  const [otherName, setOtherName] = useState<string>(as === "client" ? "your pro" : "the client");
+  const [otherName, setOtherName] = useState<string>(as === "client" ? "your worker" : "the client");
   const [closedDates, setClosedDates] = useState<string[]>([]);
   const [busyTimes, setBusyTimes] = useState<string[]>([]);
   const [date, setDate] = useState<string | null>(null);
@@ -50,7 +50,7 @@ export default function RescheduleRequestForm({ bookingId, as }: Props) {
         if (!active) return;
         setWorkerId(detail.worker?.id ?? null);
         setOtherName(
-          as === "client" ? (detail.worker?.fullName ?? "your pro") : (detail.client?.fullName ?? "the client"),
+          as === "client" ? (detail.worker?.fullName ?? "your worker") : (detail.client?.fullName ?? "the client"),
         );
         if (as === "client" && detail.worker?.id) {
           setClosedDates(await getWorkerUnavailableDates(detail.worker.id));
@@ -66,7 +66,7 @@ export default function RescheduleRequestForm({ bookingId, as }: Props) {
     };
   }, [bookingId, as]);
 
-  // Jobs already on the picked day: the pro's (for a client) or my own (for a worker).
+  // Jobs already on the picked day: the worker's (for a client) or my own (for a worker).
   useEffect(() => {
     if (!date) return;
     let active = true;

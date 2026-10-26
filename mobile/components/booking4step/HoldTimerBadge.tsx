@@ -25,7 +25,7 @@ export default function HoldTimerBadge({ holdStartedAt, workerName }: Props) {
     >
       <Ionicons name="time-outline" size={18} color={timer.isExpiring ? colors.error : colors.warning} />
       <Text className={`text-xs ml-2 flex-1 ${timer.isExpiring ? "text-error" : "text-warning"}`}>
-        {workerName ? `${workerName} is held for you` : "This pro is held for you"} — complete your booking within{" "}
+        {workerName ? `${workerName} is held for you` : "This worker is held for you"} — complete your booking within{" "}
         <Text className="font-bold">{timer.remainingLabel}</Text>
       </Text>
     </View>

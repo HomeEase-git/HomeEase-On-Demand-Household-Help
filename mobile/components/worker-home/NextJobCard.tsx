@@ -20,7 +20,7 @@ export const NextJobCard: React.FC<Props> = ({ job, onOpen }) => {
     <View className="bg-brand rounded-2xl p-4 mx-4 mt-3">
       <View className="flex-row items-center justify-between">
         <Text className="text-white/80 text-xs font-semibold">NEXT JOB</Text>
-        <StatusBadge status={job.status} />
+        <StatusBadge status={job.status} variant="booking" />
       </View>
       <Text className="text-white text-lg font-bold mt-1" numberOfLines={1}>
         {job.service}

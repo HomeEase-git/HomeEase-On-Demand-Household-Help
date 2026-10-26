@@ -49,19 +49,24 @@ enum BookingStatus {
   ACCEPTED
   REJECTED
   IN_PROGRESS
+  // Retired with the quote feature (2026-10-26): the worker now bills on an
+  // invoice after the job. Kept so old rows and audit history still parse;
+  // the 20261026000000_invoice_after_job migration moved live rows back to
+  // ACCEPTED and nothing sets these any more.
   QUOTE_SUBMITTED
   QUOTE_APPROVED
   DISPUTED
+  // The worker sent the invoice. A CASH booking waits here for the worker's
+  // "Cash received" (bookingController.markCashReceived).
   PENDING_COMPLETION
-  // Client confirmed the work is done but payment (GCash/Maya) has not yet
-  // cleared. The Xendit invoice for the full final total exists; the
-  // invoice-paid webhook moves this to COMPLETED. CASH bookings skip this
-  // state entirely (they go straight to COMPLETED on confirmation).
+  // The invoice was sent on a GCash/Maya booking: the Xendit invoice for the
+  // full total exists and the invoice-paid webhook moves this to COMPLETED.
   AWAITING_PAYMENT
   COMPLETED
   CANCELLED
 }
 
+// Retired with the quote feature (2026-10-26); old rows only.
 enum QuoteStatus {
   PENDING
   SUBMITTED
@@ -257,17 +262,30 @@ enum ScopeFieldType {
 
 // Prices are admin-set only (ServiceTask.basePrice) — see taskPriceService.
 // FIXED: basePrice is the flat price.
-// PER_UNIT: basePrice is the rate; final price = rate x the answer to
-// ServiceTask.quantityScopeField (e.g. per-kilo laundry, per-sqm painting).
-// CUSTOM_QUOTE: no upfront price at all — worker quotes after inspecting,
-// via the existing submitQuote flow (see bookingController.submitQuote).
+// PER_UNIT: basePrice is the price per piece; final price = price x the
+// client's count, the answer to ServiceTask.quantityScopeField (e.g. per
+// outlet, per kilo, per sq.m.).
 enum TaskPricingModel {
   FIXED
   PER_UNIT
   // Retired: was worker-defined price steps (WorkerTaskTierPrice). Can no
   // longer be picked; a leftover task is charged like PER_UNIT.
   TIERED
+  // Retired 2026-10-26: the worker quoted on site. Former custom-quote jobs
+  // were switched to FIXED and off; the admin prices them to switch them on.
   CUSTOM_QUOTE
+}
+
+// What a line on the worker's invoice is (BookingAddOn.kind).
+enum InvoiceLineKind {
+  // A worker package the client picked at booking.
+  PACKAGE
+  // A free job preference picked at booking (always ₱0).
+  PREFERENCE
+  // Parts or materials the worker bought; needs a receipt photo.
+  PART
+  // Work done beyond what was booked; needs a photo of the work.
+  EXTRA_WORK
 }
 
 // ============================================================================
@@ -605,45 +623,9 @@ model WorkerProfile {
   payoutAccountName   String?
   payoutAccountNumber String?
 
-  // BIR Tax Identification Number — required before a Form 2307 withholding
-  // certificate can be generated for this worker (see taxCertificateService).
-  // Format: 000-000-000 or 000-000-000-000 with branch code (see utils/taxId.ts).
-  // Stored encrypted (utils/fieldEncryption.ts) — the same TIN encrypts
-  // differently each time, so uniqueness is enforced on tinHash instead.
-  tin     String?
-  tinHash String? @unique
-
   // Workers must be 18+ (utils/age.ts). Entered by the worker at the ID
   // step and checked by the admin against the ID itself at approval.
-  birthDate     DateTime? @db.Date
-  tinVerifiedAt DateTime?
-
-  // VAT registration — self-declared then admin-verified (mirrors the
-  // Certification review pattern, not the KYC AI pipeline: one document, one
-  // reviewer decision). vatRegistered is the ONLY field pricing/booking logic
-  // may read — it only flips true on admin APPROVED, never on submission
-  // alone, so an unverified claim can never affect a client's price. Workers
-  // are legally required to register once their gross annual receipts cross
-  // BIR's VAT threshold, regardless of trade — this is unrelated to whether
-  // their trade counts as a PRC-licensed profession (see taxCertificateService
-  // / AppSettings.atcCode, which is a separate, trade-based question).
-  vatRegistered         Boolean            @default(false)
-  vatDocumentUrl        String?
-  vatVerificationStatus KycDocumentStatus?
-  vatRejectionReason    String?
-  vatSubmittedAt        DateTime?
-  vatReviewedAt         DateTime?
-  vatReviewedById       String? // soft reference — User.id of the admin who reviewed it
-
-  // Set by the scheduled sweep (vatSummaryService.flagWorkersOverVatThreshold)
-  // the first time this non-VAT-registered worker's trailing-12-month gross
-  // receipts cross BIR's mandatory VAT-registration threshold — advisory
-  // only, never auto-flips vatRegistered (that stays admin-approved-only,
-  // see above). Prevents re-notifying the worker/admins every single sweep
-  // tick once already flagged; naturally stops mattering once the worker
-  // actually registers (vatRegistered becomes true, excluding them from the
-  // sweep's query regardless of this field).
-  vatThresholdFlaggedAt DateTime?
+  birthDate DateTime? @db.Date
 
   // Platform commission + withholding tax owed on CASH jobs (paid to the
   // worker in person, so the platform's cut can't be skimmed from a gateway
@@ -665,20 +647,16 @@ model WorkerProfile {
   updatedAt DateTime @updatedAt
 
   // Relations
-  serviceCategories    WorkerServiceCategory[]
-  taskSelections       WorkerTaskSelection[]
-  certifications       Certification[]
-  scopeCapabilities    WorkerScopeFieldCapability[]
-  reviews              Review[]
-  resumeParseResult    ResumeParseResult?
-  availability         WorkerAvailability[]
-  availabilityTemplate WorkerAvailabilityTemplate[]
-  dateOverrides        WorkerDateOverride[]
-  packages             WorkerPackage[]
-  taskPrices           WorkerTaskPrice[]
-  tierPrices           WorkerTaskTierPrice[]
-  debtLedger           DebtLedgerEntry[]
-  debtPayments         DebtPayment[]
+  serviceCategories WorkerServiceCategory[]
+  taskSelections    WorkerTaskSelection[]
+  certifications    Certification[]
+  scopeCapabilities WorkerScopeFieldCapability[]
+  reviews           Review[]
+  resumeParseResult ResumeParseResult?
+  dateOverrides     WorkerDateOverride[]
+  packages          WorkerPackage[]
+  debtLedger        DebtLedgerEntry[]
+  debtPayments      DebtPayment[]
 
   @@index([userId])
   @@index([kycStatus])
@@ -707,58 +685,6 @@ model WorkerDateOverride {
 
   @@unique([workerProfileId, date])
   @@index([date])
-}
-
-// RETIRED with time slots (workers now set a weekly schedule plus
-// WorkerDateOverride). Nothing reads or writes this any more; kept so old
-// rows load.
-// Was: per-date/slot availability record used by auto-matching to find candidate
-// workers for a given (date, timeSlot) — a normalized companion to the
-// coarse-grained WorkerProfile.availableDays weekly pattern.
-model WorkerAvailability {
-  id              String        @id @default(cuid())
-  workerProfileId String
-  workerProfile   WorkerProfile @relation(fields: [workerProfileId], references: [id], onDelete: Cascade)
-
-  date      DateTime
-  timeSlot  TimeSlot
-  isBlocked Boolean  @default(false) // worker explicitly marked this date/slot unavailable
-  isBooked  Boolean  @default(false) // an active booking currently occupies this slot — blocks closing it
-
-  // Set when a worker's job overruns into this date/slot (see
-  // bookingController.extendBooking) — a reservation for that spillover
-  // work, not a real Booking. Soft reference (no FK, matches
-  // Cancellation.cancelledById's convention) to the original booking that
-  // caused the block, so cancelBooking/completeBooking/admin-cancel paths
-  // can tell "a block I created that nothing ever claimed" (isBooked: false
-  // -> safe to release) apart from a real booking now occupying it.
-  blockedByBookingId String?
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  @@unique([workerProfileId, date, timeSlot])
-  @@index([workerProfileId, date])
-}
-
-// RETIRED with time slots — see WorkerDateOverride. Kept for history.
-// Was: a worker's recurring weekly pattern (see B8) — materializeAvailabilityTemplates
-// uses this to auto-open matching WorkerAvailability rows on a rolling
-// forward window, so a worker with a stable schedule doesn't have to
-// manually re-open the same days every week. Only ever CREATES rows that
-// don't exist yet; never flips an existing row (a manual close, or a bulk
-// "mark unavailable" block) back open.
-model WorkerAvailabilityTemplate {
-  id              String        @id @default(cuid())
-  workerProfileId String
-  workerProfile   WorkerProfile @relation(fields: [workerProfileId], references: [id], onDelete: Cascade)
-
-  dayOfWeek Int // 0=Sun ... 6=Sat, matches WorkerProfile.availableDays convention
-  timeSlot  TimeSlot
-
-  createdAt DateTime @default(now())
-
-  @@unique([workerProfileId, dayOfWeek, timeSlot])
 }
 
 // ============================================================================
@@ -930,7 +856,7 @@ model ServiceType {
   // <Ionicons name={icon} />. Null means the category predates this field or
   // was never assigned one; mobile falls back to its static name-based guess
   // (utils/categoryIcons.ts) in that case.
-  icon String?
+  icon               String?
   // Optional photo shown blurred behind the service's worker list in the app
   // (public promo-banners bucket, uploaded from the admin Service Catalog).
   backgroundImageUrl String?
@@ -1163,9 +1089,8 @@ model ServiceTask {
   // Required for PER_UNIT/TIERED, where the rate is per this unit; optional
   // and display-only otherwise. quantityScopeFieldId is PER_UNIT/TIERED only:
   // the NUMBER-type ServiceScopeField (must belong to this
-  // task's serviceType) whose answer supplies the quantity — multiplied
-  // against a worker's WorkerTaskPrice.unitPrice for PER_UNIT, or resolved
-  // against a worker's WorkerTaskTierPrice rows for TIERED.
+  // task's serviceType) whose answer supplies the quantity, multiplied
+  // against basePrice.
   unitLabel            String?
   quantityScopeFieldId String?
   quantityScopeField   ServiceScopeField? @relation(fields: [quantityScopeFieldId], references: [id])
@@ -1181,84 +1106,18 @@ model ServiceTask {
 
   // Relations
   bookings         Booking[]
-  workerPrices     WorkerTaskPrice[]
   workerSelections WorkerTaskSelection[]
-  workerTierPrices WorkerTaskTierPrice[]
   scopeFieldLinks  ServiceScopeFieldTask[]
 
   @@index([serviceTypeId])
   @@index([quantityScopeFieldId])
 }
 
-// RETIRED — workers no longer set prices (see taskPriceService); nothing
-// reads or writes this table any more. Kept for history.
-// Was: a worker's own price for one ServiceTask, within that task's admin-set
-// minPrice/maxPrice bound — mirrors WorkerPackage's shape and trust model
-// exactly (ownership-gated CRUD in workerController, never trusted from the
-// client at booking time: bookingController.createBooking re-fetches this
-// row server-side by (workerProfileId, serviceTaskId), same as it already
-// does for WorkerPackage). No row exists for a CUSTOM_QUOTE task — see
-// ServiceTask.pricingModel. Price-only: whether the worker offers this task
-// at all is WorkerTaskSelection's job, not this model's.
-model WorkerTaskPrice {
-  id              String        @id @default(cuid())
-  workerProfileId String
-  workerProfile   WorkerProfile @relation(fields: [workerProfileId], references: [id], onDelete: Cascade)
-  serviceTaskId   String
-  serviceTask     ServiceTask   @relation(fields: [serviceTaskId], references: [id], onDelete: Cascade)
-
-  price     Float? // FIXED model
-  unitPrice Float? // PER_UNIT model
-  isActive  Boolean @default(true)
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  @@unique([workerProfileId, serviceTaskId])
-  @@index([serviceTaskId])
-}
-
-// RETIRED along with TIERED pricing — nothing reads or writes it any more.
-// Was: a worker's own price *step* for a TIERED task — a worker has several of
-// these per task (not unique per worker+task like WorkerTaskPrice, since a
-// price table is many rows), each row valid for quantities up to `upToQty`.
-// Resolution (see taskPriceService.resolveTierPrice) walks a worker's rows in
-// ascending upToQty order and takes the first one where
-// `upToQty == null || quantity <= upToQty` — null is only meaningful on the
-// last row ("this price and above"). Deliberately NOT admin-defined brackets:
-// every worker sets their own thresholds and prices independently, so there
-// is no shared row for one worker's edit to disturb another's — setMyTaskPrice
-// replaces a worker's whole table wholesale on every save (delete + recreate
-// in one transaction) rather than upserting by id, which is safe here for
-// exactly that reason (nothing else references one specific row by id; a
-// Booking snapshots a plain basePrice number, never a row reference).
-model WorkerTaskTierPrice {
-  id              String        @id @default(cuid())
-  workerProfileId String
-  workerProfile   WorkerProfile @relation(fields: [workerProfileId], references: [id], onDelete: Cascade)
-  serviceTaskId   String
-  serviceTask     ServiceTask   @relation(fields: [serviceTaskId], references: [id], onDelete: Cascade)
-
-  upToQty Float? // null = open-ended top row ("this price and above")
-  price   Float
-
-  isActive Boolean @default(true)
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  @@index([workerProfileId, serviceTaskId])
-}
-
-// The single "worker offers this task" signal, for every pricing model —
-// including CUSTOM_QUOTE, which never gets a WorkerTaskPrice row (priced
-// on-site), so before this model existed there was no record at all of
-// task-level selection for quote-based work. setMyTaskPrice upserts a
-// matching row here so a FIXED/PER_UNIT task can't end up priced without
-// being selected or vice versa. A row here may only exist for a task whose
+// The single "worker offers this task" signal, for every pricing model,
+// including CUSTOM_QUOTE (priced on-site). A row here may only exist for a task whose
 // parent category has a WorkerServiceCategory row for the same worker (any
 // status) — enforced in application code, not a DB constraint. Soft-toggle
-// (isActive), matching WorkerTaskPrice's convention, so unchecking a task
+// (isActive), so unchecking a task
 // doesn't lose history.
 model WorkerTaskSelection {
   id              String        @id @default(cuid())
@@ -1370,10 +1229,9 @@ model Booking {
   estimatedPrice Float
   tip            Float? @default(0)
 
-  // VAT snapshot — vatApplicable/vatRate are pinned from the assigned
-  // worker's WorkerProfile.vatRegistered at the earliest point a real price
-  // is shown (createBooking for FIXED/PER_UNIT tasks; submitQuote for
-  // CUSTOM_QUOTE, since estimatedPrice is 0 until then). Settlement
+  // VAT snapshot — vatApplicable/vatRate were pinned from the assigned
+  // worker's VAT registration (retired 2026-10; always false now) when the
+  // booking was made. Settlement
   // (paymentLifecycleService.priceBooking) always reads these, never the
   // worker's live status — so a worker becoming VAT-registered mid-job can't
   // change a price the client already agreed to. vatAmount is filled in at
@@ -1396,7 +1254,9 @@ model Booking {
   commissionRateSnapshot     Float?
   withholdingTaxRateSnapshot Float?
 
-  // Quote lifecycle
+  // Quote lifecycle — retired 2026-10-26 (the worker now bills on an invoice
+  // after the job, see BookingAddOn). Kept for bookings quoted before then:
+  // their laborCost + materialsCost still price them (computeBookingFinalTotal).
   quoteStatus   QuoteStatus?
   laborCost     Float?
   materialsCost Float?
@@ -1421,9 +1281,7 @@ model Booking {
   // — see getBookingDetail's timeline, which used to fall back to updatedAt.
   acceptedAt DateTime?
 
-  // Set once the 12h "please approve/dispute this quote" reminder fires
-  // (see bookingWorker.remindAndAutoApproveQuotes) — prevents re-sending it
-  // on every hourly sweep tick, distinct from the 24h auto-approve itself.
+  // Retired with the quote feature; old rows only.
   quoteReminderSentAt DateTime?
 
   // Reschedule-on-conflict — set when a DIFFERENT worker's booking spilled
@@ -1437,7 +1295,6 @@ model Booking {
   rescheduledAt            DateTime?
   previousScheduledDate    DateTime?
   previousTimeSlot         TimeSlot?
-  rescheduledFromBookingId String? // soft reference — the original spilling-over booking's id, same convention as Cancellation.cancelledById
   rescheduleReminderSentAt DateTime?
   // Non-null = this reschedule episode is resolved (client explicitly kept
   // the date, or the 24h auto-confirm fired) — doubles as the gate that lets
@@ -1489,8 +1346,8 @@ model Booking {
   // Worker proof photos (adviser note): "before" is required to start the
   // job, at least one "progress" photo is required to mark it done, and the
   // "after" photo is completionPhotoUrl. Booking-photos bucket, worker-owned.
-  beforePhotoUrls   String[] @default([])
-  progressPhotoUrls String[] @default([])
+  beforePhotoUrls    String[] @default([])
+  progressPhotoUrls  String[] @default([])
 
   // Job execution timeline — discrete milestones distinct from completionDate
   // (client-confirmed) and workerArrivedAt (see ArrivalVerification for the
@@ -1500,7 +1357,7 @@ model Booking {
   workerCompletedAt DateTime?
 
   // Set by the scheduled sweep (bookingWorker.flagWorkerNoShows) once an
-  // ACCEPTED booking's scheduled slot start + AppSettings.noShowGraceHours
+  // ACCEPTED booking's scheduled slot start + AppSettings.noShowGraceMinutes
   // has passed with no workerArrivedAt — there was previously no concept of
   // a worker no-show at all, so a client whose worker simply never opened
   // the app again had no way to escape the booking (cancelBooking hard-
@@ -1647,9 +1504,9 @@ model BookingGroup {
   @@index([workerId])
 }
 
-// A priced line on the worker's quote. Each carries its own proof of purchase
-// and proof of use; Booking.materialsCost is the sum of a booking's items
-// (see bookingController.submitQuote), so pricing code reads that, not this.
+// Retired 2026-10-26 with the quote feature: a priced line on a worker's
+// quote, kept for bookings quoted before then. Booking.materialsCost is the
+// sum of a booking's items, so pricing code reads that, not this.
 model BookingQuoteItem {
   id        String  @id @default(cuid())
   bookingId String
@@ -1664,6 +1521,11 @@ model BookingQuoteItem {
   @@index([bookingId])
 }
 
+// A line on the booking's bill beyond the job itself. Packages and job
+// preferences are added when the client books; parts and extra work are
+// added by the worker on the invoice when the job is done
+// (bookingController.completeBooking). The client accepts the invoice by
+// paying it, or reports it (reportInvoice) before any money moves.
 model BookingAddOn {
   id        String  @id @default(cuid())
   bookingId String
@@ -1671,28 +1533,22 @@ model BookingAddOn {
 
   name  String
   price Float
+  // Null on rows from before invoices (packages, preferences, and the
+  // retired mid-job extras the client approved one by one).
+  kind      InvoiceLineKind?
+  // PART: the receipt. EXTRA_WORK: the work done. Worker uploads only.
+  photoUrls String[]         @default([])
 
-  // A worker-added mid-job line item used to count toward the final bill
-  // the instant it was created — no client consent step at all. Both null
-  // = pending the client's response; the two are mutually exclusive.
-  // Excluded from every finalPrice/settlement computation
-  // (bookingController.getBookingDetail/approveQuote/completeBooking,
-  // paymentLifecycleService.loadBooking) until clientApprovedAt is set —
-  // only by the client (respondToAddon) — there is no auto-approve, so an
-  // extra is billed only with the client's explicit OK. Any addon still pending when the job is marked complete
-  // (bookingController.completeBooking) gets clientRejectedAt stamped
-  // automatically — add-ons freeze at completion, so a still-open
-  // approve/reject prompt afterward could never affect the already-locked
-  // finalPrice anyway, and would just confuse the client.
+  // Only lines with clientApprovedAt count toward the bill
+  // (computeBookingFinalTotal, paymentLifecycleService.loadBooking). Lines
+  // chosen at booking and lines on the sent invoice are stamped when added;
+  // an admin removing a reported line stamps clientRejectedAt instead
+  // (adminDisputeController REMOVE_INVOICE_EXTRAS). Older mid-job extras
+  // still pending at completion are rejected there too.
   clientApprovedAt DateTime?
   clientRejectedAt DateTime?
-  // Needed for the reminder sweep (bookingWorker.remindPendingAddons) to know how long an addon
-  // has been pending — nothing else on this model was ever timestamped.
   createdAt        DateTime  @default(now())
-  // Set once the 2h "please approve/reject this addon" reminder fires (see
-  // bookingWorker.remindPendingAddons) — prevents re-sending it on
-  // every hourly sweep tick, same convention as
-  // Booking.quoteReminderSentAt.
+  // Retired with the mid-job extra-work approval; old rows only.
   reminderSentAt   DateTime?
 
   @@index([bookingId])
@@ -1891,17 +1747,15 @@ model Payment {
   commissionRate   Float @default(0.10)
   commissionAmount Float
 
-  // Withholding tax (BIR compliance — contractor-category workers, see
-  // AppSettings.atcCode for the current code)
-  withholdingTaxRate   Float @default(0.02)
+  // Withholding tax. 0 since workers file their own taxes (2026-10); rows
+  // from before keep the 2% that was actually withheld.
+  withholdingTaxRate   Float @default(0)
   withholdingTaxAmount Float
 
   // VAT collected on behalf of BIR from a VAT-registered worker's price —
   // snapshotted from the booking (see Booking.vatApplicable/vatRate above),
   // never re-derived from the worker's live status. This is NOT platform
-  // revenue and is never netted against commission/withholding — see
-  // VatCollectionSummary, which is what sources the worker-facing "VAT you
-  // collected" report from this field, not TaxRemittance.
+  // revenue and is never netted against commission/withholding.
   vatApplicable Boolean @default(false)
   vatRate       Float?
   vatAmount     Float   @default(0)
@@ -1958,11 +1812,6 @@ model Payment {
   authorizedAt     DateTime?
   capturedAmount   Float?
   capturedAt       DateTime?
-  // Deprecated — populated only on CARD-era rows from before CARD support
-  // was removed; no longer written to.
-  authorizationId  String?
-  paymentIntentId  String?
-  clientSecret     String?
 
   // Payment method used
   methodType        PaymentMethodType
@@ -1980,9 +1829,7 @@ model Payment {
   // own funds rather than continue chasing an unpaid client. subtotal/
   // commissionAmount/withholdingTaxAmount/vatAmount/workerPayout still
   // reflect the normal computed split (the worker received real taxable
-  // income regardless of who funded it, so 2307/withholding reporting stays
-  // correct) — but vatSummaryService must exclude these rows from "VAT
-  // collected from clients" reporting, since no client payment happened.
+  // income regardless of who funded it).
   platformFunded Boolean @default(false)
 
   payout         Payout?
@@ -2149,12 +1996,12 @@ model Review {
   photoUrls String[] @default([]) // client-attached photos, uploaded via POST /bookings/:id/review-photo/upload
 
   // Moderation — admin-side flagging/hiding, see ReviewStatus
-  flagged    Boolean      @default(false)
-  flagReason String?
+  flagged          Boolean      @default(false)
+  flagReason       String?
   // Which part was reported: 'REVIEW' (the client's comment, reported by the
   // worker) or 'RESPONSE' (the worker's reply, reported by the client).
-  flagTarget String?
-  status     ReviewStatus @default(VISIBLE)
+  flagTarget       String?
+  status           ReviewStatus @default(VISIBLE)
   // Set when the worker was warned for their reply (the review part uses
   // status WARNED), so one reply can't earn more than one strike.
   responseWarnedAt DateTime?
@@ -2270,21 +2117,6 @@ model AuditLog {
   @@index([actorId])
 }
 
-// RETIRED (2026-09-27): per-city price bounds did nothing once prices became
-// admin-fixed; nothing reads or writes this any more. Kept for history.
-model PricingRule {
-  id          String @id @default(cuid())
-  city        String
-  serviceType String
-  minPrice    Float
-  maxPrice    Float
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  @@unique([city, serviceType])
-}
-
 model AppSettings {
   id                   String  @id @default("singleton")
   siteName             String  @default("HomeEaseAdmin")
@@ -2293,10 +2125,7 @@ model AppSettings {
 
   // Platform configuration — live business rules read at runtime by the
   // booking/payment/worker-availability flows (see appSettingsService).
-  commissionRate     Float @default(0.10)
-  withholdingTaxRate Float @default(0.02)
-  // Retired with time slots; nothing reads it.
-  maxSlotsPerDay     Int   @default(2)
+  commissionRate Float @default(0.10)
 
   // Worker age range, checked at signup against the date of birth.
   workerMinAge Int @default(18)
@@ -2316,20 +2145,8 @@ model AppSettings {
   noShowPenaltyAmount           Float @default(200)
   clientFaultCompensationAmount Float @default(200)
 
-  // BIR Alphanumeric Tax Code for the withholding tax certificate (Form
-  // 2307) — see taxCertificateService. Data, not a hardcoded constant: kept
-  // null on a fresh environment and certificate generation refuses to issue
-  // rather than silently default to a possibly-wrong code. Current value
-  // (WI120, "income payments to certain contractors") was corrected 2026-09-14
-  // from a mismatched WC158 after checking the actual BIR ATC table — WC158
-  // is goods-suppliers-at-1%, not this. One code covers every worker
-  // regardless of VAT registration: none of this platform's trades are
-  // PRC-licensed professions, so the VAT-status-split article never applied.
-  // Ignored since 2026-10-13: atcCode and withholdingTaxRate are now fixed in
-  // appSettingsService (FIXED_TAX) and no longer admin-editable.
-  atcCode              String?
-  pendingExpiryMinutes Int     @default(60)
-  geofenceRadiusMeters Int     @default(100)
+  pendingExpiryMinutes Int @default(60)
+  geofenceRadiusMeters Int @default(100)
 
   // Worker decline-limit cooldown (see bookingController.declineBooking) —
   // hit maxDeclinesBeforeCooldown declines within declineWindowHours and the
@@ -2362,9 +2179,6 @@ model AppSettings {
   // crossing this puts the worker's account on hold until an admin clears it.
   workerDebtHoldLimit Float @default(2500)
 
-  // Retired: replaced by noShowGraceMinutes.
-  noShowGraceHours Int @default(2)
-
   // How long a dispute can sit OPEN/UNDER_REVIEW before the SLA sweep
   // (bookingWorker.escalateStaleDisputes) re-notifies admins — previously a
   // dispute an admin never looked at just sat there forever with the
@@ -2386,96 +2200,10 @@ model AppSettings {
   updatedAt DateTime @updatedAt
 }
 
-enum TaxCertificateStatus {
-  DRAFT // aggregated + PDF generated, not yet released to the worker
-  ISSUED // visible to the worker in-app (see workerController.getMyTaxCertificates)
-  // A payment counted in this certificate's totals was refunded after the
-  // certificate was already issued (see
-  // paymentLifecycleService.flagTaxRecordsForRefundedPayment) — the figures
-  // on the issued PDF now overstate real income/tax withheld. Sits outside
-  // the normal DRAFT->ISSUED flow; an admin must review and reissue a
-  // corrected certificate, there's no automatic correction.
-  NEEDS_REVIEW
-}
-
-// BIR Form 2307 (Certificate of Creditable Tax Withheld at Source) data —
-// one row per worker per reporting period. Generated from Payment rows by
-// taxCertificateService; see that file for the caveat that the rendered PDF
-// is not guaranteed to match BIR's exact official template.
-model TaxCertificate {
-  id       String @id @default(cuid())
-  workerId String // soft reference — User.id of the worker, same convention as Payout.workerId
-
-  periodStart DateTime
-  periodEnd   DateTime
-
-  // Snapshots at generation time — same "don't let a later profile edit
-  // silently rewrite an already-issued record" convention as
-  // Payout.accountName/accountNumber.
-  workerName String
-  workerTin  String
-
-  totalIncomePayments Float // sum of (Payment.subtotal - Payment.commissionAmount) captured in the period
-  totalTaxWithheld    Float // sum of Payment.withholdingTaxAmount captured in the period
-  // Per Manila calendar month of the quarter, as BIR Form 2307 lays it out:
-  // [{ month: "2026-07", incomePayments, taxWithheld }, ...] — one entry per
-  // month in the period, zeros included. Null on certificates generated
-  // before this was added (regenerate to fill it).
-  monthlyBreakdown    Json?
-
-  pdfPath String // Supabase Storage object path in a PRIVATE bucket — a signed URL is minted on read, never stored here
-  status  TaxCertificateStatus @default(DRAFT)
-
-  issuedAt    DateTime?
-  generatedBy String // soft reference — User.id of the admin who triggered generation
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  @@unique([workerId, periodStart, periodEnd])
-  @@index([workerId])
-  @@index([status])
-}
-
-// Deliberately separate from TaxCertificate/TaxRemittance — this is VAT a
-// worker collected on their own sales (12% they charged on top of their
-// price because they're VAT-registered), which the PLATFORM never remits;
-// the worker files it themselves via their own 2550Q/2551Q. Keeping it a
-// distinct model makes "informational only, carries no platform liability"
-// structural rather than a fact someone has to remember when querying.
-// Sourced from Payment.vatAmount (what was legally collected per job), never
-// Payout.amount (see paymentLifecycleService — a cash job's debt clawback can
-// make those two numbers differ).
-model VatCollectionSummary {
-  id       String @id @default(cuid())
-  workerId String // soft reference — User.id, same convention as TaxCertificate.workerId
-
-  periodStart DateTime
-  periodEnd   DateTime
-
-  workerName String // snapshot at generation time, same convention as TaxCertificate.workerName
-
-  totalVatCollected Float // sum of Payment.vatAmount for this worker in the period
-
-  // Same reasoning as TaxCertificate/TaxRemittance's NEEDS_REVIEW status —
-  // no separate status enum here since this model only ever had one state,
-  // so a boolean flag is enough. Set when a payment counted in
-  // totalVatCollected is refunded after this summary was already generated
-  // (see paymentLifecycleService.flagTaxRecordsForRefundedPayment).
-  needsReview Boolean @default(false)
-
-  generatedBy String // soft reference — User.id of the admin who triggered generation
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-
-  @@unique([workerId, periodStart, periodEnd])
-  @@index([workerId])
-}
-
 enum TaxRemittanceStatus {
   PENDING
   REMITTED
-  // Same reasoning as TaxCertificateStatus.NEEDS_REVIEW — a payment counted
+  // A payment counted
   // in this period's totalTaxWithheld was refunded after the period was
   // already marked REMITTED, so the recorded figure now overstates what was
   // actually due. Needs an admin to review the real over-remittance amount;
@@ -2483,11 +2211,14 @@ enum TaxRemittanceStatus {
   NEEDS_REVIEW
 }
 
+// Retired 2026-10: workers file their own taxes, so HomeEase no longer
+// remits withholding. Kept because ledgerOpeningService reads the
+// remitted total when opening the ledger; nothing writes it any more.
 // Bookkeeping/audit trail for the platform's own BIR remittance of withheld
 // tax — there is no public BIR e-filing API, so actual filing/payment
 // happens outside the app (eFPS or an authorized bank); this just tracks
 // that it happened. One row per reporting period, aggregated across all
-// workers. See taxRemittanceService.
+// workers.
 model TaxRemittance {
   id String @id @default(cuid())
 

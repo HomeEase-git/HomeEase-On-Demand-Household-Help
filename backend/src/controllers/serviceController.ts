@@ -65,10 +65,10 @@ export const getServiceTypes = async (_req: Request, res: Response) => {
 
     const servicesWithWorkerCount = services.map(({ workerCategories, tasks, ...service }) => {
       const workers = workerCategories.map((c) => c.workerProfile);
-      // Custom-quote jobs have no upfront price (stored as 0), so they'd pull
+      // A switched-off former custom-quote job has no price (0), so it'd pull
       // the tile's range down to ₱0.
       const activeTaskPrices = tasks
-        .filter((t) => t.isActive && t.pricingModel !== 'CUSTOM_QUOTE')
+        .filter((t) => t.isActive && t.basePrice > 0)
         .map((t) => t.basePrice);
       const taskPrices = activeTaskPrices.length ? activeTaskPrices : [service.basePrice];
 

@@ -175,7 +175,7 @@ export default function Payouts() {
               <table className="table">
                 <thead>
                   <tr>
-                    <th>Payout ID</th><th>Booking</th><th>Worker</th><th>Client</th><th>Payout Amount</th><th>Commission</th><th>Method</th><th>Status</th><th>Xendit Ref</th><th>Released</th><th></th>
+                    <th>Payout ID</th><th>Booking</th><th>Worker</th><th>Client</th><th>Payout Amount</th><th>Service Fee</th><th>Method</th><th>Status</th><th>Xendit Ref</th><th>Released</th><th></th>
                   </tr>
                 </thead>
                 <tbody>
@@ -276,7 +276,7 @@ export default function Payouts() {
                 <div className="value">{formatPeso(selected.payoutAmount)}</div>
               </div>
               <div className="detail-block">
-                <label>Commission</label>
+                <label>Service Fee</label>
                 <div className="value">{selected.commissionAmount != null ? formatPeso(selected.commissionAmount) : '—'}</div>
               </div>
               <div className="detail-block">

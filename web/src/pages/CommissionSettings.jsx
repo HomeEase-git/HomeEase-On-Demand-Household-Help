@@ -23,7 +23,7 @@ export default function CommissionSettings() {
   return (
     <SettingsFormPage
       title="Payment Management"
-      subtitle="Commission & worker debt"
+      subtitle="Service fee & worker debt"
       form={form}
       nav={<SubNav items={PAYMENTS_SUB_NAV} />}
     >
@@ -31,13 +31,13 @@ export default function CommissionSettings() {
         <>
           <SettingsSection
             icon="fa-percent"
-            title="Commission"
+            title="Service Fee"
             description="HomeEase's share of each completed job, taken from the worker's earnings. Changes apply to new payments; past payments keep the rate they were charged at."
           >
             <div className="detail-grid" style={{ marginBottom: 0 }}>
               <AdornedNumberField
                 id="settings-commission-rate"
-                label="Commission Rate"
+                label="Service Fee Rate"
                 suffix="%"
                 min={0}
                 max={100}
@@ -52,7 +52,7 @@ export default function CommissionSettings() {
           <SettingsSection
             icon="fa-hand-holding-dollar"
             title="Worker Debt"
-            description="Cash jobs leave the worker owing HomeEase its commission. That debt is taken out of their next GCash/Maya payouts."
+            description="Cash jobs leave the worker owing HomeEase its service fee. That debt is taken out of their next GCash/Maya payouts."
           >
             <div className="detail-grid" style={{ marginBottom: 0 }}>
               <AdornedNumberField

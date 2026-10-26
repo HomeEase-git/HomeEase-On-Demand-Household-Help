@@ -65,14 +65,12 @@ jobs:
       SUPABASE_CHAT_BUCKET: chat-images
       SUPABASE_AVATAR_BUCKET: avatars
       SUPABASE_BOOKING_PHOTO_BUCKET: booking-photos
-      SUPABASE_TAX_CERTIFICATE_BUCKET: tax-certificates
       ANTHROPIC_API_KEY: ""
       ANTHROPIC_MODEL: claude-sonnet-4-5
       MAX_FILE_SIZE: "5242880"
       UPLOAD_DIR: uploads
       ALLOWED_ORIGINS: http://localhost:5173
       COMMISSION_RATE: "0.10"
-      WITHHOLDING_TAX_RATE: "0.02"
       REDIS_HOST: 127.0.0.1
       REDIS_PORT: "6379"
     defaults:

@@ -138,7 +138,7 @@ export default function TrackBookingScreen() {
   // that fallback was silently mislabeling every other real status
   // (InProgress, QuoteSubmitted, QuoteApproved, PendingCompletion, Disputed)
   // as "Booking cancelled".
-  const steps = ["Booked", "Accepted", "In Progress", "Done"];
+  const steps = ["Waiting", "Confirmed", "Ongoing", "Done"];
 
   const currentStepIndex = (() => {
     switch (booking.status) {
@@ -149,10 +149,10 @@ export default function TrackBookingScreen() {
       case "QuoteApproved":
         return 1;
       case "InProgress":
-      case "PendingCompletion":
-      case "AwaitingPayment":
       case "Disputed":
         return 2;
+      case "PendingCompletion":
+      case "AwaitingPayment":
       case "Completed":
         return 3;
       default:
@@ -163,23 +163,23 @@ export default function TrackBookingScreen() {
   const statusLabel = (() => {
     switch (booking.status) {
       case "Pending":
-        return "Waiting for worker to accept";
+        return "Finding your worker";
       case "Accepted":
-        return "Worker accepted — getting ready";
+        return "Your booking is confirmed";
       case "QuoteSubmitted":
-        return "Worker sent a quote — awaiting your approval";
+        return "Your worker sent a price for you to approve";
       case "QuoteApproved":
-        return "Quote approved — worker will begin soon";
+        return "Price approved — your worker will begin soon";
       case "InProgress":
-        return "Worker is on the job";
+        return "Work is underway";
       case "PendingCompletion":
-        return "Job done — confirm and pay to finish";
+        return "Your worker finished the job";
       case "AwaitingPayment":
-        return "Confirmed — complete your payment to finish";
+        return "Job done — pay to finish your booking";
       case "Disputed":
-        return "This booking is under dispute";
+        return "HomeEase is reviewing this booking";
       case "Completed":
-        return "Service completed";
+        return "All done";
       case "Cancelled":
         return "Booking cancelled";
       case "Declined":

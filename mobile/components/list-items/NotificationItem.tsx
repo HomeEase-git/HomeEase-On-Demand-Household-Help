@@ -17,52 +17,63 @@ type Props = {
   onPress: () => void;
 };
 
+export const CATEGORY: Record<
+  string,
+  {
+    icon: React.ComponentProps<typeof Ionicons>["name"];
+    color: string;
+    label: string;
+  }
+> = {
+  booking: { icon: "calendar-outline", color: colors.brand.DEFAULT, label: "Booking" },
+  payment: { icon: "wallet-outline", color: colors.success, label: "Payment" },
+  review: { icon: "star-outline", color: colors.warning, label: "Review" },
+  message: { icon: "chatbubble-outline", color: colors.brand.DEFAULT, label: "Message" },
+  system: { icon: "notifications-outline", color: colors.warning, label: "Update" },
+};
+
 export const NotificationItem: React.FC<Props> = ({
   notification,
   onPress,
 }) => {
-  const iconColor =
-    notification.type === "booking"
-      ? colors.brand.DEFAULT
-      : notification.type === "payment"
-        ? colors.success
-        : colors.warning;
+  const { icon, color } = CATEGORY[notification.type] ?? CATEGORY.system;
+  const unread = !notification.isRead;
 
   return (
     <Pressable
-      className={`flex-row items-start py-4 border-b border-divider px-3 rounded-xl mb-2 ${
-        !notification.isRead ? "bg-card-light" : ""
+      accessibilityRole="button"
+      accessibilityLabel={`${unread ? "Unread. " : ""}${notification.title}. ${notification.body}. ${notification.time}`}
+      className={`flex-row items-start p-3 rounded-2xl mb-2 border active:opacity-70 ${
+        unread ? "bg-card-light border-accent/30" : "bg-card border-divider"
       }`}
       onPress={onPress}
     >
       <View
-        className="w-10 h-10 rounded-full items-center justify-center mr-3"
-        style={{ backgroundColor: `${iconColor}20` }}
+        className="w-11 h-11 rounded-full items-center justify-center mr-3"
+        style={{ backgroundColor: `${color}20` }}
       >
-        <Ionicons
-          name={
-            notification.type === "payment"
-              ? "wallet-outline"
-              : notification.type === "booking"
-                ? "calendar-outline"
-                : "chatbubble-outline"
-          }
-          size={20}
-          color={iconColor}
-        />
+        <Ionicons name={icon} size={22} color={color} />
       </View>
       <View className="flex-1">
-        <Text className="text-text-primary font-bold">{notification.title}</Text>
-        <Text className="text-text-secondary text-sm" numberOfLines={2}>
+        <View className="flex-row items-start justify-between">
+          <Text
+            className={`flex-1 text-text-primary ${unread ? "font-bold" : "font-medium"}`}
+            numberOfLines={1}
+          >
+            {notification.title}
+          </Text>
+          <Text className="text-text-muted text-xs ml-2 mt-0.5">
+            {notification.time}
+          </Text>
+        </View>
+        <Text
+          className={`text-sm mt-0.5 ${unread ? "text-text-primary" : "text-text-secondary"}`}
+          numberOfLines={2}
+        >
           {notification.body}
         </Text>
-        <Text className="text-text-muted text-xs mt-1">
-          {notification.time}
-        </Text>
       </View>
-      {!notification.isRead && (
-        <View className="w-2 h-2 rounded-full bg-accent mt-2 ml-2" />
-      )}
+      {unread && <View className="w-2.5 h-2.5 rounded-full bg-accent mt-1.5 ml-2" />}
     </Pressable>
   );
 };

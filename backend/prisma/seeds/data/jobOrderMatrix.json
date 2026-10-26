@@ -1485,15 +1485,16 @@
         },
         {
           "name": "House Rewiring",
-          "unit": "job",
-          "pricingModel": "CUSTOM_QUOTE",
+          "unit": "room",
+          "pricingModel": "PER_UNIT",
           "questions": [
             {
               "label": "Number of rooms",
               "fieldType": "NUMBER",
               "required": true,
               "minValue": 1,
-              "maxValue": 30
+              "maxValue": 30,
+              "setsPrice": true
             },
             {
               "label": "Number of floors",
@@ -1521,7 +1522,8 @@
                 "No"
               ]
             }
-          ]
+          ],
+          "price": 2500
         }
       ]
     },
@@ -2328,8 +2330,8 @@
         },
         {
           "name": "Roof Deck / Gutter Waterproofing",
-          "unit": "job",
-          "pricingModel": "CUSTOM_QUOTE",
+          "unit": "sq.m.",
+          "pricingModel": "PER_UNIT",
           "questions": [
             {
               "label": "Area",
@@ -2347,7 +2349,8 @@
               "fieldType": "NUMBER",
               "required": true,
               "minValue": 1,
-              "maxValue": 500
+              "maxValue": 500,
+              "setsPrice": true
             },
             {
               "label": "Active leak?",
@@ -2358,7 +2361,8 @@
                 "No"
               ]
             }
-          ]
+          ],
+          "price": 450
         }
       ]
     },
@@ -2691,15 +2695,16 @@
         },
         {
           "name": "Termite Soil Poisoning (whole house)",
-          "unit": "house",
-          "pricingModel": "CUSTOM_QUOTE",
+          "unit": "sq.m.",
+          "pricingModel": "PER_UNIT",
           "questions": [
             {
               "label": "Floor area (sq.m.)",
               "fieldType": "NUMBER",
               "required": true,
               "minValue": 20,
-              "maxValue": 2000
+              "maxValue": 2000,
+              "setsPrice": true
             },
             {
               "label": "Floor type",
@@ -2721,7 +2726,8 @@
                 "Under construction"
               ]
             }
-          ]
+          ],
+          "price": 60
         }
       ]
     },

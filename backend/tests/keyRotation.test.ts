@@ -1,16 +1,8 @@
 import path from 'path';
 import { execFileSync } from 'child_process';
-import request from 'supertest';
-import app from '@/app';
 import prisma from '@config/database';
 import { decrypt, encrypt, isUnderPreviousKey } from '@utils/encryption';
-import {
-  decryptField,
-  encryptField,
-  hashTin,
-  isUnderPreviousDataKey,
-  tinHashCandidates,
-} from '@utils/fieldEncryption';
+import { decryptField, encryptField, isUnderPreviousDataKey } from '@utils/fieldEncryption';
 import { createTestUser, deleteTestUser } from './helpers';
 
 const OLD_DATA = 'o'.repeat(64);
@@ -58,14 +50,6 @@ describe('encryption key rotation (unit)', () => {
     expect(decryptField(fresh)).toBe('09171234567');
   });
 
-  it('offers the TIN hash under every key during a rotation', () => {
-    useKeys({ data: OLD_DATA });
-    const oldHash = hashTin('123-456-789');
-    useKeys({ data: NEW_DATA, dataPrevious: OLD_DATA });
-    expect(tinHashCandidates('123-456-789')).toEqual([hashTin('123-456-789'), oldHash]);
-    expect(hashTin('123-456-789')).not.toBe(oldHash);
-  });
-
   it('does the same for admin MFA secrets', () => {
     useKeys({ mfa: OLD_MFA });
     const old = encrypt('JBSWY3DPEHPK3PXP');
@@ -106,32 +90,10 @@ describe('encryption key rotation (database)', () => {
 
   afterAll(async () => {
     for (const id of createdUserIds) await deleteTestUser(id);
-    await prisma.taxCertificate.deleteMany({ where: { workerName: 'Rotation Test' } });
     await prisma.$disconnect();
   });
 
-  it('blocks a duplicate TIN that is still hashed under the previous key', async () => {
-    useKeys({ data: OLD_DATA });
-    const { user: first } = await createTestUser('rotation-tin-a', { role: 'WORKER' });
-    createdUserIds.push(first.id);
-    await prisma.workerProfile.update({
-      where: { userId: first.id },
-      data: { tin: encryptField('111-222-333'), tinHash: hashTin('111-222-333') },
-    });
-
-    useKeys({ data: NEW_DATA, dataPrevious: OLD_DATA });
-    const { user: second, plainPassword } = await createTestUser('rotation-tin-b', { role: 'WORKER' });
-    createdUserIds.push(second.id);
-    const login = await request(app).post('/api/auth/login').send({ email: second.email, password: plainPassword });
-
-    const res = await request(app)
-      .patch('/api/workers/me/tax-info')
-      .set('Authorization', `Bearer ${login.body.data.token}`)
-      .send({ tin: '111-222-333' });
-    expect(res.status).toBe(409);
-  });
-
-  it('the rotation script moves every value to the new key and rehashes TINs', async () => {
+  it('the rotation script moves every value to the new key', async () => {
     useKeys({ data: OLD_DATA, mfa: OLD_MFA });
     const { user: worker } = await createTestUser('rotation-script', { role: 'WORKER' });
     const { user: admin } = await createTestUser('rotation-script-admin', { role: 'ADMIN' });
@@ -140,21 +102,6 @@ describe('encryption key rotation (database)', () => {
       where: { userId: worker.id },
       data: {
         payoutAccountNumber: encryptField('09998887777'),
-        tin: encryptField('444-555-666'),
-        tinHash: hashTin('444-555-666'),
-      },
-    });
-    const certificate = await prisma.taxCertificate.create({
-      data: {
-        workerId: worker.id,
-        periodStart: new Date('2026-01-01'),
-        periodEnd: new Date('2026-03-31'),
-        workerName: 'Rotation Test',
-        workerTin: encryptField('444-555-666'),
-        totalIncomePayments: 0,
-        totalTaxWithheld: 0,
-        pdfPath: 'x.pdf',
-        generatedBy: admin.id,
       },
     });
     await prisma.mfaSecret.create({ data: { userId: admin.id, secretEncrypted: encrypt('JBSWY3DPEHPK3PXP'), pending: false } });
@@ -162,7 +109,7 @@ describe('encryption key rotation (database)', () => {
     const before = await prisma.workerProfile.findUniqueOrThrow({ where: { userId: worker.id } });
     const dryOutput = runScript(['--dry']);
     expect(dryOutput).toMatch(/DRY RUN/);
-    expect((await prisma.workerProfile.findUniqueOrThrow({ where: { userId: worker.id } })).tin).toBe(before.tin);
+    expect((await prisma.workerProfile.findUniqueOrThrow({ where: { userId: worker.id } })).payoutAccountNumber).toBe(before.payoutAccountNumber);
 
     runScript();
 
@@ -170,15 +117,11 @@ describe('encryption key rotation (database)', () => {
     useKeys({ data: NEW_DATA, mfa: NEW_MFA });
     const after = await prisma.workerProfile.findUniqueOrThrow({ where: { userId: worker.id } });
     expect(decryptField(after.payoutAccountNumber!)).toBe('09998887777');
-    expect(decryptField(after.tin!)).toBe('444-555-666');
-    expect(after.tinHash).toBe(hashTin('444-555-666'));
-    const cert = await prisma.taxCertificate.findUniqueOrThrow({ where: { id: certificate.id } });
-    expect(decryptField(cert.workerTin)).toBe('444-555-666');
     const secret = await prisma.mfaSecret.findUniqueOrThrow({ where: { userId: admin.id } });
     expect(decrypt(secret.secretEncrypted)).toBe('JBSWY3DPEHPK3PXP');
 
     // Re-running changes nothing.
-    expect(runScript()).toMatch(/worker profiles 0, payouts 0, tax certificates 0/);
+    expect(runScript()).toMatch(/worker profiles 0, payouts 0 /);
   }, 60_000);
 
   it('writes nothing if any value decrypts with neither key', async () => {
@@ -198,31 +141,5 @@ describe('encryption key rotation (database)', () => {
     expect(after.payoutAccountNumber).toBe(readableValue);
 
     await prisma.workerProfile.update({ where: { userId: stranger.id }, data: { payoutAccountNumber: null } });
-  }, 60_000);
-
-  it('reports two workers who ended up with the same TIN under different keys', async () => {
-    useKeys({ data: OLD_DATA });
-    const { user: oldKeyWorker } = await createTestUser('rotation-dup-old', { role: 'WORKER' });
-    createdUserIds.push(oldKeyWorker.id);
-    await prisma.workerProfile.update({
-      where: { userId: oldKeyWorker.id },
-      data: { tin: encryptField('777-888-999'), tinHash: hashTin('777-888-999') },
-    });
-    useKeys({ data: NEW_DATA });
-    const { user: newKeyWorker } = await createTestUser('rotation-dup-new', { role: 'WORKER' });
-    createdUserIds.push(newKeyWorker.id);
-    await prisma.workerProfile.update({
-      where: { userId: newKeyWorker.id },
-      data: { tin: encryptField('777-888-999'), tinHash: hashTin('777-888-999') },
-    });
-
-    const output = runScriptExpectingFailure();
-    expect(output).toMatch(/share a TIN with another worker/);
-
-    // Clean up so later runs aren't blocked by this pair.
-    await prisma.workerProfile.updateMany({
-      where: { userId: { in: [oldKeyWorker.id, newKeyWorker.id] } },
-      data: { tin: null, tinHash: null },
-    });
   }, 60_000);
 });

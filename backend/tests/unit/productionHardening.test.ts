@@ -19,8 +19,6 @@ describe('Production config check', () => {
     SUPABASE_SERVICE_KEY: 's',
     GOOGLE_MAPS_API_KEY: 'g',
     SENTRY_DSN: 'https://k@sentry/1',
-    PLATFORM_LEGAL_NAME: 'HomeEase',
-    PLATFORM_TIN: '000',
   };
 
   it('passes a complete production setup', () => {

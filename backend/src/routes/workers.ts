@@ -27,12 +27,6 @@ import {
   deleteCertification,
   getPayoutMethod,
   updatePayoutMethod,
-  getTaxInfo,
-  updateTaxInfo,
-  getMyVatRegistration,
-  submitVatRegistration,
-  getMyVatSummary,
-  getMyTaxCertificates,
   getMyCalendar,
   updateWeeklySchedule,
   updateDateOverrides,
@@ -53,7 +47,6 @@ import {
   validateUpdateCertification,
   validateUpdateCertificationVisibility,
   validateUpdatePayoutMethod,
-  validateUpdateTaxInfo,
   validateCreatePackage,
   validateUpdatePackage,
 } from '../middleware/validation';
@@ -158,12 +151,6 @@ router.patch(
   updatePayoutMethod
 );
 
-router.get('/me/tax-info', authMiddleware, restrictTo('WORKER'), getTaxInfo);
-router.patch('/me/tax-info', authMiddleware, restrictTo('WORKER'), validateUpdateTaxInfo, updateTaxInfo);
-router.get('/me/vat-registration', authMiddleware, restrictTo('WORKER'), getMyVatRegistration);
-router.post('/me/vat-registration', authMiddleware, restrictTo('WORKER'), submitVatRegistration);
-router.get('/me/vat-summary', authMiddleware, restrictTo('WORKER'), getMyVatSummary);
-router.get('/me/tax-certificates', authMiddleware, restrictTo('WORKER'), getMyTaxCertificates);
 
 // Availability calendar: weekly schedule + per-date overrides, with the
 // worker's accepted jobs and follow-up visits on each day.

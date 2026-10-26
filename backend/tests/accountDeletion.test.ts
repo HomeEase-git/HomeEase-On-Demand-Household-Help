@@ -42,7 +42,6 @@ describe('DELETE /api/users/me', () => {
         bio: 'Aircon tech',
         address: '1 Test St',
         payoutAccountNumber: encryptField('09171234567'),
-        tin: encryptField('123-456-789-000'),
         currentLat: 14.6,
         currentLng: 121,
       },
@@ -81,7 +80,6 @@ describe('DELETE /api/users/me', () => {
       bio: null,
       address: null,
       payoutAccountNumber: null,
-      tin: null,
       currentLat: null,
     });
     // The client's booking history survives.

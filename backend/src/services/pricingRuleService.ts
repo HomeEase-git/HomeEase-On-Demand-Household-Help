@@ -1,6 +1,6 @@
 import type { DoleWageReference } from '@/constants/doleWageReference';
 
-// City price rules (PricingRule) were retired with admin-fixed pricing
+// City price rules were retired with admin-fixed pricing
 // (2026-09-27): a job's price only changes with add-ons, distance, the
 // expertise tier, units and a same-day rush fee, so there's nothing left for
 // a per-city min/max to guard. Only the DOLE wage-floor check remains.

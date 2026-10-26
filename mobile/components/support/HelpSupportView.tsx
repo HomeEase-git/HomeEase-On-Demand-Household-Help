@@ -56,7 +56,7 @@ export function HelpSupportView({ role }: Props) {
       label: role === "client" ? "My bookings" : "My jobs",
       sub:
         role === "client"
-          ? "Cancel, reschedule or review a quote"
+          ? "Cancel, reschedule or report an invoice"
           : "Cancel or reschedule a job",
       icon: "calendar-outline",
       onPress: () => router.push(bookingsPath),

@@ -34,7 +34,6 @@ const MENU_GROUPS = [
     title: "Earnings",
     items: [
       { label: "Payout Method", path: "/(worker)/earnings/payout", icon: "wallet-outline" },
-      { label: "Tax & VAT", path: "/(worker)/earnings/tax-info", icon: "receipt-outline" },
     ],
   },
   {

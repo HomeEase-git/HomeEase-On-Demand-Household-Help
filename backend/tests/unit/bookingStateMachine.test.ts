@@ -5,22 +5,25 @@ describe('booking state machine — valid transitions', () => {
     ['PENDING', 'ACCEPTED'],
     ['PENDING', 'REJECTED'],
     ['PENDING', 'CANCELLED'],
-    ['ACCEPTED', 'QUOTE_SUBMITTED'],
+    ['ACCEPTED', 'IN_PROGRESS'],
     ['ACCEPTED', 'CANCELLED'],
     ['IN_PROGRESS', 'PENDING_COMPLETION'],
     ['IN_PROGRESS', 'CANCELLED'],
-    ['QUOTE_SUBMITTED', 'QUOTE_APPROVED'],
-    ['QUOTE_SUBMITTED', 'DISPUTED'],
-    ['QUOTE_SUBMITTED', 'CANCELLED'],
-    ['QUOTE_APPROVED', 'IN_PROGRESS'],
-    ['QUOTE_APPROVED', 'ACCEPTED'],
-    ['QUOTE_APPROVED', 'CANCELLED'],
-    ['QUOTE_SUBMITTED', 'ACCEPTED'],
-    ['DISPUTED', 'QUOTE_APPROVED'],
-    ['DISPUTED', 'ACCEPTED'],
-    ['DISPUTED', 'CANCELLED'],
+    // The invoice is sent: cash waits for "Cash received", GCash/Maya is billed.
     ['PENDING_COMPLETION', 'COMPLETED'],
+    ['PENDING_COMPLETION', 'AWAITING_PAYMENT'],
     ['PENDING_COMPLETION', 'CANCELLED'],
+    ['AWAITING_PAYMENT', 'COMPLETED'],
+    // The client reports the invoice before paying.
+    ['PENDING_COMPLETION', 'DISPUTED'],
+    ['AWAITING_PAYMENT', 'DISPUTED'],
+    // An admin keeps or adjusts the invoice, or cancels.
+    ['DISPUTED', 'PENDING_COMPLETION'],
+    ['DISPUTED', 'AWAITING_PAYMENT'],
+    ['DISPUTED', 'CANCELLED'],
+    // Retired quote statuses can only be cancelled.
+    ['QUOTE_SUBMITTED', 'CANCELLED'],
+    ['QUOTE_APPROVED', 'CANCELLED'],
   ])('allows %s -> %s', (from, to) => {
     expect(isValidTransition(from, to)).toBe(true);
   });
@@ -29,23 +32,27 @@ describe('booking state machine — valid transitions', () => {
     ['PENDING', 'IN_PROGRESS'],
     ['PENDING', 'COMPLETED'],
     ['PENDING', 'QUOTE_SUBMITTED'],
-    // The job can't start (or finish) before the client approves the quote.
-    ['ACCEPTED', 'IN_PROGRESS'],
     ['ACCEPTED', 'COMPLETED'],
     ['ACCEPTED', 'REJECTED'],
+    ['ACCEPTED', 'QUOTE_SUBMITTED'],
     ['IN_PROGRESS', 'QUOTE_SUBMITTED'],
-    ['IN_PROGRESS', 'QUOTE_APPROVED'],
+    ['IN_PROGRESS', 'COMPLETED'],
+    ['IN_PROGRESS', 'DISPUTED'],
     ['IN_PROGRESS', 'PENDING'],
-    ['QUOTE_SUBMITTED', 'IN_PROGRESS'],
-    ['QUOTE_SUBMITTED', 'PENDING_COMPLETION'],
-    ['QUOTE_APPROVED', 'QUOTE_SUBMITTED'],
-    ['QUOTE_APPROVED', 'PENDING_COMPLETION'],
-    ['QUOTE_APPROVED', 'COMPLETED'],
+    ['QUOTE_SUBMITTED', 'QUOTE_APPROVED'],
+    ['QUOTE_APPROVED', 'IN_PROGRESS'],
     ['DISPUTED', 'IN_PROGRESS'],
-    ['DISPUTED', 'PENDING_COMPLETION'],
-    ['PENDING_COMPLETION', 'QUOTE_APPROVED'],
+    ['DISPUTED', 'QUOTE_APPROVED'],
+    ['AWAITING_PAYMENT', 'PENDING_COMPLETION'],
   ])('rejects %s -> %s', (from, to) => {
     expect(isValidTransition(from, to)).toBe(false);
+  });
+
+  it('never moves a booking into a retired quote status', () => {
+    for (const targets of Object.values(VALID_TRANSITIONS)) {
+      expect(targets).not.toContain('QUOTE_SUBMITTED');
+      expect(targets).not.toContain('QUOTE_APPROVED');
+    }
   });
 
   it('treats every terminal status as a dead end', () => {

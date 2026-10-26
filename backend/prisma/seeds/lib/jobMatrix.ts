@@ -21,8 +21,8 @@ export type MatrixQuestion = {
 export type MatrixJob = {
   name: string;
   unit: string;
-  pricingModel: 'FIXED' | 'PER_UNIT' | 'CUSTOM_QUOTE';
-  price?: number;
+  pricingModel: 'FIXED' | 'PER_UNIT';
+  price: number;
   replaces?: string;
   questions: MatrixQuestion[];
 };
@@ -38,7 +38,7 @@ export const matrixBounds = (price: number) => ({ minPrice: Math.round(price * 0
 
 /** The category tile's starting price: its cheapest priced job. */
 export const matrixStartingPrice = (matrix: MatrixCategory) =>
-  Math.min(...matrix.jobs.filter((j) => j.pricingModel !== 'CUSTOM_QUOTE').map((j) => j.price!));
+  Math.min(...matrix.jobs.map((j) => j.price));
 
 /**
  * Builds the catalog save for `matrix`. A live job named in a row's
@@ -85,16 +85,15 @@ export function buildMatrixPayload(
       if (q.setsPrice) quantityFieldRef = key;
       scopeFields.push(fieldPayload(q, [ref], key));
     }
-    const quote = job.pricingModel === 'CUSTOM_QUOTE';
     tasks.push({
       ...(live ? { id: live.id } : { key: ref }),
       name: job.name,
       description: live?.description ?? null,
-      basePrice: quote ? 0 : job.price!,
+      basePrice: job.price,
       pricingModel: job.pricingModel,
       unitLabel: job.unit,
       quantityFieldRef: job.pricingModel === 'PER_UNIT' ? quantityFieldRef : null,
-      durationHours: quote ? null : live?.durationHours ?? null,
+      durationHours: live?.durationHours ?? null,
       isActive: true,
     });
   }
@@ -125,22 +124,4 @@ export function buildMatrixPayload(
     scopeFields,
   };
   return { body, warnings, unmatched, liveFor, jobRef: (i: number) => liveFor[i]?.id ?? `job:${i}` };
-}
-
-/**
- * Upper bound for a category's city price cap (PricingRule.maxPrice): its
- * most expensive possible booking at the top worker tier, plus 25% headroom
- * for the distance fee and worker packages, rounded up to the next ₱1,000.
- */
-export function matrixCapMax(matrix: MatrixCategory, topTierMultiplier: number): number {
-  const largestJob = Math.max(
-    ...matrix.jobs
-      .filter((j) => j.pricingModel !== 'CUSTOM_QUOTE')
-      .map((j) => {
-        const max = matrixBounds(j.price!).maxPrice;
-        if (j.pricingModel !== 'PER_UNIT') return max;
-        return max * (j.questions.find((q) => q.setsPrice)?.maxValue ?? 1);
-      })
-  );
-  return Math.ceil((largestJob * topTierMultiplier * 1.25) / 1000) * 1000;
 }

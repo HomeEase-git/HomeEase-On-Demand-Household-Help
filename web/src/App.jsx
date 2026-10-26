@@ -25,7 +25,6 @@ const TransactionDetail = lazy(() => import('./pages/TransactionDetail'))
 const Refunds = lazy(() => import('./pages/Refunds'))
 const Books = lazy(() => import('./pages/Books'))
 const Payouts = lazy(() => import('./pages/Payouts'))
-const VatRegistrations = lazy(() => import('./pages/VatRegistrations'))
 const ServiceRequests = lazy(() => import('./pages/ServiceRequests'))
 const WorkerPackages = lazy(() => import('./pages/WorkerPackages'))
 const PriceAdjustments = lazy(() => import('./pages/PriceAdjustments'))
@@ -81,12 +80,10 @@ export default function App() {
           { path: 'payments/payouts', element: <Payouts /> },
           { path: 'payments/books', element: <Books /> },
           { path: 'payments/commission', element: <CommissionSettings /> },
-          { path: 'tax', element: <Navigate to="/tax/vat-registrations" replace /> },
-          { path: 'tax/certificates', element: <Navigate to="/tax/vat-registrations" replace /> },
-          { path: 'tax/vat-registrations', element: <VatRegistrations /> },
-          // Old locations from when tax lived under Payments — kept so bookmarks still resolve.
-          { path: 'payments/tax-certificates', element: <Navigate to="/tax/vat-registrations" replace /> },
-          { path: 'payments/vat-registrations', element: <Navigate to="/tax/vat-registrations" replace /> },
+          // Tax pages were removed (workers file their own taxes); old bookmarks land on Payments.
+          { path: 'tax/*', element: <Navigate to="/payments" replace /> },
+          { path: 'payments/tax-certificates', element: <Navigate to="/payments" replace /> },
+          { path: 'payments/vat-registrations', element: <Navigate to="/payments" replace /> },
           { path: 'reviews', element: <Reviews /> },
           { path: 'reviews/flagged', element: <ReviewsFlagged /> },
           { path: 'reviews/detail/:id', element: <ReviewDetail /> },

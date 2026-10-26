@@ -17,6 +17,7 @@ import { findAutoMatchWorker, LATE_CANCEL_THRESHOLD_HOURS } from '@services/matc
 import {
   settleCashBooking,
   createCompletionInvoice,
+  voidUnpaidPayment,
 } from '@services/paymentLifecycleService';
 import {
   toDayStart,
@@ -31,7 +32,7 @@ import {
 } from '@services/workerAvailabilityService';
 import { chargePenaltyTx } from '@services/debtLedgerService';
 import { toOwnedBookingPhotoUrls } from '@utils/storageUrls';
-import { validateQuoteItems, sumQuoteItems, type QuoteItemInput } from '@utils/quoteItems';
+import { validateInvoiceItems, invoiceLines, invoiceStatus, type InvoiceItemInput } from '@utils/invoiceItems';
 import { updateBookingIfStatus, isBookingStatusConflict, lockBooking } from '@services/bookingStatusWrite';
 
 // The booking's status changed between our read and our write (another
@@ -104,8 +105,8 @@ const FOLLOW_UP_PARENT_STATUSES: BookingStatus[] = ['PENDING_COMPLETION', 'AWAIT
  * inspection): same worker as the finished inspection/diagnosis job, which
  * the worker still has to accept.
  *
- * No Payment row is created here — payment is taken after the job is finished
- * and finally priced (see confirmCompletion). A 1-hour expiry job is queued so
+ * No Payment row is created here — the client pays the worker's invoice after
+ * the job (see completeBooking). An expiry job is queued so
  * an unanswered PENDING booking auto-cancels (see queues/bookingQueue +
  * workers/bookingWorker).
  */
@@ -273,6 +274,10 @@ export const createBooking = async (req: AuthRequest, res: Response) => {
     if (serviceTaskId && !serviceTask) {
       return res.status(404).json(errorResponse(404, 'Service task not found'));
     }
+    // A switched-off job (e.g. a former custom-quote job not priced yet) can't be booked.
+    if (serviceTask && (!serviceTask.isActive || !(serviceTask.basePrice > 0))) {
+      return res.status(409).json(errorResponse(409, "This job isn't available right now. Please pick another one."));
+    }
 
     // Follow-up job: only after an inspection/diagnosis job, only with the
     // same worker, only once that job is done.
@@ -297,7 +302,7 @@ export const createBooking = async (req: AuthRequest, res: Response) => {
         return res.status(409).json(errorResponse(409, 'You can request a follow-up job once the inspection is finished'));
       }
       if (!parent.workerId || (requestedWorkerId && requestedWorkerId !== parent.workerId)) {
-        return res.status(409).json(errorResponse(409, 'A follow-up job goes to the same pro who did the inspection'));
+        return res.status(409).json(errorResponse(409, 'A follow-up job goes to the same worker who did the inspection'));
       }
       followUpWorkerId = parent.workerId;
     }
@@ -310,9 +315,6 @@ export const createBooking = async (req: AuthRequest, res: Response) => {
     if (!serviceTask && !serviceTypeConfig) {
       return res.status(404).json(errorResponse(404, 'Service type not found'));
     }
-
-    // CUSTOM_QUOTE has no upfront price at all — the worker quotes on site.
-    const isCustomQuoteTask = serviceTask?.pricingModel === 'CUSTOM_QUOTE';
 
     const effectiveScopeAnswers =
       scopeAnswers && typeof scopeAnswers === 'object' && !Array.isArray(scopeAnswers) ? scopeAnswers : undefined;
@@ -435,7 +437,7 @@ export const createBooking = async (req: AuthRequest, res: Response) => {
             select: { id: true },
           });
           if (!eligible) {
-            return res.status(409).json(errorResponse(409, 'This pro does not handle the selected option for this service'));
+            return res.status(409).json(errorResponse(409, 'This worker does not handle the selected option for this service'));
           }
         }
 
@@ -443,7 +445,7 @@ export const createBooking = async (req: AuthRequest, res: Response) => {
           (c) => c.serviceType.name.toLowerCase() === resolvedServiceTypeName.toLowerCase()
         );
         if (!bookedCategory || bookedCategory.status !== 'VERIFIED') {
-          return res.status(409).json(errorResponse(409, 'This pro does not offer this service'));
+          return res.status(409).json(errorResponse(409, 'This worker does not offer this service'));
         }
       }
 
@@ -460,7 +462,7 @@ export const createBooking = async (req: AuthRequest, res: Response) => {
       // workerSetupService). Auto-match already filters them out.
       if (!(await getWorkerSetupStatus(workerProfile.userId))?.complete) {
         if (await tryNextAutoMatchCandidate()) continue;
-        return res.status(409).json(errorResponse(409, "This pro isn't taking bookings yet"));
+        return res.status(409).json(errorResponse(409, "This worker isn't taking bookings yet"));
       }
 
       // Weekly schedule + date overrides. Not re-checked for a follow-up job:
@@ -468,7 +470,7 @@ export const createBooking = async (req: AuthRequest, res: Response) => {
       // can still decline.
       if (!followUpWorkerId && !(await isWorkerAvailableOn(prisma, workerProfile, scheduledDate))) {
         if (await tryNextAutoMatchCandidate()) continue;
-        return res.status(409).json(errorResponse(409, "This pro isn't working on that date"));
+        return res.status(409).json(errorResponse(409, "This worker isn't working on that date"));
       }
 
       // Every task is priced by the admin (see taskPriceService), so the only
@@ -485,7 +487,7 @@ export const createBooking = async (req: AuthRequest, res: Response) => {
         });
         if (!selection?.isActive) {
           if (await tryNextAutoMatchCandidate()) continue;
-          return res.status(409).json(errorResponse(409, 'This pro does not offer this specific service'));
+          return res.status(409).json(errorResponse(409, 'This worker does not offer this specific service'));
         }
         const priced = taskBasePrice(serviceTask, effectiveScopeAnswers);
         if (!priced.ok) {
@@ -496,11 +498,11 @@ export const createBooking = async (req: AuthRequest, res: Response) => {
         basePrice = serviceTypeConfig!.basePrice;
       }
 
-      // VAT snapshot — pinned from the worker's status at the earliest point a
-      // real price is shown, so settlement never re-checks the worker's live
-      // vatRegistered flag (see paymentLifecycleService.priceBooking).
-      const vatApplicable = !isCustomQuoteTask && workerProfile.vatRegistered;
-      const vatRate = vatApplicable ? VAT_RATE : null;
+      // Workers file their own taxes, so HomeEase adds no VAT to a new
+      // booking. The snapshot columns stay for bookings priced before that
+      // (settlement still honours their frozen vatApplicable/vatRate).
+      const vatApplicable = false;
+      const vatRate = null;
 
       // Distance fee is based on the worker's fixed service address, not a
       // live position (see WorkerProfile.addressLat/addressLng comment).
@@ -524,11 +526,12 @@ export const createBooking = async (req: AuthRequest, res: Response) => {
       // this array (only resolvedPackages below, priced from the worker's own
       // approved WorkerPackage rows, are a trustworthy priced-add-on source).
       const preferenceAddOns = (Array.isArray(addOns) ? addOns : []).map((a) => ({
+        kind: 'PREFERENCE' as const,
         name: a.name || a.id || 'Add-on',
         price: 0,
       }));
 
-      let resolvedPackages: { name: string; price: number }[] = [];
+      let resolvedPackages: { kind: 'PACKAGE'; name: string; price: number }[] = [];
       if (Array.isArray(packageIds) && packageIds.length > 0) {
         const found = await prisma.workerPackage.findMany({
           where: { id: { in: packageIds }, workerProfileId: workerProfile.id, isActive: true, status: 'APPROVED' },
@@ -536,7 +539,7 @@ export const createBooking = async (req: AuthRequest, res: Response) => {
         if (found.length !== packageIds.length) {
           return res.status(400).json(errorResponse(400, 'One or more selected packages are unavailable'));
         }
-        resolvedPackages = found.map((p) => ({ name: p.name, price: p.price }));
+        resolvedPackages = found.map((p) => ({ kind: 'PACKAGE' as const, name: p.name, price: p.price }));
       }
 
       const addOnsList = [...preferenceAddOns, ...resolvedPackages];
@@ -612,12 +615,13 @@ export const createBooking = async (req: AuthRequest, res: Response) => {
           if (addOnsList.length > 0) {
             // These are what the client chose at checkout (packages and job
             // preferences), so choosing them is the consent: they start
-            // approved and count toward the bill. Only extras the worker adds
-            // mid-job (addAddon) wait for the client's approval.
+            // approved and count toward the bill. Parts and extra work are
+            // added later, on the worker's invoice (completeBooking).
             const chosenAt = new Date();
             await tx.bookingAddOn.createMany({
               data: addOnsList.map((a) => ({
                 bookingId: created.id,
+                kind: a.kind,
                 name: a.name,
                 price: typeof a.price === 'number' ? a.price : 0,
                 clientApprovedAt: chosenAt,
@@ -659,8 +663,8 @@ export const createBooking = async (req: AuthRequest, res: Response) => {
             },
           });
 
-          // No Payment row is created here — the client pays after the job is
-          // finished and finally priced (see confirmCompletion).
+          // No Payment row is created here — the client pays the worker's
+          // invoice after the job (see completeBooking).
           return created;
         });
 
@@ -917,8 +921,8 @@ export const getBookingDetail = async (req: AuthRequest, res: Response) => {
           orderBy: { createdAt: 'desc' },
         },
         visits: { orderBy: [{ scheduledDate: 'asc' }, { scheduledTime: 'asc' }] },
-        // Quote data lives inline on Booking (laborCost, materialsCost, etc.)
-        addOns: true,  // schema relation is addOns (capital O)
+        addOns: { orderBy: { createdAt: 'asc' } },
+        // Bookings quoted before invoices replaced quotes (see invoiceLines).
         quoteItems: { orderBy: { createdAt: 'asc' } },
         review: true,
         pricingLogs: { orderBy: { createdAt: 'asc' } },
@@ -978,7 +982,7 @@ export const getBookingDetail = async (req: AuthRequest, res: Response) => {
       booking.payment?.vatAmount ??
       (booking.vatApplicable ? round2(finalPrice * (booking.vatRate ?? VAT_RATE)) : (booking.vatAmount ?? 0));
     // The first (booking-time) log carries the fee split; later logs are
-    // quote stages.
+    // quote stages on older bookings.
     const bookingPricingLog = booking.pricingLogs[0] ?? null;
     const priceBreakdown = {
       ...itemizeBookingPrice(bookingPricingLog, booking),
@@ -1065,7 +1069,6 @@ export const getBookingDetail = async (req: AuthRequest, res: Response) => {
           service: f.serviceTask?.name ?? f.serviceType,
         })),
         allowsFollowUp: booking.serviceTask?.allowsFollowUp ?? false,
-        // CUSTOM_QUOTE: priced by the worker's quote (see submitQuote).
         serviceTaskPricingModel: booking.serviceTask?.pricingModel ?? null,
         visits: booking.visits,
         nearbyJobs,
@@ -1116,7 +1119,7 @@ export const getBookingDetail = async (req: AuthRequest, res: Response) => {
         location: booking.location,
         city: booking.city,
         // Booking address coordinates — client-side re-offer flow (a declined
-        // booking's "Find Another Pro") needs these to prefill a new draft
+        // booking's "Find Another Worker") needs these to prefill a new draft
         // without asking the client to re-pick their address.
         clientLat: booking.clientLat,
         clientLng: booking.clientLng,
@@ -1198,27 +1201,18 @@ export const getBookingDetail = async (req: AuthRequest, res: Response) => {
               workerPayout: booking.payment.workerPayout,
             }
           : null,
-        quote: hasQuote
-          ? {
-              laborCost: booking.laborCost,
-              materialsCost: booking.materialsCost,
-              notes: booking.quoteNotes,
-              status: booking.quoteStatus,
-              quotedAt: booking.quotedAt,
-              receiptUrls: booking.quoteReceiptUrls,
-              proofOfUseUrls: booking.quoteProofOfUseUrls,
-              items: booking.quoteItems.map((i) => ({
-                id: i.id,
-                name: i.name,
-                price: i.price,
-                receiptUrls: i.receiptUrls,
-                proofOfUseUrls: i.proofOfUseUrls,
-              })),
-              rejectedAt: booking.quoteRejectedAt,
-              rejectionReason: booking.quoteRejectionReason,
-              revision: booking.quoteRevision,
-            }
-          : null,
+        // The bill the worker sends at the end of the job (completeBooking):
+        // the job itself, then packages, parts and extra work. Before it's
+        // sent, the lines show what the client booked.
+        invoice: {
+          status: invoiceStatus(booking.status, booking.workerCompletedAt),
+          sentAt: booking.workerCompletedAt,
+          lines: invoiceLines(booking),
+          subtotal: finalPrice,
+          vatAmount: breakdownVat,
+          tip: breakdownTip,
+          total: priceBreakdown.total,
+        },
         addOns: booking.addOns,
         review: booking.review,
         notes: booking.notes,
@@ -1234,8 +1228,6 @@ export const getBookingDetail = async (req: AuthRequest, res: Response) => {
           workerArrivedAt: booking.workerArrivedAt,
           workerStartedAt: booking.workerStartedAt,
           workerCompletedAt: booking.workerCompletedAt,
-          quotedAt: booking.quotedAt,
-          approvedAt: booking.approvedAt,
           completionDate: booking.completionDate,
         },
         pricingLogs: booking.pricingLogs,
@@ -1813,8 +1805,9 @@ export const updateWorkerLiveLocation = async (req: AuthRequest, res: Response) 
 
 /**
  * PATCH /api/bookings/:id/start
- * Worker starts the job — requires a prior verified arrival and the client's
- * approved quote (QUOTE_APPROVED).
+ * Worker starts the job — requires a prior verified arrival and photos of
+ * the job before any work. The price is the one the client booked; parts and
+ * extra work go on the invoice at the end (completeBooking).
  */
 export const startBooking = async (req: AuthRequest, res: Response) => {
   try {
@@ -1824,9 +1817,7 @@ export const startBooking = async (req: AuthRequest, res: Response) => {
 
     const id = req.params.id as string;
 
-    const booking = await prisma.booking.findUnique({
-      where: { id },
-    });
+    const booking = await prisma.booking.findUnique({ where: { id } });
 
     if (!booking) {
       return res.status(404).json(errorResponse(404, 'Booking not found'));
@@ -1836,16 +1827,8 @@ export const startBooking = async (req: AuthRequest, res: Response) => {
       return res.status(403).json(errorResponse(403, 'This booking is not assigned to you'));
     }
 
-    // The job can only start once the client has approved the quote.
     if (!isValidTransition(booking.status, 'IN_PROGRESS')) {
-      return res.status(409).json(
-        errorResponse(
-          409,
-          booking.status === 'ACCEPTED' || booking.status === 'QUOTE_SUBMITTED'
-            ? 'The client must approve your quote before you can start the job'
-            : `Cannot start booking with status ${booking.status}`
-        )
-      );
+      return res.status(409).json(errorResponse(409, `Cannot start booking with status ${booking.status}`));
     }
 
     if (!booking.workerArrivedAt) {
@@ -1894,9 +1877,8 @@ export const startBooking = async (req: AuthRequest, res: Response) => {
   }
 };
 
-// A job's work is under way in these statuses — the worker can plan another
-// visit for it.
-const VISIT_ALLOWED_STATUSES = ['IN_PROGRESS', 'QUOTE_SUBMITTED', 'QUOTE_APPROVED'];
+// A job's work is under way — the worker can plan another visit for it.
+const VISIT_ALLOWED_STATUSES = ['IN_PROGRESS'];
 
 /**
  * POST /api/bookings/:id/visits
@@ -1947,7 +1929,7 @@ export const scheduleVisit = async (req: AuthRequest, res: Response) => {
       userId: booking.clientId,
       type: 'FOLLOW_UP_VISIT_SCHEDULED',
       title: 'Follow-up Visit Scheduled',
-      message: `Your pro needs another visit to finish the job: ${when}.${visit.notes ? ` Note: ${visit.notes}` : ''}`,
+      message: `Your worker needs another visit to finish the job: ${when}.${visit.notes ? ` Note: ${visit.notes}` : ''}`,
       relatedId: id,
     });
 
@@ -2002,7 +1984,7 @@ export const cancelVisit = async (req: AuthRequest, res: Response) => {
       userId: visit.booking.clientId,
       type: 'FOLLOW_UP_VISIT_SCHEDULED',
       title: 'Follow-up Visit Cancelled',
-      message: `Your pro cancelled the follow-up visit on ${visit.scheduledDate.toLocaleDateString('en-PH', { month: 'short', day: 'numeric', timeZone: 'UTC' })}.`,
+      message: `Your worker cancelled the follow-up visit on ${visit.scheduledDate.toLocaleDateString('en-PH', { month: 'short', day: 'numeric', timeZone: 'UTC' })}.`,
       relatedId: id,
     });
 
@@ -2110,7 +2092,7 @@ export const requestReschedule = async (req: AuthRequest, res: Response) => {
       return res.status(409).json(errorResponse(409, 'This booking has no assigned worker'));
     }
     if (booking.workerArrivedAt != null) {
-      return res.status(409).json(errorResponse(409, 'The pro has already arrived, so this booking can no longer be rescheduled'));
+      return res.status(409).json(errorResponse(409, 'The worker has already arrived, so this booking can no longer be rescheduled'));
     }
     if (booking.rescheduleRequestedAt != null && booking.rescheduleRequestRespondedAt == null) {
       return res.status(409).json(errorResponse(409, 'There is already a pending reschedule request for this booking'));
@@ -2139,7 +2121,7 @@ export const requestReschedule = async (req: AuthRequest, res: Response) => {
         return res.status(404).json(errorResponse(404, 'Worker profile not found'));
       }
       if (!(await isWorkerAvailableOn(prisma, workerProfile, requestedDate))) {
-        return res.status(409).json(errorResponse(409, "Your pro isn't working on that date"));
+        return res.status(409).json(errorResponse(409, "Your worker isn't working on that date"));
       }
     }
 
@@ -2166,7 +2148,7 @@ export const requestReschedule = async (req: AuthRequest, res: Response) => {
       title: 'Reschedule Requested',
       message: isClient
         ? `Your client asked to move this booking to ${when}. Review and accept or decline.`
-        : `Your pro asked to move this booking to ${when}. Review and accept or decline.`,
+        : `Your worker asked to move this booking to ${when}. Review and accept or decline.`,
       relatedId: id,
     });
 
@@ -2181,7 +2163,7 @@ export const requestReschedule = async (req: AuthRequest, res: Response) => {
 
     return res.status(200).json({
       success: true,
-      message: isClient ? 'Reschedule requested — waiting for your pro to respond' : 'Reschedule requested — waiting for the client to respond',
+      message: isClient ? 'Reschedule requested — waiting for your worker to respond' : 'Reschedule requested — waiting for the client to respond',
       data: { id, requestedScheduledDate: requestedDate, requestedScheduledTime: time },
     });
   } catch (error) {
@@ -2292,10 +2274,10 @@ export const respondToRescheduleRequest = async (req: AuthRequest, res: Response
 
     if (accept) {
       if (booking.workerArrivedAt != null) {
-        return res.status(409).json(errorResponse(409, 'The pro has already arrived, so this booking can no longer be moved'));
+        return res.status(409).json(errorResponse(409, 'The worker has already arrived, so this booking can no longer be moved'));
       }
       // The proposal may be days old: re-run the start rules and, for a
-      // client's proposal, the pro's availability on the proposed day.
+      // client's proposal, the worker's availability on the proposed day.
       const { rushMinLeadHours } = await getAppSettings();
       const startCheck = checkBookingStart(isoDay(booking.requestedScheduledDate), newTime, rushMinLeadHours);
       if (!startCheck.ok) {
@@ -2311,9 +2293,9 @@ export const respondToRescheduleRequest = async (req: AuthRequest, res: Response
         }
       }
 
-      // Same rule as acceptBooking: a pro can't hold two jobs with the same
+      // Same rule as acceptBooking: a worker can't hold two jobs with the same
       // start time. The worker row is locked so this check and the move can't
-      // interleave with another accept or reschedule for the same pro.
+      // interleave with another accept or reschedule for the same worker.
       const requestedDate = booking.requestedScheduledDate;
       await prisma.$transaction(async (tx) => {
         if (booking.workerId) {
@@ -2370,7 +2352,7 @@ export const respondToRescheduleRequest = async (req: AuthRequest, res: Response
           ? `The new date for your booking was accepted.`
           : requester === 'WORKER'
             ? 'The client kept the original date and time. Please arrive on time — a no-show is cancelled with a penalty.'
-            : 'Your pro could not take the new date — your booking stays as originally scheduled.',
+            : 'Your worker could not take the new date — your booking stays as originally scheduled.',
         relatedId: id,
       });
     }
@@ -2397,502 +2379,13 @@ export const respondToRescheduleRequest = async (req: AuthRequest, res: Response
           409,
           req.user?.role === 'WORKER'
             ? 'You already have a job starting at that time on that day. Decline this request, or ask the client for a different time.'
-            : 'Your pro already has another job starting at that time. Decline this request and suggest a different time.'
+            : 'Your worker already has another job starting at that time. Decline this request and suggest a different time.'
         ),
         code: 'START_TIME_CLASH',
       });
     }
     console.error('Error responding to reschedule request:', error);
     return res.status(500).json(errorResponse(500, 'Failed to respond to reschedule request'));
-  }
-};
-
-/**
- * POST /api/bookings/:id/quote
- * Worker submits a quote for materials on top of the booking's already-agreed
- * service price. laborCost is pinned to booking.estimatedPrice (the client
- * can't be charged more for labor than what was agreed when they booked),
- * except for a CUSTOM_QUOTE job, where the worker's quote IS the first price.
- *
- * Body is `items`: priced lines, each needing its own photos of the receipt and
- * of the item used on site (see utils/quoteItems). If the quoted amount doesn't match the receipt the
- * client refuses the quote (rejectQuote) and the worker revises it here —
- * a resubmission after a refusal bumps quoteRevision.
- * Quote data is stored inline on the Booking model (no separate Quote table in schema)
- */
-export const submitQuote = async (req: AuthRequest, res: Response) => {
-  try {
-    if (!req.user || req.user.role !== 'WORKER') {
-      return res.status(403).json(errorResponse(403, 'Only workers can submit quotes'));
-    }
-
-    const id = req.params.id as string;
-    const { notes } = req.body;
-
-    const booking = await prisma.booking.findUnique({
-      where: { id },
-      include: { serviceTask: { select: { pricingModel: true } } },
-    });
-
-    if (!booking) {
-      return res.status(404).json(errorResponse(404, 'Booking not found'));
-    }
-
-    if (booking.workerId !== req.user.userId) {
-      return res.status(403).json(errorResponse(403, 'This booking is not assigned to you'));
-    }
-
-    if (!isValidTransition(booking.status, 'QUOTE_SUBMITTED')) {
-      return res.status(409).json(errorResponse(409, `Cannot submit quote for booking with status ${booking.status}`));
-    }
-
-    // The quote comes after the worker has arrived and assessed the job, and
-    // before the job starts.
-    if (!booking.workerArrivedAt) {
-      return res.status(409).json(errorResponse(409, 'Check in as arrived before sending your quote'));
-    }
-
-    // Each item carries its own proof of purchase + proof of use. Only booking
-    // photos this worker uploaded count (see utils/storageUrls).
-    const parsed = validateQuoteItems(req.body.items);
-    if (!parsed.ok) {
-      return res.status(400).json(errorResponse(400, parsed.error));
-    }
-    const items: QuoteItemInput[] = [];
-    for (const item of parsed.items) {
-      const receiptUrls = toOwnedBookingPhotoUrls(item.receiptUrls, req.user.userId);
-      const proofOfUseUrls = toOwnedBookingPhotoUrls(item.proofOfUseUrls, req.user.userId);
-      if (!receiptUrls || !proofOfUseUrls) {
-        return res.status(400).json(errorResponse(400, 'Upload the photos again — one of them could not be verified'));
-      }
-      items.push({ ...item, receiptUrls, proofOfUseUrls });
-    }
-    const materialsCost = sumQuoteItems(items);
-    // Booking keeps the union of item photos so the admin and legacy client
-    // views that read the aggregate columns keep working.
-    const receiptUrls = items.flatMap((i) => i.receiptUrls);
-    const proofOfUseUrls = items.flatMap((i) => i.proofOfUseUrls);
-
-    // CUSTOM_QUOTE tasks have no upfront price (estimatedPrice is 0 from
-    // createBooking) — the worker's laborCost here IS the first real price
-    // the client sees, so it's accepted from the request instead of pinned,
-    // and the VAT snapshot (deliberately deferred at creation) happens now.
-    const isCustomQuoteTask = booking.serviceTask?.pricingModel === 'CUSTOM_QUOTE';
-    let laborCost = booking.estimatedPrice;
-    let vatUpdate: { vatApplicable: boolean; vatRate: number | null } | undefined;
-
-    if (isCustomQuoteTask) {
-      const requestedLaborCost = Number(req.body.laborCost);
-      if (!Number.isFinite(requestedLaborCost) || requestedLaborCost <= 0) {
-        return res.status(400).json(errorResponse(400, 'Enter your price for the work (labor) for a custom-quote service'));
-      }
-      laborCost = requestedLaborCost;
-
-      const workerProfile = booking.workerId
-        ? await prisma.workerProfile.findUnique({
-            where: { userId: booking.workerId },
-            select: { vatRegistered: true },
-          })
-        : null;
-      const vatApplicable = !!workerProfile?.vatRegistered;
-      vatUpdate = { vatApplicable, vatRate: vatApplicable ? VAT_RATE : null };
-    }
-
-    const isRevision = booking.quoteStatus === 'REJECTED';
-
-    // Quote totals live on Booking; the items live in BookingQuoteItem and are
-    // replaced wholesale, so an edit or delete is just a resubmission. One
-    // transaction so a lost status race can't leave the items swapped.
-    await prisma.$transaction(async (tx) => {
-      await updateBookingIfStatus(tx, id, booking.status, {
-        laborCost,
-        materialsCost,
-        quoteNotes: notes,
-        quoteReceiptUrls: receiptUrls,
-        quoteProofOfUseUrls: proofOfUseUrls,
-        quoteStatus: 'SUBMITTED',
-        quotedAt: new Date(),
-        quoteReminderSentAt: null,
-        ...(isRevision ? { quoteRevision: { increment: 1 } } : {}),
-        status: 'QUOTE_SUBMITTED',
-        ...vatUpdate,
-      });
-      await tx.bookingQuoteItem.deleteMany({ where: { bookingId: id } });
-      if (items.length > 0) {
-        await tx.bookingQuoteItem.createMany({ data: items.map((i) => ({ ...i, bookingId: id })) });
-      }
-    });
-    const updated = await prisma.booking.findUniqueOrThrow({ where: { id } });
-
-    // Log the revised total (labor + materials) so getBookingDetail's
-    // pricingLogs shows the quote stage alongside the original estimate.
-    await prisma.pricingLog.create({
-      data: {
-        bookingId: id,
-        basePrice: updated.laborCost ?? booking.estimatedPrice,
-        finalEstimate: (updated.laborCost ?? 0) + (updated.materialsCost ?? 0),
-        breakdown: {
-          stage: isRevision ? 'QUOTE_REVISED' : 'QUOTE_SUBMITTED',
-          laborCost: updated.laborCost,
-          materialsCost: updated.materialsCost,
-          notes: updated.quoteNotes,
-          revision: updated.quoteRevision,
-        },
-      },
-    });
-
-    await notifyUser({
-      userId: booking.clientId,
-      type: 'QUOTE_SUBMITTED',
-      title: isRevision ? 'Revised Quote Submitted' : 'Quote Submitted',
-      message: isRevision
-        ? 'Your pro revised the quote. Check it against the receipt and approve or refuse it.'
-        : 'Your pro submitted a quote. Check it against the receipt and approve or refuse it.',
-      relatedId: id,
-    });
-
-    return res.status(201).json({
-      success: true,
-      message: isRevision ? 'Revised quote submitted' : 'Quote submitted successfully',
-      data: {
-        id: updated.id,
-        laborCost: updated.laborCost,
-        materialsCost: updated.materialsCost,
-        totalCost: (updated.laborCost ?? 0) + (updated.materialsCost ?? 0),
-        notes: updated.quoteNotes,
-        receiptUrls: updated.quoteReceiptUrls,
-        proofOfUseUrls: updated.quoteProofOfUseUrls,
-        revision: updated.quoteRevision,
-      },
-    });
-  } catch (error) {
-    if (isBookingStatusConflict(error)) return bookingConflict(res);
-    console.error('Error submitting quote:', error);
-    return res.status(500).json(errorResponse(500, 'Failed to submit quote'));
-  }
-};
-
-/**
- * POST /api/bookings/:id/quote/reopen
- * Worker takes a submitted or approved quote back to ACCEPTED (before the job
- * starts) to edit its items. Items are kept; the worker resubmits (submitQuote), and the client
- * approves the new total. Bumps quoteRevision so the client can't approve the
- * version they saw before the edit (approveQuote pins the revision).
- */
-export const reopenQuote = async (req: AuthRequest, res: Response) => {
-  try {
-    if (!req.user || req.user.role !== 'WORKER') {
-      return res.status(403).json(errorResponse(403, 'Only workers can edit a quote'));
-    }
-
-    const id = req.params.id as string;
-    const booking = await prisma.booking.findUnique({ where: { id } });
-    if (!booking) {
-      return res.status(404).json(errorResponse(404, 'Booking not found'));
-    }
-    if (booking.workerId !== req.user.userId) {
-      return res.status(403).json(errorResponse(403, 'This booking is not assigned to you'));
-    }
-    if (!['QUOTE_SUBMITTED', 'QUOTE_APPROVED'].includes(booking.status) || !isValidTransition(booking.status, 'ACCEPTED')) {
-      return res.status(409).json(errorResponse(409, `Cannot edit the quote of a booking with status ${booking.status}`));
-    }
-
-    await updateBookingIfStatus(prisma, id, booking.status, {
-      status: 'ACCEPTED',
-      quoteStatus: null,
-      approvedAt: null,
-      finalPrice: null,
-      quoteReminderSentAt: null,
-      quoteRevision: { increment: 1 },
-    });
-
-    await notifyUser({
-      userId: booking.clientId,
-      type: 'QUOTE_SUBMITTED',
-      title: 'Quote being edited',
-      message: 'Your pro is editing the quote. You will be asked to approve the new total.',
-      relatedId: id,
-    });
-
-    return res.json({ success: true, message: 'Quote reopened for editing' });
-  } catch (error) {
-    if (isBookingStatusConflict(error)) return bookingConflict(res);
-    console.error('Error reopening quote:', error);
-    return res.status(500).json(errorResponse(500, 'Failed to reopen quote'));
-  }
-};
-
-/**
- * PATCH /api/bookings/:id/quote/approve
- * Client approves quote
- */
-export const approveQuote = async (req: AuthRequest, res: Response) => {
-  try {
-    if (!req.user || req.user.role !== 'CLIENT') {
-      return res.status(403).json(errorResponse(403, 'Only clients can approve quotes'));
-    }
-
-    const id = req.params.id as string;
-
-    const booking = await prisma.booking.findUnique({
-      where: { id },
-      // Only approved add-ons count toward the locked finalPrice — see
-      // BookingAddOn.clientApprovedAt's schema comment.
-      include: { addOns: { where: { clientApprovedAt: { not: null } } } },
-    });
-
-    if (!booking) {
-      return res.status(404).json(errorResponse(404, 'Booking not found'));
-    }
-
-    if (booking.clientId !== req.user.userId) {
-      return res.status(403).json(errorResponse(403, 'This booking is not yours'));
-    }
-
-    if (booking.laborCost == null || booking.materialsCost == null) {
-      return res.status(400).json(errorResponse(400, 'No quote exists for this booking'));
-    }
-
-    // DISPUTED -> QUOTE_APPROVED is a valid transition, but only for an
-    // admin resolving the dispute (adminDisputeController APPROVE_QUOTE).
-    // Letting the client approve it here moved the booking on while its
-    // Dispute row stayed OPEN, leaving an orphan in the admin queue whose
-    // quote actions all 409 with "Booking is not currently disputed".
-    if (booking.status === 'DISPUTED') {
-      return res.status(409).json(errorResponse(409, 'This quote is under admin review and can no longer be approved directly'));
-    }
-
-    if (!isValidTransition(booking.status, 'QUOTE_APPROVED')) {
-      return res.status(409).json(errorResponse(409, `Cannot approve quote for booking with status ${booking.status}`));
-    }
-
-    // The client approves the revision they were shown. A worker who reopened
-    // and resubmitted while the screen sat open has bumped it, so the stale
-    // approval is refused instead of locking in a total the client never saw.
-    const viewedRevision = req.body?.revision;
-    if (!Number.isInteger(viewedRevision)) {
-      return res.status(400).json(errorResponse(400, 'revision of the quote you reviewed is required'));
-    }
-    if (viewedRevision !== booking.quoteRevision) {
-      return res.status(409).json(errorResponse(409, 'The quote changed. Review the new total before approving.'));
-    }
-
-    // Mirrors getBookingDetail's finalPrice formula (laborCost + materialsCost
-    // + addOns) so this stored snapshot doesn't undercount items the worker
-    // added on-site.
-    const addonsCost = booking.addOns.reduce((sum, addon) => sum + addon.price, 0);
-
-    // Also pinned to the viewed revision, so a revision racing in between the
-    // read above and this write can't get a price approved that was never seen.
-    await updateBookingIfStatus(
-      prisma,
-      id,
-      booking.status,
-      {
-        status: 'QUOTE_APPROVED',
-        quoteStatus: 'APPROVED',
-        approvedAt: new Date(),
-        finalPrice: booking.laborCost! + booking.materialsCost! + addonsCost,
-      },
-      { quoteRevision: viewedRevision, quotedAt: booking.quotedAt }
-    );
-    const updated = await prisma.booking.findUniqueOrThrow({ where: { id } });
-
-    // Notify worker (workerId is nullable on Booking — skip if unassigned)
-    if (booking.workerId) {
-      await notifyUser({
-        userId: booking.workerId,
-        type: 'QUOTE_APPROVED',
-        title: 'Quote Approved',
-        message: 'Client has approved your quote',
-        relatedId: id,
-      });
-    }
-
-    return res.status(200).json({
-      success: true,
-      message: 'Quote approved successfully',
-      data: {
-        id: updated.id,
-        status: updated.status,
-        finalPrice: updated.finalPrice,
-      },
-    });
-  } catch (error) {
-    if (isBookingStatusConflict(error)) return bookingConflict(res);
-    console.error('Error approving quote:', error);
-    return res.status(500).json(errorResponse(500, 'Failed to approve quote'));
-  }
-};
-
-/**
- * PATCH /api/bookings/:id/quote/reject
- * Client refuses a submitted quote — e.g. the materials price doesn't match
- * the receipt. The booking goes back to ACCEPTED and the worker revises
- * and resubmits (submitQuote); nothing is charged for the refused version.
- * Distinct from disputeQuote, which asks an admin to step in.
- */
-export const rejectQuote = async (req: AuthRequest, res: Response) => {
-  try {
-    if (!req.user || req.user.role !== 'CLIENT') {
-      return res.status(403).json(errorResponse(403, 'Only clients can refuse quotes'));
-    }
-
-    const id = req.params.id as string;
-    const reason = String(req.body.reason).trim();
-
-    const booking = await prisma.booking.findUnique({ where: { id } });
-    if (!booking) {
-      return res.status(404).json(errorResponse(404, 'Booking not found'));
-    }
-    if (booking.clientId !== req.user.userId) {
-      return res.status(403).json(errorResponse(403, 'This booking is not yours'));
-    }
-    if (booking.status !== 'QUOTE_SUBMITTED') {
-      return res.status(409).json(errorResponse(409, `Cannot refuse a quote for a booking with status ${booking.status}`));
-    }
-
-    // Status-guarded so a racing approve / auto-approve can't be overwritten.
-    const result = await prisma.booking.updateMany({
-      where: { id, status: 'QUOTE_SUBMITTED' },
-      data: {
-        status: 'ACCEPTED',
-        quoteStatus: 'REJECTED',
-        quoteRejectedAt: new Date(),
-        quoteRejectionReason: reason,
-        quoteReminderSentAt: null,
-      },
-    });
-    if (result.count === 0) {
-      return res.status(409).json(errorResponse(409, 'This quote was already answered'));
-    }
-
-    if (booking.workerId) {
-      await notifyUser({
-        userId: booking.workerId,
-        type: 'QUOTE_REJECTED',
-        title: 'Quote Refused',
-        message: `The client refused your quote: ${reason}. Please revise it and submit it again.`,
-        relatedId: id,
-      });
-    }
-
-    await writeAuditLog({
-      actorId: req.user.userId,
-      actorRole: req.user.role,
-      action: 'QUOTE_REJECTED',
-      category: 'STATUS_CHANGE',
-      message: `Client refused the quote for booking ${formatDisplayId(id)}: ${reason}`,
-      metadata: { bookingId: id },
-    });
-
-    return res.status(200).json({ success: true, message: 'Quote refused — your pro will revise it', data: { id, status: 'ACCEPTED' } });
-  } catch (error) {
-    console.error('Error refusing quote:', error);
-    return res.status(500).json(errorResponse(500, 'Failed to refuse quote'));
-  }
-};
-
-/**
- * PATCH /api/bookings/:id/quote/dispute
- * Client disputes quote: creates a Dispute record (status OPEN, raised by
- * the client), moves the booking to DISPUTED, and notifies every admin so
- * one of them can resolve it via PATCH /api/admin/disputes/:id/resolve.
- * Schema uses DISPUTED (not QUOTE_DISPUTED) as the BookingStatus value.
- */
-export const disputeQuote = async (req: AuthRequest, res: Response) => {
-  try {
-    if (!req.user || req.user.role !== 'CLIENT') {
-      return res.status(403).json(errorResponse(403, 'Only clients can dispute quotes'));
-    }
-
-    const id = req.params.id as string;
-    const { reason, evidenceUrls } = req.body;
-    // Optional — already-uploaded image URLs (see uploadController's
-    // upload-then-attach pattern). Never required to file a legitimate
-    // dispute.
-    const cleanEvidenceUrls: string[] = Array.isArray(evidenceUrls)
-      ? evidenceUrls.filter((url): url is string => typeof url === 'string')
-      : [];
-
-    const booking = await prisma.booking.findUnique({
-      where: { id },
-    });
-
-    if (!booking) {
-      return res.status(404).json(errorResponse(404, 'Booking not found'));
-    }
-
-    if (booking.clientId !== req.user.userId) {
-      return res.status(403).json(errorResponse(403, 'This booking is not yours'));
-    }
-
-    if (booking.laborCost == null || booking.materialsCost == null) {
-      return res.status(400).json(errorResponse(400, 'No quote exists for this booking'));
-    }
-
-    // Schema status is DISPUTED (not QUOTE_DISPUTED)
-    if (!isValidTransition(booking.status, 'DISPUTED')) {
-      return res.status(409).json(errorResponse(409, `Cannot dispute quote for booking with status ${booking.status}`));
-    }
-
-    const raisedById = req.user.userId;
-    const { updated, dispute } = await prisma.$transaction(async (tx) => {
-      await updateBookingIfStatus(tx, id, booking.status, {
-        status: 'DISPUTED',
-        quoteStatus: 'DISPUTED',
-        disputeReason: reason,
-      });
-      const dispute = await tx.dispute.create({
-        data: {
-          bookingId: id,
-          raisedById,
-          reason: typeof reason === 'string' ? reason : 'Client disputed the submitted quote',
-          status: 'OPEN',
-          evidenceUrls: cleanEvidenceUrls,
-        },
-      });
-      return { updated: await tx.booking.findUniqueOrThrow({ where: { id } }), dispute };
-    });
-
-    // Notify worker (workerId is nullable on Booking — skip if unassigned)
-    if (booking.workerId) {
-      await notifyUser({
-        userId: booking.workerId,
-        type: 'DISPUTE_OPENED',
-        title: 'Quote Disputed',
-        message: `Client has disputed your quote: ${reason}`,
-        relatedId: id,
-      });
-    }
-
-    const admins = await prisma.user.findMany({ where: { role: 'ADMIN', isDeleted: false }, select: { id: true } });
-    await Promise.all(
-      admins.map((admin) =>
-        notifyUser({
-          userId: admin.id,
-          type: 'DISPUTE_OPENED',
-          title: 'New Dispute Raised',
-          message: `Booking ${formatDisplayId(id)} was disputed by the client: ${reason}`,
-          relatedId: dispute.id,
-        })
-      )
-    );
-
-    return res.status(200).json({
-      success: true,
-      message: 'Quote disputed successfully',
-      data: {
-        id: updated.id,
-        status: updated.status,
-        disputeReason: updated.disputeReason,
-        disputeId: dispute.id,
-      },
-    });
-  } catch (error) {
-    if (isBookingStatusConflict(error)) return bookingConflict(res);
-    console.error('Error disputing quote:', error);
-    return res.status(500).json(errorResponse(500, 'Failed to dispute quote'));
   }
 };
 
@@ -2947,7 +2440,7 @@ export const addProgressPhotos = async (req: AuthRequest, res: Response) => {
       // No dedicated type; same choice as startBooking's "Service Started".
       type: 'BOOKING_ACCEPTED',
       title: 'Job update',
-      message: 'Your pro posted a progress photo of the job.',
+      message: 'Your worker posted a progress photo of the job.',
       relatedId: id,
     });
 
@@ -2959,10 +2452,16 @@ export const addProgressPhotos = async (req: AuthRequest, res: Response) => {
 };
 
 /**
- * PATCH /api/bookings/:id/complete
- * Worker submits proof of completed work (a required photo). This does NOT
- * finalize the booking — it moves to PENDING_COMPLETION and waits for the
- * client to confirm via POST /api/bookings/:id/confirm-completion.
+ * PATCH /api/bookings/:id/complete  { completionPhotoUrl, items? }
+ * Worker finishes the job and sends the invoice: the completion photo plus
+ * any parts (each with a receipt photo) and extra work (each with a photo of
+ * the work) on top of the booked price. There's no approval step: the client
+ * sees every line, then pays it or reports it (reportInvoice) before any
+ * money moves.
+ *   CASH        -> PENDING_COMPLETION until the worker taps "Cash received"
+ *                  (markCashReceived).
+ *   GCASH/MAYA  -> the Xendit invoice is raised in the same request
+ *                  (AWAITING_PAYMENT); paying it completes the booking.
  */
 export const completeBooking = async (req: AuthRequest, res: Response) => {
   try {
@@ -2971,22 +2470,34 @@ export const completeBooking = async (req: AuthRequest, res: Response) => {
     }
 
     const id = req.params.id as string;
+    const workerId = req.user.userId;
     const { completionPhotoUrl } = req.body as { completionPhotoUrl?: string };
 
     if (!completionPhotoUrl || typeof completionPhotoUrl !== 'string') {
       return res.status(400).json(errorResponse(400, 'A completion photo is required to complete this job'));
     }
 
-    const booking = await prisma.booking.findUnique({
-      where: { id },
-      include: { addOns: true },
-    });
+    const parsed = validateInvoiceItems(req.body?.items);
+    if (!parsed.ok) {
+      return res.status(400).json(errorResponse(400, parsed.error));
+    }
+    // Only photos this worker uploaded (see utils/storageUrls).
+    const items: InvoiceItemInput[] = [];
+    for (const item of parsed.items) {
+      const photoUrls = toOwnedBookingPhotoUrls(item.photoUrls, workerId);
+      if (!photoUrls) {
+        return res.status(400).json(errorResponse(400, 'Upload the photos again — one of them could not be verified'));
+      }
+      items.push({ ...item, photoUrls });
+    }
+
+    const booking = await prisma.booking.findUnique({ where: { id } });
 
     if (!booking) {
       return res.status(404).json(errorResponse(404, 'Booking not found'));
     }
 
-    if (booking.workerId !== req.user.userId) {
+    if (booking.workerId !== workerId) {
       return res.status(403).json(errorResponse(403, 'This booking is not assigned to you'));
     }
 
@@ -2996,7 +2507,7 @@ export const completeBooking = async (req: AuthRequest, res: Response) => {
 
     // Must be a photo this worker uploaded — otherwise the response layer
     // would hand back a signed URL to someone else's private file.
-    const storedCompletionPhotoUrl = toOwnedBookingPhotoUrls([completionPhotoUrl], req.user.userId)?.[0] ?? null;
+    const storedCompletionPhotoUrl = toOwnedBookingPhotoUrls([completionPhotoUrl], workerId)?.[0] ?? null;
     if (storedCompletionPhotoUrl === null) {
       return res.status(400).json(errorResponse(400, 'Upload the completion photo again — it could not be verified'));
     }
@@ -3005,17 +2516,14 @@ export const completeBooking = async (req: AuthRequest, res: Response) => {
       return res.status(409).json(errorResponse(409, 'Post at least one progress photo before marking the job done'));
     }
 
-    const updated = await prisma.$transaction(async (tx) => {
-      // Under the booking lock (shared with addAddon/respondToAddon), the
-      // add-ons read here are final: no new extra or approval can land
-      // between this read and the bill being locked below.
+    const { updated, totalAmount } = await prisma.$transaction(async (tx) => {
+      // Under the booking lock the bill is final: nothing else can add a
+      // line between this read and the total being locked below.
       const locked = await lockBooking(tx, id);
       const addOns = locked?.addOns ?? [];
 
-      // Add-ons freeze right here — any still-pending one (never approved or
-      // rejected) can no longer affect anything after this point, so resolve
-      // it as rejected rather than leaving a dangling "Approve/Reject" prompt
-      // the client could still tap on a job that's already done and billed.
+      // Older bookings may still hold a mid-job extra the client never
+      // answered (that approval step is retired). It can't be billed now.
       const stillPendingAddonIds = addOns
         .filter((addon) => addon.clientApprovedAt == null && addon.clientRejectedAt == null)
         .map((addon) => addon.id);
@@ -3026,35 +2534,44 @@ export const completeBooking = async (req: AuthRequest, res: Response) => {
         });
       }
 
-      // Lock in the final billable subtotal now — only approved add-ons count
-      // (see BookingAddOn.clientApprovedAt's schema comment) — this is what
-      // the client pays at confirmation.
-      const approvedAddOns = addOns.filter((addon) => addon.clientApprovedAt != null);
-      const { subtotal: lockedFinalPrice } = computeBookingFinalTotal({
+      const sentAt = new Date();
+      if (items.length > 0) {
+        await tx.bookingAddOn.createMany({
+          data: items.map((item) => ({
+            bookingId: id,
+            kind: item.kind,
+            name: item.name,
+            price: item.price,
+            photoUrls: item.photoUrls,
+            clientApprovedAt: sentAt,
+          })),
+        });
+      }
+
+      const billed = [...addOns.filter((addon) => addon.clientApprovedAt != null), ...items];
+      const totals = computeBookingFinalTotal({
         estimatedPrice: booking.estimatedPrice,
         laborCost: booking.laborCost,
         materialsCost: booking.materialsCost,
         tip: booking.tip,
-        addOns: approvedAddOns,
+        addOns: billed,
+        vatApplicable: booking.vatApplicable,
+        vatRate: booking.vatRate,
       });
 
       await updateBookingIfStatus(tx, id, booking.status, {
         status: 'PENDING_COMPLETION',
         completionPhotoUrl: storedCompletionPhotoUrl,
-        workerCompletedAt: new Date(),
-        finalPrice: lockedFinalPrice,
+        workerCompletedAt: sentAt,
+        finalPrice: totals.subtotal,
       });
       const b = await tx.booking.findUniqueOrThrow({ where: { id } });
 
-      // The worker's side of the job is done — update their active-job
-      // count now rather than waiting on the client's confirmation, which may
-      // be delayed or (via the 24h auto-settle job) skipped.
-      if (booking.workerId) {
-        await tx.workerProfile.update({
-          where: { userId: booking.workerId },
-          data: { activeJobCount: { decrement: 1 } },
-        });
-      }
+      // The worker's side of the job is done.
+      await tx.workerProfile.update({
+        where: { userId: workerId },
+        data: { activeJobCount: { decrement: 1 } },
+      });
 
       // Follow-up visits: any still ahead are no longer needed.
       await tx.bookingVisit.updateMany({
@@ -3062,24 +2579,45 @@ export const completeBooking = async (req: AuthRequest, res: Response) => {
         data: { status: 'DONE' },
       });
 
-      return b;
+      return { updated: b, totalAmount: totals.totalAmount };
     });
 
-    // Notify client to review the submitted photo and confirm
+    // GCash/Maya: raise the Xendit invoice now. If that fails the booking
+    // stays PENDING_COMPLETION and the client's "Pay now" retries it.
+    const method = booking.paymentMethodType ?? 'CASH';
+    let status: string = updated.status;
+    if (method !== 'CASH') {
+      try {
+        const invoice = await createCompletionInvoice(id);
+        status = 'alreadyPaid' in invoice ? 'COMPLETED' : 'AWAITING_PAYMENT';
+      } catch (error) {
+        console.error(`Raising the payment invoice failed for booking ${id}; left in PENDING_COMPLETION:`, error);
+      }
+    }
+
+    const amount = `₱${totalAmount.toFixed(2)}`;
     await notifyUser({
       userId: booking.clientId,
       type: 'BOOKING_COMPLETED',
-      title: 'Worker Submitted Completed Work',
-      message: 'Please review the photo and confirm the job is done.',
+      title: 'Your invoice is ready',
+      message:
+        method === 'CASH'
+          ? `Your worker finished the job. Pay ${amount} in cash to your worker. If something on the invoice is wrong, report it in the app before you pay.`
+          : `Your worker finished the job. Pay ${amount} with ${method === 'MAYA' ? 'Maya' : 'GCash'} in the app. If something on the invoice is wrong, report it before you pay.`,
       relatedId: id,
+    });
+    void sendSmsToUser({
+      userId: booking.clientId,
+      message: `HomeEase: Your worker finished the job (${formatDisplayId(id)}). Amount due: ${amount}. Open the app to see the invoice.`,
     });
 
     return res.status(200).json({
       success: true,
-      message: 'Completion submitted — waiting for client confirmation',
+      message: method === 'CASH' ? 'Invoice sent. Collect the cash, then tap Cash received.' : 'Invoice sent. Waiting for the client to pay.',
       data: {
         id: updated.id,
-        status: updated.status,
+        status,
+        total: totalAmount,
         completionPhotoUrl: updated.completionPhotoUrl,
       },
     });
@@ -3091,32 +2629,92 @@ export const completeBooking = async (req: AuthRequest, res: Response) => {
 };
 
 /**
+ * PATCH /api/bookings/:id/cash-received
+ * Worker confirms the client paid the invoice in cash. Settles the booking to
+ * COMPLETED and books the service fee onto the worker's dues. Refused while
+ * the client has reported the invoice (DISPUTED).
+ */
+export const markCashReceived = async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user || req.user.role !== 'WORKER') {
+      return res.status(403).json(errorResponse(403, 'Only workers can confirm a cash payment'));
+    }
+
+    const id = req.params.id as string;
+    const booking = await prisma.booking.findUnique({ where: { id } });
+
+    if (!booking) {
+      return res.status(404).json(errorResponse(404, 'Booking not found'));
+    }
+    if (booking.workerId !== req.user.userId) {
+      return res.status(403).json(errorResponse(403, 'This booking is not assigned to you'));
+    }
+    if ((booking.paymentMethodType ?? 'CASH') !== 'CASH') {
+      return res.status(409).json(errorResponse(409, 'This client pays with GCash or Maya in the app'));
+    }
+    if (booking.status !== 'PENDING_COMPLETION') {
+      return res.status(409).json(
+        errorResponse(
+          409,
+          booking.status === 'DISPUTED'
+            ? 'The client reported this invoice. HomeEase is reviewing it before any payment.'
+            : `Cannot confirm a cash payment for a booking with status ${booking.status}`
+        )
+      );
+    }
+
+    // PENDING_COMPLETION only: a report that lands in between wins.
+    const payment = await settleCashBooking(id, ['PENDING_COMPLETION']);
+
+    await notifyUser({
+      userId: booking.clientId,
+      type: 'PAYMENT_RECEIVED',
+      title: 'Payment received',
+      message: `Your worker confirmed your cash payment of ₱${payment.totalAmount.toFixed(2)}. Thank you for using HomeEase!`,
+      relatedId: id,
+    });
+    void sendSmsToUser({
+      userId: booking.clientId,
+      message: `HomeEase: Cash payment of ₱${payment.totalAmount.toFixed(2)} received for booking ${formatDisplayId(id)}. Thank you!`,
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: 'Cash payment recorded',
+      data: {
+        id,
+        status: 'COMPLETED',
+        payment: {
+          status: payment.status,
+          methodType: payment.methodType,
+          totalAmount: payment.totalAmount,
+          workerPayout: payment.workerPayout,
+        },
+      },
+    });
+  } catch (error) {
+    if (isBookingStatusConflict(error)) return bookingConflict(res);
+    console.error('Error recording cash payment:', error);
+    return res.status(500).json(errorResponse(500, 'Failed to record the cash payment'));
+  }
+};
+
+/**
  * PATCH /api/bookings/:id/confirm-completion
- * Client confirms the worker's submitted proof of work — this is the payment
- * step. Payment method is locked to whatever the client chose at booking time.
- *
- *   CASH        -> settleCashBooking finalizes the booking immediately (the
- *                  client already paid the worker in person); responds
- *                  { status: 'COMPLETED' }.
- *   GCASH/MAYA  -> createCompletionInvoice raises a Xendit invoice for the full
- *                  final total, booking -> AWAITING_PAYMENT; responds
- *                  { status: 'AWAITING_PAYMENT', checkoutUrl, invoiceId }. The
- *                  invoice-paid webhook (finalizePaidBooking) finalizes it.
- *
- * activeJobCount/slot were already freed in completeBooking.
+ * The client's "Pay now" on a GCash/Maya invoice: raises (or resumes) the
+ * Xendit checkout for the invoice total and returns its URL. The invoice-paid
+ * webhook (finalizePaidBooking) completes the booking. A cash invoice is paid
+ * to the worker in person, who confirms it (markCashReceived).
  */
 export const confirmCompletion = async (req: AuthRequest, res: Response) => {
   try {
     if (!req.user || req.user.role !== 'CLIENT') {
-      return res.status(403).json(errorResponse(403, 'Only clients can confirm job completion'));
+      return res.status(403).json(errorResponse(403, 'Only clients can pay for a booking'));
     }
 
     const id = req.params.id as string;
 
-    const booking = await prisma.booking.findUnique({
-      where: { id },
-      include: { addOns: true },
-    });
+    const booking = await prisma.booking.findUnique({ where: { id } });
 
     if (!booking) {
       return res.status(404).json(errorResponse(404, 'Booking not found'));
@@ -3126,48 +2724,16 @@ export const confirmCompletion = async (req: AuthRequest, res: Response) => {
       return res.status(403).json(errorResponse(403, 'This booking does not belong to you'));
     }
 
-    // Allowed from PENDING_COMPLETION (first confirm) or AWAITING_PAYMENT
-    // (client retrying an abandoned checkout).
+    if ((booking.paymentMethodType ?? 'CASH') === 'CASH') {
+      return res.status(409).json(errorResponse(409, 'Pay your worker in cash. They confirm it in their app.'));
+    }
+
+    // Allowed once the invoice is sent (PENDING_COMPLETION if raising the
+    // Xendit invoice failed, AWAITING_PAYMENT for a retried checkout).
     if (booking.status !== 'PENDING_COMPLETION' && booking.status !== 'AWAITING_PAYMENT') {
-      return res
-        .status(409)
-        .json(errorResponse(409, `Cannot confirm completion for booking with status ${booking.status}`));
+      return res.status(409).json(errorResponse(409, `Cannot pay for a booking with status ${booking.status}`));
     }
 
-    const method = booking.paymentMethodType ?? 'CASH';
-
-    if (method === 'CASH') {
-      const payment = await settleCashBooking(id);
-
-      if (booking.workerId) {
-        await notifyUser({
-          userId: booking.workerId,
-          type: 'BOOKING_COMPLETED',
-          title: 'Client Confirmed Completion',
-          message: 'The client confirmed your work is done.',
-          relatedId: id,
-        });
-      }
-
-      return res.status(200).json({
-        success: true,
-        message: 'Completion confirmed — cash payment recorded',
-        data: {
-          id,
-          status: 'COMPLETED',
-          finalPrice: payment.subtotal,
-          completedAt: payment.capturedAt,
-          payment: {
-            status: payment.status,
-            methodType: payment.methodType,
-            totalAmount: payment.totalAmount,
-            workerPayout: payment.workerPayout,
-          },
-        },
-      });
-    }
-
-    // GCASH / MAYA — raise the invoice, wait for the webhook.
     const invoice = await createCompletionInvoice(id);
 
     if ('alreadyPaid' in invoice) {
@@ -3177,7 +2743,7 @@ export const confirmCompletion = async (req: AuthRequest, res: Response) => {
       const payment = await prisma.payment.findUnique({ where: { bookingId: id } });
       return res.status(200).json({
         success: true,
-        message: 'Completion confirmed — payment already received',
+        message: 'Payment already received',
         data: {
           id,
           status: 'COMPLETED',
@@ -3197,7 +2763,7 @@ export const confirmCompletion = async (req: AuthRequest, res: Response) => {
 
     return res.status(200).json({
       success: true,
-      message: 'Completion confirmed — payment required',
+      message: 'Payment required',
       data: {
         id,
         status: 'AWAITING_PAYMENT',
@@ -3207,8 +2773,92 @@ export const confirmCompletion = async (req: AuthRequest, res: Response) => {
       },
     });
   } catch (error) {
-    console.error('Error confirming booking completion:', error);
-    return res.status(500).json(errorResponse(500, 'Failed to confirm completion'));
+    console.error('Error starting payment:', error);
+    return res.status(500).json(errorResponse(500, 'Failed to start the payment'));
+  }
+};
+
+/**
+ * PATCH /api/bookings/:id/invoice/report  { reason, evidenceUrls? }
+ * The client says something on the invoice is wrong, before paying. The
+ * booking goes to DISPUTED, an unpaid GCash/Maya invoice is voided so it
+ * can't be paid mid-review, and an admin keeps the invoice, removes the
+ * worker's added lines, or cancels (adminDisputeController.resolveDispute).
+ */
+export const reportInvoice = async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user || req.user.role !== 'CLIENT') {
+      return res.status(403).json(errorResponse(403, 'Only clients can report an invoice'));
+    }
+
+    const id = req.params.id as string;
+    const reason = typeof req.body?.reason === 'string' ? req.body.reason.trim() : '';
+    if (reason.length < 10 || reason.length > 500) {
+      return res.status(400).json(errorResponse(400, 'Tell us what is wrong (10 to 500 characters)'));
+    }
+    // Optional, already-uploaded photos (upload-then-attach, see uploadController).
+    const evidenceUrls: string[] = Array.isArray(req.body?.evidenceUrls)
+      ? req.body.evidenceUrls.filter((url: unknown): url is string => typeof url === 'string').slice(0, 5)
+      : [];
+
+    const booking = await prisma.booking.findUnique({ where: { id }, include: { payment: { select: { status: true } } } });
+    if (!booking) {
+      return res.status(404).json(errorResponse(404, 'Booking not found'));
+    }
+    if (booking.clientId !== req.user.userId) {
+      return res.status(403).json(errorResponse(403, 'This booking is not yours'));
+    }
+    if (booking.status !== 'PENDING_COMPLETION' && booking.status !== 'AWAITING_PAYMENT') {
+      return res.status(409).json(errorResponse(409, 'You can report the invoice after your worker sends it and before you pay'));
+    }
+    if (booking.payment?.status === 'COMPLETED') {
+      return res.status(409).json(errorResponse(409, 'This invoice is already paid. Contact support for a refund.'));
+    }
+
+    const raisedById = req.user.userId;
+    const dispute = await prisma.$transaction(async (tx) => {
+      await updateBookingIfStatus(tx, id, booking.status, { status: 'DISPUTED', disputeReason: reason });
+      return tx.dispute.create({
+        data: { bookingId: id, raisedById, reason: `Invoice reported: ${reason}`, status: 'OPEN', evidenceUrls },
+      });
+    });
+
+    await voidUnpaidPayment(id, 'Invoice reported by the client').catch((error) => {
+      console.error(`Failed to void the unpaid invoice for reported booking ${id}:`, error);
+    });
+
+    if (booking.workerId) {
+      await notifyUser({
+        userId: booking.workerId,
+        type: 'DISPUTE_OPENED',
+        title: 'Invoice reported',
+        message: `The client reported your invoice: ${reason}. HomeEase will review it. Don't collect payment until then.`,
+        relatedId: id,
+      });
+    }
+
+    const admins = await prisma.user.findMany({ where: { role: 'ADMIN', isDeleted: false }, select: { id: true } });
+    await Promise.all(
+      admins.map((admin) =>
+        notifyUser({
+          userId: admin.id,
+          type: 'DISPUTE_OPENED',
+          title: 'Invoice reported',
+          message: `The client reported the invoice for booking ${formatDisplayId(id)}: ${reason}`,
+          relatedId: dispute.id,
+        })
+      )
+    );
+
+    return res.status(200).json({
+      success: true,
+      message: 'Reported. HomeEase will review the invoice and contact you.',
+      data: { id, status: 'DISPUTED', disputeId: dispute.id },
+    });
+  } catch (error) {
+    if (isBookingStatusConflict(error)) return bookingConflict(res);
+    console.error('Error reporting invoice:', error);
+    return res.status(500).json(errorResponse(500, 'Failed to report the invoice'));
   }
 };
 
@@ -3448,7 +3098,7 @@ export const cancelBooking = async (req: AuthRequest, res: Response) => {
         title: 'Booking Cancelled',
         message:
           cancelFault === 'CLIENT'
-            ? `Your pro cancelled this job on site and reported it was caused on the client's side: ${reason}. HomeEase will review their proof; a ₱${compensationAmount?.toFixed(0)} cancellation fee applies if it's confirmed.`
+            ? `Your worker cancelled this job on site and reported it was caused on the client's side: ${reason}. HomeEase will review their proof; a ₱${compensationAmount?.toFixed(0)} cancellation fee applies if it's confirmed.`
             : `Booking has been cancelled${reason ? `: ${reason}` : ''}`,
         relatedId: id,
       });
@@ -3498,183 +3148,6 @@ export const cancelBooking = async (req: AuthRequest, res: Response) => {
     if (isBookingStatusConflict(error)) return bookingConflict(res);
     console.error('Error cancelling booking:', error);
     return res.status(500).json(errorResponse(500, 'Failed to cancel booking'));
-  }
-};
-
-// From arrival until the worker marks the job done — the window where extra
-// work can be agreed on the same visit (e.g. inspection -> repair now).
-function canAddExtraWork(booking: { status: string; workerArrivedAt: Date | null }) {
-  return (
-    (booking.status === 'ACCEPTED' && booking.workerArrivedAt != null) ||
-    ['QUOTE_SUBMITTED', 'QUOTE_APPROVED', 'IN_PROGRESS'].includes(booking.status)
-  );
-}
-
-/**
- * POST /api/bookings/:id/addons  { name, price }
- * Worker adds extra work to the same booking (restored from before PR #147).
- * It starts pending and is billed only if the client approves it
- * (respondToAddon) — there is no auto-approve.
- */
-export const addAddon = async (req: AuthRequest, res: Response) => {
-  try {
-    if (!req.user) {
-      return res.status(401).json(errorResponse(401, 'Not authenticated'));
-    }
-    const id = req.params.id as string;
-    const name = typeof req.body?.name === 'string' ? req.body.name.trim() : '';
-    const price = Number(req.body?.price);
-    if (!name || name.length > 100) {
-      return res.status(400).json(errorResponse(400, 'Name the extra work (up to 100 characters)'));
-    }
-    if (!Number.isFinite(price) || price <= 0 || price > 100000) {
-      return res.status(400).json(errorResponse(400, 'Enter a price between ₱1 and ₱100,000'));
-    }
-
-    const workerId = req.user.userId;
-    // Checked and inserted under the booking lock completeBooking also takes,
-    // so an extra can't be added after completion has frozen the bill.
-    const result = await prisma.$transaction(async (tx) => {
-      const booking = await lockBooking(tx, id);
-      if (!booking || booking.workerId !== workerId) return { status: 404, message: 'Booking not found' } as const;
-      if (!canAddExtraWork(booking)) {
-        return { status: 409, message: 'Extra work can be added from arrival until you mark the job done' } as const;
-      }
-      const addon = await tx.bookingAddOn.create({
-        data: { bookingId: id, name, price: roundToCentavo(price) },
-      });
-      return { status: 201, addon, booking } as const;
-    });
-    if (result.status !== 201) {
-      return res.status(result.status).json(errorResponse(result.status, result.message));
-    }
-    const { addon, booking } = result;
-
-    await notifyUser({
-      userId: booking.clientId,
-      type: 'ADDON_ADDED',
-      title: 'Approve extra work?',
-      message: `Your pro added "${addon.name}" (₱${addon.price}) to this job. It is only billed if you approve it.`,
-      relatedId: id,
-    });
-
-    return res.status(201).json({ success: true, message: 'Extra work added. Waiting for the client.', data: addon });
-  } catch (error) {
-    console.error('Error adding addon:', error);
-    return res.status(500).json(errorResponse(500, 'Failed to add extra work'));
-  }
-};
-
-/**
- * POST /api/bookings/:id/addons/request  { description }
- * Client asks the worker for extra work on the same visit. The worker gets a
- * notification and prices it with addAddon; the client then approves it.
- */
-export const requestExtraWork = async (req: AuthRequest, res: Response) => {
-  try {
-    if (!req.user) {
-      return res.status(401).json(errorResponse(401, 'Not authenticated'));
-    }
-    const id = req.params.id as string;
-    const description = typeof req.body?.description === 'string' ? req.body.description.trim() : '';
-    if (description.length < 3 || description.length > 300) {
-      return res.status(400).json(errorResponse(400, 'Describe the extra work (3 to 300 characters)'));
-    }
-
-    const booking = await prisma.booking.findUnique({ where: { id } });
-    if (!booking || booking.clientId !== req.user.userId || !booking.workerId) {
-      return res.status(404).json(errorResponse(404, 'Booking not found'));
-    }
-    if (!canAddExtraWork(booking)) {
-      return res.status(409).json(errorResponse(409, 'You can ask for extra work once your pro has arrived, until the job is done'));
-    }
-
-    // ponytail: the request lives only in the worker's notification; persist it
-    // on BookingAddOn if workers start missing requests.
-    await notifyUser({
-      userId: booking.workerId,
-      type: 'ADDON_ADDED',
-      title: 'Client asked for extra work',
-      message: `"${description}" — open the job and use Add Extra Work to send a price.`,
-      relatedId: id,
-    });
-
-    return res.json({ success: true, message: 'Sent. Your pro will send a price for you to approve.' });
-  } catch (error) {
-    console.error('Error requesting extra work:', error);
-    return res.status(500).json(errorResponse(500, 'Failed to send the request'));
-  }
-};
-
-/**
- * PATCH /api/bookings/:id/addons/:addonId/respond
- * Client approves or rejects a pending mid-job addon (see addAddon /
- * BookingAddOn.clientApprovedAt). Only the pending state is actionable —
- * once resolved (by the client here, or rejected automatically at completion)
- * it can't be re-answered.
- */
-export const respondToAddon = async (req: AuthRequest, res: Response) => {
-  try {
-    if (!req.user || req.user.role !== 'CLIENT') {
-      return res.status(403).json(errorResponse(403, 'Only clients can respond to an addon'));
-    }
-
-    const { id, addonId } = req.params as { id: string; addonId: string };
-    const { approve } = req.body as { approve?: boolean };
-    if (typeof approve !== 'boolean') {
-      return res.status(400).json(errorResponse(400, 'approve must be true or false'));
-    }
-
-    const addon = await prisma.bookingAddOn.findUnique({
-      where: { id: addonId },
-      include: { booking: { select: { id: true, clientId: true, workerId: true } } },
-    });
-
-    if (!addon || addon.bookingId !== id) {
-      return res.status(404).json(errorResponse(404, 'Addon not found'));
-    }
-    if (addon.booking.clientId !== req.user.userId) {
-      return res.status(403).json(errorResponse(403, 'This booking is not yours'));
-    }
-    // Re-read under the booking lock: completion may have frozen the bill
-    // (rejecting pending extras) since the read above.
-    const result = await prisma.$transaction(async (tx) => {
-      const booking = await lockBooking(tx, id);
-      const current = booking?.addOns.find((a) => a.id === addonId);
-      if (!booking || !current) return { status: 404, message: 'Addon not found' } as const;
-      if (current.clientApprovedAt || current.clientRejectedAt) {
-        return { status: 409, message: 'This addon has already been resolved' } as const;
-      }
-      if (!canAddExtraWork(booking)) {
-        return { status: 409, message: 'This job is already done, so its extras can no longer change' } as const;
-      }
-      const updated = await tx.bookingAddOn.update({
-        where: { id: addonId },
-        data: approve ? { clientApprovedAt: new Date() } : { clientRejectedAt: new Date() },
-      });
-      return { status: 200, updated } as const;
-    });
-    if (result.status !== 200) {
-      return res.status(result.status).json(errorResponse(result.status, result.message));
-    }
-    const { updated } = result;
-
-    if (addon.booking.workerId) {
-      await notifyUser({
-        userId: addon.booking.workerId,
-        type: 'ADDON_ADDED',
-        title: approve ? 'Addon approved' : 'Addon rejected',
-        message: approve
-          ? `The client approved "${addon.name}" (₱${addon.price}) — it'll be included in the final bill.`
-          : `The client rejected "${addon.name}" (₱${addon.price}) — it won't be billed.`,
-        relatedId: id,
-      });
-    }
-
-    return res.json({ success: true, data: updated });
-  } catch (error) {
-    console.error('Error responding to addon:', error);
-    return res.status(500).json(errorResponse(500, 'Failed to respond to addon'));
   }
 };
 

@@ -14,7 +14,9 @@ import UploadCard from "../../../../components/ui/UploadCard";
 import StarRating from "../../../../components/ui/StarRating";
 import ImageSourcePickerBottomSheet from "../../../../components/bottom-sheets/ImageSourcePickerBottomSheet";
 import ProofPhotosField from "../../../../components/booking/ProofPhotosField";
-import AddExtraWorkModal from "../../../../components/modals/AddExtraWorkModal";
+import InvoiceLineModal from "../../../../components/modals/InvoiceLineModal";
+import { InvoiceCard } from "../../../../components/booking-detail/InvoiceCard";
+import type { ApiInvoice } from "../../../../utils/mapBookingDetail";
 import type { BottomSheetHandle } from "../../../../components/bottom-sheets/BottomSheetWrapper";
 import { Skeleton } from "../../../../components/ui/Skeleton";
 import { API_STATUS_MAP } from "../../../../store/bookingStore";
@@ -51,7 +53,7 @@ type BookingDetail = {
   completionPhotoUrl?: string | null;
   beforePhotoUrls?: string[];
   progressPhotoUrls?: string[];
-  addOns?: { id: string; name: string; price: number; clientApprovedAt: string | null; clientRejectedAt: string | null }[];
+  addOns?: { id: string; kind: string | null; name: string; price: number; clientApprovedAt: string | null; clientRejectedAt: string | null }[];
   workerArrivedAt?: string | null;
   timeline?: { workerArrivedAt?: string | null; workerStartedAt?: string | null; workerCompletedAt?: string | null } | null;
   // Set when a no-show cancelled this job (see backend
@@ -68,7 +70,9 @@ type BookingDetail = {
   rescheduleRequestRespondedAt?: string | null;
   // "Follow Up Date" visits (see scheduleFollowUpVisit).
   visits?: { id: string; scheduledDate: string; scheduledTime: string; notes: string | null; status: string }[];
-  quote?: { status?: string | null; rejectionReason?: string | null; revision?: number } | null;
+  // The bill the worker sends at the end of the job (see backend completeBooking).
+  invoice?: ApiInvoice;
+  paymentMethodType?: "CASH" | "GCASH" | "MAYA" | null;
   parentBooking?: { id: string; service: string } | null;
   payment?: {
     status: string;
@@ -109,8 +113,10 @@ export default function JobDetailScreen() {
   const [beforePhotoUrls, setBeforePhotoUrls] = useState<string[]>([]);
   const [progressDraft, setProgressDraft] = useState<string[]>([]);
   const [postingProgress, setPostingProgress] = useState(false);
-  const [addExtraVisible, setAddExtraVisible] = useState(false);
-  const [addingExtra, setAddingExtra] = useState(false);
+  // Parts and extra work added to the invoice before it's sent.
+  const [invoiceItems, setInvoiceItems] = useState<api.InvoiceItemPayload[]>([]);
+  const [lineModalKind, setLineModalKind] = useState<api.InvoiceItemPayload["kind"] | null>(null);
+  const [confirmingCash, setConfirmingCash] = useState(false);
   const [elapsedMs, setElapsedMs] = useState(0);
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
@@ -236,8 +242,6 @@ export default function JobDetailScreen() {
   const status = API_STATUS_MAP[job.status] ?? "Pending";
   const isAccepted = status === "Accepted";
   const isInProgress = status === "InProgress";
-  const isQuoteSubmitted = status === "QuoteSubmitted";
-  const isQuoteApproved = status === "QuoteApproved";
   const isDisputed = status === "Disputed";
   const isPendingCompletion = status === "PendingCompletion";
   const isAwaitingPayment = status === "AwaitingPayment";
@@ -248,21 +252,23 @@ export default function JobDetailScreen() {
   // so it's visible before the worker even accepts the job.
   const tip = job.payment?.tip ?? job.tip ?? 0;
   const hasArrived = !!(job.workerArrivedAt || job.timeline?.workerArrivedAt);
-  // Items live in the quote; a submitted or approved quote is reopened to edit
-  // them (bookingController.reopenQuote) and the client approves the new total.
-  const canEditQuote = isQuoteSubmitted || isQuoteApproved;
-  // Same window the backend allows (bookingController.canAddExtraWork).
-  const canAddExtra = (isAccepted && hasArrived) || isQuoteSubmitted || isQuoteApproved || isInProgress;
-  const canCancelJob = isAccepted || isInProgress || isQuoteSubmitted || isQuoteApproved || isDisputed;
+  const canCancelJob = isAccepted || isInProgress;
   const hasOpenRescheduleRequest = !!job.rescheduleRequestedAt && !job.rescheduleRequestRespondedAt;
   // The client asked (or an older request from before either side could ask).
   const hasPendingRescheduleRequest = hasOpenRescheduleRequest && job.rescheduleRequestedBy !== "WORKER";
   const iAskedToReschedule = hasOpenRescheduleRequest && job.rescheduleRequestedBy === "WORKER";
   const canRequestReschedule = isAccepted && !hasArrived && !hasOpenRescheduleRequest;
   // Work under way — another visit can be planned for a job that needs more days.
-  const canScheduleVisit = isInProgress || isQuoteSubmitted || isQuoteApproved;
-  // A refused (or reopened) quote returns the job to Accepted, where it is revised.
-  const quoteRefused = isAccepted && job.quote?.status === "REJECTED";
+  const canScheduleVisit = isInProgress;
+  const isCash = (job.paymentMethodType ?? "CASH") === "CASH";
+  // The job starts right after check-in, or with check-in in the same tap.
+  const canStartNow = isAccepted;
+  const invoice = job.invoice;
+  const invoiceSent = !!invoice && (invoice.status === "DUE" || invoice.status === "REPORTED" || invoice.status === "PAID");
+  // What the client will be asked to pay: the booked price (packages
+  // included), the lines added here, and the tip.
+  const draftInvoiceTotal = amount + invoiceItems.reduce((sum, item) => sum + item.price, 0) + tip;
+  const bookedPackages = (job.addOns ?? []).filter((a) => a.clientApprovedAt && a.price > 0 && a.kind !== "PART" && a.kind !== "EXTRA_WORK");
   const startTime = bookingStartTime(job);
   const startsAt = startTime ? startInstant(job.scheduledDate.slice(0, 10), startTime) : null;
   const startPassed = !!startsAt && now >= startsAt.getTime();
@@ -288,35 +294,15 @@ export default function JobDetailScreen() {
       timestamp: "",
       status: hasArrived ? ("done" as const) : isAccepted ? ("active" as const) : ("pending" as const),
     },
-    // The quote comes right after arriving, before the job starts.
     {
-      label: "Quote",
+      label: "Ongoing",
       timestamp: "",
-      status:
-        isQuoteApproved || isInProgress || isPendingCompletion || isAwaitingPayment || isCompleted
-          ? ("done" as const)
-          : hasArrived && (isAccepted || isQuoteSubmitted || isDisputed)
-            ? ("active" as const)
-            : ("pending" as const),
+      status: invoiceSent || isCompleted ? ("done" as const) : isInProgress ? ("active" as const) : ("pending" as const),
     },
     {
-      label: "In Progress",
+      label: "Paid",
       timestamp: "",
-      status:
-        isPendingCompletion || isAwaitingPayment || isCompleted
-          ? ("done" as const)
-          : isInProgress
-            ? ("active" as const)
-            : ("pending" as const),
-    },
-    {
-      label: "Completed",
-      timestamp: "",
-      status: isCompleted
-        ? ("done" as const)
-        : isPendingCompletion || isAwaitingPayment
-          ? ("active" as const)
-          : ("pending" as const),
+      status: isCompleted ? ("done" as const) : invoiceSent ? ("active" as const) : ("pending" as const),
     },
   ];
 
@@ -342,6 +328,21 @@ export default function JobDetailScreen() {
   const handleStart = async () => {
     setSubmitting(true);
     try {
+      // One tap checks in and starts a job with a set price.
+      if (!hasArrived) {
+        try {
+          const position = await getCurrentPosition();
+          await api.arriveBooking(job.id, position.lat, position.lng, position.accuracy, position.mocked);
+        } catch (error) {
+          if (error instanceof LocationPermissionDeniedError) {
+            alertModal.error("Location needed", "Please enable location access to check in at the job site.");
+          } else {
+            const message = error instanceof Error ? error.message : "Failed to verify your arrival.";
+            alertModal.error("Can't check in yet", message);
+          }
+          return;
+        }
+      }
       await api.startBooking(job.id, beforePhotoUrls);
       setBeforePhotoUrls([]);
       alertModal.success(
@@ -351,27 +352,12 @@ export default function JobDetailScreen() {
       load();
     } catch (error) {
       console.error("Start booking error:", error);
-      // Show the server's reason (no before photo, quote not approved yet…);
+      // Show the server's reason (no before photo, not checked in yet…);
       // the generic text hid what the worker needs to do.
       const message = error instanceof Error && error.message ? error.message : "Failed to start this job. Please try again.";
       alertModal.error("Can't start this job", message);
     } finally {
       setSubmitting(false);
-    }
-  };
-
-  const handleAddExtra = async (name: string, price: number) => {
-    setAddingExtra(true);
-    try {
-      await api.addBookingAddOn(job.id, name, price);
-      setAddExtraVisible(false);
-      alertModal.success("Sent to client", "It's added to the bill once the client approves it.");
-      load(true);
-    } catch (error: any) {
-      console.error("Add extra work error:", error);
-      alertModal.error("Error", error?.message || "Failed to add the extra work. Please try again.");
-    } finally {
-      setAddingExtra(false);
     }
   };
 
@@ -464,26 +450,29 @@ export default function JobDetailScreen() {
     }
   };
 
-  const handleMarkComplete = () => {
+  const handleSendInvoice = () => {
     if (!completionPhotoUrl) return;
     alertModal.confirm(
-      "Mark as Complete?",
-      "Confirm you've finished this job. The client will review your photo and confirm completion.",
+      "Send the invoice?",
+      isCash
+        ? `The client will be asked to pay you ₱${draftInvoiceTotal.toFixed(2)} in cash. Tap Cash received once they do.`
+        : `The client will be asked to pay ₱${draftInvoiceTotal.toFixed(2)} with ${job.paymentMethodType === "MAYA" ? "Maya" : "GCash"} in the app.`,
       {
-        confirmText: "Confirm",
+        confirmText: "Send Invoice",
         cancelText: "Cancel",
         onConfirm: async () => {
           setSubmitting(true);
           try {
-            await api.completeBooking(job.id, completionPhotoUrl);
+            await api.completeBooking(job.id, completionPhotoUrl, invoiceItems);
+            setInvoiceItems([]);
             alertModal.success(
-              "Submitted!",
-              "The client will review your photo and confirm completion.",
-              [{ text: "OK", onPress: () => router.back() }],
+              "Invoice sent",
+              isCash ? "Collect the cash, then tap Cash received." : "You're paid once the client's payment comes in.",
             );
-          } catch (error) {
-            console.error("Complete booking error:", error);
-            alertModal.error("Error", "Failed to complete this job. Please try again.");
+            load();
+          } catch (error: any) {
+            console.error("Send invoice error:", error);
+            alertModal.error("Error", error?.message || "Failed to send the invoice. Please try again.");
           } finally {
             setSubmitting(false);
           }
@@ -492,19 +481,24 @@ export default function JobDetailScreen() {
     );
   };
 
-  const handleEditQuote = () => {
+  const handleCashReceived = () => {
     alertModal.confirm(
-      "Edit this quote?",
-      "The client will need to approve the new total after you resubmit.",
+      "Cash received?",
+      `Confirm the client paid you ₱${(invoice?.total ?? amount + tip).toFixed(2)} in cash.`,
       {
-        confirmText: "Edit Quote",
+        confirmText: "Cash Received",
+        cancelText: "Not Yet",
         onConfirm: async () => {
+          setConfirmingCash(true);
           try {
-            await api.reopenQuote(job.id);
-            router.push(`/(worker)/records/quote/${job.id}`);
-          } catch (error) {
-            console.error("Reopen quote error:", error);
-            alertModal.error("Error", "Failed to reopen the quote. Please try again.");
+            await api.markCashReceived(job.id);
+            alertModal.success("Job done", "Nice work. The cash payment is recorded.", [{ text: "OK", onPress: () => router.back() }]);
+          } catch (error: any) {
+            console.error("Cash received error:", error);
+            alertModal.error("Error", error?.message || "Failed to record the payment. Please try again.");
+            load();
+          } finally {
+            setConfirmingCash(false);
           }
         },
       },
@@ -524,9 +518,9 @@ export default function JobDetailScreen() {
       `Date: ${formatJobDate(job.scheduledDate)}`,
       ``,
       `Subtotal: ₱${(job.payment?.subtotal ?? amount).toFixed(2)}`,
-      `Commission: -₱${commissionEstimate.toFixed(2)}`,
+      `Service fee: -₱${commissionEstimate.toFixed(2)}`,
       taxEstimate > 0 ? `Withholding tax: -₱${taxEstimate.toFixed(2)}` : null,
-      tip > 0 ? `Tip (yours, untaxed): +₱${tip.toFixed(2)}` : null,
+      tip > 0 ? `Tip (yours in full): +₱${tip.toFixed(2)}` : null,
       `Your payout: ₱${payoutEstimate.toFixed(2)}`,
     ].filter(Boolean);
     Share.share({ message: lines.join("\n") }).catch(() => {});
@@ -538,7 +532,7 @@ export default function JobDetailScreen() {
       <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 100 }}>
         {/* Status */}
         <View className="items-center mb-4">
-          <StatusBadge status={status as any} />
+          <StatusBadge status={status as any} variant="booking" />
         </View>
 
         {/* Pending client-initiated reschedule request */}
@@ -586,19 +580,6 @@ export default function JobDetailScreen() {
             <View className="mt-3">
               <OutlinedButton label="Withdraw Request" onPress={handleWithdrawMyReschedule} />
             </View>
-          </View>
-        )}
-
-        {/* The client refused the quote */}
-        {quoteRefused && (
-          <View className="bg-error/10 border border-error/30 rounded-2xl p-4 mb-3">
-            <Text className="text-error font-bold text-sm">The client refused your quote</Text>
-            {!!job.quote?.rejectionReason && (
-              <Text className="text-text-secondary text-xs mt-1.5">&ldquo;{job.quote.rejectionReason}&rdquo;</Text>
-            )}
-            <Text className="text-text-muted text-xs mt-1.5">
-              Fix the quote so it matches your receipt, then submit it again.
-            </Text>
           </View>
         )}
 
@@ -654,18 +635,23 @@ export default function JobDetailScreen() {
           </Text>
           <Text className="text-success font-bold text-2xl">₱{payoutEstimate.toFixed(2)}</Text>
           <Text className="text-text-muted text-xs mt-1">
-            Service ₱{(job.payment?.subtotal ?? amount).toFixed(2)} − commission ₱{commissionEstimate.toFixed(2)}
+            Service ₱{(job.payment?.subtotal ?? amount).toFixed(2)} − service fee ₱{commissionEstimate.toFixed(2)}
             {taxEstimate > 0 ? ` − tax ₱${taxEstimate.toFixed(2)}` : ""}
           </Text>
           {tip > 0 && (
             <View className="bg-gold/20 rounded-full self-start px-2.5 py-1 mt-2 flex-row items-center">
               <Text className="text-xs">🎉</Text>
               <Text className="text-accent text-xs font-bold ml-1">
-                Includes a ₱{tip.toFixed(2)} tip — yours in full, no commission or tax
+                Includes a ₱{tip.toFixed(2)} tip — yours in full, no service fee
               </Text>
             </View>
           )}
         </View>
+
+        {/* The invoice, once sent */}
+        {invoiceSent && invoice && (
+          <InvoiceCard invoice={invoice} />
+        )}
 
         {/* Completion photo — shown once submitted */}
         {job.completionPhotoUrl && (
@@ -724,33 +710,6 @@ export default function JobDetailScreen() {
 
         {/* Actions */}
         <View className="gap-3 mt-4">
-          {isAccepted && !hasArrived && (
-            <PrimaryButton
-              label="I've Arrived"
-              fullWidth
-              onPress={handleArrive}
-              disabled={arriving}
-              loading={arriving}
-            />
-          )}
-          {/* Arrived: assess the job, then send the quote — the job starts once the client approves it. */}
-          {isAccepted && hasArrived && (
-            <>
-              <PrimaryButton
-                label={quoteRefused ? "Revise Quote" : "Send Quote"}
-                fullWidth
-                onPress={() => router.push(`/(worker)/records/quote/${job.id}`)}
-              />
-              <Text className="text-text-muted text-xs text-center -mt-1">
-                The client reviews your quote first. You can start the job once they approve it.
-              </Text>
-            </>
-          )}
-          {isAccepted && !hasArrived && (
-            <Text className="text-text-muted text-xs text-center -mt-1">
-              Check in within 100 m of the job site, then send your quote.
-            </Text>
-          )}
           {canRequestReschedule && (
             <OutlinedButton
               label="Request Reschedule"
@@ -765,7 +724,7 @@ export default function JobDetailScreen() {
               </Text>
             </View>
           )}
-          {isQuoteApproved && (
+          {canStartNow && (
             <View>
               <ProofPhotosField
                 bookingId={job.id}
@@ -776,33 +735,19 @@ export default function JobDetailScreen() {
                 required
               />
               <PrimaryButton
-                label="Start Job"
+                label={hasArrived ? "Start Job" : "I've Arrived, Start Job"}
                 fullWidth
                 onPress={handleStart}
                 disabled={submitting || beforePhotoUrls.length === 0}
                 loading={submitting}
               />
+              {!hasArrived && (
+                <Text className="text-text-muted text-xs text-center mt-2">
+                  Be within 100 m of the job site. Your location is checked when you start.
+                </Text>
+              )}
             </View>
           )}
-          {canEditQuote && <OutlinedButton label="Edit Quote" fullWidth onPress={handleEditQuote} />}
-          {!!job.addOns?.length && (
-            <View className="bg-card rounded-2xl p-4">
-              <Text className="text-text-primary font-bold mb-2">Extra work</Text>
-              {job.addOns.map((a) => (
-                <View key={a.id} className="flex-row justify-between py-1">
-                  <Text className="text-text-secondary text-sm flex-1">
-                    {a.name} · ₱{a.price}
-                  </Text>
-                  <Text
-                    className={`text-xs font-semibold ${a.clientApprovedAt ? "text-success" : a.clientRejectedAt ? "text-error" : "text-warning"}`}
-                  >
-                    {a.clientApprovedAt ? "Approved" : a.clientRejectedAt ? "Declined" : "Waiting for client"}
-                  </Text>
-                </View>
-              ))}
-            </View>
-          )}
-          {canAddExtra && <OutlinedButton label="Add Extra Work" fullWidth onPress={() => setAddExtraVisible(true)} />}
           {canScheduleVisit && (
             <OutlinedButton
               label="Schedule Follow-up Visit"
@@ -810,18 +755,13 @@ export default function JobDetailScreen() {
               onPress={() => router.push(`/(worker)/records/visit/${job.id}`)}
             />
           )}
-          {isQuoteSubmitted && (
-            <View className="bg-accent/10 border border-accent rounded-2xl p-4 items-center">
-              <Text className="text-accent font-semibold">
-                Quote submitted. Waiting for client approval.
-              </Text>
-            </View>
-          )}
           {isDisputed && (
             <View className="bg-error/10 border border-error rounded-2xl p-4 items-center">
-              <Text className="text-error font-semibold">The client disputed your quote.</Text>
+              <Text className="text-error font-semibold">
+                {invoice?.status === "REPORTED" ? "The client reported your invoice." : "This job is under review."}
+              </Text>
               <Text className="text-text-secondary text-xs mt-1 text-center">
-                HomeEase support will review it and may ask you to submit a new quote.
+                HomeEase will review it and tell you the outcome. Don&apos;t collect payment until then.
               </Text>
             </View>
           )}
@@ -855,6 +795,57 @@ export default function JobDetailScreen() {
                   />
                 )}
               </View>
+              {/* The invoice: the booked job, then anything added here */}
+              <View className="bg-card rounded-2xl p-4">
+                <Text className="text-text-primary font-bold mb-1">Invoice</Text>
+                <Text className="text-text-muted text-xs mb-3">
+                  Add any parts you bought or extra work you did. The client sees every line and pays the total.
+                </Text>
+                <View className="flex-row justify-between mb-2">
+                  <Text className="text-text-primary text-sm flex-1 pr-2">{job.service}</Text>
+                  <Text className="text-text-primary text-sm font-semibold">
+                    ₱{(job.estimatedPrice).toFixed(2)}
+                  </Text>
+                </View>
+                {bookedPackages.map((pkg) => (
+                  <View key={pkg.id} className="flex-row justify-between mb-2">
+                    <Text className="text-text-secondary text-sm flex-1 pr-2">{pkg.name}</Text>
+                    <Text className="text-text-primary text-sm">₱{pkg.price.toFixed(2)}</Text>
+                  </View>
+                ))}
+                {invoiceItems.map((item, index) => (
+                  <View key={`${item.name}-${index}`} className="flex-row items-center justify-between mb-2">
+                    <Text className="text-text-secondary text-sm flex-1 pr-2">
+                      {item.name} · {item.kind === "PART" ? "Part" : "Extra work"}
+                    </Text>
+                    <Text className="text-text-primary text-sm mr-3">₱{item.price.toFixed(2)}</Text>
+                    <Text
+                      className="text-error text-xs font-semibold"
+                      onPress={() => setInvoiceItems((items) => items.filter((_, i) => i !== index))}
+                    >
+                      Remove
+                    </Text>
+                  </View>
+                ))}
+                {tip > 0 && (
+                  <View className="flex-row justify-between mb-2">
+                    <Text className="text-text-secondary text-sm">Tip</Text>
+                    <Text className="text-text-primary text-sm">₱{tip.toFixed(2)}</Text>
+                  </View>
+                )}
+                <View className="border-t border-divider pt-2 mt-1 flex-row justify-between">
+                  <Text className="text-text-primary font-bold">Total</Text>
+                  <Text className="text-text-primary font-bold">₱{draftInvoiceTotal.toFixed(2)}</Text>
+                </View>
+                <View className="flex-row gap-2 mt-3">
+                  <View className="flex-1">
+                    <OutlinedButton label="Add a Part" fullWidth onPress={() => setLineModalKind("PART")} />
+                  </View>
+                  <View className="flex-1">
+                    <OutlinedButton label="Add Extra Work" fullWidth onPress={() => setLineModalKind("EXTRA_WORK")} />
+                  </View>
+                </View>
+              </View>
               {completionPhotoUri ? (
                 <View>
                   <Image
@@ -878,9 +869,9 @@ export default function JobDetailScreen() {
                 />
               )}
               <PrimaryButton
-                label="Complete Job"
+                label="Send Invoice"
                 fullWidth
-                onPress={handleMarkComplete}
+                onPress={handleSendInvoice}
                 disabled={submitting || uploadingPhoto || !completionPhotoUrl || !job.progressPhotoUrls?.length}
                 loading={submitting}
               />
@@ -889,17 +880,29 @@ export default function JobDetailScreen() {
               )}
             </View>
           )}
-          {isPendingCompletion && (
-            <View className="bg-accent/10 border border-accent rounded-2xl p-4 items-center">
-              <Text className="text-accent font-semibold">
-                Waiting for the client to review your photo, confirm completion, and pay.
+          {isPendingCompletion && isCash && (
+            <View className="gap-2">
+              <PrimaryButton
+                label={`Cash Received · ₱${(invoice?.total ?? amount + tip).toFixed(2)}`}
+                fullWidth
+                onPress={handleCashReceived}
+                disabled={confirmingCash}
+                loading={confirmingCash}
+              />
+              <Text className="text-text-muted text-xs text-center">
+                Tap once the client has paid you. If you don&apos;t, it&apos;s recorded as paid after 24 hours.
               </Text>
+            </View>
+          )}
+          {isPendingCompletion && !isCash && (
+            <View className="bg-accent/10 border border-accent rounded-2xl p-4 items-center">
+              <Text className="text-accent font-semibold">Waiting for the client&apos;s payment.</Text>
             </View>
           )}
           {isAwaitingPayment && (
             <View className="bg-warning/10 border border-warning rounded-2xl p-4 items-center">
               <Text className="text-warning font-semibold">
-                The client confirmed the job — waiting for their payment to clear.
+                Waiting for the client&apos;s {job.paymentMethodType === "MAYA" ? "Maya" : "GCash"} payment.
               </Text>
               <Text className="text-text-secondary text-xs mt-1">
                 Your payout is released once payment is received.
@@ -934,11 +937,16 @@ export default function JobDetailScreen() {
           )}
         </View>
       </ScrollView>
-      <AddExtraWorkModal
-        visible={addExtraVisible}
-        loading={addingExtra}
-        onConfirm={handleAddExtra}
-        onCancel={() => setAddExtraVisible(false)}
+      <InvoiceLineModal
+        key={lineModalKind ?? "closed"}
+        visible={lineModalKind != null}
+        bookingId={job.id}
+        kind={lineModalKind ?? "PART"}
+        onConfirm={(item) => {
+          setInvoiceItems((items) => [...items, item]);
+          setLineModalKind(null);
+        }}
+        onCancel={() => setLineModalKind(null)}
       />
       <ImageSourcePickerBottomSheet
         innerRef={photoSheetRef}

@@ -137,7 +137,7 @@ export default function Payments() {
           onTabChange={(tab) => setFilter('statusTab', tab)}
         />
       </div>
-      <SectionCard title="Commission Overview">
+      <SectionCard title="Service Fee Overview">
         <div className="detail-grid" style={{ marginBottom: 0 }}>
           <div className="detail-block">
             <label>Clients Paid</label>
@@ -148,7 +148,7 @@ export default function Payments() {
             <div className="value">{formatPeso(totals.workers)}</div>
           </div>
           <div className="detail-block">
-            <label>Platform Commission (revenue)</label>
+            <label>Service Fees (revenue)</label>
             <div className="value">
               {formatPeso(totals.platform)}{' '}
               {totals.ratePercent != null && (
@@ -158,10 +158,13 @@ export default function Payments() {
               )}
             </div>
           </div>
-          <div className="detail-block">
-            <label>Withholding Tax Held (for BIR)</label>
-            <div className="value">{formatPeso(totals.withholding)}</div>
-          </div>
+          {/* Only payments from before HomeEase stopped withholding tax and adding VAT carry these. */}
+          {totals.withholding > 0 && (
+            <div className="detail-block">
+              <label>Withholding Tax Held (for BIR)</label>
+              <div className="value">{formatPeso(totals.withholding)}</div>
+            </div>
+          )}
           {totals.vat > 0 && (
             <div className="detail-block">
               <label>VAT Collected (for BIR)</label>

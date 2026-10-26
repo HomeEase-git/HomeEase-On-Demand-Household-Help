@@ -8,9 +8,9 @@ import {
 
 // Price changes (same-day fee and notice, distance fee, expertise tiers,
 // no-show penalty, client-fault compensation) live on Price Adjustments,
-// commission and worker debt on Payments → Commission & Debt, and
-// booking/decline rules on Bookings → Booking Rules. Withholding tax and the
-// ATC code are fixed (appSettingsService). This page keeps site identity, admin account/alert settings, and
+// the service fee and worker debt on Payments → Service Fee & Debt, and
+// booking/decline rules on Bookings → Booking Rules. HomeEase withholds no
+// tax (workers file their own). This page keeps site identity, admin account/alert settings, and
 // trust & safety.
 const NUMBER_FIELD_BOUNDS = {
   noShowGraceMinutes: [15, 480],
@@ -213,9 +213,9 @@ export default function Settings() {
           <p className="toggle-row__hint" style={{ marginTop: '0.5rem' }}>
             Looking for job prices or fees? Job prices are on the <Link to="/price-list">Price List</Link>; the same-day
             fee, same-day notice, distance fee and expertise tiers are in <Link to="/price-adjustments">Price Adjustments</Link>;
-            hold timeout, arrival radius and the decline policy are in <Link to="/bookings/rules">Bookings → Booking Rules</Link>; commission
-            is in <Link to="/payments/commission">Payments → Commission &amp; Debt</Link>. Withholding tax (2%) and the BIR
-            ATC code (WI120) are fixed.
+            hold timeout, arrival radius and the decline policy are in <Link to="/bookings/rules">Bookings → Booking Rules</Link>; the service fee
+            is in <Link to="/payments/commission">Payments → Service Fee &amp; Debt</Link>. HomeEase withholds no tax: workers
+            file their own.
           </p>
         </>
       )}

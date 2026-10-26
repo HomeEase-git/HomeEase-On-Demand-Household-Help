@@ -15,12 +15,12 @@ export const QUESTION_TYPES = {
   YESNO: { label: 'Yes / No', hint: 'Quick toggle', example: 'e.g. Has pets?' },
 }
 
-// Prices are set here only; workers can't change them. (The old "worker
-// price steps" model is retired — a saved one opens as Price × count.)
+// Prices are set here only; workers can't change them. Two ways to price a
+// job. (The old "worker price steps" model is retired — a saved one opens as
+// price per piece; custom quotes are gone, extras go on the worker's invoice.)
 export const PRICING_MODELS = {
   FIXED: { label: 'Flat price', hint: 'One price for the whole job or visit.' },
-  PER_UNIT: { label: 'Price × count', hint: 'Multiplied by a number question, e.g. How many units?' },
-  CUSTOM_QUOTE: { label: 'Custom quote', hint: 'The worker inspects, then sends a price for approval.' },
+  PER_UNIT: { label: 'Price per piece', hint: 'The client picks how many, e.g. outlets, rooms, kilos.' },
 }
 
 export const COMMON_UNITS = ['job', 'visit', 'unit', 'piece', 'item', 'room', 'door', 'basket', 'set', 'sq.m.', 'house', 'area', 'line', 'trip', 'kilo']
@@ -62,6 +62,42 @@ export function emptyQuestion() {
   return { ref: null, label: '', helpText: '', type: 'ONE', choices: ['', ''], min: 1, max: 10, required: true, match: false }
 }
 
+/**
+ * Every per-piece job needs a Number question to supply its quantity. Admins
+ * no longer add it by hand: give any per-piece job without one a built-in
+ * "Number of <unit>" question, so the booking form always asks how many.
+ */
+const autoCountLabel = (job) => `Number of ${(job.unit || '').trim() || 'pieces'}`
+
+export function ensureCountQuestions(draft) {
+  for (const job of draft.jobs) {
+    if (!usesCount(job.model)) {
+      // Back to a flat price: the job's count question has no use. After a
+      // reload the link is gone, so also match the built-in question's label.
+      const builtIn = autoCountLabel(job).toLowerCase()
+      job.questions = job.questions.filter(
+        (x) => x.ref !== job.quantityRef && !(x.type === 'NUMBER' && x.label.trim().toLowerCase() === builtIn)
+      )
+      job.quantityRef = null
+      job.unit = '' // a flat price has no unit
+      continue
+    }
+    const q = job.quantityRef && findQuestion(draft, job.quantityRef)
+    if (q?.type === 'NUMBER') continue
+    const ref = newKey('q')
+    job.questions.unshift({
+      ...emptyQuestion(),
+      ref,
+      label: autoCountLabel(job),
+      type: 'NUMBER',
+      choices: [],
+      min: 1,
+      max: 100,
+    })
+    job.quantityRef = ref
+  }
+}
+
 export function emptyDraft() {
   return {
     details: { name: '', description: '', basePrice: '', icon: null, backgroundImageUrl: null, requiresCertification: false },
@@ -85,7 +121,8 @@ export function serviceToDraft(service) {
     description: t.description || '',
     unit: t.unitLabel || '',
     price: t.basePrice,
-    model: t.pricingModel === 'TIERED' ? 'PER_UNIT' : t.pricingModel,
+    // TIERED opens as per piece; a leftover custom quote (switched off, no price) as flat.
+    model: t.pricingModel === 'TIERED' ? 'PER_UNIT' : t.pricingModel === 'CUSTOM_QUOTE' ? 'FIXED' : t.pricingModel,
     durationHours: t.durationHours ?? '',
     allowsFollowUp: Boolean(t.allowsFollowUp),
     isActive: t.isActive,
@@ -168,22 +205,19 @@ export function draftToPayload(draft) {
     icon: details.icon,
     backgroundImageUrl: details.backgroundImageUrl || null,
     requiresCertification: details.requiresCertification,
-    tasks: draft.jobs.map((j) => {
-      const quote = j.model === 'CUSTOM_QUOTE'
-      return {
-        ...(j.id ? { id: j.id } : { key: j.ref }),
-        name: j.name.trim(),
-        description: j.description.trim() || null,
-        basePrice: quote ? 0 : Number(j.price),
-        pricingModel: j.model,
-        unitLabel: j.unit.trim() || null,
-        quantityFieldRef: usesCount(j.model) ? j.quantityRef : null,
-        durationHours: quote || j.durationHours === '' || j.durationHours == null ? null : Number(j.durationHours),
-        isActive: j.isActive,
-        allowsFollowUp: Boolean(j.allowsFollowUp),
-        overrideReason: j.overrideReason.trim() || undefined,
-      }
-    }),
+    tasks: draft.jobs.map((j) => ({
+      ...(j.id ? { id: j.id } : { key: j.ref }),
+      name: j.name.trim(),
+      description: j.description.trim() || null,
+      basePrice: Number(j.price) || 0,
+      pricingModel: j.model,
+      unitLabel: j.unit.trim() || null,
+      quantityFieldRef: usesCount(j.model) ? j.quantityRef : null,
+      durationHours: j.durationHours === '' || j.durationHours == null ? null : Number(j.durationHours),
+      isActive: j.isActive,
+      allowsFollowUp: Boolean(j.allowsFollowUp),
+      overrideReason: j.overrideReason.trim() || undefined,
+    })),
     scopeFields: [
       ...draft.common.map((q) => questionToField(q, [])),
       ...draft.jobs.flatMap((j) => j.questions.map((q) => questionToField(q, [j.ref]))),
@@ -211,14 +245,15 @@ export function validateDraft(draft, doleFloor) {
   for (const j of draft.jobs) {
     const name = j.name.trim() || 'Untitled job'
     if (!j.name.trim()) return 'A job has no name.'
-    if (j.model !== 'CUSTOM_QUOTE') {
-      if (!(Number(j.price) > 0)) return `“${name}” needs a price above ₱0.`
+    // A switched-off job may have no price yet (a former custom-quote job).
+    if (j.isActive) {
+      if (!(Number(j.price) > 0)) return `“${name}” needs a price above ₱0 before it can be switched on.`
       if (doleFloor && Number(j.price) < doleFloor && !j.overrideReason.trim()) {
         return `“${name}”: the price is under the DOLE hourly wage reference (₱${doleFloor.toFixed(2)}). Edit the job and give a reason to keep it.`
       }
     }
     if (usesCount(j.model)) {
-      if (!j.unit.trim()) return `“${name}” is priced per unit, so it needs a unit (e.g. unit, room, kilo).`
+      if (!j.unit.trim()) return `“${name}” is priced per piece, so it needs a unit (e.g. outlet, room, kilo).`
       const count = countQuestionFor(draft, j)
       if (!count || count.type !== 'NUMBER') {
         return `“${name}” is priced per ${j.unit || 'unit'} but has no count question. Add a Number question and tick “This number sets the price”.`

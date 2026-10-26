@@ -50,7 +50,8 @@ describe('taskBasePrice', () => {
     ).toEqual({ ok: true, basePrice: 1250 });
   });
 
-  it('has no upfront price for a custom-quote task', () => {
-    expect(taskBasePrice({ basePrice: 999, pricingModel: 'CUSTOM_QUOTE' }, {})).toEqual({ ok: true, basePrice: 0 });
+  // Custom quotes are retired: a leftover row is never priced at ₱0.
+  it('charges a retired custom-quote task its flat price', () => {
+    expect(taskBasePrice({ basePrice: 999, pricingModel: 'CUSTOM_QUOTE' }, {})).toEqual({ ok: true, basePrice: 999 });
   });
 });

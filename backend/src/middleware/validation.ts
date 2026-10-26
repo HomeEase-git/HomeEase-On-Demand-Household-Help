@@ -1,7 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import { errorResponse } from '../utils/errorResponse';
 import { KYC_DOCUMENT_TYPES } from '../utils/kycDocumentTypes';
-import { isValidTin } from '../utils/taxId';
 import { isValidStartTime } from '../services/workerAvailabilityService';
 import {
   VALID_CONDITIONS,
@@ -335,18 +334,6 @@ export const validateUpdatePayoutMethod = (
   return next();
 };
 
-export const validateUpdateTaxInfo = (req: Request, res: Response, next: NextFunction) => {
-  const { tin } = req.body;
-
-  if (typeof tin !== 'string' || !isValidTin(tin)) {
-    return res
-      .status(400)
-      .json(errorResponse(400, 'tin must be a valid Philippine TIN (e.g. 000-000-000 or 000-000-000-000)'));
-  }
-
-  return next();
-};
-
 // Booking validators
 // Rough Philippines bounding box (the only market this platform serves) —
 // rejects wildly wrong/spoofed coordinates before they ever reach a
@@ -560,39 +547,6 @@ export const validateLiveLocation = (
   return next();
 };
 
-export const validateSubmitQuote = (
-  req: Request,
-  res: Response,
-  next: NextFunction
-) => {
-  const { items, laborCost, notes } = req.body;
-
-  // laborCost is only read for a custom-quote job (see
-  // bookingController.submitQuote); every other job's labor is its booked price.
-  // Per-item shape and proof rules live in utils/quoteItems.
-  if (!Array.isArray(items)) {
-    return res.status(400).json(errorResponse(400, 'items must be an array'));
-  }
-
-  if (laborCost !== undefined && laborCost !== null && (typeof laborCost !== 'number' || laborCost < 0)) {
-    return res.status(400).json(errorResponse(400, 'laborCost must be a non-negative number'));
-  }
-
-  if (notes !== undefined && typeof notes !== 'string') {
-    return res.status(400).json(errorResponse(400, 'notes must be a string'));
-  }
-
-  return next();
-};
-
-export const validateRejectQuote = (req: Request, res: Response, next: NextFunction) => {
-  const { reason } = req.body;
-  if (typeof reason !== 'string' || reason.trim().length < 5 || reason.length > 1000) {
-    return res.status(400).json(errorResponse(400, 'Tell the worker why (5 to 1000 characters)'));
-  }
-  return next();
-};
-
 /** A date + start time, used by reschedule requests and follow-up visits. */
 export const validateDateAndTime = (req: Request, res: Response, next: NextFunction) => {
   const { date, time, notes } = req.body;
@@ -619,38 +573,6 @@ export const validateBookingStatusUpdate = (
     return res.status(400).json(errorResponse(400, 'reason must be a string'));
   }
   
-  return next();
-};
-
-export const validateApproveQuote = (
-  _req: Request,
-  _res: Response,
-  next: NextFunction
-) => {
-  // Quote approval needs no additional fields beyond ID in params
-  return next();
-};
-
-export const validateDisputeQuote = (
-  req: Request,
-  res: Response,
-  next: NextFunction
-) => {
-  const { reason, evidenceUrls } = req.body;
-
-  if (!reason || typeof reason !== 'string') {
-    return res.status(400).json(errorResponse(400, 'reason is required and must be a string'));
-  }
-
-  if (
-    evidenceUrls !== undefined &&
-    (!Array.isArray(evidenceUrls) ||
-      evidenceUrls.length > 5 ||
-      !evidenceUrls.every((url) => typeof url === 'string'))
-  ) {
-    return res.status(400).json(errorResponse(400, 'evidenceUrls must be an array of up to 5 URL strings'));
-  }
-
   return next();
 };
 

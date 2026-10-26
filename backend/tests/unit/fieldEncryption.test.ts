@@ -1,7 +1,6 @@
 import {
   decryptField,
   encryptField,
-  hashTin,
   isEncryptedField,
   maskEncryptedFieldsDeep,
   maskLastFour,
@@ -32,11 +31,6 @@ describe('fieldEncryption', () => {
     const stored = encryptField('09171234567');
     const tampered = stored.slice(0, -2) + (stored.endsWith('00') ? '11' : '00');
     expect(() => decryptField(tampered)).toThrow();
-  });
-
-  it('hashes TINs deterministically for the uniqueness check', () => {
-    expect(hashTin('123-456-789-000')).toBe(hashTin('123-456-789-000'));
-    expect(hashTin('123-456-789-000')).not.toBe(hashTin('123-456-789-001'));
   });
 
   it('masks to the last four characters', () => {

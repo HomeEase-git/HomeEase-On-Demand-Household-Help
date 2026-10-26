@@ -27,11 +27,10 @@ export const NAV_STRUCTURE = [
     ],
   },
   // Bookings and Payments already expose their sub-pages (Disputes, Payouts,
-  // Refunds, Commission & Debt) via an in-page SubNav tab strip, so they stay single links here
+  // Refunds, Service Fee & Debt) via an in-page SubNav tab strip, so they stay single links here
   // instead of duplicating that navigation as a sidebar dropdown too.
   { type: 'link', to: '/bookings', page: 'bookings', icon: 'fa-calendar-check', label: 'Bookings' },
   { type: 'link', to: '/payments', page: 'payments', icon: 'fa-credit-card', label: 'Payments' },
-  { type: 'link', to: '/tax/vat-registrations', page: 'vat-registrations', icon: 'fa-receipt', label: 'VAT Registrations' },
   { type: 'link', to: '/reviews', page: 'reviews', icon: 'fa-star', label: 'Reviews' },
   { type: 'link', to: '/reports/logs', page: 'reports', icon: 'fa-chart-bar', label: 'Reports' },
   { type: 'link', to: '/promo-banners', page: 'promo-banners', icon: 'fa-images', label: 'Promo Banners' },

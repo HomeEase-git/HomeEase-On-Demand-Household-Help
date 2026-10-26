@@ -9,7 +9,7 @@ const EXTRA_PAGES = [
   { to: '/payments/refunds', icon: 'fa-rotate-left', label: 'Refunds', group: 'Payments' },
   { to: '/payments/payouts', icon: 'fa-money-bill-transfer', label: 'Payouts', group: 'Payments' },
   { to: '/payments/books', icon: 'fa-book', label: 'Books & reconciliation', group: 'Payments' },
-  { to: '/payments/commission', icon: 'fa-percent', label: 'Commission & Debt', group: 'Payments' },
+  { to: '/payments/commission', icon: 'fa-percent', label: 'Service Fee & Debt', group: 'Payments' },
   { to: '/reviews/flagged', icon: 'fa-flag', label: 'Flagged reviews', group: 'Reviews' },
   { to: '/mfa-setup', icon: 'fa-shield-halved', label: 'Two-factor authentication', group: 'Settings' },
 ]
@@ -22,8 +22,8 @@ const KEYWORDS = {
   '/service-requests': 'add category skills certification approve',
   '/worker-packages': 'bundles approve price',
   '/price-list': 'prices rates cost job bulk increase raise pricing',
-  '/price-adjustments': 'pricing rules same-day rush fee distance km tier pro expert multiplier no-show penalty compensation',
-  '/payments/commission': 'commission rate platform fee cut worker debt hold limit dues',
+  '/price-adjustments': 'pricing rules same-day rush fee distance km tier worker expert multiplier no-show penalty compensation',
+  '/payments/commission': 'service fee commission rate platform fee cut worker debt hold limit dues',
 }
 
 export const OPEN_COMMAND_PALETTE_EVENT = 'homeease:open-command-palette'

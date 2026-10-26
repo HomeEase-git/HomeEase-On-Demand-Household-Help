@@ -34,8 +34,11 @@ function formatAge(ageHours) {
 const STATUS_BADGE_VARIANT = {
   OPEN: 'pending',
   UNDER_REVIEW: 'pending',
+  // Older quote-dispute outcomes.
   RESOLVED_APPROVED: 'approved',
   RESOLVED_NEW_QUOTE_REQUESTED: 'approved',
+  RESOLVED_INVOICE_KEPT: 'approved',
+  RESOLVED_INVOICE_ADJUSTED: 'approved',
   RESOLVED_CANCELLED: 'approved',
   RESOLVED_PAID: 'approved',
   RESOLVED_WORKER_PROTECTED: 'approved',
@@ -43,18 +46,19 @@ const STATUS_BADGE_VARIANT = {
   RESOLVED_DISMISSED: 'approved',
 }
 
-const QUOTE_DISPUTE_ACTIONS = [
+// The client reported the worker's invoice before paying.
+const INVOICE_DISPUTE_ACTIONS = [
   {
-    action: 'APPROVE_QUOTE',
-    label: 'Approve Quote',
+    action: 'KEEP_INVOICE',
+    label: 'Keep Invoice',
     className: 'btn btn-success',
-    description: 'Proceeds the booking to QUOTE_APPROVED at the disputed price. The worker can complete the job as quoted.',
+    description: 'The invoice stands as sent. The client is asked to pay it again (cash to the worker, or a new GCash/Maya checkout).',
   },
   {
-    action: 'REQUEST_NEW_QUOTE',
-    label: 'Request New Quote',
+    action: 'REMOVE_INVOICE_EXTRAS',
+    label: 'Remove Added Lines',
     className: 'btn btn-outline',
-    description: 'Sends the booking back to IN_PROGRESS so the worker can submit a revised quote.',
+    description: 'Takes off the parts and extra work the worker added, keeps the booked job, and asks the client to pay the rest.',
   },
 ]
 
@@ -85,7 +89,7 @@ const NON_PAYMENT_ACTIONS = [
   },
 ]
 
-// For a dispute the booking has already moved past — e.g. a quote dispute
+// For a dispute the booking has already moved past — e.g. a dispute
 // whose booking left DISPUTED some other way, or a reschedule escalation
 // support already sorted out. Closes the dispute without touching the
 // booking or any money.
@@ -97,14 +101,16 @@ const DISMISS_ACTION = {
 }
 
 // Mirrors adminDisputeController.resolveDispute's guards so only actions
-// that can actually succeed are offered — quote actions need the booking
-// still DISPUTED, CANCEL_BOOKING needs one of the statuses below.
+// that can actually succeed are offered — invoice actions need the booking
+// still DISPUTED with an invoice sent, CANCEL_BOOKING needs one of the
+// statuses below.
 const CANCELLABLE_BOOKING_STATUSES = ['DISPUTED', 'PENDING_COMPLETION', 'AWAITING_PAYMENT', 'COMPLETED']
 
 function getActionsForDispute(dispute) {
   if (!dispute) return []
   if (dispute.bookingStatus === 'DISPUTED') {
-    return [...QUOTE_DISPUTE_ACTIONS, CANCEL_ACTION]
+    // A dispute on an older quote (no invoice yet) can only be cancelled.
+    return dispute.hasInvoice ? [...INVOICE_DISPUTE_ACTIONS, CANCEL_ACTION] : [CANCEL_ACTION]
   }
   const actions = dispute.bookingStatus === 'AWAITING_PAYMENT' ? [...NON_PAYMENT_ACTIONS] : []
   if (CANCELLABLE_BOOKING_STATUSES.includes(dispute.bookingStatus)) actions.push(CANCEL_ACTION)
@@ -146,8 +152,8 @@ export default function BookingDispute() {
   const { user } = useAuth()
 
   // The backend filters on an exact status match; "Resolved" spans 3
-  // possible values (RESOLVED_APPROVED/RESOLVED_NEW_QUOTE_REQUESTED/
-  // RESOLVED_CANCELLED), so that tab fetches 'all' and filters client-side.
+  // several RESOLVED_* values (RESOLVED_INVOICE_KEPT/RESOLVED_INVOICE_ADJUSTED/
+  // RESOLVED_CANCELLED, ...), so that tab fetches 'all' and filters client-side.
   // "Refund Failed" is a dedicated backend pseudo-status (NEEDS_REFUND_REVIEW,
   // matched on Dispute.refundStatus rather than Dispute.status) — the queue
   // for a CANCEL_BOOKING resolution whose refund/void to Xendit failed and
@@ -426,7 +432,7 @@ export default function BookingDispute() {
             </p>
             {isDisputeActionable(selected.status) && !CANCELLABLE_BOOKING_STATUSES.includes(selected.bookingStatus) && (
               <p className="modal-body" style={{ marginBottom: '0.75rem', color: 'var(--warning, #b45309)' }}>
-                This booking is no longer in dispute ({selected.bookingStatus?.replace(/_/g, ' ')}), so quote actions no longer apply. Dismiss this dispute if nothing else is needed.
+                This booking is no longer in dispute ({selected.bookingStatus?.replace(/_/g, ' ')}), so invoice actions no longer apply. Dismiss this dispute if nothing else is needed.
               </p>
             )}
             <div className="modal-detail-grid--2col">

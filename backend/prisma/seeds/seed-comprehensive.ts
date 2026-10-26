@@ -1144,8 +1144,6 @@ async function createBookingsAndPayments(
     { status: BookingStatus.ACCEPTED },
     { status: BookingStatus.REJECTED },
     { status: BookingStatus.IN_PROGRESS, urgencyLevel: UrgencyLevel.URGENT },
-    { status: BookingStatus.QUOTE_SUBMITTED, quoteReminderSent: true },
-    { status: BookingStatus.QUOTE_APPROVED },
     { status: BookingStatus.PENDING_COMPLETION, completionReminderSent: true },
     // AWAITING_PAYMENT — pay-after-completion, GCash/Maya invoice outstanding.
     { status: BookingStatus.AWAITING_PAYMENT, forceMethod: "GATEWAY" },

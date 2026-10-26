@@ -344,7 +344,7 @@ export default function RequestDetailScreen() {
         <View className="bg-card rounded-2xl p-4 mb-3">
           <Text className="text-text-primary font-bold mb-2">Status</Text>
           <View className="flex-row items-center gap-2">
-            <StatusBadge status={status as any} />
+            <StatusBadge status={status as any} variant="booking" />
             {!!booking.group && (
               <View className="bg-accent/10 rounded-full px-2 py-0.5">
                 <Text className="text-accent text-[11px] font-bold">
@@ -387,17 +387,20 @@ export default function RequestDetailScreen() {
               </View>
               <View className="flex-row justify-between py-1">
                 <Text className="text-text-muted text-xs">
-                  Platform commission
+                  Service fee
                   {booking.earnings.commissionRate != null
                     ? ` (${Number((booking.earnings.commissionRate * 100).toFixed(2))}%)`
                     : ""}
                 </Text>
                 <Text className="text-text-secondary text-xs">-₱{booking.earnings.commissionAmount.toFixed(2)}</Text>
               </View>
-              <View className="flex-row justify-between py-1">
-                <Text className="text-text-muted text-xs">Withholding tax</Text>
-                <Text className="text-text-secondary text-xs">-₱{booking.earnings.withholdingTaxAmount.toFixed(2)}</Text>
-              </View>
+              {/* Only on jobs paid before HomeEase stopped withholding tax. */}
+              {booking.earnings.withholdingTaxAmount > 0 && (
+                <View className="flex-row justify-between py-1">
+                  <Text className="text-text-muted text-xs">Withholding tax</Text>
+                  <Text className="text-text-secondary text-xs">-₱{booking.earnings.withholdingTaxAmount.toFixed(2)}</Text>
+                </View>
+              )}
               {booking.earnings.vatAmount > 0 && (
                 <View className="flex-row justify-between py-1">
                   <Text className="text-text-muted text-xs">VAT collected for you</Text>
@@ -415,6 +418,9 @@ export default function RequestDetailScreen() {
                 <Text className="text-text-muted text-xs">You Receive</Text>
                 <Text className="text-success text-xs font-bold">₱{booking.earnings.workerPayout.toFixed(2)}</Text>
               </View>
+              <Text className="text-text-muted text-[11px] mt-1">
+                Taxes on your earnings are yours to file with the BIR.
+              </Text>
             </View>
           )}
         </View>

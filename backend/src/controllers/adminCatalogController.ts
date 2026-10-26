@@ -184,7 +184,6 @@ export function validateCatalog(
 }
 
 function taskData(task: CatalogTaskInput, sortOrder: number) {
-  const isCustomQuote = task.pricingModel === 'CUSTOM_QUOTE';
   return {
     name: task.name!.trim(),
     description: task.description?.trim() || null,
@@ -194,9 +193,9 @@ function taskData(task: CatalogTaskInput, sortOrder: number) {
     // Retired worker price range — see ServiceTask.minPrice.
     minPrice: null,
     maxPrice: null,
-    // Display-only for FIXED/CUSTOM_QUOTE (the matrix's "per visit").
+    // Display-only for FIXED (the matrix's "per visit").
     unitLabel: task.unitLabel?.trim() || null,
-    durationHours: isCustomQuote ? null : task.durationHours ?? null,
+    durationHours: task.durationHours ?? null,
     // Omitted by the job-matrix script, which mustn't reset it.
     ...(task.allowsFollowUp !== undefined ? { allowsFollowUp: task.allowsFollowUp } : {}),
   };
@@ -327,7 +326,7 @@ async function saveCatalog(req: AuthRequest, res: Response, serviceTypeId: strin
   // Same minimum-wage guardrail as the single-job save (adminServiceTaskController).
   const doleNotes: string[] = [];
   for (const task of tasks) {
-    if (task.pricingModel === 'CUSTOM_QUOTE') continue;
+    if (task.isActive === false) continue;
     const check = checkDoleFloor(getHighestDoleWageReference(), task.basePrice!, task.overrideReason);
     if (check.blocked) {
       return res.status(400).json(errorResponse(400, `Job "${task.name!.trim()}": ${check.message}`));

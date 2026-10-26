@@ -109,10 +109,10 @@ export default function PriceAdjustments() {
             title="Expertise Tiers"
             description="Rates scale up for higher tiers, computed live from a worker's rating, completed jobs and years of experience (declared at KYC, confirmed by the admin) — not manually assigned. A worker needs all three."
           >
-            <p className="settings-group__label" style={{ marginTop: 0 }}>Pro Tier</p>
+            <p className="settings-group__label" style={{ marginTop: 0 }}>Skilled Tier</p>
             <div className="detail-grid" style={{ marginBottom: 0 }}>
               <AdornedNumberField
-                id="settings-pro-min-rating"
+                id="settings-worker-min-rating"
                 label="Min Rating"
                 min={0}
                 max={5}
@@ -122,7 +122,7 @@ export default function PriceAdjustments() {
                 error={fieldErrors.tierProMinRating}
               />
               <AdornedNumberField
-                id="settings-pro-min-jobs"
+                id="settings-worker-min-jobs"
                 label="Min Completed Jobs"
                 min={0}
                 value={current.tierProMinJobs}
@@ -130,7 +130,7 @@ export default function PriceAdjustments() {
                 error={fieldErrors.tierProMinJobs}
               />
               <AdornedNumberField
-                id="settings-pro-min-years"
+                id="settings-worker-min-years"
                 label="Min Years of Experience"
                 suffix="yrs"
                 min={0}
@@ -140,7 +140,7 @@ export default function PriceAdjustments() {
                 error={fieldErrors.tierProMinYears}
               />
               <AdornedNumberField
-                id="settings-pro-multiplier"
+                id="settings-worker-multiplier"
                 label="Rate Multiplier"
                 suffix="×"
                 min={1}
@@ -201,7 +201,7 @@ export default function PriceAdjustments() {
           <SettingsSection
             icon="fa-scale-balanced"
             title="Penalties & Compensation"
-            description="Fixed amounts charged when a booking goes wrong on site. They aren't part of the job price and are only charged in these cases. The default ₱200 is roughly a pro's round-trip fare and lost time for a wasted visit, and it is the same both ways so neither side is favored."
+            description="Fixed amounts charged when a booking goes wrong on site. They aren't part of the job price and are only charged in these cases. The default ₱200 is roughly a worker's round-trip fare and lost time for a wasted visit, and it is the same both ways so neither side is favored."
           >
             <div className="detail-grid" style={{ marginBottom: 0 }}>
               <AdornedNumberField
@@ -236,7 +236,7 @@ export default function PriceAdjustments() {
 
           <p className="toggle-row__hint" style={{ marginTop: '0.5rem' }}>
             Looking for the commission rate or the worker debt limit? They don&apos;t change what clients pay, so they&apos;re in{' '}
-            <Link to="/payments/commission">Payments → Commission &amp; Debt</Link>.
+            <Link to="/payments/commission">Payments → Service Fee &amp; Debt</Link>.
           </p>
         </>
       )}

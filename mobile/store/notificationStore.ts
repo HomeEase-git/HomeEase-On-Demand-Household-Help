@@ -22,13 +22,13 @@ export function notificationCategory(type: string): NotificationCategory {
   return 'system';
 }
 
-// Where a client's push tap goes: straight to the booking (or its quote) when
-// the notification names one, else the notification screen. relatedId is a
+// Where a client's push tap goes: straight to the booking when the
+// notification names one, else the notification screen. relatedId is a
 // booking id for booking/payment types only (disputes etc. use other ids).
 export function clientNotificationRoute(type: string, relatedId: string | null | undefined, notificationId: string): string {
   const category = notificationCategory(type);
   if (relatedId && (category === "booking" || category === "payment")) {
-    return type === "QUOTE_SUBMITTED" || type === "QUOTE_REMINDER" ? `/(client)/booking/${relatedId}/quote` : `/(client)/booking/${relatedId}`;
+    return `/(client)/booking/${relatedId}`;
   }
   return `/(client)/inbox/notification/${notificationId}`;
 }

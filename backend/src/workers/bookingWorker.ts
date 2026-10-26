@@ -27,29 +27,25 @@ import { JWT_EXPIRY } from '@utils/jwt';
 import { purgeExpiredData } from '@services/dataRetentionService';
 
 const HOUR_MS = 60 * 60 * 1000;
+// The invoice has been sent this long without being paid: remind the client
+// (and, for cash, the worker to tap "Cash received").
 const COMPLETION_REMINDER_HOURS = 12;
 // AWAITING_PAYMENT gets a much shorter, separate reminder than the general
-// 12h completion one — the client already confirmed and a checkout exists,
-// so this is a "you have one thing left, come finish it" nudge for an
-// abandoned/forgotten Xendit webview, not "go review a photo and decide."
+// 12h one — a checkout exists, so this is a "you have one thing left, come
+// finish it" nudge for an abandoned/forgotten Xendit webview.
 const PAYMENT_REMINDER_HOURS = 2;
-const COMPLETION_AUTO_CONFIRM_HOURS = 24;
-// A GCash/Maya booking the client confirmed but never paid (or never even
-// confirmed) is escalated to an admin dispute after this long. No platform
-// money is fronted — the worker is simply not paid until it clears.
+// A cash invoice the worker never marked "Cash received" and the client never
+// reported is recorded as paid after this long. The client had the whole
+// window to report it; the worker is told so they can contact support.
+const CASH_AUTO_SETTLE_HOURS = 24;
+// A GCash/Maya booking the client never paid is escalated to an admin
+// dispute after this long. No platform money is fronted — the worker is
+// simply not paid until it clears.
 const PAYMENT_OVERDUE_DISPUTE_HOURS = 72;
 // Reconcile a payment/payout that's been mid-flight longer than this against
 // Xendit directly, in case a webhook was missed.
 const RECONCILE_AFTER_HOURS = 1;
-const QUOTE_REMINDER_HOURS = 12;
-const QUOTE_AUTO_APPROVE_HOURS = 24;
-// Shorter than the quote window — a mid-job addon happens while the job is
-// actively being worked on (the client is presumably reachable/nearby),
-// and most bookings complete well within a day anyway (completeBooking
-// auto-resolves anything still pending at that point regardless), so this
-// sweep mainly matters for longer-running jobs.
-const ADDON_REMINDER_HOURS = 2;
-// Same shape as the quote-approval safety net above — a client who never
+// A client who never
 // opens the app to explicitly keep/decline a reschedule shouldn't leave it
 // unresolved forever (see bookingController.extendBooking/acknowledgeReschedule).
 const RESCHEDULE_REMINDER_HOURS = 12;
@@ -175,14 +171,14 @@ async function escalateOverduePayment(booking: { id: string; clientId: string; w
 }
 
 /**
- * Post-completion payment safety net (pay-after-completion model).
+ * Unpaid-invoice safety net (the worker sends the invoice at completion).
  *
- *  - PENDING_COMPLETION 12h  -> nudge the client to confirm.
+ *  - PENDING_COMPLETION / AWAITING_PAYMENT 12h -> nudge the client to pay
+ *    (and, for cash, the worker to tap "Cash received").
  *  - AWAITING_PAYMENT 2h (own clock, separate from the 12h above) -> nudge
  *    the client to finish an abandoned/forgotten Xendit checkout.
- *  - PENDING_COMPLETION 24h + CASH -> auto-confirm: the client is assumed to
- *    have paid the worker in person, so the booking is finalized and the
- *    platform's cut is accrued as worker commission debt (settleCashBooking).
+ *  - PENDING_COMPLETION + CASH 24h -> recorded as paid (settleCashBooking).
+ *    A reported invoice is DISPUTED, so it's never picked up here.
  *  - PENDING_COMPLETION / AWAITING_PAYMENT 72h + GCash/Maya -> escalate to an
  *    admin dispute. No auto-complete, no platform funds fronted.
  *  - Reconciliation: PENDING payments / PROCESSING payouts older than 1h are
@@ -193,11 +189,11 @@ export async function remindAndAutoSettleCompletions(): Promise<void> {
   const now = Date.now();
   const reminderCutoff = new Date(now - COMPLETION_REMINDER_HOURS * HOUR_MS);
   const paymentReminderCutoff = new Date(now - PAYMENT_REMINDER_HOURS * HOUR_MS);
-  const autoConfirmCutoff = new Date(now - COMPLETION_AUTO_CONFIRM_HOURS * HOUR_MS);
   const overdueCutoff = new Date(now - PAYMENT_OVERDUE_DISPUTE_HOURS * HOUR_MS);
   const reconcileCutoff = new Date(now - RECONCILE_AFTER_HOURS * HOUR_MS);
+  const cashSettleCutoff = new Date(now - CASH_AUTO_SETTLE_HOURS * HOUR_MS);
 
-  // 1. 12h reminder — worker submitted a photo, client hasn't confirmed/paid.
+  // 1. 12h reminder — the invoice was sent and is still unpaid.
   const needsReminder = await prisma.booking.findMany({
     where: {
       status: { in: ['PENDING_COMPLETION', 'AWAITING_PAYMENT'] },
@@ -206,13 +202,25 @@ export async function remindAndAutoSettleCompletions(): Promise<void> {
     },
   });
   for (const booking of needsReminder) {
+    const isCash = (booking.paymentMethodType ?? 'CASH') === 'CASH';
     await notifyUser({
       userId: booking.clientId,
       type: 'COMPLETION_REMINDER',
-      title: 'Please confirm and pay for your completed job',
-      message: 'Your worker marked this job done — review the photo, confirm, and complete payment.',
+      title: 'Your invoice is still unpaid',
+      message: isCash
+        ? 'Your worker finished this job. Pay them in cash, or report the invoice in the app if something is wrong.'
+        : 'Your worker finished this job. Open the booking to pay, or report the invoice if something is wrong.',
       relatedId: booking.id,
     });
+    if (isCash && booking.workerId) {
+      await notifyUser({
+        userId: booking.workerId,
+        type: 'COMPLETION_REMINDER',
+        title: 'Did you get the cash?',
+        message: `If the client paid you for booking ${formatDisplayId(booking.id)}, open the job and tap Cash received.`,
+        relatedId: booking.id,
+      });
+    }
     await prisma.booking.update({
       where: { id: booking.id },
       data: { completionReminderSentAt: new Date() },
@@ -245,37 +253,37 @@ export async function remindAndAutoSettleCompletions(): Promise<void> {
     });
   }
 
-  // 2. CASH PENDING_COMPLETION past 24h -> auto-confirm (cash assumed collected).
+  // 2. A cash invoice nobody confirmed or reported in 24h -> recorded as paid.
   const staleCash = await prisma.booking.findMany({
     where: {
       status: 'PENDING_COMPLETION',
-      workerCompletedAt: { lte: autoConfirmCutoff },
       OR: [{ paymentMethodType: 'CASH' }, { paymentMethodType: null }],
+      workerCompletedAt: { lte: cashSettleCutoff },
     },
   });
   for (const booking of staleCash) {
     try {
-      await settleCashBooking(booking.id);
+      await settleCashBooking(booking.id, ['PENDING_COMPLETION']);
       await notifyUser({
         userId: booking.clientId,
         type: 'BOOKING_AUTO_COMPLETED',
-        title: 'Booking Auto-Completed',
-        message: "You didn't confirm in time, so this cash booking was automatically marked complete.",
+        title: 'Your job is done',
+        message: 'We recorded your cash payment to your worker. If you did not pay, contact support.',
         relatedId: booking.id,
       });
       if (booking.workerId) {
         await notifyUser({
           userId: booking.workerId,
           type: 'BOOKING_AUTO_COMPLETED',
-          title: 'Job Auto-Completed',
-          message: 'The client did not confirm in time, so this cash job was auto-completed.',
+          title: 'Cash payment recorded',
+          message: `You didn't tap Cash received for booking ${formatDisplayId(booking.id)} within ${CASH_AUTO_SETTLE_HOURS} hours, so we recorded it as paid. If the client didn't pay, contact support.`,
           relatedId: booking.id,
         });
       }
       await writeAuditLog({
         action: 'BOOKING_AUTO_SETTLED',
         category: 'STATUS_CHANGE',
-        message: `Cash booking ${booking.id} auto-completed after 24h without client confirmation`,
+        message: `Cash booking ${booking.id} recorded as paid ${CASH_AUTO_SETTLE_HOURS}h after the invoice, with no Cash received or report`,
         metadata: { bookingId: booking.id },
       });
     } catch (error) {
@@ -426,137 +434,6 @@ export async function remindAndAutoSettleCompletions(): Promise<void> {
 }
 
 /**
- * Client-approval safety net for QUOTE_SUBMITTED bookings — same shape as
- * remindAndAutoSettleCompletions but for the quote-approval step: a 12h
- * reminder, then an unresponsive client's quote auto-approves at 24h so a
- * worker who already did the job isn't stuck unable to complete it (and get
- * paid) because the client never opened the app.
- */
-export async function remindAndAutoApproveQuotes(): Promise<void> {
-  const now = Date.now();
-  const reminderCutoff = new Date(now - QUOTE_REMINDER_HOURS * HOUR_MS);
-  const autoApproveCutoff = new Date(now - QUOTE_AUTO_APPROVE_HOURS * HOUR_MS);
-
-  const needsReminder = await prisma.booking.findMany({
-    where: {
-      status: 'QUOTE_SUBMITTED',
-      quotedAt: { lte: reminderCutoff },
-      quoteReminderSentAt: null,
-    },
-  });
-
-  for (const booking of needsReminder) {
-    await notifyUser({
-      userId: booking.clientId,
-      type: 'QUOTE_REMINDER',
-      title: 'A quote is waiting for your approval',
-      message: 'Your worker submitted a quote for this job — review and approve or dispute it.',
-      relatedId: booking.id,
-    });
-    await prisma.booking.update({
-      where: { id: booking.id },
-      data: { quoteReminderSentAt: new Date() },
-    });
-  }
-
-  const staleQuotes = await prisma.booking.findMany({
-    where: {
-      status: 'QUOTE_SUBMITTED',
-      quotedAt: { lte: autoApproveCutoff },
-    },
-    // Only approved add-ons count toward finalPrice — see
-    // BookingAddOn.clientApprovedAt's schema comment. Mirrors
-    // bookingController.approveQuote's own formula, which this sweep is the
-    // unattended equivalent of.
-    include: { addOns: { where: { clientApprovedAt: { not: null } } } },
-  });
-
-  for (const booking of staleQuotes) {
-    if (booking.laborCost == null || booking.materialsCost == null) continue;
-
-    const addonsCost = booking.addOns.reduce((sum, addon) => sum + addon.price, 0);
-
-    try {
-      // Guarded on the same quote revision the client would have seen, so a
-      // client approve/refuse or a worker revision since the read wins.
-      try {
-        await updateBookingIfStatus(
-          prisma,
-          booking.id,
-          'QUOTE_SUBMITTED',
-          {
-            status: 'QUOTE_APPROVED',
-            quoteStatus: 'APPROVED',
-            approvedAt: new Date(),
-            finalPrice: booking.laborCost! + booking.materialsCost! + addonsCost,
-          },
-          { quoteRevision: booking.quoteRevision, quotedAt: booking.quotedAt }
-        );
-      } catch (error) {
-        if (isBookingStatusConflict(error)) continue;
-        throw error;
-      }
-
-      if (booking.workerId) {
-        await notifyUser({
-          userId: booking.workerId,
-          type: 'QUOTE_AUTO_APPROVED',
-          title: 'Quote Auto-Approved',
-          message: 'The client did not respond in time, so your quote was automatically approved. You can now complete the job.',
-          relatedId: booking.id,
-        });
-      }
-      await notifyUser({
-        userId: booking.clientId,
-        type: 'QUOTE_AUTO_APPROVED',
-        title: 'Quote Auto-Approved',
-        message: "You didn't respond in time, so the worker's quote was automatically approved.",
-        relatedId: booking.id,
-      });
-
-      await writeAuditLog({
-        action: 'QUOTE_AUTO_APPROVED',
-        category: 'STATUS_CHANGE',
-        message: `Booking ${booking.id} quote auto-approved after 24h without client response`,
-        metadata: { bookingId: booking.id },
-      });
-    } catch (error) {
-      console.error(`Failed to auto-approve quote for booking ${booking.id}:`, error);
-    }
-  }
-}
-
-/**
- * Reminder for a pending mid-job extra (see bookingController.addAddon /
- * respondToAddon): one nudge to the client after ADDON_REMINDER_HOURS. There
- * is deliberately no auto-approve: an extra is only billed when the client
- * taps Approve, so the price is agreed in the app. Anything still pending
- * when the job is marked complete is auto-REJECTED by completeBooking.
- */
-export async function remindPendingAddons(): Promise<void> {
-  const reminderCutoff = new Date(Date.now() - ADDON_REMINDER_HOURS * HOUR_MS);
-
-  const needsReminder = await prisma.bookingAddOn.findMany({
-    where: { clientApprovedAt: null, clientRejectedAt: null, createdAt: { lte: reminderCutoff }, reminderSentAt: null },
-    include: { booking: { select: { id: true, clientId: true } } },
-  });
-
-  for (const addon of needsReminder) {
-    await notifyUser({
-      userId: addon.booking.clientId,
-      type: 'ADDON_ADDED',
-      title: 'Extra work is waiting for your approval',
-      message: `"${addon.name}" (₱${addon.price}) still needs your answer. It is only billed if you approve it.`,
-      relatedId: addon.booking.id,
-    });
-    await prisma.bookingAddOn.update({
-      where: { id: addon.id },
-      data: { reminderSentAt: new Date() },
-    });
-  }
-}
-
-/**
  * Worker no-show: an ACCEPTED booking whose start time passed
  * AppSettings.noShowGraceMinutes ago with no check-in is cancelled, and the
  * worker is charged AppSettings.noShowPenaltyAmount (added to their platform
@@ -638,7 +515,7 @@ export async function cancelWorkerNoShows(): Promise<void> {
         userId: booking.clientId,
         type: 'BOOKING_CANCELLED',
         title: "Your worker didn't show up",
-        message: `Your worker didn't check in within ${noShowGraceMinutes} minutes of the start time, so the booking was cancelled. You won't be charged — you can book another pro right away.`,
+        message: `Your worker didn't check in within ${noShowGraceMinutes} minutes of the start time, so the booking was cancelled. You won't be charged — you can book another worker right away.`,
         relatedId: booking.id,
       });
       void sendSmsToUser({
@@ -730,8 +607,7 @@ export async function escalateStaleDisputes(): Promise<void> {
 
 /**
  * Client-response safety net for a rescheduled booking (see
- * bookingController.extendBooking/acknowledgeReschedule) — same shape as
- * remindAndAutoApproveQuotes: a 12h reminder, then an unresponsive client's
+ * bookingController.extendBooking/acknowledgeReschedule): a 12h reminder, then an unresponsive client's
  * new date auto-confirms at 24h so the episode doesn't sit open forever.
  */
 export async function remindAndAutoConfirmReschedules(): Promise<void> {
@@ -752,7 +628,7 @@ export async function remindAndAutoConfirmReschedules(): Promise<void> {
       userId: booking.clientId,
       type: 'BOOKING_RESCHEDULE_REMINDER',
       title: 'Your booking was moved',
-      message: 'Your pro needs another day — review the new date and confirm or cancel.',
+      message: 'Your worker needs another day — review the new date and confirm or cancel.',
       relatedId: booking.id,
     });
     await prisma.booking.update({
@@ -838,7 +714,7 @@ export async function remindAndAutoDeclineRescheduleRequests(): Promise<void> {
       title: 'Reschedule request waiting',
       message:
         booking.rescheduleRequestedBy === 'WORKER'
-          ? 'Your pro is still waiting on your response to their reschedule request.'
+          ? 'Your worker is still waiting on your response to their reschedule request.'
           : 'Your client is still waiting on your response to their reschedule request.',
       relatedId: booking.id,
     });
@@ -1095,12 +971,6 @@ export async function startBookingWorker() {
           break;
         case JOB_NAMES.AUTO_SETTLE_COMPLETED:
           await remindAndAutoSettleCompletions();
-          break;
-        case JOB_NAMES.QUOTE_TIMEOUT_SWEEP:
-          await remindAndAutoApproveQuotes();
-          break;
-        case JOB_NAMES.ADDON_TIMEOUT_SWEEP:
-          await remindPendingAddons();
           break;
         case JOB_NAMES.NO_SHOW_SWEEP:
           await cancelWorkerNoShows();

@@ -100,7 +100,7 @@ export default function EarningsTransactionScreen() {
             )}
             {!!transaction.breakdown.commissionAmount && (
               <Row
-                label={`Platform commission${
+                label={`Service fee${
                   transaction.breakdown.commissionPercentage
                     ? ` (${Math.round(transaction.breakdown.commissionPercentage)}%)`
                     : ""

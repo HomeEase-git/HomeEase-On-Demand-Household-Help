@@ -6,10 +6,10 @@
  *  - PER_UNIT: basePrice is the rate per unit, times the quantity answer.
  *  - TIERED: retired (it was worker-defined price steps); any leftover task
  *    is charged like PER_UNIT so it never becomes unbookable.
- *  - CUSTOM_QUOTE: no upfront price; the worker quotes after inspecting.
+ *  - CUSTOM_QUOTE: retired. Former custom-quote jobs were switched off and
+ *    are refused at booking (see createBooking).
  *
- * Workers no longer set prices, so the old WorkerTaskPrice /
- * WorkerTaskTierPrice rows and ServiceTask.minPrice/maxPrice are ignored.
+ * Workers no longer set prices, so ServiceTask.minPrice/maxPrice are ignored.
  */
 
 export function isPerUnitModel(pricingModel: string): boolean {
@@ -32,7 +32,6 @@ export function taskBasePrice(
   task: { basePrice: number; pricingModel: string; quantityScopeField?: { label: string } | null },
   scopeAnswers: Record<string, unknown> | null | undefined
 ): TaskPriceResult {
-  if (task.pricingModel === 'CUSTOM_QUOTE') return { ok: true, basePrice: 0 };
   if (!isPerUnitModel(task.pricingModel)) return { ok: true, basePrice: task.basePrice };
 
   const field = task.quantityScopeField;

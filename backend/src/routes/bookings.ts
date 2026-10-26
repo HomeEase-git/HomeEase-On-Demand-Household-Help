@@ -14,17 +14,11 @@ import {
   requestReschedule,
   withdrawRescheduleRequest,
   respondToRescheduleRequest,
-  submitQuote,
-  reopenQuote,
-  approveQuote,
-  rejectQuote,
-  disputeQuote,
   completeBooking,
+  markCashReceived,
   confirmCompletion,
+  reportInvoice,
   cancelBooking,
-  respondToAddon,
-  addAddon,
-  requestExtraWork,
   submitReview,
   reportReview,
   addProgressPhotos,
@@ -34,12 +28,8 @@ import { authMiddleware } from '../middleware/auth';
 import { restrictTo } from '../middleware/role';
 import {
   validateCreateBooking,
-  validateSubmitQuote,
-  validateRejectQuote,
   validateDateAndTime,
   validateBookingStatusUpdate,
-  validateApproveQuote,
-  validateDisputeQuote,
   validateAddReview,
   validateArriveBooking,
   validateLiveLocation,
@@ -95,41 +85,30 @@ router.patch('/:id/request-reschedule', restrictTo('CLIENT', 'WORKER'), validate
 router.patch('/:id/reschedule-request/withdraw', restrictTo('CLIENT', 'WORKER'), withdrawRescheduleRequest);
 router.patch('/:id/reschedule-request/respond', restrictTo('CLIENT', 'WORKER'), respondToRescheduleRequest);
 
-// Submit quote (worker only)
-router.post('/:id/quote', restrictTo('WORKER'), validateSubmitQuote, submitQuote);
-// Take a submitted/approved quote back to IN_PROGRESS so its items can be edited
-router.post('/:id/quote/reopen', restrictTo('WORKER'), reopenQuote);
-
-// Approve or refuse quote (client only)
-router.patch('/:id/quote/approve', restrictTo('CLIENT'), validateApproveQuote, approveQuote);
-router.patch('/:id/quote/reject', restrictTo('CLIENT'), validateRejectQuote, rejectQuote);
-
-// Dispute quote (client only)
-router.patch('/:id/quote/dispute', restrictTo('CLIENT'), validateDisputeQuote, disputeQuote);
-
 // Upload a job-completion proof photo (worker only)
 router.post('/:id/completion-photo/upload', restrictTo('WORKER'), bookingPhotoUpload, uploadBookingCompletionPhoto);
-// Same upload for the worker's other job photos: quote receipts, materials
-// in use, and proof for a cancellation after arriving.
+// Same upload for the worker's other job photos: invoice receipts, extra
+// work, and proof for a cancellation after arriving.
 router.post('/:id/job-photo/upload', restrictTo('WORKER'), bookingPhotoUpload, uploadBookingCompletionPhoto);
 
 // Worker posts an "ongoing" proof photo update (worker only)
 router.post('/:id/progress-photos', restrictTo('WORKER'), addProgressPhotos);
 
-// Complete booking — worker submits completion photo, awaits client confirmation (worker only)
+// Worker finishes the job and sends the invoice (completion photo, parts,
+// extra work) (worker only)
 router.patch('/:id/complete', restrictTo('WORKER'), completeBooking);
 
-// Confirm completion — client reviews the photo and finalizes the booking (client only)
+// Worker confirms the client paid a cash invoice (worker only)
+router.patch('/:id/cash-received', restrictTo('WORKER'), markCashReceived);
+
+// "Pay now" on a GCash/Maya invoice — returns the checkout URL (client only)
 router.patch('/:id/confirm-completion', restrictTo('CLIENT'), confirmCompletion);
+
+// Client reports the invoice before paying — goes to an admin (client only)
+router.patch('/:id/invoice/report', restrictTo('CLIENT'), reportInvoice);
 
 // Cancel booking (client or worker)
 router.patch('/:id/cancel', validateBookingStatusUpdate, cancelBooking);
-
-// Extra work on the same visit: the worker adds a priced extra, the client
-// can ask for one, and only the client's approval bills it.
-router.post('/:id/addons', restrictTo('WORKER'), addAddon);
-router.post('/:id/addons/request', restrictTo('CLIENT'), requestExtraWork);
-router.patch('/:id/addons/:addonId/respond', restrictTo('CLIENT'), respondToAddon);
 
 // Upload a review photo (client only) — no reviewId yet, returned URL is
 // included in the submit-review payload as photoUrls.

@@ -53,7 +53,7 @@ export default function RecordsScreen() {
   const filtered = jobs.filter((j) => tabForJob(j) === tab);
 
   // An ongoing job opens straight into the live job screen (arrive, start,
-  // quote, complete); a finished one opens its record.
+  // send the invoice, cash received); a finished one opens its record.
   const handleRecordPress = useCallback(
     (job: WorkerJob) => {
       router.push(tabForJob(job) === "Ongoing" ? `/(worker)/records/job/${job.id}` : `/(worker)/records/${job.id}`);

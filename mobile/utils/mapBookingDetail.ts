@@ -4,6 +4,30 @@ import type { ConditionType, RoomType, TimeSlot } from "../types/booking4step.ty
 // The client booking detail API response and its mapping to the app's
 // Booking shape. Moved out of app/(client)/booking/[bookingId]/index.tsx.
 
+/** One line of the worker's invoice (backend utils/invoiceItems.invoiceLines). */
+export type InvoiceLine = {
+  id: string | null;
+  kind: "JOB" | "PACKAGE" | "PREFERENCE" | "PART" | "EXTRA_WORK";
+  name: string;
+  price: number;
+  photoUrls: string[];
+};
+
+/**
+ * The bill the worker sends when the job is done. NOT_SENT: the lines show
+ * what was booked. DUE: waiting for payment. REPORTED: the client reported
+ * it and HomeEase is reviewing it.
+ */
+export type ApiInvoice = {
+  status: "NOT_SENT" | "DUE" | "REPORTED" | "PAID" | "CANCELLED";
+  sentAt: string | null;
+  lines: InvoiceLine[];
+  subtotal: number;
+  vatAmount: number;
+  tip: number;
+  total: number;
+};
+
 export type ApiBookingDetail = {
   id: string;
   worker: { id: string; fullName: string; phone?: string | null; avatar?: string | null; verified?: boolean } | null;
@@ -85,17 +109,7 @@ export type ApiBookingDetail = {
   // an ordinary single-day booking. Sibling list is date-ordered.
   groupId?: string | null;
   group?: { totalDays: number; bookings: { id: string; scheduledDate: string; status: string }[] } | null;
-  quote: {
-    laborCost: number;
-    materialsCost: number;
-    notes: string | null;
-    quotedAt: string | null;
-    status?: string | null;
-    receiptUrls?: string[];
-    proofOfUseUrls?: string[];
-    rejectionReason?: string | null;
-    revision?: number;
-  } | null;
+  invoice?: ApiInvoice;
   review: { rating: number; comment: string | null; workerResponse?: string | null } | null;
   // Follow-up jobs: this booking's inspection (parent), and follow-up jobs
   // requested after it. allowsFollowUp = this is an inspection/diagnosis job.
@@ -146,15 +160,6 @@ export function mapApiBookingDetail(d: ApiBookingDetail): Booking {
             accountIdentifier: d.paymentAccountIdentifier ?? undefined,
           }
         : undefined,
-    quote: d.quote
-      ? {
-          laborCost: d.quote.laborCost,
-          materialsCost: d.quote.materialsCost,
-          totalAmount: d.finalPrice ?? d.quote.laborCost + d.quote.materialsCost,
-          notes: d.quote.notes ?? "",
-          submittedAt: d.quote.quotedAt ?? d.scheduledDate,
-        }
-      : undefined,
     rating: d.review?.rating,
     reviewText: d.review?.comment ?? undefined,
     rescheduledAt: d.rescheduledAt,

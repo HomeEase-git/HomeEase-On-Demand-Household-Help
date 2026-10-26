@@ -835,8 +835,6 @@ async function createBookingsAndPayments(
     { status: BookingStatus.ACCEPTED },
     { status: BookingStatus.REJECTED },
     { status: BookingStatus.IN_PROGRESS },
-    { status: BookingStatus.QUOTE_SUBMITTED },
-    { status: BookingStatus.QUOTE_APPROVED },
     { status: BookingStatus.PENDING_COMPLETION },
     { status: BookingStatus.DISPUTED, disputeStatus: "OPEN" },
     { status: BookingStatus.DISPUTED, disputeStatus: "UNDER_REVIEW" },

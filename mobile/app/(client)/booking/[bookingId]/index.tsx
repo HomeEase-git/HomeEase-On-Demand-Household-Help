@@ -9,6 +9,7 @@ import ScreenHeader from "../../../../components/ui/ScreenHeader";
 import StatusBadge from "../../../../components/ui/StatusBadge";
 import { BookingStatusHero } from "../../../../components/booking-detail/BookingStatusHero";
 import { BookingWorkerCard } from "../../../../components/booking-detail/BookingWorkerCard";
+import { InvoiceCard } from "../../../../components/booking-detail/InvoiceCard";
 import { formatJobTime, getBookingTimeline } from "../../../../utils/bookingTimeline";
 import PrimaryButton from "../../../../components/ui/PrimaryButton";
 import OutlinedButton from "../../../../components/ui/OutlinedButton";
@@ -25,10 +26,9 @@ import {
   acknowledgeReschedule as acknowledgeRescheduleApi,
   withdrawRescheduleRequest as withdrawRescheduleRequestApi,
   respondToRescheduleRequest,
-  respondToBookingAddOn,
   cancelBooking as cancelBookingApi,
   reportReview,
-  requestExtraWork,
+  reportInvoice,
 } from "../../../../services/api";
 import { formatTime12h } from "../../../../utils/bookingTime";
 import { colors } from "../../../../constants";
@@ -61,8 +61,8 @@ export default function BookingDetailScreen() {
   // backend-persisted charge instead of recomputing an invented one.
   const [rawDetail, setRawDetail] = useState<ApiBookingDetail | null>(null);
   const [reportVisible, setReportVisible] = useState(false);
-  const [extraVisible, setExtraVisible] = useState(false);
-  const [requestingExtra, setRequestingExtra] = useState(false);
+  const [invoiceReportVisible, setInvoiceReportVisible] = useState(false);
+  const [reportingInvoice, setReportingInvoice] = useState(false);
   const [reporting, setReporting] = useState(false);
   const [loading, setLoading] = useState(true);
   const [confirmingCompletion, setConfirmingCompletion] = useState(false);
@@ -102,16 +102,12 @@ export default function BookingDetailScreen() {
     }, [refreshBookingDetail]),
   );
 
-  // Picks up the worker's quote, arrival and completion without a manual
+  // Picks up the worker's arrival and invoice without a manual
   // refresh. Paused while the client is mid-action so a refresh can't
   // disturb the payment or confirmation flow.
   usePolling(() => refreshBookingDetail().catch(() => {}), 10000, {
     paused: !focused || confirmingCompletion || processingPayment || checkoutVisible,
   });
-
-  // Declared before the early returns below so the hook order stays the
-  // same between the loading render and the loaded one.
-  const [respondingAddonId, setRespondingAddonId] = useState<string | null>(null);
 
   if (loading && !booking) {
     return (
@@ -140,11 +136,6 @@ export default function BookingDetailScreen() {
     );
   }
 
-  // Real, backend-persisted values only — payment.subtotal/tip/totalAmount
-  // are what Xendit actually charged; fall back to the booking amount for
-  // the rare case a Payment row doesn't exist yet.
-  const pendingAddOns = rawDetail?.addOns?.filter((a) => !a.clientApprovedAt && !a.clientRejectedAt) ?? [];
-
   // Prefer the server-assembled breakdown (basePrice/distanceFee/tierFee
   // from the booking's PricingLog, VAT from settlement) — falls back to a
   // collapsed subtotal/addOns/tip/total for bookings fetched before that
@@ -165,19 +156,6 @@ export default function BookingDetailScreen() {
     total: booking.payment?.totalAmount ?? booking.amount,
   };
 
-  const handleAddonResponse = async (addonId: string, approve: boolean) => {
-    setRespondingAddonId(addonId);
-    try {
-      await respondToBookingAddOn(booking.id, addonId, approve);
-      await refreshBookingDetail();
-    } catch (error) {
-      console.error("Respond to addon error:", error);
-      alertModal.error("Error", "Failed to respond to this addon. Please try again.");
-    } finally {
-      setRespondingAddonId(null);
-    }
-  };
-
   // A worker no-show cancels the booking automatically now; an older
   // booking flagged before that can still be cancelled free (the client
   // didn't choose this, same as a forced reschedule below).
@@ -193,16 +171,16 @@ export default function BookingDetailScreen() {
   const hasPendingRescheduleRequest = hasOpenRescheduleRequest && !workerAskedToReschedule;
   const workerHasArrived = !!rawDetail?.timeline?.workerArrivedAt;
   const canRequestReschedule = rawDetail?.status === "ACCEPTED" && !workerHasArrived && !hasOpenRescheduleRequest;
-  // Follow-up job after an inspection/diagnosis (same pro), once its work is done.
+  // Follow-up job after an inspection/diagnosis (same worker), once its work is done.
   const canRequestFollowUp =
     !!rawDetail?.allowsFollowUp &&
     !!booking.workerId &&
     ["PENDING_COMPLETION", "AWAITING_PAYMENT", "COMPLETED"].includes(rawDetail?.status ?? "");
   const upcomingVisits = (rawDetail?.visits ?? []).filter((v) => v.status === "SCHEDULED");
-  // Same window the backend allows (bookingController.canAddExtraWork).
-  const canRequestExtra =
-    (rawDetail?.status === "ACCEPTED" && !!rawDetail?.timeline?.workerArrivedAt) ||
-    ["QUOTE_SUBMITTED", "QUOTE_APPROVED", "IN_PROGRESS"].includes(rawDetail?.status ?? "");
+  // The worker's invoice, once sent (NOT_SENT shows the booked price instead).
+  const invoice = rawDetail?.invoice;
+  const invoiceSent = !!invoice && invoice.status !== "NOT_SENT" && invoice.status !== "CANCELLED";
+  const invoiceDue = invoice?.status === "DUE";
   const jobTime = formatJobTime(rawDetail?.timeline?.workerStartedAt, rawDetail?.timeline?.workerCompletedAt);
   const requestedWhen = rawDetail?.requestedScheduledDate
     ? `${new Date(rawDetail.requestedScheduledDate).toLocaleDateString("en-PH", { month: "short", day: "numeric", timeZone: "UTC" })}${
@@ -212,9 +190,8 @@ export default function BookingDetailScreen() {
   const isCompleted = booking.status === "Completed";
   const isPendingCompletion = booking.status === "PendingCompletion";
   const isAwaitingPayment = booking.status === "AwaitingPayment";
-  const hasQuote = booking.status === "QuoteSubmitted" && booking.quote;
   // Distinct from a client-initiated cancel: a worker declining is its own
-  // "Declined" status, and only then do we offer "Find Another Pro". The raw
+  // "Declined" status, and only then do we offer "Find Another Worker". The raw
   // status covers the moment before the list status has refreshed.
   const isDeclined = booking.status === "Declined" || rawDetail?.status === "REJECTED";
 
@@ -274,7 +251,7 @@ export default function BookingDetailScreen() {
       accept ? "Accept new time?" : "Keep the original time?",
       accept
         ? `Move this booking to ${requestedWhen}?`
-        : "Your booking stays at its original date and time, and your pro is expected to arrive then.",
+        : "Your booking stays at its original date and time, and your worker is expected to arrive then.",
       {
         confirmText: accept ? "Accept" : "Keep Original",
         onConfirm: async () => {
@@ -341,7 +318,7 @@ export default function BookingDetailScreen() {
 
     alertModal.confirm(
       "Cancel entire job?",
-      `This cancels every day of this ${booking.groupTotalDays}-day job that's still pending (${cancellableIds.length} of ${siblings.length}). Days a pro has already accepted aren't affected.`,
+      `This cancels every day of this ${booking.groupTotalDays}-day job that's still pending (${cancellableIds.length} of ${siblings.length}). Days a worker has already accepted aren't affected.`,
       {
         confirmText: "Cancel Entire Job",
         destructive: true,
@@ -379,6 +356,7 @@ export default function BookingDetailScreen() {
   ).toUpperCase();
   const isCashBooking = bookingMethod === "CASH";
   const finalTotal =
+    invoice?.total ??
     rawDetail?.payment?.totalAmount ??
     booking.payment?.totalAmount ??
     booking.amount;
@@ -496,8 +474,9 @@ export default function BookingDetailScreen() {
     refreshBookingDetail().catch(() => {});
   };
 
-  // "Confirm & Pay" (online) / "Confirm Cash Payment" (cash). Cash finalizes
-  // immediately; GCash/Maya returns a Xendit checkout URL to open.
+  // "Pay now" on a GCash/Maya invoice whose checkout wasn't raised when the
+  // worker sent it. Returns a Xendit checkout URL to open; a cash invoice is
+  // paid to the worker, who confirms it.
   const handleConfirmCompletion = async () => {
     if (confirmingCompletion) return;
     setConfirmingCompletion(true);
@@ -527,10 +506,10 @@ export default function BookingDetailScreen() {
         openCheckout(result.checkoutUrl);
       }
     } catch (error) {
-      console.error("Confirm completion error:", error);
+      console.error("Pay now error:", error);
       alertModal.error(
         "Error",
-        "Failed to confirm completion. Please try again.",
+        "We couldn't start the payment. Please try again.",
       );
     } finally {
       setConfirmingCompletion(false);
@@ -548,7 +527,7 @@ export default function BookingDetailScreen() {
       >
         {/* Status Row */}
         <View className="flex-row items-center gap-2 mb-4">
-          <StatusBadge status={booking.status} />
+          <StatusBadge status={booking.status} variant="booking" />
           {!!booking.groupTotalDays && (
             <View className="bg-accent/10 rounded-full px-2 py-0.5">
               <Text className="text-accent text-[11px] font-bold">
@@ -570,6 +549,7 @@ export default function BookingDetailScreen() {
           timeline={getBookingTimeline(booking.status, {
             scheduledDate: formatScheduledDate(booking.date),
             workerName,
+            isCash: isCashBooking,
           })}
         />
 
@@ -579,7 +559,7 @@ export default function BookingDetailScreen() {
             <View className="flex-row items-center">
               <Ionicons name="calendar" size={22} color={colors.warning} />
               <Text className="font-bold text-sm text-text-primary ml-2 flex-1">
-                Your pro needs another day
+                Your worker needs another day
               </Text>
             </View>
             <Text className="text-text-secondary text-xs mt-1.5">
@@ -624,12 +604,12 @@ export default function BookingDetailScreen() {
           </View>
         )}
 
-        {/* The pro asked to move this booking — the client answers */}
+        {/* The worker asked to move this booking — the client answers */}
         {workerAskedToReschedule && (
           <View className="bg-warning/10 border border-warning/30 rounded-2xl p-4 mb-4">
             <View className="flex-row items-center">
               <Ionicons name="swap-horizontal" size={22} color={colors.warning} />
-              <Text className="font-bold text-sm text-text-primary ml-2 flex-1">Your pro asked to reschedule</Text>
+              <Text className="font-bold text-sm text-text-primary ml-2 flex-1">Your worker asked to reschedule</Text>
             </View>
             <Text className="text-text-secondary text-xs mt-1.5">
               {workerName} asked to move this booking to {requestedWhen}. If you keep the original time, they&apos;re
@@ -667,56 +647,13 @@ export default function BookingDetailScreen() {
               </Text>
             </View>
             <Text className="text-text-secondary text-xs mt-1.5">
-              Waiting for your pro to respond to your request to move this booking to {requestedWhen}.
+              Waiting for your worker to respond to your request to move this booking to {requestedWhen}.
             </Text>
             <View className="mt-3">
               <OutlinedButton
                 label={withdrawingReschedule ? "Withdrawing..." : "Withdraw Request"}
                 onPress={handleWithdrawReschedule}
               />
-            </View>
-          </View>
-        )}
-
-        {/* Quote notification banner */}
-        {hasQuote && (
-          <Pressable
-            className="bg-purple-50 border border-purple-200 rounded-2xl p-4 mb-4 flex-row items-center"
-            onPress={() => router.push(`/(client)/booking/${bookingId}/quote`)}
-          >
-            <Ionicons name="document-text" size={24} color="#8B5CF6" />
-            <View className="ml-3 flex-1">
-              <Text className="font-bold text-sm text-purple-800">
-                Worker submitted a quote
-              </Text>
-              <Text className="text-text-secondary text-xs mt-0.5">
-                ₱{booking.quote!.totalAmount.toFixed(2)} total · Tap to review
-                and approve
-              </Text>
-            </View>
-            <Ionicons
-              name="chevron-forward"
-              size={20}
-              color={colors.text.muted}
-            />
-          </Pressable>
-        )}
-
-        {/* Quote approved banner */}
-        {booking.status === "QuoteApproved" && booking.quote && (
-          <View className="bg-success/10 border border-success/30 rounded-2xl p-4 mb-4 flex-row items-center">
-            <Ionicons
-              name="checkmark-circle"
-              size={24}
-              color={colors.success}
-            />
-            <View className="ml-3 flex-1">
-              <Text className="text-success font-bold text-sm">
-                Quote approved
-              </Text>
-              <Text className="text-text-secondary text-xs mt-0.5">
-                Agreed total: ₱{booking.quote.totalAmount.toFixed(2)}
-              </Text>
             </View>
           </View>
         )}
@@ -731,7 +668,7 @@ export default function BookingDetailScreen() {
               </Text>
               <Text className="text-text-secondary text-xs mt-0.5">
                 {booking.status === "Cancelled"
-                  ? "This booking was cancelled and you won't be charged. You can book another pro."
+                  ? "This booking was cancelled and you won't be charged. You can book another worker."
                   : "You can cancel this booking for free."}
               </Text>
             </View>
@@ -743,12 +680,12 @@ export default function BookingDetailScreen() {
           <View className="bg-warning/10 border border-warning/30 rounded-2xl p-4 mb-4">
             <Text className="text-warning font-bold text-sm">Cancelled on site</Text>
             <Text className="text-text-secondary text-xs mt-1">
-              Your pro cancelled at your location and reported it was caused on your side
+              Your worker cancelled at your location and reported it was caused on your side
               {rawDetail.cancellation.reason ? `: "${rawDetail.cancellation.reason}"` : ""}.{" "}
               {rawDetail.cancellation.compensationStatus === "PENDING_REVIEW"
-                ? `HomeEase is reviewing their photo proof. A ₱${rawDetail.cancellation.compensationAmount ?? 0} visit fee (it pays your pro for the trip) applies only if it's confirmed.`
+                ? `HomeEase is reviewing their photo proof. A ₱${rawDetail.cancellation.compensationAmount ?? 0} visit fee (it pays your worker for the trip) applies only if it's confirmed.`
                 : rawDetail.cancellation.compensationStatus === "APPROVED"
-                  ? `HomeEase confirmed it, so a ₱${rawDetail.cancellation.compensationAmount ?? 0} visit fee applies. It pays your pro for the wasted trip.`
+                  ? `HomeEase confirmed it, so a ₱${rawDetail.cancellation.compensationAmount ?? 0} visit fee applies. It pays your worker for the wasted trip.`
                   : "HomeEase couldn't confirm it, so no fee applies."}
             </Text>
           </View>
@@ -760,7 +697,7 @@ export default function BookingDetailScreen() {
           !!rawDetail.cancellation.reason &&
           !/^[A-Z_]+$/.test(rawDetail.cancellation.reason) && (
             <View className="bg-warning/10 border border-warning/30 rounded-2xl p-4 mb-4">
-              <Text className="text-warning font-bold text-sm">Cancelled by your pro</Text>
+              <Text className="text-warning font-bold text-sm">Cancelled by your worker</Text>
               <Text className="text-text-secondary text-xs mt-1">
                 Reason: &ldquo;{rawDetail.cancellation.reason}&rdquo;
               </Text>
@@ -782,16 +719,16 @@ export default function BookingDetailScreen() {
           </Pressable>
         )}
 
-        {/* Disputed banner */}
+        {/* Reported invoice, waiting for HomeEase */}
         {booking.status === "Disputed" && (
           <View className="bg-warning/10 border border-warning/30 rounded-2xl p-4 mb-4 flex-row items-center">
             <Ionicons name="alert-circle" size={24} color={colors.warning} />
             <View className="ml-3 flex-1">
               <Text className="text-warning font-bold text-sm">
-                Quote disputed
+                {invoice?.status === "REPORTED" ? "Invoice under review" : "Under review"}
               </Text>
               <Text className="text-text-secondary text-xs mt-0.5">
-                Support will contact you within 24 hours.
+                HomeEase is checking it and will contact you. Don&apos;t pay until then.
               </Text>
             </View>
           </View>
@@ -804,7 +741,7 @@ export default function BookingDetailScreen() {
               <Ionicons name="close-circle" size={24} color={colors.error} />
               <View className="ml-3 flex-1">
                 <Text className="text-error font-bold text-sm">
-                  {workerName && workerName !== "Unassigned" ? `${workerName} declined this booking` : "This pro declined the booking"}
+                  {workerName && workerName !== "Unassigned" ? `${workerName} declined this booking` : "This worker declined the booking"}
                 </Text>
                 {!!rawDetail?.declineReason && (
                   <Text className="text-text-primary text-xs mt-1">
@@ -812,12 +749,12 @@ export default function BookingDetailScreen() {
                   </Text>
                 )}
                 <Text className="text-text-secondary text-xs mt-0.5">
-                  Your booking details are saved. Pick another pro to continue.
+                  Your booking details are saved. Pick another worker to continue.
                 </Text>
               </View>
             </View>
             <View className="mt-3">
-              <PrimaryButton label="Find Another Pro" fullWidth onPress={handleFindAnotherPro} />
+              <PrimaryButton label="Find Another Worker" fullWidth onPress={handleFindAnotherPro} />
             </View>
           </View>
         )}
@@ -895,52 +832,13 @@ export default function BookingDetailScreen() {
           )}
         </View>
 
-        {/* Pending add-ons — awaiting client approval before they're billed */}
-        {pendingAddOns.length > 0 && (
-          <View className="bg-card rounded-2xl p-4 mb-3 border border-warning/40">
-            <Text className="text-text-primary font-semibold mb-2">
-              Additional services need your approval
-            </Text>
-            {pendingAddOns.map((addon) => (
-              <View key={addon.id} className="mb-3">
-                <View className="flex-row items-center justify-between mb-2">
-                  <Text className="text-text-primary flex-1 mr-2">{addon.name}</Text>
-                  <Text className="text-text-primary font-semibold">
-                    ₱{addon.price.toLocaleString()}
-                  </Text>
-                </View>
-                <View className="flex-row" style={{ gap: 8 }}>
-                  <View className="flex-1">
-                    <OutlinedButton
-                      label="Reject"
-                      onPress={() => handleAddonResponse(addon.id, false)}
-                      disabled={respondingAddonId === addon.id}
-                    />
-                  </View>
-                  <View className="flex-1">
-                    <PrimaryButton
-                      label="Approve"
-                      onPress={() => handleAddonResponse(addon.id, true)}
-                      disabled={respondingAddonId === addon.id}
-                      loading={respondingAddonId === addon.id}
-                    />
-                  </View>
-                </View>
-              </View>
-            ))}
-          </View>
-        )}
-
-        {canRequestExtra && (
-          <View className="mb-3">
-            <OutlinedButton label="Request Extra Work" fullWidth onPress={() => setExtraVisible(true)} />
-            <Text className="text-text-muted text-xs mt-1 text-center">
-              Need more done on this visit? Your pro sends a price here for you to approve.
-            </Text>
-          </View>
-        )}
-
-        {/* Price Breakdown */}
+        {/* The worker's invoice once sent; the booked price before that */}
+        {invoiceSent && invoice ? (
+          <InvoiceCard
+            invoice={invoice}
+            onOpenPhoto={(url) => router.push({ pathname: "/(client)/inbox/image-viewer", params: { imageUrl: url } })}
+          />
+        ) : (
         <View className="mb-3">
           <PriceBreakdownCard
             subtotal={priceBreakdown.subtotal}
@@ -959,6 +857,7 @@ export default function BookingDetailScreen() {
             detailed={true}
           />
         </View>
+        )}
 
         {/* Payment Method */}
         <View className="bg-card rounded-2xl p-4 mb-3">
@@ -1015,18 +914,13 @@ export default function BookingDetailScreen() {
         {booking.completionPhotoUrl && (
           <View className="bg-card rounded-2xl p-4 mb-3">
             <Text className="text-text-primary font-bold mb-2">
-              {isPendingCompletion ? "Worker Submitted Completed Work" : "Completion Photo"}
+              After photo
             </Text>
             <RemoteImage
               source={{ uri: booking.completionPhotoUrl }}
               style={{ width: "100%", height: 220, borderRadius: 16 }}
               resizeMode="cover"
             />
-            {isPendingCompletion && (
-              <Text className="text-text-secondary text-xs mt-2">
-                Happy with the work? Confirm completion below.
-              </Text>
-            )}
           </View>
         )}
 
@@ -1083,13 +977,19 @@ export default function BookingDetailScreen() {
 
         {/* Action Buttons */}
         <View className="gap-3 mt-2">
-          {isPendingCompletion && (
+          {invoiceDue && isCashBooking && (
+            <View className="bg-accent/10 rounded-2xl p-4">
+              <Text className="text-text-primary text-base font-bold text-center">
+                Pay ₱{finalTotal.toLocaleString("en-PH", { minimumFractionDigits: 2 })} in cash to your worker
+              </Text>
+              <Text className="text-text-secondary text-sm text-center mt-1">
+                Your worker confirms it in their app.
+              </Text>
+            </View>
+          )}
+          {isPendingCompletion && !isCashBooking && (
             <PrimaryButton
-              label={
-                isCashBooking
-                  ? `Confirm Cash Payment · ₱${finalTotal}`
-                  : `Confirm & Pay · ₱${finalTotal}`
-              }
+              label={`Pay Now · ₱${finalTotal}`}
               fullWidth
               onPress={handleConfirmCompletion}
               disabled={confirmingCompletion || processingPayment}
@@ -1098,20 +998,18 @@ export default function BookingDetailScreen() {
           )}
           {isAwaitingPayment && (
             <PrimaryButton
-              label={`Resume Payment · ₱${finalTotal}`}
+              label={`Pay Now · ₱${finalTotal}`}
               fullWidth
               onPress={handleResumePayment}
               disabled={processingPayment}
               loading={processingPayment}
             />
           )}
-          {hasQuote && (
-            <PrimaryButton
-              label="Review & Approve Quote"
+          {invoiceDue && (
+            <OutlinedButton
+              label="Something's wrong with the invoice?"
               fullWidth
-              onPress={() =>
-                router.push(`/(client)/booking/${bookingId}/quote`)
-              }
+              onPress={() => setInvoiceReportVisible(true)}
             />
           )}
           {canTrack && (
@@ -1189,25 +1087,27 @@ export default function BookingDetailScreen() {
         onCancel={handleCheckoutCancel}
       />
       <ReportModal
-        visible={extraVisible}
-        title="Request extra work"
-        message="Describe what else you need done on this visit. Your pro will send a price for you to approve; nothing is billed until you do."
-        placeholder="e.g. Please also fix the leaking faucet"
-        confirmLabel="Send Request"
-        loading={requestingExtra}
-        onConfirm={async (description) => {
-          setRequestingExtra(true);
+        visible={invoiceReportVisible}
+        title="Report the invoice"
+        message="Tell us what's wrong, for example a part you didn't get or work that wasn't done. Don't pay yet: HomeEase checks it and contacts you."
+        placeholder="e.g. Only one outlet was installed, not two"
+        confirmLabel="Send Report"
+        minLength={10}
+        loading={reportingInvoice}
+        onConfirm={async (reason) => {
+          setReportingInvoice(true);
           try {
-            await requestExtraWork(booking.id, description);
-            setExtraVisible(false);
-            alertModal.success("Request sent", "Your pro will send a price for you to approve.");
+            await reportInvoice(booking.id, reason);
+            setInvoiceReportVisible(false);
+            await refreshBookingDetail();
+            alertModal.success("Reported", "HomeEase will check the invoice and contact you.");
           } catch (error: any) {
-            alertModal.error("Error", error?.message || "Could not send the request. Please try again.");
+            alertModal.error("Error", error?.message || "Could not send the report. Please try again.");
           } finally {
-            setRequestingExtra(false);
+            setReportingInvoice(false);
           }
         }}
-        onCancel={() => setExtraVisible(false)}
+        onCancel={() => setInvoiceReportVisible(false)}
       />
       <ReportModal
         visible={reportVisible}

@@ -8,7 +8,6 @@ import {
   voidUnpaidPayment,
   stopWorkerPayout,
   undoWorkerSettlement,
-  flagTaxRecordsForRefundedPayment,
   PayoutAlreadySentError,
 } from '@services/paymentLifecycleService';
 import { postManualRefund } from '@services/ledgerService';
@@ -211,7 +210,6 @@ export async function markRefundedManually(id: string, adminId: string, note: st
         refundedAt: new Date(),
       },
     });
-    await flagTaxRecordsForRefundedPayment(payment);
     // Cash jobs never had the client's money on the platform's books.
     if (payment.methodType !== 'CASH') {
       await postManualRefund(prisma, payment, payment.booking.workerId, workerAlreadyPaid, payment.booking.clientId);

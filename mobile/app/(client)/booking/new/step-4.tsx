@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from "react";
-import { View, Text, TextInput, Switch } from "react-native";
+import { View, Text, TextInput, Pressable } from "react-native";
 import { KeyboardAwareScrollView } from "../../../../components/ui/KeyboardAwareScrollView";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter, useFocusEffect } from "expo-router";
@@ -9,22 +9,15 @@ import ScreenHeader from "../../../../components/ui/ScreenHeader";
 import StepperHorizontal from "../../../../components/steppers/StepperHorizontal";
 import { BookingFooterBar } from "../../../../components/booking4step/BookingFooterBar";
 import OutlinedButton from "../../../../components/ui/OutlinedButton";
-import AddOnsToggleGroup from "../../../../components/booking4step/AddOnsToggleGroup";
-import PackageSelector from "../../../../components/booking4step/PackageSelector";
 import TipSlider from "../../../../components/booking4step/TipSlider";
 import PaymentMethodSelector from "../../../../components/booking4step/PaymentMethodSelector";
 import PricingRangePreview from "../../../../components/booking4step/PricingRangePreview";
-import GenericConfirmationModal from "../../../../components/modals/GenericConfirmationModal";
 import { useBookingStore, type Booking } from "../../../../store/bookingStore";
 import { useBookingPriceEstimate } from "../../../../hooks/useBookingPriceEstimate";
 import { useWorkerDiscovery } from "../../../../hooks/useWorkerDiscovery";
 import { validateDraftForSubmit } from "../../../../utils/bookingValidation";
 import { PAYMENT_METHOD_TYPE_MAP } from "../../../../utils/paymentMethodMap";
-import {
-  ADD_ON_TOGGLE_LABELS,
-  PET_FRIENDLY_PRIORITY,
-  type AddOnToggleKey,
-} from "../../../../types/booking4step.types";
+import { PET_FRIENDLY_PRIORITY } from "../../../../types/booking4step.types";
 import { formatTime12h, isRushDate } from "../../../../utils/bookingTime";
 import { generateIdempotencyKey } from "../../../../utils/idempotencyKey";
 import { isPhMobileNumber } from "../../../../utils/paymentAccount";
@@ -32,7 +25,7 @@ import { feedback } from "../../../../utils/feedback";
 import * as api from "../../../../services/api";
 import { useAlertModal } from "../../../../contexts/AlertModalContext";
 
-const BOOKING_STEPS = ["Scope", "Schedule", "Who", "Confirm"];
+const BOOKING_STEPS = ["Service", "When & where", "Book"];
 
 const ACCOUNT_FIELD_CONFIG: Record<
   string,
@@ -57,16 +50,17 @@ export default function BookingStep4Screen() {
   const setDraft = useBookingStore((s) => s.setDraft);
   const setBookingCreated = useBookingStore((s) => s.setBookingCreated);
 
-  const [hasPets, setHasPets] = useState<boolean>(
-    (draft.priorities ?? []).includes(PET_FRIENDLY_PRIORITY)
-  );
-  const [addOnToggles, setAddOnToggles] = useState<string[]>(draft.addOnToggles ?? []);
-  const [selectedPackageIds, setSelectedPackageIds] = useState<string[]>(draft.selectedPackageIds ?? []);
-  const [packagesTotal, setPackagesTotal] = useState(0);
-  const [paymentMethod, setPaymentMethod] = useState<string | null>(draft.paymentMethod);
+  // Pets and packages are picked earlier (Step 1 / the worker picker); this
+  // screen only adds payment and an optional tip.
+  const priorities = draft.priorities ?? [];
+  const hasPets = priorities.includes(PET_FRIENDLY_PRIORITY);
+  const selectedPackageIds = draft.selectedPackageIds ?? [];
+  const packagesTotal = draft.selectedPackagesTotal ?? 0;
+  // Cash unless the client has a saved default (picked up below) — one less
+  // choice before booking.
+  const [paymentMethod, setPaymentMethod] = useState<string | null>(draft.paymentMethod ?? "cash");
   const [accountValue, setAccountValue] = useState(draft.paymentAccountIdentifier ?? "");
   const [tip, setTip] = useState<number>(draft.tip ?? 0);
-  const [confirmVisible, setConfirmVisible] = useState(false);
   const [loading, setLoading] = useState(false);
 
   const isRush = isRushDate(draft.date);
@@ -76,21 +70,8 @@ export default function BookingStep4Screen() {
   // moment the user taps "Next"), Step 4 is the last screen before submit —
   // there's no forward transition to hang a commit off of. Without writing
   // these through immediately, navigating back to Step 3/2 (e.g. to change
-  // pro or slot) and returning here remounts this screen and silently resets
-  // payment method/account number/tip/pets/packages back to the draft's last
-  // saved values.
-  const updateHasPets = (value: boolean) => {
-    setHasPets(value);
-    setDraft({ priorities: value ? [PET_FRIENDLY_PRIORITY] : [] });
-  };
-  const updateAddOnToggles = (value: string[]) => {
-    setAddOnToggles(value);
-    setDraft({ addOnToggles: value });
-  };
-  const updateSelectedPackageIds = (value: string[]) => {
-    setSelectedPackageIds(value);
-    setDraft({ selectedPackageIds: value });
-  };
+  // worker or slot) and returning here remounts this screen and silently resets
+  // payment method/account number/tip back to the draft's last saved values.
   const updatePaymentMethod = (value: string) => {
     setPaymentMethod(value);
     setDraft({ paymentMethod: value });
@@ -104,8 +85,10 @@ export default function BookingStep4Screen() {
     setDraft({ tip: value });
   };
 
-  const priorities = hasPets ? [PET_FRIENDLY_PRIORITY] : [];
-  const effectiveDraft = { ...draft, paymentMethod, priorities, addOnToggles, tip };
+  const effectiveDraft = { ...draft, paymentMethod, priorities, addOnToggles: [], tip };
+  const scopeAnswersSummary = Object.entries(draft.scopeAnswers ?? {})
+    .map(([label, value]) => `${label}: ${Array.isArray(value) ? value.join(", ") : value}`)
+    .join("\n");
   const validation = validateDraftForSubmit(effectiveDraft);
   // A selected task's own admin range (same source Step 1 used) takes
   // priority over the category-wide spread once one's been picked — only
@@ -119,17 +102,14 @@ export default function BookingStep4Screen() {
     packagesTotal,
     tip
   );
-  const scopeAnswersSummary = Object.entries(draft.scopeAnswers ?? {})
-    .map(([label, value]) => `${label}: ${Array.isArray(value) ? value.join(", ") : value}`)
-    .join(" · ");
 
   // Re-verify the held worker is still available that day right before the
   // user commits — the HoldTimerBadge in Step 3 is a UX countdown only, not
   // a real server-side reservation, so the first sign it died could
   // otherwise be a 409 at submit, after filling in packages/payment/tip.
   // Scoped to this specific worker (workerId filter) when one was picked or
-  // locked in; unscoped (any pro) for an auto-matched booking.
-  // A follow-up job goes to the same pro regardless of their schedule (they
+  // locked in; unscoped (any worker) for an auto-matched booking.
+  // A follow-up job goes to the same worker regardless of their schedule (they
   // accept or decline it), so there's nothing to re-check.
   const readyToCheckAvailability = !!draft.serviceType && !!draft.date && !!draft.time && !isFollowUp;
   const {
@@ -192,8 +172,8 @@ export default function BookingStep4Screen() {
       alertModal.warning(
         "No longer available",
         draft.isAutoMatched
-          ? "No pro is available on this date anymore. Please pick a different date."
-          : `${draft.workerName ?? "This pro"} is no longer available on this date. Please pick a different date or pro.`
+          ? "No worker is available on this date anymore. Please pick a different date."
+          : `${draft.workerName ?? "This worker"} is no longer available on this date. Please pick a different date or worker.`
       );
       return;
     }
@@ -216,11 +196,12 @@ export default function BookingStep4Screen() {
       alertModal.error("Booking incomplete", validation.errors.join("\n"));
       return;
     }
-    setConfirmVisible(true);
+    // No second "are you sure" step: nothing is charged now, and the client
+    // can cancel for free until a worker confirms.
+    submit();
   };
 
-  const onConfirm = async () => {
-    setConfirmVisible(false);
+  const submit = async () => {
     setLoading(true);
 
     try {
@@ -234,17 +215,11 @@ export default function BookingStep4Screen() {
         paymentMethod,
         paymentAccountIdentifier: accountValue.trim() || null,
         priorities,
-        addOnToggles,
+        addOnToggles: [],
         selectedPackageIds,
         tip,
         idempotencyKey,
       });
-
-      const addOns = addOnToggles.map((key) => ({
-        id: key,
-        name: ADD_ON_TOGGLE_LABELS[key as AddOnToggleKey],
-        price: 0,
-      }));
 
       const response = await api.createBooking({
         workerId: draft.isAutoMatched ? null : draft.workerId,
@@ -258,7 +233,7 @@ export default function BookingStep4Screen() {
         date: draft.date!,
         time: draft.time!,
         parentBookingId: draft.parentBookingId ?? undefined,
-        addOns,
+        addOns: [],
         packageIds: selectedPackageIds,
         priorities,
         tip,
@@ -318,7 +293,7 @@ export default function BookingStep4Screen() {
     <SafeAreaView className="flex-1 bg-white">
       <ScreenHeader title="Confirm & Book" showBack />
       <KeyboardAwareScrollView className="flex-1" contentContainerStyle={{ padding: 24, paddingBottom: 40 }}>
-        <StepperHorizontal steps={BOOKING_STEPS} currentStep={3} />
+        <StepperHorizontal steps={BOOKING_STEPS} currentStep={2} />
 
         {!validation.ok && (
           <View className="bg-yellow-100 rounded-xl p-3 mb-4">
@@ -338,8 +313,8 @@ export default function BookingStep4Screen() {
               <Text className="text-error font-bold text-sm">This date is no longer available</Text>
               <Text className="text-error text-xs mt-0.5">
                 {draft.isAutoMatched
-                  ? "No pro is available on this date anymore."
-                  : `${draft.workerName ?? "This pro"} is no longer available on this date.`}
+                  ? "No worker is available on this date anymore."
+                  : `${draft.workerName ?? "This worker"} is no longer available on this date.`}
               </Text>
               <View className="mt-2.5">
                 <OutlinedButton
@@ -355,58 +330,63 @@ export default function BookingStep4Screen() {
           <View className="bg-accent/10 rounded-2xl p-3.5 mb-4 flex-row items-start">
             <Ionicons name="git-branch-outline" size={18} color={colors.accent.DEFAULT} style={{ marginTop: 1 }} />
             <Text className="text-text-secondary text-xs ml-2.5 flex-1">
-              Follow-up job for your inspection with {draft.workerName ?? "your pro"}. It&apos;s a separate job with its
-              own price, and your pro can accept or decline it.
+              Follow-up job for your inspection with {draft.workerName ?? "your worker"}. It&apos;s a separate job with its
+              own price, and your worker can accept or decline it.
             </Text>
           </View>
         )}
 
         {/* Booking summary */}
         <View className="bg-card rounded-2xl p-4">
-          <Text className="text-text-primary font-bold mb-3">Summary</Text>
-          <SummaryRow label="Pro" value={draft.isAutoMatched ? "Auto-matched" : draft.workerName || "—"} />
-          <SummaryRow label="Service" value={draft.category || "—"} />
-          <SummaryRow label="Details" value={scopeAnswersSummary || "—"} />
           <SummaryRow
-            label="Date & start time"
-            value={`${draft.date ?? "—"} · ${draft.time ? formatTime12h(draft.time) : "—"}${isRush ? " · Same-day (rush)" : ""}`}
+            label="Service"
+            value={[draft.category, draft.selectedTaskName].filter(Boolean).join(" · ") || "—"}
           />
-          <SummaryRow label="Address" value={draft.address || "—"} last />
+          {!!scopeAnswersSummary && <SummaryRow label="Details" value={scopeAnswersSummary} />}
+          {!!draft.description?.trim() && <SummaryRow label="Notes" value={draft.description.trim()} />}
+          {(draft.issuePhotoUrls?.length ?? 0) > 0 && (
+            <SummaryRow
+              label="Photos"
+              value={`${draft.issuePhotoUrls!.length} added`}
+            />
+          )}
+          {hasPets && <SummaryRow label="Pets" value="Yes, pet-friendly worker" />}
+          {selectedPackageIds.length > 0 && (
+            <SummaryRow
+              label="Packages"
+              value={`${selectedPackageIds.length} selected${packagesTotal > 0 ? ` · ₱${packagesTotal.toFixed(2)}` : ""}`}
+            />
+          )}
+          <SummaryRow
+            label="When"
+            value={`${draft.date ?? "—"} · ${draft.time ? formatTime12h(draft.time) : "—"}${isRush ? " · Same-day" : ""}`}
+          />
+          <SummaryRow label="Where" value={draft.address || "—"} />
+          <View className="flex-row justify-between items-center">
+            <Text className="text-text-secondary text-base">Worker</Text>
+            <View className="flex-1 flex-row justify-end items-center ml-3">
+              <Text className="text-text-primary text-base font-medium text-right flex-shrink" numberOfLines={1}>
+                {draft.isAutoMatched ? "Best available" : draft.workerName || "—"}
+              </Text>
+              {!draft.workerLocked && !isFollowUp && (
+                <Pressable
+                  accessibilityRole="button"
+                  hitSlop={12}
+                  onPress={() => router.push("/(client)/booking/new/step-3")}
+                  style={{ minHeight: 44, justifyContent: "center", marginLeft: 12 }}
+                >
+                  <Text className="text-accent font-bold text-base">Change</Text>
+                </Pressable>
+              )}
+            </View>
+          </View>
         </View>
 
         <View className="mt-4">
           <PricingRangePreview estimate={priceEstimate} />
         </View>
 
-        <Text className="text-text-primary font-bold text-sm mb-2 mt-6">Pets</Text>
-        <View className="bg-card rounded-xl p-3.5 flex-row items-center">
-          <View className="flex-1 pr-3">
-            <Text className="text-text-primary font-semibold text-sm">I have pets at home</Text>
-            <Text className="text-text-muted text-xs mt-0.5">
-              We&apos;ll match you with a pet-friendly pro
-            </Text>
-          </View>
-          <Switch
-            value={hasPets}
-            onValueChange={updateHasPets}
-            trackColor={{ false: colors.toggleOff, true: colors.accent.DEFAULT }}
-            thumbColor={colors.white}
-          />
-        </View>
-
-        <Text className="text-text-primary font-bold text-sm mb-2 mt-6">Packages</Text>
-        <PackageSelector
-          workerId={draft.isAutoMatched ? null : draft.workerId}
-          serviceTypeId={draft.serviceTypeId}
-          selected={selectedPackageIds}
-          onChange={updateSelectedPackageIds}
-          onSelectedTotalChange={setPackagesTotal}
-        />
-
-        <Text className="text-text-primary font-bold text-sm mb-2 mt-6">Job Preferences</Text>
-        <AddOnsToggleGroup selected={addOnToggles} onChange={updateAddOnToggles} />
-
-        <Text className="text-text-primary font-bold text-sm mb-2 mt-6">Payment Method</Text>
+        <Text className="text-text-primary font-bold text-base mb-2 mt-6">How will you pay?</Text>
         <PaymentMethodSelector value={paymentMethod} onChange={updatePaymentMethod} />
 
         {paymentMethod && ACCOUNT_FIELD_CONFIG[paymentMethod] && (
@@ -426,14 +406,16 @@ export default function BookingStep4Screen() {
           </View>
         )}
 
-        <Text className="text-text-primary font-bold text-sm mb-2 mt-6">Add a Tip</Text>
-        <TipSlider value={tip} onChange={updateTip} />
+        <Text className="text-text-secondary text-sm mt-2">
+          You pay after the job is done. Nothing is charged now, and you can cancel for free until a worker confirms.
+        </Text>
 
+        <Text className="text-text-primary font-bold text-base mb-2 mt-6">Add a tip (optional)</Text>
+        <TipSlider value={tip} onChange={updateTip} />
       </KeyboardAwareScrollView>
       <BookingFooterBar
-        estimate={draft.selectedTaskPricingModel === "CUSTOM_QUOTE" ? null : priceEstimate}
-        noPriceText="Quote after inspection"
-        buttonLabel="Submit request"
+        estimate={priceEstimate}
+        buttonLabel="Book Now"
         disabled={
           !paymentMethod ||
           loading ||
@@ -444,31 +426,15 @@ export default function BookingStep4Screen() {
         loading={loading}
         onPress={handleSubmit}
       />
-
-      <GenericConfirmationModal
-        visible={confirmVisible}
-        title={isFollowUp ? "Request this follow-up job?" : "Submit booking request"}
-        message={
-          isFollowUp
-            ? `This asks ${draft.workerName ?? "your pro"} for a new, separately priced job${
-                draft.date ? ` on ${draft.date}${draft.time ? ` at ${formatTime12h(draft.time)}` : ""}` : ""
-              }. No charge now — you'll pay after it's done and you've confirmed it.`
-            : "No charge now. You'll pay after the job is done and you've confirmed it."
-        }
-        confirmLabel="Submit"
-        cancelLabel="Cancel"
-        onConfirm={onConfirm}
-        onCancel={() => setConfirmVisible(false)}
-      />
     </SafeAreaView>
   );
 }
 
 function SummaryRow({ label, value, last }: { label: string; value: string; last?: boolean }) {
   return (
-    <View className={`flex-row justify-between ${last ? "" : "mb-2"}`}>
-      <Text className="text-text-secondary text-sm">{label}</Text>
-      <Text className="text-text-primary text-sm font-medium flex-1 text-right ml-3" numberOfLines={2}>
+    <View className={`flex-row justify-between ${last ? "" : "mb-3"}`}>
+      <Text className="text-text-secondary text-base">{label}</Text>
+      <Text className="text-text-primary text-base font-medium flex-1 text-right ml-3" numberOfLines={2}>
         {value}
       </Text>
     </View>

@@ -5,7 +5,7 @@ info:
   description: >
     Full REST API surface for the HomeEase household-services marketplace:
     auth, client/worker profiles, worker discovery, the booking lifecycle
-    (creation/auto-match through accept/arrive/start/quote/complete/review),
+    (creation/auto-match through accept/arrive/start/invoice/payment/review),
     payments & Xendit escrow, messaging, notifications, KYC verification,
     and the admin back office (users, bookings, disputes, payments, pricing
     rules, reviews, reports, analytics, audit logs, settings).
@@ -175,7 +175,7 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorEnvelope' }
         '409':
-          description: Worker at capacity, slot no longer available, or price outside PricingRule bounds
+          description: Worker at capacity or slot no longer available
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorEnvelope' }
@@ -283,7 +283,7 @@ paths:
   /bookings/{id}/start:
     patch:
       tags: [Bookings]
-      summary: Worker starts the job (requires a prior verified arrival)
+      summary: Worker starts the job from ACCEPTED (requires a prior verified arrival and a before photo), at the price the client booked
       parameters: [{ $ref: '#/components/parameters/BookingId' }]
       responses:
         '200': { description: Started }
@@ -342,114 +342,6 @@ paths:
         '200': { description: Saved }
         '409': { description: A date being closed has an accepted job }
 
-  /bookings/{id}/quote:
-    post:
-      tags: [Bookings]
-      summary: Worker submits the quote items on top of the pinned labor estimate
-      description: >-
-        Items replace any previously submitted set. Each item needs its own
-        receipt photos and photos of it in use (booking photos the worker
-        uploaded); the sum of item prices becomes the materials cost. A
-        resubmission after the client refused the quote increments its revision.
-      parameters: [{ $ref: '#/components/parameters/BookingId' }]
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [items]
-              properties:
-                items:
-                  type: array
-                  maxItems: 20
-                  items:
-                    type: object
-                    required: [name, price, receiptUrls, proofOfUseUrls]
-                    properties:
-                      name: { type: string }
-                      price: { type: number, exclusiveMinimum: true, minimum: 0 }
-                      receiptUrls: { type: array, minItems: 1, maxItems: 5, items: { type: string } }
-                      proofOfUseUrls: { type: array, minItems: 1, maxItems: 5, items: { type: string } }
-                laborCost: { type: number, minimum: 0, description: Custom-quote jobs only }
-                notes: { type: string }
-      responses:
-        '201': { description: Quote submitted }
-        '400': { $ref: '#/components/responses/BadRequest' }
-        '403': { $ref: '#/components/responses/Forbidden' }
-        '404': { $ref: '#/components/responses/NotFound' }
-        '409': { $ref: '#/components/responses/Conflict' }
-
-  /bookings/{id}/quote/reopen:
-    post:
-      tags: [Bookings]
-      summary: Worker takes a submitted or approved quote back to IN_PROGRESS to edit its items
-      parameters: [{ $ref: '#/components/parameters/BookingId' }]
-      responses:
-        '200': { description: Reopened }
-        '403': { $ref: '#/components/responses/Forbidden' }
-        '404': { $ref: '#/components/responses/NotFound' }
-        '409': { $ref: '#/components/responses/Conflict' }
-
-  /bookings/{id}/quote/approve:
-    patch:
-      tags: [Bookings]
-      summary: Client approves the submitted quote
-      parameters: [{ $ref: '#/components/parameters/BookingId' }]
-      responses:
-        '200': { description: Approved }
-        '400':
-          description: No quote exists on this booking
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
-        '403': { $ref: '#/components/responses/Forbidden' }
-        '404': { $ref: '#/components/responses/NotFound' }
-        '409': { $ref: '#/components/responses/Conflict' }
-
-  /bookings/{id}/quote/reject:
-    patch:
-      tags: [Bookings]
-      summary: Client refuses the quote (e.g. it doesn't match the receipt); the worker revises it
-      parameters: [{ $ref: '#/components/parameters/BookingId' }]
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [reason]
-              properties:
-                reason: { type: string, minLength: 5 }
-      responses:
-        '200': { description: Refused — booking back to IN_PROGRESS }
-        '409': { $ref: '#/components/responses/Conflict' }
-
-  /bookings/{id}/quote/dispute:
-    patch:
-      tags: [Bookings]
-      summary: Client disputes the submitted quote (creates a Dispute, notifies admins)
-      parameters: [{ $ref: '#/components/parameters/BookingId' }]
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [reason]
-              properties:
-                reason: { type: string }
-      responses:
-        '200': { description: Disputed }
-        '400':
-          description: No quote exists on this booking
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
-        '403': { $ref: '#/components/responses/Forbidden' }
-        '404': { $ref: '#/components/responses/NotFound' }
-        '409': { $ref: '#/components/responses/Conflict' }
-
   /bookings/{id}/completion-photo/upload:
     post:
       tags: [Bookings]
@@ -483,7 +375,7 @@ paths:
   /bookings/{id}/complete:
     patch:
       tags: [Bookings]
-      summary: Worker submits completion (requires QUOTE_APPROVED + a completion photo); frees capacity/slot
+      summary: Worker finishes the job and sends the invoice (IN_PROGRESS + a progress photo + a completion photo). Parts and extra work are added as lines with photos; there is no approval step. Cash waits in PENDING_COMPLETION for Cash received; GCash/Maya gets its Xendit invoice (AWAITING_PAYMENT)
       parameters: [{ $ref: '#/components/parameters/BookingId' }]
       requestBody:
         required: true
@@ -494,8 +386,24 @@ paths:
               required: [completionPhotoUrl]
               properties:
                 completionPhotoUrl: { type: string, format: uri }
+                items:
+                  type: array
+                  maxItems: 20
+                  items:
+                    type: object
+                    required: [kind, name, price, photoUrls]
+                    properties:
+                      kind: { type: string, enum: [PART, EXTRA_WORK] }
+                      name: { type: string, maxLength: 120 }
+                      price: { type: number, minimum: 0.01, maximum: 100000 }
+                      photoUrls:
+                        type: array
+                        minItems: 1
+                        maxItems: 5
+                        items: { type: string, format: uri }
+                        description: PART — the receipt. EXTRA_WORK — the work done. The worker's own booking photos only.
       responses:
-        '200': { description: Marked PENDING_COMPLETION }
+        '200': { description: Invoice sent; returns the status and the invoice total }
         '400': { $ref: '#/components/responses/BadRequest' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
@@ -504,10 +412,43 @@ paths:
   /bookings/{id}/confirm-completion:
     patch:
       tags: [Bookings]
-      summary: Client confirms completion; captures payment and releases escrow to the worker
+      summary: Pay now — returns the Xendit checkout for a GCash/Maya invoice (PENDING_COMPLETION or AWAITING_PAYMENT). Refused (409) for cash, which the worker confirms
       parameters: [{ $ref: '#/components/parameters/BookingId' }]
       responses:
-        '200': { description: Completed; payment captured and released }
+        '200': { description: Checkout URL, or COMPLETED if Xendit already shows it paid }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /bookings/{id}/cash-received:
+    patch:
+      tags: [Bookings]
+      summary: Worker confirms the client paid a cash invoice (PENDING_COMPLETION) — settles it to COMPLETED. Refused while the client has reported the invoice
+      parameters: [{ $ref: '#/components/parameters/BookingId' }]
+      responses:
+        '200': { description: Cash payment recorded }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /bookings/{id}/invoice/report:
+    patch:
+      tags: [Bookings]
+      summary: Client reports the invoice before paying (PENDING_COMPLETION or AWAITING_PAYMENT) — booking goes DISPUTED, an unpaid GCash/Maya invoice is voided, admins are notified
+      parameters: [{ $ref: '#/components/parameters/BookingId' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason: { type: string, minLength: 10, maxLength: 500 }
+                evidenceUrls: { type: array, maxItems: 5, items: { type: string, format: uri } }
+      responses:
+        '200': { description: Reported; returns the disputeId }
+        '400': { $ref: '#/components/responses/BadRequest' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
@@ -1161,8 +1102,8 @@ paths:
       description: >-
         Consolidated read for the task-first "Skills & Services" screen —
         every active ServiceType/ServiceTask, grouped by category, each task
-        annotated with this worker's own WorkerTaskSelection and
-        WorkerTaskPrice (if any) and each category with its
+        annotated with this worker's own WorkerTaskSelection and each
+        category with its
         WorkerServiceCategory status.
       responses:
         '200': { description: OK }
@@ -1731,7 +1672,7 @@ paths:
               properties:
                 action:
                   type: string
-                  enum: [APPROVE_QUOTE, REQUEST_NEW_QUOTE, CANCEL_BOOKING]
+                  enum: [KEEP_INVOICE, REMOVE_INVOICE_EXTRAS, CANCEL_BOOKING, RESOLVE_FOR_WORKER, PAY_WORKER_FROM_PLATFORM, DISMISS]
                 resolution: { type: string }
       responses:
         '200': { description: Resolved }
@@ -1797,63 +1738,6 @@ paths:
         '404': { $ref: '#/components/responses/NotFound' }
         '409':
           description: Booking already in a terminal state
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
-
-  /bookings/{id}/addons:
-    post:
-      tags: [Bookings]
-      summary: Worker adds priced extra work to the same booking (arrived through IN_PROGRESS). Billed only after the client approves via /addons/{addonId}/respond; never auto-approved.
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema: { type: string }
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [name, price]
-              properties:
-                name: { type: string, maxLength: 100 }
-                price: { type: number, minimum: 1, maximum: 100000 }
-      responses:
-        '201': { description: Added, pending client approval }
-        '400': { $ref: '#/components/responses/BadRequest' }
-        '404': { $ref: '#/components/responses/NotFound' }
-        '409':
-          description: Worker has not arrived yet, or the job is already marked done
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
-
-  /bookings/{id}/addons/request:
-    post:
-      tags: [Bookings]
-      summary: Client asks the worker for extra work on this visit; the worker is notified and prices it with POST /bookings/{id}/addons.
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema: { type: string }
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [description]
-              properties:
-                description: { type: string, minLength: 3, maxLength: 300 }
-      responses:
-        '200': { description: Sent to the worker }
-        '400': { $ref: '#/components/responses/BadRequest' }
-        '404': { $ref: '#/components/responses/NotFound' }
-        '409':
-          description: Worker has not arrived yet, or the job is already marked done
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorEnvelope' }
@@ -2425,8 +2309,6 @@ paths:
                 supportEmail: { type: string, format: email }
                 notificationsEnabled: { type: boolean }
                 commissionRate: { type: number, minimum: 0, maximum: 1 }
-                withholdingTaxRate: { type: number, minimum: 0, maximum: 1 }
-                maxSlotsPerDay: { type: integer, minimum: 1, maximum: 24 }
                 pendingExpiryMinutes: { type: integer, minimum: 5, maximum: 10080 }
                 geofenceRadiusMeters: { type: integer, minimum: 0, maximum: 5000, description: "0 disables the arrival distance check" }
       responses:
@@ -2524,10 +2406,12 @@ components:
         - ACCEPTED
         - REJECTED
         - IN_PROGRESS
+        # Retired with quotes (old rows only); nothing sets them now.
         - QUOTE_SUBMITTED
         - QUOTE_APPROVED
         - DISPUTED
         - PENDING_COMPLETION
+        - AWAITING_PAYMENT
         - COMPLETED
         - CANCELLED
 
@@ -2640,7 +2524,3 @@ components:
             id: { type: string }
             status: { type: string }
             escrowStatus: { type: string }
-            clientSecret:
-              type: string
-              nullable: true
-              description: Deprecated — always null now that CARD payments are no longer supported

@@ -4,8 +4,6 @@ import crypto from 'node:crypto';
 import { authLimiter } from '@middleware/rateLimit';
 import {
   remindAndAutoSettleCompletions,
-  remindAndAutoApproveQuotes,
-  remindPendingAddons,
   cancelWorkerNoShows,
   escalateStaleDisputes,
   remindAndAutoConfirmReschedules,
@@ -15,7 +13,6 @@ import {
   clearStaleWorkerLocations,
 } from '@workers/bookingWorker';
 import { expireOverduePendingBookings } from '@services/pendingExpirySweep';
-import { flagWorkersOverVatThreshold } from '@services/vatSummaryService';
 import { syncXenditFees } from '@services/ledgerFeeSyncService';
 import { purgeExpiredData } from '@services/dataRetentionService';
 
@@ -23,15 +20,11 @@ const router = Router();
 
 const TASKS = {
   'settle-completions': remindAndAutoSettleCompletions,
-  'approve-quotes': remindAndAutoApproveQuotes,
-  // Key kept for the existing cron caller; it only sends reminders now.
-  'approve-addons': remindPendingAddons,
   'flag-no-shows': cancelWorkerNoShows,
   'escalate-stale-disputes': escalateStaleDisputes,
   'expire-pending': expireOverduePendingBookings,
   'confirm-reschedules': remindAndAutoConfirmReschedules,
   'decline-reschedule-requests': remindAndAutoDeclineRescheduleRequests,
-  'flag-vat-threshold': flagWorkersOverVatThreshold,
   'flag-expired-kyc': flagExpiredKycDocuments,
   'auto-suspend-workers': autoSuspendUnderperformingWorkers,
   'clear-stale-locations': clearStaleWorkerLocations,

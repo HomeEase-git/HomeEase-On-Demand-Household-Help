@@ -11,8 +11,10 @@ interface AuthRequest extends Request {
   user?: JwtPayload;
 }
 
-// TIERED (worker-defined price steps) is retired — prices are admin-set only.
-const VALID_PRICING_MODELS: TaskPricingModel[] = ['FIXED', 'PER_UNIT', 'CUSTOM_QUOTE'];
+// Two ways to price a job: a flat price, or a price per piece the client
+// counts. TIERED (worker price steps) and CUSTOM_QUOTE (worker quotes on site)
+// are retired; extras and parts go on the worker's invoice instead.
+const VALID_PRICING_MODELS: TaskPricingModel[] = ['FIXED', 'PER_UNIT'];
 
 const taskInclude = {
   quantityScopeField: { select: { id: true, label: true } },
@@ -34,9 +36,9 @@ export type TaskInputBody = {
 
 /**
  * The admin's price (basePrice) is what every client pays and every worker
- * earns — FIXED: the flat price, PER_UNIT: the rate per unit. CUSTOM_QUOTE
- * has no upfront price at all (worker quotes on-site via submitQuote), so it
- * must NOT carry a unit/quantity field.
+ * earns — FIXED: the flat price, PER_UNIT: the price per piece. A switched-off
+ * job may have no price yet (former custom-quote jobs); it needs one before
+ * it can be switched back on.
  */
 export function validateTaskInput(body: TaskInputBody, existingNumberFieldIds: Set<string>): string | null {
   if (!body.name?.trim()) {
@@ -55,14 +57,7 @@ export function validateTaskInput(body: TaskInputBody, existingNumberFieldIds: S
     return 'allowsFollowUp must be true or false.';
   }
 
-  if (body.pricingModel === 'CUSTOM_QUOTE') {
-    if (body.quantityScopeFieldId) {
-      return 'Custom-quote tasks cannot have a quantity field.';
-    }
-    return null;
-  }
-
-  if (body.basePrice <= 0) {
+  if (body.isActive !== false && body.basePrice <= 0) {
     return 'Price must be above ₱0.';
   }
 
@@ -119,14 +114,10 @@ export const createTask = async (req: AuthRequest, res: Response) => {
       return res.status(400).json(errorResponse(400, validationError));
     }
 
-    const isCustomQuote = body.pricingModel === 'CUSTOM_QUOTE';
-
     // Minimum-wage guardrail on the admin price — applies platform-wide (no
     // per-city variant), so it's checked against the highest region-wide
     // DOLE floor since there's no city here to look up.
-    const doleCheck = isCustomQuote
-      ? ({ blocked: false, note: null } as const)
-      : checkDoleFloor(getHighestDoleWageReference(), body.basePrice!, body.overrideReason);
+    const doleCheck = checkDoleFloor(getHighestDoleWageReference(), body.basePrice!, body.overrideReason);
     if (doleCheck.blocked) {
       return res.status(400).json(errorResponse(400, doleCheck.message));
     }
@@ -140,11 +131,11 @@ export const createTask = async (req: AuthRequest, res: Response) => {
         pricingModel: body.pricingModel as TaskPricingModel,
         minPrice: null,
         maxPrice: null,
-        // Display-only for FIXED/CUSTOM_QUOTE (the matrix's "per visit").
+        // Display-only for FIXED (the matrix's "per visit").
         unitLabel: body.unitLabel?.trim() || null,
         quantityScopeFieldId:
           body.pricingModel === 'PER_UNIT' ? body.quantityScopeFieldId! : null,
-        durationHours: isCustomQuote ? null : body.durationHours ?? null,
+        durationHours: body.durationHours ?? null,
         allowsFollowUp: body.allowsFollowUp ?? false,
       },
       include: taskInclude,
@@ -181,20 +172,20 @@ export const updateTask = async (req: AuthRequest, res: Response) => {
       return res.status(404).json(errorResponse(404, 'Task not found'));
     }
 
-    const numberFieldIds = await getNumberFieldIds(serviceTypeId);
-    const validationError = validateTaskInput(body, numberFieldIds);
-    if (validationError) {
-      return res.status(400).json(errorResponse(400, validationError));
-    }
     if (body.isActive !== undefined && typeof body.isActive !== 'boolean') {
       return res.status(400).json(errorResponse(400, 'isActive must be a boolean.'));
     }
+    const isActive = body.isActive ?? existing.isActive;
 
-    const isCustomQuote = body.pricingModel === 'CUSTOM_QUOTE';
+    const numberFieldIds = await getNumberFieldIds(serviceTypeId);
+    const validationError = validateTaskInput({ ...body, isActive }, numberFieldIds);
+    if (validationError) {
+      return res.status(400).json(errorResponse(400, validationError));
+    }
 
-    const doleCheck = isCustomQuote
-      ? ({ blocked: false, note: null } as const)
-      : checkDoleFloor(getHighestDoleWageReference(), body.basePrice!, body.overrideReason);
+    const doleCheck = isActive
+      ? checkDoleFloor(getHighestDoleWageReference(), body.basePrice!, body.overrideReason)
+      : ({ blocked: false, note: null } as const);
     if (doleCheck.blocked) {
       return res.status(400).json(errorResponse(400, doleCheck.message));
     }
@@ -209,12 +200,12 @@ export const updateTask = async (req: AuthRequest, res: Response) => {
           pricingModel: body.pricingModel as TaskPricingModel,
           minPrice: null,
           maxPrice: null,
-          // Display-only for FIXED/CUSTOM_QUOTE (the matrix's "per visit").
+          // Display-only for FIXED (the matrix's "per visit").
           unitLabel: body.unitLabel?.trim() || null,
           quantityScopeFieldId:
             body.pricingModel === 'PER_UNIT' ? body.quantityScopeFieldId! : null,
-          durationHours: isCustomQuote ? null : body.durationHours ?? null,
-          isActive: body.isActive ?? existing.isActive,
+          durationHours: body.durationHours ?? null,
+          isActive,
           ...(body.allowsFollowUp !== undefined ? { allowsFollowUp: body.allowsFollowUp } : {}),
         },
         include: taskInclude,
@@ -254,6 +245,10 @@ export const toggleTaskActive = async (req: AuthRequest, res: Response) => {
     const existing = await prisma.serviceTask.findFirst({ where: { id: taskId, serviceTypeId } });
     if (!existing) {
       return res.status(404).json(errorResponse(404, 'Task not found'));
+    }
+    // A former custom-quote job has no price; it needs one before clients can book it.
+    if (isActive && !(existing.basePrice > 0)) {
+      return res.status(400).json(errorResponse(400, 'Give this job a price before switching it on.'));
     }
 
     const task = await prisma.serviceTask.update({

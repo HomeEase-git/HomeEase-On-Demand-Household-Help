@@ -16,6 +16,7 @@ import {
   countQuestionFor,
   draftToPayload,
   emptyDraft,
+  ensureCountQuestions,
   formatPeso,
   isChoiceType,
   newKey,
@@ -73,8 +74,11 @@ export default function ServiceCatalogEditor() {
         const service = all.find((s) => s.id === id)
         if (!service) throw new Error('This service no longer exists.')
         const d = serviceToDraft(service)
-        setDraft(d)
         setBaseline(snapshotOf(d))
+        // Fix leftovers from older saves (a flat job still holding its count
+        // question); it shows as an unsaved change so the admin saves it.
+        ensureCountQuestions(d)
+        setDraft(d)
         setIsActive(service.isActive)
         setPreviewJob(d.jobs.find((j) => j.isActive)?.ref ?? null)
       }
@@ -113,6 +117,7 @@ export default function ServiceCatalogEditor() {
     setSaveError('')
     const next = clone(draft)
     fn(next)
+    ensureCountQuestions(next)
     setDraft(next)
   }
   const withUndo = (text, fn) => {
@@ -188,7 +193,8 @@ export default function ServiceCatalogEditor() {
   const saveJob = (originalRef, values) => {
     change((d) => {
       if (originalRef) {
-        Object.assign(jobIn(d, originalRef), values)
+        const { questions, ...rest } = values
+        Object.assign(jobIn(d, originalRef), rest)
       } else {
         const job = { ...values, ref: newKey('j'), id: undefined, isActive: true, questions: [] }
         d.jobs.push(job)
@@ -329,9 +335,6 @@ export default function ServiceCatalogEditor() {
     )
 
   const priceLine = (job) => {
-    if (job.model === 'CUSTOM_QUOTE') {
-      return <div className="sce-priceline"><i className="fas fa-circle-info" /> Custom quote. The worker inspects first, then sends a price for the client to approve.</div>
-    }
     if (!usesCount(job.model)) {
       return (
         <div className="sce-priceline">
@@ -390,7 +393,7 @@ export default function ServiceCatalogEditor() {
             )}
           </span>
           <span className="sce-job__unit">{job.unit ? `per ${job.unit}` : '—'}</span>
-          <span className="sce-job__price sce-r">{job.model === 'CUSTOM_QUOTE' ? 'Quote' : formatPeso(job.price)}</span>
+          <span className="sce-job__price sce-r">{Number(job.price) > 0 ? formatPeso(job.price) : 'No price'}</span>
           <span className="sce-job__qs sce-r">
             {!job.isActive ? (
               <span className="sce-chip sce-chip--off">Inactive</span>
@@ -564,7 +567,7 @@ export default function ServiceCatalogEditor() {
                   )}
                 </div>
                 <small style={{ color: 'var(--text-muted)', fontSize: '0.75rem' }}>
-                  {uploadingBg ? 'Uploading...' : 'A photo related to this service. The app shows it slightly blurred behind the list of pros. Saved when you save the service.'}
+                  {uploadingBg ? 'Uploading...' : 'A photo related to this service. The app shows it slightly blurred behind the list of workers. Saved when you save the service.'}
                 </small>
               </div>
               <label className="sce-check sce-span">
@@ -576,21 +579,8 @@ export default function ServiceCatalogEditor() {
               </label>
             </div>
             <div className="sce-stats">
-              {draft.jobs.length} job{draft.jobs.length === 1 ? '' : 's'} · {draft.common.length} common question{draft.common.length === 1 ? '' : 's'} · {jobQuestionCount} job question{jobQuestionCount === 1 ? '' : 's'}
+              {draft.jobs.length} job{draft.jobs.length === 1 ? '' : 's'} · {jobQuestionCount} job question{jobQuestionCount === 1 ? '' : 's'}
             </div>
-          </section>
-
-          <section className="sce-card">
-            <div className="sce-card__head">
-              <div>
-                <h2>Common questions</h2>
-                <p>Asked for every job in this category, before the job's own questions.</p>
-              </div>
-              <button type="button" className="btn btn-primary btn-sm" onClick={() => setModal({ kind: 'q', scope: 'common' })}>
-                <i className="fas fa-plus" /> Add question
-              </button>
-            </div>
-            <div className="sce-card__body">{questionList(draft.common, 'common', null)}</div>
           </section>
 
           <section className="sce-card">

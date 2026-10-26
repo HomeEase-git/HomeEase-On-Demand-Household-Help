@@ -104,8 +104,7 @@ export default function ClientPreview({ draft, jobRef, onJobChange }) {
   const jobQuestions = job ? job.questions : []
 
   let estimate = { main: '—', sub: '' }
-  if (job?.model === 'CUSTOM_QUOTE') estimate = { main: 'Quote', sub: 'The worker sends a price after inspecting' }
-  else if (job && !usesCount(job.model)) estimate = { main: formatPeso(job.price), sub: job.unit ? `Flat, per ${job.unit}` : 'Flat price' }
+  if (job && !usesCount(job.model)) estimate = { main: formatPeso(job.price), sub: job.unit ? `Flat, per ${job.unit}` : 'Flat price' }
   else if (job) {
     const n = countQ ? Number(answers[countQ.ref] ?? countQ.min ?? 1) : 1
     estimate = {
@@ -163,7 +162,7 @@ export default function ClientPreview({ draft, jobRef, onJobChange }) {
               </label>
               {job && (
                 <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginTop: '0.35rem' }}>
-                  {job.model === 'CUSTOM_QUOTE' ? 'Price after inspection' : `${formatPeso(job.price)}${job.unit ? ` per ${job.unit}` : ''}`}
+                  {`${formatPeso(job.price)}${job.unit ? ` per ${job.unit}` : ''}`}
                 </div>
               )}
             </div>

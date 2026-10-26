@@ -15,14 +15,14 @@ describe("formatJobTime", () => {
 
 describe("getBookingTimeline", () => {
   it.each<[BookingStatus, number, string]>([
-    ["Pending", 1, "normal"],
-    ["Accepted", 2, "normal"],
+    ["Pending", 0, "normal"],
+    ["Accepted", 1, "normal"],
+    ["QuoteSubmitted", 1, "action"],
+    ["QuoteApproved", 1, "normal"],
     ["InProgress", 2, "normal"],
-    ["QuoteSubmitted", 2, "action"],
-    ["QuoteApproved", 2, "normal"],
+    ["Disputed", 2, "issue"],
     ["PendingCompletion", 3, "action"],
     ["AwaitingPayment", 3, "action"],
-    ["Disputed", 3, "issue"],
     ["Completed", TIMELINE_STEPS.length, "normal"],
     ["Cancelled", 0, "stopped"],
   ])("%s is at step %i with a %s tone", (status, current, tone) => {
@@ -32,18 +32,26 @@ describe("getBookingTimeline", () => {
     expect(t.headline.length).toBeGreaterThan(0);
   });
 
-  it("never marks a cancelled booking as accepted", () => {
-    // The old stepper showed "Accepted ✓" for anything that wasn't Pending.
+  it("has four plain steps", () => {
+    expect(TIMELINE_STEPS).toEqual(["Waiting", "Confirmed", "Ongoing", "Done"]);
+  });
+
+  it("asks a GCash/Maya client to pay once the worker is done, but not a cash client", () => {
+    expect(getBookingTimeline("PendingCompletion", { isCash: false }).tone).toBe("action");
+    expect(getBookingTimeline("PendingCompletion", { isCash: true }).tone).toBe("action");
+  });
+
+  it("never marks a cancelled booking as confirmed", () => {
     expect(getBookingTimeline("Cancelled").current).toBe(0);
   });
 
   it("names the worker and the date when it has them", () => {
     const t = getBookingTimeline("Accepted", { workerName: "Elias", scheduledDate: "Monday, 28 September 2026" });
-    expect(t.headline).toBe("Elias is booked");
-    expect(t.detail).toContain("Monday, 28 September 2026");
+    expect(t.headline).toBe("Your booking is confirmed");
+    expect(t.detail).toBe("Elias will come on Monday, 28 September 2026.");
   });
 
   it("falls back to a generic name while no worker is assigned", () => {
-    expect(getBookingTimeline("Accepted", { workerName: "Unassigned" }).headline).toBe("Your worker is booked");
+    expect(getBookingTimeline("Accepted", { workerName: "Unassigned" }).detail).toBe("Your worker will do your job.");
   });
 });

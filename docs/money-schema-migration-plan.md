@@ -80,11 +80,9 @@ Then a delete that would orphan money history fails instead of cascading. `Booki
 | `Dispute` | refundAmount |
 | `ClientProfile` | outstandingBalance |
 | `WorkerProfile` | commissionOwed, compensationCredit |
-| `TaxCertificate` | totalIncomePayments, totalTaxWithheld |
 | `TaxRemittance` | totalTaxWithheld |
-| `VatCollectionSummary` | totalVatCollected |
 | `AppSettings` | noShowPenaltyAmount, clientFaultCompensationAmount, workerDebtHoldLimit, perKmFee |
-| Price lists | `ServiceTask`, `ServiceType`, `WorkerTaskPrice`, `WorkerTaskTierPrice`, `WorkerPackage`, `PricingRule`, `PricingLog` |
+| Price lists | `ServiceTask`, `ServiceType`, `WorkerPackage`, `PricingLog` |
 
 Rates (`commissionRate`, `withholdingTaxRate`, `vatRate`, `rushFeeRate`, the tier multipliers) are not money amounts. They can stay `Float`, or become `Decimal(6,4)`.
 

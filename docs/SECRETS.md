@@ -29,7 +29,7 @@ G = GitHub Actions secret, L = local `.env` only.
 | `DIRECT_URL` (Neon owner password) | R, L | The whole database, schema included (migrations) | **Critical:** full control of all data | [Database password](#database-password) |
 | `DATABASE_URL` (`homeease_app` password, once switched; see [DATA-RESILIENCE.md](DATA-RESILIENCE.md#database-roles)) | R | Rows in app tables | **Critical:** read/write of all rows, but no schema changes and no editing of audit or ledger entries | [Database password](#database-password) |
 | `homeease_readonly` password | Password manager | Read-only access for reports and investigations | **High:** every row readable | [Database password](#database-password) |
-| `DATA_ENCRYPTION_KEY` | R | Payout account numbers, TINs (and the TIN duplicate-check hash) | Encrypted fields readable, **if** the database also leaks | [Encryption keys](#encryption-keys) |
+| `DATA_ENCRYPTION_KEY` | R | Payout account numbers | Encrypted fields readable, **if** the database also leaks | [Encryption keys](#encryption-keys) |
 | `MFA_ENCRYPTION_KEY` | R | Admin authenticator-app secrets | Admin MFA codes could be generated, **if** the database also leaks | [Encryption keys](#encryption-keys) |
 | `JWT_SECRET` | R | Signs every access token | Anyone can mint a token for any account, including admin | [JWT secret](#jwt-secret) |
 | `XENDIT_SECRET_KEY` | R, L | Invoices, refunds, **payouts** | Money can be moved out of the Xendit balance | [Swap](#simple-swap) (Xendit → Settings → API keys) |
@@ -98,11 +98,10 @@ so do the Render update straight after.
    npx tsx scripts/rotate-encryption-keys.ts         # apply
    ```
    Add `--neon-websocket` if your network blocks direct Postgres connections to Neon.
-   The script re-encrypts payout numbers, TINs and MFA secrets, and recomputes TIN hashes. It plans everything first and writes nothing if any value decrypts with neither key.
+   The script re-encrypts payout numbers and MFA secrets. It plans everything first and writes nothing if any value decrypts with neither key.
    If it reports rows edited during the run, run it again.
-   If it reports two workers sharing a TIN, one was saved in the few seconds when old and new instances overlapped. Resolve it by hand, then run the script again.
    It is safe to run again; a second run reports 0 changes.
-4. Check a worker's payout settings, and generate a tax certificate or sign in as an admin with MFA.
+4. Check a worker's payout settings, or sign in as an admin with MFA.
 5. Remove `<KEY>_PREVIOUS` on Render.
 6. **Keep the old key in the password manager until every database backup older than the rotation has expired.** Restoring one of those backups needs the old key.
 

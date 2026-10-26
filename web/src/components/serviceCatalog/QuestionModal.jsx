@@ -221,7 +221,7 @@ export default function QuestionModal({ initial, job, isCount, currentCountLabel
                 <span>
                   This number sets the price
                   <small>
-                    {job.model === 'CUSTOM_QUOTE' ? 'Price' : formatPeso(job.price)} × this answer
+                    {formatPeso(job.price)} × this answer
                     {job.unit ? ` (${job.unit})` : ''}.
                   </small>
                 </span>

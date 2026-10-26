@@ -56,7 +56,7 @@ export const RecordCard: React.FC<Props> = ({ record, onPress }) => {
               ? `₱${record.amount}`
               : "Cancelled"}
         </Text>
-        <StatusBadge status={record.status as StatusType} />
+        <StatusBadge status={record.status as StatusType} variant="booking" />
       </View>
     </PressableScale>
   );

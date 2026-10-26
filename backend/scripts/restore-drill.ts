@@ -195,10 +195,8 @@ async function verify(prisma: PrismaClient, asOf: Date | undefined): Promise<voi
   if (process.env.DATA_ENCRYPTION_KEY?.trim()) {
     const values = await prisma.$queryRawUnsafe<{ v: string }[]>(`
       SELECT v FROM (
-        SELECT tin AS v FROM "WorkerProfile" UNION ALL
-        SELECT "payoutAccountNumber" FROM "WorkerProfile" UNION ALL
-        SELECT "accountNumber" FROM "Payout" UNION ALL
-        SELECT "workerTin" FROM "TaxCertificate"
+        SELECT "payoutAccountNumber" AS v FROM "WorkerProfile" UNION ALL
+        SELECT "accountNumber" FROM "Payout"
       ) x WHERE v LIKE 'enc:v1:%' LIMIT ${ENCRYPTED_SAMPLE}`);
     const failures = values.filter(({ v }) => {
       try {

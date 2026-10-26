@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { View, Text, ActivityIndicator, Pressable } from "react-native";
+import { View, Text, ActivityIndicator, Pressable, Switch } from "react-native";
 import { RemoteImage } from "../../../../components/ui/RemoteImage";
 import { KeyboardAwareScrollView } from "../../../../components/ui/KeyboardAwareScrollView";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -14,8 +14,9 @@ import ServiceCategorySelector, {
 } from "../../../../components/booking4step/ServiceCategorySelector";
 import TaskSelector from "../../../../components/booking4step/TaskSelector";
 import DynamicScopeFields from "../../../../components/booking4step/DynamicScopeFields";
-import { fieldAppliesToTask, type ServiceTaskOption } from "../../../../types/booking4step.types";
+import { fieldAppliesToTask, PET_FRIENDLY_PRIORITY, type ServiceTaskOption } from "../../../../types/booking4step.types";
 import PricingRangePreview from "../../../../components/booking4step/PricingRangePreview";
+import PackageSelector from "../../../../components/booking4step/PackageSelector";
 import { BookingFooterBar } from "../../../../components/booking4step/BookingFooterBar";
 import ImageSourcePickerBottomSheet from "../../../../components/bottom-sheets/ImageSourcePickerBottomSheet";
 import type { BottomSheetHandle } from "../../../../components/bottom-sheets/BottomSheetWrapper";
@@ -28,7 +29,7 @@ import { useAlertModal } from "../../../../contexts/AlertModalContext";
 
 const MAX_ISSUE_PHOTOS = 5;
 
-const BOOKING_STEPS = ["Scope", "Schedule", "Who", "Confirm"];
+const BOOKING_STEPS = ["Service", "When & where", "Book"];
 
 function hasAnswer(value: string | string[] | undefined): boolean {
   return Array.isArray(value) ? value.length > 0 : !!value && value.trim().length > 0;
@@ -48,6 +49,7 @@ export default function BookingStep1Screen() {
   const [scopeAnswers, setScopeAnswers] = useState<Record<string, string | string[]>>({});
   const [description, setDescription] = useState(draft.description);
   const [issuePhotos, setIssuePhotos] = useState<string[]>(draft.issuePhotoUrls ?? []);
+  const [hasPets, setHasPets] = useState<boolean>((draft.priorities ?? []).includes(PET_FRIENDLY_PRIORITY));
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
   const photoSheetRef = useRef<BottomSheetHandle | null>(null);
 
@@ -90,9 +92,9 @@ export default function BookingStep1Screen() {
                   basePrice: task.basePrice,
                   pricingModel: task.pricingModel,
                   // Prices are admin-set: one price per job, the same at
-                  // every pro (before their tier surcharge and distance fee).
-                  minPrice: task.pricingModel === "CUSTOM_QUOTE" ? null : task.basePrice,
-                  maxPrice: task.pricingModel === "CUSTOM_QUOTE" ? null : task.basePrice,
+                  // every worker (before their tier surcharge and distance fee).
+                  minPrice: task.basePrice,
+                  maxPrice: task.basePrice,
                   unitLabel: task.unitLabel ?? null,
                   quantityScopeFieldId: task.quantityScopeFieldId ?? null,
                   isActive: task.isActive,
@@ -164,12 +166,9 @@ export default function BookingStep1Screen() {
   // yet keeps today's flat-category-price booking unchanged.
   const activeTasks = selectedCategory?.tasks ?? [];
   const requiresTaskSelection = activeTasks.length > 0;
-  const isCustomQuoteTask = selectedTask?.pricingModel === "CUSTOM_QUOTE";
 
   // A selected task's own admin price replaces the category's
-  // marketplace-wide range once picked. Custom-quote
-  // has no upfront range at all (worker quotes after inspecting), so it's
-  // fed 0/0 here and the preview is skipped entirely in the JSX below instead.
+  // marketplace-wide range once picked.
   const priceEstimate = useBookingPriceEstimate({
     min: selectedTask ? (selectedTask.minPrice ?? 0) : (selectedCategory?.priceRangeMin ?? 0),
     max: selectedTask ? (selectedTask.maxPrice ?? 0) : (selectedCategory?.priceRangeMax ?? 0),
@@ -298,7 +297,7 @@ export default function BookingStep1Screen() {
 
         {draft.workerLocked && draft.workerServiceTypes && draft.workerServiceTypes.length > 0 && !loadingCategories && displayCategories.length === 0 && (
           <Text className="text-error text-sm mt-2">
-            This pro&apos;s listed services aren&apos;t currently bookable. Please go back and pick a different pro.
+            This worker&apos;s listed services aren&apos;t currently bookable. Please go back and pick a different worker.
           </Text>
         )}
 
@@ -319,19 +318,45 @@ export default function BookingStep1Screen() {
           </View>
         )}
 
-        {isCustomQuoteTask ? (
-          <View className="bg-brand rounded-2xl p-4 mt-6">
-            <Text className="text-white/70 text-xs font-medium">Estimated price</Text>
-            <Text className="text-white font-bold text-base mt-0.5">Quote after inspection</Text>
-            <Text className="text-white/60 text-xs mt-2">
-              Your pro will inspect the job and send a quote before any charge applies.
-            </Text>
-          </View>
-        ) : (
+        <View className="mt-6">
+          <PricingRangePreview estimate={priceEstimate} />
+        </View>
+
+        {/* A worker picked from their profile: their packages are offered here.
+            Otherwise they're offered when the client chooses a worker. */}
+        {selectedCategory && draft.workerLocked && draft.workerId && (
           <View className="mt-6">
-            <PricingRangePreview estimate={priceEstimate} />
+            <Text className="text-text-primary font-bold text-lg mb-3">
+              {draft.workerName ? `${draft.workerName}'s packages (optional)` : "Packages (optional)"}
+            </Text>
+            <PackageSelector
+              workerId={draft.workerId}
+              serviceTypeId={
+                draft.workerServiceTypes?.find((ws) => ws.name.toLowerCase() === selectedCategory.name.toLowerCase())?.id ??
+                null
+              }
+              selected={draft.selectedPackageIds ?? []}
+              onChange={(ids) => setDraft({ selectedPackageIds: ids })}
+              onSelectedTotalChange={(total) => setDraft({ selectedPackagesTotal: total })}
+            />
           </View>
         )}
+
+        <View className="bg-card rounded-xl p-3.5 flex-row items-center mt-6">
+          <View className="flex-1 pr-3">
+            <Text className="text-text-primary font-semibold text-base">I have pets at home</Text>
+            <Text className="text-text-muted text-sm mt-0.5">We&apos;ll match you with a pet-friendly worker</Text>
+          </View>
+          <Switch
+            value={hasPets}
+            onValueChange={(value) => {
+              setHasPets(value);
+              setDraft({ priorities: value ? [PET_FRIENDLY_PRIORITY] : [] });
+            }}
+            trackColor={{ false: colors.toggleOff, true: colors.accent.DEFAULT }}
+            thumbColor={colors.white}
+          />
+        </View>
 
         <Text className="text-text-secondary font-bold text-sm mb-1 mt-6">Description (optional)</Text>
         <InputField
@@ -340,7 +365,7 @@ export default function BookingStep1Screen() {
           onChangeText={(t) => {
             setDescription(t);
           }}
-          placeholder="Anything specific the pro should know?"
+          placeholder="Anything specific the worker should know?"
           multiline
         />
 
@@ -377,8 +402,7 @@ export default function BookingStep1Screen() {
 
       </KeyboardAwareScrollView>
       <BookingFooterBar
-        estimate={selectedCategory && !isCustomQuoteTask ? priceEstimate : null}
-        noPriceText={isCustomQuoteTask ? "Quote after inspection" : undefined}
+        estimate={selectedCategory ? priceEstimate : null}
         buttonLabel="Next"
         disabled={loadingCategories}
         onPress={handleNext}

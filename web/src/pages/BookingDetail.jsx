@@ -17,6 +17,9 @@ const TERMINAL_STATUSES = ['Completed', 'Cancelled', 'Rejected']
 
 const peso = (n) => `₱${Number(n ?? 0).toLocaleString('en-PH', { minimumFractionDigits: 2 })}`
 
+const INVOICE_STATUS = { DUE: 'waiting for payment', REPORTED: 'reported by the client', PAID: 'paid' }
+const INVOICE_LINE_KIND = { JOB: 'Job', PACKAGE: 'Package', PREFERENCE: 'Preference', PART: 'Part (receipt)', EXTRA_WORK: 'Extra work' }
+
 function formatTime12h(time) {
   if (!time) return ''
   const [h, m] = time.split(':').map(Number)
@@ -116,7 +119,7 @@ export default function BookingDetail() {
                     )}
                   </div>
                 )}
-                {booking.pricing.tierFee > 0 && <div>Pro tier surcharge: {peso(booking.pricing.tierFee)}</div>}
+                {booking.pricing.tierFee > 0 && <div>Skilled tier surcharge: {peso(booking.pricing.tierFee)}</div>}
                 {booking.pricing.rushFee > 0 && <div>Same-day fee: {peso(booking.pricing.rushFee)}</div>}
                 {booking.pricing.addOnsTotal > 0 && <div>Add-ons: {peso(booking.pricing.addOnsTotal)}</div>}
                 <div><strong>Estimate: {peso(booking.pricing.estimate)}</strong></div>
@@ -200,45 +203,29 @@ export default function BookingDetail() {
         </SectionCard>
       )}
 
-      {booking.quote && (
-        <SectionCard title={`Quote${booking.quote.revision > 0 ? ` (revision ${booking.quote.revision + 1})` : ''}`}>
-          <div className="detail-grid">
-            <div className="detail-block">
-              <label>Status</label>
-              <div className="value">{booking.quote.status ? booking.quote.status.replace(/_/g, ' ') : '—'}</div>
-            </div>
-            <div className="detail-block">
-              <label>Service</label>
-              <div className="value">{booking.quote.laborCost != null ? peso(booking.quote.laborCost) : '—'}</div>
-            </div>
-            <div className="detail-block">
-              <label>Materials</label>
-              <div className="value">{peso(booking.quote.materialsCost)}</div>
-            </div>
-            {booking.quote.notes && (
-              <div className="detail-block detail-block--full">
-                <label>Worker&apos;s Notes</label>
-                <div className="value">{booking.quote.notes}</div>
-              </div>
-            )}
-            {booking.quote.rejectionReason && (
-              <div className="detail-block detail-block--full">
-                <label>Client Refused Because</label>
-                <div className="value">{booking.quote.rejectionReason}</div>
-              </div>
-            )}
-            <div className="detail-block detail-block--full">
-              <label>Receipts</label>
-              <div className="value">
-                <PhotoRow urls={booking.quote.receiptUrls} alt="Receipt" />
-              </div>
-            </div>
-            <div className="detail-block detail-block--full">
-              <label>Materials In Use</label>
-              <div className="value">
-                <PhotoRow urls={booking.quote.proofOfUseUrls} alt="Materials in use" />
-              </div>
-            </div>
+      {booking.invoice && booking.invoice.status !== 'NOT_SENT' && (
+        <SectionCard title={`Invoice${INVOICE_STATUS[booking.invoice.status] ? ` · ${INVOICE_STATUS[booking.invoice.status]}` : ''}`}>
+          <div className="table-wrap">
+            <table className="table">
+              <thead>
+                <tr>
+                  <th>Line</th>
+                  <th>Type</th>
+                  <th style={{ textAlign: 'right' }}>Amount</th>
+                  <th>Photos</th>
+                </tr>
+              </thead>
+              <tbody>
+                {booking.invoice.lines.map((line, i) => (
+                  <tr key={line.id ?? `job-${i}`}>
+                    <td>{line.name}</td>
+                    <td>{INVOICE_LINE_KIND[line.kind] ?? line.kind}</td>
+                    <td style={{ textAlign: 'right' }}>{peso(line.price)}</td>
+                    <td>{line.photoUrls.length ? <PhotoRow urls={line.photoUrls} alt={line.name} /> : '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         </SectionCard>
       )}

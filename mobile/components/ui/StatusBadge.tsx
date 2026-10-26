@@ -20,9 +20,28 @@ export type StatusType =
 
 type Props = {
   status: StatusType;
+  // A booking's status reads in four plain words (see BOOKING_LABEL); the
+  // same badge also shows payment and document statuses, which keep theirs.
+  variant?: "booking";
 };
 
-export const StatusBadge: React.FC<Props> = ({ status }) => {
+// What clients and workers see for a booking, whatever the backend status.
+const BOOKING_LABEL: Partial<Record<StatusType, string>> = {
+  Pending: "Waiting",
+  Accepted: "Confirmed",
+  QuoteSubmitted: "Price to approve",
+  QuoteApproved: "Confirmed",
+  InProgress: "Ongoing",
+  Ongoing: "Ongoing",
+  Disputed: "Under review",
+  PendingCompletion: "Payment due",
+  AwaitingPayment: "Payment due",
+  Completed: "Done",
+  Declined: "Declined",
+  Cancelled: "Cancelled",
+};
+
+export const StatusBadge: React.FC<Props> = ({ status, variant }) => {
   let containerClass = "px-3 py-1 rounded-full";
   let textClass = "text-xs font-semibold";
 
@@ -84,7 +103,7 @@ export const StatusBadge: React.FC<Props> = ({ status }) => {
     InProgress: "In Progress",
     QuoteSubmitted: "Quote Submitted",
     QuoteApproved: "Quote Approved",
-    PendingCompletion: "Awaiting Confirmation",
+    PendingCompletion: "Payment Due",
     AwaitingPayment: "Awaiting Payment",
     Pending: "Pending",
     Declined: "Declined",
@@ -93,7 +112,9 @@ export const StatusBadge: React.FC<Props> = ({ status }) => {
 
   return (
     <View className={containerClass}>
-      <Text className={textClass}>{displayLabel[status] ?? status}</Text>
+      <Text className={textClass}>
+        {(variant === "booking" ? BOOKING_LABEL[status] : undefined) ?? displayLabel[status] ?? status}
+      </Text>
     </View>
   );
 };

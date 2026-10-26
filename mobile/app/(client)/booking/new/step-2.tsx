@@ -23,11 +23,11 @@ import { addressStorage } from "../../../../utils/storage";
 import { displayAddress, geocodeAddressWithFallback } from "../../../../utils/geo";
 import { RUSH_FEE_RATE, RUSH_MIN_LEAD_HOURS, earliestStartTime, isRushDate, phTodayIso } from "../../../../utils/bookingTime";
 
-const BOOKING_STEPS = ["Scope", "Schedule", "Who", "Confirm"];
+const BOOKING_STEPS = ["Service", "When & where", "Book"];
 
 export default function BookingStep2Screen() {
   const router = useRouter();
-  // Same estimate as Step 4, from what Step 1 saved (null for custom-quote jobs).
+  // Same estimate as Step 4, from what Step 1 saved.
   const draftEstimate = useDraftPriceEstimate();
   const alertModal = useAlertModal();
   const draft = useBookingStore((s) => s.draft);
@@ -182,7 +182,7 @@ export default function BookingStep2Screen() {
     };
   }, [lockedWorkerId, date]);
 
-  // How many pros work on the picked date (for a locked worker: 0 or 1).
+  // How many workers work on the picked date (for a locked worker: 0 or 1).
   // Workers take several jobs a day, so the start time doesn't change this.
   const { count: prosAvailable, loading: loadingCount } = useDateAvailabilityCount(
     {
@@ -217,10 +217,10 @@ export default function BookingStep2Screen() {
   const handleNext = () => {
     if (noProsOnDate) {
       alertModal.warning(
-        "No pros available",
+        "No workers available",
         draft.workerLocked
-          ? `${draft.workerName ?? "This pro"} isn't working on this date. Try a different date, or go back and choose another pro.`
-          : "No pros are available on this date. Try a different date.",
+          ? `${draft.workerName ?? "This worker"} isn't working on this date. Try a different date, or go back and choose another worker.`
+          : "No workers are available on this date. Try a different date.",
       );
       return;
     }
@@ -229,8 +229,35 @@ export default function BookingStep2Screen() {
       return;
     }
 
-    setDraft({ address, lat, lng, city, date, time });
-    router.push("/(client)/booking/new/step-3");
+    // Straight to the review screen: unless the client already picked or
+    // locked in a worker, the best available one is matched for them
+    // (they can still choose one from the review screen).
+    const keepWorker = !!draft.workerId && (draft.workerLocked || !draft.isAutoMatched);
+    setDraft({
+      address,
+      lat,
+      lng,
+      city,
+      date,
+      time,
+      ...(keepWorker
+        ? {}
+        : {
+            workerId: null,
+            workerName: null,
+            workerTier: null,
+            workerEstimatedTotal: null,
+            workerPriceBreakdown: null,
+            workerUnitPrice: null,
+            workerAvatar: null,
+            workerRating: null,
+            isAutoMatched: true,
+            holdStartedAt: null,
+            selectedPackageIds: [],
+            selectedPackagesTotal: 0,
+          }),
+    });
+    router.push("/(client)/booking/new/step-4");
   };
 
   return (
@@ -278,23 +305,23 @@ export default function BookingStep2Screen() {
           {date && !loadingCount && prosAvailable != null
             ? draft.workerLocked
               ? prosAvailable > 0
-                ? `${draft.workerName ?? "Your pro"} works on this date.`
-                : `${draft.workerName ?? "Your pro"} isn't working on this date.`
-              : `${prosAvailable} pro${prosAvailable === 1 ? "" : "s"} available on this date.`
-            : "When should your pro arrive?"}
+                ? `${draft.workerName ?? "Your worker"} works on this date.`
+                : `${draft.workerName ?? "Your worker"} isn't working on this date.`
+              : `${prosAvailable} worker${prosAvailable === 1 ? "" : "s"} available on this date.`
+            : "When should your worker arrive?"}
         </Text>
         <StartTimePicker value={time} onChange={setTime} minTime={minTime} busyTimes={workerBusyTimes} />
 
         {noProsOnDate && (
           <Text className="text-error text-sm mt-2">
             {draft.workerLocked
-              ? `${draft.workerName ?? "This pro"} isn't working on this date. Try another date or pro.`
-              : "No pros are available on this date. Try another date."}
+              ? `${draft.workerName ?? "This worker"} isn't working on this date. Try another date or worker.`
+              : "No workers are available on this date. Try another date."}
           </Text>
         )}
 
       </ScrollView>
-      <BookingFooterBar estimate={draftEstimate} noPriceText="Quote after inspection" buttonLabel="Next" onPress={handleNext} />
+      <BookingFooterBar estimate={draftEstimate} buttonLabel="Next" onPress={handleNext} />
 
       <AddressPickerBottomSheet
         innerRef={addressSheetRef}
