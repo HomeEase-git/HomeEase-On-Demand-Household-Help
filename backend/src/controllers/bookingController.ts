@@ -2805,9 +2805,13 @@ export const reportInvoice = async (req: AuthRequest, res: Response) => {
       return res.status(400).json(errorResponse(400, 'Tell us what is wrong (10 to 500 characters)'));
     }
     // Optional, already-uploaded photos (upload-then-attach, see uploadController).
-    const evidenceUrls: string[] = Array.isArray(req.body?.evidenceUrls)
-      ? req.body.evidenceUrls.filter((url: unknown): url is string => typeof url === 'string').slice(0, 5)
+    const evidenceUrls: unknown[] = Array.isArray(req.body?.evidenceUrls)
+      ? req.body.evidenceUrls.slice(0, 5)
       : [];
+    const ownedEvidence = toOwnedBookingPhotoUrls(evidenceUrls, req.user.userId);
+    if (!ownedEvidence) {
+      return res.status(400).json(errorResponse(400, 'Upload the photos again — one of them could not be verified'));
+    }
 
     const booking = await prisma.booking.findUnique({ where: { id }, include: { payment: { select: { status: true } } } });
     if (!booking) {
@@ -2827,7 +2831,7 @@ export const reportInvoice = async (req: AuthRequest, res: Response) => {
     const dispute = await prisma.$transaction(async (tx) => {
       await updateBookingIfStatus(tx, id, booking.status, { status: 'DISPUTED', disputeReason: reason });
       return tx.dispute.create({
-        data: { bookingId: id, raisedById, reason: `Invoice reported: ${reason}`, status: 'OPEN', evidenceUrls },
+        data: { bookingId: id, raisedById, reason: `Invoice reported: ${reason}`, status: 'OPEN', evidenceUrls: ownedEvidence },
       });
     });
 

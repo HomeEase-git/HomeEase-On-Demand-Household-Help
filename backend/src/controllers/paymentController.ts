@@ -1,3 +1,4 @@
+import { toOwnedBookingPhotoUrls } from '@utils/storageUrls';
 import { Request, Response } from 'express';
 import { raiseSecurityAlert } from '@services/securityAlertService';
 import crypto from 'crypto';
@@ -266,9 +267,10 @@ export const refundPayment = async (req: AuthRequest, res: Response) => {
     // Optional — already-uploaded image URLs (see uploadController's
     // upload-then-attach pattern). Never required to file a legitimate
     // refund/dispute.
-    const cleanEvidenceUrls: string[] = Array.isArray(evidenceUrls)
-      ? evidenceUrls.filter((url): url is string => typeof url === 'string')
-      : [];
+    const cleanEvidenceUrls = toOwnedBookingPhotoUrls(evidenceUrls ?? [], currentUserId);
+    if (!cleanEvidenceUrls) {
+      return res.status(400).json(errorResponse(400, 'Upload the photos again — one of them could not be verified'));
+    }
 
     const payment = await prisma.payment.findUnique({
       where: { id },

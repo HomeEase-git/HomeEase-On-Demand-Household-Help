@@ -108,4 +108,21 @@ describe('Booking gaps — notifications and detail fields', () => {
       expect(await prisma.cancellation.count({ where: { bookingId: booking.id } })).toBe(0);
     }
   );
+
+  it("rejects invoice-report evidence that isn't the client's own upload", async () => {
+    const booking = await createTestBooking({ clientId, workerId, status: 'PENDING_COMPLETION' });
+    createdBookingIds.push(booking.id);
+    const report = (evidenceUrls: string[]) =>
+      request(app)
+        .patch(`/api/bookings/${booking.id}/invoice/report`)
+        .set('Authorization', `Bearer ${clientToken}`)
+        .send({ reason: 'The parts charge is wrong', evidenceUrls });
+
+    const bad = await report([photoUrl(workerId, 'someone-elses')]);
+    expect(bad.status).toBe(400);
+    expect((await prisma.booking.findUnique({ where: { id: booking.id } }))?.status).toBe('PENDING_COMPLETION');
+
+    const good = await report([photoUrl(clientId, 'mine')]);
+    expect(good.status).toBe(200);
+  });
 });
