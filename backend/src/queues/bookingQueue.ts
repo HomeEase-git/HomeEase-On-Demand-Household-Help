@@ -8,6 +8,7 @@ export const JOB_NAMES = {
   EXPIRE_PENDING: 'expire-pending-booking',
   AUTO_SETTLE_COMPLETED: 'auto-settle-completed-bookings',
   NO_SHOW_SWEEP: 'worker-no-show-sweep',
+  STUCK_BOOKING_SWEEP: 'stuck-booking-sweep',
   DISPUTE_SLA_SWEEP: 'dispute-sla-sweep',
   RESCHEDULE_TIMEOUT_SWEEP: 'reschedule-timeout-sweep',
   RESCHEDULE_REQUEST_TIMEOUT_SWEEP: 'reschedule-request-timeout-sweep',
@@ -22,6 +23,7 @@ export const JOB_NAMES = {
 export const REPEATABLE_JOB_IDS = {
   AUTO_SETTLE_COMPLETED: 'auto-settle-completed-bookings-hourly',
   NO_SHOW_SWEEP: 'worker-no-show-sweep-hourly',
+  STUCK_BOOKING_SWEEP: 'stuck-booking-sweep-10min',
   DISPUTE_SLA_SWEEP: 'dispute-sla-sweep-hourly',
   RESCHEDULE_TIMEOUT_SWEEP: 'reschedule-timeout-sweep-hourly',
   RESCHEDULE_REQUEST_TIMEOUT_SWEEP: 'reschedule-request-timeout-sweep-hourly',
@@ -128,6 +130,16 @@ export async function registerRepeatableBookingJobs(): Promise<void> {
     { pattern: '*/10 * * * *' },
     {
       name: JOB_NAMES.NO_SHOW_SWEEP,
+      data: {},
+      opts: { removeOnComplete: true, removeOnFail: true },
+    }
+  );
+
+  await bookingQueue.upsertJobScheduler(
+    REPEATABLE_JOB_IDS.STUCK_BOOKING_SWEEP,
+    { pattern: '*/10 * * * *' },
+    {
+      name: JOB_NAMES.STUCK_BOOKING_SWEEP,
       data: {},
       opts: { removeOnComplete: true, removeOnFail: true },
     }

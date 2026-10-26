@@ -26,6 +26,7 @@ import { revokeUserSessions } from '@utils/tokenRevocation';
 import { revokeAllRefreshTokens } from '@utils/otpService';
 import { JWT_EXPIRY } from '@utils/jwt';
 import { purgeExpiredData } from '@services/dataRetentionService';
+import { escalateCancelRequest } from '@services/bookingProblemService';
 
 const HOUR_MS = 60 * 60 * 1000;
 // The invoice has been sent this long without being paid: remind the client
@@ -59,6 +60,13 @@ const RESCHEDULE_AUTO_CONFIRM_HOURS = 24;
 // commitment instead of forcing a date change nobody explicitly agreed to.
 const RESCHEDULE_REQUEST_REMINDER_HOURS = 24;
 const RESCHEDULE_REQUEST_AUTO_DECLINE_HOURS = 48;
+// Stuck-booking sweep (see nudgeStuckBookings).
+const CANCEL_REQUEST_TIMEOUT_HOURS = 2;
+const CANCEL_REQUEST_MIN_ANSWER_MINUTES = 15;
+const START_REMINDER_MINUTES = 30;
+const START_NUDGE_HOURS = 2;
+const PROGRESS_REMINDER_HOURS = 12;
+const PROGRESS_ESCALATE_HOURS = 48;
 
 /**
  * A PENDING booking that no worker responded to within an hour is
@@ -468,6 +476,101 @@ export async function cancelWorkerNoShows(): Promise<void> {
       await cancelAsWorkerNoShow(booking, { noShowGraceMinutes, noShowPenaltyAmount }, now);
     } catch (error) {
       console.error(`Failed to cancel worker no-show booking ${booking.id}:`, error);
+    }
+  }
+}
+
+/**
+ * Catches bookings that stall without anyone doing anything wrong on paper:
+ * a client cancel request the worker never answered, a worker who checked in
+ * but never tapped Start Job, and a job left IN_PROGRESS for days. Each step
+ * nudges once (the *SentAt column is stamped right after the send).
+ */
+export async function nudgeStuckBookings(now = new Date()): Promise<void> {
+  const MIN_MS = 60 * 1000;
+  const due = (clock: Date, ms: number) => now.getTime() >= clock.getTime() + ms;
+  const remind = (userId: string, bookingId: string, title: string, message: string) =>
+    notifyUser({ userId, type: 'BOOKING_REMINDER', title, message, relatedId: bookingId });
+
+  // 1. Cancel requests nobody answered.
+  const requests = await prisma.booking.findMany({
+    where: {
+      cancelRequestedAt: { not: null },
+      cancelRequestEscalatedAt: null,
+      status: { in: ['ACCEPTED', 'IN_PROGRESS'] },
+    },
+  });
+  for (const b of requests) {
+    try {
+      const asked = b.cancelRequestedAt!.getTime();
+      let deadline = asked + CANCEL_REQUEST_TIMEOUT_HOURS * HOUR_MS;
+      if (b.status === 'ACCEPTED') {
+        // A request just before the start still gives the worker 15 minutes.
+        const floor = Math.max(bookingStartInstant(b).getTime(), asked + CANCEL_REQUEST_MIN_ANSWER_MINUTES * MIN_MS);
+        deadline = Math.min(deadline, floor);
+      }
+      if (now.getTime() < deadline) continue;
+      await escalateCancelRequest(b, 'NO_ANSWER');
+    } catch (error) {
+      if (!isBookingStatusConflict(error)) console.error(`Failed to escalate cancel request for booking ${b.id}:`, error);
+    }
+  }
+
+  // 2. Checked in, never started.
+  const unstarted = await prisma.booking.findMany({
+    where: {
+      status: 'ACCEPTED',
+      workerArrivedAt: { not: null },
+      OR: [{ startReminderSentAt: null }, { startNudgeSentAt: null, clientNotHereAt: null }],
+    },
+  });
+  for (const b of unstarted) {
+    try {
+      // An early check-in doesn't count until the booked start.
+      const clock = new Date(Math.max(b.workerArrivedAt!.getTime(), bookingStartInstant(b).getTime()));
+      if (!b.startReminderSentAt && b.workerId && due(clock, START_REMINDER_MINUTES * MIN_MS)) {
+        await remind(b.workerId, b.id, 'Tap Start Job', "You checked in but haven't started. Add your before photos and tap Start Job.");
+        await prisma.booking.update({ where: { id: b.id }, data: { startReminderSentAt: now } });
+      }
+      if (!b.startNudgeSentAt && !b.clientNotHereAt && due(clock, START_NUDGE_HOURS * HOUR_MS)) {
+        await remind(b.clientId, b.id, 'Is your job under way?', "Your worker checked in but hasn't started. If something's wrong, tap Report a problem.");
+        await prisma.booking.update({ where: { id: b.id }, data: { startNudgeSentAt: now } });
+      }
+    } catch (error) {
+      console.error(`Failed to nudge unstarted booking ${b.id}:`, error);
+    }
+  }
+
+  // 3. Left in progress.
+  const running = await prisma.booking.findMany({
+    where: {
+      status: 'IN_PROGRESS',
+      workerStartedAt: { not: null },
+      OR: [{ progressReminderSentAt: null }, { progressEscalatedAt: null }],
+    },
+    include: { visits: { select: { scheduledDate: true, scheduledTime: true, status: true } } },
+  });
+  let admins: { id: string }[] | null = null;
+  for (const b of running) {
+    try {
+      // A follow-up visit planned ahead restarts the clock from that visit.
+      const times = [b.workerStartedAt!, ...b.visits.filter((v) => v.status !== 'CANCELLED').map((v) => bookingStartInstant(v))];
+      const clock = new Date(Math.max(...times.map((t) => t.getTime())));
+      if (clock > now) continue;
+      if (!b.progressReminderSentAt && b.workerId && due(clock, PROGRESS_REMINDER_HOURS * HOUR_MS)) {
+        await remind(b.workerId, b.id, 'Finish or schedule a follow-up', 'This job is still in progress. Mark it complete, or schedule a follow-up visit.');
+        await prisma.booking.update({ where: { id: b.id }, data: { progressReminderSentAt: now } });
+      }
+      if (!b.progressEscalatedAt && due(clock, PROGRESS_ESCALATE_HOURS * HOUR_MS)) {
+        await remind(b.clientId, b.id, 'Is your job finished?', "Your job is still marked in progress. If something's wrong, tap Report a problem.");
+        admins ??= await prisma.user.findMany({ where: { role: 'ADMIN', isDeleted: false }, select: { id: true } });
+        await Promise.all(
+          admins.map((a) => remind(a.id, b.id, 'Job stuck in progress', `Booking ${formatDisplayId(b.id)} has been in progress for over ${PROGRESS_ESCALATE_HOURS}h.`))
+        );
+        await prisma.booking.update({ where: { id: b.id }, data: { progressEscalatedAt: now } });
+      }
+    } catch (error) {
+      console.error(`Failed to nudge in-progress booking ${b.id}:`, error);
     }
   }
 }
@@ -993,6 +1096,9 @@ export async function startBookingWorker() {
           break;
         case JOB_NAMES.NO_SHOW_SWEEP:
           await cancelWorkerNoShows();
+          break;
+        case JOB_NAMES.STUCK_BOOKING_SWEEP:
+          await nudgeStuckBookings();
           break;
         case JOB_NAMES.DISPUTE_SLA_SWEEP:
           await escalateStaleDisputes();

@@ -5,6 +5,7 @@ import { authLimiter } from '@middleware/rateLimit';
 import {
   remindAndAutoSettleCompletions,
   cancelWorkerNoShows,
+  nudgeStuckBookings,
   escalateStaleDisputes,
   remindAndAutoConfirmReschedules,
   remindAndAutoDeclineRescheduleRequests,
@@ -21,6 +22,7 @@ const router = Router();
 const TASKS = {
   'settle-completions': remindAndAutoSettleCompletions,
   'flag-no-shows': cancelWorkerNoShows,
+  'nudge-stuck-bookings': nudgeStuckBookings,
   'escalate-stale-disputes': escalateStaleDisputes,
   'expire-pending': expireOverduePendingBookings,
   'confirm-reschedules': remindAndAutoConfirmReschedules,
