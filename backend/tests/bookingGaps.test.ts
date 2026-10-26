@@ -289,6 +289,7 @@ describe('Booking gaps — notifications and detail fields', () => {
       const booking = await seed('ACCEPTED');
       await prisma.workerProfile.update({ where: { userId: workerId }, data: { activeJobCount: { increment: 1 } } });
       const before = await prisma.workerProfile.findUniqueOrThrow({ where: { userId: workerId } });
+      const clientBefore = await prisma.clientProfile.findUniqueOrThrow({ where: { userId: clientId } });
 
       const asked = await problem(booking.id, { reason: 'NEED_TO_CANCEL', note: 'Plans changed' });
       expect(asked.status).toBe(200);
@@ -300,10 +301,48 @@ describe('Booking gaps — notifications and detail fields', () => {
       expect(res.status).toBe(200);
       const after = await prisma.booking.findUniqueOrThrow({ where: { id: booking.id }, include: { cancellation: true } });
       expect(after.status).toBe('CANCELLED');
-      expect(after.cancellation).toMatchObject({ reason: 'CLIENT_CANCEL_AGREED', penalizedWorkerId: null });
+      expect(after.cancellation).toMatchObject({
+        reason: 'CLIENT_CANCEL_AGREED',
+        penalizedWorkerId: null,
+        compensationStatus: 'NOT_APPLICABLE',
+      });
       const profile = await prisma.workerProfile.findUniqueOrThrow({ where: { userId: workerId } });
       expect(profile.commissionOwed).toBe(before.commissionOwed);
       expect(profile.activeJobCount).toBe(before.activeJobCount - 1);
+      const clientAfter = await prisma.clientProfile.findUniqueOrThrow({ where: { userId: clientId } });
+      expect(clientAfter.paymentHoldAt).toBeNull();
+      expect(clientAfter.outstandingBalance).toBe(clientBefore.outstandingBalance);
+    });
+
+    it('a failed escalation leaves the request unescalated so it can be retried', async () => {
+      const booking = await seed('ACCEPTED');
+      expect((await problem(booking.id, { reason: 'NEED_TO_CANCEL' })).status).toBe(200);
+
+      // Make the dispute insert inside the escalation transaction fail.
+      const realTransaction = prisma.$transaction.bind(prisma);
+      const spy = jest.spyOn(prisma, '$transaction').mockImplementationOnce(((fn: (tx: unknown) => Promise<unknown>) =>
+        realTransaction((tx) =>
+          fn(
+            new Proxy(tx, {
+              get: (target, prop) =>
+                prop === 'dispute'
+                  ? new Proxy(target.dispute, {
+                      get: (d, p) => (p === 'create' ? () => Promise.reject(new Error('transient db error')) : Reflect.get(d, p)),
+                    })
+                  : Reflect.get(target, prop),
+            })
+          )
+        )) as never);
+      try {
+        expect((await respond(booking.id, false)).status).toBe(500);
+      } finally {
+        spy.mockRestore();
+      }
+      expect((await prisma.booking.findUniqueOrThrow({ where: { id: booking.id } })).cancelRequestEscalatedAt).toBeNull();
+      expect(await prisma.dispute.count({ where: { bookingId: booking.id } })).toBe(0);
+
+      expect((await respond(booking.id, false)).status).toBe(200);
+      expect(await prisma.dispute.count({ where: { bookingId: booking.id, status: 'OPEN' } })).toBe(1);
     });
 
     it('NEED_TO_CANCEL then worker declines: escalated to a dispute, and a second answer is 409', async () => {
