@@ -1155,6 +1155,15 @@ export const getBookingDetail = async (req: AuthRequest, res: Response) => {
         // client can cancel penalty-free even though the booking is past
         // PENDING (see cancelBooking's hasWorkerNoShow carve-out).
         workerNoShowFlaggedAt: booking.workerNoShowFlaggedAt,
+        // "Client not here" no-show (worker side) and cancel-after-start request.
+        clientNotHereAt: booking.clientNotHereAt,
+        clientNoShowCancelAt: booking.clientNotHereAt
+          ? new Date(booking.clientNotHereAt.getTime() + (await getAppSettings()).noShowGraceMinutes * 60_000).toISOString()
+          : null,
+        cancelRequestedAt: booking.cancelRequestedAt,
+        cancelRequestReason: booking.cancelRequestReason,
+        cancelRequestEscalatedAt: booking.cancelRequestEscalatedAt,
+        hasOpenDispute: (booking.disputes ?? []).some((d: any) => d.status === 'OPEN' || d.status === 'UNDER_REVIEW'),
         rooms: booking.rooms,
         condition: booking.condition,
         scopeAnswers: booking.scopeAnswers,
@@ -1697,7 +1706,7 @@ export const arriveBooking = async (req: AuthRequest, res: Response) => {
 
     await notifyUser({
       userId: updated.clientId,
-      type: 'BOOKING_ACCEPTED',
+      type: 'BOOKING_ARRIVED',
       title: 'Worker Has Arrived',
       message: 'Your worker has checked in at the job site.',
       relatedId: id,
@@ -1854,8 +1863,7 @@ export const startBooking = async (req: AuthRequest, res: Response) => {
     // Notify client
     await notifyUser({
       userId: updated.clientId,
-      // No BOOKING_STARTED in schema; BOOKING_ACCEPTED is the closest available
-      type: 'BOOKING_ACCEPTED',
+      type: 'BOOKING_STARTED',
       title: 'Service Started',
       message: 'The worker has started your service',
       relatedId: id,

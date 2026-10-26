@@ -1,0 +1,18 @@
+ALTER TYPE "NotificationType" ADD VALUE 'BOOKING_ARRIVED';
+ALTER TYPE "NotificationType" ADD VALUE 'BOOKING_STARTED';
+ALTER TYPE "NotificationType" ADD VALUE 'BOOKING_PROBLEM_REPORTED';
+ALTER TYPE "NotificationType" ADD VALUE 'BOOKING_CANCEL_REQUESTED';
+ALTER TYPE "NotificationType" ADD VALUE 'BOOKING_CLIENT_NOT_HERE';
+ALTER TYPE "NotificationType" ADD VALUE 'BOOKING_REMINDER';
+
+ALTER TABLE "Booking"
+  ADD COLUMN "workerPingedAt" TIMESTAMP(3),
+  ADD COLUMN "cancelRequestedAt" TIMESTAMP(3),
+  ADD COLUMN "cancelRequestReason" TEXT,
+  ADD COLUMN "cancelRequestEscalatedAt" TIMESTAMP(3),
+  ADD COLUMN "clientNotHereAt" TIMESTAMP(3),
+  ADD COLUMN "startReminderSentAt" TIMESTAMP(3),
+  ADD COLUMN "startNudgeSentAt" TIMESTAMP(3),
+  ADD COLUMN "progressReminderSentAt" TIMESTAMP(3),
+  ADD COLUMN "progressEscalatedAt" TIMESTAMP(3),
+  ADD COLUMN "cashSecondReminderSentAt" TIMESTAMP(3);

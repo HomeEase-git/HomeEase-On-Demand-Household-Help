@@ -213,6 +213,12 @@ enum NotificationType {
   PACKAGE_APPROVED
   PACKAGE_REJECTED
   QUOTE_REJECTED
+  BOOKING_ARRIVED
+  BOOKING_STARTED
+  BOOKING_PROBLEM_REPORTED
+  BOOKING_CANCEL_REQUESTED
+  BOOKING_CLIENT_NOT_HERE
+  BOOKING_REMINDER
   FOLLOW_UP_VISIT_SCHEDULED
   CANCELLATION_PENALTY
   CANCELLATION_COMPENSATION
@@ -1366,6 +1372,19 @@ model Booking {
   // resulting Cancellation is attributed to the worker
   // (Cancellation.penalizedWorkerId) for the auto-match scoring penalty.
   workerNoShowFlaggedAt DateTime?
+
+  // Booking-gap tracking: worker ping, cancel request after start, client
+  // "not here" no-show, and one-shot reminder/escalation stamps for sweeps.
+  workerPingedAt           DateTime?
+  cancelRequestedAt        DateTime?
+  cancelRequestReason      String?
+  cancelRequestEscalatedAt DateTime?
+  clientNotHereAt          DateTime?
+  startReminderSentAt      DateTime?
+  startNudgeSentAt         DateTime?
+  progressReminderSentAt   DateTime?
+  progressEscalatedAt      DateTime?
+  cashSecondReminderSentAt DateTime?
 
   // Set once the 12h "please confirm this job is done" reminder fires (see
   // bookingWorker.autoSettleCompletedBookings) — prevents re-sending it on
