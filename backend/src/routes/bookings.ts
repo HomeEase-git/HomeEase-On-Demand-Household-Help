@@ -6,6 +6,7 @@ import {
   acceptBooking,
   declineBooking,
   arriveBooking,
+  reportClientNotHere,
   updateWorkerLiveLocation,
   startBooking,
   scheduleVisit,
@@ -62,6 +63,9 @@ router.patch('/:id/decline', restrictTo('WORKER'), validateBookingStatusUpdate, 
 
 // Worker checks in as arrived at the job site (worker only)
 router.patch('/:id/arrive', restrictTo('WORKER'), validateArriveBooking, arriveBooking);
+
+// Worker is at the door and can't reach the client: alerts them and starts the wait (worker only)
+router.patch('/:id/client-not-here', restrictTo('WORKER'), reportClientNotHere);
 
 // Worker's live GPS while en route (worker only) — pushed to the client over
 // the socket so "Track Service" can show a moving marker

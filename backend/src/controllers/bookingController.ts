@@ -54,6 +54,7 @@ import { roundToCentavo } from '@utils/money';
 import { buildCapabilityFilters } from '@services/matchingService';
 import { schedulePendingExpiry, cancelPendingExpiryJob } from '@queues/bookingQueue';
 import { finalizeCancellationTx, afterCancellation } from '@services/bookingCancellationService';
+import { applyClientFaultCompensationTx } from '@services/cancellationCompensationService';
 import { VALID_TRANSITIONS, isValidTransition } from '@services/bookingStateMachine';
 import { getAppSettings } from '@services/appSettingsService';
 import { computeWorkerTier, tierMultiplier } from '@utils/workerTier';
@@ -1758,6 +1759,64 @@ export const arriveBooking = async (req: AuthRequest, res: Response) => {
 };
 
 /**
+ * PATCH /api/bookings/:id/client-not-here
+ * Worker, checked in but can't reach the client: alerts the client and starts
+ * the grace wait. Once AppSettings.noShowGraceMinutes pass, the worker can
+ * cancel as a client no-show without photo proof (see cancelBooking).
+ * Repeat calls return the first alert time.
+ */
+export const reportClientNotHere = async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      return res.status(401).json(errorResponse(401, 'Not authenticated'));
+    }
+    const id = req.params.id as string;
+    const booking = await prisma.booking.findUnique({ where: { id } });
+    if (!booking) {
+      return res.status(404).json(errorResponse(404, 'Booking not found'));
+    }
+    if (booking.workerId !== req.user.userId) {
+      return res.status(403).json(errorResponse(403, 'This booking is not assigned to you'));
+    }
+    if (booking.status !== 'ACCEPTED') {
+      return res.status(409).json(errorResponse(409, `Cannot alert the client for booking with status ${booking.status}`));
+    }
+    if (!booking.workerArrivedAt) {
+      return res.status(409).json(errorResponse(409, 'Check in at the job site first'));
+    }
+
+    const { noShowGraceMinutes } = await getAppSettings();
+    let clientNotHereAt = booking.clientNotHereAt;
+    if (!clientNotHereAt) {
+      clientNotHereAt = new Date();
+      await updateBookingIfStatus(prisma, id, 'ACCEPTED', { clientNotHereAt }, { clientNotHereAt: null });
+      const message = "Your worker checked in and can't reach you. Please come to the door or message them.";
+      await notifyUser({
+        userId: booking.clientId,
+        type: 'BOOKING_CLIENT_NOT_HERE',
+        title: 'Your worker is at your door',
+        message,
+        relatedId: id,
+      });
+      void sendSmsToUser({ userId: booking.clientId, message: `HomeEase ${formatDisplayId(id)}: ${message}` });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: 'The client has been alerted',
+      data: {
+        clientNotHereAt: clientNotHereAt.toISOString(),
+        canCancelAt: new Date(clientNotHereAt.getTime() + noShowGraceMinutes * 60_000).toISOString(),
+      },
+    });
+  } catch (error) {
+    if (isBookingStatusConflict(error)) return bookingConflict(res);
+    console.error('Error alerting client:', error);
+    return res.status(500).json(errorResponse(500, 'Failed to alert the client'));
+  }
+};
+
+/**
  * PATCH /api/bookings/:id/live-location
  * Worker's foreground GPS watch pings this while en route to an ACCEPTED
  * booking. Stores the latest position on WorkerProfile.currentLat/currentLng
@@ -2955,7 +3014,19 @@ export const cancelBooking = async (req: AuthRequest, res: Response) => {
     let cancelFault: 'CLIENT' | 'WORKER' | null = null;
     let proofUrls: string[] = [];
 
-    if (afterArrival) {
+    // The worker alerted the client at the door and waited out the grace
+    // period: no photo proof needed, and the fee is approved automatically.
+    const clientNoShowConfirmed =
+      afterArrival &&
+      fault === 'CLIENT' &&
+      booking.status === 'ACCEPTED' &&
+      booking.clientNotHereAt != null &&
+      Date.now() >= booking.clientNotHereAt.getTime() + settings.noShowGraceMinutes * 60_000;
+    const cancelReason = clientNoShowConfirmed && !(typeof reason === 'string' && reason.trim().length >= 10) ? 'Client was not home' : reason;
+
+    if (clientNoShowConfirmed) {
+      cancelFault = 'CLIENT';
+    } else if (afterArrival) {
       if (fault !== 'CLIENT' && fault !== 'WORKER') {
         return res.status(400).json(errorResponse(400, "You've already arrived — say whose fault the cancellation is (CLIENT or WORKER)"));
       }
@@ -3021,8 +3092,8 @@ export const cancelBooking = async (req: AuthRequest, res: Response) => {
             ? 'CLIENT_DECLINED_RESCHEDULE'
             : hasWorkerNoShow && cancelledByRole === 'CLIENT'
               ? 'WORKER_NO_SHOW'
-              : typeof reason === 'string'
-                ? reason.trim()
+              : typeof cancelReason === 'string'
+                ? cancelReason.trim()
                 : null,
           cancelledWithinHours,
           workerCancellationReason:
@@ -3040,8 +3111,19 @@ export const cancelBooking = async (req: AuthRequest, res: Response) => {
           compensationAmount,
           compensationStatus: cancelFault === 'CLIENT' ? 'PENDING_REVIEW' : 'NOT_APPLICABLE',
         },
-        reason
+        cancelReason
       );
+
+      if (clientNoShowConfirmed && booking.workerId && compensationAmount) {
+        await applyClientFaultCompensationTx(tx, {
+          bookingId: id,
+          clientId: booking.clientId,
+          workerId: booking.workerId,
+          amount: compensationAmount,
+          reviewedById: null,
+          reviewNote: 'Auto-approved: worker checked in by GPS and waited after alerting the client',
+        });
+      }
 
       // penaltyAmount is only set for a worker-fault cancel, so workerId is the canceller.
       if (penaltyAmount && booking.workerId) {
@@ -3058,13 +3140,30 @@ export const cancelBooking = async (req: AuthRequest, res: Response) => {
     });
 
     // Best-effort — same reasoning as accept/decline above.
-    await afterCancellation(id, reason || 'Booking cancelled', req.user.userId);
+    await afterCancellation(id, cancelReason || 'Booking cancelled', req.user.userId);
 
     // Notify the other party (workerId may be null if booking is unassigned)
     const notificationUserId =
       booking.clientId === req.user.userId ? booking.workerId : booking.clientId;
 
-    if (notificationUserId) {
+    if (clientNoShowConfirmed) {
+      const displayId = formatDisplayId(id);
+      const amount = compensationAmount ?? 0;
+      await notifyUser({
+        userId: booking.clientId,
+        type: 'CANCELLATION_COMPENSATION',
+        title: 'Cancellation fee',
+        message: `Your worker waited at the door and couldn't reach you, so booking ${displayId} was cancelled as caused on your side. A ₱${amount.toFixed(2)} fee applies, and new bookings are paused until it's settled — contact support to pay. If you were home, contact support.`,
+        relatedId: id,
+      });
+      await notifyUser({
+        userId: req.user.userId,
+        type: 'CANCELLATION_COMPENSATION',
+        title: 'Compensation approved',
+        message: `Your cancellation of booking ${displayId} was accepted. You'll receive ₱${amount.toFixed(2)} (applied to any dues first, the rest with your next payout).`,
+        relatedId: id,
+      });
+    } else if (notificationUserId) {
       await notifyUser({
         userId: notificationUserId,
         type: 'BOOKING_CANCELLED',
@@ -3087,7 +3186,7 @@ export const cancelBooking = async (req: AuthRequest, res: Response) => {
       });
     }
 
-    if (cancelFault === 'CLIENT') {
+    if (cancelFault === 'CLIENT' && !clientNoShowConfirmed) {
       const admins = await prisma.user.findMany({ where: { role: 'ADMIN', isDeleted: false }, select: { id: true } });
       await Promise.all(
         admins.map((admin) =>
@@ -3105,7 +3204,9 @@ export const cancelBooking = async (req: AuthRequest, res: Response) => {
     return res.status(200).json({
       success: true,
       message:
-        cancelFault === 'CLIENT'
+        clientNoShowConfirmed
+          ? 'Booking cancelled — the cancellation fee was approved'
+          : cancelFault === 'CLIENT'
           ? 'Booking cancelled — HomeEase will review your proof'
           : penaltyAmount
             ? `Booking cancelled — a ₱${penaltyAmount.toFixed(2)} penalty applies`
@@ -3114,7 +3215,7 @@ export const cancelBooking = async (req: AuthRequest, res: Response) => {
         id: updated.id,
         status: updated.status,
         penaltyAmount,
-        compensationStatus: cancelFault === 'CLIENT' ? 'PENDING_REVIEW' : 'NOT_APPLICABLE',
+        compensationStatus: clientNoShowConfirmed ? 'APPROVED' : cancelFault === 'CLIENT' ? 'PENDING_REVIEW' : 'NOT_APPLICABLE',
       },
     });
   } catch (error) {

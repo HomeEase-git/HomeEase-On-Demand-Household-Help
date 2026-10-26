@@ -280,6 +280,34 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorEnvelope' }
 
+  /bookings/{id}/client-not-here:
+    patch:
+      tags: [Bookings]
+      summary: Worker at the door alerts the client (must have checked in). After noShowGraceMinutes the worker can cancel with fault CLIENT and no proof; the fee is auto-approved
+      parameters: [{ $ref: '#/components/parameters/BookingId' }]
+      responses:
+        '200':
+          description: Client alerted (repeat calls return the first alert time)
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          clientNotHereAt: { type: string, format: date-time }
+                          canCancelAt: { type: string, format: date-time }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: Not ACCEPTED, or the worker has not checked in at the job site
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+
   /bookings/{id}/start:
     patch:
       tags: [Bookings]
