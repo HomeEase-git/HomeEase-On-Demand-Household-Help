@@ -2932,6 +2932,11 @@ export const cancelBooking = async (req: AuthRequest, res: Response) => {
       );
     }
 
+    // Once the invoice is out the job is done; a worker cancel would void it.
+    if (req.user.role === 'WORKER' && !['ACCEPTED', 'IN_PROGRESS'].includes(booking.status)) {
+      return res.status(409).json(errorResponse(409, "The invoice is sent, so this job can't be cancelled here. If something is wrong, contact support."));
+    }
+
     if (!isValidTransition(booking.status, 'CANCELLED')) {
       return res.status(409).json(errorResponse(409, `Cannot cancel booking with status ${booking.status}`));
     }

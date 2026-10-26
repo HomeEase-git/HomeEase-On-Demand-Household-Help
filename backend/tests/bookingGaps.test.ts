@@ -7,6 +7,11 @@ import { createTestUser, deleteTestUser, createTestBooking, deleteTestBooking } 
 const CLIENT_LOCATION = { lat: 14.5995, lng: 120.9842 };
 const NEARBY_WORKER_LOCATION = { lat: 14.5995 + 0.0005, lng: 120.9842 };
 
+/** A booking photo URL "uploaded" by this user (see utils/storageUrls). */
+function photoUrl(userId: string, name: string) {
+  return `${process.env.SUPABASE_URL}/storage/v1/object/public/${BOOKING_PHOTO_BUCKET}/${userId}/${name}.jpg`;
+}
+
 describe('Booking gaps — notifications and detail fields', () => {
   const createdUserIds: string[] = [];
   const createdBookingIds: string[] = [];
@@ -83,4 +88,24 @@ describe('Booking gaps — notifications and detail fields', () => {
       hasOpenDispute: false,
     });
   });
+
+  it.each(['PENDING_COMPLETION', 'AWAITING_PAYMENT', 'DISPUTED'] as const)(
+    'refuses a worker cancel once the invoice is sent (%s)',
+    async (status) => {
+      const booking = await createTestBooking({ clientId, workerId, status });
+      createdBookingIds.push(booking.id);
+      await prisma.booking.update({ where: { id: booking.id }, data: { workerArrivedAt: new Date(), workerCompletedAt: new Date() } });
+
+      const res = await request(app)
+        .patch(`/api/bookings/${booking.id}/cancel`)
+        .set('Authorization', `Bearer ${workerToken}`)
+        .send({ reason: 'Changed my mind about it', fault: 'CLIENT', proofUrls: [photoUrl(workerId, 'x')] });
+      expect(res.status).toBe(409);
+      expect(res.body.message).toBe("The invoice is sent, so this job can't be cancelled here. If something is wrong, contact support.");
+
+      const after = await prisma.booking.findUnique({ where: { id: booking.id } });
+      expect(after?.status).toBe(status);
+      expect(await prisma.cancellation.count({ where: { bookingId: booking.id } })).toBe(0);
+    }
+  );
 });
