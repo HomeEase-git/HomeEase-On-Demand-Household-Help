@@ -19,6 +19,8 @@ import {
   markCashReceived,
   confirmCompletion,
   reportInvoice,
+  reportBookingProblem,
+  respondToCancelRequest,
   cancelBooking,
   submitReview,
   reportReview,
@@ -110,6 +112,12 @@ router.patch('/:id/confirm-completion', restrictTo('CLIENT'), confirmCompletion)
 
 // Client reports the invoice before paying — goes to an admin (client only)
 router.patch('/:id/invoice/report', restrictTo('CLIENT'), reportInvoice);
+
+// Client reports a problem after the worker accepts, before the invoice (client only)
+router.post('/:id/problem', restrictTo('CLIENT'), reportBookingProblem);
+
+// Worker agrees to or declines the client's cancel request (worker only)
+router.patch('/:id/cancel-request/respond', restrictTo('WORKER'), respondToCancelRequest);
 
 // Cancel booking (client or worker)
 router.patch('/:id/cancel', validateBookingStatusUpdate, cancelBooking);

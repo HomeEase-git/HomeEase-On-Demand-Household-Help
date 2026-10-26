@@ -487,7 +487,8 @@ export const resolveDispute = async (req: AuthRequest, res: Response) => {
 
     // Invoice actions only make sense on a reported invoice; CANCEL_BOOKING can also
     // resolve a payment-overdue or refund-request dispute (booking still in
-    // PENDING_COMPLETION / AWAITING_PAYMENT / COMPLETED); the payment actions
+    // PENDING_COMPLETION / AWAITING_PAYMENT / COMPLETED) or a client problem
+    // report before the invoice (ACCEPTED / IN_PROGRESS); the payment actions
     // only make sense on a completed-but-unpaid job.
     if (isPaymentAction) {
       if (booking.status !== 'AWAITING_PAYMENT') {
@@ -510,7 +511,7 @@ export const resolveDispute = async (req: AuthRequest, res: Response) => {
     }
     if (
       action === 'CANCEL_BOOKING' &&
-      !['DISPUTED', 'PENDING_COMPLETION', 'AWAITING_PAYMENT', 'COMPLETED'].includes(booking.status)
+      !['ACCEPTED', 'IN_PROGRESS', 'DISPUTED', 'PENDING_COMPLETION', 'AWAITING_PAYMENT', 'COMPLETED'].includes(booking.status)
     ) {
       return res.status(409).json(errorResponse(409, `Cannot resolve — booking is ${booking.status}`));
     }

@@ -481,6 +481,60 @@ paths:
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
 
+  /bookings/{id}/problem:
+    post:
+      tags: [Bookings]
+      summary: Client reports a problem on an ACCEPTED or IN_PROGRESS booking — pings a late worker (or cancels as a no-show past the grace time), asks the worker to agree to cancel, or opens a dispute for an admin
+      parameters: [{ $ref: '#/components/parameters/BookingId' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason: { type: string, enum: [WORKER_NOT_HERE, WORKER_STOPPED, NEED_TO_CANCEL, OTHER] }
+                note: { type: string, maxLength: 500, description: Required (10+ characters) for OTHER }
+      responses:
+        '200':
+          description: What happened
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      outcome: { type: string, enum: [WORKER_PINGED, CANCELLED, CANCEL_REQUESTED, REPORTED] }
+                      autoCancelAt: { type: string, format: date-time, description: Only for WORKER_PINGED }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '429': { description: The worker was already pinged in the last 15 minutes }
+
+  /bookings/{id}/cancel-request/respond:
+    patch:
+      tags: [Bookings]
+      summary: Worker answers the client's cancel request — agreeing cancels with no penalty, declining sends it to an admin as a dispute
+      parameters: [{ $ref: '#/components/parameters/BookingId' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [accept]
+              properties:
+                accept: { type: boolean }
+      responses:
+        '200': { description: Cancelled, or escalated to an admin }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { description: There is no open cancel request to answer }
+
   /bookings/{id}/review:
     post:
       tags: [Bookings]

@@ -3,7 +3,14 @@ import app from '@/app';
 import prisma from '@config/database';
 import { BOOKING_PHOTO_BUCKET } from '@config/supabase';
 import { getAppSettings } from '@services/appSettingsService';
+import { sendSmsToUser } from '@utils/smsService';
+import { addDays, phTodayStart } from '@services/workerAvailabilityService';
 import { createTestUser, deleteTestUser, createTestBooking, deleteTestBooking } from './helpers';
+
+jest.mock('@utils/smsService', () => ({
+  ...jest.requireActual('@utils/smsService'),
+  sendSmsToUser: jest.fn().mockResolvedValue(undefined),
+}));
 
 const CLIENT_LOCATION = { lat: 14.5995, lng: 120.9842 };
 const NEARBY_WORKER_LOCATION = { lat: 14.5995 + 0.0005, lng: 120.9842 };
@@ -20,20 +27,24 @@ describe('Booking gaps — notifications and detail fields', () => {
   let clientId: string;
   let workerToken: string;
   let workerId: string;
+  let adminToken: string;
 
   beforeAll(async () => {
     const { user: client, plainPassword: clientPw } = await createTestUser('booking-gaps-client', { role: 'CLIENT' });
     const { user: worker, plainPassword: workerPw } = await createTestUser('booking-gaps-worker', { role: 'WORKER' });
-    createdUserIds.push(client.id, worker.id);
+    const { user: admin, plainPassword: adminPw } = await createTestUser('booking-gaps-admin', { role: 'ADMIN' });
+    createdUserIds.push(client.id, worker.id, admin.id);
     clientId = client.id;
     workerId = worker.id;
 
-    const [clientLogin, workerLogin] = await Promise.all([
+    const [clientLogin, workerLogin, adminLogin] = await Promise.all([
       request(app).post('/api/auth/login').send({ email: client.email, password: clientPw }),
       request(app).post('/api/auth/login').send({ email: worker.email, password: workerPw }),
+      request(app).post('/api/auth/login').send({ email: admin.email, password: adminPw }),
     ]);
     clientToken = clientLogin.body.data.token;
     workerToken = workerLogin.body.data.token;
+    adminToken = adminLogin.body.data.token;
   });
 
   afterAll(async () => {
@@ -199,5 +210,144 @@ describe('Booking gaps — notifications and detail fields', () => {
 
     const good = await report([photoUrl(clientId, 'mine')]);
     expect(good.status).toBe(200);
+  });
+
+  describe('report a problem and cancel requests', () => {
+    const problem = (id: string, body: Record<string, unknown>) =>
+      request(app).post(`/api/bookings/${id}/problem`).set('Authorization', `Bearer ${clientToken}`).send(body);
+    const respond = (id: string, accept: boolean) =>
+      request(app)
+        .patch(`/api/bookings/${id}/cancel-request/respond`)
+        .set('Authorization', `Bearer ${workerToken}`)
+        .send({ accept });
+    const seed = async (status: 'ACCEPTED' | 'IN_PROGRESS' | 'PENDING_COMPLETION', extra: { scheduledDate?: Date } = {}) => {
+      const booking = await createTestBooking({ clientId, workerId, status, ...extra });
+      createdBookingIds.push(booking.id);
+      return booking;
+    };
+
+    beforeEach(() => jest.mocked(sendSmsToUser).mockClear());
+
+    it('pings the worker before the deadline and returns autoCancelAt', async () => {
+      const booking = await seed('ACCEPTED');
+      const res = await problem(booking.id, { reason: 'WORKER_NOT_HERE' });
+      expect(res.status).toBe(200);
+      expect(res.body.data.outcome).toBe('WORKER_PINGED');
+      const { noShowGraceMinutes } = await getAppSettings();
+      const start = new Date(`${booking.scheduledDate.toISOString().slice(0, 10)}T09:00:00+08:00`).getTime();
+      expect(new Date(res.body.data.autoCancelAt).getTime()).toBe(start + noShowGraceMinutes * 60_000);
+      expect((await prisma.booking.findUniqueOrThrow({ where: { id: booking.id } })).workerPingedAt).not.toBeNull();
+    });
+
+    it('a second ping within 15 min is 429, with one SMS and notification only', async () => {
+      const booking = await seed('ACCEPTED');
+      expect((await problem(booking.id, { reason: 'WORKER_NOT_HERE' })).status).toBe(200);
+      const again = await problem(booking.id, { reason: 'WORKER_NOT_HERE' });
+      expect(again.status).toBe(429);
+      expect(again.body.message).toBe('We already pinged your worker. Give them a few minutes.');
+      expect(await prisma.notification.count({ where: { userId: workerId, relatedId: booking.id, type: 'BOOKING_REMINDER' } })).toBe(1);
+      expect(jest.mocked(sendSmsToUser).mock.calls.filter(([arg]) => arg.userId === workerId)).toHaveLength(1);
+    });
+
+    it('cancels as a no-show past the deadline', async () => {
+      const booking = await seed('ACCEPTED', { scheduledDate: addDays(phTodayStart(), -2) });
+      await prisma.workerProfile.update({ where: { userId: workerId }, data: { activeJobCount: { increment: 1 } } });
+      const before = await prisma.workerProfile.findUniqueOrThrow({ where: { userId: workerId } });
+
+      const res = await problem(booking.id, { reason: 'WORKER_NOT_HERE' });
+      expect(res.status).toBe(200);
+      expect(res.body.data.outcome).toBe('CANCELLED');
+      const after = await prisma.booking.findUniqueOrThrow({ where: { id: booking.id }, include: { cancellation: true } });
+      expect(after.status).toBe('CANCELLED');
+      expect(after.cancellation?.reason).toBe('WORKER_NO_SHOW');
+
+      await prisma.workerProfile.update({
+        where: { userId: workerId },
+        data: { commissionOwed: before.commissionOwed, debtHoldAt: before.debtHoldAt },
+      });
+    });
+
+    it('WORKER_STOPPED opens one dispute, and a repeat is 409', async () => {
+      const booking = await seed('IN_PROGRESS');
+      const res = await problem(booking.id, { reason: 'WORKER_STOPPED', note: 'Left after an hour' });
+      expect(res.status).toBe(200);
+      expect(res.body.data.outcome).toBe('REPORTED');
+      expect(await prisma.notification.count({ where: { userId: workerId, relatedId: booking.id, type: 'BOOKING_PROBLEM_REPORTED' } })).toBe(1);
+
+      const again = await problem(booking.id, { reason: 'WORKER_STOPPED' });
+      expect(again.status).toBe(409);
+      expect(again.body.message).toBe('You already reported this. HomeEase is on it.');
+      expect(await prisma.dispute.count({ where: { bookingId: booking.id } })).toBe(1);
+    });
+
+    it('OTHER without a note is 400', async () => {
+      const booking = await seed('IN_PROGRESS');
+      expect((await problem(booking.id, { reason: 'OTHER' })).status).toBe(400);
+    });
+
+    it('NEED_TO_CANCEL then worker agrees: cancelled, no penalty', async () => {
+      const booking = await seed('ACCEPTED');
+      await prisma.workerProfile.update({ where: { userId: workerId }, data: { activeJobCount: { increment: 1 } } });
+      const before = await prisma.workerProfile.findUniqueOrThrow({ where: { userId: workerId } });
+
+      const asked = await problem(booking.id, { reason: 'NEED_TO_CANCEL', note: 'Plans changed' });
+      expect(asked.status).toBe(200);
+      expect(asked.body.data.outcome).toBe('CANCEL_REQUESTED');
+      expect(await prisma.notification.count({ where: { userId: workerId, relatedId: booking.id, type: 'BOOKING_CANCEL_REQUESTED' } })).toBe(1);
+      expect((await problem(booking.id, { reason: 'NEED_TO_CANCEL' })).status).toBe(409);
+
+      const res = await respond(booking.id, true);
+      expect(res.status).toBe(200);
+      const after = await prisma.booking.findUniqueOrThrow({ where: { id: booking.id }, include: { cancellation: true } });
+      expect(after.status).toBe('CANCELLED');
+      expect(after.cancellation).toMatchObject({ reason: 'CLIENT_CANCEL_AGREED', penalizedWorkerId: null });
+      const profile = await prisma.workerProfile.findUniqueOrThrow({ where: { userId: workerId } });
+      expect(profile.commissionOwed).toBe(before.commissionOwed);
+      expect(profile.activeJobCount).toBe(before.activeJobCount - 1);
+    });
+
+    it('NEED_TO_CANCEL then worker declines: escalated to a dispute, and a second answer is 409', async () => {
+      const booking = await seed('ACCEPTED');
+      expect((await problem(booking.id, { reason: 'NEED_TO_CANCEL' })).status).toBe(200);
+
+      const res = await respond(booking.id, false);
+      expect(res.status).toBe(200);
+      expect(await prisma.dispute.count({ where: { bookingId: booking.id, status: 'OPEN' } })).toBe(1);
+      expect((await prisma.booking.findUniqueOrThrow({ where: { id: booking.id } })).cancelRequestEscalatedAt).not.toBeNull();
+
+      const again = await respond(booking.id, true);
+      expect(again.status).toBe(409);
+      expect(again.body.message).toBe('There is no cancel request to answer');
+    });
+
+    it('agreeing after the invoice is sent is 409 with no Cancellation row', async () => {
+      const booking = await seed('IN_PROGRESS');
+      expect((await problem(booking.id, { reason: 'NEED_TO_CANCEL' })).status).toBe(200);
+      await prisma.booking.update({ where: { id: booking.id }, data: { status: 'PENDING_COMPLETION', workerCompletedAt: new Date() } });
+
+      expect((await respond(booking.id, true)).status).toBe(409);
+      expect(await prisma.cancellation.count({ where: { bookingId: booking.id } })).toBe(0);
+    });
+
+    it('refuses a problem report once the invoice is sent', async () => {
+      const booking = await seed('PENDING_COMPLETION');
+      const res = await problem(booking.id, { reason: 'WORKER_STOPPED' });
+      expect(res.status).toBe(409);
+      expect(res.body.message).toBe('You can report a problem here until your worker sends the invoice');
+    });
+
+    it("lets an admin cancel an IN_PROGRESS booking's dispute", async () => {
+      const booking = await seed('IN_PROGRESS');
+      await prisma.workerProfile.update({ where: { userId: workerId }, data: { activeJobCount: { increment: 1 } } });
+      expect((await problem(booking.id, { reason: 'WORKER_STOPPED' })).status).toBe(200);
+      const dispute = await prisma.dispute.findFirstOrThrow({ where: { bookingId: booking.id } });
+
+      const res = await request(app)
+        .patch(`/api/admin/disputes/${dispute.id}/resolve`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ action: 'CANCEL_BOOKING', resolution: 'Worker left the job' });
+      expect(res.status).toBe(200);
+      expect((await prisma.booking.findUniqueOrThrow({ where: { id: booking.id } })).status).toBe('CANCELLED');
+    });
   });
 });

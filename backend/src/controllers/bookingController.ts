@@ -33,7 +33,14 @@ import {
 import { chargePenaltyTx } from '@services/debtLedgerService';
 import { toOwnedBookingPhotoUrls } from '@utils/storageUrls';
 import { validateInvoiceItems, invoiceLines, invoiceStatus, type InvoiceItemInput } from '@utils/invoiceItems';
-import { updateBookingIfStatus, isBookingStatusConflict, lockBooking } from '@services/bookingStatusWrite';
+import {
+  updateBookingIfStatus,
+  isBookingStatusConflict,
+  lockBooking,
+  BookingStatusConflictError,
+} from '@services/bookingStatusWrite';
+import { openBookingDispute, escalateCancelRequest } from '@services/bookingProblemService';
+import { cancelAsWorkerNoShow } from '@workers/bookingWorker';
 
 // The booking's status changed between our read and our write (another
 // request or a sweep job won the race) — tell the caller to refresh.
@@ -2931,6 +2938,209 @@ export const reportInvoice = async (req: AuthRequest, res: Response) => {
     if (isBookingStatusConflict(error)) return bookingConflict(res);
     console.error('Error reporting invoice:', error);
     return res.status(500).json(errorResponse(500, 'Failed to report the invoice'));
+  }
+};
+
+const PROBLEM_REASONS = ['WORKER_NOT_HERE', 'WORKER_STOPPED', 'NEED_TO_CANCEL', 'OTHER'] as const;
+type ProblemReason = (typeof PROBLEM_REASONS)[number];
+const PROBLEM_LABELS: Record<ProblemReason, string> = {
+  WORKER_NOT_HERE: "Worker isn't here",
+  WORKER_STOPPED: 'Worker stopped the job',
+  NEED_TO_CANCEL: 'Client needs to cancel',
+  OTHER: 'Other problem',
+};
+const WORKER_PING_COOLDOWN_MS = 15 * 60_000;
+
+/**
+ * POST /api/bookings/:id/problem  { reason, note? }
+ * The client's way out after the worker accepts, until the invoice is sent:
+ *   WORKER_NOT_HERE: before the no-show deadline, pings the worker (once per
+ *     15 min); after it, cancels as a worker no-show. Once the worker has
+ *     checked in it's reported like WORKER_STOPPED.
+ *   NEED_TO_CANCEL: asks the worker to agree (respondToCancelRequest).
+ *   WORKER_STOPPED / OTHER: opens a dispute for an admin.
+ */
+export const reportBookingProblem = async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user || req.user.role !== 'CLIENT') {
+      return res.status(403).json(errorResponse(403, 'Only clients can report a problem'));
+    }
+    const id = req.params.id as string;
+    const reason = req.body?.reason as ProblemReason;
+    if (!PROBLEM_REASONS.includes(reason)) {
+      return res.status(400).json(errorResponse(400, `reason must be one of: ${PROBLEM_REASONS.join(', ')}`));
+    }
+    if (req.body?.note !== undefined && req.body?.note !== null && typeof req.body.note !== 'string') {
+      return res.status(400).json(errorResponse(400, 'note must be text'));
+    }
+    const note = typeof req.body?.note === 'string' && req.body.note.trim() ? req.body.note.trim() : null;
+    if (note && note.length > 500) {
+      return res.status(400).json(errorResponse(400, 'Keep the note under 500 characters'));
+    }
+    if (reason === 'OTHER' && (!note || note.length < 10)) {
+      return res.status(400).json(errorResponse(400, 'Tell us what is wrong (at least 10 characters)'));
+    }
+
+    const booking = await prisma.booking.findUnique({ where: { id } });
+    if (!booking) {
+      return res.status(404).json(errorResponse(404, 'Booking not found'));
+    }
+    if (booking.clientId !== req.user.userId) {
+      return res.status(403).json(errorResponse(403, 'This booking is not yours'));
+    }
+    if (booking.status !== 'ACCEPTED' && booking.status !== 'IN_PROGRESS') {
+      return res.status(409).json(errorResponse(409, 'You can report a problem here until your worker sends the invoice'));
+    }
+    const workerId = booking.workerId!;
+
+    if (reason === 'WORKER_NOT_HERE' && booking.status === 'ACCEPTED' && !booking.workerArrivedAt) {
+      const settings = await getAppSettings();
+      const now = new Date();
+      const autoCancelAt = new Date(bookingStartInstant(booking).getTime() + settings.noShowGraceMinutes * 60_000);
+      if (now >= autoCancelAt) {
+        if (!(await cancelAsWorkerNoShow(booking, settings, now))) return bookingConflict(res);
+        return res.status(200).json({ success: true, message: 'Booking cancelled', data: { outcome: 'CANCELLED' } });
+      }
+
+      const pingedRecently = (at: Date | null) => !!at && now.getTime() - at.getTime() < WORKER_PING_COOLDOWN_MS;
+      const tooSoon = () =>
+        res.status(429).json(errorResponse(429, 'We already pinged your worker. Give them a few minutes.'));
+      if (pingedRecently(booking.workerPingedAt)) return tooSoon();
+      try {
+        // Guarded so two quick taps send one ping.
+        await updateBookingIfStatus(
+          prisma,
+          id,
+          'ACCEPTED',
+          { workerPingedAt: now },
+          { workerArrivedAt: null, OR: [{ workerPingedAt: null }, { workerPingedAt: { lt: new Date(now.getTime() - WORKER_PING_COOLDOWN_MS) } }] }
+        );
+      } catch (error) {
+        if (!isBookingStatusConflict(error)) throw error;
+        const fresh = await prisma.booking.findUnique({ where: { id }, select: { workerPingedAt: true } });
+        return pingedRecently(fresh?.workerPingedAt ?? null) ? tooSoon() : bookingConflict(res);
+      }
+      const message = 'Your client is waiting for you. Head over now or message them.';
+      await notifyUser({ userId: workerId, type: 'BOOKING_REMINDER', title: 'Your client is waiting', message, relatedId: id });
+      void sendSmsToUser({ userId: workerId, message: `HomeEase ${formatDisplayId(id)}: ${message}` });
+      return res.status(200).json({
+        success: true,
+        message: 'We pinged your worker',
+        data: { outcome: 'WORKER_PINGED', autoCancelAt: autoCancelAt.toISOString() },
+      });
+    }
+
+    if (reason === 'NEED_TO_CANCEL') {
+      const alreadyAsked = () =>
+        res.status(409).json(errorResponse(409, 'You already asked to cancel. Your worker will answer soon.'));
+      if (booking.cancelRequestedAt) return alreadyAsked();
+      try {
+        await updateBookingIfStatus(
+          prisma,
+          id,
+          booking.status,
+          { cancelRequestedAt: new Date(), cancelRequestReason: note },
+          { cancelRequestedAt: null }
+        );
+      } catch (error) {
+        if (isBookingStatusConflict(error)) return alreadyAsked();
+        throw error;
+      }
+      await notifyUser({
+        userId: workerId,
+        type: 'BOOKING_CANCEL_REQUESTED',
+        title: 'Your client wants to cancel',
+        message: 'Open the job to agree or decline.',
+        relatedId: id,
+      });
+      return res.status(200).json({ success: true, message: 'We asked your worker', data: { outcome: 'CANCEL_REQUESTED' } });
+    }
+
+    const label = PROBLEM_LABELS[reason];
+    const dispute = await openBookingDispute({
+      bookingId: id,
+      raisedById: req.user.userId,
+      reason: note ? `${label}: ${note}` : label,
+    });
+    if (!dispute) {
+      return res.status(409).json(errorResponse(409, 'You already reported this. HomeEase is on it.'));
+    }
+    await notifyUser({
+      userId: workerId,
+      type: 'BOOKING_PROBLEM_REPORTED',
+      title: 'Your client reported a problem',
+      message: `${label}. HomeEase will look into it and contact you.`,
+      relatedId: id,
+    });
+    return res.status(200).json({ success: true, message: 'Reported. HomeEase is on it.', data: { outcome: 'REPORTED' } });
+  } catch (error) {
+    if (isBookingStatusConflict(error)) return bookingConflict(res);
+    console.error('Error reporting a booking problem:', error);
+    return res.status(500).json(errorResponse(500, 'Failed to report the problem'));
+  }
+};
+
+/**
+ * PATCH /api/bookings/:id/cancel-request/respond  { accept }
+ * The worker answers the client's cancel request: agreeing cancels with no
+ * penalty for anyone; declining sends it to an admin (escalateCancelRequest).
+ */
+export const respondToCancelRequest = async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      return res.status(401).json(errorResponse(401, 'Not authenticated'));
+    }
+    const id = req.params.id as string;
+    const accept = req.body?.accept;
+    if (typeof accept !== 'boolean') {
+      return res.status(400).json(errorResponse(400, 'accept must be true or false'));
+    }
+
+    const booking = await prisma.booking.findUnique({ where: { id } });
+    if (!booking) {
+      return res.status(404).json(errorResponse(404, 'Booking not found'));
+    }
+    const noRequest = () => res.status(409).json(errorResponse(409, 'There is no cancel request to answer'));
+    if (
+      booking.workerId !== req.user.userId ||
+      (booking.status !== 'ACCEPTED' && booking.status !== 'IN_PROGRESS') ||
+      !booking.cancelRequestedAt ||
+      booking.cancelRequestEscalatedAt
+    ) {
+      return noRequest();
+    }
+
+    if (!accept) {
+      await escalateCancelRequest(booking, 'DECLINED');
+      return res.status(200).json({ success: true, message: 'HomeEase will decide', data: { id, status: booking.status } });
+    }
+
+    await prisma.$transaction(async (tx) => {
+      // A decline that escalated since the read above wins.
+      const fresh = await lockBooking(tx, id);
+      if (!fresh || fresh.cancelRequestEscalatedAt) throw new BookingStatusConflictError(id, [booking.status]);
+      await finalizeCancellationTx(tx, booking, 'CLIENT', {
+        cancelledBy: 'CLIENT',
+        cancelledById: booking.clientId,
+        reason: 'CLIENT_CANCEL_AGREED',
+        penalizedWorkerId: null,
+        compensationStatus: 'NOT_APPLICABLE',
+      });
+    });
+    await afterCancellation(id, 'CLIENT_CANCEL_AGREED', booking.clientId);
+
+    await notifyUser({
+      userId: booking.clientId,
+      type: 'BOOKING_CANCELLED',
+      title: 'Booking cancelled',
+      message: "Your worker agreed. The booking is cancelled and you won't be charged.",
+      relatedId: id,
+    });
+    return res.status(200).json({ success: true, message: 'Booking cancelled', data: { id, status: 'CANCELLED' } });
+  } catch (error) {
+    if (isBookingStatusConflict(error)) return bookingConflict(res);
+    console.error('Error answering a cancel request:', error);
+    return res.status(500).json(errorResponse(500, 'Failed to answer the cancel request'));
   }
 };
 
