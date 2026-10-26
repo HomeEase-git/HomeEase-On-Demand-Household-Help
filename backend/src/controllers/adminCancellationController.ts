@@ -1,12 +1,12 @@
 import { Request, Response } from 'express';
 import prisma from '@config/database';
-import { postCancellationFee } from '@services/ledgerService';
 import { errorResponse } from '@utils/errorResponse';
 import { writeAuditLog } from '@utils/auditLog';
 import { notifyUser } from '@utils/notify';
 import { formatDisplayId } from '@utils/formatters';
 import { getAppSettings } from '@services/appSettingsService';
-import { chargePenaltyTx, creditCompensationTx } from '@services/debtLedgerService';
+import { chargePenaltyTx } from '@services/debtLedgerService';
+import { applyClientFaultCompensationTx } from '@services/cancellationCompensationService';
 import type { JwtPayload } from '@/types/index';
 
 interface AuthRequest extends Request {
@@ -124,39 +124,37 @@ export const reviewCancellation = async (req: AuthRequest, res: Response) => {
     const displayId = formatDisplayId(bookingId);
 
     await prisma.$transaction(async (tx) => {
+      if (decision === 'APPROVE') {
+        const claimed = await applyClientFaultCompensationTx(tx, {
+          bookingId,
+          clientId,
+          workerId,
+          amount,
+          reviewedById: adminId ?? null,
+          reviewNote: note.trim(),
+        });
+        if (!claimed) throw new Error('ALREADY_REVIEWED');
+        return;
+      }
+
       // Status-guarded so two admins can't both decide it.
       const claim = await tx.cancellation.updateMany({
         where: { bookingId, compensationStatus: 'PENDING_REVIEW' },
         data: {
-          compensationStatus: decision === 'APPROVE' ? 'APPROVED' : 'REJECTED',
+          compensationStatus: 'REJECTED',
           reviewedById: adminId ?? null,
           reviewedAt: new Date(),
           reviewNote: note.trim(),
-          ...(decision === 'REJECT'
-            ? { fault: 'WORKER', penalizedWorkerId: workerId, penaltyAmount: penalty > 0 ? penalty : null }
-            : {}),
+          fault: 'WORKER',
+          penalizedWorkerId: workerId,
+          penaltyAmount: penalty > 0 ? penalty : null,
         },
       });
       if (claim.count === 0) throw new Error('ALREADY_REVIEWED');
 
       const workerProfile = await tx.workerProfile.findUniqueOrThrow({ where: { userId: workerId }, select: { id: true } });
 
-      if (decision === 'APPROVE') {
-        const client = await tx.clientProfile.findUnique({ where: { userId: clientId }, select: { outstandingBalance: true } });
-        await tx.clientProfile.update({
-          where: { userId: clientId },
-          data: {
-            outstandingBalance: (client?.outstandingBalance ?? 0) + amount,
-            paymentHoldAt: new Date(),
-            paymentHoldNote: `Cancellation fee ₱${amount.toFixed(2)} for booking ${displayId}`,
-          },
-        });
-        await creditCompensationTx(tx, workerProfile.id, amount, {
-          bookingId,
-          note: `Compensation for client-caused cancellation of ${displayId}`,
-        });
-        await postCancellationFee(tx, clientId, workerId, amount, { key: bookingId, bookingId });
-      } else if (penalty > 0) {
+      if (penalty > 0) {
         await chargePenaltyTx(tx, workerProfile.id, penalty, {
           bookingId,
           note: `Cancellation proof for ${displayId} was not accepted`,

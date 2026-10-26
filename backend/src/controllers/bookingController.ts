@@ -53,6 +53,7 @@ import {
 import { roundToCentavo } from '@utils/money';
 import { buildCapabilityFilters } from '@services/matchingService';
 import { schedulePendingExpiry, cancelPendingExpiryJob } from '@queues/bookingQueue';
+import { finalizeCancellationTx, afterCancellation } from '@services/bookingCancellationService';
 import { VALID_TRANSITIONS, isValidTransition } from '@services/bookingStateMachine';
 import { getAppSettings } from '@services/appSettingsService';
 import { computeWorkerTier, tierMultiplier } from '@utils/workerTier';
@@ -3009,51 +3010,11 @@ export const cancelBooking = async (req: AuthRequest, res: Response) => {
             : null;
 
     const updated = await prisma.$transaction(async (tx) => {
-      // Claim the transition first: if the status moved since the read above
-      // (accept, expiry, completion), nothing below runs. The UPDATE also
-      // holds the row lock until commit.
-      await updateBookingIfStatus(tx, id, booking.status, {
-        status: 'CANCELLED',
-        notes: reason, // schema has no cancelReason; kept as the canceller's own free-text reason
-      });
-
-      // Free up the worker's active-job count for any pre-completion status.
-      // A DISPUTED booking can also be reached post-completion
-      // (AWAITING_PAYMENT -> DISPUTED) where completeBooking already freed
-      // it — workerCompletedAt distinguishes that case.
-      const workerProfile = booking.workerId
-        ? await tx.workerProfile.findUnique({ where: { userId: booking.workerId }, select: { id: true } })
-        : null;
-      if (
-        workerProfile &&
-        !booking.workerCompletedAt &&
-        ['ACCEPTED', 'IN_PROGRESS', 'QUOTE_SUBMITTED', 'QUOTE_APPROVED', 'DISPUTED'].includes(booking.status)
-      ) {
-        await tx.workerProfile.update({
-          where: { id: workerProfile.id },
-          data: { activeJobCount: { decrement: 1 } },
-        });
-      }
-
-      await tx.bookingVisit.updateMany({
-        where: { bookingId: id, status: 'SCHEDULED' },
-        data: { status: 'CANCELLED' },
-      });
-
-      // A booking cancelled outside dispute resolution ends whatever dispute
-      // was open on it — otherwise it lingers in the admin queue.
-      await tx.dispute.updateMany({
-        where: { bookingId: id, status: { in: ['OPEN', 'UNDER_REVIEW'] } },
-        data: {
-          status: 'RESOLVED_DISMISSED',
-          resolution: `Booking was cancelled by the ${cancelledByRole.toLowerCase()} before this dispute was resolved`,
-          resolvedAt: new Date(),
-        },
-      });
-
-      await tx.cancellation.create({
-        data: {
-          bookingId: id,
+      const cancelled = await finalizeCancellationTx(
+        tx,
+        booking,
+        cancelledByRole,
+        {
           cancelledBy: cancelledByRole,
           cancelledById: req.user!.userId,
           reason: hasPendingReschedule
@@ -3079,30 +3040,25 @@ export const cancelBooking = async (req: AuthRequest, res: Response) => {
           compensationAmount,
           compensationStatus: cancelFault === 'CLIENT' ? 'PENDING_REVIEW' : 'NOT_APPLICABLE',
         },
-      });
+        reason
+      );
 
-      if (penaltyAmount && workerProfile) {
-        await chargePenaltyTx(tx, workerProfile.id, penaltyAmount, {
-          bookingId: id,
-          note: `Cancelled booking ${formatDisplayId(id)} after arriving (worker's fault)`,
-        });
+      // penaltyAmount is only set for a worker-fault cancel, so workerId is the canceller.
+      if (penaltyAmount && booking.workerId) {
+        const workerProfile = await tx.workerProfile.findUnique({ where: { userId: booking.workerId }, select: { id: true } });
+        if (workerProfile) {
+          await chargePenaltyTx(tx, workerProfile.id, penaltyAmount, {
+            bookingId: id,
+            note: `Cancelled booking ${formatDisplayId(id)} after arriving (worker's fault)`,
+          });
+        }
       }
 
-      return tx.booking.findUniqueOrThrow({ where: { id } });
+      return cancelled;
     });
 
     // Best-effort — same reasoning as accept/decline above.
-    await cancelPendingExpiryJob(id).catch((error) => {
-      console.error(`Failed to cancel pending-expiry job for cancelled booking ${id}:`, error);
-    });
-    await requestRefund({
-      bookingId: id,
-      reason: reason || 'Booking cancelled',
-      source: 'BOOKING_CANCELLED',
-      requestedById: req.user.userId,
-    }).catch((error) => {
-      console.error(`Failed to void/refund-request payment for cancelled booking ${id}:`, error);
-    });
+    await afterCancellation(id, reason || 'Booking cancelled', req.user.userId);
 
     // Notify the other party (workerId may be null if booking is unassigned)
     const notificationUserId =

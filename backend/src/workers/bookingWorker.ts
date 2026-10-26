@@ -1,4 +1,5 @@
 import { Worker, type Job } from 'bullmq';
+import type { Booking } from '@prisma/client';
 import prisma from '@config/database';
 import { workerConnection as connection } from '@config/redis';
 import { notifyUser } from '@utils/notify';
@@ -464,87 +465,105 @@ export async function cancelWorkerNoShows(): Promise<void> {
     if (now < deadline || !booking.workerId) continue;
 
     try {
-      const cancelled = await prisma.$transaction(async (tx) => {
-        // Status-guarded: a check-in or cancel that raced this sweep wins.
-        const claim = await tx.booking.updateMany({
-          where: { id: booking.id, status: 'ACCEPTED', workerArrivedAt: null },
-          data: { status: 'CANCELLED', workerNoShowFlaggedAt: now },
-        });
-        if (claim.count === 0) return false;
-
-        const workerProfile = await tx.workerProfile.update({
-          where: { userId: booking.workerId! },
-          data: { activeJobCount: { decrement: 1 } },
-          select: { id: true },
-        });
-
-        await tx.bookingVisit.updateMany({
-          where: { bookingId: booking.id, status: 'SCHEDULED' },
-          data: { status: 'CANCELLED' },
-        });
-
-        await tx.cancellation.create({
-          data: {
-            bookingId: booking.id,
-            cancelledBy: 'ADMIN',
-            cancelledById: 'system',
-            reason: 'WORKER_NO_SHOW',
-            cancelledWithinHours: 0,
-            workerCancellationReason: 'WORKER_FAULT',
-            penalizedWorkerId: booking.workerId,
-            fault: 'WORKER',
-            penaltyAmount: noShowPenaltyAmount > 0 ? noShowPenaltyAmount : null,
-          },
-        });
-
-        if (noShowPenaltyAmount > 0) {
-          await chargePenaltyTx(tx, workerProfile.id, noShowPenaltyAmount, {
-            bookingId: booking.id,
-            note: `No-show: didn't check in within ${noShowGraceMinutes} minutes of the start time`,
-          });
-        }
-        return true;
-      });
-      if (!cancelled) continue;
-
-      await requestRefund({ bookingId: booking.id, reason: 'WORKER_NO_SHOW', source: 'BOOKING_CANCELLED' }).catch((error) => {
-        console.error(`Failed to void/refund-request payment for no-show booking ${booking.id}:`, error);
-      });
-
-      await notifyUser({
-        userId: booking.clientId,
-        type: 'BOOKING_CANCELLED',
-        title: "Your worker didn't show up",
-        message: `Your worker didn't check in within ${noShowGraceMinutes} minutes of the start time, so the booking was cancelled. You won't be charged — you can book another worker right away.`,
-        relatedId: booking.id,
-      });
-      void sendSmsToUser({
-        userId: booking.clientId,
-        message: `HomeEase: Your worker didn't arrive for booking ${formatDisplayId(booking.id)}, so it was cancelled. You won't be charged.`,
-      });
-
-      await notifyUser({
-        userId: booking.workerId,
-        type: 'CANCELLATION_PENALTY',
-        title: 'Booking cancelled: no-show',
-        message:
-          noShowPenaltyAmount > 0
-            ? `You didn't check in within ${noShowGraceMinutes} minutes of the start time, so the booking was cancelled and a ₱${noShowPenaltyAmount.toFixed(2)} penalty was added to your platform dues.`
-            : `You didn't check in within ${noShowGraceMinutes} minutes of the start time, so the booking was cancelled.`,
-        relatedId: booking.id,
-      });
-
-      await writeAuditLog({
-        action: 'WORKER_NO_SHOW_CANCELLED',
-        category: 'STATUS_CHANGE',
-        level: 'WARN',
-        message: `Booking ${booking.id} cancelled as a worker no-show (${noShowGraceMinutes} min past start, no check-in)`,
-        metadata: { bookingId: booking.id, workerId: booking.workerId, penalty: noShowPenaltyAmount },
-      });
+      await cancelAsWorkerNoShow(booking, { noShowGraceMinutes, noShowPenaltyAmount }, now);
     } catch (error) {
       console.error(`Failed to cancel worker no-show booking ${booking.id}:`, error);
     }
   }
+}
+
+/**
+ * Cancels one ACCEPTED booking as a worker no-show (see cancelWorkerNoShows,
+ * which checks the deadline first). Returns whether it cancelled — false when
+ * a check-in or cancel raced it.
+ */
+export async function cancelAsWorkerNoShow(
+  booking: Booking,
+  settings: { noShowGraceMinutes: number; noShowPenaltyAmount: number },
+  now: Date = new Date()
+): Promise<boolean> {
+  const { noShowGraceMinutes, noShowPenaltyAmount } = settings;
+  const workerId = booking.workerId;
+  if (!workerId) return false;
+
+  const cancelled = await prisma.$transaction(async (tx) => {
+    // Status-guarded: a check-in or cancel that raced this sweep wins.
+    const claim = await tx.booking.updateMany({
+      where: { id: booking.id, status: 'ACCEPTED', workerArrivedAt: null },
+      data: { status: 'CANCELLED', workerNoShowFlaggedAt: now },
+    });
+    if (claim.count === 0) return false;
+
+    const workerProfile = await tx.workerProfile.update({
+      where: { userId: workerId },
+      data: { activeJobCount: { decrement: 1 } },
+      select: { id: true },
+    });
+
+    await tx.bookingVisit.updateMany({
+      where: { bookingId: booking.id, status: 'SCHEDULED' },
+      data: { status: 'CANCELLED' },
+    });
+
+    await tx.cancellation.create({
+      data: {
+        bookingId: booking.id,
+        cancelledBy: 'ADMIN',
+        cancelledById: 'system',
+        reason: 'WORKER_NO_SHOW',
+        cancelledWithinHours: 0,
+        workerCancellationReason: 'WORKER_FAULT',
+        penalizedWorkerId: booking.workerId,
+        fault: 'WORKER',
+        penaltyAmount: noShowPenaltyAmount > 0 ? noShowPenaltyAmount : null,
+      },
+    });
+
+    if (noShowPenaltyAmount > 0) {
+      await chargePenaltyTx(tx, workerProfile.id, noShowPenaltyAmount, {
+        bookingId: booking.id,
+        note: `No-show: didn't check in within ${noShowGraceMinutes} minutes of the start time`,
+      });
+    }
+    return true;
+  });
+  if (!cancelled) return false;
+
+  await requestRefund({ bookingId: booking.id, reason: 'WORKER_NO_SHOW', source: 'BOOKING_CANCELLED' }).catch((error) => {
+    console.error(`Failed to void/refund-request payment for no-show booking ${booking.id}:`, error);
+  });
+
+  await notifyUser({
+    userId: booking.clientId,
+    type: 'BOOKING_CANCELLED',
+    title: "Your worker didn't show up",
+    message: `Your worker didn't check in within ${noShowGraceMinutes} minutes of the start time, so the booking was cancelled. You won't be charged — you can book another worker right away.`,
+    relatedId: booking.id,
+  });
+  void sendSmsToUser({
+    userId: booking.clientId,
+    message: `HomeEase: Your worker didn't arrive for booking ${formatDisplayId(booking.id)}, so it was cancelled. You won't be charged.`,
+  });
+
+  await notifyUser({
+    userId: workerId,
+    type: 'CANCELLATION_PENALTY',
+    title: 'Booking cancelled: no-show',
+    message:
+      noShowPenaltyAmount > 0
+        ? `You didn't check in within ${noShowGraceMinutes} minutes of the start time, so the booking was cancelled and a ₱${noShowPenaltyAmount.toFixed(2)} penalty was added to your platform dues.`
+        : `You didn't check in within ${noShowGraceMinutes} minutes of the start time, so the booking was cancelled.`,
+    relatedId: booking.id,
+  });
+
+  await writeAuditLog({
+    action: 'WORKER_NO_SHOW_CANCELLED',
+    category: 'STATUS_CHANGE',
+    level: 'WARN',
+    message: `Booking ${booking.id} cancelled as a worker no-show (${noShowGraceMinutes} min past start, no check-in)`,
+    metadata: { bookingId: booking.id, workerId: booking.workerId, penalty: noShowPenaltyAmount },
+  });
+  return true;
 }
 
 /**
