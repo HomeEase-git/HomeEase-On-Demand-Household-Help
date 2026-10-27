@@ -277,7 +277,8 @@ export default function JobDetailScreen() {
   // included), the lines added here, and the tip.
   const draftInvoiceTotal = amount + invoiceItems.reduce((sum, item) => sum + item.price, 0) + tip;
   const bookedPackages = (job.addOns ?? []).filter((a) => a.clientApprovedAt && a.price > 0 && a.kind !== "PART" && a.kind !== "EXTRA_WORK");
-  const hasCancelRequest = !!job.cancelRequestedAt && !job.cancelRequestEscalatedAt;
+  // Open jobs only: an agreed request stays on the row after the cancel.
+  const hasCancelRequest = (isAccepted || isInProgress) && !!job.cancelRequestedAt && !job.cancelRequestEscalatedAt;
   const waitingForClient = isAccepted && hasArrived && !!job.clientNotHereAt && !!job.clientNoShowCancelAt;
   const noShowCancelOpen = waitingForClient && now >= new Date(job.clientNoShowCancelAt!).getTime();
   // Hidden while a better path exists: the client's cancel request, or the no-show cancel.

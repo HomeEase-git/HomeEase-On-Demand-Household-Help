@@ -175,11 +175,14 @@ export default function BookingDetailScreen() {
   const workerAskedToReschedule = hasOpenRescheduleRequest && rawDetail?.rescheduleRequestedBy === "WORKER";
   const hasPendingRescheduleRequest = hasOpenRescheduleRequest && !workerAskedToReschedule;
   const workerHasArrived = !!rawDetail?.timeline?.workerArrivedAt;
+  const isOpenJob = rawDetail?.status === "ACCEPTED" || rawDetail?.status === "IN_PROGRESS";
+  // An agreed request stays on the row after the cancel, so only open jobs wait on one.
+  const waitingOnCancelRequest = isOpenJob && !!rawDetail?.cancelRequestedAt && !rawDetail?.cancelRequestEscalatedAt;
   const canReportProblem =
-    (rawDetail?.status === "ACCEPTED" || rawDetail?.status === "IN_PROGRESS") &&
+    isOpenJob &&
     !rawDetail?.hasOpenDispute &&
     // Hidden only while the worker is still answering a cancel request.
-    !(rawDetail?.cancelRequestedAt && !rawDetail?.cancelRequestEscalatedAt);
+    !waitingOnCancelRequest;
   const canRequestReschedule = rawDetail?.status === "ACCEPTED" && !workerHasArrived && !hasOpenRescheduleRequest;
   // Follow-up job after an inspection/diagnosis (same worker), once its work is done.
   const canRequestFollowUp =
@@ -729,7 +732,7 @@ export default function BookingDetailScreen() {
           </Pressable>
         )}
 
-        {rawDetail?.cancelRequestedAt && !rawDetail.cancelRequestEscalatedAt && (
+        {waitingOnCancelRequest && (
           <View className="bg-warning/10 border border-warning/30 rounded-2xl p-4 mb-4">
             <Text className="text-text-secondary text-xs">Waiting for your worker to agree to cancel.</Text>
           </View>
