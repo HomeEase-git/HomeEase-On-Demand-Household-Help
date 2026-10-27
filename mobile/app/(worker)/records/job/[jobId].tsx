@@ -1018,7 +1018,7 @@ export default function JobDetailScreen() {
                 loading={confirmingCash}
               />
               <Text className="text-text-muted text-xs text-center">
-                Tap once the client has paid you. If you don&apos;t, it&apos;s recorded as paid after 24 hours.
+                Tap once the client has paid you. If you don&apos;t, it&apos;s recorded as paid after 3 days.
               </Text>
               <Text
                 className={`text-error text-xs font-semibold text-center py-1 ${busyAction ? "opacity-40" : ""}`}

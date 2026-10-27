@@ -103,7 +103,7 @@ export const CLIENT_FAQ: FaqCategory[] = [
       },
       {
         q: "When and how do I pay?",
-        a: "You pay after the job is done, with GCash, Maya or cash. When the worker marks the job complete, you confirm it and pay. If you don't respond within 24 hours, completion is confirmed automatically.",
+        a: "You pay after the job is done, with GCash, Maya or cash. When the worker sends the invoice, pay it in the app or pay your worker in cash. If a cash invoice isn't confirmed or reported within 3 days (72 hours), it's recorded as paid.",
       },
       {
         q: "Is it safe to pay with GCash or Maya?",

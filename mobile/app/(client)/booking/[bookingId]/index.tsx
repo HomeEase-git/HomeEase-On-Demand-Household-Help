@@ -178,7 +178,8 @@ export default function BookingDetailScreen() {
   const canReportProblem =
     (rawDetail?.status === "ACCEPTED" || rawDetail?.status === "IN_PROGRESS") &&
     !rawDetail?.hasOpenDispute &&
-    !rawDetail?.cancelRequestedAt;
+    // Hidden only while the worker is still answering a cancel request.
+    !(rawDetail?.cancelRequestedAt && !rawDetail?.cancelRequestEscalatedAt);
   const canRequestReschedule = rawDetail?.status === "ACCEPTED" && !workerHasArrived && !hasOpenRescheduleRequest;
   // Follow-up job after an inspection/diagnosis (same worker), once its work is done.
   const canRequestFollowUp =

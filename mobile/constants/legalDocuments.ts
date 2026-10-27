@@ -218,7 +218,7 @@ export const WORKER_AGREEMENT: LegalDocument = {
         "You're free to accept or decline requests. If you decline 3 requests within 7 days, new requests pause for 24 hours.",
         "Late cancellations and no-shows lower your position when clients are matched with workers.",
         "Skilled and Expert tiers are based on your rating, completed jobs and years of experience (confirmed by HomeEase at verification), and add a tier fee to the price.",
-        "When the job is done, send the invoice from the job screen. Add any parts you bought with a photo of the receipt, and any extra work with a photo of the work. For cash jobs, tap Cash received once the client pays you; if you don't, the payment is recorded after 24 hours. The client can report an invoice before paying, and HomeEase decides whether it stands.",
+        "When the job is done, send the invoice from the job screen. Add any parts you bought with a photo of the receipt, and any extra work with a photo of the work. For cash jobs, tap Cash received once the client pays you; if you don't, the payment is recorded after 3 days (72 hours). The client can report an invoice before paying, and HomeEase decides whether it stands.",
       ],
     },
     {

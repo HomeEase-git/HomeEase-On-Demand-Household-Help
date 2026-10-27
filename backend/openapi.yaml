@@ -517,13 +517,15 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                properties:
-                  data:
-                    type: object
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - type: object
                     properties:
-                      outcome: { type: string, enum: [WORKER_PINGED, CANCELLED, CANCEL_REQUESTED, REPORTED] }
-                      autoCancelAt: { type: string, format: date-time, description: Only for WORKER_PINGED }
+                      data:
+                        type: object
+                        properties:
+                          outcome: { type: string, enum: [WORKER_PINGED, CANCELLED, CANCEL_REQUESTED, REPORTED] }
+                          autoCancelAt: { type: string, format: date-time, description: Only for WORKER_PINGED }
         '400': { $ref: '#/components/responses/BadRequest' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
@@ -547,6 +549,7 @@ paths:
       responses:
         '200': { description: Cancelled, or escalated to an admin }
         '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { description: There is no open cancel request to answer }
 
