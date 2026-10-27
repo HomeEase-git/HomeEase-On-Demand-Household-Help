@@ -249,15 +249,22 @@ export async function remindAndAutoSettleCompletions(): Promise<void> {
       OR: [{ paymentMethodType: 'CASH' }, { paymentMethodType: null }],
       // Past 72h it is settled in this same run, so no "in 1 day" warning.
       workerCompletedAt: { lte: secondReminderCutoff, gt: cashSettleCutoff },
-      // A booking that went through a dispute is never auto-settled.
+      // A booking that went through a dispute, or has one open, is never auto-settled.
       disputeResolvedAt: null,
+      disputes: { none: { status: { in: ['OPEN', 'UNDER_REVIEW'] } } },
       cashSecondReminderSentAt: null,
     },
   });
   for (const booking of needsSecondReminder) {
     try {
       const claimed = await prisma.booking.updateMany({
-        where: { id: booking.id, status: 'PENDING_COMPLETION', disputeResolvedAt: null, cashSecondReminderSentAt: null },
+        where: {
+          id: booking.id,
+          status: 'PENDING_COMPLETION',
+          disputeResolvedAt: null,
+          disputes: { none: { status: { in: ['OPEN', 'UNDER_REVIEW'] } } },
+          cashSecondReminderSentAt: null,
+        },
         data: { cashSecondReminderSentAt: new Date() },
       });
       if (claimed.count !== 1) continue;
@@ -315,6 +322,8 @@ export async function remindAndAutoSettleCompletions(): Promise<void> {
       OR: [{ paymentMethodType: 'CASH' }, { paymentMethodType: null }],
       workerCompletedAt: { lte: cashSettleCutoff },
       disputeResolvedAt: null,
+      // A problem reported before the invoice can still be open here.
+      disputes: { none: { status: { in: ['OPEN', 'UNDER_REVIEW'] } } },
     },
   });
   for (const booking of staleCash) {
@@ -544,6 +553,12 @@ export async function nudgeStuckBookings(now = new Date()): Promise<void> {
   const claim = async (b: { id: string; status: Booking['status'] }, column: 'startReminderSentAt' | 'startNudgeSentAt' | 'progressReminderSentAt' | 'progressEscalatedAt') =>
     (await prisma.booking.updateMany({ where: { id: b.id, status: b.status, [column]: null }, data: { [column]: now } })).count === 1;
 
+  // The client nudges say "tap Report a problem", which the app hides while a
+  // dispute or the client's own cancel request is open, so skip them then.
+  const OPEN_DISPUTE = { status: { in: ['OPEN', 'UNDER_REVIEW'] } };
+  const clientIsBeingHelped = (b: { disputes: unknown[]; cancelRequestedAt: Date | null; cancelRequestEscalatedAt: Date | null }) =>
+    b.disputes.length > 0 || (b.cancelRequestedAt != null && b.cancelRequestEscalatedAt == null);
+
   // 1. Cancel requests nobody answered.
   const requests = await prisma.booking.findMany({
     where: {
@@ -576,6 +591,7 @@ export async function nudgeStuckBookings(now = new Date()): Promise<void> {
       workerArrivedAt: { lte: new Date(now.getTime() - START_REMINDER_MINUTES * MIN_MS) },
       OR: [{ startReminderSentAt: null }, { startNudgeSentAt: null, clientNotHereAt: null }],
     },
+    include: { disputes: { where: OPEN_DISPUTE, select: { id: true } } },
   });
   for (const b of unstarted) {
     try {
@@ -584,7 +600,7 @@ export async function nudgeStuckBookings(now = new Date()): Promise<void> {
       if (!b.startReminderSentAt && b.workerId && due(clock, START_REMINDER_MINUTES * MIN_MS) && (await claim(b, 'startReminderSentAt'))) {
         await remind(b.workerId, b.id, 'Tap Start Job', "You checked in but haven't started. Add your before photos and tap Start Job.");
       }
-      if (!b.startNudgeSentAt && !b.clientNotHereAt && due(clock, START_NUDGE_HOURS * HOUR_MS) && (await claim(b, 'startNudgeSentAt'))) {
+      if (!b.startNudgeSentAt && !b.clientNotHereAt && !clientIsBeingHelped(b) && due(clock, START_NUDGE_HOURS * HOUR_MS) && (await claim(b, 'startNudgeSentAt'))) {
         await remind(b.clientId, b.id, 'Is your job under way?', "Your worker checked in but hasn't started. If something's wrong, tap Report a problem.");
       }
     } catch (error) {
@@ -599,7 +615,10 @@ export async function nudgeStuckBookings(now = new Date()): Promise<void> {
       workerStartedAt: { lte: new Date(now.getTime() - PROGRESS_REMINDER_HOURS * HOUR_MS) },
       OR: [{ progressReminderSentAt: null }, { progressEscalatedAt: null }],
     },
-    include: { visits: { select: { scheduledDate: true, scheduledTime: true, status: true } } },
+    include: {
+      visits: { select: { scheduledDate: true, scheduledTime: true, status: true } },
+      disputes: { where: OPEN_DISPUTE, select: { id: true } },
+    },
   });
   let admins: { id: string }[] | null = null;
   for (const b of running) {
@@ -612,7 +631,9 @@ export async function nudgeStuckBookings(now = new Date()): Promise<void> {
         await remind(b.workerId, b.id, 'Finish or schedule a follow-up', 'This job is still in progress. Mark it complete, or schedule a follow-up visit.');
       }
       if (!b.progressEscalatedAt && due(clock, PROGRESS_ESCALATE_HOURS * HOUR_MS) && (await claim(b, 'progressEscalatedAt'))) {
-        await remind(b.clientId, b.id, 'Is your job finished?', "Your job is still marked in progress. If something's wrong, tap Report a problem.");
+        if (!clientIsBeingHelped(b)) {
+          await remind(b.clientId, b.id, 'Is your job finished?', "Your job is still marked in progress. If something's wrong, tap Report a problem.");
+        }
         admins ??= await prisma.user.findMany({ where: { role: 'ADMIN', isDeleted: false }, select: { id: true } });
         const results = await Promise.allSettled(
           admins.map((a) => remind(a.id, b.id, 'Job stuck in progress', `Booking ${formatDisplayId(b.id)} has been in progress for over ${PROGRESS_ESCALATE_HOURS}h.`))

@@ -552,6 +552,21 @@ describe('Booking gaps — notifications and detail fields', () => {
       expect(await notes(booking.id, clientId)).toHaveLength(0);
     });
 
+    it("doesn't point the client at Report a problem while a dispute is open", async () => {
+      const unstarted = await seedStuck('ACCEPTED', { workerArrivedAt: ago(3 * HOUR) });
+      const running = await seedStuck('IN_PROGRESS', { workerStartedAt: ago(49 * HOUR) });
+      for (const b of [unstarted, running]) {
+        await prisma.dispute.create({ data: { bookingId: b.id, raisedById: clientId, reason: 'Something is wrong', status: 'OPEN' } });
+      }
+
+      await nudgeStuckBookings();
+      expect(await notes(unstarted.id, workerId)).toHaveLength(1);
+      expect(await notes(unstarted.id, clientId)).toHaveLength(0);
+      expect(await notes(running.id, workerId)).toHaveLength(1);
+      expect(await notes(running.id, clientId)).toHaveLength(0);
+      expect(await notes(running.id, createdUserIds[2])).toHaveLength(1);
+    });
+
     it('waits for the booked start after an early check-in', async () => {
       // Booked tomorrow, so the start is hours away.
       const booking = await seedStuck('ACCEPTED', { workerArrivedAt: ago(3 * HOUR) }, 1);
@@ -622,6 +637,17 @@ describe('Booking gaps — notifications and detail fields', () => {
       const booking = await seedInvoice(100, { disputeResolvedAt: new Date() });
       await remindAndAutoSettleCompletions();
       expect(await status(booking.id)).toBe('PENDING_COMPLETION');
+    });
+
+    it('never auto-settles or warns while a problem dispute is still open', async () => {
+      const late = await seedInvoice(73);
+      const due = await seedInvoice(49);
+      for (const b of [late, due]) {
+        await prisma.dispute.create({ data: { bookingId: b.id, raisedById: clientId, reason: 'Worker stopped the job', status: 'OPEN' } });
+      }
+      await remindAndAutoSettleCompletions();
+      expect(await status(late.id)).toBe('PENDING_COMPLETION');
+      expect(await prisma.notification.count({ where: { relatedId: due.id, message: { contains: 'in 1 day' } } })).toBe(0);
     });
 
     it('sends no second reminder for a booking that went through a dispute', async () => {
