@@ -124,6 +124,18 @@ describe('Booking gaps — notifications and detail fields', () => {
     }
   );
 
+  it('gives the generic status message for a worker cancel on a cancelled booking', async () => {
+    const booking = await createTestBooking({ clientId, workerId, status: 'CANCELLED' });
+    createdBookingIds.push(booking.id);
+
+    const res = await request(app)
+      .patch(`/api/bookings/${booking.id}/cancel`)
+      .set('Authorization', `Bearer ${workerToken}`)
+      .send({ workerCancellationReason: 'OTHER' });
+    expect(res.status).toBe(409);
+    expect(res.body.message).toBe('Cannot cancel booking with status CANCELLED');
+  });
+
   describe('client not here', () => {
     const notHere = (id: string) =>
       request(app).patch(`/api/bookings/${id}/client-not-here`).set('Authorization', `Bearer ${workerToken}`);
@@ -242,12 +254,47 @@ describe('Booking gaps — notifications and detail fields', () => {
       expect(await prisma.cancellation.count({ where: { bookingId: booking.id } })).toBe(0);
     });
 
-    it('with a zero fee, cancels with no fee, no hold and no review', async () => {
-      const { noShowGraceMinutes } = await getAppSettings();
+    /** Runs `fn` with the client-fault fee set to 0, then restores it. */
+    async function withZeroFee(fn: () => Promise<void>) {
       const settings = await prisma.appSettings.upsert({ where: { id: 'singleton' }, update: {}, create: { id: 'singleton' } });
       await prisma.appSettings.update({ where: { id: 'singleton' }, data: { clientFaultCompensationAmount: 0 } });
       invalidateAppSettingsCache();
       try {
+        await fn();
+      } finally {
+        await prisma.appSettings.update({
+          where: { id: 'singleton' },
+          data: { clientFaultCompensationAmount: settings.clientFaultCompensationAmount },
+        });
+        invalidateAppSettingsCache();
+      }
+    }
+
+    it('with a zero fee, a proof cancel blaming the client is a plain cancel with no review', async () => {
+      await withZeroFee(async () => {
+        const booking = await createTestBooking({ clientId, workerId, status: 'ACCEPTED', workerArrivedAt: new Date() });
+        createdBookingIds.push(booking.id);
+        await prisma.workerProfile.update({ where: { userId: workerId }, data: { activeJobCount: { increment: 1 } } });
+        
+        const res = await request(app)
+          .patch(`/api/bookings/${booking.id}/cancel`)
+          .set('Authorization', `Bearer ${workerToken}`)
+          .send({ fault: 'CLIENT', reason: 'Gate locked and nobody answered', proofUrls: [photoUrl(workerId, 'locked-gate')] });
+        expect(res.status).toBe(200);
+        expect(res.body.data.compensationStatus).toBe('NOT_APPLICABLE');
+        expect(res.body.message).toBe('Booking cancelled successfully');
+        const cancellation = await prisma.cancellation.findFirstOrThrow({ where: { bookingId: booking.id } });
+        expect(cancellation).toMatchObject({ compensationStatus: 'NOT_APPLICABLE', compensationAmount: null });
+        expect(cancellation.proofUrls).toHaveLength(1);
+        expect(await prisma.notification.count({ where: { relatedId: booking.id, type: 'CANCELLATION_COMPENSATION' } })).toBe(0);
+        const note = await prisma.notification.findFirstOrThrow({ where: { userId: clientId, relatedId: booking.id, type: 'BOOKING_CANCELLED' } });
+        expect(note.message).not.toMatch(/fee|₱/);
+      });
+    });
+
+    it('with a zero fee, cancels with no fee, no hold and no review', async () => {
+      const { noShowGraceMinutes } = await getAppSettings();
+      await withZeroFee(async () => {
         const booking = await createTestBooking({ clientId, workerId, status: 'ACCEPTED', workerArrivedAt: new Date(), scheduledDate: pastStart() });
         createdBookingIds.push(booking.id);
         await prisma.booking.update({
@@ -268,13 +315,7 @@ describe('Booking gaps — notifications and detail fields', () => {
         const note = await prisma.notification.findFirstOrThrow({ where: { userId: clientId, relatedId: booking.id, type: 'BOOKING_CANCELLED' } });
         expect(note.message).not.toMatch(/fee|₱/);
         expect(await prisma.notification.count({ where: { userId: workerId, relatedId: booking.id, type: 'BOOKING_CANCELLED' } })).toBe(1);
-      } finally {
-        await prisma.appSettings.update({
-          where: { id: 'singleton' },
-          data: { clientFaultCompensationAmount: settings.clientFaultCompensationAmount },
-        });
-        invalidateAppSettingsCache();
-      }
+      });
     });
 
     it('still needs proof before the wait is over', async () => {

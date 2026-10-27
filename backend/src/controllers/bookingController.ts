@@ -3297,7 +3297,7 @@ export const cancelBooking = async (req: AuthRequest, res: Response) => {
     }
 
     // Once the invoice is out the job is done; a worker cancel would void it.
-    if (req.user.role === 'WORKER' && !['ACCEPTED', 'IN_PROGRESS'].includes(booking.status)) {
+    if (req.user.role === 'WORKER' && ['PENDING_COMPLETION', 'AWAITING_PAYMENT', 'DISPUTED'].includes(booking.status)) {
       return res.status(409).json(errorResponse(409, "The invoice is sent, so this job can't be cancelled here. If something is wrong, contact support."));
     }
 
@@ -3361,16 +3361,14 @@ export const cancelBooking = async (req: AuthRequest, res: Response) => {
         : null;
 
     const penaltyAmount = cancelFault === 'WORKER' ? settings.noShowPenaltyAmount : null;
-    // On the no-proof no-show path a zero fee (admin setting) means nothing to
-    // charge or approve: no amount, NOT_APPLICABLE, no fee wording.
+    // A zero fee (admin setting) means nothing to charge, approve or review:
+    // no amount, NOT_APPLICABLE, no fee wording, no admin review.
     const compensationAmount =
-      cancelFault === 'CLIENT' && !(clientNoShowConfirmed && settings.clientFaultCompensationAmount <= 0)
-        ? settings.clientFaultCompensationAmount
-        : null;
+      cancelFault === 'CLIENT' && settings.clientFaultCompensationAmount > 0 ? settings.clientFaultCompensationAmount : null;
     // The status the caller ends up with. An approved fee is still written as
     // PENDING_REVIEW: applyClientFaultCompensationTx claims it from there.
     const compensationStatus =
-      cancelFault !== 'CLIENT' || (clientNoShowConfirmed && !compensationAmount)
+      cancelFault !== 'CLIENT' || !compensationAmount
         ? 'NOT_APPLICABLE'
         : clientNoShowConfirmed
           ? 'APPROVED'
@@ -3465,7 +3463,7 @@ export const cancelBooking = async (req: AuthRequest, res: Response) => {
         userId: booking.clientId,
         type: 'CANCELLATION_COMPENSATION',
         title: 'Cancellation fee',
-        message: `Your worker waited at the door and couldn't reach you, so booking ${displayId} was cancelled as caused on your side. A ₱${amount.toFixed(2)} fee applies, and new bookings are paused until it's settled — contact support to pay. If you were home, contact support.`,
+        message: `Your worker waited at the door and couldn't reach you, so booking ${displayId} was cancelled as caused on your side. A ₱${amount.toFixed(2)} fee applies, and new bookings are paused until it's settled. If you were home or want to pay, contact support.`,
         relatedId: id,
       });
       await notifyUser({
@@ -3497,8 +3495,8 @@ export const cancelBooking = async (req: AuthRequest, res: Response) => {
         type: 'BOOKING_CANCELLED',
         title: 'Booking Cancelled',
         message:
-          cancelFault === 'CLIENT'
-            ? `Your worker cancelled this job on site and reported it was caused on the client's side: ${reason}. HomeEase will review their proof; a ₱${compensationAmount?.toFixed(0)} cancellation fee applies if it's confirmed.`
+          cancelFault === 'CLIENT' && compensationAmount
+            ? `Your worker cancelled this job on site and reported it was caused on the client's side: ${reason}. HomeEase will review their proof; a ₱${compensationAmount.toFixed(2)} cancellation fee applies if it's confirmed.`
             : `Booking has been cancelled${reason ? `: ${reason}` : ''}`,
         relatedId: id,
       });
@@ -3514,7 +3512,7 @@ export const cancelBooking = async (req: AuthRequest, res: Response) => {
       });
     }
 
-    if (cancelFault === 'CLIENT' && !clientNoShowConfirmed) {
+    if (cancelFault === 'CLIENT' && !clientNoShowConfirmed && compensationAmount) {
       const admins = await prisma.user.findMany({ where: { role: 'ADMIN', isDeleted: false }, select: { id: true } });
       await Promise.all(
         admins.map((admin) =>
@@ -3536,7 +3534,7 @@ export const cancelBooking = async (req: AuthRequest, res: Response) => {
           ? compensationAmount
             ? 'Booking cancelled — the cancellation fee was approved'
             : 'Booking cancelled successfully'
-          : cancelFault === 'CLIENT'
+          : cancelFault === 'CLIENT' && compensationAmount
           ? 'Booking cancelled — HomeEase will review your proof'
           : penaltyAmount
             ? `Booking cancelled — a ₱${penaltyAmount.toFixed(2)} penalty applies`
