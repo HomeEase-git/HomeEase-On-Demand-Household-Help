@@ -272,9 +272,15 @@ describe('Booking flow — arrival geofencing, the invoice after the job, disput
     };
     const complete = (id: string, body: Record<string, unknown>) =>
       request(app).patch(`/api/bookings/${id}/complete`).set('Authorization', `Bearer ${workerToken}`).send(body);
-    const done = photo(workerId, 'after');
-    const part = { kind: 'PART', name: 'Outlet cover', price: 120, photoUrls: [photo(workerId, 'receipt')] };
-    const extra = { kind: 'EXTRA_WORK', name: 'Second outlet', price: 300, photoUrls: [photo(workerId, 'extra')] };
+    // Built in beforeAll: workerId isn't set yet when this describe body runs.
+    let done: string;
+    let part: Record<string, unknown>;
+    let extra: Record<string, unknown>;
+    beforeAll(() => {
+      done = photo(workerId, 'after');
+      part = { kind: 'PART', name: 'Outlet cover', price: 120, photoUrls: [photo(workerId, 'receipt')] };
+      extra = { kind: 'EXTRA_WORK', name: 'Second outlet', price: 300, photoUrls: [photo(workerId, 'extra')] };
+    });
 
     it('cannot complete a job that has not been started', async () => {
       const booking = await createTestBooking({ clientId, workerId, status: 'ACCEPTED', workerArrivedAt: new Date() });
