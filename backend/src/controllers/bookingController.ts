@@ -2775,6 +2775,80 @@ export const markCashReceived = async (req: AuthRequest, res: Response) => {
 };
 
 /**
+ * PATCH /api/bookings/:id/cash-not-paid
+ * The worker says the client has not paid the cash invoice. The booking goes
+ * to DISPUTED with an open dispute for an admin. Cash only: nothing to void.
+ */
+export const reportCashNotPaid = async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user || req.user.role !== 'WORKER') {
+      return res.status(403).json(errorResponse(403, 'Only workers can report an unpaid cash invoice'));
+    }
+
+    const id = req.params.id as string;
+    const booking = await prisma.booking.findUnique({ where: { id } });
+    if (!booking) {
+      return res.status(404).json(errorResponse(404, 'Booking not found'));
+    }
+    if (booking.workerId !== req.user.userId) {
+      return res.status(403).json(errorResponse(403, 'This booking is not assigned to you'));
+    }
+    if ((booking.paymentMethodType ?? 'CASH') !== 'CASH') {
+      return res.status(409).json(errorResponse(409, 'This client pays with GCash or Maya in the app'));
+    }
+    if (booking.status !== 'PENDING_COMPLETION') {
+      return res.status(409).json(
+        errorResponse(
+          409,
+          booking.status === 'DISPUTED'
+            ? 'This invoice is already being reviewed by HomeEase.'
+            : `Cannot report an unpaid invoice for a booking with status ${booking.status}`
+        )
+      );
+    }
+
+    const raisedById = req.user.userId;
+    const dispute = await prisma.$transaction(async (tx) => {
+      await updateBookingIfStatus(tx, id, 'PENDING_COMPLETION', { status: 'DISPUTED' });
+      return tx.dispute.create({
+        data: { bookingId: id, raisedById, reason: 'Worker reports the client has not paid the cash invoice', status: 'OPEN' },
+      });
+    });
+
+    await notifyUser({
+      userId: booking.clientId,
+      type: 'DISPUTE_OPENED',
+      title: 'Your worker says the cash is unpaid',
+      message: `Your worker reported that the cash for booking ${formatDisplayId(id)} has not been paid. HomeEase will review it and contact you.`,
+      relatedId: id,
+    });
+
+    const admins = await prisma.user.findMany({ where: { role: 'ADMIN', isDeleted: false }, select: { id: true } });
+    await Promise.all(
+      admins.map((admin) =>
+        notifyUser({
+          userId: admin.id,
+          type: 'DISPUTE_OPENED',
+          title: 'Cash not paid',
+          message: `The worker reports the client has not paid the cash invoice for booking ${formatDisplayId(id)}.`,
+          relatedId: dispute.id,
+        })
+      )
+    );
+
+    return res.status(200).json({
+      success: true,
+      message: 'Reported. HomeEase will review it and contact you.',
+      data: { id, status: 'DISPUTED', disputeId: dispute.id },
+    });
+  } catch (error) {
+    if (isBookingStatusConflict(error)) return bookingConflict(res);
+    console.error('Error reporting unpaid cash invoice:', error);
+    return res.status(500).json(errorResponse(500, 'Failed to report the unpaid invoice'));
+  }
+};
+
+/**
  * PATCH /api/bookings/:id/confirm-completion
  * The client's "Pay now" on a GCash/Maya invoice: raises (or resumes) the
  * Xendit checkout for the invoice total and returns its URL. The invoice-paid

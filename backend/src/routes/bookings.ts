@@ -17,6 +17,7 @@ import {
   respondToRescheduleRequest,
   completeBooking,
   markCashReceived,
+  reportCashNotPaid,
   confirmCompletion,
   reportInvoice,
   reportBookingProblem,
@@ -106,6 +107,7 @@ router.patch('/:id/complete', restrictTo('WORKER'), completeBooking);
 
 // Worker confirms the client paid a cash invoice (worker only)
 router.patch('/:id/cash-received', restrictTo('WORKER'), markCashReceived);
+router.patch('/:id/cash-not-paid', restrictTo('WORKER'), reportCashNotPaid);
 
 // "Pay now" on a GCash/Maya invoice — returns the checkout URL (client only)
 router.patch('/:id/confirm-completion', restrictTo('CLIENT'), confirmCompletion);

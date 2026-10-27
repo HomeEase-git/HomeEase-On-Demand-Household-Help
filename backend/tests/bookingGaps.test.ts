@@ -5,7 +5,7 @@ import { BOOKING_PHOTO_BUCKET } from '@config/supabase';
 import { getAppSettings } from '@services/appSettingsService';
 import { sendSmsToUser } from '@utils/smsService';
 import { addDays, phTodayStart } from '@services/workerAvailabilityService';
-import { nudgeStuckBookings } from '@workers/bookingWorker';
+import { nudgeStuckBookings, remindAndAutoSettleCompletions } from '@workers/bookingWorker';
 import type { Prisma } from '@prisma/client';
 import { createTestUser, deleteTestUser, createTestBooking, deleteTestBooking } from './helpers';
 
@@ -484,6 +484,72 @@ describe('Booking gaps — notifications and detail fields', () => {
       expect((await reload(stuck.id)).progressEscalatedAt).not.toBeNull();
       expect(await notes(planned.id, workerId)).toHaveLength(0);
       expect(await notes(planned.id, clientId)).toHaveLength(0);
+    });
+  });
+
+  describe('cash invoices', () => {
+    const HOUR = 60 * 60_000;
+    // Real clock, backdated invoices: only genuinely due rows are touched.
+    async function seedInvoice(hoursAgo: number, data: Prisma.BookingUncheckedUpdateInput = {}) {
+      const created = await createTestBooking({ clientId, workerId, status: 'PENDING_COMPLETION' });
+      createdBookingIds.push(created.id);
+      return prisma.booking.update({
+        where: { id: created.id },
+        data: { paymentMethodType: 'CASH', workerCompletedAt: new Date(Date.now() - hoursAgo * HOUR), ...data },
+      });
+    }
+    const status = async (id: string) => (await prisma.booking.findUniqueOrThrow({ where: { id } })).status;
+    const second = (id: string, userId: string) =>
+      prisma.notification.count({ where: { userId, relatedId: id, type: 'COMPLETION_REMINDER', title: { not: 'Did you get the cash?' } } });
+
+    it('records cash as paid after 72h, not 24h', async () => {
+      const day = await seedInvoice(25);
+      const late = await seedInvoice(73);
+      await remindAndAutoSettleCompletions();
+      expect(await status(day.id)).toBe('PENDING_COMPLETION');
+      expect(await status(late.id)).toBe('COMPLETED');
+    });
+
+    it('sends the second cash reminder once, at 48h', async () => {
+      const early = await seedInvoice(25);
+      const due = await seedInvoice(49);
+      await remindAndAutoSettleCompletions();
+      await remindAndAutoSettleCompletions();
+      const dueNotes = await prisma.notification.findMany({
+        where: { relatedId: due.id, type: 'COMPLETION_REMINDER', message: { contains: 'in 1 day' } },
+      });
+      expect(dueNotes).toHaveLength(1);
+      expect(dueNotes[0].userId).toBe(clientId);
+      expect(await prisma.notification.count({ where: { relatedId: due.id, userId: workerId, type: 'COMPLETION_REMINDER', title: 'Did you get the cash?' } })).toBeGreaterThanOrEqual(1);
+      expect(await prisma.notification.count({ where: { relatedId: early.id, message: { contains: 'in 1 day' } } })).toBe(0);
+      expect((await prisma.booking.findUniqueOrThrow({ where: { id: due.id } })).cashSecondReminderSentAt).not.toBeNull();
+    });
+
+    it('never auto-settles a booking that went through a dispute', async () => {
+      const booking = await seedInvoice(100, { disputeResolvedAt: new Date() });
+      await remindAndAutoSettleCompletions();
+      expect(await status(booking.id)).toBe('PENDING_COMPLETION');
+    });
+
+    it('lets the worker report that the client did not pay', async () => {
+      const booking = await seedInvoice(1);
+      const res = await request(app).patch(`/api/bookings/${booking.id}/cash-not-paid`).set('Authorization', `Bearer ${workerToken}`);
+      expect(res.status).toBe(200);
+      expect(res.body.data).toMatchObject({ id: booking.id, status: 'DISPUTED' });
+      const dispute = await prisma.dispute.findFirstOrThrow({ where: { bookingId: booking.id } });
+      expect(dispute).toMatchObject({ status: 'OPEN', reason: 'Worker reports the client has not paid the cash invoice', raisedById: workerId });
+      expect(res.body.data.disputeId).toBe(dispute.id);
+      expect(await prisma.notification.count({ where: { userId: clientId, relatedId: booking.id, type: 'DISPUTE_OPENED' } })).toBe(1);
+
+      const again = await request(app).patch(`/api/bookings/${booking.id}/cash-received`).set('Authorization', `Bearer ${workerToken}`);
+      expect(again.status).toBe(409);
+    });
+
+    it('refuses cash-not-paid on a GCash booking', async () => {
+      const booking = await seedInvoice(1, { paymentMethodType: 'GCASH' });
+      const res = await request(app).patch(`/api/bookings/${booking.id}/cash-not-paid`).set('Authorization', `Bearer ${workerToken}`);
+      expect(res.status).toBe(409);
+      expect(res.body.message).toBe('This client pays with GCash or Maya in the app');
     });
   });
 });

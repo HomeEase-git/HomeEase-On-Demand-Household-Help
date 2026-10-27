@@ -459,6 +459,17 @@ paths:
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
 
+  /bookings/{id}/cash-not-paid:
+    patch:
+      tags: [Bookings]
+      summary: Worker reports the client has not paid a cash invoice (PENDING_COMPLETION) — booking goes DISPUTED, admins and the client are notified. No body
+      parameters: [{ $ref: '#/components/parameters/BookingId' }]
+      responses:
+        '200': { description: Reported; returns id, status DISPUTED and the disputeId }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
   /bookings/{id}/invoice/report:
     patch:
       tags: [Bookings]

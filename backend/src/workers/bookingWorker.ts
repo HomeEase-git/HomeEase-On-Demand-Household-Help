@@ -38,8 +38,11 @@ const COMPLETION_REMINDER_HOURS = 12;
 const PAYMENT_REMINDER_HOURS = 2;
 // A cash invoice the worker never marked "Cash received" and the client never
 // reported is recorded as paid after this long. The client had the whole
-// window to report it; the worker is told so they can contact support.
-const CASH_AUTO_SETTLE_HOURS = 24;
+// window to report it (and a second reminder a day before the end); the
+// worker is told so they can contact support. A booking that already went
+// through a dispute is never auto-settled.
+const CASH_AUTO_SETTLE_HOURS = 72;
+const CASH_SECOND_REMINDER_HOURS = 48;
 // A GCash/Maya booking the client never paid is escalated to an admin
 // dispute after this long. No platform money is fronted — the worker is
 // simply not paid until it clears.
@@ -186,7 +189,8 @@ async function escalateOverduePayment(booking: { id: string; clientId: string; w
  *    (and, for cash, the worker to tap "Cash received").
  *  - AWAITING_PAYMENT 2h (own clock, separate from the 12h above) -> nudge
  *    the client to finish an abandoned/forgotten Xendit checkout.
- *  - PENDING_COMPLETION + CASH 24h -> recorded as paid (settleCashBooking).
+ *  - PENDING_COMPLETION + CASH 48h -> second reminder, a day before the end.
+ *  - PENDING_COMPLETION + CASH 72h -> recorded as paid (settleCashBooking).
  *    A reported invoice is DISPUTED, so it's never picked up here.
  *  - PENDING_COMPLETION / AWAITING_PAYMENT 72h + GCash/Maya -> escalate to an
  *    admin dispute. No auto-complete, no platform funds fronted.
@@ -236,6 +240,41 @@ export async function remindAndAutoSettleCompletions(): Promise<void> {
     });
   }
 
+  // 1a. Cash second reminder at 48h. Claim first so the BullMQ sweep and
+  // /internal/cron can't both send it.
+  const secondReminderCutoff = new Date(now - CASH_SECOND_REMINDER_HOURS * HOUR_MS);
+  const needsSecondReminder = await prisma.booking.findMany({
+    where: {
+      status: 'PENDING_COMPLETION',
+      OR: [{ paymentMethodType: 'CASH' }, { paymentMethodType: null }],
+      workerCompletedAt: { lte: secondReminderCutoff },
+      cashSecondReminderSentAt: null,
+    },
+  });
+  for (const booking of needsSecondReminder) {
+    const claimed = await prisma.booking.updateMany({
+      where: { id: booking.id, status: 'PENDING_COMPLETION', cashSecondReminderSentAt: null },
+      data: { cashSecondReminderSentAt: new Date() },
+    });
+    if (claimed.count !== 1) continue;
+    await notifyUser({
+      userId: booking.clientId,
+      type: 'COMPLETION_REMINDER',
+      title: 'Your invoice is still unpaid',
+      message: 'Your cash invoice is still open. It will be recorded as paid in 1 day unless you report it.',
+      relatedId: booking.id,
+    });
+    if (booking.workerId) {
+      await notifyUser({
+        userId: booking.workerId,
+        type: 'COMPLETION_REMINDER',
+        title: 'Did you get the cash?',
+        message: `If the client paid you for booking ${formatDisplayId(booking.id)}, open the job and tap Cash received.`,
+        relatedId: booking.id,
+      });
+    }
+  }
+
   // 1b. AWAITING_PAYMENT-specific reminder — much shorter than the general
   // 12h one above, and on its own clock (awaitingPaymentSince, not
   // workerCompletedAt) so it fires promptly even for a booking that sat in
@@ -262,12 +301,13 @@ export async function remindAndAutoSettleCompletions(): Promise<void> {
     });
   }
 
-  // 2. A cash invoice nobody confirmed or reported in 24h -> recorded as paid.
+  // 2. A cash invoice nobody confirmed or reported in 72h -> recorded as paid.
   const staleCash = await prisma.booking.findMany({
     where: {
       status: 'PENDING_COMPLETION',
       OR: [{ paymentMethodType: 'CASH' }, { paymentMethodType: null }],
       workerCompletedAt: { lte: cashSettleCutoff },
+      disputeResolvedAt: null,
     },
   });
   for (const booking of staleCash) {
