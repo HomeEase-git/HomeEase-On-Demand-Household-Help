@@ -6,3 +6,6 @@ Dockerfile           text eol=lf
 *.dockerfile         text eol=lf
 *.template           text eol=lf
 docker-compose*.yml  text eol=lf
+*.pdf binary
+*.png binary
+*.jpg binary
