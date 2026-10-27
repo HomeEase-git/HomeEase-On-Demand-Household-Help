@@ -33,6 +33,15 @@ export function clientNotificationRoute(type: string, relatedId: string | null |
   return `/(client)/inbox/notification/${notificationId}`;
 }
 
+// Worker push taps: same rule, to the job screen.
+export function workerNotificationRoute(type: string, relatedId: string | null | undefined, notificationId: string): string {
+  const category = notificationCategory(type);
+  if (relatedId && (category === "booking" || category === "payment")) {
+    return `/(worker)/records/job/${relatedId}`;
+  }
+  return `/(worker)/inbox/notification/${notificationId}`;
+}
+
 type NotificationState = {
   notifications: Notification[];
   unreadCount: number;
