@@ -955,6 +955,7 @@ export const getBookingDetail = async (req: AuthRequest, res: Response) => {
     if (!isOwner && req.user.role !== 'ADMIN') {
       return res.status(403).json(errorResponse(403, 'You do not have permission to view this booking'));
     }
+    const settings = await getAppSettings();
 
     // Why the worker turned the request down (REJECTED only), so the client
     // can see it — transparency over a bare "declined".
@@ -996,7 +997,7 @@ export const getBookingDetail = async (req: AuthRequest, res: Response) => {
     const bookingPricingLog = booking.pricingLogs[0] ?? null;
     const priceBreakdown = {
       ...itemizeBookingPrice(bookingPricingLog, booking),
-      distanceFeeNote: describeDistanceFee(bookingPricingLog, await getAppSettings()),
+      distanceFeeNote: describeDistanceFee(bookingPricingLog, settings),
       addOns: (booking.addOns || [])
         .filter((addon: any) => addon.clientApprovedAt != null)
         .map((addon: any) => ({ name: addon.name, price: addon.price })),
@@ -1043,14 +1044,13 @@ export const getBookingDetail = async (req: AuthRequest, res: Response) => {
           workerPayout: p.workerPayout,
         };
       } else {
-        const live = await getAppSettings();
         earnings = {
           isEstimate: true,
           ...computeWorkerEarnings({
             subtotal: finalPrice,
             tip: breakdownTip,
-            commissionRate: booking.commissionRateSnapshot ?? live.commissionRate,
-            withholdingTaxRate: booking.withholdingTaxRateSnapshot ?? live.withholdingTaxRate,
+            commissionRate: booking.commissionRateSnapshot ?? settings.commissionRate,
+            withholdingTaxRate: booking.withholdingTaxRateSnapshot ?? settings.withholdingTaxRate,
             vatApplicable: booking.vatApplicable,
             vatRate: booking.vatRate,
           }),
@@ -1168,12 +1168,12 @@ export const getBookingDetail = async (req: AuthRequest, res: Response) => {
         // "Client not here" no-show (worker side) and cancel-after-start request.
         clientNotHereAt: booking.clientNotHereAt,
         clientNoShowCancelAt: booking.clientNotHereAt
-          ? ((await clientNoShowCancelAt(booking, (await getAppSettings()).noShowGraceMinutes))?.toISOString() ?? null)
+          ? ((await clientNoShowCancelAt(booking, settings.noShowGraceMinutes))?.toISOString() ?? null)
           : null,
         cancelRequestedAt: booking.cancelRequestedAt,
         cancelRequestReason: booking.cancelRequestReason,
         cancelRequestEscalatedAt: booking.cancelRequestEscalatedAt,
-        hasOpenDispute: (booking.disputes ?? []).some((d: any) => d.status === 'OPEN' || d.status === 'UNDER_REVIEW'),
+        hasOpenDispute: booking.disputes.some((d) => d.status === 'OPEN' || d.status === 'UNDER_REVIEW'),
         rooms: booking.rooms,
         condition: booking.condition,
         scopeAnswers: booking.scopeAnswers,
@@ -3414,7 +3414,7 @@ export const cancelBooking = async (req: AuthRequest, res: Response) => {
             : null;
 
     const updated = await prisma.$transaction(async (tx) => {
-      const cancelled = await finalizeCancellationTx(
+      const { booking: cancelled, workerProfileId } = await finalizeCancellationTx(
         tx,
         booking,
         cancelledByRole,
@@ -3459,14 +3459,11 @@ export const cancelBooking = async (req: AuthRequest, res: Response) => {
       }
 
       // penaltyAmount is only set for a worker-fault cancel, so workerId is the canceller.
-      if (penaltyAmount && booking.workerId) {
-        const workerProfile = await tx.workerProfile.findUnique({ where: { userId: booking.workerId }, select: { id: true } });
-        if (workerProfile) {
-          await chargePenaltyTx(tx, workerProfile.id, penaltyAmount, {
-            bookingId: id,
-            note: `Cancelled booking ${formatDisplayId(id)} after arriving (worker's fault)`,
-          });
-        }
+      if (penaltyAmount && workerProfileId) {
+        await chargePenaltyTx(tx, workerProfileId, penaltyAmount, {
+          bookingId: id,
+          note: `Cancelled booking ${formatDisplayId(id)} after arriving (worker's fault)`,
+        });
       }
 
       return cancelled;

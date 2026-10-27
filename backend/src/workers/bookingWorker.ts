@@ -557,6 +557,18 @@ export async function nudgeStuckBookings(now = new Date()): Promise<void> {
   // The client nudges say "tap Report a problem", which the app hides while a
   // dispute or the client's own cancel request is open, so skip them then.
   const OPEN_DISPUTE = { status: { in: ['OPEN', 'UNDER_REVIEW'] } };
+  // What passes 2 and 3 read besides their own columns.
+  const NUDGE_FIELDS = {
+    id: true,
+    status: true,
+    clientId: true,
+    workerId: true,
+    scheduledDate: true,
+    scheduledTime: true,
+    timeSlot: true,
+    cancelRequestedAt: true,
+    cancelRequestEscalatedAt: true,
+  } as const;
   const clientIsBeingHelped = (b: { disputes: unknown[]; cancelRequestedAt: Date | null; cancelRequestEscalatedAt: Date | null }) =>
     b.disputes.length > 0 || (b.cancelRequestedAt != null && b.cancelRequestEscalatedAt == null);
 
@@ -592,7 +604,14 @@ export async function nudgeStuckBookings(now = new Date()): Promise<void> {
       workerArrivedAt: { lte: new Date(now.getTime() - START_REMINDER_MINUTES * MIN_MS) },
       OR: [{ startReminderSentAt: null }, { startNudgeSentAt: null, clientNotHereAt: null }],
     },
-    include: { disputes: { where: OPEN_DISPUTE, select: { id: true } } },
+    select: {
+      ...NUDGE_FIELDS,
+      workerArrivedAt: true,
+      startReminderSentAt: true,
+      startNudgeSentAt: true,
+      clientNotHereAt: true,
+      disputes: { where: OPEN_DISPUTE, select: { id: true } },
+    },
   });
   for (const b of unstarted) {
     try {
@@ -616,7 +635,11 @@ export async function nudgeStuckBookings(now = new Date()): Promise<void> {
       workerStartedAt: { lte: new Date(now.getTime() - PROGRESS_REMINDER_HOURS * HOUR_MS) },
       OR: [{ progressReminderSentAt: null }, { progressEscalatedAt: null }],
     },
-    include: {
+    select: {
+      ...NUDGE_FIELDS,
+      workerStartedAt: true,
+      progressReminderSentAt: true,
+      progressEscalatedAt: true,
       visits: { select: { scheduledDate: true, scheduledTime: true, status: true } },
       disputes: { where: OPEN_DISPUTE, select: { id: true } },
     },

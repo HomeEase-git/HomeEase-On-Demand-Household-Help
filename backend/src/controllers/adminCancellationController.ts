@@ -6,7 +6,7 @@ import { notifyUser } from '@utils/notify';
 import { formatDisplayId } from '@utils/formatters';
 import { getAppSettings } from '@services/appSettingsService';
 import { chargePenaltyTx } from '@services/debtLedgerService';
-import { applyClientFaultCompensationTx } from '@services/cancellationCompensationService';
+import { applyClientFaultCompensationTx, claimCompensationReviewTx } from '@services/cancellationCompensationService';
 import type { JwtPayload } from '@/types/index';
 
 interface AuthRequest extends Request {
@@ -137,20 +137,15 @@ export const reviewCancellation = async (req: AuthRequest, res: Response) => {
         return;
       }
 
-      // Status-guarded so two admins can't both decide it.
-      const claim = await tx.cancellation.updateMany({
-        where: { bookingId, compensationStatus: 'PENDING_REVIEW' },
-        data: {
-          compensationStatus: 'REJECTED',
-          reviewedById: adminId ?? null,
-          reviewedAt: new Date(),
-          reviewNote: note.trim(),
-          fault: 'WORKER',
-          penalizedWorkerId: workerId,
-          penaltyAmount: penalty > 0 ? penalty : null,
-        },
+      const claimed = await claimCompensationReviewTx(tx, bookingId, {
+        compensationStatus: 'REJECTED',
+        reviewedById: adminId ?? null,
+        reviewNote: note.trim(),
+        fault: 'WORKER',
+        penalizedWorkerId: workerId,
+        penaltyAmount: penalty > 0 ? penalty : null,
       });
-      if (claim.count === 0) throw new Error('ALREADY_REVIEWED');
+      if (!claimed) throw new Error('ALREADY_REVIEWED');
 
       const workerProfile = await tx.workerProfile.findUniqueOrThrow({ where: { userId: workerId }, select: { id: true } });
 

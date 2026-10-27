@@ -6,7 +6,8 @@ import { cancelPendingExpiryJob } from '@queues/bookingQueue';
 /**
  * The shared writes of cancelling a booking, inside the caller's transaction.
  * Throws BookingStatusConflictError if the status moved since `booking` was
- * read, so nothing below runs. Returns the reloaded booking.
+ * read, so nothing below runs. Returns the reloaded booking and the
+ * assigned worker's profile id (null when there's no worker or profile).
  */
 export async function finalizeCancellationTx(
   tx: Prisma.TransactionClient,
@@ -14,7 +15,7 @@ export async function finalizeCancellationTx(
   cancelledByRole: 'CLIENT' | 'WORKER' | 'ADMIN',
   cancellation: Omit<Prisma.CancellationUncheckedCreateInput, 'bookingId'>,
   notes?: string | null
-): Promise<Booking> {
+): Promise<{ booking: Booking; workerProfileId: string | null }> {
   const id = booking.id;
 
   // Claim the transition first: if the status moved since the read above
@@ -61,7 +62,7 @@ export async function finalizeCancellationTx(
 
   await tx.cancellation.create({ data: { ...cancellation, bookingId: id } });
 
-  return tx.booking.findUniqueOrThrow({ where: { id } });
+  return { booking: await tx.booking.findUniqueOrThrow({ where: { id } }), workerProfileId: workerProfile?.id ?? null };
 }
 
 /** Best-effort follow-ups once the cancellation has committed. */
