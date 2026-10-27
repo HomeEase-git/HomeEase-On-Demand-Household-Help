@@ -34,12 +34,17 @@ import { decryptField, encryptField, isEncryptedField, isUnderPreviousDataKey } 
 const DRY_RUN = process.argv.includes('--dry');
 const NEON_WEBSOCKET = process.argv.includes('--neon-websocket');
 // --user <id>, repeatable: only these users' rows (all rows when absent).
-const USER_IDS = process.argv.flatMap((arg, i) => (arg === '--user' && process.argv[i + 1] ? [process.argv[i + 1]!] : []));
-if (process.argv.includes('--user') && USER_IDS.length === 0) {
-  console.error('--user needs a user id — refusing to run against every row.');
-  process.exit(1);
-}
-const onlyUsers =<K extends string>(key: K) => (USER_IDS.length > 0 ? ({ [key]: { in: USER_IDS } } as Record<K, { in: string[] }>) : {});
+const USER_IDS: string[] = [];
+process.argv.forEach((arg, i) => {
+  if (arg !== '--user') return;
+  const id = process.argv[i + 1];
+  if (!id || id.startsWith('--')) {
+    console.error('--user needs a user id after it — refusing to run.');
+    process.exit(1);
+  }
+  USER_IDS.push(id);
+});
+const onlyUsers = <K extends string>(key: K) => (USER_IDS.length > 0 ? ({ [key]: { in: USER_IDS } } as Record<K, { in: string[] }>) : {});
 
 const rotatingData = !!process.env.DATA_ENCRYPTION_KEY_PREVIOUS?.trim();
 const rotatingMfa = !!process.env.MFA_ENCRYPTION_KEY_PREVIOUS?.trim();

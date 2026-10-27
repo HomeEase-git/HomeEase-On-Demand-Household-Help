@@ -101,6 +101,7 @@ so do the Render update straight after.
    The script re-encrypts payout numbers and MFA secrets. It plans everything first and writes nothing if any value decrypts with neither key.
    If it reports rows edited during the run, run it again.
    It is safe to run again; a second run reports 0 changes.
+   `--user <id>` (repeatable) limits the run to those users' rows. Use it only for re-runs or on a dev/test database; a scoped run is **not** a production rotation. Never remove `<KEY>_PREVIOUS` after a scoped run: rows it skipped are still under the old key and would become unreadable.
 4. Check a worker's payout settings, or sign in as an admin with MFA.
 5. Remove `<KEY>_PREVIOUS` on Render.
 6. **Keep the old key in the password manager until every database backup older than the rotation has expired.** Restoring one of those backups needs the old key.
