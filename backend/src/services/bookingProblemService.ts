@@ -1,8 +1,18 @@
-import type { Booking, Dispute, Prisma } from '@prisma/client';
+import type { Booking, BookingStatus, Dispute, Prisma } from '@prisma/client';
 import prisma from '@config/database';
 import { notifyUser } from '@utils/notify';
 import { formatDisplayId } from '@utils/formatters';
-import { lockBooking, updateBookingIfStatus } from '@services/bookingStatusWrite';
+import { BookingStatusConflictError, lockBooking, updateBookingIfStatus } from '@services/bookingStatusWrite';
+
+/**
+ * Row-locks the booking until the transaction ends and throws
+ * BookingStatusConflictError if it has moved out of `allowed` since the
+ * caller read it (callers map that to 409).
+ */
+async function lockInStatus(tx: Prisma.TransactionClient, bookingId: string, allowed: readonly BookingStatus[]) {
+  const booking = await lockBooking(tx, bookingId);
+  if (!booking || !allowed.includes(booking.status)) throw new BookingStatusConflictError(bookingId, allowed);
+}
 
 /**
  * Creates an OPEN dispute inside the caller's transaction, or returns null
@@ -13,9 +23,10 @@ async function createDisputeTx(
   tx: Prisma.TransactionClient,
   bookingId: string,
   raisedById: string,
-  reason: string
+  reason: string,
+  allowedStatuses: readonly BookingStatus[]
 ): Promise<Dispute | null> {
-  await lockBooking(tx, bookingId);
+  await lockInStatus(tx, bookingId, allowedStatuses);
   const existing = await tx.dispute.findFirst({
     where: { bookingId, status: { in: ['OPEN', 'UNDER_REVIEW'] } },
     select: { id: true },
@@ -27,18 +38,23 @@ async function createDisputeTx(
 /**
  * Opens an OPEN dispute inside the caller's transaction, or adds this report
  * to the one already open (a problem reported before the invoice), so a
- * booking never has two at once. Takes the booking row lock.
+ * booking never has two at once. Takes the booking row lock. A joined report
+ * keeps the original raisedById, so its line is prefixed with who said it.
  */
 export async function openOrJoinDisputeTx(
   tx: Prisma.TransactionClient,
-  data: { bookingId: string; raisedById: string; reason: string; evidenceUrls?: string[] }
+  data: { bookingId: string; raisedById: string; reason: string; evidenceUrls?: string[] },
+  opts: { allowedStatuses: readonly BookingStatus[]; raisedByRole: 'CLIENT' | 'WORKER' }
 ): Promise<Dispute> {
-  await lockBooking(tx, data.bookingId);
+  await lockInStatus(tx, data.bookingId, opts.allowedStatuses);
   const existing = await tx.dispute.findFirst({ where: { bookingId: data.bookingId, status: { in: ['OPEN', 'UNDER_REVIEW'] } } });
   if (!existing) return tx.dispute.create({ data: { ...data, status: 'OPEN' } });
   return tx.dispute.update({
     where: { id: existing.id },
-    data: { reason: `${existing.reason}\n${data.reason}`, evidenceUrls: { push: data.evidenceUrls ?? [] } },
+    data: {
+      reason: `${existing.reason}\n[${opts.raisedByRole.toLowerCase()}] ${data.reason}`,
+      evidenceUrls: { push: data.evidenceUrls ?? [] },
+    },
   });
 }
 
@@ -66,20 +82,23 @@ export async function openBookingDispute({
   bookingId,
   raisedById,
   reason,
+  allowedStatuses,
 }: {
   bookingId: string;
   raisedById: string;
   reason: string;
+  /** Statuses the caller read; a booking that moved since throws BookingStatusConflictError. */
+  allowedStatuses: readonly BookingStatus[];
 }): Promise<Dispute | null> {
-  const dispute = await prisma.$transaction((tx) => createDisputeTx(tx, bookingId, raisedById, reason));
+  const dispute = await prisma.$transaction((tx) => createDisputeTx(tx, bookingId, raisedById, reason, allowedStatuses));
   if (dispute) await notifyAdminsOfDispute(dispute);
   return dispute;
 }
 
 /**
  * The worker declined (or never answered) the client's cancel request, so an
- * admin decides: marks the request escalated and opens a dispute in one
- * transaction (a failure leaves it unescalated, so a retry or the sweep can
+ * admin decides: marks the request escalated and opens a dispute (or adds
+ * the request to the one already open) in one transaction (a failure leaves it unescalated, so a retry or the sweep can
  * try again), then tells the admins and the client.
  */
 export async function escalateCancelRequest(booking: Booking, why: 'DECLINED' | 'NO_ANSWER'): Promise<void> {
@@ -94,14 +113,17 @@ export async function escalateCancelRequest(booking: Booking, why: 'DECLINED' | 
       { cancelRequestEscalatedAt: new Date() },
       { cancelRequestEscalatedAt: null }
     );
-    return createDisputeTx(
+    return openOrJoinDisputeTx(
       tx,
-      booking.id,
-      booking.clientId,
-      `Client asked to cancel (${booking.cancelRequestReason ?? 'no reason given'}); worker ${workerDid}`
+      {
+        bookingId: booking.id,
+        raisedById: booking.clientId,
+        reason: `Client asked to cancel (${booking.cancelRequestReason ?? 'no reason given'}); worker ${workerDid}`,
+      },
+      { allowedStatuses: ['ACCEPTED', 'IN_PROGRESS'], raisedByRole: 'CLIENT' }
     );
   });
-  if (dispute) await notifyAdminsOfDispute(dispute);
+  await notifyAdminsOfDispute(dispute);
 
   await notifyUser({
     userId: booking.clientId,

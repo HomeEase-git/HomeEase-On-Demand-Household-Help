@@ -56,6 +56,22 @@ describe('Booking gaps — notifications and detail fields', () => {
     await prisma.$disconnect();
   });
 
+  /**
+   * The controller's next booking read returns the row as it is now, then the
+   * row is changed underneath it: the request acts on a stale status.
+   */
+  function staleRead(bookingId: string, change: Prisma.BookingUncheckedUpdateInput) {
+    const real = prisma.booking.findUnique.bind(prisma.booking);
+    const spy = jest.spyOn(prisma.booking, 'findUnique').mockImplementation((async (args: Prisma.BookingFindUniqueArgs) => {
+      const row = await real(args);
+      if (args.where.id === bookingId) {
+        spy.mockRestore();
+        await prisma.booking.update({ where: { id: bookingId }, data: change });
+      }
+      return row;
+    }) as never);
+  }
+
   it('tells the client the worker arrived with BOOKING_ARRIVED', async () => {
     const booking = await createTestBooking({
       clientId,
@@ -152,6 +168,15 @@ describe('Booking gaps — notifications and detail fields', () => {
       const { noShowGraceMinutes } = await getAppSettings();
       const at = new Date(res.body.data.clientNotHereAt).getTime();
       expect(new Date(res.body.data.canCancelAt).getTime()).toBe(at + noShowGraceMinutes * 60_000);
+      expect(await prisma.notification.count({ where: { userId: clientId, relatedId: booking.id, type: 'BOOKING_CLIENT_NOT_HERE' } })).toBe(1);
+    });
+
+    it('answers two parallel alerts with 200 and alerts the client once', async () => {
+      const booking = await createTestBooking({ clientId, workerId, status: 'ACCEPTED', workerArrivedAt: new Date() });
+      createdBookingIds.push(booking.id);
+      const [a, b] = await Promise.all([notHere(booking.id), notHere(booking.id)]);
+      expect([a.status, b.status]).toEqual([200, 200]);
+      expect(a.body.data.clientNotHereAt).toBe(b.body.data.clientNotHereAt);
       expect(await prisma.notification.count({ where: { userId: clientId, relatedId: booking.id, type: 'BOOKING_CLIENT_NOT_HERE' } })).toBe(1);
     });
 
@@ -363,8 +388,8 @@ describe('Booking gaps — notifications and detail fields', () => {
     expect(res.body.data).toMatchObject({ status: 'DISPUTED', disputeId: open.id });
     expect(await prisma.dispute.count({ where: { bookingId: booking.id } })).toBe(1);
     const dispute = await prisma.dispute.findUniqueOrThrow({ where: { id: open.id } });
-    expect(dispute.reason).toContain('Worker stopped the job');
-    expect(dispute.reason).toContain('Invoice reported: The parts charge is wrong');
+    expect(dispute.reason).toBe('Worker stopped the job\n[client] Invoice reported: The parts charge is wrong');
+    expect(dispute.raisedById).toBe(clientId);
     expect(dispute.evidenceUrls).toHaveLength(1);
     expect((await prisma.booking.findUniqueOrThrow({ where: { id: booking.id } })).status).toBe('DISPUTED');
   });
@@ -492,6 +517,38 @@ describe('Booking gaps — notifications and detail fields', () => {
       const clientAfter = await prisma.clientProfile.findUniqueOrThrow({ where: { userId: clientId } });
       expect(clientAfter.paymentHoldAt).toBeNull();
       expect(clientAfter.outstandingBalance).toBe(clientBefore.outstandingBalance);
+    });
+
+    it('NEED_TO_CANCEL that loses a race to a status change is a status conflict, not "already asked"', async () => {
+      const booking = await seed('ACCEPTED');
+      staleRead(booking.id, { status: 'IN_PROGRESS', workerStartedAt: new Date() });
+      const res = await problem(booking.id, { reason: 'NEED_TO_CANCEL' });
+      expect(res.status).toBe(409);
+      expect(res.body.message).toBe('This booking was just updated. Refresh and try again.');
+      expect((await prisma.booking.findUniqueOrThrow({ where: { id: booking.id } })).cancelRequestedAt).toBeNull();
+    });
+
+    it('opens no dispute when the booking moved past the reported status', async () => {
+      const booking = await seed('IN_PROGRESS');
+      staleRead(booking.id, { status: 'PENDING_COMPLETION', workerCompletedAt: new Date() });
+      const res = await problem(booking.id, { reason: 'WORKER_STOPPED' });
+      expect(res.status).toBe(409);
+      expect(res.body.message).toBe('This booking was just updated. Refresh and try again.');
+      expect(await prisma.dispute.count({ where: { bookingId: booking.id } })).toBe(0);
+    });
+
+    it('a declined cancel request joins a dispute that is already open', async () => {
+      const booking = await seed('IN_PROGRESS');
+      expect((await problem(booking.id, { reason: 'NEED_TO_CANCEL', note: 'Moving house' })).status).toBe(200);
+      const open = await prisma.dispute.create({
+        data: { bookingId: booking.id, raisedById: clientId, reason: 'Worker stopped the job', status: 'OPEN' },
+      });
+
+      expect((await respond(booking.id, false)).status).toBe(200);
+      expect(await prisma.dispute.count({ where: { bookingId: booking.id } })).toBe(1);
+      const dispute = await prisma.dispute.findUniqueOrThrow({ where: { id: open.id } });
+      expect(dispute.reason).toBe('Worker stopped the job\n[client] Client asked to cancel (Moving house); worker declined');
+      expect((await prisma.booking.findUniqueOrThrow({ where: { id: booking.id } })).cancelRequestEscalatedAt).not.toBeNull();
     });
 
     it('a failed escalation leaves the request unescalated so it can be retried', async () => {

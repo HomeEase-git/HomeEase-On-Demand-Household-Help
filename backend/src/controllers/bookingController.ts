@@ -1814,9 +1814,22 @@ export const reportClientNotHere = async (req: AuthRequest, res: Response) => {
 
     const { noShowGraceMinutes } = await getAppSettings();
     let clientNotHereAt = booking.clientNotHereAt;
+    let alertNow = false;
     if (!clientNotHereAt) {
-      clientNotHereAt = new Date();
-      await updateBookingIfStatus(prisma, id, 'ACCEPTED', { clientNotHereAt }, { clientNotHereAt: null });
+      const now = new Date();
+      try {
+        await updateBookingIfStatus(prisma, id, 'ACCEPTED', { clientNotHereAt: now }, { clientNotHereAt: null });
+        clientNotHereAt = now;
+        alertNow = true;
+      } catch (error) {
+        if (!isBookingStatusConflict(error)) throw error;
+        // A parallel tap won: answer like a repeat call.
+        const fresh = await prisma.booking.findUnique({ where: { id }, select: { status: true, clientNotHereAt: true } });
+        if (fresh?.status !== 'ACCEPTED' || !fresh.clientNotHereAt) return bookingConflict(res);
+        clientNotHereAt = fresh.clientNotHereAt;
+      }
+    }
+    if (alertNow) {
       const message = "Your worker checked in and can't reach you. Please come to the door or message them.";
       await notifyUser({
         userId: booking.clientId,
@@ -2830,7 +2843,11 @@ export const reportCashNotPaid = async (req: AuthRequest, res: Response) => {
     const raisedById = req.user.userId;
     const dispute = await prisma.$transaction(async (tx) => {
       await updateBookingIfStatus(tx, id, 'PENDING_COMPLETION', { status: 'DISPUTED' });
-      return openOrJoinDisputeTx(tx, { bookingId: id, raisedById, reason: 'Worker reports the client has not paid the cash invoice' });
+      return openOrJoinDisputeTx(
+        tx,
+        { bookingId: id, raisedById, reason: 'Worker reports the client has not paid the cash invoice' },
+        { allowedStatuses: ['DISPUTED'], raisedByRole: 'WORKER' }
+      );
     });
 
     await notifyUser({
@@ -2989,7 +3006,11 @@ export const reportInvoice = async (req: AuthRequest, res: Response) => {
     const raisedById = req.user.userId;
     const dispute = await prisma.$transaction(async (tx) => {
       await updateBookingIfStatus(tx, id, booking.status, { status: 'DISPUTED', disputeReason: reason });
-      return openOrJoinDisputeTx(tx, { bookingId: id, raisedById, reason: `Invoice reported: ${reason}`, evidenceUrls: ownedEvidence });
+      return openOrJoinDisputeTx(
+        tx,
+        { bookingId: id, raisedById, reason: `Invoice reported: ${reason}`, evidenceUrls: ownedEvidence },
+        { allowedStatuses: ['DISPUTED'], raisedByRole: 'CLIENT' }
+      );
     });
 
     await voidUnpaidPayment(id, 'Invoice reported by the client').catch((error) => {
@@ -3133,8 +3154,9 @@ export const reportBookingProblem = async (req: AuthRequest, res: Response) => {
           { cancelRequestedAt: null }
         );
       } catch (error) {
-        if (isBookingStatusConflict(error)) return alreadyAsked();
-        throw error;
+        if (!isBookingStatusConflict(error)) throw error;
+        const fresh = await prisma.booking.findUnique({ where: { id }, select: { status: true, cancelRequestedAt: true } });
+        return fresh?.status === booking.status && fresh.cancelRequestedAt ? alreadyAsked() : bookingConflict(res);
       }
       await notifyUser({
         userId: workerId,
@@ -3151,6 +3173,7 @@ export const reportBookingProblem = async (req: AuthRequest, res: Response) => {
       bookingId: id,
       raisedById: req.user.userId,
       reason: note ? `${label}: ${note}` : label,
+      allowedStatuses: [booking.status],
     });
     if (!dispute) {
       return res.status(409).json(errorResponse(409, 'You already reported this. HomeEase is on it.'));

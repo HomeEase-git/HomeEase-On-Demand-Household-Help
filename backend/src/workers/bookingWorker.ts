@@ -549,7 +549,8 @@ export async function nudgeStuckBookings(now = new Date()): Promise<void> {
   const remind = (userId: string, bookingId: string, title: string, message: string) =>
     notifyUser({ userId, type: 'BOOKING_REMINDER', title, message, relatedId: bookingId });
   // Stamps the column only if still unset and the status unchanged, so two
-  // overlapping runs can't both send.
+  // overlapping runs can't both send. Claim-then-send: notifyUser never throws,
+  // so a nudge is lost only if the process dies between the claim and the send.
   const claim = async (b: { id: string; status: Booking['status'] }, column: 'startReminderSentAt' | 'startNudgeSentAt' | 'progressReminderSentAt' | 'progressEscalatedAt') =>
     (await prisma.booking.updateMany({ where: { id: b.id, status: b.status, [column]: null }, data: { [column]: now } })).count === 1;
 
