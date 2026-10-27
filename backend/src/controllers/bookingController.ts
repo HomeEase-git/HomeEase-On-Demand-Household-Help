@@ -3173,7 +3173,7 @@ export const reportBookingProblem = async (req: AuthRequest, res: Response) => {
       bookingId: id,
       raisedById: req.user.userId,
       reason: note ? `${label}: ${note}` : label,
-      allowedStatuses: [booking.status],
+      allowedStatuses: ['ACCEPTED', 'IN_PROGRESS'],
     });
     if (!dispute) {
       return res.status(409).json(errorResponse(409, 'You already reported this. HomeEase is on it.'));
@@ -3384,14 +3384,16 @@ export const cancelBooking = async (req: AuthRequest, res: Response) => {
         : null;
 
     const penaltyAmount = cancelFault === 'WORKER' ? settings.noShowPenaltyAmount : null;
-    // A zero fee (admin setting) means nothing to charge, approve or review:
-    // no amount, NOT_APPLICABLE, no fee wording, no admin review.
+    // A zero fee (admin setting) means no amount and no fee wording. The
+    // no-proof no-show path then has nothing to approve (NOT_APPLICABLE), but a
+    // proof claim still goes to an admin: it's the only check on a worker
+    // blaming the client to dodge the no-show penalty.
     const compensationAmount =
       cancelFault === 'CLIENT' && settings.clientFaultCompensationAmount > 0 ? settings.clientFaultCompensationAmount : null;
     // The status the caller ends up with. An approved fee is still written as
     // PENDING_REVIEW: applyClientFaultCompensationTx claims it from there.
     const compensationStatus =
-      cancelFault !== 'CLIENT' || !compensationAmount
+      cancelFault !== 'CLIENT' || (clientNoShowConfirmed && !compensationAmount)
         ? 'NOT_APPLICABLE'
         : clientNoShowConfirmed
           ? 'APPROVED'
@@ -3532,7 +3534,7 @@ export const cancelBooking = async (req: AuthRequest, res: Response) => {
       });
     }
 
-    if (cancelFault === 'CLIENT' && !clientNoShowConfirmed && compensationAmount) {
+    if (cancelFault === 'CLIENT' && !clientNoShowConfirmed) {
       const admins = await prisma.user.findMany({ where: { role: 'ADMIN', isDeleted: false }, select: { id: true } });
       await Promise.all(
         admins.map((admin) =>
@@ -3540,7 +3542,7 @@ export const cancelBooking = async (req: AuthRequest, res: Response) => {
             userId: admin.id,
             type: 'CANCELLATION_COMPENSATION',
             title: 'Cancellation Needs Review',
-            message: `A worker cancelled booking ${formatDisplayId(id)} on site, blaming the client. Review the proof to decide the compensation.`,
+            message: `A worker cancelled booking ${formatDisplayId(id)} on site, blaming the client. Review the proof to decide ${compensationAmount ? 'the compensation' : 'whose fault it was'}.`,
             relatedId: id,
           })
         )
@@ -3554,7 +3556,7 @@ export const cancelBooking = async (req: AuthRequest, res: Response) => {
           ? compensationAmount
             ? 'Booking cancelled — the cancellation fee was approved'
             : 'Booking cancelled successfully'
-          : cancelFault === 'CLIENT' && compensationAmount
+          : cancelFault === 'CLIENT'
           ? 'Booking cancelled — HomeEase will review your proof'
           : penaltyAmount
             ? `Booking cancelled — a ₱${penaltyAmount.toFixed(2)} penalty applies`

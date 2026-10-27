@@ -21,6 +21,8 @@ interface AuthRequest extends Request {
 //             hold until it's settled, same as an unpaid booking) and the
 //             worker is compensated (against their dues first, the rest on
 //             their next payout — see debtLedgerService.creditCompensationTx).
+//             With no fee on the claim (the fee was 0 when it was filed) the
+//             claim is only marked APPROVED: no hold, no ledger, no credit.
 //   REJECT  — the proof doesn't hold up, so it's treated as the worker's
 //             fault: the no-show penalty applies.
 
@@ -119,11 +121,21 @@ export const reviewCancellation = async (req: AuthRequest, res: Response) => {
     }
 
     const settings = await getAppSettings();
-    const amount = cancellation.compensationAmount ?? settings.clientFaultCompensationAmount;
+    // The fee in force when the claim was filed; a later change doesn't apply.
+    const amount = cancellation.compensationAmount ?? 0;
     const penalty = settings.noShowPenaltyAmount;
     const displayId = formatDisplayId(bookingId);
 
     await prisma.$transaction(async (tx) => {
+      if (decision === 'APPROVE' && amount <= 0) {
+        const claimed = await claimCompensationReviewTx(tx, bookingId, {
+          compensationStatus: 'APPROVED',
+          reviewedById: adminId ?? null,
+          reviewNote: note.trim(),
+        });
+        if (!claimed) throw new Error('ALREADY_REVIEWED');
+        return;
+      }
       if (decision === 'APPROVE') {
         const claimed = await applyClientFaultCompensationTx(tx, {
           bookingId,
@@ -157,7 +169,22 @@ export const reviewCancellation = async (req: AuthRequest, res: Response) => {
       }
     });
 
-    if (decision === 'APPROVE') {
+    if (decision === 'APPROVE' && amount <= 0) {
+      await notifyUser({
+        userId: clientId,
+        type: 'BOOKING_CANCELLED',
+        title: 'Cancellation reviewed',
+        message: `We reviewed the cancellation of booking ${displayId} and found it was caused on your side. No fee applies. Note: ${note.trim()}`,
+        relatedId: bookingId,
+      });
+      await notifyUser({
+        userId: workerId,
+        type: 'CANCELLATION_COMPENSATION',
+        title: 'Cancellation proof accepted',
+        message: `Your proof for booking ${displayId} was accepted. No penalty applies. Note: ${note.trim()}`,
+        relatedId: bookingId,
+      });
+    } else if (decision === 'APPROVE') {
       await notifyUser({
         userId: clientId,
         type: 'CANCELLATION_COMPENSATION',
@@ -192,7 +219,10 @@ export const reviewCancellation = async (req: AuthRequest, res: Response) => {
       metadata: { bookingId, decision, amount: decision === 'APPROVE' ? amount : penalty },
     });
 
-    return res.json({ success: true, message: decision === 'APPROVE' ? 'Compensation approved' : 'Claim rejected — penalty applied' });
+    return res.json({
+      success: true,
+      message: decision === 'REJECT' ? 'Claim rejected — penalty applied' : amount > 0 ? 'Compensation approved' : 'Claim approved',
+    });
   } catch (error: any) {
     if (error?.message === 'ALREADY_REVIEWED') {
       return res.status(409).json(errorResponse(409, 'This cancellation was already reviewed'));

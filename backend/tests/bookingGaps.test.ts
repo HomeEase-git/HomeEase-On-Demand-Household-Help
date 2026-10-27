@@ -67,9 +67,16 @@ describe('Booking gaps — notifications and detail fields', () => {
    * The controller's next booking read returns the row as it is now, then the
    * row is changed underneath it: the request acts on a stale status.
    */
+  let staleSpy: jest.SpyInstance | null = null;
+  afterEach(() => {
+    staleSpy?.mockRestore();
+    staleSpy = null;
+  });
   function staleRead(bookingId: string, change: Prisma.BookingUncheckedUpdateInput) {
     const real = prisma.booking.findUnique.bind(prisma.booking);
-    const spy = jest.spyOn(prisma.booking, 'findUnique').mockImplementation((async (args: Prisma.BookingFindUniqueArgs) => {
+    const spy = jest.spyOn(prisma.booking, 'findUnique');
+    staleSpy = spy; // restored in afterEach if the request never reads the booking
+    spy.mockImplementation((async (args: Prisma.BookingFindUniqueArgs) => {
       const row = await real(args);
       if (args.where.id === bookingId) {
         spy.mockRestore();
@@ -361,26 +368,79 @@ describe('Booking gaps — notifications and detail fields', () => {
       }
     }
 
-    it('with a zero fee, a proof cancel blaming the client is a plain cancel with no review', async () => {
+    /** A proof cancel blaming the client, filed while the fee is 0. */
+    async function zeroFeeProofCancel() {
+      const booking = await createTestBooking({ clientId, workerId, status: 'ACCEPTED', workerArrivedAt: new Date() });
+      createdBookingIds.push(booking.id);
+      await prisma.workerProfile.update({ where: { userId: workerId }, data: { activeJobCount: { increment: 1 } } });
+      let res!: request.Response;
       await withZeroFee(async () => {
-        const booking = await createTestBooking({ clientId, workerId, status: 'ACCEPTED', workerArrivedAt: new Date() });
-        createdBookingIds.push(booking.id);
-        await prisma.workerProfile.update({ where: { userId: workerId }, data: { activeJobCount: { increment: 1 } } });
-        
-        const res = await request(app)
+        res = await request(app)
           .patch(`/api/bookings/${booking.id}/cancel`)
           .set('Authorization', `Bearer ${workerToken}`)
           .send({ fault: 'CLIENT', reason: 'Gate locked and nobody answered', proofUrls: [photoUrl(workerId, 'locked-gate')] });
-        expect(res.status).toBe(200);
-        expect(res.body.data.compensationStatus).toBe('NOT_APPLICABLE');
-        expect(res.body.message).toBe('Booking cancelled successfully');
-        const cancellation = await prisma.cancellation.findFirstOrThrow({ where: { bookingId: booking.id } });
-        expect(cancellation).toMatchObject({ compensationStatus: 'NOT_APPLICABLE', compensationAmount: null });
-        expect(cancellation.proofUrls).toHaveLength(1);
-        expect(await prisma.notification.count({ where: { relatedId: booking.id, type: 'CANCELLATION_COMPENSATION' } })).toBe(0);
-        const note = await prisma.notification.findFirstOrThrow({ where: { userId: clientId, relatedId: booking.id, type: 'BOOKING_CANCELLED' } });
-        expect(note.message).not.toMatch(/fee|₱/);
       });
+      return { booking, res };
+    }
+    const review = (bookingId: string, decision: 'APPROVE' | 'REJECT') =>
+      request(app)
+        .patch(`/api/admin/cancellations/${bookingId}/review`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ decision, note: 'Checked the photos against the booking' });
+
+    it('with a zero fee, a proof cancel blaming the client still goes to review, with no fee wording', async () => {
+      const { booking, res } = await zeroFeeProofCancel();
+      expect(res.status).toBe(200);
+      expect(res.body.data.compensationStatus).toBe('PENDING_REVIEW');
+      expect(res.body.message).toBe('Booking cancelled — HomeEase will review your proof');
+      const cancellation = await prisma.cancellation.findFirstOrThrow({ where: { bookingId: booking.id } });
+      expect(cancellation).toMatchObject({ compensationStatus: 'PENDING_REVIEW', compensationAmount: null });
+      expect(cancellation.proofUrls).toHaveLength(1);
+      const alert = await prisma.notification.findFirstOrThrow({
+        where: { userId: createdUserIds[2], relatedId: booking.id, type: 'CANCELLATION_COMPENSATION', title: 'Cancellation Needs Review' },
+      });
+      expect(alert.message).not.toMatch(/compensation|fee/i);
+      const note = await prisma.notification.findFirstOrThrow({ where: { userId: clientId, relatedId: booking.id, type: 'BOOKING_CANCELLED' } });
+      expect(note.message).not.toMatch(/fee|₱/);
+    });
+
+    it('approving a no-fee claim only marks it approved: no hold, credit or ledger post', async () => {
+      const { booking } = await zeroFeeProofCancel();
+      const clientBefore = await prisma.clientProfile.findUniqueOrThrow({ where: { userId: clientId } });
+      const workerBefore = await prisma.workerProfile.findUniqueOrThrow({ where: { userId: workerId } });
+
+      // The fee is back to its real value now; the old claim must not pick it up.
+      const res = await review(booking.id, 'APPROVE');
+      expect(res.status).toBe(200);
+      expect(res.body.message).toBe('Claim approved');
+      expect((await prisma.cancellation.findFirstOrThrow({ where: { bookingId: booking.id } })).compensationStatus).toBe('APPROVED');
+      const clientAfter = await prisma.clientProfile.findUniqueOrThrow({ where: { userId: clientId } });
+      expect(clientAfter).toMatchObject({ paymentHoldAt: clientBefore.paymentHoldAt, outstandingBalance: clientBefore.outstandingBalance });
+      const workerAfter = await prisma.workerProfile.findUniqueOrThrow({ where: { userId: workerId } });
+      expect(workerAfter).toMatchObject({ compensationCredit: workerBefore.compensationCredit, commissionOwed: workerBefore.commissionOwed });
+      expect(await prisma.ledgerTransaction.count({ where: { bookingId: booking.id } })).toBe(0);
+      const told = await prisma.notification.findMany({ where: { relatedId: booking.id, userId: { in: [clientId, workerId] }, title: { in: ['Cancellation reviewed', 'Cancellation proof accepted'] } } });
+      expect(told).toHaveLength(2);
+      for (const n of told) expect(n.message).not.toMatch(/₱/);
+    });
+
+    it('rejecting a no-fee claim still penalizes the worker', async () => {
+      const { noShowPenaltyAmount } = await getAppSettings();
+      const { booking } = await zeroFeeProofCancel();
+      const before = await prisma.workerProfile.findUniqueOrThrow({ where: { userId: workerId } });
+      try {
+        const res = await review(booking.id, 'REJECT');
+        expect(res.status).toBe(200);
+        const cancellation = await prisma.cancellation.findFirstOrThrow({ where: { bookingId: booking.id } });
+        expect(cancellation).toMatchObject({ compensationStatus: 'REJECTED', fault: 'WORKER', penalizedWorkerId: workerId });
+        const after = await prisma.workerProfile.findUniqueOrThrow({ where: { userId: workerId } });
+        expect(after.commissionOwed - before.commissionOwed).toBeCloseTo(noShowPenaltyAmount);
+      } finally {
+        await prisma.workerProfile.update({
+          where: { userId: workerId },
+          data: { commissionOwed: before.commissionOwed, debtHoldAt: before.debtHoldAt },
+        });
+      }
     });
 
     it('with a zero fee, cancels with no fee, no hold and no review', async () => {
