@@ -30,11 +30,12 @@ export const ProblemReportSheet: React.FC<Props> = ({
   const [reason, setReason] = useState<ProblemReason | null>(null);
   const [note, setNote] = useState("");
 
-  // Reopening starts clean (reset during render, not in an effect).
+  // Reopening starts clean: reset on the open transition, so nothing changes
+  // while the sheet fades out (during render, not in an effect).
   const [wasVisible, setWasVisible] = useState(visible);
   if (wasVisible !== visible) {
     setWasVisible(visible);
-    if (!visible) {
+    if (visible) {
       setReason(null);
       setNote("");
     }
