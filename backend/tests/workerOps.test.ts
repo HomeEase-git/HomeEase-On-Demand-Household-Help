@@ -202,7 +202,7 @@ describe('worker operations overhaul', () => {
       const stored = await prisma.booking.findUniqueOrThrow({ where: { id: tampered.body.data.id } });
       expect(stored.estimatedPrice).toBe(honest.body.data.estimatedPrice);
       expect(stored.finalPrice).toBeNull();
-      expect(stored.addOnsSnapshot).toEqual([{ name: 'Free discount', price: 0 }]);
+      expect(stored.addOnsSnapshot).toEqual([{ kind: 'PREFERENCE', name: 'Free discount', price: 0 }]);
 
       const negativeTip = await request(app)
         .post('/api/bookings')
