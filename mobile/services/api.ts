@@ -1819,7 +1819,6 @@ export async function completeBooking(bookingId: string, completionPhotoUrl: str
   }
 }
 
-/** Worker confirms the client paid a cash invoice; the booking is done. */
 export async function respondToCancelRequest(bookingId: string, accept: boolean) {
   try {
     return await api.patch(`/bookings/${bookingId}/cancel-request/respond`, { accept });
@@ -1847,6 +1846,7 @@ export async function reportCashNotPaid(bookingId: string) {
   }
 }
 
+/** Worker confirms the client paid a cash invoice; the booking is done. */
 export async function markCashReceived(bookingId: string) {
   try {
     return await api.patch(`/bookings/${bookingId}/cash-received`);

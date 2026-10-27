@@ -260,7 +260,6 @@ export default function JobDetailScreen() {
   // so it's visible before the worker even accepts the job.
   const tip = job.payment?.tip ?? job.tip ?? 0;
   const hasArrived = !!(job.workerArrivedAt || job.timeline?.workerArrivedAt);
-  const canCancelJob = isAccepted || isInProgress;
   const hasOpenRescheduleRequest = !!job.rescheduleRequestedAt && !job.rescheduleRequestRespondedAt;
   // The client asked (or an older request from before either side could ask).
   const hasPendingRescheduleRequest = hasOpenRescheduleRequest && job.rescheduleRequestedBy !== "WORKER";
@@ -280,6 +279,8 @@ export default function JobDetailScreen() {
   const hasCancelRequest = !!job.cancelRequestedAt && !job.cancelRequestEscalatedAt;
   const waitingForClient = isAccepted && hasArrived && !!job.clientNotHereAt && !!job.clientNoShowCancelAt;
   const noShowCancelOpen = waitingForClient && now >= new Date(job.clientNoShowCancelAt!).getTime();
+  // Hidden while a better path exists: the client's cancel request, or the no-show cancel.
+  const canCancelJob = (isAccepted || isInProgress) && !hasCancelRequest && !noShowCancelOpen;
   const startTime = bookingStartTime(job);
   const startsAt = startTime ? startInstant(job.scheduledDate.slice(0, 10), startTime) : null;
   const startPassed = !!startsAt && now >= startsAt.getTime();
@@ -1015,7 +1016,7 @@ export default function JobDetailScreen() {
                 Tap once the client has paid you. If you don&apos;t, it&apos;s recorded as paid after 24 hours.
               </Text>
               <Text
-                className="text-error text-xs font-semibold text-center py-1"
+                className={`text-error text-xs font-semibold text-center py-1 ${busyAction ? "opacity-40" : ""}`}
                 onPress={busyAction ? undefined : handleCashNotPaid}
               >
                 Client didn&apos;t pay
