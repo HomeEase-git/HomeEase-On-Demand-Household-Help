@@ -33,10 +33,14 @@ export function clientNotificationRoute(type: string, relatedId: string | null |
   return `/(client)/inbox/notification/${notificationId}`;
 }
 
-// Worker push taps: same rule, to the job screen.
+// Worker push taps: new requests open Accept/Decline, finished bookings open
+// the record, everything else the live job screen (which also handles reschedules).
+const WORKER_RECORD_TYPES = ["BOOKING_COMPLETED", "BOOKING_AUTO_COMPLETED", "BOOKING_CANCELLED", "PAYMENT_RECEIVED", "PAYMENT_CAPTURED"];
 export function workerNotificationRoute(type: string, relatedId: string | null | undefined, notificationId: string): string {
   const category = notificationCategory(type);
   if (relatedId && (category === "booking" || category === "payment")) {
+    if (type === "BOOKING_REQUEST") return `/(worker)/requests/${relatedId}`;
+    if (WORKER_RECORD_TYPES.includes(type)) return `/(worker)/records/${relatedId}`;
     return `/(worker)/records/job/${relatedId}`;
   }
   return `/(worker)/inbox/notification/${notificationId}`;

@@ -25,6 +25,17 @@ describe("workerNotificationRoute", () => {
       expect(workerNotificationRoute(type, "b1", "n1")).toBe("/(worker)/records/job/b1");
     }
   });
+  it("opens Accept/Decline for a new request", () => {
+    expect(workerNotificationRoute("BOOKING_REQUEST", "b1", "n1")).toBe("/(worker)/requests/b1");
+  });
+  it("opens the job for reschedule requests", () => {
+    expect(workerNotificationRoute("BOOKING_RESCHEDULE_REQUESTED", "b1", "n1")).toBe("/(worker)/records/job/b1");
+  });
+  it("opens the record for finished bookings", () => {
+    for (const type of ["BOOKING_COMPLETED", "BOOKING_AUTO_COMPLETED", "BOOKING_CANCELLED", "PAYMENT_RECEIVED", "PAYMENT_CAPTURED"]) {
+      expect(workerNotificationRoute(type, "b1", "n1")).toBe("/(worker)/records/b1");
+    }
+  });
   it("falls back to the notification screen without a booking", () => {
     expect(workerNotificationRoute("BOOKING_REMINDER", undefined, "n1")).toBe("/(worker)/inbox/notification/n1");
     expect(workerNotificationRoute("SYSTEM_ANNOUNCEMENT", "x", "n1")).toBe("/(worker)/inbox/notification/n1");
