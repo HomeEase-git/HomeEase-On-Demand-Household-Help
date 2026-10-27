@@ -63,8 +63,12 @@ describe('encryption key rotation (unit)', () => {
 describe('encryption key rotation (database)', () => {
   const createdUserIds: string[] = [];
 
-  const runScript = (extraArgs: string[] = []) =>
-    execFileSync(process.execPath, [require.resolve('tsx/cli'), path.join(__dirname, '../scripts/rotate-encryption-keys.ts'), ...extraArgs], {
+  // Scoped to this file's users: the dev database is shared and holds other
+  // people's rows under the real key, which the script must not touch.
+  const runScript = (extraArgs: string[] = []) => {
+    const script = path.join(__dirname, '../scripts/rotate-encryption-keys.ts');
+    const users = createdUserIds.flatMap((id) => ['--user', id]);
+    return execFileSync(process.execPath, [require.resolve('tsx/cli'), script, ...users, ...extraArgs], {
       cwd: path.join(__dirname, '..'),
       env: {
         ...process.env,
@@ -76,6 +80,7 @@ describe('encryption key rotation (database)', () => {
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'pipe'],
     });
+  };
 
   /** Runs the script expecting failure; returns its combined output. */
   const runScriptExpectingFailure = (): string => {

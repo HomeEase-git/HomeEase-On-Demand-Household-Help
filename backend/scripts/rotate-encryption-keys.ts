@@ -12,6 +12,8 @@
 //     npx tsx scripts/rotate-encryption-keys.ts --dry    # report only
 //   ...same...  npx tsx scripts/rotate-encryption-keys.ts  # apply
 //   (MFA_ENCRYPTION_KEY / MFA_ENCRYPTION_KEY_PREVIOUS the same way.)
+//   add --user <id>  (repeatable) to touch only those users' rows, e.g. to
+//     re-run one account, or to run against a shared dev database.
 //   add --neon-websocket  to connect through Neon's WebSocket proxy (port 443)
 //     when the network blocks raw Postgres connections to Neon; needs
 //     `npm i --no-save @prisma/adapter-neon @neondatabase/serverless ws`.
@@ -31,6 +33,13 @@ import { decryptField, encryptField, isEncryptedField, isUnderPreviousDataKey } 
 
 const DRY_RUN = process.argv.includes('--dry');
 const NEON_WEBSOCKET = process.argv.includes('--neon-websocket');
+// --user <id>, repeatable: only these users' rows (all rows when absent).
+const USER_IDS = process.argv.flatMap((arg, i) => (arg === '--user' && process.argv[i + 1] ? [process.argv[i + 1]!] : []));
+if (process.argv.includes('--user') && USER_IDS.length === 0) {
+  console.error('--user needs a user id — refusing to run against every row.');
+  process.exit(1);
+}
+const onlyUsers =<K extends string>(key: K) => (USER_IDS.length > 0 ? ({ [key]: { in: USER_IDS } } as Record<K, { in: string[] }>) : {});
 
 const rotatingData = !!process.env.DATA_ENCRYPTION_KEY_PREVIOUS?.trim();
 const rotatingMfa = !!process.env.MFA_ENCRYPTION_KEY_PREVIOUS?.trim();
@@ -85,7 +94,7 @@ function reencryptField(stored: string | null, label: string): string | undefine
 
 async function planDataKey() {
   const workerProfiles = await prisma.workerProfile.findMany({
-    where: { payoutAccountNumber: { startsWith: 'enc:' } },
+    where: { payoutAccountNumber: { startsWith: 'enc:' }, ...onlyUsers('userId') },
     select: { id: true, payoutAccountNumber: true },
   });
   for (const profile of workerProfiles) {
@@ -102,7 +111,7 @@ async function planDataKey() {
   }
 
   const payouts = await prisma.payout.findMany({
-    where: { accountNumber: { startsWith: 'enc:' } },
+    where: { accountNumber: { startsWith: 'enc:' }, ...onlyUsers('workerId') },
     select: { id: true, accountNumber: true },
   });
   for (const payout of payouts) {
@@ -114,7 +123,7 @@ async function planDataKey() {
 }
 
 async function planMfaKey() {
-  const rows = await prisma.mfaSecret.findMany({ select: { id: true, secretEncrypted: true } });
+  const rows = await prisma.mfaSecret.findMany({ where: onlyUsers('userId'), select: { id: true, secretEncrypted: true } });
   for (const row of rows) {
     let underPrevious: boolean;
     try {
