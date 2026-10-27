@@ -44,4 +44,13 @@ describe("ProblemReportSheet", () => {
     await rerender(<ProblemReportSheet {...base} inProgress />);
     expect(queryByText("Worker stopped working")).not.toBeNull();
   });
+
+  it("starts clean when reopened", async () => {
+    const { getByText, rerender } = await render(<ProblemReportSheet {...base} />);
+    await fireEvent.press(getByText("I need to cancel"));
+    await rerender(<ProblemReportSheet {...base} visible={false} />);
+    await rerender(<ProblemReportSheet {...base} />);
+    await fireEvent.press(getByText("Send"));
+    expect(base.onSend).not.toHaveBeenCalled();
+  });
 });

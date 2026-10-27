@@ -30,6 +30,16 @@ export const ProblemReportSheet: React.FC<Props> = ({
   const [reason, setReason] = useState<ProblemReason | null>(null);
   const [note, setNote] = useState("");
 
+  // Reopening starts clean (reset during render, not in an effect).
+  const [wasVisible, setWasVisible] = useState(visible);
+  if (wasVisible !== visible) {
+    setWasVisible(visible);
+    if (!visible) {
+      setReason(null);
+      setNote("");
+    }
+  }
+
   const chips: { value: ProblemReason; label: string }[] = [
     ...(workerArrived ? [] : [{ value: "WORKER_NOT_HERE" as const, label: "Worker isn't here" }]),
     ...(inProgress ? [{ value: "WORKER_STOPPED" as const, label: "Worker stopped working" }] : []),

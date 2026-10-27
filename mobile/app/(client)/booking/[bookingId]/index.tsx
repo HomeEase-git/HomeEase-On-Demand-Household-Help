@@ -734,7 +734,7 @@ export default function BookingDetailScreen() {
           </View>
         )}
 
-        {rawDetail?.hasOpenDispute && (
+        {rawDetail?.hasOpenDispute && booking.status !== "Disputed" && (
           <View className="bg-warning/10 border border-warning/30 rounded-2xl p-4 mb-4 flex-row items-center">
             <Ionicons name="alert-circle" size={24} color={colors.warning} />
             <View className="ml-3 flex-1">
