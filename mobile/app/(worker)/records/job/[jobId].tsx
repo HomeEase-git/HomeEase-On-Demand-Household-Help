@@ -73,6 +73,12 @@ type BookingDetail = {
   // The bill the worker sends at the end of the job (see backend completeBooking).
   invoice?: ApiInvoice;
   paymentMethodType?: "CASH" | "GCASH" | "MAYA" | null;
+  // Client no-show and cancel-request state (see backend clientNotHere / requestCancel).
+  clientNotHereAt?: string | null;
+  clientNoShowCancelAt?: string | null;
+  cancelRequestedAt?: string | null;
+  cancelRequestReason?: string | null;
+  cancelRequestEscalatedAt?: string | null;
   parentBooking?: { id: string; service: string } | null;
   payment?: {
     status: string;
@@ -117,6 +123,8 @@ export default function JobDetailScreen() {
   const [invoiceItems, setInvoiceItems] = useState<api.InvoiceItemPayload[]>([]);
   const [lineModalKind, setLineModalKind] = useState<api.InvoiceItemPayload["kind"] | null>(null);
   const [confirmingCash, setConfirmingCash] = useState(false);
+  // Which of the new one-tap controls is mid-request, to block double taps.
+  const [busyAction, setBusyAction] = useState<null | "agree" | "decline" | "notHere" | "noShowCancel" | "notPaid">(null);
   const [elapsedMs, setElapsedMs] = useState(0);
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
@@ -269,6 +277,9 @@ export default function JobDetailScreen() {
   // included), the lines added here, and the tip.
   const draftInvoiceTotal = amount + invoiceItems.reduce((sum, item) => sum + item.price, 0) + tip;
   const bookedPackages = (job.addOns ?? []).filter((a) => a.clientApprovedAt && a.price > 0 && a.kind !== "PART" && a.kind !== "EXTRA_WORK");
+  const hasCancelRequest = !!job.cancelRequestedAt && !job.cancelRequestEscalatedAt;
+  const waitingForClient = isAccepted && hasArrived && !!job.clientNotHereAt && !!job.clientNoShowCancelAt;
+  const noShowCancelOpen = waitingForClient && now >= new Date(job.clientNoShowCancelAt!).getTime();
   const startTime = bookingStartTime(job);
   const startsAt = startTime ? startInstant(job.scheduledDate.slice(0, 10), startTime) : null;
   const startPassed = !!startsAt && now >= startsAt.getTime();
@@ -505,6 +516,66 @@ export default function JobDetailScreen() {
     );
   };
 
+  const timeOf = (iso: string) =>
+    new Date(iso).toLocaleTimeString("en-PH", { hour: "numeric", minute: "2-digit" });
+
+  // Runs one action with a busy flag; errors show the server's reason.
+  const runAction = async (key: NonNullable<typeof busyAction>, fn: () => Promise<void>) => {
+    setBusyAction(key);
+    try {
+      await fn();
+    } catch (error: any) {
+      console.error(`Worker action ${key} error:`, error);
+      alertModal.error("Error", error?.message || "Something went wrong. Please try again.");
+    } finally {
+      setBusyAction(null);
+      load(true);
+    }
+  };
+
+  const handleCancelRequestAnswer = (accept: boolean) => {
+    const run = () =>
+      runAction(accept ? "agree" : "decline", async () => {
+        await api.respondToCancelRequest(job.id, accept);
+      });
+    if (!accept) return run();
+    alertModal.confirm("Cancel this job?", "No penalty for you or the client.", {
+      confirmText: "Cancel Job",
+      cancelText: "Keep Job",
+      destructive: true,
+      onConfirm: run,
+    });
+  };
+
+  const handleClientNotHere = () =>
+    runAction("notHere", async () => {
+      const { canCancelAt } = await api.reportClientNotHere(job.id);
+      alertModal.success("Client alerted", `We alerted your client. You can cancel at ${timeOf(canCancelAt)} if they don't come.`);
+    });
+
+  const handleNoShowCancel = () => {
+    alertModal.confirm("Cancel and charge the client the no-show fee?", undefined, {
+      confirmText: "Cancel Job",
+      cancelText: "Keep Waiting",
+      destructive: true,
+      onConfirm: () =>
+        runAction("noShowCancel", async () => {
+          await api.cancelBooking(job.id, "Client was not home", undefined, { fault: "CLIENT", proofUrls: [] });
+        }),
+    });
+  };
+
+  const handleCashNotPaid = () => {
+    alertModal.confirm("Tell HomeEase the client hasn't paid? An admin will follow up.", undefined, {
+      confirmText: "Tell HomeEase",
+      cancelText: "Not Yet",
+      onConfirm: () =>
+        runAction("notPaid", async () => {
+          await api.reportCashNotPaid(job.id);
+        }),
+    });
+  };
+
   const handleMessageClient = () => {
     router.push(`/(worker)/inbox/chat/${job.client.id}`);
   };
@@ -579,6 +650,35 @@ export default function JobDetailScreen() {
             </Text>
             <View className="mt-3">
               <OutlinedButton label="Withdraw Request" onPress={handleWithdrawMyReschedule} />
+            </View>
+          </View>
+        )}
+
+        {/* Client asked to cancel */}
+        {hasCancelRequest && (
+          <View className="bg-accent/10 border border-accent/30 rounded-2xl p-4 mb-3">
+            <Text className="font-bold text-sm text-text-primary">Your client wants to cancel</Text>
+            {!!job.cancelRequestReason && (
+              <Text className="text-text-secondary text-xs mt-1.5">{job.cancelRequestReason}</Text>
+            )}
+            <View className="flex-row gap-2 mt-3">
+              <View className="flex-1">
+                <PrimaryButton
+                  label="Agree"
+                  fullWidth
+                  disabled={busyAction != null}
+                  loading={busyAction === "agree"}
+                  onPress={() => handleCancelRequestAnswer(true)}
+                />
+              </View>
+              <View className="flex-1">
+                <OutlinedButton
+                  label="Decline"
+                  fullWidth
+                  disabled={busyAction != null}
+                  onPress={() => handleCancelRequestAnswer(false)}
+                />
+              </View>
             </View>
           </View>
         )}
@@ -748,6 +848,28 @@ export default function JobDetailScreen() {
               )}
             </View>
           )}
+          {isAccepted && hasArrived && !job.clientNotHereAt && (
+            <OutlinedButton
+              label="Client not here"
+              fullWidth
+              disabled={busyAction != null}
+              onPress={handleClientNotHere}
+            />
+          )}
+          {waitingForClient && !noShowCancelOpen && (
+            <Text className="text-text-secondary text-xs text-center">
+              Waiting for the client until {timeOf(job.clientNoShowCancelAt!)}
+            </Text>
+          )}
+          {noShowCancelOpen && (
+            <PrimaryButton
+              label="Cancel: client no-show"
+              fullWidth
+              disabled={busyAction != null}
+              loading={busyAction === "noShowCancel"}
+              onPress={handleNoShowCancel}
+            />
+          )}
           {canScheduleVisit && (
             <OutlinedButton
               label="Schedule Follow-up Visit"
@@ -891,6 +1013,12 @@ export default function JobDetailScreen() {
               />
               <Text className="text-text-muted text-xs text-center">
                 Tap once the client has paid you. If you don&apos;t, it&apos;s recorded as paid after 24 hours.
+              </Text>
+              <Text
+                className="text-error text-xs font-semibold text-center py-1"
+                onPress={busyAction ? undefined : handleCashNotPaid}
+              >
+                Client didn&apos;t pay
               </Text>
             </View>
           )}

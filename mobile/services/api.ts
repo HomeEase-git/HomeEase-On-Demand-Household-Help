@@ -1820,6 +1820,33 @@ export async function completeBooking(bookingId: string, completionPhotoUrl: str
 }
 
 /** Worker confirms the client paid a cash invoice; the booking is done. */
+export async function respondToCancelRequest(bookingId: string, accept: boolean) {
+  try {
+    return await api.patch(`/bookings/${bookingId}/cancel-request/respond`, { accept });
+  } catch (error) {
+    console.error('Respond to cancel request error:', error);
+    throw error;
+  }
+}
+
+export async function reportClientNotHere(bookingId: string): Promise<{ clientNotHereAt: string; canCancelAt: string }> {
+  try {
+    return await api.patch(`/bookings/${bookingId}/client-not-here`);
+  } catch (error) {
+    console.error('Client not here error:', error);
+    throw error;
+  }
+}
+
+export async function reportCashNotPaid(bookingId: string) {
+  try {
+    return await api.patch(`/bookings/${bookingId}/cash-not-paid`);
+  } catch (error) {
+    console.error('Cash not paid error:', error);
+    throw error;
+  }
+}
+
 export async function markCashReceived(bookingId: string) {
   try {
     return await api.patch(`/bookings/${bookingId}/cash-received`);
