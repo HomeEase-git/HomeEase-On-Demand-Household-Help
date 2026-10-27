@@ -484,13 +484,18 @@ export async function cancelWorkerNoShows(): Promise<void> {
  * Catches bookings that stall without anyone doing anything wrong on paper:
  * a client cancel request the worker never answered, a worker who checked in
  * but never tapped Start Job, and a job left IN_PROGRESS for days. Each step
- * nudges once (the *SentAt column is stamped right after the send).
+ * nudges at most once: the *SentAt column is claimed first (a conditional
+ * update), and only the run that wins the claim sends.
  */
 export async function nudgeStuckBookings(now = new Date()): Promise<void> {
   const MIN_MS = 60 * 1000;
   const due = (clock: Date, ms: number) => now.getTime() >= clock.getTime() + ms;
   const remind = (userId: string, bookingId: string, title: string, message: string) =>
     notifyUser({ userId, type: 'BOOKING_REMINDER', title, message, relatedId: bookingId });
+  // Stamps the column only if still unset and the status unchanged, so two
+  // overlapping runs can't both send.
+  const claim = async (b: { id: string; status: Booking['status'] }, column: 'startReminderSentAt' | 'startNudgeSentAt' | 'progressReminderSentAt' | 'progressEscalatedAt') =>
+    (await prisma.booking.updateMany({ where: { id: b.id, status: b.status, [column]: null }, data: { [column]: now } })).count === 1;
 
   // 1. Cancel requests nobody answered.
   const requests = await prisma.booking.findMany({
@@ -520,7 +525,8 @@ export async function nudgeStuckBookings(now = new Date()): Promise<void> {
   const unstarted = await prisma.booking.findMany({
     where: {
       status: 'ACCEPTED',
-      workerArrivedAt: { not: null },
+      // The clock is a max with workerArrivedAt, so nothing is due before this.
+      workerArrivedAt: { lte: new Date(now.getTime() - START_REMINDER_MINUTES * MIN_MS) },
       OR: [{ startReminderSentAt: null }, { startNudgeSentAt: null, clientNotHereAt: null }],
     },
   });
@@ -528,13 +534,11 @@ export async function nudgeStuckBookings(now = new Date()): Promise<void> {
     try {
       // An early check-in doesn't count until the booked start.
       const clock = new Date(Math.max(b.workerArrivedAt!.getTime(), bookingStartInstant(b).getTime()));
-      if (!b.startReminderSentAt && b.workerId && due(clock, START_REMINDER_MINUTES * MIN_MS)) {
+      if (!b.startReminderSentAt && b.workerId && due(clock, START_REMINDER_MINUTES * MIN_MS) && (await claim(b, 'startReminderSentAt'))) {
         await remind(b.workerId, b.id, 'Tap Start Job', "You checked in but haven't started. Add your before photos and tap Start Job.");
-        await prisma.booking.update({ where: { id: b.id }, data: { startReminderSentAt: now } });
       }
-      if (!b.startNudgeSentAt && !b.clientNotHereAt && due(clock, START_NUDGE_HOURS * HOUR_MS)) {
+      if (!b.startNudgeSentAt && !b.clientNotHereAt && due(clock, START_NUDGE_HOURS * HOUR_MS) && (await claim(b, 'startNudgeSentAt'))) {
         await remind(b.clientId, b.id, 'Is your job under way?', "Your worker checked in but hasn't started. If something's wrong, tap Report a problem.");
-        await prisma.booking.update({ where: { id: b.id }, data: { startNudgeSentAt: now } });
       }
     } catch (error) {
       console.error(`Failed to nudge unstarted booking ${b.id}:`, error);
@@ -545,7 +549,7 @@ export async function nudgeStuckBookings(now = new Date()): Promise<void> {
   const running = await prisma.booking.findMany({
     where: {
       status: 'IN_PROGRESS',
-      workerStartedAt: { not: null },
+      workerStartedAt: { lte: new Date(now.getTime() - PROGRESS_REMINDER_HOURS * HOUR_MS) },
       OR: [{ progressReminderSentAt: null }, { progressEscalatedAt: null }],
     },
     include: { visits: { select: { scheduledDate: true, scheduledTime: true, status: true } } },
@@ -557,17 +561,16 @@ export async function nudgeStuckBookings(now = new Date()): Promise<void> {
       const times = [b.workerStartedAt!, ...b.visits.filter((v) => v.status !== 'CANCELLED').map((v) => bookingStartInstant(v))];
       const clock = new Date(Math.max(...times.map((t) => t.getTime())));
       if (clock > now) continue;
-      if (!b.progressReminderSentAt && b.workerId && due(clock, PROGRESS_REMINDER_HOURS * HOUR_MS)) {
+      if (!b.progressReminderSentAt && b.workerId && due(clock, PROGRESS_REMINDER_HOURS * HOUR_MS) && (await claim(b, 'progressReminderSentAt'))) {
         await remind(b.workerId, b.id, 'Finish or schedule a follow-up', 'This job is still in progress. Mark it complete, or schedule a follow-up visit.');
-        await prisma.booking.update({ where: { id: b.id }, data: { progressReminderSentAt: now } });
       }
-      if (!b.progressEscalatedAt && due(clock, PROGRESS_ESCALATE_HOURS * HOUR_MS)) {
+      if (!b.progressEscalatedAt && due(clock, PROGRESS_ESCALATE_HOURS * HOUR_MS) && (await claim(b, 'progressEscalatedAt'))) {
         await remind(b.clientId, b.id, 'Is your job finished?', "Your job is still marked in progress. If something's wrong, tap Report a problem.");
         admins ??= await prisma.user.findMany({ where: { role: 'ADMIN', isDeleted: false }, select: { id: true } });
-        await Promise.all(
+        const results = await Promise.allSettled(
           admins.map((a) => remind(a.id, b.id, 'Job stuck in progress', `Booking ${formatDisplayId(b.id)} has been in progress for over ${PROGRESS_ESCALATE_HOURS}h.`))
         );
-        await prisma.booking.update({ where: { id: b.id }, data: { progressEscalatedAt: now } });
+        for (const r of results) if (r.status === 'rejected') console.error(`Failed to alert an admin about booking ${b.id}:`, r.reason);
       }
     } catch (error) {
       console.error(`Failed to nudge in-progress booking ${b.id}:`, error);

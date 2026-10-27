@@ -4,7 +4,7 @@ import prisma from '@config/database';
 import { BOOKING_PHOTO_BUCKET } from '@config/supabase';
 import { getAppSettings } from '@services/appSettingsService';
 import { sendSmsToUser } from '@utils/smsService';
-import { addDays, phTodayStart, bookingStartInstant } from '@services/workerAvailabilityService';
+import { addDays, phTodayStart } from '@services/workerAvailabilityService';
 import { nudgeStuckBookings } from '@workers/bookingWorker';
 import type { Prisma } from '@prisma/client';
 import { createTestUser, deleteTestUser, createTestBooking, deleteTestBooking } from './helpers';
@@ -393,99 +393,95 @@ describe('Booking gaps — notifications and detail fields', () => {
   });
 
   describe('stuck-booking sweep', () => {
+    // The sweep scans the shared dev DB, so these run on the real clock with
+    // timestamps backdated rather than a fake future "now".
     const MIN = 60_000;
     const HOUR = 60 * MIN;
-    const at = (base: Date, ms: number) => new Date(base.getTime() + ms);
+    const ago = (ms: number) => new Date(Date.now() - ms);
 
-    async function seedStuck(status: 'ACCEPTED' | 'IN_PROGRESS', data: Prisma.BookingUncheckedUpdateInput = {}) {
-      const created = await createTestBooking({ clientId, workerId, status, scheduledDate: phTodayStart(new Date()), scheduledTime: '09:00' });
+    async function seedStuck(status: 'ACCEPTED' | 'IN_PROGRESS', data: Prisma.BookingUncheckedUpdateInput = {}, daysFromToday = -10) {
+      const created = await createTestBooking({
+        clientId,
+        workerId,
+        status,
+        scheduledDate: addDays(phTodayStart(new Date()), daysFromToday),
+        scheduledTime: '09:00',
+      });
       createdBookingIds.push(created.id);
-      const booking = await prisma.booking.update({ where: { id: created.id }, data });
-      return { booking, start: bookingStartInstant(booking) };
+      return prisma.booking.update({ where: { id: created.id }, data });
     }
     const notes = (id: string, userId: string) =>
       prisma.notification.findMany({ where: { userId, relatedId: id, type: 'BOOKING_REMINDER' }, orderBy: { createdAt: 'asc' } });
     const reload = (id: string) => prisma.booking.findUniqueOrThrow({ where: { id } });
+    const openDisputes = (id: string) => prisma.dispute.count({ where: { bookingId: id, status: 'OPEN' } });
 
     it('escalates a cancel request nobody answered within 2h', async () => {
-      const requestedAt = new Date('2026-01-01T00:00:00Z');
-      const { booking } = await seedStuck('IN_PROGRESS', { cancelRequestedAt: requestedAt, cancelRequestReason: 'Need to go' });
+      const fresh = await seedStuck('IN_PROGRESS', { cancelRequestedAt: ago(HOUR), cancelRequestReason: 'Need to go' });
+      const old = await seedStuck('IN_PROGRESS', { cancelRequestedAt: ago(2 * HOUR + MIN), cancelRequestReason: 'Need to go' });
 
-      await nudgeStuckBookings(at(requestedAt, HOUR));
-      expect(await prisma.dispute.count({ where: { bookingId: booking.id } })).toBe(0);
-
-      await nudgeStuckBookings(at(requestedAt, 2 * HOUR));
-      expect(await prisma.dispute.count({ where: { bookingId: booking.id, status: 'OPEN' } })).toBe(1);
-      expect((await reload(booking.id)).cancelRequestEscalatedAt).not.toBeNull();
+      await nudgeStuckBookings();
+      expect(await openDisputes(fresh.id)).toBe(0);
+      expect(await openDisputes(old.id)).toBe(1);
+      expect((await reload(old.id)).cancelRequestEscalatedAt).not.toBeNull();
     });
 
     it('gives the worker 15 min when the request comes after the booked start', async () => {
-      const { booking, start } = await seedStuck('ACCEPTED');
-      const requestedAt = at(start, 30 * MIN);
-      await prisma.booking.update({ where: { id: booking.id }, data: { cancelRequestedAt: requestedAt, cancelRequestReason: 'Sick' } });
+      const tooSoon = await seedStuck('ACCEPTED', { cancelRequestedAt: ago(10 * MIN), cancelRequestReason: 'Sick' });
+      const waited = await seedStuck('ACCEPTED', { cancelRequestedAt: ago(16 * MIN), cancelRequestReason: 'Sick' });
 
-      await nudgeStuckBookings(at(requestedAt, 10 * MIN));
-      expect(await prisma.dispute.count({ where: { bookingId: booking.id } })).toBe(0);
-
-      await nudgeStuckBookings(at(requestedAt, 16 * MIN));
-      expect(await prisma.dispute.count({ where: { bookingId: booking.id, status: 'OPEN' } })).toBe(1);
+      await nudgeStuckBookings();
+      expect(await openDisputes(tooSoon.id)).toBe(0);
+      expect(await openDisputes(waited.id)).toBe(1);
     });
 
     it('reminds the worker once, 30 min after check-in on time, and nudges the client at 2h', async () => {
-      const { booking, start } = await seedStuck('ACCEPTED');
-      await prisma.booking.update({ where: { id: booking.id }, data: { workerArrivedAt: start } });
+      const early = await seedStuck('ACCEPTED', { workerArrivedAt: ago(29 * MIN) });
+      const late = await seedStuck('ACCEPTED', { workerArrivedAt: ago(31 * MIN) });
 
-      await nudgeStuckBookings(at(start, 29 * MIN));
-      expect(await notes(booking.id, workerId)).toHaveLength(0);
-
-      await nudgeStuckBookings(at(start, 31 * MIN));
-      const [reminder] = await notes(booking.id, workerId);
+      await nudgeStuckBookings();
+      await nudgeStuckBookings();
+      expect(await notes(early.id, workerId)).toHaveLength(0);
+      const [reminder, ...rest] = await notes(late.id, workerId);
       expect(reminder.title).toBe('Tap Start Job');
-      await nudgeStuckBookings(at(start, 32 * MIN));
-      expect(await notes(booking.id, workerId)).toHaveLength(1);
-      expect(await notes(booking.id, clientId)).toHaveLength(0);
+      expect(rest).toHaveLength(0);
+      expect(await notes(late.id, clientId)).toHaveLength(0);
 
-      await nudgeStuckBookings(at(start, 2 * HOUR + MIN));
-      const [nudge] = await notes(booking.id, clientId);
-      expect(nudge.title).toBe('Is your job under way?');
+      const long = await seedStuck('ACCEPTED', { workerArrivedAt: ago(2 * HOUR + MIN) });
+      await nudgeStuckBookings();
+      expect((await notes(long.id, clientId)).map((n) => n.title)).toEqual(['Is your job under way?']);
     });
 
     it('does not nudge the client when the worker said the client is not here', async () => {
-      const { booking, start } = await seedStuck('ACCEPTED');
-      await prisma.booking.update({ where: { id: booking.id }, data: { workerArrivedAt: start, clientNotHereAt: start } });
+      const booking = await seedStuck('ACCEPTED', { workerArrivedAt: ago(3 * HOUR), clientNotHereAt: ago(2 * HOUR) });
 
-      await nudgeStuckBookings(at(start, 3 * HOUR));
+      await nudgeStuckBookings();
       expect(await notes(booking.id, workerId)).toHaveLength(1);
       expect(await notes(booking.id, clientId)).toHaveLength(0);
     });
 
     it('waits for the booked start after an early check-in', async () => {
-      const { booking, start } = await seedStuck('ACCEPTED');
-      await prisma.booking.update({ where: { id: booking.id }, data: { workerArrivedAt: at(start, -3 * HOUR) } });
+      // Booked tomorrow, so the start is hours away.
+      const booking = await seedStuck('ACCEPTED', { workerArrivedAt: ago(3 * HOUR) }, 1);
 
-      await nudgeStuckBookings(at(start, -HOUR));
-      await nudgeStuckBookings(at(start, 10 * MIN));
+      await nudgeStuckBookings();
       expect(await notes(booking.id, workerId)).toHaveLength(0);
     });
 
     it('nudges a job in progress for 49h, and leaves one with a visit tomorrow alone', async () => {
-      const { booking, start } = await seedStuck('IN_PROGRESS');
-      await prisma.booking.update({ where: { id: booking.id }, data: { workerStartedAt: start } });
       const adminId = createdUserIds[2];
+      const mid = await seedStuck('IN_PROGRESS', { workerStartedAt: ago(13 * HOUR) });
+      const stuck = await seedStuck('IN_PROGRESS', { workerStartedAt: ago(49 * HOUR) });
+      const planned = await seedStuck('IN_PROGRESS', { workerStartedAt: ago(49 * HOUR) });
+      await prisma.bookingVisit.create({ data: { bookingId: planned.id, scheduledDate: addDays(phTodayStart(new Date()), 1), scheduledTime: '09:00' } });
 
-      await nudgeStuckBookings(at(start, 13 * HOUR));
-      expect((await notes(booking.id, workerId)).map((n) => n.title)).toEqual(['Finish or schedule a follow-up']);
-
-      await nudgeStuckBookings(at(start, 49 * HOUR));
-      expect((await notes(booking.id, clientId)).map((n) => n.title)).toEqual(['Is your job finished?']);
-      expect(await notes(booking.id, adminId)).toHaveLength(1);
-      expect((await reload(booking.id)).progressEscalatedAt).not.toBeNull();
-
-      const { booking: planned, start: plannedStart } = await seedStuck('IN_PROGRESS');
-      await prisma.booking.update({ where: { id: planned.id }, data: { workerStartedAt: plannedStart } });
-      const now = at(plannedStart, 49 * HOUR);
-      await prisma.bookingVisit.create({ data: { bookingId: planned.id, scheduledDate: addDays(phTodayStart(now), 1), scheduledTime: '09:00' } });
-      await nudgeStuckBookings(now);
+      await nudgeStuckBookings();
+      await nudgeStuckBookings();
+      expect((await notes(mid.id, workerId)).map((n) => n.title)).toEqual(['Finish or schedule a follow-up']);
+      expect(await notes(mid.id, clientId)).toHaveLength(0);
+      expect((await notes(stuck.id, workerId)).map((n) => n.title)).toEqual(['Finish or schedule a follow-up']);
+      expect((await notes(stuck.id, clientId)).map((n) => n.title)).toEqual(['Is your job finished?']);
+      expect(await notes(stuck.id, adminId)).toHaveLength(1);
+      expect((await reload(stuck.id)).progressEscalatedAt).not.toBeNull();
       expect(await notes(planned.id, workerId)).toHaveLength(0);
       expect(await notes(planned.id, clientId)).toHaveLength(0);
     });
