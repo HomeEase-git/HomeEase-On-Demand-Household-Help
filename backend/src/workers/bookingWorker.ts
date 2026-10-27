@@ -679,6 +679,16 @@ export async function cancelAsWorkerNoShow(
       data: { status: 'CANCELLED' },
     });
 
+    // Same as finalizeCancellationTx: the cancel ends any dispute still open.
+    await tx.dispute.updateMany({
+      where: { bookingId: booking.id, status: { in: ['OPEN', 'UNDER_REVIEW'] } },
+      data: {
+        status: 'RESOLVED_DISMISSED',
+        resolution: 'Booking was cancelled as a worker no-show before this dispute was resolved',
+        resolvedAt: now,
+      },
+    });
+
     await tx.cancellation.create({
       data: {
         bookingId: booking.id,

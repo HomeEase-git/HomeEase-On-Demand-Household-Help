@@ -40,7 +40,7 @@ import {
   lockBooking,
   BookingStatusConflictError,
 } from '@services/bookingStatusWrite';
-import { openBookingDispute, escalateCancelRequest } from '@services/bookingProblemService';
+import { openBookingDispute, openOrJoinDisputeTx, escalateCancelRequest } from '@services/bookingProblemService';
 import { cancelAsWorkerNoShow } from '@workers/bookingWorker';
 
 // The booking's status changed between our read and our write (another
@@ -2830,14 +2830,12 @@ export const reportCashNotPaid = async (req: AuthRequest, res: Response) => {
     const raisedById = req.user.userId;
     const dispute = await prisma.$transaction(async (tx) => {
       await updateBookingIfStatus(tx, id, 'PENDING_COMPLETION', { status: 'DISPUTED' });
-      return tx.dispute.create({
-        data: { bookingId: id, raisedById, reason: 'Worker reports the client has not paid the cash invoice', status: 'OPEN' },
-      });
+      return openOrJoinDisputeTx(tx, { bookingId: id, raisedById, reason: 'Worker reports the client has not paid the cash invoice' });
     });
 
     await notifyUser({
       userId: booking.clientId,
-      type: 'DISPUTE_OPENED',
+      type: 'BOOKING_PROBLEM_REPORTED',
       title: 'Your worker says the cash is unpaid',
       message: `Your worker reported that the cash for booking ${formatDisplayId(id)} has not been paid. HomeEase will review it and contact you.`,
       relatedId: id,
@@ -2991,9 +2989,7 @@ export const reportInvoice = async (req: AuthRequest, res: Response) => {
     const raisedById = req.user.userId;
     const dispute = await prisma.$transaction(async (tx) => {
       await updateBookingIfStatus(tx, id, booking.status, { status: 'DISPUTED', disputeReason: reason });
-      return tx.dispute.create({
-        data: { bookingId: id, raisedById, reason: `Invoice reported: ${reason}`, status: 'OPEN', evidenceUrls: ownedEvidence },
-      });
+      return openOrJoinDisputeTx(tx, { bookingId: id, raisedById, reason: `Invoice reported: ${reason}`, evidenceUrls: ownedEvidence });
     });
 
     await voidUnpaidPayment(id, 'Invoice reported by the client').catch((error) => {

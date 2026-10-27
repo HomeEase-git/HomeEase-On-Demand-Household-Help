@@ -15,9 +15,18 @@ type NotifyUserInput = {
  * Creates a Notification row and pushes it live to the target user's socket
  * room, if connected. Centralizes what used to be scattered
  * `prisma.notification.create` calls across booking/payment/message flows.
+ * Never throws (returns null if the row can't be saved): callers notify after
+ * their action has committed, and a lost notification mustn't turn that into
+ * a 500.
  */
 export const notifyUser = async (input: NotifyUserInput) => {
-  const notification = await prisma.notification.create({ data: input });
+  let notification;
+  try {
+    notification = await prisma.notification.create({ data: input });
+  } catch (error) {
+    console.error(`Failed to save a ${input.type} notification for user ${input.userId}:`, error);
+    return null;
+  }
 
   try {
     getIO().to(input.userId).emit('notification:new', notification);

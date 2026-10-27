@@ -307,6 +307,50 @@ describe('Booking gaps — notifications and detail fields', () => {
     expect(good.status).toBe(200);
   });
 
+  it('adds an invoice report to an open problem dispute instead of opening a second', async () => {
+    const booking = await createTestBooking({ clientId, workerId, status: 'PENDING_COMPLETION' });
+    createdBookingIds.push(booking.id);
+    const open = await prisma.dispute.create({
+      data: { bookingId: booking.id, raisedById: clientId, reason: 'Worker stopped the job', status: 'OPEN' },
+    });
+
+    const res = await request(app)
+      .patch(`/api/bookings/${booking.id}/invoice/report`)
+      .set('Authorization', `Bearer ${clientToken}`)
+      .send({ reason: 'The parts charge is wrong', evidenceUrls: [photoUrl(clientId, 'receipt')] });
+    expect(res.status).toBe(200);
+    expect(res.body.data).toMatchObject({ status: 'DISPUTED', disputeId: open.id });
+    expect(await prisma.dispute.count({ where: { bookingId: booking.id } })).toBe(1);
+    const dispute = await prisma.dispute.findUniqueOrThrow({ where: { id: open.id } });
+    expect(dispute.reason).toContain('Worker stopped the job');
+    expect(dispute.reason).toContain('Invoice reported: The parts charge is wrong');
+    expect(dispute.evidenceUrls).toHaveLength(1);
+    expect((await prisma.booking.findUniqueOrThrow({ where: { id: booking.id } })).status).toBe('DISPUTED');
+  });
+
+  it('notifyUser never throws, so a committed action stays a success', async () => {
+    const spy = jest.spyOn(prisma.notification, 'create').mockRejectedValueOnce(new Error('db down'));
+    const errorLog = jest.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      await expect(notifyUser({ userId: clientId, type: 'BOOKING_REMINDER', title: 't', message: 'm' })).resolves.toBeNull();
+    } finally {
+      spy.mockRestore();
+      errorLog.mockRestore();
+    }
+  });
+
+  it('dismisses an open dispute when the booking is cancelled as a worker no-show', async () => {
+    const booking = await createTestBooking({ clientId, workerId, status: 'ACCEPTED', scheduledDate: addDays(phTodayStart(), -2) });
+    createdBookingIds.push(booking.id);
+    await prisma.workerProfile.update({ where: { userId: workerId }, data: { activeJobCount: { increment: 1 } } });
+    const dispute = await prisma.dispute.create({
+      data: { bookingId: booking.id, raisedById: clientId, reason: 'Worker is not here', status: 'OPEN' },
+    });
+
+    expect(await cancelAsWorkerNoShow(booking, { noShowGraceMinutes: 60, noShowPenaltyAmount: 0 })).toBe(true);
+    expect((await prisma.dispute.findUniqueOrThrow({ where: { id: dispute.id } })).status).toBe('RESOLVED_DISMISSED');
+  });
+
   describe('report a problem and cancel requests', () => {
     const problem = (id: string, body: Record<string, unknown>) =>
       request(app).post(`/api/bookings/${id}/problem`).set('Authorization', `Bearer ${clientToken}`).send(body);
@@ -665,7 +709,7 @@ describe('Booking gaps — notifications and detail fields', () => {
       const dispute = await prisma.dispute.findFirstOrThrow({ where: { bookingId: booking.id } });
       expect(dispute).toMatchObject({ status: 'OPEN', reason: 'Worker reports the client has not paid the cash invoice', raisedById: workerId });
       expect(res.body.data.disputeId).toBe(dispute.id);
-      expect(await prisma.notification.count({ where: { userId: clientId, relatedId: booking.id, type: 'DISPUTE_OPENED' } })).toBe(1);
+      expect(await prisma.notification.count({ where: { userId: clientId, relatedId: booking.id, type: 'BOOKING_PROBLEM_REPORTED' } })).toBe(1);
 
       const again = await request(app).patch(`/api/bookings/${booking.id}/cash-received`).set('Authorization', `Bearer ${workerToken}`);
       expect(again.status).toBe(409);

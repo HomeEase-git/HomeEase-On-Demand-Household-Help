@@ -24,6 +24,24 @@ async function createDisputeTx(
   return tx.dispute.create({ data: { bookingId, raisedById, reason, status: 'OPEN' } });
 }
 
+/**
+ * Opens an OPEN dispute inside the caller's transaction, or adds this report
+ * to the one already open (a problem reported before the invoice), so a
+ * booking never has two at once. Takes the booking row lock.
+ */
+export async function openOrJoinDisputeTx(
+  tx: Prisma.TransactionClient,
+  data: { bookingId: string; raisedById: string; reason: string; evidenceUrls?: string[] }
+): Promise<Dispute> {
+  await lockBooking(tx, data.bookingId);
+  const existing = await tx.dispute.findFirst({ where: { bookingId: data.bookingId, status: { in: ['OPEN', 'UNDER_REVIEW'] } } });
+  if (!existing) return tx.dispute.create({ data: { ...data, status: 'OPEN' } });
+  return tx.dispute.update({
+    where: { id: existing.id },
+    data: { reason: `${existing.reason}\n${data.reason}`, evidenceUrls: { push: data.evidenceUrls ?? [] } },
+  });
+}
+
 /** Tells every admin about a newly opened dispute (after it has committed). */
 async function notifyAdminsOfDispute(dispute: Dispute): Promise<void> {
   const admins = await prisma.user.findMany({ where: { role: 'ADMIN', isDeleted: false }, select: { id: true } });
