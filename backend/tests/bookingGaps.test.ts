@@ -105,6 +105,26 @@ describe('Booking gaps — notifications and detail fields', () => {
     expect(await prisma.notification.findFirst({ where: { userId: clientId, relatedId: booking.id, type: 'BOOKING_ARRIVED' } })).not.toBeNull();
   });
 
+  it('keeps the first check-in when the worker checks in again', async () => {
+    const booking = await createTestBooking({ clientId, workerId, status: 'ACCEPTED', clientLat: CLIENT_LOCATION.lat, clientLng: CLIENT_LOCATION.lng });
+    createdBookingIds.push(booking.id);
+    const arrive = (loc: { lat: number; lng: number }) =>
+      request(app).patch(`/api/bookings/${booking.id}/arrive`).set('Authorization', `Bearer ${workerToken}`).send(loc);
+
+    const first = await arrive(NEARBY_WORKER_LOCATION);
+    expect(first.status).toBe(200);
+    // A stale screen far from the site: still 200, nothing rewritten.
+    const again = await arrive({ lat: 15, lng: 121 });
+    expect(again.status).toBe(200);
+    expect(again.body.data.workerArrivedAt).toBe(first.body.data.workerArrivedAt);
+    expect(again.body.data.arrivalVerification.id).toBe(first.body.data.arrivalVerification.id);
+
+    const after = await prisma.booking.findUniqueOrThrow({ where: { id: booking.id } });
+    expect(after.workerArrivedAt?.toISOString()).toBe(first.body.data.workerArrivedAt);
+    expect(after.workerLat).toBe(NEARBY_WORKER_LOCATION.lat);
+    expect(await prisma.notification.count({ where: { userId: clientId, relatedId: booking.id, type: 'BOOKING_ARRIVED' } })).toBe(1);
+  });
+
   it('tells the client the job started with BOOKING_STARTED', async () => {
     const booking = await createTestBooking({ clientId, workerId, status: 'ACCEPTED', workerArrivedAt: new Date() });
     createdBookingIds.push(booking.id);
@@ -318,6 +338,7 @@ describe('Booking gaps — notifications and detail fields', () => {
       const detail = await request(app).get(`/api/bookings/${booking.id}`).set('Authorization', `Bearer ${workerToken}`);
       expect(new Date(detail.body.data.clientNoShowCancelAt).getTime()).toBe(start + noShowGraceMinutes * 60_000);
       expect(typeof detail.body.data.clientFaultFeeAmount).toBe('number');
+      expect(detail.body.data.noShowGraceMinutes).toBe(noShowGraceMinutes);
 
       const res = await request(app)
         .patch(`/api/bookings/${booking.id}/cancel`)
@@ -351,6 +372,51 @@ describe('Booking gaps — notifications and detail fields', () => {
         .send({ fault: 'CLIENT' });
       expect(res.status).toBe(400);
       expect(await prisma.cancellation.count({ where: { bookingId: booking.id } })).toBe(0);
+    });
+
+    it('needs proof when the worker checked in after the grace period', async () => {
+      const { noShowGraceMinutes } = await getAppSettings();
+      // Booked start an hour past the grace period ago: the worker is late.
+      const start = new Date(Math.floor((Date.now() - (noShowGraceMinutes + 60) * 60_000) / 60_000) * 60_000);
+      const ph = new Date(start.getTime() + 8 * 3_600_000);
+      const booking = await createTestBooking({
+        clientId,
+        workerId,
+        status: 'ACCEPTED',
+        clientLat: CLIENT_LOCATION.lat,
+        clientLng: CLIENT_LOCATION.lng,
+        scheduledDate: phTodayStart(start),
+        scheduledTime: ph.toISOString().slice(11, 16),
+      });
+      createdBookingIds.push(booking.id);
+      const clientBefore = await prisma.clientProfile.findUniqueOrThrow({ where: { userId: clientId } });
+
+      const arrived = await request(app)
+        .patch(`/api/bookings/${booking.id}/arrive`)
+        .set('Authorization', `Bearer ${workerToken}`)
+        .send(NEARBY_WORKER_LOCATION);
+      expect(arrived.status).toBe(200);
+      expect(arrived.body.data.arrivalVerification.isOutsideBookedWindow).toBe(true);
+      const alert = await notHere(booking.id);
+      expect(alert.status).toBe(200);
+      expect(alert.body.data.canCancelAt).toBeNull();
+      await prisma.booking.update({
+        where: { id: booking.id },
+        data: { clientNotHereAt: new Date(Date.now() - (noShowGraceMinutes + 1) * 60_000) },
+      });
+      const detail = await request(app).get(`/api/bookings/${booking.id}`).set('Authorization', `Bearer ${workerToken}`);
+      expect(detail.body.data.clientNoShowCancelAt).toBeNull();
+
+      const res = await request(app)
+        .patch(`/api/bookings/${booking.id}/cancel`)
+        .set('Authorization', `Bearer ${workerToken}`)
+        .send({ fault: 'CLIENT' });
+      expect(res.status).toBe(400);
+      expect(res.body.message).toBe('Explain what happened (at least 10 characters)');
+      expect(await prisma.cancellation.count({ where: { bookingId: booking.id, compensationStatus: 'APPROVED' } })).toBe(0);
+      expect(await prisma.cancellation.count({ where: { bookingId: booking.id } })).toBe(0);
+      const clientAfter = await prisma.clientProfile.findUniqueOrThrow({ where: { userId: clientId } });
+      expect(clientAfter.paymentHoldAt).toEqual(clientBefore.paymentHoldAt);
     });
 
     /** Runs `fn` with the client-fault fee set to 0, then restores it. */
@@ -854,12 +920,16 @@ describe('Booking gaps — notifications and detail fields', () => {
       expect((await notes(long.id, clientId)).map((n) => n.title)).toEqual(['Is your job under way?']);
     });
 
-    it('does not nudge the client when the worker said the client is not here', async () => {
+    it('reminds nobody when the worker said the client is not here', async () => {
+      const waiting = await seedStuck('ACCEPTED', { workerArrivedAt: ago(31 * MIN), clientNotHereAt: ago(20 * MIN) });
       const booking = await seedStuck('ACCEPTED', { workerArrivedAt: ago(3 * HOUR), clientNotHereAt: ago(2 * HOUR) });
 
       await nudgeStuckBookings();
-      expect(await notes(booking.id, workerId)).toHaveLength(1);
+      expect(await notes(waiting.id, workerId)).toHaveLength(0);
+      expect(await notes(booking.id, workerId)).toHaveLength(0);
       expect(await notes(booking.id, clientId)).toHaveLength(0);
+      // Left unclaimed.
+      expect((await reload(waiting.id)).startReminderSentAt).toBeNull();
     });
 
     it("doesn't point the client at Report a problem while a dispute is open", async () => {

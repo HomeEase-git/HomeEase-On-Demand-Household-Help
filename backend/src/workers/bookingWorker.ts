@@ -596,20 +596,21 @@ export async function nudgeStuckBookings(now = new Date()): Promise<void> {
     }
   }
 
-  // 2. Checked in, never started.
+  // 2. Checked in, never started. A worker who said the client isn't here is
+  // waiting at the door, not forgetting to start: no reminder either way.
   const unstarted = await prisma.booking.findMany({
     where: {
       status: 'ACCEPTED',
       // The clock is a max with workerArrivedAt, so nothing is due before this.
       workerArrivedAt: { lte: new Date(now.getTime() - START_REMINDER_MINUTES * MIN_MS) },
-      OR: [{ startReminderSentAt: null }, { startNudgeSentAt: null, clientNotHereAt: null }],
+      clientNotHereAt: null,
+      OR: [{ startReminderSentAt: null }, { startNudgeSentAt: null }],
     },
     select: {
       ...NUDGE_FIELDS,
       workerArrivedAt: true,
       startReminderSentAt: true,
       startNudgeSentAt: true,
-      clientNotHereAt: true,
       disputes: { where: OPEN_DISPUTE, select: { id: true } },
     },
   });
@@ -620,7 +621,7 @@ export async function nudgeStuckBookings(now = new Date()): Promise<void> {
       if (!b.startReminderSentAt && b.workerId && due(clock, START_REMINDER_MINUTES * MIN_MS) && (await claim(b, 'startReminderSentAt'))) {
         await remind(b.workerId, b.id, 'Tap Start Job', "You checked in but haven't started. Add your before photos and tap Start Job.");
       }
-      if (!b.startNudgeSentAt && !b.clientNotHereAt && !clientIsBeingHelped(b) && due(clock, START_NUDGE_HOURS * HOUR_MS) && (await claim(b, 'startNudgeSentAt'))) {
+      if (!b.startNudgeSentAt && !clientIsBeingHelped(b) && due(clock, START_NUDGE_HOURS * HOUR_MS) && (await claim(b, 'startNudgeSentAt'))) {
         await remind(b.clientId, b.id, 'Is your job under way?', "Your worker checked in but hasn't started. If something's wrong, tap Report a problem.");
       }
     } catch (error) {

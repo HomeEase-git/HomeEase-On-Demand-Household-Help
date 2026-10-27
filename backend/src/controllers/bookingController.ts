@@ -1172,6 +1172,8 @@ export const getBookingDetail = async (req: AuthRequest, res: Response) => {
           : null,
         // Admin no-show fee in pesos (0 = none), so the worker's confirm copy is honest.
         clientFaultFeeAmount: settings.clientFaultCompensationAmount,
+        // Minutes after the booked start before an un-checked-in worker is late.
+        noShowGraceMinutes: settings.noShowGraceMinutes,
         cancelRequestedAt: booking.cancelRequestedAt,
         cancelRequestReason: booking.cancelRequestReason,
         cancelRequestEscalatedAt: booking.cancelRequestEscalatedAt,
@@ -1669,6 +1671,26 @@ export const arriveBooking = async (req: AuthRequest, res: Response) => {
 
     if (booking.clientLat == null || booking.clientLng == null) {
       return res.status(409).json(errorResponse(409, 'Booking has no client location on file to verify arrival against'));
+    }
+
+    // A repeat tap (or a stale screen) keeps the first check-in.
+    if (booking.workerArrivedAt) {
+      const arrival = await prisma.arrivalVerification.findUnique({ where: { bookingId: id } });
+      return res.status(200).json({
+        success: true,
+        message: 'Already checked in',
+        data: {
+          id: booking.id,
+          workerArrivedAt: booking.workerArrivedAt,
+          arrivalVerification: arrival && {
+            id: arrival.id,
+            distanceMeters: arrival.distanceMeters,
+            isVerified: arrival.isVerified,
+            isOutsideBookedWindow: arrival.isOutsideBookedWindow,
+            createdAt: arrival.createdAt,
+          },
+        },
+      });
     }
 
     const { geofenceRadiusMeters, noShowGraceMinutes } = await getAppSettings();

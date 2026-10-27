@@ -98,8 +98,9 @@ export async function openBookingDispute({
 /**
  * The worker declined (or never answered) the client's cancel request, so an
  * admin decides: marks the request escalated and opens a dispute (or adds
- * the request to the one already open) in one transaction (a failure leaves it unescalated, so a retry or the sweep can
- * try again), then tells the admins and the client.
+ * the request to the one already open) in one transaction (a failure leaves
+ * it unescalated, so a retry or the sweep can try again), then tells the
+ * admins and the client.
  */
 export async function escalateCancelRequest(booking: Booking, why: 'DECLINED' | 'NO_ANSWER'): Promise<void> {
   const workerDid = why === 'DECLINED' ? 'declined' : "didn't answer";
