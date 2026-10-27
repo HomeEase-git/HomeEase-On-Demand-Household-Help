@@ -62,6 +62,7 @@ export type ApiBookingDetail = {
   rescheduleRequestedAt?: string | null;
   clientNotHereAt?: string | null;
   clientNoShowCancelAt?: string | null;
+  clientFaultFeeAmount?: number;
   cancelRequestedAt?: string | null;
   cancelRequestReason?: string | null;
   cancelRequestEscalatedAt?: string | null;

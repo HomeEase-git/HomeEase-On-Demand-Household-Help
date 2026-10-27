@@ -317,6 +317,7 @@ describe('Booking gaps — notifications and detail fields', () => {
       });
       const detail = await request(app).get(`/api/bookings/${booking.id}`).set('Authorization', `Bearer ${workerToken}`);
       expect(new Date(detail.body.data.clientNoShowCancelAt).getTime()).toBe(start + noShowGraceMinutes * 60_000);
+      expect(typeof detail.body.data.clientFaultFeeAmount).toBe('number');
 
       const res = await request(app)
         .patch(`/api/bookings/${booking.id}/cancel`)

@@ -1170,6 +1170,8 @@ export const getBookingDetail = async (req: AuthRequest, res: Response) => {
         clientNoShowCancelAt: booking.clientNotHereAt
           ? ((await clientNoShowCancelAt(booking, settings.noShowGraceMinutes))?.toISOString() ?? null)
           : null,
+        // Admin no-show fee in pesos (0 = none), so the worker's confirm copy is honest.
+        clientFaultFeeAmount: settings.clientFaultCompensationAmount,
         cancelRequestedAt: booking.cancelRequestedAt,
         cancelRequestReason: booking.cancelRequestReason,
         cancelRequestEscalatedAt: booking.cancelRequestEscalatedAt,

@@ -76,6 +76,7 @@ type BookingDetail = {
   // Client no-show and cancel-request state (see backend clientNotHere / requestCancel).
   clientNotHereAt?: string | null;
   clientNoShowCancelAt?: string | null;
+  clientFaultFeeAmount?: number;
   cancelRequestedAt?: string | null;
   cancelRequestReason?: string | null;
   cancelRequestEscalatedAt?: string | null;
@@ -560,7 +561,8 @@ export default function JobDetailScreen() {
     });
 
   const handleNoShowCancel = () => {
-    alertModal.confirm("Cancel and charge the client the no-show fee?", undefined, {
+    const fee = job.clientFaultFeeAmount ?? 0;
+    alertModal.confirm(fee > 0 ? `Cancel and charge the client the ₱${fee.toFixed(2)} no-show fee?` : "Cancel as a client no-show?", undefined, {
       confirmText: "Cancel Job",
       cancelText: "Keep Waiting",
       destructive: true,
