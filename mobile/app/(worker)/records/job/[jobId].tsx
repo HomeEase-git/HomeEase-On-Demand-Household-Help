@@ -111,7 +111,6 @@ export default function JobDetailScreen() {
   const [job, setJob] = useState<BookingDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
-  const [arriving, setArriving] = useState(false);
   const [respondingToReschedule, setRespondingToReschedule] = useState(false);
   const [completionPhotoUri, setCompletionPhotoUri] = useState<string | null>(null);
   const [completionPhotoUrl, setCompletionPhotoUrl] = useState<string | null>(null);
@@ -320,13 +319,12 @@ export default function JobDetailScreen() {
     },
   ];
 
-  const handleArrive = async () => {
-    setArriving(true);
+  // GPS check-in. Shows its own error and returns false when it fails.
+  const checkIn = async () => {
     try {
       const position = await getCurrentPosition();
       await api.arriveBooking(job.id, position.lat, position.lng, position.accuracy, position.mocked);
-      alertModal.success("Arrival confirmed", "You're checked in at the job site.");
-      load();
+      return true;
     } catch (error) {
       if (error instanceof LocationPermissionDeniedError) {
         alertModal.error("Location needed", "Please enable location access to check in at the job site.");
@@ -334,8 +332,7 @@ export default function JobDetailScreen() {
         const message = error instanceof Error ? error.message : "Failed to verify your arrival.";
         alertModal.error("Can't check in yet", message);
       }
-    } finally {
-      setArriving(false);
+      return false;
     }
   };
 
@@ -343,20 +340,7 @@ export default function JobDetailScreen() {
     setSubmitting(true);
     try {
       // One tap checks in and starts a job with a set price.
-      if (!hasArrived) {
-        try {
-          const position = await getCurrentPosition();
-          await api.arriveBooking(job.id, position.lat, position.lng, position.accuracy, position.mocked);
-        } catch (error) {
-          if (error instanceof LocationPermissionDeniedError) {
-            alertModal.error("Location needed", "Please enable location access to check in at the job site.");
-          } else {
-            const message = error instanceof Error ? error.message : "Failed to verify your arrival.";
-            alertModal.error("Can't check in yet", message);
-          }
-          return;
-        }
-      }
+      if (!hasArrived && !(await checkIn())) return;
       await api.startBooking(job.id, beforePhotoUrls);
       setBeforePhotoUrls([]);
       alertModal.success(
@@ -552,6 +536,8 @@ export default function JobDetailScreen() {
 
   const handleClientNotHere = () =>
     runAction("notHere", async () => {
+      // Not checked in yet (locked door): check in first, stop if that fails.
+      if (!hasArrived && !(await checkIn())) return;
       const { canCancelAt } = await api.reportClientNotHere(job.id);
       alertModal.success(
         "Client alerted",
@@ -847,7 +833,7 @@ export default function JobDetailScreen() {
                 label={hasArrived ? "Start Job" : "I've Arrived, Start Job"}
                 fullWidth
                 onPress={handleStart}
-                disabled={submitting || beforePhotoUrls.length === 0}
+                disabled={submitting || busyAction != null || beforePhotoUrls.length === 0}
                 loading={submitting}
               />
               {!hasArrived && (
@@ -857,11 +843,11 @@ export default function JobDetailScreen() {
               )}
             </View>
           )}
-          {isAccepted && hasArrived && !job.clientNotHereAt && (
+          {isAccepted && (hasArrived || startPassed) && !job.clientNotHereAt && (
             <OutlinedButton
               label="Client not here"
               fullWidth
-              disabled={busyAction != null}
+              disabled={busyAction != null || submitting}
               onPress={handleClientNotHere}
             />
           )}
