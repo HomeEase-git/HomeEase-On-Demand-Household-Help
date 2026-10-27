@@ -77,6 +77,7 @@ type BookingDetail = {
   clientNotHereAt?: string | null;
   clientNoShowCancelAt?: string | null;
   clientFaultFeeAmount?: number;
+  noShowGraceMinutes?: number;
   cancelRequestedAt?: string | null;
   cancelRequestReason?: string | null;
   cancelRequestEscalatedAt?: string | null;
@@ -285,6 +286,9 @@ export default function JobDetailScreen() {
   const startTime = bookingStartTime(job);
   const startsAt = startTime ? startInstant(job.scheduledDate.slice(0, 10), startTime) : null;
   const startPassed = !!startsAt && now >= startsAt.getTime();
+  const graceMinutes = job.noShowGraceMinutes ?? NO_SHOW_GRACE_MINUTES;
+  // Past start + grace without a check-in, the worker is the late one.
+  const pastGrace = !!startsAt && now > startsAt.getTime() + graceMinutes * 60_000;
   const upcomingVisits = (job.visits ?? []).filter((v) => v.status === "SCHEDULED");
   const requestedWhen = job.requestedScheduledDate
     ? `${new Date(job.requestedScheduledDate).toLocaleDateString("en-PH", { month: "short", day: "numeric", timeZone: "UTC" })}${
@@ -671,6 +675,7 @@ export default function JobDetailScreen() {
                   label="Decline"
                   fullWidth
                   disabled={busyAction != null}
+                  loading={busyAction === "decline"}
                   onPress={() => handleCancelRequestAnswer(false)}
                 />
               </View>
@@ -782,7 +787,7 @@ export default function JobDetailScreen() {
                 You haven&apos;t checked in
               </Text>
               <Text className="text-text-secondary text-xs mt-0.5">
-                If you don&apos;t check in within {NO_SHOW_GRACE_MINUTES} minutes of the start time, this job is
+                If you don&apos;t check in within {graceMinutes} minutes of the start time, this job is
                 cancelled and a ₱{NO_SHOW_PENALTY} penalty is added to your dues.
               </Text>
             </View>
@@ -843,11 +848,12 @@ export default function JobDetailScreen() {
               )}
             </View>
           )}
-          {isAccepted && (hasArrived || startPassed) && !job.clientNotHereAt && (
+          {isAccepted && (hasArrived || (startPassed && !pastGrace)) && !job.clientNotHereAt && (
             <OutlinedButton
               label="Client not here"
               fullWidth
               disabled={busyAction != null || submitting}
+              loading={busyAction === "notHere"}
               onPress={handleClientNotHere}
             />
           )}

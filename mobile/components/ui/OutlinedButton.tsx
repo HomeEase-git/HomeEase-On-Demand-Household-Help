@@ -1,11 +1,13 @@
 import React from "react";
-import { Text } from "react-native";
+import { ActivityIndicator, Text } from "react-native";
 import { PressableScale } from "./PressableScale";
+import { colors } from "../../constants";
 
 type Props = {
   label: string;
   onPress: () => void;
   disabled?: boolean;
+  loading?: boolean;
   fullWidth?: boolean;
 };
 
@@ -13,11 +15,12 @@ export const OutlinedButton: React.FC<Props> = ({
   label,
   onPress,
   disabled,
+  loading,
   fullWidth,
 }) => {
   return (
     <PressableScale
-      inert={!!(disabled)}
+      inert={!!(disabled || loading)}
       className={`bg-white border-2 border-brand rounded-xl py-4 px-6 items-center justify-center ${
         fullWidth ? "w-full" : ""
       } ${disabled ? "opacity-50" : ""}`}
@@ -37,13 +40,17 @@ export const OutlinedButton: React.FC<Props> = ({
       // screen loads) stops receiving touches on its own surface on Android,
       // leaving only the label tappable.
       onPress={() => {
-        if (!(disabled)) onPress();
+        if (!(disabled || loading)) onPress();
       }}
-      accessibilityState={{ disabled: !!(disabled) }}
+      accessibilityState={{ disabled: !!(disabled || loading) }}
     >
-      <Text className="text-brand font-semibold text-center" numberOfLines={1}>
-        {label}
-      </Text>
+      {loading ? (
+        <ActivityIndicator color={colors.brand.DEFAULT} />
+      ) : (
+        <Text className="text-brand font-semibold text-center" numberOfLines={1}>
+          {label}
+        </Text>
+      )}
     </PressableScale>
   );
 };
