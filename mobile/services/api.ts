@@ -1839,6 +1839,22 @@ export async function reportInvoice(bookingId: string, reason: string, evidenceU
   }
 }
 
+export type ProblemReason = 'WORKER_NOT_HERE' | 'WORKER_STOPPED' | 'NEED_TO_CANCEL' | 'OTHER';
+
+/** Client reports a problem with an accepted or ongoing booking; the server picks the outcome. */
+export async function reportBookingProblem(bookingId: string, reason: ProblemReason, note?: string) {
+  try {
+    const response = await api.post(`/bookings/${bookingId}/problem`, { reason, note });
+    return response as unknown as {
+      outcome: 'WORKER_PINGED' | 'CANCELLED' | 'CANCEL_REQUESTED' | 'REPORTED';
+      autoCancelAt?: string;
+    };
+  } catch (error) {
+    console.error('Report problem error:', error);
+    throw error;
+  }
+}
+
 export type ConfirmCompletionResult =
   | { status: 'COMPLETED'; finalPrice?: number; completedAt?: string; payment?: unknown }
   | { status: 'AWAITING_PAYMENT'; checkoutUrl: string; invoiceId: string; amount: number };

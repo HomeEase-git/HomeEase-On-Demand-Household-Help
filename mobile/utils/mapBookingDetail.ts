@@ -60,6 +60,12 @@ export type ApiBookingDetail = {
   // asks (rescheduleRequestedBy), the other answers. Null
   // rescheduleRequestRespondedAt means still waiting.
   rescheduleRequestedAt?: string | null;
+  clientNotHereAt?: string | null;
+  clientNoShowCancelAt?: string | null;
+  cancelRequestedAt?: string | null;
+  cancelRequestReason?: string | null;
+  cancelRequestEscalatedAt?: string | null;
+  hasOpenDispute?: boolean;
   rescheduleRequestedBy?: "CLIENT" | "WORKER" | null;
   requestedScheduledDate?: string | null;
   requestedScheduledTime?: string | null;

@@ -29,11 +29,14 @@ import {
   cancelBooking as cancelBookingApi,
   reportReview,
   reportInvoice,
+  reportBookingProblem,
 } from "../../../../services/api";
 import { formatTime12h } from "../../../../utils/bookingTime";
 import { colors } from "../../../../constants";
 import { useAlertModal } from "../../../../contexts/AlertModalContext";
 import ReportModal from "../../../../components/modals/ReportModal";
+import ProblemReportSheet from "../../../../components/modals/ProblemReportSheet";
+import { formatTime } from "../../../../utils/formatTime";
 import { mapApiBookingDetail, type ApiBookingDetail } from "../../../../utils/mapBookingDetail";
 
 function formatScheduledDate(date: string): string {
@@ -63,6 +66,8 @@ export default function BookingDetailScreen() {
   const [reportVisible, setReportVisible] = useState(false);
   const [invoiceReportVisible, setInvoiceReportVisible] = useState(false);
   const [reportingInvoice, setReportingInvoice] = useState(false);
+  const [problemVisible, setProblemVisible] = useState(false);
+  const [reportingProblem, setReportingProblem] = useState(false);
   const [reporting, setReporting] = useState(false);
   const [loading, setLoading] = useState(true);
   const [confirmingCompletion, setConfirmingCompletion] = useState(false);
@@ -170,6 +175,10 @@ export default function BookingDetailScreen() {
   const workerAskedToReschedule = hasOpenRescheduleRequest && rawDetail?.rescheduleRequestedBy === "WORKER";
   const hasPendingRescheduleRequest = hasOpenRescheduleRequest && !workerAskedToReschedule;
   const workerHasArrived = !!rawDetail?.timeline?.workerArrivedAt;
+  const canReportProblem =
+    (rawDetail?.status === "ACCEPTED" || rawDetail?.status === "IN_PROGRESS") &&
+    !rawDetail?.hasOpenDispute &&
+    !rawDetail?.cancelRequestedAt;
   const canRequestReschedule = rawDetail?.status === "ACCEPTED" && !workerHasArrived && !hasOpenRescheduleRequest;
   // Follow-up job after an inspection/diagnosis (same worker), once its work is done.
   const canRequestFollowUp =
@@ -719,6 +728,36 @@ export default function BookingDetailScreen() {
           </Pressable>
         )}
 
+        {rawDetail?.cancelRequestedAt && !rawDetail.cancelRequestEscalatedAt && (
+          <View className="bg-warning/10 border border-warning/30 rounded-2xl p-4 mb-4">
+            <Text className="text-text-secondary text-xs">Waiting for your worker to agree to cancel.</Text>
+          </View>
+        )}
+
+        {rawDetail?.hasOpenDispute && (
+          <View className="bg-warning/10 border border-warning/30 rounded-2xl p-4 mb-4 flex-row items-center">
+            <Ionicons name="alert-circle" size={24} color={colors.warning} />
+            <View className="ml-3 flex-1">
+              <Text className="text-warning font-bold text-sm">Under review</Text>
+              <Text className="text-text-secondary text-xs mt-0.5">
+                HomeEase is checking it and will contact you.
+              </Text>
+            </View>
+          </View>
+        )}
+
+        {rawDetail?.clientNotHereAt && rawDetail.status === "ACCEPTED" && (
+          <View className="bg-accent/10 border border-accent/30 rounded-2xl p-4 mb-4">
+            <Text className="text-text-secondary text-xs">Your worker is at your door.</Text>
+          </View>
+        )}
+
+        {canReportProblem && (
+          <View className="mb-4">
+            <OutlinedButton label="Report a problem" onPress={() => setProblemVisible(true)} />
+          </View>
+        )}
+
         {/* Reported invoice, waiting for HomeEase */}
         {booking.status === "Disputed" && (
           <View className="bg-warning/10 border border-warning/30 rounded-2xl p-4 mb-4 flex-row items-center">
@@ -1086,6 +1125,33 @@ export default function BookingDetailScreen() {
         onFailed={handleCheckoutFailed}
         onCancel={handleCheckoutCancel}
       />
+      <ProblemReportSheet
+        visible={problemVisible}
+        workerArrived={workerHasArrived}
+        inProgress={rawDetail?.status === "IN_PROGRESS"}
+        loading={reportingProblem}
+        onSend={async (reason, note) => {
+          setReportingProblem(true);
+          try {
+            const { outcome, autoCancelAt } = await reportBookingProblem(booking.id, reason, note);
+            setProblemVisible(false);
+            await refreshBookingDetail();
+            const message = {
+              WORKER_PINGED: `We pinged your worker. If they're not there by ${autoCancelAt ? formatTime(autoCancelAt) : "soon"}, the booking is cancelled for free.`,
+              CANCELLED: "Booking cancelled. You won't be charged.",
+              CANCEL_REQUESTED: "We asked your worker. You'll hear back within 2 hours.",
+              REPORTED: "Reported. HomeEase will contact you.",
+            }[outcome];
+            alertModal.success("Done", message);
+          } catch (error: any) {
+            alertModal.error("Error", error?.message || "Could not send the report. Please try again.");
+          } finally {
+            setReportingProblem(false);
+          }
+        }}
+        onCancel={() => setProblemVisible(false)}
+      />
+
       <ReportModal
         visible={invoiceReportVisible}
         title="Report the invoice"

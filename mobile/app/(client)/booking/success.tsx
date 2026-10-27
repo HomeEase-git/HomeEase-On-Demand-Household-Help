@@ -252,7 +252,7 @@ export default function BookingSuccessScreen() {
           </View>
           {!canCancel && detail && !TERMINAL_STATUSES.includes(detail.status) && (
             <Text className="text-text-muted text-xs text-center mb-4 -mt-4">
-              Your worker has accepted, so this can no longer be cancelled here. Message them or contact support.
+              Your worker has accepted. Open the booking and tap Report a problem if you need to cancel.
             </Text>
           )}
 
