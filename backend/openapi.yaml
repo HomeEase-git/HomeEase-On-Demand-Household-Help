@@ -283,7 +283,7 @@ paths:
   /bookings/{id}/client-not-here:
     patch:
       tags: [Bookings]
-      summary: Worker at the door alerts the client (must have checked in). After noShowGraceMinutes the worker can cancel with fault CLIENT and no proof; the fee is auto-approved
+      summary: Worker at the door alerts the client (must have checked in). noShowGraceMinutes after the alert, and never before the booked start plus that grace, the worker can cancel with fault CLIENT and no proof; the fee is auto-approved. Not offered when the check-in was flagged outside the booked window
       parameters: [{ $ref: '#/components/parameters/BookingId' }]
       responses:
         '200':
@@ -299,7 +299,11 @@ paths:
                         type: object
                         properties:
                           clientNotHereAt: { type: string, format: date-time }
-                          canCancelAt: { type: string, format: date-time }
+                          canCancelAt:
+                            type: string
+                            format: date-time
+                            nullable: true
+                            description: max(clientNotHereAt, booked start) + noShowGraceMinutes. Null when the check-in was outside the booked window (cancel with proof instead)
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
         '409':
@@ -1390,6 +1394,12 @@ paths:
     patch:
       tags: [Bookings]
       summary: Client or worker cancels a booking before completion
+      description: |
+        A worker who has checked in must give `fault` (CLIENT or WORKER), a reason (10+ characters) and 1-5 proof photos;
+        a CLIENT-fault claim goes to admin review (PENDING_REVIEW). Exception: after `/client-not-here`, once its
+        `canCancelAt` has passed, `{ fault: CLIENT }` alone cancels with no proof and the fee is auto-approved
+        (APPROVED), or NOT_APPLICABLE when the admin fee setting is 0. Before the booked start a worker who has not
+        checked in sends `workerCancellationReason`.
       parameters: [{ $ref: '#/components/parameters/BookingId' }]
       requestBody:
         content:
@@ -1398,8 +1408,27 @@ paths:
               type: object
               properties:
                 reason: { type: string }
+                fault: { type: string, enum: [CLIENT, WORKER] }
+                proofUrls: { type: array, maxItems: 5, items: { type: string, format: uri } }
+                workerCancellationReason: { type: string, enum: [WORKER_FAULT, CLIENT_NO_SHOW, OTHER] }
       responses:
-        '200': { description: Cancelled }
+        '200':
+          description: Cancelled
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          id: { type: string }
+                          status: { type: string }
+                          penaltyAmount: { type: number, nullable: true }
+                          compensationStatus: { type: string, enum: [APPROVED, NOT_APPLICABLE, PENDING_REVIEW] }
+        '400': { $ref: '#/components/responses/BadRequest' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }

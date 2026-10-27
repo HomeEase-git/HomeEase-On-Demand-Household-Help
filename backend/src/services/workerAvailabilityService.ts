@@ -95,6 +95,19 @@ export function bookingStartInstant(booking: {
   return startInstant(booking.scheduledDate, bookingStartTime(booking));
 }
 
+/**
+ * When a worker who alerted an absent client can cancel as a client no-show:
+ * the grace period counts from the alert, but never from before the booked
+ * start, so an early check-in can't charge the client before their own time.
+ */
+export function clientNoShowDeadline(
+  booking: { scheduledDate: Date; scheduledTime?: string | null; timeSlot?: TimeSlot | null; clientNotHereAt: Date },
+  graceMinutes: number
+): Date {
+  const from = Math.max(booking.clientNotHereAt.getTime(), bookingStartInstant(booking).getTime());
+  return new Date(from + graceMinutes * 60 * 1000);
+}
+
 /** Whether a PH date is today (a same-day, "rush" booking). */
 export function isRushDate(date: Date | string, now: Date = new Date()): boolean {
   return toDayStart(date).getTime() === phTodayStart(now).getTime();

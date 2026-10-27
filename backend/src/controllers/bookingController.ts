@@ -1,5 +1,5 @@
 import { Request, Response } from 'express';
-import type { BookingStatus, ConditionType, PaymentMethodType, RoomType, WorkerCancellationReason } from '@prisma/client';
+import type { Booking, BookingStatus, ConditionType, PaymentMethodType, RoomType, WorkerCancellationReason } from '@prisma/client';
 import prisma from '@config/database';
 import { errorResponse } from '@utils/errorResponse';
 import { maskProfanity } from '@utils/profanityFilter';
@@ -25,6 +25,7 @@ import {
   checkBookingStart,
   bookingStartTime,
   bookingStartInstant,
+  clientNoShowDeadline,
   isOutsideBookedWindow,
   isWorkerAvailableOn,
   findNearbyJobs,
@@ -1167,7 +1168,7 @@ export const getBookingDetail = async (req: AuthRequest, res: Response) => {
         // "Client not here" no-show (worker side) and cancel-after-start request.
         clientNotHereAt: booking.clientNotHereAt,
         clientNoShowCancelAt: booking.clientNotHereAt
-          ? new Date(booking.clientNotHereAt.getTime() + (await getAppSettings()).noShowGraceMinutes * 60_000).toISOString()
+          ? ((await clientNoShowCancelAt(booking, (await getAppSettings()).noShowGraceMinutes))?.toISOString() ?? null)
           : null,
         cancelRequestedAt: booking.cancelRequestedAt,
         cancelRequestReason: booking.cancelRequestReason,
@@ -1766,6 +1767,25 @@ export const arriveBooking = async (req: AuthRequest, res: Response) => {
 };
 
 /**
+ * When the worker can cancel as a client no-show without proof, or null when
+ * that path is closed: no alert yet, or a check-in flagged outside the booked
+ * window (then it's the normal proof + admin review cancel).
+ */
+async function clientNoShowCancelAt(
+  booking: Pick<Booking, 'id' | 'scheduledDate' | 'scheduledTime' | 'timeSlot' | 'clientNotHereAt'>,
+  graceMinutes: number
+): Promise<Date | null> {
+  const { clientNotHereAt } = booking;
+  if (!clientNotHereAt) return null;
+  const arrival = await prisma.arrivalVerification.findUnique({
+    where: { bookingId: booking.id },
+    select: { isOutsideBookedWindow: true },
+  });
+  if (arrival?.isOutsideBookedWindow) return null;
+  return clientNoShowDeadline({ ...booking, clientNotHereAt }, graceMinutes);
+}
+
+/**
  * PATCH /api/bookings/:id/client-not-here
  * Worker, checked in but can't reach the client: alerts the client and starts
  * the grace wait. Once AppSettings.noShowGraceMinutes pass, the worker can
@@ -1813,7 +1833,7 @@ export const reportClientNotHere = async (req: AuthRequest, res: Response) => {
       message: 'The client has been alerted',
       data: {
         clientNotHereAt: clientNotHereAt.toISOString(),
-        canCancelAt: new Date(clientNotHereAt.getTime() + noShowGraceMinutes * 60_000).toISOString(),
+        canCancelAt: (await clientNoShowCancelAt({ ...booking, clientNotHereAt }, noShowGraceMinutes))?.toISOString() ?? null,
       },
     });
   } catch (error) {
@@ -3300,12 +3320,11 @@ export const cancelBooking = async (req: AuthRequest, res: Response) => {
 
     // The worker alerted the client at the door and waited out the grace
     // period: no photo proof needed, and the fee is approved automatically.
-    const clientNoShowConfirmed =
-      afterArrival &&
-      fault === 'CLIENT' &&
-      booking.status === 'ACCEPTED' &&
-      booking.clientNotHereAt != null &&
-      Date.now() >= booking.clientNotHereAt.getTime() + settings.noShowGraceMinutes * 60_000;
+    const noShowCancelAt =
+      afterArrival && fault === 'CLIENT' && booking.status === 'ACCEPTED'
+        ? await clientNoShowCancelAt(booking, settings.noShowGraceMinutes)
+        : null;
+    const clientNoShowConfirmed = noShowCancelAt != null && Date.now() >= noShowCancelAt.getTime();
     const cancelReason = clientNoShowConfirmed && !(typeof reason === 'string' && reason.trim().length >= 10) ? 'Client was not home' : reason;
 
     if (clientNoShowConfirmed) {
@@ -3346,7 +3365,20 @@ export const cancelBooking = async (req: AuthRequest, res: Response) => {
         : null;
 
     const penaltyAmount = cancelFault === 'WORKER' ? settings.noShowPenaltyAmount : null;
-    const compensationAmount = cancelFault === 'CLIENT' ? settings.clientFaultCompensationAmount : null;
+    // On the no-proof no-show path a zero fee (admin setting) means nothing to
+    // charge or approve: no amount, NOT_APPLICABLE, no fee wording.
+    const compensationAmount =
+      cancelFault === 'CLIENT' && !(clientNoShowConfirmed && settings.clientFaultCompensationAmount <= 0)
+        ? settings.clientFaultCompensationAmount
+        : null;
+    // The status the caller ends up with. An approved fee is still written as
+    // PENDING_REVIEW: applyClientFaultCompensationTx claims it from there.
+    const compensationStatus =
+      cancelFault !== 'CLIENT' || (clientNoShowConfirmed && !compensationAmount)
+        ? 'NOT_APPLICABLE'
+        : clientNoShowConfirmed
+          ? 'APPROVED'
+          : 'PENDING_REVIEW';
 
     // Who takes the auto-match scoring penalty for this cancellation — see
     // Cancellation.penalizedWorkerId's schema comment. A CLIENT-fault claim
@@ -3393,7 +3425,7 @@ export const cancelBooking = async (req: AuthRequest, res: Response) => {
           proofUrls,
           penaltyAmount,
           compensationAmount,
-          compensationStatus: cancelFault === 'CLIENT' ? 'PENDING_REVIEW' : 'NOT_APPLICABLE',
+          compensationStatus: compensationStatus === 'APPROVED' ? 'PENDING_REVIEW' : compensationStatus,
         },
         cancelReason
       );
@@ -3430,9 +3462,9 @@ export const cancelBooking = async (req: AuthRequest, res: Response) => {
     const notificationUserId =
       booking.clientId === req.user.userId ? booking.workerId : booking.clientId;
 
-    if (clientNoShowConfirmed) {
+    if (clientNoShowConfirmed && compensationAmount) {
       const displayId = formatDisplayId(id);
-      const amount = compensationAmount ?? 0;
+      const amount = compensationAmount;
       await notifyUser({
         userId: booking.clientId,
         type: 'CANCELLATION_COMPENSATION',
@@ -3445,6 +3477,22 @@ export const cancelBooking = async (req: AuthRequest, res: Response) => {
         type: 'CANCELLATION_COMPENSATION',
         title: 'Compensation approved',
         message: `Your cancellation of booking ${displayId} was accepted. You'll receive ₱${amount.toFixed(2)} (applied to any dues first, the rest with your next payout).`,
+        relatedId: id,
+      });
+    } else if (clientNoShowConfirmed) {
+      // No fee set: a plain cancel for both sides.
+      await notifyUser({
+        userId: booking.clientId,
+        type: 'BOOKING_CANCELLED',
+        title: 'Booking Cancelled',
+        message: `Your worker waited at the door and couldn't reach you, so booking ${formatDisplayId(id)} was cancelled.`,
+        relatedId: id,
+      });
+      await notifyUser({
+        userId: req.user.userId,
+        type: 'BOOKING_CANCELLED',
+        title: 'Booking Cancelled',
+        message: `Booking ${formatDisplayId(id)} was cancelled because the client wasn't home.`,
         relatedId: id,
       });
     } else if (notificationUserId) {
@@ -3489,7 +3537,9 @@ export const cancelBooking = async (req: AuthRequest, res: Response) => {
       success: true,
       message:
         clientNoShowConfirmed
-          ? 'Booking cancelled — the cancellation fee was approved'
+          ? compensationAmount
+            ? 'Booking cancelled — the cancellation fee was approved'
+            : 'Booking cancelled successfully'
           : cancelFault === 'CLIENT'
           ? 'Booking cancelled — HomeEase will review your proof'
           : penaltyAmount
@@ -3499,7 +3549,7 @@ export const cancelBooking = async (req: AuthRequest, res: Response) => {
         id: updated.id,
         status: updated.status,
         penaltyAmount,
-        compensationStatus: clientNoShowConfirmed ? 'APPROVED' : cancelFault === 'CLIENT' ? 'PENDING_REVIEW' : 'NOT_APPLICABLE',
+        compensationStatus,
       },
     });
   } catch (error) {

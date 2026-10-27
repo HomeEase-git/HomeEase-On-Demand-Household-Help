@@ -1828,7 +1828,7 @@ export async function respondToCancelRequest(bookingId: string, accept: boolean)
   }
 }
 
-export async function reportClientNotHere(bookingId: string): Promise<{ clientNotHereAt: string; canCancelAt: string }> {
+export async function reportClientNotHere(bookingId: string): Promise<{ clientNotHereAt: string; canCancelAt: string | null }> {
   try {
     return await api.patch(`/bookings/${bookingId}/client-not-here`);
   } catch (error) {

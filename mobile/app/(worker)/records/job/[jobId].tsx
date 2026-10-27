@@ -551,7 +551,12 @@ export default function JobDetailScreen() {
   const handleClientNotHere = () =>
     runAction("notHere", async () => {
       const { canCancelAt } = await api.reportClientNotHere(job.id);
-      alertModal.success("Client alerted", `We alerted your client. You can cancel at ${timeOf(canCancelAt)} if they don't come.`);
+      alertModal.success(
+        "Client alerted",
+        canCancelAt
+          ? `We alerted your client. You can cancel at ${timeOf(canCancelAt)} if they don't come.`
+          : "We alerted your client. If they don't come, cancel the job with a photo as proof."
+      );
     });
 
   const handleNoShowCancel = () => {

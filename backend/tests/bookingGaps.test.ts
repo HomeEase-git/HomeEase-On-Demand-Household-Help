@@ -2,10 +2,11 @@ import request from 'supertest';
 import app from '@/app';
 import prisma from '@config/database';
 import { BOOKING_PHOTO_BUCKET } from '@config/supabase';
-import { getAppSettings } from '@services/appSettingsService';
+import { getAppSettings, invalidateAppSettingsCache } from '@services/appSettingsService';
 import { sendSmsToUser } from '@utils/smsService';
 import { addDays, phTodayStart } from '@services/workerAvailabilityService';
-import { nudgeStuckBookings, remindAndAutoSettleCompletions } from '@workers/bookingWorker';
+import { cancelAsWorkerNoShow, nudgeStuckBookings, remindAndAutoSettleCompletions } from '@workers/bookingWorker';
+import { notifyUser } from '@utils/notify';
 import type { Prisma } from '@prisma/client';
 import { createTestUser, deleteTestUser, createTestBooking, deleteTestBooking } from './helpers';
 
@@ -127,8 +128,11 @@ describe('Booking gaps — notifications and detail fields', () => {
     const notHere = (id: string) =>
       request(app).patch(`/api/bookings/${id}/client-not-here`).set('Authorization', `Bearer ${workerToken}`);
 
+    // Booked yesterday, so the start is long past and the wait counts from the alert.
+    const pastStart = () => addDays(phTodayStart(), -1);
+
     it('alerts the client and gives the worker a cancel time', async () => {
-      const booking = await createTestBooking({ clientId, workerId, status: 'ACCEPTED', workerArrivedAt: new Date() });
+      const booking = await createTestBooking({ clientId, workerId, status: 'ACCEPTED', workerArrivedAt: new Date(), scheduledDate: pastStart() });
       createdBookingIds.push(booking.id);
 
       const res = await notHere(booking.id);
@@ -157,7 +161,7 @@ describe('Booking gaps — notifications and detail fields', () => {
 
     it('cancels as a client no-show without proof once the wait is over, fee auto-approved', async () => {
       const { noShowGraceMinutes, clientFaultCompensationAmount } = await getAppSettings();
-      const booking = await createTestBooking({ clientId, workerId, status: 'ACCEPTED', workerArrivedAt: new Date() });
+      const booking = await createTestBooking({ clientId, workerId, status: 'ACCEPTED', workerArrivedAt: new Date(), scheduledDate: pastStart() });
       createdBookingIds.push(booking.id);
       await prisma.booking.update({
         where: { id: booking.id },
@@ -182,6 +186,95 @@ describe('Booking gaps — notifications and detail fields', () => {
 
       await prisma.clientProfile.update({ where: { userId: clientId }, data: { paymentHoldAt: null, outstandingBalance: 0 } });
       await prisma.workerProfile.update({ where: { userId: workerId }, data: { compensationCredit: profileBefore.compensationCredit } });
+    });
+
+    it('counts the wait from the booked start after an early check-in', async () => {
+      const { noShowGraceMinutes } = await getAppSettings();
+      // Booked tomorrow: the worker checked in early, and the alert's own wait is over.
+      const booking = await createTestBooking({ clientId, workerId, status: 'ACCEPTED', workerArrivedAt: new Date() });
+      createdBookingIds.push(booking.id);
+      await prisma.arrivalVerification.create({
+        data: { bookingId: booking.id, workerLat: 0, workerLng: 0, distanceMeters: 0, isVerified: true, isOutsideBookedWindow: false },
+      });
+      const alert = await notHere(booking.id);
+      expect(alert.status).toBe(200);
+      const start = new Date(`${booking.scheduledDate.toISOString().slice(0, 10)}T09:00:00+08:00`).getTime();
+      expect(new Date(alert.body.data.canCancelAt).getTime()).toBe(start + noShowGraceMinutes * 60_000);
+
+      await prisma.booking.update({
+        where: { id: booking.id },
+        data: { clientNotHereAt: new Date(Date.now() - (noShowGraceMinutes + 1) * 60_000) },
+      });
+      const detail = await request(app).get(`/api/bookings/${booking.id}`).set('Authorization', `Bearer ${workerToken}`);
+      expect(new Date(detail.body.data.clientNoShowCancelAt).getTime()).toBe(start + noShowGraceMinutes * 60_000);
+
+      const res = await request(app)
+        .patch(`/api/bookings/${booking.id}/cancel`)
+        .set('Authorization', `Bearer ${workerToken}`)
+        .send({ fault: 'CLIENT' });
+      expect(res.status).toBe(400);
+      expect(res.body.message).toBe('Explain what happened (at least 10 characters)');
+      expect(await prisma.cancellation.count({ where: { bookingId: booking.id } })).toBe(0);
+    });
+
+    it('needs proof when the check-in was flagged outside the booked window', async () => {
+      const { noShowGraceMinutes } = await getAppSettings();
+      const booking = await createTestBooking({ clientId, workerId, status: 'ACCEPTED', workerArrivedAt: new Date(), scheduledDate: pastStart() });
+      createdBookingIds.push(booking.id);
+      await prisma.arrivalVerification.create({
+        data: { bookingId: booking.id, workerLat: 0, workerLng: 0, distanceMeters: 0, isVerified: true, isOutsideBookedWindow: true },
+      });
+      const alert = await notHere(booking.id);
+      expect(alert.status).toBe(200);
+      expect(alert.body.data.canCancelAt).toBeNull();
+      await prisma.booking.update({
+        where: { id: booking.id },
+        data: { clientNotHereAt: new Date(Date.now() - (noShowGraceMinutes + 1) * 60_000) },
+      });
+      const detail = await request(app).get(`/api/bookings/${booking.id}`).set('Authorization', `Bearer ${workerToken}`);
+      expect(detail.body.data.clientNoShowCancelAt).toBeNull();
+
+      const res = await request(app)
+        .patch(`/api/bookings/${booking.id}/cancel`)
+        .set('Authorization', `Bearer ${workerToken}`)
+        .send({ fault: 'CLIENT' });
+      expect(res.status).toBe(400);
+      expect(await prisma.cancellation.count({ where: { bookingId: booking.id } })).toBe(0);
+    });
+
+    it('with a zero fee, cancels with no fee, no hold and no review', async () => {
+      const { noShowGraceMinutes } = await getAppSettings();
+      const settings = await prisma.appSettings.upsert({ where: { id: 'singleton' }, update: {}, create: { id: 'singleton' } });
+      await prisma.appSettings.update({ where: { id: 'singleton' }, data: { clientFaultCompensationAmount: 0 } });
+      invalidateAppSettingsCache();
+      try {
+        const booking = await createTestBooking({ clientId, workerId, status: 'ACCEPTED', workerArrivedAt: new Date(), scheduledDate: pastStart() });
+        createdBookingIds.push(booking.id);
+        await prisma.booking.update({
+          where: { id: booking.id },
+          data: { clientNotHereAt: new Date(Date.now() - (noShowGraceMinutes + 1) * 60_000) },
+        });
+
+        const res = await request(app)
+          .patch(`/api/bookings/${booking.id}/cancel`)
+          .set('Authorization', `Bearer ${workerToken}`)
+          .send({ fault: 'CLIENT' });
+        expect(res.status).toBe(200);
+        expect(res.body.data.compensationStatus).toBe('NOT_APPLICABLE');
+        const cancellation = await prisma.cancellation.findFirstOrThrow({ where: { bookingId: booking.id } });
+        expect(cancellation).toMatchObject({ compensationStatus: 'NOT_APPLICABLE', compensationAmount: null });
+        expect((await prisma.clientProfile.findUniqueOrThrow({ where: { userId: clientId } })).paymentHoldAt).toBeNull();
+        expect(await prisma.notification.count({ where: { relatedId: booking.id, type: 'CANCELLATION_COMPENSATION' } })).toBe(0);
+        const note = await prisma.notification.findFirstOrThrow({ where: { userId: clientId, relatedId: booking.id, type: 'BOOKING_CANCELLED' } });
+        expect(note.message).not.toMatch(/fee|₱/);
+        expect(await prisma.notification.count({ where: { userId: workerId, relatedId: booking.id, type: 'BOOKING_CANCELLED' } })).toBe(1);
+      } finally {
+        await prisma.appSettings.update({
+          where: { id: 'singleton' },
+          data: { clientFaultCompensationAmount: settings.clientFaultCompensationAmount },
+        });
+        invalidateAppSettingsCache();
+      }
     });
 
     it('still needs proof before the wait is over', async () => {
