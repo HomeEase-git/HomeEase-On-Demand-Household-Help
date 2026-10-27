@@ -1,3 +1,4 @@
+import crypto from 'crypto';
 import request from 'supertest';
 import app from '@/app';
 import prisma from '@config/database';
@@ -51,6 +52,12 @@ describe('Booking gaps — notifications and detail fields', () => {
   });
 
   afterAll(async () => {
+    // Real dev-DB admins get the admin alerts too: remove what these tests sent,
+    // keyed by the test bookings and the disputes opened on them.
+    const disputes = await prisma.dispute.findMany({ where: { bookingId: { in: createdBookingIds } }, select: { id: true } });
+    await prisma.notification.deleteMany({
+      where: { relatedId: { in: [...createdBookingIds, ...disputes.map((d) => d.id)] } },
+    });
     for (const id of createdBookingIds) await deleteTestBooking(id);
     for (const id of createdUserIds) await deleteTestUser(id);
     await prisma.$disconnect();
@@ -205,24 +212,83 @@ describe('Booking gaps — notifications and detail fields', () => {
         data: { clientNotHereAt: new Date(Date.now() - (noShowGraceMinutes + 1) * 60_000) },
       });
       const profileBefore = await prisma.workerProfile.findUniqueOrThrow({ where: { userId: workerId } });
+      const clientBefore = await prisma.clientProfile.findUniqueOrThrow({ where: { userId: clientId } });
+
+      try {
+        const res = await request(app)
+          .patch(`/api/bookings/${booking.id}/cancel`)
+          .set('Authorization', `Bearer ${workerToken}`)
+          .send({ fault: 'CLIENT' });
+        expect(res.status).toBe(200);
+        expect(res.body.data.compensationStatus).toBe('APPROVED');
+
+        const cancellation = await prisma.cancellation.findFirstOrThrow({ where: { bookingId: booking.id } });
+        expect(cancellation.compensationStatus).toBe('APPROVED');
+        expect(cancellation.reviewedById).toBeNull();
+        expect((await prisma.clientProfile.findUniqueOrThrow({ where: { userId: clientId } })).paymentHoldAt).not.toBeNull();
+        const profileAfter = await prisma.workerProfile.findUniqueOrThrow({ where: { userId: workerId } });
+        expect(profileAfter.compensationCredit - profileBefore.compensationCredit).toBe(clientFaultCompensationAmount);
+        expect(await prisma.notification.count({ where: { relatedId: booking.id, type: 'CANCELLATION_COMPENSATION', user: { role: 'ADMIN' } } })).toBe(0);
+        const fee = await prisma.notification.findFirstOrThrow({ where: { userId: clientId, relatedId: booking.id, type: 'CANCELLATION_COMPENSATION' } });
+        expect(fee.message).toMatch(/until it's settled\. If you were home or want to pay, contact support\.$/);
+      } finally {
+        await prisma.clientProfile.update({
+          where: { userId: clientId },
+          data: {
+            paymentHoldAt: clientBefore.paymentHoldAt,
+            paymentHoldNote: clientBefore.paymentHoldNote,
+            outstandingBalance: clientBefore.outstandingBalance,
+          },
+        });
+        await prisma.workerProfile.update({ where: { userId: workerId }, data: { compensationCredit: profileBefore.compensationCredit } });
+      }
+    });
+
+    it('a WORKER-fault cancel after the wait is the normal penalty path, with no client fee', async () => {
+      const { noShowGraceMinutes, noShowPenaltyAmount } = await getAppSettings();
+      const booking = await createTestBooking({ clientId, workerId, status: 'ACCEPTED', workerArrivedAt: new Date(), scheduledDate: pastStart() });
+      createdBookingIds.push(booking.id);
+      await prisma.booking.update({
+        where: { id: booking.id },
+        data: { clientNotHereAt: new Date(Date.now() - (noShowGraceMinutes + 1) * 60_000) },
+      });
+      await prisma.workerProfile.update({ where: { userId: workerId }, data: { activeJobCount: { increment: 1 } } });
+      const before = await prisma.workerProfile.findUniqueOrThrow({ where: { userId: workerId } });
+
+      try {
+        const res = await request(app)
+          .patch(`/api/bookings/${booking.id}/cancel`)
+          .set('Authorization', `Bearer ${workerToken}`)
+          .send({ fault: 'WORKER', reason: 'My motorbike broke down', proofUrls: [photoUrl(workerId, 'bike')] });
+        expect(res.status).toBe(200);
+        expect(res.body.data).toMatchObject({ compensationStatus: 'NOT_APPLICABLE', penaltyAmount: noShowPenaltyAmount });
+        const cancellation = await prisma.cancellation.findFirstOrThrow({ where: { bookingId: booking.id } });
+        expect(cancellation).toMatchObject({ fault: 'WORKER', compensationAmount: null, penalizedWorkerId: workerId });
+        expect(await prisma.notification.count({ where: { userId: clientId, relatedId: booking.id, type: 'CANCELLATION_COMPENSATION' } })).toBe(0);
+      } finally {
+        await prisma.workerProfile.update({
+          where: { userId: workerId },
+          data: { commissionOwed: before.commissionOwed, debtHoldAt: before.debtHoldAt },
+        });
+      }
+    });
+
+    it('does not auto-approve a client no-show once the job is in progress', async () => {
+      const { noShowGraceMinutes } = await getAppSettings();
+      const booking = await createTestBooking({ clientId, workerId, status: 'IN_PROGRESS', workerArrivedAt: new Date(), scheduledDate: pastStart() });
+      createdBookingIds.push(booking.id);
+      await prisma.booking.update({
+        where: { id: booking.id },
+        data: { clientNotHereAt: new Date(Date.now() - (noShowGraceMinutes + 1) * 60_000) },
+      });
 
       const res = await request(app)
         .patch(`/api/bookings/${booking.id}/cancel`)
         .set('Authorization', `Bearer ${workerToken}`)
         .send({ fault: 'CLIENT' });
-      expect(res.status).toBe(200);
-      expect(res.body.data.compensationStatus).toBe('APPROVED');
-
-      const cancellation = await prisma.cancellation.findFirstOrThrow({ where: { bookingId: booking.id } });
-      expect(cancellation.compensationStatus).toBe('APPROVED');
-      expect(cancellation.reviewedById).toBeNull();
-      expect((await prisma.clientProfile.findUniqueOrThrow({ where: { userId: clientId } })).paymentHoldAt).not.toBeNull();
-      const profileAfter = await prisma.workerProfile.findUniqueOrThrow({ where: { userId: workerId } });
-      expect(profileAfter.compensationCredit - profileBefore.compensationCredit).toBe(clientFaultCompensationAmount);
-      expect(await prisma.notification.count({ where: { relatedId: booking.id, type: 'CANCELLATION_COMPENSATION', user: { role: 'ADMIN' } } })).toBe(0);
-
-      await prisma.clientProfile.update({ where: { userId: clientId }, data: { paymentHoldAt: null, outstandingBalance: 0 } });
-      await prisma.workerProfile.update({ where: { userId: workerId }, data: { compensationCredit: profileBefore.compensationCredit } });
+      expect(res.status).toBe(400);
+      expect(res.body.message).toBe('Explain what happened (at least 10 characters)');
+      expect(await prisma.cancellation.count({ where: { bookingId: booking.id } })).toBe(0);
     });
 
     it('counts the wait from the booked start after an early check-in', async () => {
@@ -371,6 +437,21 @@ describe('Booking gaps — notifications and detail fields', () => {
 
     const good = await report([photoUrl(clientId, 'mine')]);
     expect(good.status).toBe(200);
+  });
+
+  it("rejects refund evidence that isn't the client's own upload", async () => {
+    // A payment id that doesn't exist: the evidence check runs first, so an
+    // own photo gets the normal 404 and someone else's is 400.
+    const refund = (evidenceUrls: string[]) =>
+      request(app)
+        .post(`/api/payments/${crypto.randomUUID()}/refund`)
+        .set('Authorization', `Bearer ${clientToken}`)
+        .send({ reason: 'Job was not done', evidenceUrls });
+
+    const bad = await refund([photoUrl(workerId, 'someone-elses')]);
+    expect(bad.status).toBe(400);
+    expect(bad.body.message).toBe('Upload the photos again — one of them could not be verified');
+    expect((await refund([photoUrl(clientId, 'mine')])).status).toBe(404);
   });
 
   it('adds an invoice report to an open problem dispute instead of opening a second', async () => {
@@ -590,6 +671,8 @@ describe('Booking gaps — notifications and detail fields', () => {
       expect(res.status).toBe(200);
       expect(await prisma.dispute.count({ where: { bookingId: booking.id, status: 'OPEN' } })).toBe(1);
       expect((await prisma.booking.findUniqueOrThrow({ where: { id: booking.id } })).cancelRequestEscalatedAt).not.toBeNull();
+      const told = await prisma.notification.findFirstOrThrow({ where: { userId: clientId, relatedId: booking.id, type: 'BOOKING_PROBLEM_REPORTED' } });
+      expect(told.message).toBe("Your worker didn't agree to cancel, so HomeEase will decide. We'll tell you the outcome.");
 
       const again = await respond(booking.id, true);
       expect(again.status).toBe(409);
@@ -627,9 +710,33 @@ describe('Booking gaps — notifications and detail fields', () => {
     });
   });
 
+  /**
+   * These tests run the real sweep on purpose (its queries are what's under
+   * test), but the dev DB is a copy of real data, so its top-level scans are
+   * narrowed to this file's bookings: genuinely overdue real rows are left
+   * alone. Test-only spies; production code has no test filter.
+   */
+  function scopeSweepToTestRows() {
+    type FindMany = { findMany: (args?: { where?: object }) => Promise<unknown> };
+    const narrow = (delegate: FindMany, where: () => object) => {
+      const real = delegate.findMany.bind(delegate);
+      return jest
+        .spyOn(delegate, 'findMany')
+        .mockImplementation(((args: { where?: object } = {}) => real({ ...args, where: { AND: [args.where ?? {}, where()] } })) as never);
+    };
+    const spies = [
+      narrow(prisma.booking as unknown as FindMany, () => ({ id: { in: createdBookingIds } })),
+      narrow(prisma.payment as unknown as FindMany, () => ({ bookingId: { in: createdBookingIds } })),
+      narrow(prisma.payout as unknown as FindMany, () => ({ id: { in: [] } })),
+    ];
+    return () => spies.forEach((spy) => spy.mockRestore());
+  }
+
   describe('stuck-booking sweep', () => {
-    // The sweep scans the shared dev DB, so these run on the real clock with
-    // timestamps backdated rather than a fake future "now".
+    // Real clock with timestamps backdated rather than a fake future "now".
+    let unscope: () => void;
+    beforeEach(() => (unscope = scopeSweepToTestRows()));
+    afterEach(() => unscope());
     const MIN = 60_000;
     const HOUR = 60 * MIN;
     const ago = (ms: number) => new Date(Date.now() - ms);
@@ -739,7 +846,10 @@ describe('Booking gaps — notifications and detail fields', () => {
 
   describe('cash invoices', () => {
     const HOUR = 60 * 60_000;
-    // Real clock, backdated invoices: only genuinely due rows are touched.
+    // Real clock, backdated invoices; the sweep is scoped to this file's rows.
+    let unscope: () => void;
+    beforeEach(() => (unscope = scopeSweepToTestRows()));
+    afterEach(() => unscope());
     async function seedInvoice(hoursAgo: number, data: Prisma.BookingUncheckedUpdateInput = {}) {
       const created = await createTestBooking({ clientId, workerId, status: 'PENDING_COMPLETION' });
       createdBookingIds.push(created.id);
