@@ -53,7 +53,7 @@ function formatWhen(dateIso, time) {
 }
 
 function formatPeso(amount) {
-  return amount == null ? '—' : `₱${Number(amount).toLocaleString('en-PH', { minimumFractionDigits: 2 })}`
+  return !amount ? 'No fee' : `₱${Number(amount).toLocaleString('en-PH', { minimumFractionDigits: 2 })}`
 }
 
 /**
@@ -99,7 +99,7 @@ export default function CancellationReviews() {
     Scheduled: formatWhen(r.scheduledDate, r.scheduledTime),
     Client: r.client?.fullName ?? '',
     Worker: r.worker?.fullName ?? '',
-    Fee: r.compensationAmount ?? '',
+    Fee: r.compensationAmount ?? 0,
     Status: r.compensationStatus,
     'Review Note': r.reviewNote ?? '',
   })
@@ -149,7 +149,7 @@ export default function CancellationReviews() {
     setSubmitting(true)
     try {
       await reviewCancellation(selected.bookingId, decision, note.trim())
-      showSuccess(decision === 'APPROVE' ? 'Approved — the worker will be compensated.' : 'Rejected — the penalty was applied.')
+      showSuccess(decision === 'APPROVE' ? (selected.compensationAmount ? 'Approved — the worker will be compensated.' : 'Approved — the client was at fault. No fee was charged.') : 'Rejected — the penalty was applied.')
       setRows((prev) =>
         params.statusTab === 'Pending'
           ? prev.filter((r) => r.bookingId !== selected.bookingId)
@@ -342,7 +342,9 @@ export default function CancellationReviews() {
 
             {selected.compensationStatus === 'PENDING_REVIEW' && decision && (
               <div style={{ marginTop: '1rem' }}>
-                <p className="modal-body">{DECISIONS[decision].description}</p>
+                <p className="modal-body">{decision === 'APPROVE' && !selected.compensationAmount
+                    ? 'The proof shows the client caused the cancellation. There is no cancellation fee, so nothing is charged.'
+                    : DECISIONS[decision].description}</p>
                 <label htmlFor="cancellation-note" style={{ display: 'block', marginBottom: '0.35rem', fontWeight: 600 }}>
                   Note (sent to both sides, required)
                 </label>
