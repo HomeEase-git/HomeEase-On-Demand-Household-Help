@@ -531,6 +531,13 @@ describe('Booking gaps — notifications and detail fields', () => {
       expect(await status(booking.id)).toBe('PENDING_COMPLETION');
     });
 
+    it('sends no second reminder for a booking that went through a dispute', async () => {
+      const booking = await seedInvoice(49, { disputeResolvedAt: new Date() });
+      await remindAndAutoSettleCompletions();
+      expect(await prisma.notification.count({ where: { relatedId: booking.id, message: { contains: 'in 1 day' } } })).toBe(0);
+      expect((await prisma.booking.findUniqueOrThrow({ where: { id: booking.id } })).cashSecondReminderSentAt).toBeNull();
+    });
+
     it('lets the worker report that the client did not pay', async () => {
       const booking = await seedInvoice(1);
       const res = await request(app).patch(`/api/bookings/${booking.id}/cash-not-paid`).set('Authorization', `Bearer ${workerToken}`);

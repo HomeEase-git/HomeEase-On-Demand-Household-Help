@@ -107,6 +107,7 @@ router.patch('/:id/complete', restrictTo('WORKER'), completeBooking);
 
 // Worker confirms the client paid a cash invoice (worker only)
 router.patch('/:id/cash-received', restrictTo('WORKER'), markCashReceived);
+// Worker says the client has not paid the cash invoice; opens a dispute (worker only)
 router.patch('/:id/cash-not-paid', restrictTo('WORKER'), reportCashNotPaid);
 
 // "Pay now" on a GCash/Maya invoice — returns the checkout URL (client only)

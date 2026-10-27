@@ -247,31 +247,38 @@ export async function remindAndAutoSettleCompletions(): Promise<void> {
     where: {
       status: 'PENDING_COMPLETION',
       OR: [{ paymentMethodType: 'CASH' }, { paymentMethodType: null }],
-      workerCompletedAt: { lte: secondReminderCutoff },
+      // Past 72h it is settled in this same run, so no "in 1 day" warning.
+      workerCompletedAt: { lte: secondReminderCutoff, gt: cashSettleCutoff },
+      // A booking that went through a dispute is never auto-settled.
+      disputeResolvedAt: null,
       cashSecondReminderSentAt: null,
     },
   });
   for (const booking of needsSecondReminder) {
-    const claimed = await prisma.booking.updateMany({
-      where: { id: booking.id, status: 'PENDING_COMPLETION', cashSecondReminderSentAt: null },
-      data: { cashSecondReminderSentAt: new Date() },
-    });
-    if (claimed.count !== 1) continue;
-    await notifyUser({
-      userId: booking.clientId,
-      type: 'COMPLETION_REMINDER',
-      title: 'Your invoice is still unpaid',
-      message: 'Your cash invoice is still open. It will be recorded as paid in 1 day unless you report it.',
-      relatedId: booking.id,
-    });
-    if (booking.workerId) {
+    try {
+      const claimed = await prisma.booking.updateMany({
+        where: { id: booking.id, status: 'PENDING_COMPLETION', disputeResolvedAt: null, cashSecondReminderSentAt: null },
+        data: { cashSecondReminderSentAt: new Date() },
+      });
+      if (claimed.count !== 1) continue;
       await notifyUser({
-        userId: booking.workerId,
+        userId: booking.clientId,
         type: 'COMPLETION_REMINDER',
-        title: 'Did you get the cash?',
-        message: `If the client paid you for booking ${formatDisplayId(booking.id)}, open the job and tap Cash received.`,
+        title: 'Your invoice is still unpaid',
+        message: 'Your cash invoice is still open. It will be recorded as paid in 1 day unless you report it.',
         relatedId: booking.id,
       });
+      if (booking.workerId) {
+        await notifyUser({
+          userId: booking.workerId,
+          type: 'COMPLETION_REMINDER',
+          title: 'Did you get the cash?',
+          message: `If the client paid you for booking ${formatDisplayId(booking.id)}, open the job and tap Cash received.`,
+          relatedId: booking.id,
+        });
+      }
+    } catch (error) {
+      console.error(`Failed to send the second cash reminder for booking ${booking.id}:`, error);
     }
   }
 

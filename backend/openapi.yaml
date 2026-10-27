@@ -462,7 +462,7 @@ paths:
   /bookings/{id}/cash-not-paid:
     patch:
       tags: [Bookings]
-      summary: Worker reports the client has not paid a cash invoice (PENDING_COMPLETION) — booking goes DISPUTED, admins and the client are notified. No body
+      summary: Worker reports the client has not paid a cash invoice (PENDING_COMPLETION) â€” booking goes DISPUTED, admins and the client are notified. No body
       parameters: [{ $ref: '#/components/parameters/BookingId' }]
       responses:
         '200': { description: Reported; returns id, status DISPUTED and the disputeId }
