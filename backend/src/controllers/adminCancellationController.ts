@@ -1,12 +1,12 @@
 import { Request, Response } from 'express';
 import prisma from '@config/database';
-import { postCancellationFee } from '@services/ledgerService';
 import { errorResponse } from '@utils/errorResponse';
 import { writeAuditLog } from '@utils/auditLog';
 import { notifyUser } from '@utils/notify';
 import { formatDisplayId } from '@utils/formatters';
 import { getAppSettings } from '@services/appSettingsService';
-import { chargePenaltyTx, creditCompensationTx } from '@services/debtLedgerService';
+import { chargePenaltyTx } from '@services/debtLedgerService';
+import { applyClientFaultCompensationTx, claimCompensationReviewTx } from '@services/cancellationCompensationService';
 import type { JwtPayload } from '@/types/index';
 
 interface AuthRequest extends Request {
@@ -21,6 +21,8 @@ interface AuthRequest extends Request {
 //             hold until it's settled, same as an unpaid booking) and the
 //             worker is compensated (against their dues first, the rest on
 //             their next payout — see debtLedgerService.creditCompensationTx).
+//             With no fee on the claim (the fee was 0 when it was filed) the
+//             claim is only marked APPROVED: no hold, no ledger, no credit.
 //   REJECT  — the proof doesn't hold up, so it's treated as the worker's
 //             fault: the no-show penalty applies.
 
@@ -119,44 +121,47 @@ export const reviewCancellation = async (req: AuthRequest, res: Response) => {
     }
 
     const settings = await getAppSettings();
-    const amount = cancellation.compensationAmount ?? settings.clientFaultCompensationAmount;
+    // The fee in force when the claim was filed; a later change doesn't apply.
+    const amount = cancellation.compensationAmount ?? 0;
     const penalty = settings.noShowPenaltyAmount;
     const displayId = formatDisplayId(bookingId);
 
     await prisma.$transaction(async (tx) => {
-      // Status-guarded so two admins can't both decide it.
-      const claim = await tx.cancellation.updateMany({
-        where: { bookingId, compensationStatus: 'PENDING_REVIEW' },
-        data: {
-          compensationStatus: decision === 'APPROVE' ? 'APPROVED' : 'REJECTED',
+      if (decision === 'APPROVE' && amount <= 0) {
+        const claimed = await claimCompensationReviewTx(tx, bookingId, {
+          compensationStatus: 'APPROVED',
           reviewedById: adminId ?? null,
-          reviewedAt: new Date(),
           reviewNote: note.trim(),
-          ...(decision === 'REJECT'
-            ? { fault: 'WORKER', penalizedWorkerId: workerId, penaltyAmount: penalty > 0 ? penalty : null }
-            : {}),
-        },
+        });
+        if (!claimed) throw new Error('ALREADY_REVIEWED');
+        return;
+      }
+      if (decision === 'APPROVE') {
+        const claimed = await applyClientFaultCompensationTx(tx, {
+          bookingId,
+          clientId,
+          workerId,
+          amount,
+          reviewedById: adminId ?? null,
+          reviewNote: note.trim(),
+        });
+        if (!claimed) throw new Error('ALREADY_REVIEWED');
+        return;
+      }
+
+      const claimed = await claimCompensationReviewTx(tx, bookingId, {
+        compensationStatus: 'REJECTED',
+        reviewedById: adminId ?? null,
+        reviewNote: note.trim(),
+        fault: 'WORKER',
+        penalizedWorkerId: workerId,
+        penaltyAmount: penalty > 0 ? penalty : null,
       });
-      if (claim.count === 0) throw new Error('ALREADY_REVIEWED');
+      if (!claimed) throw new Error('ALREADY_REVIEWED');
 
       const workerProfile = await tx.workerProfile.findUniqueOrThrow({ where: { userId: workerId }, select: { id: true } });
 
-      if (decision === 'APPROVE') {
-        const client = await tx.clientProfile.findUnique({ where: { userId: clientId }, select: { outstandingBalance: true } });
-        await tx.clientProfile.update({
-          where: { userId: clientId },
-          data: {
-            outstandingBalance: (client?.outstandingBalance ?? 0) + amount,
-            paymentHoldAt: new Date(),
-            paymentHoldNote: `Cancellation fee ₱${amount.toFixed(2)} for booking ${displayId}`,
-          },
-        });
-        await creditCompensationTx(tx, workerProfile.id, amount, {
-          bookingId,
-          note: `Compensation for client-caused cancellation of ${displayId}`,
-        });
-        await postCancellationFee(tx, clientId, workerId, amount, { key: bookingId, bookingId });
-      } else if (penalty > 0) {
+      if (penalty > 0) {
         await chargePenaltyTx(tx, workerProfile.id, penalty, {
           bookingId,
           note: `Cancellation proof for ${displayId} was not accepted`,
@@ -164,7 +169,22 @@ export const reviewCancellation = async (req: AuthRequest, res: Response) => {
       }
     });
 
-    if (decision === 'APPROVE') {
+    if (decision === 'APPROVE' && amount <= 0) {
+      await notifyUser({
+        userId: clientId,
+        type: 'BOOKING_CANCELLED',
+        title: 'Cancellation reviewed',
+        message: `We reviewed the cancellation of booking ${displayId} and found it was caused on your side. No fee applies. Note: ${note.trim()}`,
+        relatedId: bookingId,
+      });
+      await notifyUser({
+        userId: workerId,
+        type: 'CANCELLATION_COMPENSATION',
+        title: 'Cancellation proof accepted',
+        message: `Your proof for booking ${displayId} was accepted. No penalty applies. Note: ${note.trim()}`,
+        relatedId: bookingId,
+      });
+    } else if (decision === 'APPROVE') {
       await notifyUser({
         userId: clientId,
         type: 'CANCELLATION_COMPENSATION',
@@ -199,7 +219,10 @@ export const reviewCancellation = async (req: AuthRequest, res: Response) => {
       metadata: { bookingId, decision, amount: decision === 'APPROVE' ? amount : penalty },
     });
 
-    return res.json({ success: true, message: decision === 'APPROVE' ? 'Compensation approved' : 'Claim rejected — penalty applied' });
+    return res.json({
+      success: true,
+      message: decision === 'REJECT' ? 'Claim rejected — penalty applied' : amount > 0 ? 'Compensation approved' : 'Claim approved',
+    });
   } catch (error: any) {
     if (error?.message === 'ALREADY_REVIEWED') {
       return res.status(409).json(errorResponse(409, 'This cancellation was already reviewed'));

@@ -22,24 +22,20 @@ describe('config/pricing env parsing', () => {
     return require('@config/pricing');
   }
 
-  it('falls back to the 2% withholding default when the env var is unset', () => {
-    const { WITHHOLDING_TAX_RATE } = loadWithEnv(undefined, undefined);
-    expect(WITHHOLDING_TAX_RATE).toBe(0.02);
+  it('withholds no tax, whatever the env says (workers file their own)', () => {
+    expect(loadWithEnv(undefined, undefined).WITHHOLDING_TAX_RATE).toBe(0);
+    expect(loadWithEnv(undefined, '0.05').WITHHOLDING_TAX_RATE).toBe(0);
   });
 
-  it('falls back to the default when the env var is an empty string (not 0)', () => {
-    const { WITHHOLDING_TAX_RATE, COMMISSION_RATE } = loadWithEnv('', '');
-    expect(WITHHOLDING_TAX_RATE).toBe(0.02);
-    expect(COMMISSION_RATE).toBe(0.1);
+  it('falls back to the commission default when the env var is an empty string (not 0)', () => {
+    expect(loadWithEnv('', undefined).COMMISSION_RATE).toBe(0.1);
   });
 
-  it('uses an explicit env override when provided', () => {
-    const { WITHHOLDING_TAX_RATE } = loadWithEnv(undefined, '0.05');
-    expect(WITHHOLDING_TAX_RATE).toBe(0.05);
+  it('uses an explicit commission override when provided', () => {
+    expect(loadWithEnv('0.15', undefined).COMMISSION_RATE).toBe(0.15);
   });
 
-  it('clamps out-of-range values to [0, 1]', () => {
-    const { WITHHOLDING_TAX_RATE } = loadWithEnv(undefined, '5');
-    expect(WITHHOLDING_TAX_RATE).toBe(1);
+  it('clamps out-of-range commission values to [0, 1]', () => {
+    expect(loadWithEnv('5', undefined).COMMISSION_RATE).toBe(1);
   });
 });

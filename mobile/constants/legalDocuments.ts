@@ -13,9 +13,9 @@
 //   terms until a Philippine lawyer reviews them. Don't reword them casually.
 
 export const LEGAL_VERSIONS = {
-  CLIENT_USER_AGREEMENT: "2026-09-27",
-  WORKER_SERVICE_AGREEMENT: "2026-09-27",
-  PRIVACY_NOTICE: "2026-09-30",
+  CLIENT_USER_AGREEMENT: "2026-10-26",
+  WORKER_SERVICE_AGREEMENT: "2026-10-26",
+  PRIVACY_NOTICE: "2026-10-25",
   KYC_CONSENT: "2026-09-25",
 } as const;
 
@@ -78,9 +78,8 @@ export const CLIENT_TERMS: LegalDocument = {
         "You pick an exact start time between 7:00 AM and 6:00 PM.",
         "Same-day bookings are allowed at least 2 hours ahead, with a same-day fee of 25% of the service price.",
         "A booking request expires if no worker accepts it in time. Nothing is charged for an expired request.",
-        "Some jobs need a quote. Materials in a quote come with photos of the receipt and of the materials used. You can approve the quote, refuse it so the worker revises it, or open a dispute. If you don't respond within 24 hours, it is approved automatically.",
+        "When the job is done, your worker sends an invoice: the job, plus any parts they bought (with a photo of the receipt) or extra work they did (with a photo). Pay it in cash to your worker or with GCash or Maya in the app. If something on the invoice is wrong, report it before you pay and HomeEase reviews it.",
         "After an inspection or diagnosis, the worker may propose a follow-up job or a follow-up visit date. A follow-up job is only booked once you confirm it.",
-        "If a worker proposes an add-on during the job and you don't respond within 6 hours, it is approved automatically.",
         "If a worker needs to move your booking because of a scheduling conflict and you don't respond within 24 hours, the new date is confirmed automatically. You can instead cancel free of charge.",
         "If you ask to reschedule and the worker doesn't respond within 48 hours, your request is declined and the original date stays.",
       ],
@@ -91,18 +90,18 @@ export const CLIENT_TERMS: LegalDocument = {
         "The total is shown before you confirm a booking. It can include:",
       ],
       bullets: [
-        "The price for the job, which is fixed by HomeEase, times the number of units where the job is priced per unit, plus any add-ons or approved quote.",
-        "A tier fee for Pro or Expert workers (based on their rating, completed jobs and years of experience).",
+        "The price for the job, which is fixed by HomeEase, times the number of pieces where the job is priced per piece, plus any packages you choose.",
+        "Parts and extra work your worker adds to the invoice at the end of the job.",
+        "A tier fee for Skilled or Expert workers (based on their rating, completed jobs and years of experience).",
         "A same-day fee of 25% of the service price, for same-day bookings.",
         "A distance fee for travel beyond the free distance, calculated from the worker's address to yours.",
         "An optional tip, which goes in full to the worker.",
-        "12% VAT, only if the worker is VAT-registered.",
       ],
     },
     {
       heading: "6. Payment",
       bullets: [
-        "You pay after the job is done. When the worker marks the job complete, you confirm it. If you don't respond within 24 hours, completion is confirmed automatically.",
+        "You pay after the job is done. For cash, you pay the worker when they finish, and the job is complete when they mark it done. For GCash or Maya, you're asked to pay as soon as the worker marks the job done.",
         "GCash and Maya payments are processed by our payment provider, Xendit. HomeEase does not store your GCash or Maya login details.",
         "Cash is paid directly to the worker.",
         "If a GCash or Maya payment is still unpaid 72 hours after completion, it becomes a dispute handled by HomeEase. While a balance is unpaid, you may not be able to make new bookings.",
@@ -120,7 +119,7 @@ export const CLIENT_TERMS: LegalDocument = {
     {
       heading: "8. Problems, disputes and refunds",
       paragraphs: [
-        "If something goes wrong, open a dispute on the booking in the app. A HomeEase admin reviews the booking record, chat messages, photos, quotes and the worker's check-in location, and decides the outcome, which may include a refund to your original payment method. We don't issue platform credit.",
+        "If something goes wrong, report the invoice before you pay, or contact us from Help & Support. A HomeEase admin reviews the booking record, chat messages, photos, invoice and the worker's check-in location, and decides the outcome, which may include a refund to your original payment method. We don't issue platform credit.",
         "This process doesn't limit your other rights under Philippine law, including filing a complaint with the Department of Trade and Industry.",
       ],
     },
@@ -214,12 +213,12 @@ export const WORKER_AGREEMENT: LegalDocument = {
     {
       heading: "5. Jobs and your prices",
       bullets: [
-        "HomeEase sets the price of each job. It changes only with add-ons, distance, your expertise tier, the number of units and the same-day fee.",
+        "HomeEase sets the price of each job. It changes only with the number of pieces, distance, your expertise tier, the same-day fee, and the parts and extra work on your invoice.",
         "You choose the days you work (your weekly schedule) and can change single dates on your calendar. Clients book an exact start time on your working days, and there is no limit on jobs per day — you're responsible for not overbooking yourself.",
         "You're free to accept or decline requests. If you decline 3 requests within 7 days, new requests pause for 24 hours.",
         "Late cancellations and no-shows lower your position when clients are matched with workers.",
-        "Pro and Expert tiers are based on your rating, completed jobs and years of experience (confirmed by HomeEase at verification), and add a tier fee to the price.",
-        "When you add materials to a quote, attach photos of the receipt and of the materials used. The client can refuse a quote that doesn't match, and you revise it.",
+        "Skilled and Expert tiers are based on your rating, completed jobs and years of experience (confirmed by HomeEase at verification), and add a tier fee to the price.",
+        "When the job is done, send the invoice from the job screen. Add any parts you bought with a photo of the receipt, and any extra work with a photo of the work. For cash jobs, tap Cash received once the client pays you; if you don't, the payment is recorded after 3 days (72 hours). The client can report an invoice before paying, and HomeEase decides whether it stands.",
       ],
     },
     {
@@ -229,14 +228,13 @@ export const WORKER_AGREEMENT: LegalDocument = {
       ],
     },
     {
-      heading: "7. Commission, tax and payouts",
+      heading: "7. Service fee, taxes and payouts",
       bullets: [
-        "HomeEase keeps a commission from the job price, currently 10%. The rate is fixed when you accept each job.",
-        "2% withholding tax is deducted and paid to the BIR on your behalf. If your TIN is on file, you receive a BIR Form 2307 each quarter.",
-        "Tips go to you in full. If you're VAT-registered, the VAT the client pays is passed to you, and filing it is your responsibility. We'll notify you if your earnings pass the ₱3,000,000 VAT registration threshold.",
-        "Registering for and paying your own taxes is your responsibility.",
+        "HomeEase keeps a service fee from the job price, currently 10%. The rate is fixed when you accept each job.",
+        "HomeEase does not withhold tax from your earnings. Tips go to you in full.",
+        "Registering for, filing and paying your own taxes (including VAT, if it applies to you) is your responsibility.",
         "For GCash and Maya jobs, your earnings are sent to your GCash or Maya account through Xendit once the client's payment is confirmed. If you haven't added a payout account, earnings are held until you do.",
-        "For cash jobs, the client pays you directly, and the commission and withholding tax are recorded as an amount you owe HomeEase. It is deducted from your next payouts. If you owe more than the limit set by HomeEase (currently ₱500), you can't accept new jobs until it's settled.",
+        "For cash jobs, the client pays you directly, and the service fee is recorded as an amount you owe HomeEase. It is deducted from your next payouts. If you owe more than the limit set by HomeEase (currently ₱500), you can't accept new jobs until it's settled.",
       ],
     },
     {
@@ -256,7 +254,7 @@ export const WORKER_AGREEMENT: LegalDocument = {
     {
       heading: "10. Disputes",
       paragraphs: [
-        "Either you or the client can open a dispute on a booking. HomeEase reviews the chat messages, booking records, quotes, photos and check-in location, and decides the outcome (for example approving a quote, requesting a revised quote, or cancelling with a refund). If you think a decision is wrong, contact support to ask for it to be reconsidered. This process doesn't limit your other legal remedies.",
+        "Either you or the client can open a dispute on a booking. HomeEase reviews the chat messages, booking records, invoices, photos and check-in location, and decides the outcome (for example keeping the invoice, removing lines from it, or cancelling with a refund). If you think a decision is wrong, contact support to ask for it to be reconsidered. This process doesn't limit your other legal remedies.",
       ],
     },
     {
@@ -302,13 +300,13 @@ export const PRIVACY_POLICY: LegalDocument = {
       bullets: [
         "Everyone: name, email, phone number, password (stored hashed), profile photo, notification settings, device push token, and the IP address and device used when you sign up or accept our terms.",
         "Clients: service addresses and their map location, booking details and photos you attach.",
-        "Workers: government ID, selfie, police/NBI/barangay clearance, health certificate, certifications, resume, date of birth, years of experience, home address, TIN, GCash or Maya payout account, and VAT registration documents.",
+        "Workers: government ID, selfie, police/NBI/barangay clearance, health certificate, certifications, resume, date of birth, years of experience, home address, and GCash or Maya payout account.",
         "Location: a worker's live GPS location while travelling to an accepted booking, and their check-in location, including whether a fake-GPS app was detected.",
         "Chat messages and photos, ratings, reviews, disputes, and payment records (amounts, method and status).",
         "Security records: when you sign in or fail to, and the IP address involved in suspicious activity such as repeated failed sign-ins.",
       ],
       paragraphs: [
-        "Government ID numbers, your TIN, clearances and your selfie are sensitive personal information. We collect them only with your specific consent, given before you upload them.",
+        "Government ID numbers, clearances and your selfie are sensitive personal information. We collect them only with your specific consent, given before you upload them.",
       ],
     },
     {
@@ -316,7 +314,7 @@ export const PRIVACY_POLICY: LegalDocument = {
       bullets: [
         "To provide the service you signed up for: bookings, matching, payments, payouts, notifications and support.",
         "To verify workers' identity and eligibility (with your consent).",
-        "To meet legal duties, such as BIR withholding tax, Form 2307 and record-keeping.",
+        "To meet legal duties, such as record-keeping.",
         "To keep the platform safe: preventing fraud, detecting fake GPS, resolving disputes and enforcing our terms.",
       ],
     },
@@ -363,7 +361,7 @@ export const PRIVACY_POLICY: LegalDocument = {
     {
       heading: "8. Security",
       paragraphs: [
-        "ID documents, resumes and chat photos are stored privately and shown only through links that expire after an hour. Payout account numbers and TINs are encrypted, and so are our backups. If a breach puts your data at real risk, we will notify you and the National Privacy Commission as the law requires.",
+        "ID documents, resumes and chat photos are stored privately and shown only through links that expire after an hour. Payout account numbers are encrypted, and so are our backups. If a breach puts your data at real risk, we will notify you and the National Privacy Commission as the law requires.",
       ],
     },
     {

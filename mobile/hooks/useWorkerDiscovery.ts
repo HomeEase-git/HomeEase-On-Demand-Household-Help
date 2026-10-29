@@ -49,7 +49,7 @@ export function useWorkerDiscovery(filters: DiscoverWorkersFilters, enabled: boo
         setTotal(result.pagination.total);
       } catch (err) {
         if (cancelled) return;
-        setError(err instanceof Error ? err.message : 'Failed to load available pros.');
+        setError(err instanceof Error ? err.message : 'Failed to load available workers.');
         setWorkers([]);
         setTotal(0);
       } finally {
@@ -79,7 +79,7 @@ export function useWorkerDiscovery(filters: DiscoverWorkersFilters, enabled: boo
 
 /**
  * One lightweight (limit=1, we only need pagination.total) discovery call so
- * Step 2 can show "3 pros available" for the picked date. Workers take any
+ * Step 2 can show "3 workers available" for the picked date. Workers take any
  * number of jobs a day, so the start time doesn't change the count.
  */
 export function useDateAvailabilityCount(
@@ -105,7 +105,7 @@ export function useDateAvailabilityCount(
         if (cancelled || requestId.current !== thisRequest) return;
         setCount(result.pagination.total);
       } catch {
-        if (!cancelled && requestId.current === thisRequest) setCount(null); // unknown, not "no pros"
+        if (!cancelled && requestId.current === thisRequest) setCount(null); // unknown, not "no workers"
       } finally {
         if (!cancelled && requestId.current === thisRequest) {
           setLoading(false);

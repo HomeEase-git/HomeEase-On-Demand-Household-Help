@@ -61,7 +61,6 @@ jobs:
       UPLOAD_DIR: uploads
       ALLOWED_ORIGINS: http://localhost:5173
       COMMISSION_RATE: "0.10"
-      WITHHOLDING_TAX_RATE: "0.02"
     defaults:
       run:
         working-directory: backend

@@ -14,7 +14,7 @@ describe('Admin price list', () => {
   let serviceTypeId: string;
   let fixedId: string;
   let perUnitId: string;
-  let quoteId: string;
+  let unpricedId: string;
 
   beforeAll(async () => {
     const admin = await createTestUser('pricelist-admin', { role: 'ADMIN' });
@@ -33,7 +33,8 @@ describe('Admin price list', () => {
           create: [
             { name: 'Flat job', basePrice: 800, pricingModel: 'FIXED', sortOrder: 0 },
             { name: 'Per-unit job', basePrice: 300, pricingModel: 'PER_UNIT', unitLabel: 'unit', sortOrder: 1 },
-            { name: 'Quote job', basePrice: 0, pricingModel: 'CUSTOM_QUOTE', sortOrder: 2 },
+            // A former custom-quote job: switched off, no price yet.
+            { name: 'Unpriced job', basePrice: 0, pricingModel: 'FIXED', isActive: false, sortOrder: 2 },
           ],
         },
       },
@@ -42,7 +43,7 @@ describe('Admin price list', () => {
     serviceTypeId = serviceType.id;
     fixedId = serviceType.tasks.find((t) => t.name === 'Flat job')!.id;
     perUnitId = serviceType.tasks.find((t) => t.name === 'Per-unit job')!.id;
-    quoteId = serviceType.tasks.find((t) => t.name === 'Quote job')!.id;
+    unpricedId = serviceType.tasks.find((t) => t.name === 'Unpriced job')!.id;
   });
 
   afterAll(async () => {
@@ -62,7 +63,7 @@ describe('Admin price list', () => {
     expect(res.status).toBe(200);
     const category = res.body.data.categories.find((c: { id: string }) => c.id === serviceTypeId);
     expect(category.basePrice).toBe(500);
-    expect(category.tasks.map((t: { name: string }) => t.name)).toEqual(['Flat job', 'Per-unit job', 'Quote job']);
+    expect(category.tasks.map((t: { name: string }) => t.name)).toEqual(['Flat job', 'Per-unit job', 'Unpriced job']);
     expect(res.body.data.doleFloor.hourlyWage).toBe(getHighestDoleWageReference().hourlyWage);
   });
 
@@ -94,11 +95,10 @@ describe('Admin price list', () => {
     expect(meta.tasks).toContainEqual(expect.objectContaining({ taskId: fixedId, from: 800, to: 880 }));
   });
 
-  it('rejects a custom-quote job and changes nothing', async () => {
-    const res = await save({ tasks: [{ id: fixedId, basePrice: 999 }, { id: quoteId, basePrice: 500 }] });
-    expect(res.status).toBe(400);
-    expect(res.body.message).toMatch(/custom-quote/);
-    expect(await priceOf(fixedId)).toBe(880);
+  it('can price a switched-off job that has no price yet', async () => {
+    const res = await save({ tasks: [{ id: unpricedId, basePrice: 650 }] });
+    expect(res.status).toBe(200);
+    expect(await priceOf(unpricedId)).toBe(650);
   });
 
   it('rejects zero, negative, duplicate and unknown entries', async () => {

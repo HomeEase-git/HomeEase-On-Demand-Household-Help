@@ -11,21 +11,21 @@ import { getWorkerNetAmount } from "../../../utils/pricing";
 import { useTabRefresh } from "../../../hooks/useTabRefresh";
 import { usePullToRefresh } from "../../../hooks/usePullToRefresh";
 
-type RecordTab = "Ongoing" | "Completed" | "Cancelled";
-const TABS: RecordTab[] = ["Ongoing", "Completed", "Cancelled"];
+type RecordTab = "Active" | "Completed" | "Cancelled";
+const TABS: RecordTab[] = ["Active", "Completed", "Cancelled"];
 
 // New (PENDING) requests stay on the Requests tab until accepted.
 function tabForJob(job: WorkerJob): RecordTab | null {
   if (job.status === "Pending") return null;
   if (job.status === "Completed") return "Completed";
-  if (job.status === "Cancelled") return "Cancelled";
-  return "Ongoing";
+  if (job.status === "Cancelled" || job.status === "Declined") return "Cancelled";
+  return "Active";
 }
 
 export default function RecordsScreen() {
   const router = useRouter();
-  // Opens on the jobs in progress — that's what a worker comes here for.
-  const [tab, setTab] = useState<RecordTab>("Ongoing");
+  // Opens on the jobs not finished yet — that's what a worker comes here for.
+  const [tab, setTab] = useState<RecordTab>("Active");
   const [jobs, setJobs] = useState<WorkerJob[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -52,11 +52,11 @@ export default function RecordsScreen() {
 
   const filtered = jobs.filter((j) => tabForJob(j) === tab);
 
-  // An ongoing job opens straight into the live job screen (arrive, start,
-  // quote, complete); a finished one opens its record.
+  // An active job opens straight into the live job screen (arrive, start,
+  // send the invoice, cash received); a finished one opens its record.
   const handleRecordPress = useCallback(
     (job: WorkerJob) => {
-      router.push(tabForJob(job) === "Ongoing" ? `/(worker)/records/job/${job.id}` : `/(worker)/records/${job.id}`);
+      router.push(tabForJob(job) === "Active" ? `/(worker)/records/job/${job.id}` : `/(worker)/records/${job.id}`);
     },
     [router],
   );
@@ -74,7 +74,7 @@ export default function RecordsScreen() {
             tabForJob(item) === "Completed"
               ? getWorkerNetAmount(item)
               : item.finalPrice ?? item.estimatedPrice,
-          status: tabForJob(item) ?? "Ongoing",
+          status: item.status,
         }}
         onPress={() => handleRecordPress(item)}
       />

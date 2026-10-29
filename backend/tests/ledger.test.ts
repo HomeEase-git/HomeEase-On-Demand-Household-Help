@@ -21,7 +21,6 @@ import { openLedger, LedgerAlreadyOpenError } from '@services/ledgerOpeningServi
 import { syncXenditFees } from '@services/ledgerFeeSyncService';
 import { buildReconciliation } from '@services/ledgerReconciliationService';
 import { postLedger, resetLedgerOpenCache, postCancellationFee, postClientFeeCleared, postRefundSent } from '@services/ledgerService';
-import { markPeriodRemitted } from '@services/taxRemittanceService';
 import { requestRefund, markRefundedManually } from '@services/refundRequestService';
 import { manilaMonthKey } from '@utils/manilaTime';
 import { createTestUser, deleteTestUser, createTestBooking } from './helpers';
@@ -196,25 +195,6 @@ describe('Double-entry ledger', () => {
     const loss = await prisma.ledgerLine.aggregate({ where: { account: 'REFUND_LOSS' }, _sum: { amountCentavos: true } });
     expect(loss._sum.amountCentavos).toBe(40000 - 4000 - 720);
     expect(await ledgerOwed(workerA)).toBe(0);
-  });
-
-  it('books withholding tax remitted to BIR, and only the difference when re-marked', async () => {
-    const start = new Date('2035-01-01T00:00:00Z');
-    const end = new Date('2035-04-01T00:00:00Z');
-    const booking = await createTestBooking({ clientId, workerId: workerB, status: 'COMPLETED' });
-    const p = await prisma.payment.create({
-      data: { bookingId: booking.id, subtotal: 1000, commissionAmount: 100, withholdingTaxAmount: 18, workerPayout: 882, totalAmount: 1000, status: 'COMPLETED', escrowStatus: 'RELEASED', methodType: 'CASH', capturedAt: new Date('2035-02-01T00:00:00Z') },
-    });
-    await markPeriodRemitted(start, end, 'OR-1', userIds[0]);
-    await prisma.payment.update({ where: { id: p.id }, data: { withholdingTaxAmount: 20 } });
-    await markPeriodRemitted(start, end, 'OR-1b', userIds[0]);
-
-    const remitted = await prisma.ledgerLine.aggregate({
-      where: { account: 'WITHHOLDING_TAX_PAYABLE', transaction: { type: 'TAX_REMITTED' } },
-      _sum: { amountCentavos: true },
-    });
-    expect(remitted._sum.amountCentavos).toBe(2000);
-    await prisma.taxRemittance.deleteMany({ where: { periodStart: start } });
   });
 
   it('books a cancellation fee owed by the client and credited to the worker, then cleared', async () => {

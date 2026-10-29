@@ -42,7 +42,7 @@ export default function TransactionDetail() {
     { label: 'Worker', value: tx.worker },
     { label: 'Amount (Client Paid)', value: formatPeso(tx.userAmount) },
     { label: 'Worker Earnings', value: formatPeso(tx.workerAmount) },
-    { label: 'Platform Commission', value: formatPeso(tx.platformFee) },
+    { label: 'Service Fee', value: formatPeso(tx.platformFee) },
     { label: 'Method', value: tx.method },
     {
       label: 'Status',

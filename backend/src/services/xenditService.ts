@@ -54,6 +54,12 @@ export async function createInvoice(params: CreateInvoiceParams): Promise<Xendit
   };
 }
 
+/** Closes a hosted checkout so it can no longer be paid. */
+export async function expireInvoice(invoiceId: string) {
+  const res = await secretClient().post(`/invoices/${invoiceId}/expire!`);
+  return res.data;
+}
+
 export async function retrieveInvoice(invoiceId: string) {
   const res = await secretClient().get(`/v2/invoices/${invoiceId}`);
   return res.data;

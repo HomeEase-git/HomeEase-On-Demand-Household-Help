@@ -6,6 +6,7 @@ import * as DocumentPicker from "expo-document-picker";
 import * as ImagePicker from "expo-image-picker";
 import ScreenHeader from "../../components/ui/ScreenHeader";
 import StepperHorizontal from "../../components/steppers/StepperHorizontal";
+import { KYC_STEPS } from "../../constants";
 import UploadCard from "../../components/ui/UploadCard";
 import PrimaryButton from "../../components/ui/PrimaryButton";
 import { useAuthStore } from "../../store/authStore";
@@ -184,7 +185,7 @@ export default function DocumentsScreen() {
         contentContainerStyle={{ paddingHorizontal: 24, paddingBottom: 40 }}
       >
         <StepperHorizontal
-          steps={["ID", "Selfie", "Documents", "Resume", "Contract"]}
+          steps={KYC_STEPS.worker}
           currentStep={2}
         />
         <Text className="text-text-secondary text-sm mb-4">

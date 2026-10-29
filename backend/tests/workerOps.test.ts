@@ -131,6 +131,36 @@ describe('worker operations overhaul', () => {
       }
     });
 
+    it('prices a per-unit job from the quantity the client books, within the job limits', async () => {
+      const original = await prisma.serviceTask.findUniqueOrThrow({ where: { id: serviceTaskId } });
+      await prisma.serviceTask.update({
+        where: { id: serviceTaskId },
+        data: { pricingModel: 'PER_UNIT', unitLabel: 'unit', maxQuantity: 5 },
+      });
+      try {
+        const day = isoDay(addDays(phTodayStart(), 25));
+        const book = (extra: Record<string, unknown>) =>
+          request(app).post('/api/bookings').set('Authorization', `Bearer ${clientToken}`).send(bookingBody(day, '10:00', extra));
+
+        const missing = await book({});
+        expect(missing.status).toBe(400);
+        expect(missing.body.message).toMatch(/how many/i);
+        expect((await book({ quantity: 6 })).status).toBe(400);
+
+        const res = await book({ quantity: 3 });
+        expect(res.status).toBe(201);
+        const saved = await prisma.booking.findUniqueOrThrow({ where: { id: res.body.data.id } });
+        expect(saved.quantity).toBe(3);
+        expect(saved.scopeAnswers).toBeNull();
+        expect(res.body.data.pricing.basePrice).toBe(original.basePrice * 3);
+      } finally {
+        await prisma.serviceTask.update({
+          where: { id: serviceTaskId },
+          data: { pricingModel: original.pricingModel, unitLabel: original.unitLabel, maxQuantity: null },
+        });
+      }
+    });
+
     it('bills a package the client chose at checkout without a second approval, and itemises the worker take-home', async () => {
       const task = await prisma.serviceTask.findUniqueOrThrow({ where: { id: serviceTaskId } });
       const pkg = await prisma.workerPackage.create({
@@ -202,7 +232,7 @@ describe('worker operations overhaul', () => {
       const stored = await prisma.booking.findUniqueOrThrow({ where: { id: tampered.body.data.id } });
       expect(stored.estimatedPrice).toBe(honest.body.data.estimatedPrice);
       expect(stored.finalPrice).toBeNull();
-      expect(stored.addOnsSnapshot).toEqual([{ name: 'Free discount', price: 0 }]);
+      expect(stored.addOnsSnapshot).toEqual([{ kind: 'PREFERENCE', name: 'Free discount', price: 0 }]);
 
       const negativeTip = await request(app)
         .post('/api/bookings')
@@ -299,49 +329,6 @@ describe('worker operations overhaul', () => {
       expect(res.status).toBe(200);
       expect(res.body.data.availableDays).toEqual([1, 2, 3, 4, 5]);
       await prisma.workerProfile.update({ where: { id: workerProfileId }, data: { availableDays: [0, 1, 2, 3, 4, 5, 6] } });
-    });
-  });
-
-  describe('quotes need proof and can be refused', () => {
-    it('requires a receipt photo for each item, and goes back to the worker when refused', async () => {
-      const booking = await seedBooking({ status: 'ACCEPTED', workerArrivedAt: new Date() });
-
-      const noProof = await request(app)
-        .post(`/api/bookings/${booking.id}/quote`)
-        .set('Authorization', `Bearer ${workerToken}`)
-        .send({ items: [{ name: 'Pipe', price: 350, receiptUrls: [], proofOfUseUrls: [] }] });
-      expect(noProof.status).toBe(400);
-
-      const someoneElses = await request(app)
-        .post(`/api/bookings/${booking.id}/quote`)
-        .set('Authorization', `Bearer ${workerToken}`)
-        .send({ items: [{ name: 'Pipe', price: 350, receiptUrls: [photoUrl(clientId, 'r')], proofOfUseUrls: [photoUrl(workerId, 'u')] }] });
-      expect(someoneElses.status).toBe(400);
-
-      const submit = await request(app)
-        .post(`/api/bookings/${booking.id}/quote`)
-        .set('Authorization', `Bearer ${workerToken}`)
-        .send({ items: [{ name: 'Pipe', price: 350, receiptUrls: [photoUrl(workerId, 'r')], proofOfUseUrls: [photoUrl(workerId, 'u')] }] });
-      expect(submit.status).toBe(201);
-
-      const reject = await request(app)
-        .patch(`/api/bookings/${booking.id}/quote/reject`)
-        .set('Authorization', `Bearer ${clientToken}`)
-        .send({ reason: 'The receipt says ₱300, not ₱350' });
-      expect(reject.status).toBe(200);
-      const refused = await prisma.booking.findUniqueOrThrow({ where: { id: booking.id } });
-      expect(refused).toMatchObject({ status: 'ACCEPTED', quoteStatus: 'REJECTED' });
-
-      const revised = await request(app)
-        .post(`/api/bookings/${booking.id}/quote`)
-        .set('Authorization', `Bearer ${workerToken}`)
-        .send({ items: [{ name: 'Pipe', price: 300, receiptUrls: [photoUrl(workerId, 'r')], proofOfUseUrls: [photoUrl(workerId, 'u')] }] });
-      expect(revised.status).toBe(201);
-      expect(revised.body.data.revision).toBe(1);
-
-      const detail = await request(app).get(`/api/bookings/${booking.id}`).set('Authorization', `Bearer ${clientToken}`);
-      expect(detail.body.data.quote).toMatchObject({ materialsCost: 300, revision: 1, status: 'SUBMITTED' });
-      expect(detail.body.data.quote.receiptUrls).toHaveLength(1);
     });
   });
 

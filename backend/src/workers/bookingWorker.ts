@@ -1,4 +1,5 @@
 import { Worker, type Job } from 'bullmq';
+import type { Booking } from '@prisma/client';
 import prisma from '@config/database';
 import { workerConnection as connection } from '@config/redis';
 import { notifyUser } from '@utils/notify';
@@ -25,31 +26,31 @@ import { revokeUserSessions } from '@utils/tokenRevocation';
 import { revokeAllRefreshTokens } from '@utils/otpService';
 import { JWT_EXPIRY } from '@utils/jwt';
 import { purgeExpiredData } from '@services/dataRetentionService';
+import { escalateCancelRequest } from '@services/bookingProblemService';
 
 const HOUR_MS = 60 * 60 * 1000;
+// The invoice has been sent this long without being paid: remind the client
+// (and, for cash, the worker to tap "Cash received").
 const COMPLETION_REMINDER_HOURS = 12;
 // AWAITING_PAYMENT gets a much shorter, separate reminder than the general
-// 12h completion one — the client already confirmed and a checkout exists,
-// so this is a "you have one thing left, come finish it" nudge for an
-// abandoned/forgotten Xendit webview, not "go review a photo and decide."
+// 12h one — a checkout exists, so this is a "you have one thing left, come
+// finish it" nudge for an abandoned/forgotten Xendit webview.
 const PAYMENT_REMINDER_HOURS = 2;
-const COMPLETION_AUTO_CONFIRM_HOURS = 24;
-// A GCash/Maya booking the client confirmed but never paid (or never even
-// confirmed) is escalated to an admin dispute after this long. No platform
-// money is fronted — the worker is simply not paid until it clears.
+// A cash invoice the worker never marked "Cash received" and the client never
+// reported is recorded as paid after this long. The client had the whole
+// window to report it (and a second reminder a day before the end); the
+// worker is told so they can contact support. A booking that already went
+// through a dispute is never auto-settled.
+const CASH_AUTO_SETTLE_HOURS = 72;
+const CASH_SECOND_REMINDER_HOURS = 48;
+// A GCash/Maya booking the client never paid is escalated to an admin
+// dispute after this long. No platform money is fronted — the worker is
+// simply not paid until it clears.
 const PAYMENT_OVERDUE_DISPUTE_HOURS = 72;
 // Reconcile a payment/payout that's been mid-flight longer than this against
 // Xendit directly, in case a webhook was missed.
 const RECONCILE_AFTER_HOURS = 1;
-const QUOTE_REMINDER_HOURS = 12;
-const QUOTE_AUTO_APPROVE_HOURS = 24;
-// Shorter than the quote window — a mid-job addon happens while the job is
-// actively being worked on (the client is presumably reachable/nearby),
-// and most bookings complete well within a day anyway (completeBooking
-// auto-resolves anything still pending at that point regardless), so this
-// sweep mainly matters for longer-running jobs.
-const ADDON_REMINDER_HOURS = 2;
-// Same shape as the quote-approval safety net above — a client who never
+// A client who never
 // opens the app to explicitly keep/decline a reschedule shouldn't leave it
 // unresolved forever (see bookingController.extendBooking/acknowledgeReschedule).
 const RESCHEDULE_REMINDER_HOURS = 12;
@@ -62,6 +63,13 @@ const RESCHEDULE_AUTO_CONFIRM_HOURS = 24;
 // commitment instead of forcing a date change nobody explicitly agreed to.
 const RESCHEDULE_REQUEST_REMINDER_HOURS = 24;
 const RESCHEDULE_REQUEST_AUTO_DECLINE_HOURS = 48;
+// Stuck-booking sweep (see nudgeStuckBookings).
+const CANCEL_REQUEST_TIMEOUT_HOURS = 2;
+const CANCEL_REQUEST_MIN_ANSWER_MINUTES = 15;
+const START_REMINDER_MINUTES = 30;
+const START_NUDGE_HOURS = 2;
+const PROGRESS_REMINDER_HOURS = 12;
+const PROGRESS_ESCALATE_HOURS = 48;
 
 /**
  * A PENDING booking that no worker responded to within an hour is
@@ -175,14 +183,15 @@ async function escalateOverduePayment(booking: { id: string; clientId: string; w
 }
 
 /**
- * Post-completion payment safety net (pay-after-completion model).
+ * Unpaid-invoice safety net (the worker sends the invoice at completion).
  *
- *  - PENDING_COMPLETION 12h  -> nudge the client to confirm.
+ *  - PENDING_COMPLETION / AWAITING_PAYMENT 12h -> nudge the client to pay
+ *    (and, for cash, the worker to tap "Cash received").
  *  - AWAITING_PAYMENT 2h (own clock, separate from the 12h above) -> nudge
  *    the client to finish an abandoned/forgotten Xendit checkout.
- *  - PENDING_COMPLETION 24h + CASH -> auto-confirm: the client is assumed to
- *    have paid the worker in person, so the booking is finalized and the
- *    platform's cut is accrued as worker commission debt (settleCashBooking).
+ *  - PENDING_COMPLETION + CASH 48h -> second reminder, a day before the end.
+ *  - PENDING_COMPLETION + CASH 72h -> recorded as paid (settleCashBooking).
+ *    A reported invoice is DISPUTED, so it's never picked up here.
  *  - PENDING_COMPLETION / AWAITING_PAYMENT 72h + GCash/Maya -> escalate to an
  *    admin dispute. No auto-complete, no platform funds fronted.
  *  - Reconciliation: PENDING payments / PROCESSING payouts older than 1h are
@@ -193,11 +202,11 @@ export async function remindAndAutoSettleCompletions(): Promise<void> {
   const now = Date.now();
   const reminderCutoff = new Date(now - COMPLETION_REMINDER_HOURS * HOUR_MS);
   const paymentReminderCutoff = new Date(now - PAYMENT_REMINDER_HOURS * HOUR_MS);
-  const autoConfirmCutoff = new Date(now - COMPLETION_AUTO_CONFIRM_HOURS * HOUR_MS);
   const overdueCutoff = new Date(now - PAYMENT_OVERDUE_DISPUTE_HOURS * HOUR_MS);
   const reconcileCutoff = new Date(now - RECONCILE_AFTER_HOURS * HOUR_MS);
+  const cashSettleCutoff = new Date(now - CASH_AUTO_SETTLE_HOURS * HOUR_MS);
 
-  // 1. 12h reminder — worker submitted a photo, client hasn't confirmed/paid.
+  // 1. 12h reminder — the invoice was sent and is still unpaid.
   const needsReminder = await prisma.booking.findMany({
     where: {
       status: { in: ['PENDING_COMPLETION', 'AWAITING_PAYMENT'] },
@@ -206,17 +215,78 @@ export async function remindAndAutoSettleCompletions(): Promise<void> {
     },
   });
   for (const booking of needsReminder) {
+    const isCash = (booking.paymentMethodType ?? 'CASH') === 'CASH';
     await notifyUser({
       userId: booking.clientId,
       type: 'COMPLETION_REMINDER',
-      title: 'Please confirm and pay for your completed job',
-      message: 'Your worker marked this job done — review the photo, confirm, and complete payment.',
+      title: 'Your invoice is still unpaid',
+      message: isCash
+        ? 'Your worker finished this job. Pay them in cash, or report the invoice in the app if something is wrong.'
+        : 'Your worker finished this job. Open the booking to pay, or report the invoice if something is wrong.',
       relatedId: booking.id,
     });
+    if (isCash && booking.workerId) {
+      await notifyUser({
+        userId: booking.workerId,
+        type: 'COMPLETION_REMINDER',
+        title: 'Did you get the cash?',
+        message: `If the client paid you for booking ${formatDisplayId(booking.id)}, open the job and tap Cash received.`,
+        relatedId: booking.id,
+      });
+    }
     await prisma.booking.update({
       where: { id: booking.id },
       data: { completionReminderSentAt: new Date() },
     });
+  }
+
+  // 1a. Cash second reminder at 48h. Claim first so the BullMQ sweep and
+  // /internal/cron can't both send it.
+  const secondReminderCutoff = new Date(now - CASH_SECOND_REMINDER_HOURS * HOUR_MS);
+  const needsSecondReminder = await prisma.booking.findMany({
+    where: {
+      status: 'PENDING_COMPLETION',
+      OR: [{ paymentMethodType: 'CASH' }, { paymentMethodType: null }],
+      // Past 72h it is settled in this same run, so no "in 1 day" warning.
+      workerCompletedAt: { lte: secondReminderCutoff, gt: cashSettleCutoff },
+      // A booking that went through a dispute, or has one open, is never auto-settled.
+      disputeResolvedAt: null,
+      disputes: { none: { status: { in: ['OPEN', 'UNDER_REVIEW'] } } },
+      cashSecondReminderSentAt: null,
+    },
+  });
+  for (const booking of needsSecondReminder) {
+    try {
+      const claimed = await prisma.booking.updateMany({
+        where: {
+          id: booking.id,
+          status: 'PENDING_COMPLETION',
+          disputeResolvedAt: null,
+          disputes: { none: { status: { in: ['OPEN', 'UNDER_REVIEW'] } } },
+          cashSecondReminderSentAt: null,
+        },
+        data: { cashSecondReminderSentAt: new Date() },
+      });
+      if (claimed.count !== 1) continue;
+      await notifyUser({
+        userId: booking.clientId,
+        type: 'COMPLETION_REMINDER',
+        title: 'Your invoice is still unpaid',
+        message: 'Your cash invoice is still open. It will be recorded as paid in 1 day unless you report it.',
+        relatedId: booking.id,
+      });
+      if (booking.workerId) {
+        await notifyUser({
+          userId: booking.workerId,
+          type: 'COMPLETION_REMINDER',
+          title: 'Did you get the cash?',
+          message: `If the client paid you for booking ${formatDisplayId(booking.id)}, open the job and tap Cash received.`,
+          relatedId: booking.id,
+        });
+      }
+    } catch (error) {
+      console.error(`Failed to send the second cash reminder for booking ${booking.id}:`, error);
+    }
   }
 
   // 1b. AWAITING_PAYMENT-specific reminder — much shorter than the general
@@ -245,37 +315,40 @@ export async function remindAndAutoSettleCompletions(): Promise<void> {
     });
   }
 
-  // 2. CASH PENDING_COMPLETION past 24h -> auto-confirm (cash assumed collected).
+  // 2. A cash invoice nobody confirmed or reported in 72h -> recorded as paid.
   const staleCash = await prisma.booking.findMany({
     where: {
       status: 'PENDING_COMPLETION',
-      workerCompletedAt: { lte: autoConfirmCutoff },
       OR: [{ paymentMethodType: 'CASH' }, { paymentMethodType: null }],
+      workerCompletedAt: { lte: cashSettleCutoff },
+      disputeResolvedAt: null,
+      // A problem reported before the invoice can still be open here.
+      disputes: { none: { status: { in: ['OPEN', 'UNDER_REVIEW'] } } },
     },
   });
   for (const booking of staleCash) {
     try {
-      await settleCashBooking(booking.id);
+      await settleCashBooking(booking.id, ['PENDING_COMPLETION']);
       await notifyUser({
         userId: booking.clientId,
         type: 'BOOKING_AUTO_COMPLETED',
-        title: 'Booking Auto-Completed',
-        message: "You didn't confirm in time, so this cash booking was automatically marked complete.",
+        title: 'Your job is done',
+        message: 'We recorded your cash payment to your worker. If you did not pay, contact support.',
         relatedId: booking.id,
       });
       if (booking.workerId) {
         await notifyUser({
           userId: booking.workerId,
           type: 'BOOKING_AUTO_COMPLETED',
-          title: 'Job Auto-Completed',
-          message: 'The client did not confirm in time, so this cash job was auto-completed.',
+          title: 'Cash payment recorded',
+          message: `You didn't tap Cash received for booking ${formatDisplayId(booking.id)} within ${CASH_AUTO_SETTLE_HOURS} hours, so we recorded it as paid. If the client didn't pay, contact support.`,
           relatedId: booking.id,
         });
       }
       await writeAuditLog({
         action: 'BOOKING_AUTO_SETTLED',
         category: 'STATUS_CHANGE',
-        message: `Cash booking ${booking.id} auto-completed after 24h without client confirmation`,
+        message: `Cash booking ${booking.id} recorded as paid ${CASH_AUTO_SETTLE_HOURS}h after the invoice, with no Cash received or report`,
         metadata: { bookingId: booking.id },
       });
     } catch (error) {
@@ -426,137 +499,6 @@ export async function remindAndAutoSettleCompletions(): Promise<void> {
 }
 
 /**
- * Client-approval safety net for QUOTE_SUBMITTED bookings — same shape as
- * remindAndAutoSettleCompletions but for the quote-approval step: a 12h
- * reminder, then an unresponsive client's quote auto-approves at 24h so a
- * worker who already did the job isn't stuck unable to complete it (and get
- * paid) because the client never opened the app.
- */
-export async function remindAndAutoApproveQuotes(): Promise<void> {
-  const now = Date.now();
-  const reminderCutoff = new Date(now - QUOTE_REMINDER_HOURS * HOUR_MS);
-  const autoApproveCutoff = new Date(now - QUOTE_AUTO_APPROVE_HOURS * HOUR_MS);
-
-  const needsReminder = await prisma.booking.findMany({
-    where: {
-      status: 'QUOTE_SUBMITTED',
-      quotedAt: { lte: reminderCutoff },
-      quoteReminderSentAt: null,
-    },
-  });
-
-  for (const booking of needsReminder) {
-    await notifyUser({
-      userId: booking.clientId,
-      type: 'QUOTE_REMINDER',
-      title: 'A quote is waiting for your approval',
-      message: 'Your worker submitted a quote for this job — review and approve or dispute it.',
-      relatedId: booking.id,
-    });
-    await prisma.booking.update({
-      where: { id: booking.id },
-      data: { quoteReminderSentAt: new Date() },
-    });
-  }
-
-  const staleQuotes = await prisma.booking.findMany({
-    where: {
-      status: 'QUOTE_SUBMITTED',
-      quotedAt: { lte: autoApproveCutoff },
-    },
-    // Only approved add-ons count toward finalPrice — see
-    // BookingAddOn.clientApprovedAt's schema comment. Mirrors
-    // bookingController.approveQuote's own formula, which this sweep is the
-    // unattended equivalent of.
-    include: { addOns: { where: { clientApprovedAt: { not: null } } } },
-  });
-
-  for (const booking of staleQuotes) {
-    if (booking.laborCost == null || booking.materialsCost == null) continue;
-
-    const addonsCost = booking.addOns.reduce((sum, addon) => sum + addon.price, 0);
-
-    try {
-      // Guarded on the same quote revision the client would have seen, so a
-      // client approve/refuse or a worker revision since the read wins.
-      try {
-        await updateBookingIfStatus(
-          prisma,
-          booking.id,
-          'QUOTE_SUBMITTED',
-          {
-            status: 'QUOTE_APPROVED',
-            quoteStatus: 'APPROVED',
-            approvedAt: new Date(),
-            finalPrice: booking.laborCost! + booking.materialsCost! + addonsCost,
-          },
-          { quoteRevision: booking.quoteRevision, quotedAt: booking.quotedAt }
-        );
-      } catch (error) {
-        if (isBookingStatusConflict(error)) continue;
-        throw error;
-      }
-
-      if (booking.workerId) {
-        await notifyUser({
-          userId: booking.workerId,
-          type: 'QUOTE_AUTO_APPROVED',
-          title: 'Quote Auto-Approved',
-          message: 'The client did not respond in time, so your quote was automatically approved. You can now complete the job.',
-          relatedId: booking.id,
-        });
-      }
-      await notifyUser({
-        userId: booking.clientId,
-        type: 'QUOTE_AUTO_APPROVED',
-        title: 'Quote Auto-Approved',
-        message: "You didn't respond in time, so the worker's quote was automatically approved.",
-        relatedId: booking.id,
-      });
-
-      await writeAuditLog({
-        action: 'QUOTE_AUTO_APPROVED',
-        category: 'STATUS_CHANGE',
-        message: `Booking ${booking.id} quote auto-approved after 24h without client response`,
-        metadata: { bookingId: booking.id },
-      });
-    } catch (error) {
-      console.error(`Failed to auto-approve quote for booking ${booking.id}:`, error);
-    }
-  }
-}
-
-/**
- * Reminder for a pending mid-job extra (see bookingController.addAddon /
- * respondToAddon): one nudge to the client after ADDON_REMINDER_HOURS. There
- * is deliberately no auto-approve: an extra is only billed when the client
- * taps Approve, so the price is agreed in the app. Anything still pending
- * when the job is marked complete is auto-REJECTED by completeBooking.
- */
-export async function remindPendingAddons(): Promise<void> {
-  const reminderCutoff = new Date(Date.now() - ADDON_REMINDER_HOURS * HOUR_MS);
-
-  const needsReminder = await prisma.bookingAddOn.findMany({
-    where: { clientApprovedAt: null, clientRejectedAt: null, createdAt: { lte: reminderCutoff }, reminderSentAt: null },
-    include: { booking: { select: { id: true, clientId: true } } },
-  });
-
-  for (const addon of needsReminder) {
-    await notifyUser({
-      userId: addon.booking.clientId,
-      type: 'ADDON_ADDED',
-      title: 'Extra work is waiting for your approval',
-      message: `"${addon.name}" (₱${addon.price}) still needs your answer. It is only billed if you approve it.`,
-      relatedId: addon.booking.id,
-    });
-    await prisma.bookingAddOn.update({
-      where: { id: addon.id },
-      data: { reminderSentAt: new Date() },
-    });
-  }
-}
-
-/**
  * Worker no-show: an ACCEPTED booking whose start time passed
  * AppSettings.noShowGraceMinutes ago with no check-in is cancelled, and the
  * worker is charged AppSettings.noShowPenaltyAmount (added to their platform
@@ -587,87 +529,250 @@ export async function cancelWorkerNoShows(): Promise<void> {
     if (now < deadline || !booking.workerId) continue;
 
     try {
-      const cancelled = await prisma.$transaction(async (tx) => {
-        // Status-guarded: a check-in or cancel that raced this sweep wins.
-        const claim = await tx.booking.updateMany({
-          where: { id: booking.id, status: 'ACCEPTED', workerArrivedAt: null },
-          data: { status: 'CANCELLED', workerNoShowFlaggedAt: now },
-        });
-        if (claim.count === 0) return false;
-
-        const workerProfile = await tx.workerProfile.update({
-          where: { userId: booking.workerId! },
-          data: { activeJobCount: { decrement: 1 } },
-          select: { id: true },
-        });
-
-        await tx.bookingVisit.updateMany({
-          where: { bookingId: booking.id, status: 'SCHEDULED' },
-          data: { status: 'CANCELLED' },
-        });
-
-        await tx.cancellation.create({
-          data: {
-            bookingId: booking.id,
-            cancelledBy: 'ADMIN',
-            cancelledById: 'system',
-            reason: 'WORKER_NO_SHOW',
-            cancelledWithinHours: 0,
-            workerCancellationReason: 'WORKER_FAULT',
-            penalizedWorkerId: booking.workerId,
-            fault: 'WORKER',
-            penaltyAmount: noShowPenaltyAmount > 0 ? noShowPenaltyAmount : null,
-          },
-        });
-
-        if (noShowPenaltyAmount > 0) {
-          await chargePenaltyTx(tx, workerProfile.id, noShowPenaltyAmount, {
-            bookingId: booking.id,
-            note: `No-show: didn't check in within ${noShowGraceMinutes} minutes of the start time`,
-          });
-        }
-        return true;
-      });
-      if (!cancelled) continue;
-
-      await requestRefund({ bookingId: booking.id, reason: 'WORKER_NO_SHOW', source: 'BOOKING_CANCELLED' }).catch((error) => {
-        console.error(`Failed to void/refund-request payment for no-show booking ${booking.id}:`, error);
-      });
-
-      await notifyUser({
-        userId: booking.clientId,
-        type: 'BOOKING_CANCELLED',
-        title: "Your worker didn't show up",
-        message: `Your worker didn't check in within ${noShowGraceMinutes} minutes of the start time, so the booking was cancelled. You won't be charged — you can book another pro right away.`,
-        relatedId: booking.id,
-      });
-      void sendSmsToUser({
-        userId: booking.clientId,
-        message: `HomeEase: Your worker didn't arrive for booking ${formatDisplayId(booking.id)}, so it was cancelled. You won't be charged.`,
-      });
-
-      await notifyUser({
-        userId: booking.workerId,
-        type: 'CANCELLATION_PENALTY',
-        title: 'Booking cancelled: no-show',
-        message:
-          noShowPenaltyAmount > 0
-            ? `You didn't check in within ${noShowGraceMinutes} minutes of the start time, so the booking was cancelled and a ₱${noShowPenaltyAmount.toFixed(2)} penalty was added to your platform dues.`
-            : `You didn't check in within ${noShowGraceMinutes} minutes of the start time, so the booking was cancelled.`,
-        relatedId: booking.id,
-      });
-
-      await writeAuditLog({
-        action: 'WORKER_NO_SHOW_CANCELLED',
-        category: 'STATUS_CHANGE',
-        level: 'WARN',
-        message: `Booking ${booking.id} cancelled as a worker no-show (${noShowGraceMinutes} min past start, no check-in)`,
-        metadata: { bookingId: booking.id, workerId: booking.workerId, penalty: noShowPenaltyAmount },
-      });
+      await cancelAsWorkerNoShow(booking, { noShowGraceMinutes, noShowPenaltyAmount }, now);
     } catch (error) {
       console.error(`Failed to cancel worker no-show booking ${booking.id}:`, error);
     }
   }
+}
+
+/**
+ * Catches bookings that stall without anyone doing anything wrong on paper:
+ * a client cancel request the worker never answered, a worker who checked in
+ * but never tapped Start Job, and a job left IN_PROGRESS for days. Each step
+ * nudges at most once: the *SentAt column is claimed first (a conditional
+ * update), and only the run that wins the claim sends.
+ */
+export async function nudgeStuckBookings(now = new Date()): Promise<void> {
+  const MIN_MS = 60 * 1000;
+  const due = (clock: Date, ms: number) => now.getTime() >= clock.getTime() + ms;
+  const remind = (userId: string, bookingId: string, title: string, message: string) =>
+    notifyUser({ userId, type: 'BOOKING_REMINDER', title, message, relatedId: bookingId });
+  // Stamps the column only if still unset and the status unchanged, so two
+  // overlapping runs can't both send. Claim-then-send: notifyUser never throws,
+  // so a nudge is lost only if the process dies between the claim and the send.
+  const claim = async (b: { id: string; status: Booking['status'] }, column: 'startReminderSentAt' | 'startNudgeSentAt' | 'progressReminderSentAt' | 'progressEscalatedAt') =>
+    (await prisma.booking.updateMany({ where: { id: b.id, status: b.status, [column]: null }, data: { [column]: now } })).count === 1;
+
+  // The client nudges say "tap Report a problem", which the app hides while a
+  // dispute or the client's own cancel request is open, so skip them then.
+  const OPEN_DISPUTE = { status: { in: ['OPEN', 'UNDER_REVIEW'] } };
+  // What passes 2 and 3 read besides their own columns.
+  const NUDGE_FIELDS = {
+    id: true,
+    status: true,
+    clientId: true,
+    workerId: true,
+    scheduledDate: true,
+    scheduledTime: true,
+    timeSlot: true,
+    cancelRequestedAt: true,
+    cancelRequestEscalatedAt: true,
+  } as const;
+  const clientIsBeingHelped = (b: { disputes: unknown[]; cancelRequestedAt: Date | null; cancelRequestEscalatedAt: Date | null }) =>
+    b.disputes.length > 0 || (b.cancelRequestedAt != null && b.cancelRequestEscalatedAt == null);
+
+  // 1. Cancel requests nobody answered.
+  const requests = await prisma.booking.findMany({
+    where: {
+      cancelRequestedAt: { not: null },
+      cancelRequestEscalatedAt: null,
+      status: { in: ['ACCEPTED', 'IN_PROGRESS'] },
+    },
+  });
+  for (const b of requests) {
+    try {
+      const asked = b.cancelRequestedAt!.getTime();
+      let deadline = asked + CANCEL_REQUEST_TIMEOUT_HOURS * HOUR_MS;
+      if (b.status === 'ACCEPTED') {
+        // A request just before the start still gives the worker 15 minutes.
+        const floor = Math.max(bookingStartInstant(b).getTime(), asked + CANCEL_REQUEST_MIN_ANSWER_MINUTES * MIN_MS);
+        deadline = Math.min(deadline, floor);
+      }
+      if (now.getTime() < deadline) continue;
+      await escalateCancelRequest(b, 'NO_ANSWER');
+    } catch (error) {
+      if (!isBookingStatusConflict(error)) console.error(`Failed to escalate cancel request for booking ${b.id}:`, error);
+    }
+  }
+
+  // 2. Checked in, never started. A worker who said the client isn't here is
+  // waiting at the door, not forgetting to start: no reminder either way.
+  const unstarted = await prisma.booking.findMany({
+    where: {
+      status: 'ACCEPTED',
+      // The clock is a max with workerArrivedAt, so nothing is due before this.
+      workerArrivedAt: { lte: new Date(now.getTime() - START_REMINDER_MINUTES * MIN_MS) },
+      clientNotHereAt: null,
+      OR: [{ startReminderSentAt: null }, { startNudgeSentAt: null }],
+    },
+    select: {
+      ...NUDGE_FIELDS,
+      workerArrivedAt: true,
+      startReminderSentAt: true,
+      startNudgeSentAt: true,
+      disputes: { where: OPEN_DISPUTE, select: { id: true } },
+    },
+  });
+  for (const b of unstarted) {
+    try {
+      // An early check-in doesn't count until the booked start.
+      const clock = new Date(Math.max(b.workerArrivedAt!.getTime(), bookingStartInstant(b).getTime()));
+      if (!b.startReminderSentAt && b.workerId && due(clock, START_REMINDER_MINUTES * MIN_MS) && (await claim(b, 'startReminderSentAt'))) {
+        await remind(b.workerId, b.id, 'Tap Start Job', "You checked in but haven't started. Add your before photos and tap Start Job.");
+      }
+      if (!b.startNudgeSentAt && !clientIsBeingHelped(b) && due(clock, START_NUDGE_HOURS * HOUR_MS) && (await claim(b, 'startNudgeSentAt'))) {
+        await remind(b.clientId, b.id, 'Is your job under way?', "Your worker checked in but hasn't started. If something's wrong, tap Report a problem.");
+      }
+    } catch (error) {
+      console.error(`Failed to nudge unstarted booking ${b.id}:`, error);
+    }
+  }
+
+  // 3. Left in progress.
+  const running = await prisma.booking.findMany({
+    where: {
+      status: 'IN_PROGRESS',
+      workerStartedAt: { lte: new Date(now.getTime() - PROGRESS_REMINDER_HOURS * HOUR_MS) },
+      OR: [{ progressReminderSentAt: null }, { progressEscalatedAt: null }],
+    },
+    select: {
+      ...NUDGE_FIELDS,
+      workerStartedAt: true,
+      progressReminderSentAt: true,
+      progressEscalatedAt: true,
+      visits: { select: { scheduledDate: true, scheduledTime: true, status: true } },
+      disputes: { where: OPEN_DISPUTE, select: { id: true } },
+    },
+  });
+  let admins: { id: string }[] | null = null;
+  for (const b of running) {
+    try {
+      // A follow-up visit planned ahead restarts the clock from that visit.
+      const times = [b.workerStartedAt!, ...b.visits.filter((v) => v.status !== 'CANCELLED').map((v) => bookingStartInstant(v))];
+      const clock = new Date(Math.max(...times.map((t) => t.getTime())));
+      if (clock > now) continue;
+      if (!b.progressReminderSentAt && b.workerId && due(clock, PROGRESS_REMINDER_HOURS * HOUR_MS) && (await claim(b, 'progressReminderSentAt'))) {
+        await remind(b.workerId, b.id, 'Finish or schedule a follow-up', 'This job is still in progress. Mark it complete, or schedule a follow-up visit.');
+      }
+      if (!b.progressEscalatedAt && due(clock, PROGRESS_ESCALATE_HOURS * HOUR_MS) && (await claim(b, 'progressEscalatedAt'))) {
+        if (!clientIsBeingHelped(b)) {
+          await remind(b.clientId, b.id, 'Is your job finished?', "Your job is still marked in progress. If something's wrong, tap Report a problem.");
+        }
+        admins ??= await prisma.user.findMany({ where: { role: 'ADMIN', isDeleted: false }, select: { id: true } });
+        const results = await Promise.allSettled(
+          admins.map((a) => remind(a.id, b.id, 'Job stuck in progress', `Booking ${formatDisplayId(b.id)} has been in progress for over ${PROGRESS_ESCALATE_HOURS}h.`))
+        );
+        for (const r of results) if (r.status === 'rejected') console.error(`Failed to alert an admin about booking ${b.id}:`, r.reason);
+      }
+    } catch (error) {
+      console.error(`Failed to nudge in-progress booking ${b.id}:`, error);
+    }
+  }
+}
+
+/**
+ * Cancels one ACCEPTED booking as a worker no-show (see cancelWorkerNoShows,
+ * which checks the deadline first). Returns whether it cancelled — false when
+ * a check-in or cancel raced it.
+ */
+export async function cancelAsWorkerNoShow(
+  booking: Booking,
+  settings: { noShowGraceMinutes: number; noShowPenaltyAmount: number },
+  now: Date = new Date()
+): Promise<boolean> {
+  const { noShowGraceMinutes, noShowPenaltyAmount } = settings;
+  const workerId = booking.workerId;
+  if (!workerId) return false;
+
+  const cancelled = await prisma.$transaction(async (tx) => {
+    // Status-guarded: a check-in or cancel that raced this sweep wins.
+    const claim = await tx.booking.updateMany({
+      where: { id: booking.id, status: 'ACCEPTED', workerArrivedAt: null },
+      data: { status: 'CANCELLED', workerNoShowFlaggedAt: now },
+    });
+    if (claim.count === 0) return false;
+
+    const workerProfile = await tx.workerProfile.update({
+      where: { userId: workerId },
+      data: { activeJobCount: { decrement: 1 } },
+      select: { id: true },
+    });
+
+    await tx.bookingVisit.updateMany({
+      where: { bookingId: booking.id, status: 'SCHEDULED' },
+      data: { status: 'CANCELLED' },
+    });
+
+    // Same as finalizeCancellationTx: the cancel ends any dispute still open.
+    await tx.dispute.updateMany({
+      where: { bookingId: booking.id, status: { in: ['OPEN', 'UNDER_REVIEW'] } },
+      data: {
+        status: 'RESOLVED_DISMISSED',
+        resolution: 'Booking was cancelled as a worker no-show before this dispute was resolved',
+        resolvedAt: now,
+      },
+    });
+
+    await tx.cancellation.create({
+      data: {
+        bookingId: booking.id,
+        cancelledBy: 'ADMIN',
+        cancelledById: 'system',
+        reason: 'WORKER_NO_SHOW',
+        cancelledWithinHours: 0,
+        workerCancellationReason: 'WORKER_FAULT',
+        penalizedWorkerId: booking.workerId,
+        fault: 'WORKER',
+        penaltyAmount: noShowPenaltyAmount > 0 ? noShowPenaltyAmount : null,
+      },
+    });
+
+    if (noShowPenaltyAmount > 0) {
+      await chargePenaltyTx(tx, workerProfile.id, noShowPenaltyAmount, {
+        bookingId: booking.id,
+        note: `No-show: didn't check in within ${noShowGraceMinutes} minutes of the start time`,
+      });
+    }
+    return true;
+  });
+  if (!cancelled) return false;
+
+  await requestRefund({ bookingId: booking.id, reason: 'WORKER_NO_SHOW', source: 'BOOKING_CANCELLED' }).catch((error) => {
+    console.error(`Failed to void/refund-request payment for no-show booking ${booking.id}:`, error);
+  });
+
+  await notifyUser({
+    userId: booking.clientId,
+    type: 'BOOKING_CANCELLED',
+    title: "Your worker didn't show up",
+    message: `Your worker didn't check in within ${noShowGraceMinutes} minutes of the start time, so the booking was cancelled. You won't be charged — you can book another worker right away.`,
+    relatedId: booking.id,
+  });
+  void sendSmsToUser({
+    userId: booking.clientId,
+    message: `HomeEase: Your worker didn't arrive for booking ${formatDisplayId(booking.id)}, so it was cancelled. You won't be charged.`,
+  });
+
+  await notifyUser({
+    userId: workerId,
+    type: 'CANCELLATION_PENALTY',
+    title: 'Booking cancelled: no-show',
+    message:
+      noShowPenaltyAmount > 0
+        ? `You didn't check in within ${noShowGraceMinutes} minutes of the start time, so the booking was cancelled and a ₱${noShowPenaltyAmount.toFixed(2)} penalty was added to your platform dues.`
+        : `You didn't check in within ${noShowGraceMinutes} minutes of the start time, so the booking was cancelled.`,
+    relatedId: booking.id,
+  });
+
+  await writeAuditLog({
+    action: 'WORKER_NO_SHOW_CANCELLED',
+    category: 'STATUS_CHANGE',
+    level: 'WARN',
+    message: `Booking ${booking.id} cancelled as a worker no-show (${noShowGraceMinutes} min past start, no check-in)`,
+    metadata: { bookingId: booking.id, workerId: booking.workerId, penalty: noShowPenaltyAmount },
+  });
+  return true;
 }
 
 /**
@@ -730,8 +835,7 @@ export async function escalateStaleDisputes(): Promise<void> {
 
 /**
  * Client-response safety net for a rescheduled booking (see
- * bookingController.extendBooking/acknowledgeReschedule) — same shape as
- * remindAndAutoApproveQuotes: a 12h reminder, then an unresponsive client's
+ * bookingController.extendBooking/acknowledgeReschedule): a 12h reminder, then an unresponsive client's
  * new date auto-confirms at 24h so the episode doesn't sit open forever.
  */
 export async function remindAndAutoConfirmReschedules(): Promise<void> {
@@ -752,7 +856,7 @@ export async function remindAndAutoConfirmReschedules(): Promise<void> {
       userId: booking.clientId,
       type: 'BOOKING_RESCHEDULE_REMINDER',
       title: 'Your booking was moved',
-      message: 'Your pro needs another day — review the new date and confirm or cancel.',
+      message: 'Your worker needs another day — review the new date and confirm or cancel.',
       relatedId: booking.id,
     });
     await prisma.booking.update({
@@ -838,7 +942,7 @@ export async function remindAndAutoDeclineRescheduleRequests(): Promise<void> {
       title: 'Reschedule request waiting',
       message:
         booking.rescheduleRequestedBy === 'WORKER'
-          ? 'Your pro is still waiting on your response to their reschedule request.'
+          ? 'Your worker is still waiting on your response to their reschedule request.'
           : 'Your client is still waiting on your response to their reschedule request.',
       relatedId: booking.id,
     });
@@ -1096,14 +1200,11 @@ export async function startBookingWorker() {
         case JOB_NAMES.AUTO_SETTLE_COMPLETED:
           await remindAndAutoSettleCompletions();
           break;
-        case JOB_NAMES.QUOTE_TIMEOUT_SWEEP:
-          await remindAndAutoApproveQuotes();
-          break;
-        case JOB_NAMES.ADDON_TIMEOUT_SWEEP:
-          await remindPendingAddons();
-          break;
         case JOB_NAMES.NO_SHOW_SWEEP:
           await cancelWorkerNoShows();
+          break;
+        case JOB_NAMES.STUCK_BOOKING_SWEEP:
+          await nudgeStuckBookings();
           break;
         case JOB_NAMES.DISPUTE_SLA_SWEEP:
           await escalateStaleDisputes();

@@ -19,7 +19,7 @@ const REASONS = [
   "Worker taking too long",
   "Found another service",
   "Emergency",
-  "Pro needs another day, can't wait",
+  "Worker needs another day, can't wait",
   "Other",
 ];
 

@@ -258,11 +258,9 @@ describe('Worker services, packages and setup', () => {
       expect(res.body.code).toBe('WORKER_SETUP_INCOMPLETE');
     });
 
-    it('charges the admin price once setup is complete, ignoring any old worker price', async () => {
+    it('charges the admin price once setup is complete', async () => {
       const { serviceTaskId } = await completeWorkerSetup(workerId, { serviceTypeId: firstServiceId });
       await prisma.serviceTask.update({ where: { id: serviceTaskId }, data: { basePrice: 900 } });
-      // A price the worker set under the old model must not be charged.
-      await prisma.workerTaskPrice.create({ data: { workerProfileId, serviceTaskId, price: 5000 } });
 
       const status = await request(app).get('/api/workers/me/setup-status').set('Authorization', `Bearer ${workerToken}`);
       expect(status.body.data.complete).toBe(true);

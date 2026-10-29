@@ -582,7 +582,7 @@ export async function createBooking(details: CreateBookingPayload): Promise<Crea
       notes: details.notes || '',
       paymentMethodType: details.paymentMethodType,
       paymentAccountIdentifier: details.paymentAccountIdentifier,
-      scopeAnswers: details.scopeAnswers ?? undefined,
+      quantity: details.quantity ?? undefined,
       issuePhotoUrls: details.issuePhotoUrls ?? [],
       idempotencyKey: details.idempotencyKey ?? undefined,
     });
@@ -635,40 +635,6 @@ export async function cancelBooking(
   }
 }
 
-// `revision` is the quote revision the client reviewed; the server refuses the
-// approval if the worker has since reopened and resubmitted.
-export async function approveQuote(bookingId: string, revision: number) {
-  try {
-    const response = await api.patch(`/bookings/${bookingId}/quote/approve`, { revision });
-    return response;
-  } catch (error) {
-    console.error('Approve quote error:', error);
-    throw error;
-  }
-}
-
-// Client refuses a quote (e.g. it doesn't match the receipt) — it goes back
-// to the worker to revise and resubmit.
-export async function rejectQuote(bookingId: string, reason: string) {
-  try {
-    const response = await api.patch(`/bookings/${bookingId}/quote/reject`, { reason });
-    return response;
-  } catch (error) {
-    console.error('Reject quote error:', error);
-    throw error;
-  }
-}
-
-export async function disputeQuote(bookingId: string, reason: string, evidenceUrls?: string[]) {
-  try {
-    const response = await api.patch(`/bookings/${bookingId}/quote/dispute`, { reason, evidenceUrls });
-    return response;
-  } catch (error) {
-    console.error('Dispute quote error:', error);
-    throw error;
-  }
-}
-
 // ============================================================================
 // WORKER DISCOVERY & PROFILES - CLIENT
 // ============================================================================
@@ -709,10 +675,6 @@ export async function getWorkers(filters?: {
 export interface DiscoverWorkersFilters {
   serviceType?: string;
   date?: string; // YYYY-MM-DD
-  // Answers to the selected category's scope fields, keyed by field label —
-  // only fields the admin flagged "use to match workers" actually filter
-  // candidates server-side (see matchingService.buildCapabilityFilters).
-  scopeAnswers?: Record<string, string | string[]>;
   hasPets?: boolean;
   serviceTaskId?: string;
   lat?: number;
@@ -732,7 +694,7 @@ export interface DiscoverWorkersResult {
 /**
  * GET /workers with the Phase 2 discovery contract (scope + date filters,
  * server-side KYC/availability filtering, sorted rating desc). Used by
- * Step 2 (live pro count for the date) and Step 3 (full worker card list)
+ * Step 2 (live worker count for the date) and Step 3 (full worker card list)
  * — unlike the legacy `getWorkers`/`searchWorkers` above, filtering/
  * sorting/pagination all happen server-side here.
  */
@@ -741,9 +703,6 @@ export async function discoverWorkers(filters: DiscoverWorkersFilters): Promise<
     const params: Record<string, string | number> = {};
     if (filters.serviceType) params.serviceType = filters.serviceType;
     if (filters.date) params.date = filters.date;
-    if (filters.scopeAnswers && Object.keys(filters.scopeAnswers).length > 0) {
-      params.scopeAnswers = JSON.stringify(filters.scopeAnswers);
-    }
     if (filters.hasPets) params.hasPets = 'true';
     if (filters.serviceTaskId) params.serviceTaskId = filters.serviceTaskId;
     if (filters.lat != null) params.lat = filters.lat;
@@ -1616,14 +1575,19 @@ export async function declineBooking(bookingId: string, reason?: string) {
   }
 }
 
-export async function startBooking(bookingId: string, beforePhotoUrls: string[]) {
+export async function startBooking(bookingId: string) {
   try {
-    const response = await api.patch(`/bookings/${bookingId}/start`, { beforePhotoUrls });
+    const response = await api.patch(`/bookings/${bookingId}/start`);
     return response;
   } catch (error) {
     console.error('Start booking error:', error);
     throw error;
   }
+}
+
+// Worker's photos of the job as found, posted right after starting.
+export async function addBeforePhotos(bookingId: string, photoUrls: string[]) {
+  return api.post(`/bookings/${bookingId}/before-photos`, { photoUrls });
 }
 
 // Worker's "ongoing" proof photos while the job is IN_PROGRESS.
@@ -1746,66 +1710,6 @@ export async function updateWorkerLiveLocation(bookingId: string, lat: number, l
   return response;
 }
 
-export type QuoteItemPayload = {
-  name: string;
-  price: number;
-  receiptUrls: string[];
-  proofOfUseUrls: string[];
-};
-
-// Each item needs its own receipt photos and photos of it in use (uploadJobPhoto).
-// The items replace any earlier set, so editing or deleting one is a resubmit.
-// laborCost only for a custom-quote job.
-export async function submitQuote(
-  bookingId: string,
-  data: {
-    items: QuoteItemPayload[];
-    laborCost?: number;
-    notes?: string;
-  },
-) {
-  try {
-    const response = await api.post(`/bookings/${bookingId}/quote`, data);
-    return response;
-  } catch (error) {
-    console.error('Submit quote error:', error);
-    throw error;
-  }
-}
-
-// Takes a submitted/approved quote back to IN_PROGRESS so its items can be
-// edited; the client approves the new total after the worker resubmits.
-export async function reopenQuote(bookingId: string) {
-  try {
-    const response = await api.post(`/bookings/${bookingId}/quote/reopen`);
-    return response;
-  } catch (error) {
-    console.error('Reopen quote error:', error);
-    throw error;
-  }
-}
-
-// Client approves or rejects a legacy pending addon.
-/** Worker adds priced extra work to the same booking; billed only if the client approves. */
-export async function addBookingAddOn(bookingId: string, name: string, price: number) {
-  return api.post(`/bookings/${bookingId}/addons`, { name, price });
-}
-
-/** Client asks the worker for extra work on this visit; the worker replies with a price. */
-export async function requestExtraWork(bookingId: string, description: string) {
-  return api.post(`/bookings/${bookingId}/addons/request`, { description });
-}
-
-export async function respondToBookingAddOn(bookingId: string, addonId: string, approve: boolean) {
-  try {
-    const response = await api.patch(`/bookings/${bookingId}/addons/${addonId}/respond`, { approve });
-    return response;
-  } catch (error) {
-    console.error('Respond to booking addon error:', error);
-    throw error;
-  }
-}
-
 export async function uploadBookingCompletionPhoto(
   bookingId: string,
   uri: string,
@@ -1832,8 +1736,8 @@ export async function uploadBookingCompletionPhoto(
   }
 }
 
-// The worker's other job photos — quote receipts, materials in use, proof for
-// a cancellation after arriving. Same storage as the completion photo.
+// The worker's other job photos — invoice receipts, extra work, proof for a
+// cancellation after arriving. Same storage as the completion photo.
 export async function uploadJobPhoto(bookingId: string, uri: string, mimeType?: string | null): Promise<{ url: string }> {
   const filename = uri.split('/').pop() ?? `job-${Date.now()}.jpg`;
   const formData = new FormData();
@@ -1891,12 +1795,87 @@ export async function uploadReviewPhoto(
   }
 }
 
-export async function completeBooking(bookingId: string, completionPhotoUrl: string) {
+/** A line the worker adds to the invoice: a part (receipt photo) or extra work (photo of the work). */
+export type InvoiceItemPayload = {
+  kind: 'PART' | 'EXTRA_WORK';
+  name: string;
+  price: number;
+  photoUrls: string[];
+};
+
+// Sends the invoice. A CASH job resolves 'PENDING_COMPLETION' (the worker then
+// taps Cash received); a GCash/Maya job resolves 'AWAITING_PAYMENT' once its
+// Xendit invoice is raised, or stays 'PENDING_COMPLETION' if that failed (the
+// client's Pay now retries).
+export async function completeBooking(bookingId: string, completionPhotoUrl: string, items: InvoiceItemPayload[] = []) {
   try {
-    const response = await api.patch(`/bookings/${bookingId}/complete`, { completionPhotoUrl });
-    return response;
+    const response = await api.patch(`/bookings/${bookingId}/complete`, { completionPhotoUrl, items });
+    return response as unknown as { id: string; status: 'COMPLETED' | 'AWAITING_PAYMENT' | 'PENDING_COMPLETION'; total: number };
   } catch (error) {
     console.error('Complete booking error:', error);
+    throw error;
+  }
+}
+
+export async function respondToCancelRequest(bookingId: string, accept: boolean) {
+  try {
+    return await api.patch(`/bookings/${bookingId}/cancel-request/respond`, { accept });
+  } catch (error) {
+    console.error('Respond to cancel request error:', error);
+    throw error;
+  }
+}
+
+export async function reportClientNotHere(bookingId: string): Promise<{ clientNotHereAt: string; canCancelAt: string | null }> {
+  try {
+    return await api.patch(`/bookings/${bookingId}/client-not-here`);
+  } catch (error) {
+    console.error('Client not here error:', error);
+    throw error;
+  }
+}
+
+export async function reportCashNotPaid(bookingId: string) {
+  try {
+    return await api.patch(`/bookings/${bookingId}/cash-not-paid`);
+  } catch (error) {
+    console.error('Cash not paid error:', error);
+    throw error;
+  }
+}
+
+/** Worker confirms the client paid a cash invoice; the booking is done. */
+export async function markCashReceived(bookingId: string) {
+  try {
+    return await api.patch(`/bookings/${bookingId}/cash-received`);
+  } catch (error) {
+    console.error('Cash received error:', error);
+    throw error;
+  }
+}
+
+/** Client reports the invoice before paying; an admin reviews it. */
+export async function reportInvoice(bookingId: string, reason: string, evidenceUrls?: string[]) {
+  try {
+    return await api.patch(`/bookings/${bookingId}/invoice/report`, { reason, evidenceUrls });
+  } catch (error) {
+    console.error('Report invoice error:', error);
+    throw error;
+  }
+}
+
+export type ProblemReason = 'WORKER_NOT_HERE' | 'WORKER_STOPPED' | 'NEED_TO_CANCEL' | 'OTHER';
+
+/** Client reports a problem with an accepted or ongoing booking; the server picks the outcome. */
+export async function reportBookingProblem(bookingId: string, reason: ProblemReason, note?: string) {
+  try {
+    const response = await api.post(`/bookings/${bookingId}/problem`, { reason, note });
+    return response as unknown as {
+      outcome: 'WORKER_PINGED' | 'CANCELLED' | 'CANCEL_REQUESTED' | 'REPORTED';
+      autoCancelAt?: string;
+    };
+  } catch (error) {
+    console.error('Report problem error:', error);
     throw error;
   }
 }
@@ -1905,9 +1884,9 @@ export type ConfirmCompletionResult =
   | { status: 'COMPLETED'; finalPrice?: number; completedAt?: string; payment?: unknown }
   | { status: 'AWAITING_PAYMENT'; checkoutUrl: string; invoiceId: string; amount: number };
 
-// CASH -> resolves { status: 'COMPLETED' }.
-// GCASH/MAYA -> resolves { status: 'AWAITING_PAYMENT', checkoutUrl, ... }; open
-// the checkout URL and poll the transaction detail for the final outcome.
+// Pay now on a GCash/Maya invoice: resolves { status: 'AWAITING_PAYMENT',
+// checkoutUrl, ... }; open the checkout URL and poll the transaction detail
+// for the final outcome. Refused for cash (the worker confirms it).
 export async function confirmBookingCompletion(bookingId: string) {
   try {
     const response = await api.patch(`/bookings/${bookingId}/confirm-completion`);
@@ -2041,36 +2020,6 @@ export async function updateWorkerProfileDetails(data: {
   }
 }
 
-/**
- * Which specific ServiceScopeFieldOption ids this worker has declared they
- * handle (e.g. "Air Conditioner" under a category's "Appliance Type"
- * field) — replaces the old free-text Skill list. Nothing here is typed by
- * the worker; every id traces back to a real admin-defined option, fetched
- * from getServiceTypes()'s scopeFields for the categories this worker
- * offers. Used by discovery (see matchingService.buildCapabilityFilters) to
- * only show/match workers who've declared the option the client asked for.
- */
-export async function getMyCapabilities(): Promise<string[]> {
-  try {
-    const response = await api.get('/workers/me/capabilities');
-    return response.optionIds ?? [];
-  } catch (error) {
-    console.error('Get capabilities error:', error);
-    throw error;
-  }
-}
-
-/** Replace-all — pass every option id this worker currently declares. */
-export async function replaceMyCapabilities(optionIds: string[]): Promise<string[]> {
-  try {
-    const response = await api.put('/workers/me/capabilities', { optionIds });
-    return response.optionIds ?? [];
-  } catch (error) {
-    console.error('Update capabilities error:', error);
-    throw error;
-  }
-}
-
 export type WorkerServiceType = {
   id: string;
   name: string;
@@ -2153,7 +2102,7 @@ export type TaskCatalogEntry = {
       name: string;
       description?: string | null;
       pricingModel: TaskPricingModel;
-      // The admin's price (read-only for workers); null for custom-quote jobs.
+      // The admin's price (read-only for workers); null for a job with no price yet.
       price: number | null;
       unitLabel: string | null;
     };
@@ -2294,27 +2243,6 @@ export async function getWorkerPackages(workerId: string, serviceTypeId?: string
 
 export type TaskPricingModel = 'FIXED' | 'PER_UNIT' | 'TIERED' | 'CUSTOM_QUOTE';
 
-export type VatSummary = {
-  id: string;
-  periodStart: string;
-  periodEnd: string;
-  // Manila dates with the real last day ("Jul 1, 2026 to Sep 30, 2026").
-  periodLabel?: string;
-  totalVatCollected: number;
-};
-
-// Informational only — for the worker's own 2550Q/2551Q filing, never
-// remitted by the platform (see VatCollectionSummary's backend comment).
-export async function getMyVatSummary(): Promise<VatSummary[]> {
-  try {
-    const response = await api.get('/workers/me/vat-summary');
-    return Array.isArray(response) ? response : [];
-  } catch (error) {
-    console.error('Get VAT summary error:', error);
-    throw error;
-  }
-}
-
 export type Certification = {
   id: string;
   name: string;
@@ -2448,109 +2376,6 @@ export async function updatePayoutMethod(data: {
     return response;
   } catch (error) {
     console.error('Update payout method error:', error);
-    throw error;
-  }
-}
-
-export type TaxInfo = {
-  tinOnFile: boolean;
-  maskedTin: string | null;
-  tinVerifiedAt: string | null;
-};
-
-export async function getTaxInfo(): Promise<TaxInfo> {
-  try {
-    const response = await api.get('/workers/me/tax-info');
-    return response;
-  } catch (error) {
-    console.error('Get tax info error:', error);
-    throw error;
-  }
-}
-
-export async function updateTaxInfo(tin: string): Promise<TaxInfo> {
-  try {
-    const response = await api.patch('/workers/me/tax-info', { tin });
-    return response;
-  } catch (error) {
-    console.error('Update tax info error:', error);
-    throw error;
-  }
-}
-
-export type VatVerificationStatus = 'PENDING' | 'APPROVED' | 'REJECTED';
-
-export type VatRegistration = {
-  vatRegistered: boolean;
-  vatDocumentUrl: string | null;
-  vatVerificationStatus: VatVerificationStatus | null;
-  vatRejectionReason: string | null;
-  vatSubmittedAt: string | null;
-  vatReviewedAt: string | null;
-};
-
-export async function getMyVatRegistration(): Promise<VatRegistration> {
-  try {
-    const response = await api.get('/workers/me/vat-registration');
-    return response;
-  } catch (error) {
-    console.error('Get VAT registration error:', error);
-    throw error;
-  }
-}
-
-export async function submitVatRegistration(documentUrl: string): Promise<VatRegistration> {
-  try {
-    const response = await api.post('/workers/me/vat-registration', { documentUrl });
-    return response;
-  } catch (error) {
-    console.error('Submit VAT registration error:', error);
-    throw error;
-  }
-}
-
-// Not part of the onboarding KYC-document flow (submitted any time, not
-// during onboarding) — posts straight to the same upload endpoint/bucket
-// with a hardcoded documentType, bypassing the KycDocumentKey mapping layer
-// that flow uses, since VAT_REGISTRATION deliberately isn't a member of it.
-export async function uploadVatDocument(uri: string, mimeType?: string | null): Promise<{ url: string }> {
-  try {
-    const filename = uri.split('/').pop() ?? `vat-registration-${Date.now()}`;
-    const resolvedMimeType =
-      mimeType || (filename.toLowerCase().endsWith('.pdf') ? 'application/pdf' : 'image/jpeg');
-
-    const formData = new FormData();
-    formData.append('file', { uri, name: filename, type: resolvedMimeType } as any);
-    formData.append('documentType', 'VAT_REGISTRATION');
-
-    const response = await api.post('/users/me/kyc-documents/upload', formData, {
-      headers: { 'Content-Type': 'multipart/form-data' },
-    });
-    return response;
-  } catch (error) {
-    console.error('Upload VAT document error:', error);
-    throw error;
-  }
-}
-
-export type TaxCertificate = {
-  id: string;
-  periodStart: string;
-  periodEnd: string;
-  periodLabel?: string;
-  monthlyBreakdown?: Array<{ month: string; incomePayments: number; taxWithheld: number }> | null;
-  totalIncomePayments: number;
-  totalTaxWithheld: number;
-  issuedAt: string;
-  downloadUrl: string | null;
-};
-
-export async function getMyTaxCertificates(): Promise<TaxCertificate[]> {
-  try {
-    const response = await api.get('/workers/me/tax-certificates');
-    return response ?? [];
-  } catch (error) {
-    console.error('Get tax certificates error:', error);
     throw error;
   }
 }

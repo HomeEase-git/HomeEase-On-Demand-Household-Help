@@ -7,26 +7,17 @@ import path from 'path';
 import type { ServiceTask } from '@prisma/client';
 import type { CatalogBody } from '../../../src/controllers/adminCatalogController';
 
-export type MatrixQuestion = {
-  label: string;
-  helpText?: string;
-  fieldType: 'TEXT' | 'NUMBER' | 'SELECT' | 'MULTI_SELECT';
-  required: boolean;
-  options?: string[];
-  minValue?: number;
-  maxValue?: number;
-  usedForMatching?: boolean;
-  setsPrice?: boolean;
-};
 export type MatrixJob = {
   name: string;
   unit: string;
-  pricingModel: 'FIXED' | 'PER_UNIT' | 'CUSTOM_QUOTE';
-  price?: number;
+  pricingModel: 'FIXED' | 'PER_UNIT';
+  price: number;
   replaces?: string;
-  questions: MatrixQuestion[];
+  // Per-unit only: the fewest/most units a client can book (default 1 / no maximum).
+  minQuantity?: number;
+  maxQuantity?: number;
 };
-export type MatrixCategory = { name: string; commonQuestions: MatrixQuestion[]; jobs: MatrixJob[] };
+export type MatrixCategory = { name: string; jobs: MatrixJob[] };
 
 export function loadMatrix(): MatrixCategory[] {
   const file = path.join(__dirname, '..', 'data', 'jobOrderMatrix.json');
@@ -38,7 +29,7 @@ export const matrixBounds = (price: number) => ({ minPrice: Math.round(price * 0
 
 /** The category tile's starting price: its cheapest priced job. */
 export const matrixStartingPrice = (matrix: MatrixCategory) =>
-  Math.min(...matrix.jobs.filter((j) => j.pricingModel !== 'CUSTOM_QUOTE').map((j) => j.price!));
+  Math.min(...matrix.jobs.map((j) => j.price));
 
 /**
  * Builds the catalog save for `matrix`. A live job named in a row's
@@ -53,23 +44,7 @@ export function buildMatrixPayload(
 ) {
   const liveByName = new Map(liveTasks.map((t) => [t.name, t]));
   const warnings: string[] = [];
-  let keySeq = 0;
-  const qKey = () => `q:${++keySeq}`;
-  const fieldPayload = (q: MatrixQuestion, taskRefs: string[], key: string) => ({
-    key,
-    label: q.label,
-    helpText: q.helpText ?? null,
-    fieldType: q.fieldType,
-    required: q.required,
-    options: q.options ?? [],
-    minValue: q.minValue ?? null,
-    maxValue: q.maxValue ?? null,
-    usedForMatching: !!q.usedForMatching,
-    taskRefs,
-  });
-
   const tasks: NonNullable<CatalogBody['tasks']> = [];
-  const scopeFields: NonNullable<CatalogBody['scopeFields']> = matrix.commonQuestions.map((q) => fieldPayload(q, [], qKey()));
   const usedLive = new Set<string>();
   const liveFor: (ServiceTask | undefined)[] = [];
 
@@ -79,22 +54,16 @@ export function buildMatrixPayload(
     if (live) usedLive.add(live.id);
     liveFor.push(live);
     const ref = live?.id ?? `job:${i}`;
-    let quantityFieldRef: string | null = null;
-    for (const q of job.questions) {
-      const key = qKey();
-      if (q.setsPrice) quantityFieldRef = key;
-      scopeFields.push(fieldPayload(q, [ref], key));
-    }
-    const quote = job.pricingModel === 'CUSTOM_QUOTE';
     tasks.push({
       ...(live ? { id: live.id } : { key: ref }),
       name: job.name,
       description: live?.description ?? null,
-      basePrice: quote ? 0 : job.price!,
+      basePrice: job.price,
       pricingModel: job.pricingModel,
       unitLabel: job.unit,
-      quantityFieldRef: job.pricingModel === 'PER_UNIT' ? quantityFieldRef : null,
-      durationHours: quote ? null : live?.durationHours ?? null,
+      minQuantity: job.pricingModel === 'PER_UNIT' ? (job.minQuantity ?? null) : null,
+      maxQuantity: job.pricingModel === 'PER_UNIT' ? (job.maxQuantity ?? null) : null,
+      durationHours: live?.durationHours ?? null,
       isActive: true,
     });
   }
@@ -109,7 +78,8 @@ export function buildMatrixPayload(
       basePrice: live.basePrice,
       pricingModel: live.pricingModel,
       unitLabel: live.unitLabel,
-      quantityFieldRef: null,
+      minQuantity: live.minQuantity,
+      maxQuantity: live.maxQuantity,
       durationHours: live.durationHours,
       isActive: false,
     });
@@ -122,25 +92,6 @@ export function buildMatrixPayload(
     icon: category.icon,
     requiresCertification: category.requiresCertification,
     tasks,
-    scopeFields,
   };
   return { body, warnings, unmatched, liveFor, jobRef: (i: number) => liveFor[i]?.id ?? `job:${i}` };
-}
-
-/**
- * Upper bound for a category's city price cap (PricingRule.maxPrice): its
- * most expensive possible booking at the top worker tier, plus 25% headroom
- * for the distance fee and worker packages, rounded up to the next ₱1,000.
- */
-export function matrixCapMax(matrix: MatrixCategory, topTierMultiplier: number): number {
-  const largestJob = Math.max(
-    ...matrix.jobs
-      .filter((j) => j.pricingModel !== 'CUSTOM_QUOTE')
-      .map((j) => {
-        const max = matrixBounds(j.price!).maxPrice;
-        if (j.pricingModel !== 'PER_UNIT') return max;
-        return max * (j.questions.find((q) => q.setsPrice)?.maxValue ?? 1);
-      })
-  );
-  return Math.ceil((largestJob * topTierMultiplier * 1.25) / 1000) * 1000;
 }

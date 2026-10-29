@@ -1,21 +1,21 @@
 import { useEffect, useRef, useState } from 'react'
-import { COMMON_UNITS, PRICING_MODELS, usesCount } from './catalogModel'
+import { COMMON_UNITS, PRICING_MODELS, countLimitsProblem, usesCount } from './catalogModel'
 
 /**
  * Add/edit one row of the job order matrix. The price set here is what every
  * client pays and every worker earns; workers can't change it.
  */
-export default function JobModal({ initial, numberQuestions, doleRef, onSave, onClose }) {
+export default function JobModal({ initial, doleRef, onSave, onClose }) {
   const [job, setJob] = useState(() => ({
     name: '',
     description: '',
     unit: 'job',
     price: '',
     model: 'FIXED',
-    durationHours: '',
     allowsFollowUp: false,
     overrideReason: '',
-    quantityRef: null,
+    minQty: '',
+    maxQty: '',
     ...initial,
   }))
   const [error, setError] = useState('')
@@ -31,20 +31,18 @@ export default function JobModal({ initial, numberQuestions, doleRef, onSave, on
   }, [])
 
   const patch = (p) => setJob((prev) => ({ ...prev, ...p }))
-  const quote = job.model === 'CUSTOM_QUOTE'
-  const belowFloor = !quote && doleRef && job.price !== '' && Number(job.price) < doleRef.hourlyWage
+  const belowFloor = doleRef && job.price !== '' && Number(job.price) < doleRef.hourlyWage
 
   const submit = (e) => {
     e.preventDefault()
     if (!job.name.trim()) return setError('Give the job a name.')
-    if (!quote) {
-      if (!(Number(job.price) > 0)) return setError('Set a price above ₱0.')
-      if (belowFloor && !job.overrideReason.trim()) {
-        return setError('The price is under the DOLE wage reference. Give a reason to keep it.')
-      }
+    if (!(Number(job.price) > 0)) return setError('Set a price above ₱0.')
+    if (belowFloor && !job.overrideReason.trim()) {
+      return setError('The price is under the DOLE wage reference. Give a reason to keep it.')
     }
-    if (usesCount(job.model) && !job.unit.trim()) return setError('Per-unit pricing needs a unit, e.g. unit, room, kilo.')
-    if (job.durationHours !== '' && !(Number(job.durationHours) > 0)) return setError('Duration must be more than 0 hours, or left blank.')
+    if (usesCount(job.model) && !job.unit.trim()) return setError('Price per piece needs a unit, e.g. outlet, room, kilo.')
+    const limits = countLimitsProblem(job)
+    if (limits) return setError(limits)
     onSave({ ...job, name: job.name.trim(), unit: job.unit.trim().replace(/^per\s+/i, '') })
   }
 
@@ -100,7 +98,7 @@ export default function JobModal({ initial, numberQuestions, doleRef, onSave, on
           </div>
 
           <div className="sce-grid2">
-            <label className="sce-field">
+            {usesCount(job.model) && <label className="sce-field">
               <span>Unit</span>
               <div className="sce-affix">
                 <span>per</span>
@@ -115,42 +113,51 @@ export default function JobModal({ initial, numberQuestions, doleRef, onSave, on
               <datalist id="sce-units">
                 {COMMON_UNITS.map((u) => <option key={u} value={u} />)}
               </datalist>
-            </label>
+            </label>}
             <label className="sce-field">
               <span>{usesCount(job.model) ? `Price per ${job.unit || 'unit'} (₱)` : 'Price (₱)'}</span>
               <input
                 className="sce-input"
                 type="number"
                 min="0"
-                value={quote ? '' : job.price}
-                disabled={quote}
-                placeholder={quote ? 'Quoted by the worker on-site' : ''}
+                value={job.price}
                 onChange={(e) => patch({ price: e.target.value })}
               />
             </label>
           </div>
 
-          {!quote && (
+          {usesCount(job.model) && (
             <div className="sce-grid2">
               <label className="sce-field">
-                <span>Duration (hours, optional)</span>
+                <span>Fewest a client can book</span>
                 <input
                   className="sce-input"
                   type="number"
-                  min="0"
-                  step="0.5"
-                  value={job.durationHours ?? ''}
-                  onChange={(e) => patch({ durationHours: e.target.value })}
+                  min="1"
+                  value={job.minQty}
+                  onChange={(e) => patch({ minQty: e.target.value })}
+                  placeholder="1"
+                />
+              </label>
+              <label className="sce-field">
+                <span>Most a client can book</span>
+                <input
+                  className="sce-input"
+                  type="number"
+                  min="1"
+                  value={job.maxQty}
+                  onChange={(e) => patch({ maxQty: e.target.value })}
+                  placeholder="No limit"
                 />
               </label>
             </div>
           )}
-          {!quote && (
-            <div className="sce-note">
-              Every client pays this price and every worker earns from it. Workers can't change it; only the
-              expertise-tier surcharge, the distance fee and the same-day fee are added at booking.
-            </div>
-          )}
+
+          <div className="sce-note">
+            Every client pays this price and every worker earns from it. Workers can't change it; only the
+            expertise-tier surcharge, the distance fee and the same-day fee are added at booking. Parts and extra
+            work go on the worker's invoice at the end of the job.
+          </div>
 
           <label className="sce-check">
             <input
@@ -181,27 +188,6 @@ export default function JobModal({ initial, numberQuestions, doleRef, onSave, on
                 placeholder="Why this price is intentionally below the DOLE reference"
               />
             </div>
-          )}
-
-          {usesCount(job.model) && (
-            <label className="sce-field">
-              <span>Count question (sets the price)</span>
-              <select
-                className="sce-input"
-                value={job.quantityRef || ''}
-                onChange={(e) => patch({ quantityRef: e.target.value || null })}
-              >
-                <option value="">{numberQuestions.length ? 'Pick a Number question…' : 'No Number questions yet'}</option>
-                {numberQuestions.map((q) => (
-                  <option key={q.ref} value={q.ref}>
-                    {q.label}{q.common ? ' (common question)' : ''}
-                  </option>
-                ))}
-              </select>
-              <small style={{ color: 'var(--text-muted)', fontSize: '0.78rem' }}>
-                Or save the job, then add a Number question under it and tick “This number sets the price”.
-              </small>
-            </label>
           )}
 
           {error && <div className="form-error" role="alert">{error}</div>}

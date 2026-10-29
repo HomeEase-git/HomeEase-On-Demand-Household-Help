@@ -34,50 +34,7 @@ export const ROOM_TYPE_LABELS: Record<RoomType, string> = {
   OTHER: 'Hallway',
 };
 
-// Admin-configured booking "scope" step — every category is just an ordered
-// list of these (Text / Select / Multi-select / Number), configured in the
-// admin Service Catalog page. No special-cased room picker or condition
-// toggle anymore; a category that wants either just defines them as
-// ordinary fields.
-export const SCOPE_FIELD_TYPES = ['TEXT', 'SELECT', 'MULTI_SELECT', 'NUMBER'] as const;
-export type ScopeFieldType = (typeof SCOPE_FIELD_TYPES)[number];
-
-export type ScopeFieldOption = {
-  id: string;
-  label: string;
-};
-
-export type ScopeField = {
-  id: string;
-  label: string;
-  // Optional hint shown under the question.
-  helpText?: string | null;
-  fieldType: ScopeFieldType;
-  required: boolean;
-  options: ScopeFieldOption[];
-  minValue?: number | null;
-  maxValue?: number | null;
-  // Jobs (ServiceTask ids) this question is asked for. Empty = every job.
-  taskIds: string[];
-};
-
-/**
- * Whether a question is asked for the chosen job — mirrors the backend's
- * utils/scopeFields.fieldAppliesToTask. A question with no job links applies
- * to every job, and a per-unit job's own count question always applies.
- */
-export function fieldAppliesToTask(
-  field: Pick<ScopeField, 'id' | 'taskIds'>,
-  task: { id: string; quantityScopeFieldId?: string | null } | null
-): boolean {
-  if (task && task.quantityScopeFieldId === field.id) return true;
-  if (field.taskIds.length === 0) return true;
-  return task ? field.taskIds.includes(task.id) : false;
-}
-
-// Condition is no longer a platform-wide booking input (a category that
-// wants a condition-style question defines it as an ordinary field now) —
-// these are kept only to render Booking.condition on historical bookings
+// Condition is no longer a booking input — these are kept only to render Booking.condition on historical bookings
 // created before this change.
 export const CONDITION_TYPES = ['TIDY', 'NORMAL', 'HEAVY'] as const;
 export type ConditionType = (typeof CONDITION_TYPES)[number];
@@ -115,14 +72,14 @@ export type WorkerCard = {
   yearsExperience?: number | null;
 };
 
-export const TASK_PRICING_MODELS = ['FIXED', 'PER_UNIT', 'TIERED', 'CUSTOM_QUOTE'] as const;
+// TIERED is retired (charged like PER_UNIT); custom quotes are gone.
+export const TASK_PRICING_MODELS = ['FIXED', 'PER_UNIT', 'TIERED'] as const;
 export type TaskPricingModel = (typeof TASK_PRICING_MODELS)[number];
 
 // A specific bookable job within a category (e.g. "Toilet Repair" under
 // "Plumbing Repair"), priced by the admin — basePrice is the same at every
-// pro (before their tier surcharge and distance fee). minPrice/maxPrice both
-// carry that price for the estimate preview; both null for CUSTOM_QUOTE
-// (worker quotes on-site, no upfront price at all).
+// worker (before their tier surcharge and distance fee). minPrice/maxPrice
+// both carry that price for the estimate preview.
 export type ServiceTaskOption = {
   id: string;
   name: string;
@@ -132,7 +89,9 @@ export type ServiceTaskOption = {
   minPrice: number | null;
   maxPrice: number | null;
   unitLabel: string | null;
-  quantityScopeFieldId: string | null;
+  // Per-unit only: the fewest/most units a client can book (null = 1 / no maximum).
+  minQuantity: number | null;
+  maxQuantity: number | null;
   isActive: boolean;
 };
 
@@ -162,7 +121,8 @@ export type CreateBookingPayload = {
   notes?: string;
   paymentMethodType?: 'GCASH' | 'MAYA' | 'CASH';
   paymentAccountIdentifier?: string;
-  scopeAnswers?: Record<string, string | string[]>;
+  // How many units, for a per-unit job.
+  quantity?: number | null;
   issuePhotoUrls?: string[];
   idempotencyKey?: string;
 };
@@ -198,32 +158,7 @@ export type CreateBookingResponse = {
 
 // The only booking "priority" the backend acts on: any priority string
 // containing "pet" flips the auto-match filter to pet-friendly workers
-// (see bookingController `hasPets`). Step 4 collects this as a single
+// (see bookingController `hasPets`). Step 1 collects this as a single
 // toggle and submits this constant when it's on.
 export const PET_FRIENDLY_PRIORITY = 'Pet-friendly';
 
-export type AddOnToggleKey = 'eco_friendly' | 'client_supplies' | 'call_before_arrival';
-
-export const ADD_ON_TOGGLES: Array<{ key: AddOnToggleKey; label: string; description: string }> = [
-  {
-    key: 'eco_friendly',
-    label: 'Eco-Friendly Products',
-    description: 'Worker uses non-toxic, environmentally-friendly cleaning products',
-  },
-  {
-    key: 'client_supplies',
-    label: 'Client-Provided Supplies',
-    description: "I'll provide my own cleaning supplies and equipment",
-  },
-  {
-    key: 'call_before_arrival',
-    label: 'Call Before Arrival',
-    description: 'Worker calls 15-30 minutes before arriving',
-  },
-];
-
-export const ADD_ON_TOGGLE_LABELS: Record<AddOnToggleKey, string> = {
-  eco_friendly: 'Eco-Friendly Products',
-  client_supplies: 'Client-Provided Supplies',
-  call_before_arrival: 'Call Before Arrival',
-};

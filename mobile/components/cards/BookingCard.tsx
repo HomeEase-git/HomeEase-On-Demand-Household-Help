@@ -61,7 +61,7 @@ export const BookingCard: React.FC<Props> = ({ booking, onPress }) => {
         </Text>
       </View>
       <View className="items-end">
-        <StatusBadge status={booking.status as StatusType} />
+        <StatusBadge status={booking.status as StatusType} variant="booking" />
         <Text className="text-accent font-semibold mt-1">
           ₱{booking.amount}
         </Text>

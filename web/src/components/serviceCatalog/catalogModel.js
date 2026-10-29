@@ -1,32 +1,22 @@
-// Converts between the admin API's service-type shape (flat scopeFields with
-// taskLinks) and the job order editor's draft, where every job carries its own
-// question list and a category-wide "common" list holds questions asked for
-// every job. See backend/src/controllers/adminCatalogController.ts for the
-// save endpoint this feeds.
+// Converts between the admin API's service-type shape and the job order
+// editor's draft. See backend/src/controllers/adminCatalogController.ts for
+// the save endpoint this feeds. Booking questions are retired: a per-piece
+// job asks the client only how many, within the job's own limits.
 
 let seq = 0
 export const newKey = (prefix) => `${prefix}-${Date.now().toString(36)}-${++seq}`
 
-export const QUESTION_TYPES = {
-  TEXT: { label: 'Short text', hint: 'Typed answer', example: 'e.g. Brand' },
-  NUMBER: { label: 'Number', hint: 'A count or size', example: 'e.g. How many units?' },
-  ONE: { label: 'Pick one', hint: 'One choice from a list', example: 'e.g. HP' },
-  ANY: { label: 'Pick any', hint: 'Several choices', example: 'e.g. Problems seen' },
-  YESNO: { label: 'Yes / No', hint: 'Quick toggle', example: 'e.g. Has pets?' },
-}
-
-// Prices are set here only; workers can't change them. (The old "worker
-// price steps" model is retired — a saved one opens as Price × count.)
+// Prices are set here only; workers can't change them. Two ways to price a
+// job. (The old "worker price steps" model is retired — a saved one opens as
+// price per piece; custom quotes are gone, extras go on the worker's invoice.)
 export const PRICING_MODELS = {
   FIXED: { label: 'Flat price', hint: 'One price for the whole job or visit.' },
-  PER_UNIT: { label: 'Price × count', hint: 'Multiplied by a number question, e.g. How many units?' },
-  CUSTOM_QUOTE: { label: 'Custom quote', hint: 'The worker inspects, then sends a price for approval.' },
+  PER_UNIT: { label: 'Price per piece', hint: 'The client enters how many, e.g. outlets, rooms, kilos.' },
 }
 
 export const COMMON_UNITS = ['job', 'visit', 'unit', 'piece', 'item', 'room', 'door', 'basket', 'set', 'sq.m.', 'house', 'area', 'line', 'trip', 'kilo']
 
 export const usesCount = (model) => model === 'PER_UNIT'
-export const isChoiceType = (type) => type === 'ONE' || type === 'ANY'
 
 export function formatPeso(amount) {
   const num = Number(amount)
@@ -34,49 +24,24 @@ export function formatPeso(amount) {
   return `₱${num.toLocaleString('en-PH', { maximumFractionDigits: 2 })}`
 }
 
-const isYesNo = (f) =>
-  f.fieldType === 'SELECT' && f.options?.length === 2 && f.options[0].label === 'Yes' && f.options[1].label === 'No'
+const blankToNull = (v) => (v === '' || v == null ? null : Number(v))
 
-function fieldToQuestion(f, ref = f.id) {
-  const type = f.fieldType === 'NUMBER' ? 'NUMBER'
-    : f.fieldType === 'TEXT' ? 'TEXT'
-    : f.fieldType === 'MULTI_SELECT' ? 'ANY'
-    : isYesNo(f) ? 'YESNO' : 'ONE'
-  return {
-    ref,
-    id: ref === f.id ? f.id : undefined,
-    // The saved question this came from, even for a copy (see serviceToDraft).
-    sourceId: f.id,
-    label: f.label,
-    helpText: f.helpText || '',
-    type,
-    choices: (f.options || []).map((o) => o.label),
-    min: f.minValue ?? null,
-    max: f.maxValue ?? null,
-    required: f.required !== false,
-    match: !!f.usedForMatching,
-  }
-}
-
-export function emptyQuestion() {
-  return { ref: null, label: '', helpText: '', type: 'ONE', choices: ['', ''], min: 1, max: 10, required: true, match: false }
+/** "1 to 5", "at least 10", or "" — the count a client can book. */
+export function countRange(job) {
+  const min = blankToNull(job.minQty)
+  const max = blankToNull(job.maxQty)
+  if (max != null) return `${min ?? 1} to ${max}`
+  if (min != null && min > 1) return `at least ${min}`
+  return ''
 }
 
 export function emptyDraft() {
   return {
     details: { name: '', description: '', basePrice: '', icon: null, backgroundImageUrl: null, requiresCertification: false },
-    common: [],
     jobs: [],
-    splitCount: 0,
   }
 }
 
-/**
- * A question linked to several jobs is shown as its own copy under each job
- * (the first keeps its id, the rest are saved as new questions), since the
- * editor edits every job's questions independently. splitCount lets the
- * page tell the admin that happened.
- */
 export function serviceToDraft(service) {
   const jobs = (service.tasks || []).map((t) => ({
     ref: t.id,
@@ -85,48 +50,15 @@ export function serviceToDraft(service) {
     description: t.description || '',
     unit: t.unitLabel || '',
     price: t.basePrice,
-    model: t.pricingModel === 'TIERED' ? 'PER_UNIT' : t.pricingModel,
+    // TIERED opens as per piece; a leftover custom quote (switched off, no price) as flat.
+    model: t.pricingModel === 'TIERED' ? 'PER_UNIT' : t.pricingModel === 'CUSTOM_QUOTE' ? 'FIXED' : t.pricingModel,
+    minQty: t.minQuantity ?? '',
+    maxQty: t.maxQuantity ?? '',
     durationHours: t.durationHours ?? '',
     allowsFollowUp: Boolean(t.allowsFollowUp),
     isActive: t.isActive,
     overrideReason: '',
-    quantityRef: null,
-    questions: [],
   }))
-  const jobById = new Map(jobs.map((j) => [j.id, j]))
-  const common = []
-  let splitCount = 0
-
-  for (const f of service.scopeFields || []) {
-    const linked = (f.taskLinks || []).map((l) => jobById.get(l.serviceTaskId)).filter(Boolean)
-    if (linked.length === 0) {
-      common.push(fieldToQuestion(f))
-      continue
-    }
-    if (linked.length > 1) splitCount++
-    linked.forEach((job, i) => job.questions.push(fieldToQuestion(f, i === 0 ? f.id : newKey('q'))))
-  }
-
-  for (const t of service.tasks || []) {
-    if (!t.quantityScopeFieldId) continue
-    const job = jobById.get(t.id)
-    if (common.some((q) => q.id === t.quantityScopeFieldId)) {
-      job.quantityRef = t.quantityScopeFieldId
-      continue
-    }
-    const own = job.questions.find((q) => q.sourceId === t.quantityScopeFieldId)
-    const field = (service.scopeFields || []).find((f) => f.id === t.quantityScopeFieldId)
-    if (own) {
-      job.quantityRef = own.ref
-    } else if (field) {
-      // The count question is linked to other jobs only. It's still asked
-      // for this one (the price needs it), so give this job its own copy.
-      const copy = fieldToQuestion(field, newKey('q'))
-      job.questions.unshift(copy)
-      job.quantityRef = copy.ref
-      splitCount++
-    }
-  }
 
   return {
     details: {
@@ -137,25 +69,7 @@ export function serviceToDraft(service) {
       backgroundImageUrl: service.backgroundImageUrl || null,
       requiresCertification: !!service.requiresCertification,
     },
-    common,
     jobs,
-    splitCount,
-  }
-}
-
-function questionToField(q, taskRefs) {
-  const options = q.type === 'YESNO' ? ['Yes', 'No'] : isChoiceType(q.type) ? q.choices.map((c) => c.trim()).filter(Boolean) : []
-  return {
-    ...(q.id ? { id: q.id } : { key: q.ref }),
-    label: q.label.trim(),
-    helpText: q.helpText.trim() || null,
-    fieldType: q.type === 'NUMBER' ? 'NUMBER' : q.type === 'TEXT' ? 'TEXT' : q.type === 'ANY' ? 'MULTI_SELECT' : 'SELECT',
-    required: q.required,
-    options,
-    minValue: q.type === 'NUMBER' ? Number(q.min) : null,
-    maxValue: q.type === 'NUMBER' ? Number(q.max) : null,
-    usedForMatching: isChoiceType(q.type) ? q.match : false,
-    taskRefs,
   }
 }
 
@@ -168,33 +82,33 @@ export function draftToPayload(draft) {
     icon: details.icon,
     backgroundImageUrl: details.backgroundImageUrl || null,
     requiresCertification: details.requiresCertification,
-    tasks: draft.jobs.map((j) => {
-      const quote = j.model === 'CUSTOM_QUOTE'
-      return {
-        ...(j.id ? { id: j.id } : { key: j.ref }),
-        name: j.name.trim(),
-        description: j.description.trim() || null,
-        basePrice: quote ? 0 : Number(j.price),
-        pricingModel: j.model,
-        unitLabel: j.unit.trim() || null,
-        quantityFieldRef: usesCount(j.model) ? j.quantityRef : null,
-        durationHours: quote || j.durationHours === '' || j.durationHours == null ? null : Number(j.durationHours),
-        isActive: j.isActive,
-        allowsFollowUp: Boolean(j.allowsFollowUp),
-        overrideReason: j.overrideReason.trim() || undefined,
-      }
-    }),
-    scopeFields: [
-      ...draft.common.map((q) => questionToField(q, [])),
-      ...draft.jobs.flatMap((j) => j.questions.map((q) => questionToField(q, [j.ref]))),
-    ],
+    tasks: draft.jobs.map((j) => ({
+      ...(j.id ? { id: j.id } : { key: j.ref }),
+      name: j.name.trim(),
+      description: j.description.trim() || null,
+      basePrice: Number(j.price) || 0,
+      pricingModel: j.model,
+      // A flat price has no unit.
+      unitLabel: usesCount(j.model) ? j.unit.trim() || null : null,
+      minQuantity: usesCount(j.model) ? blankToNull(j.minQty) : null,
+      maxQuantity: usesCount(j.model) ? blankToNull(j.maxQty) : null,
+      durationHours: j.durationHours === '' || j.durationHours == null ? null : Number(j.durationHours),
+      isActive: j.isActive,
+      allowsFollowUp: Boolean(j.allowsFollowUp),
+      overrideReason: j.overrideReason.trim() || undefined,
+    })),
   }
 }
 
-export const findQuestion = (draft, ref) =>
-  draft.common.find((q) => q.ref === ref) || draft.jobs.flatMap((j) => j.questions).find((q) => q.ref === ref)
-
-export const countQuestionFor = (draft, job) => (job.quantityRef ? findQuestion(draft, job.quantityRef) : null)
+/** First problem with a per-piece job's count limits, or null. */
+export function countLimitsProblem(job) {
+  if (!usesCount(job.model)) return null
+  const min = blankToNull(job.minQty)
+  const max = blankToNull(job.maxQty)
+  if ((min != null && !(min >= 1)) || (max != null && !(max >= 1))) return 'The fewest and most a client can book must be at least 1.'
+  if (min != null && max != null && min > max) return 'The fewest a client can book is more than the most.'
+  return null
+}
 
 /** First problem that would stop a save, in the admin's words, or null. */
 export function validateDraft(draft, doleFloor) {
@@ -202,48 +116,21 @@ export function validateDraft(draft, doleFloor) {
   if (!d.name.trim()) return 'Give the category a name.'
   if (d.basePrice === '' || !(Number(d.basePrice) >= 0)) return 'Set a starting price for the category (₱0 or more).'
 
-  const commonLabels = new Set(draft.common.map((q) => q.label.trim().toLowerCase()))
-  for (const q of draft.common) {
-    if (!q.label.trim()) return 'A common question has no text.'
-  }
-  if (commonLabels.size !== draft.common.length) return 'Two common questions have the same text. Reword one of them.'
-
   for (const j of draft.jobs) {
     const name = j.name.trim() || 'Untitled job'
     if (!j.name.trim()) return 'A job has no name.'
-    if (j.model !== 'CUSTOM_QUOTE') {
-      if (!(Number(j.price) > 0)) return `“${name}” needs a price above ₱0.`
+    // A switched-off job may have no price yet (a former custom-quote job).
+    if (j.isActive) {
+      if (!(Number(j.price) > 0)) return `“${name}” needs a price above ₱0 before it can be switched on.`
       if (doleFloor && Number(j.price) < doleFloor && !j.overrideReason.trim()) {
         return `“${name}”: the price is under the DOLE hourly wage reference (₱${doleFloor.toFixed(2)}). Edit the job and give a reason to keep it.`
       }
     }
     if (usesCount(j.model)) {
-      if (!j.unit.trim()) return `“${name}” is priced per unit, so it needs a unit (e.g. unit, room, kilo).`
-      const count = countQuestionFor(draft, j)
-      if (!count || count.type !== 'NUMBER') {
-        return `“${name}” is priced per ${j.unit || 'unit'} but has no count question. Add a Number question and tick “This number sets the price”.`
-      }
-    }
-    const seen = new Set(commonLabels)
-    for (const q of j.questions) {
-      const key = q.label.trim().toLowerCase()
-      if (!key) return `A question under “${name}” has no text.`
-      if (seen.has(key)) return `Two questions for “${name}” read “${q.label.trim()}” (counting common questions). Reword one of them.`
-      seen.add(key)
+      if (!j.unit.trim()) return `“${name}” is priced per piece, so it needs a unit (e.g. outlet, room, kilo).`
+      const limits = countLimitsProblem(j)
+      if (limits) return `“${name}”: ${limits}`
     }
   }
   return null
-}
-
-/** Every distinct question (text + type) used anywhere, for "Start from a saved question". */
-export function buildLibrary(services, draft) {
-  const seen = new Map()
-  const add = (q) => {
-    const key = `${q.label.trim().toLowerCase()}|${q.type}`
-    if (q.label.trim() && !seen.has(key)) seen.set(key, q)
-  }
-  draft.common.forEach(add)
-  draft.jobs.forEach((j) => j.questions.forEach(add))
-  for (const s of services || []) for (const f of s.scopeFields || []) add(fieldToQuestion(f))
-  return [...seen.values()].sort((a, b) => a.label.localeCompare(b.label))
 }

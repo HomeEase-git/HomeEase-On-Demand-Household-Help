@@ -15,7 +15,7 @@ import { CategoryCard } from "../../../components/cards/CategoryCard";
 import { WorkerCard } from "../../../components/cards/WorkerCard";
 import { NotificationBadge } from "../../../components/ui/NotificationBadge";
 import { getServiceTypes, searchWorkers, getPromoBanners, getBookings, type PromoBannerItem } from "../../../services/api";
-import { mapApiBooking, type Booking, type ApiBookingListItem } from "../../../store/bookingStore";
+import { mapApiBooking, useBookingStore, type Booking, type ApiBookingListItem } from "../../../store/bookingStore";
 import { pickUpcomingBooking, pickBookAgainWorkers, type BookAgainWorker } from "../../../utils/homeBookings";
 import { StatusBadge } from "../../../components/ui/StatusBadge";
 import { Avatar } from "../../../components/ui/Avatar";
@@ -81,6 +81,15 @@ function normalizeHomeWorker(worker: any): HomeWorker {
 
 export default function ClientHomeScreen() {
   const router = useRouter();
+  const clearDraft = useBookingStore((s) => s.clearDraft);
+  const setDraft = useBookingStore((s) => s.setDraft);
+  // A service tile starts a booking straight away (the best available worker
+  // is matched); browsing workers stays on the Category tab.
+  const startBooking = async (serviceName: string) => {
+    await clearDraft();
+    setDraft({ category: serviceName, serviceType: serviceName, entrySource: "new_booking" });
+    router.push("/(client)/booking/new/step-1");
+  };
   usePushNotificationPrompt();
   const unreadCount = useNotificationStore((s) => s.unreadCount);
   const filterRef = useRef<BottomSheetHandle | null>(null);
@@ -244,7 +253,7 @@ export default function ClientHomeScreen() {
                   </Text>
                 </View>
                 <View className="items-end ml-2">
-                  <StatusBadge status={upcoming.status} />
+                  <StatusBadge status={upcoming.status} variant="booking" />
                   <Ionicons name="chevron-forward" size={18} color={colors.text.muted} style={{ marginTop: 6 }} />
                 </View>
               </Pressable>
@@ -280,10 +289,7 @@ export default function ClientHomeScreen() {
                 showsHorizontalScrollIndicator={false}
                 keyExtractor={(item) => item.id}
                 renderItem={({ item }) => (
-                  <CategoryCard
-                    category={item}
-                    onPress={() => router.push(`/(client)/category/${item.id}`)}
-                  />
+                  <CategoryCard category={item} onPress={() => startBooking(item.name)} />
                 )}
               />
             </View>

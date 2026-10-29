@@ -105,7 +105,7 @@ export default function RecordDetailScreen() {
       <ScreenHeader title="Job Record" showBack />
       <ScrollView contentContainerStyle={{ padding: 16 }}>
         <View className="items-center mb-4">
-          <StatusBadge status={status as any} />
+          <StatusBadge status={status as any} variant="booking" />
         </View>
 
         <View className="bg-card rounded-2xl p-4 mb-3">
@@ -140,7 +140,7 @@ export default function RecordDetailScreen() {
           </View>
           {isCompleted && (
             <Text className="text-text-muted text-xs mt-1 text-right">
-              After platform fee
+              After the service fee
             </Text>
           )}
         </View>

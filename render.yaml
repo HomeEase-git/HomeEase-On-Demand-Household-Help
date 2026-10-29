@@ -121,8 +121,6 @@ services:
         value: resumes
       - key: SUPABASE_CHAT_BUCKET
         value: chat-images
-      - key: SUPABASE_TAX_CERTIFICATE_BUCKET
-        value: tax-certificates
 
       # --- AI resume parsing (optional — leave blank to disable) ---
       - key: ANTHROPIC_API_KEY
@@ -143,14 +141,6 @@ services:
       # --- Pricing DEFAULTS ONLY — live values are the AppSettings DB row ---
       - key: COMMISSION_RATE
         value: "0.10"
-      - key: WITHHOLDING_TAX_RATE
-        value: "0.02"
-
-      # --- BIR 2307 certificate identity (static business facts) ---
-      - key: PLATFORM_LEGAL_NAME
-        sync: false
-      - key: PLATFORM_TIN
-        sync: false
 
   - name: homeease-redis
     type: keyvalue

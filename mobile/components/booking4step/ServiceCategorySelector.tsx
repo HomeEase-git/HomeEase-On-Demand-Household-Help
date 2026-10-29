@@ -1,6 +1,6 @@
 import React from "react";
 import { getCategoryIcon } from "../../utils/categoryIcons";
-import type { ScopeField, ServiceTaskOption } from "../../types/booking4step.types";
+import type { ServiceTaskOption } from "../../types/booking4step.types";
 import SelectDropdown from "./SelectDropdown";
 
 export type ServiceCategoryOption = {
@@ -10,7 +10,6 @@ export type ServiceCategoryOption = {
   priceRangeMin: number;
   priceRangeMax: number;
   description?: string | null;
-  scopeFields: ScopeField[];
   icon?: string | null;
   tasks: ServiceTaskOption[];
 };

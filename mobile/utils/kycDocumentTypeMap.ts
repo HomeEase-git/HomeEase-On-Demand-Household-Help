@@ -18,8 +18,8 @@ export function mapKycDocumentType(documentKey: KycDocumentKey): string {
 }
 
 // Reverse of kycDocumentTypeMap, plus the backend document types that have
-// no onboarding-wizard key (VAT_REGISTRATION is submitted later from the
-// tax-info screen, CERTIFICATION when registering for a service) — used by the
+// no onboarding-wizard key (CERTIFICATION, sent when registering for a
+// service; VAT_REGISTRATION, from the retired in-app VAT review) — used by the
 // "My Documents" screen to label a raw KycDocument row for display.
 export const kycDocumentTypeLabel: Record<string, string> = {
   GOVERNMENT_ID_FRONT: 'Government ID (Front)',

@@ -8,7 +8,7 @@ how long each kind of data is kept, and which database login may do what.
 | Store | Holds | Protection today |
 |---|---|---|
 | **Neon Postgres** (project `homeease-prod`) | Everything structured: accounts, bookings, payments, ledger, audit log, chat text | Neon keeps every change for a restore window and can rebuild the database as it was at any moment inside it. The window is **6 hours** on the Free plan (Neon console → project → Settings → Storage / history retention shows the current value). Neon replicates storage across availability zones, so a single disk or server failure loses nothing |
-| **Supabase Storage** | Files: KYC IDs and selfies, resumes, certifications, chat images, avatars, booking photos, tax certificates | Supabase itself keeps no backup of these files. The nightly off-site backup copies every bucket |
+| **Supabase Storage** | Files: KYC IDs and selfies, resumes, certifications, chat images, avatars, booking photos | Supabase itself keeps no backup of these files. The nightly off-site backup copies every bucket |
 | **Off-site backup** (Backblaze B2, see below) | An encrypted copy of the database and of every file, made each night, kept 30 days | Separate provider and account from Neon and Supabase; only the private key in the password manager can read it |
 | **Redis** (Render Key Value) | Rate-limit and login-lockout counters, session revocations, the job queue | Nothing to back up. If it's wiped: counters restart at zero; repeating jobs are re-registered at the next boot; the hourly cron backstop re-runs every sweep, including expiring overdue pending bookings. Access-token revocations ("log out everywhere", suspensions) are forgotten, so a revoked access token works again until it expires: 15 minutes once `JWT_EXPIRY` is 900. Refresh tokens are in Postgres and stay revoked |
 | **Secrets** | Render, Vercel and EAS settings; password manager | See [SECRETS.md](SECRETS.md). A backup is useless without `DATA_ENCRYPTION_KEY` and `MFA_ENCRYPTION_KEY`: the values they encrypted can't be read |
@@ -234,7 +234,7 @@ from the cron backstop (task `purge-expired-data`); see
 | Sign-in audit entries (logins, failed logins, MFA; they hold emails and names, including of people with no account) | 365 days | Deleted | `purge_expired_login_audit()`, database function |
 | Other audit entries (admin actions, security alerts, status changes, errors) | Kept | — | Can't be edited or deleted by the app |
 | Account and profile data, ID/selfie/clearance/certification/resume files | While the account is active | Erased on account deletion | `accountDeletionService.ts` |
-| Bookings, payments, payouts, ledger, tax certificates | For the period tax and accounting law requires (confirm with the accountant) | Name removed on account deletion; records kept | Not deleted automatically |
+| Bookings, payments, payouts, ledger | For the period tax and accounting law requires (confirm with the accountant) | Name removed on account deletion; records kept | Not deleted automatically |
 | Chat messages | Kept: they're the other person's record too | Images removed on account deletion | `accountDeletionService.ts` |
 | Contract and consent acceptances | Kept: proof of consent | — | — |
 | Database restore history | Neon's window (6 hours on Free) | Rolls off | Neon |

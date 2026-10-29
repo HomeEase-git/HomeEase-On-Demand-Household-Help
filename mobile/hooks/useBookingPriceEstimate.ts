@@ -24,7 +24,7 @@ export type BookingPriceEstimate =
  *   total exists — `draft.workerUnitPrice` (once a worker's picked) or the
  *   admin's rate bounds (`categoryRange`, before that) is a RATE, not a
  *   total, so it's never fed through `estimatePricePoint`/`estimateRange`
- *   as-is. Multiplied by the quantity scope-answer once both are known
+ *   as-is. Multiplied by the draft quantity once both are known
  *   (real point total); shown as a bare rate, `unitLabel` set, otherwise.
  * - `range` mode otherwise: `categoryRange` should already be whichever
  *   spread is right for the current draft — a locked worker's own price
@@ -47,15 +47,17 @@ export type BookingPriceEstimate =
 export function useBookingPriceEstimate(
   categoryRange: PriceRange,
   addOnsTotal = 0,
-  tipOverride?: number
+  tipOverride?: number,
+  // Step 1's picked per-unit job and its quantity as it's typed, before Next
+  // saves them to the draft.
+  perUnitOverride?: { quantity?: number; unitLabel?: string | null }
 ): BookingPriceEstimate {
   const draft = useBookingStore((s) => s.draft);
   const tip = tipOverride ?? draft.tip ?? 0;
-  const isPerUnit = draft.selectedTaskPricingModel === 'PER_UNIT';
-  const quantityAnswer = isPerUnit && draft.selectedTaskQuantityFieldLabel
-    ? draft.scopeAnswers?.[draft.selectedTaskQuantityFieldLabel]
-    : undefined;
-  const quantity = typeof quantityAnswer === 'string' ? Number(quantityAnswer) : NaN;
+  const isPerUnit = !!perUnitOverride || draft.selectedTaskPricingModel === 'PER_UNIT';
+  const quantityOverride = perUnitOverride ? (perUnitOverride.quantity ?? NaN) : undefined;
+  const unitLabel = perUnitOverride ? perUnitOverride.unitLabel : draft.selectedTaskUnitLabel;
+  const quantity = isPerUnit ? Number(quantityOverride ?? draft.quantity ?? NaN) : NaN;
   // Matches the server: a per-unit job is booked for at least one unit.
   const hasQuantity = Number.isFinite(quantity) && quantity >= 1;
   const rushFactor = isRushDate(draft.date) ? 1 + RUSH_FEE_RATE : 1;
@@ -82,11 +84,16 @@ export function useBookingPriceEstimate(
           point: estimatePricePoint({ laborCost: rate * quantity, addOnsTotal, tip }),
         };
       }
-      // No total is knowable yet (either no worker picked, or no quantity
-      // entered) — show the rate itself, labeled, rather than a misleading
-      // total. Uses the worker's own rate once picked, else the admin bounds.
+      // Uses the worker's own rate once picked, else the admin bounds.
       const rateRange = rate != null ? { min: rate, max: rate } : effectiveRange;
-      return { mode: 'range', range: estimateRange(rateRange), unitLabel: draft.selectedTaskUnitLabel };
+      // No worker yet (auto-match): the admin rate times the quantity is the
+      // estimate, the same way a fixed job shows its price before a worker.
+      if (hasQuantity) {
+        return { mode: 'range', range: estimateRange({ min: rateRange.min * quantity, max: rateRange.max * quantity }) };
+      }
+      // No quantity entered yet — show the rate itself, labeled, rather than
+      // a misleading total.
+      return { mode: 'range', range: estimateRange(rateRange), unitLabel };
     }
 
     return { mode: 'range', range: estimateRange(effectiveRange) };
@@ -94,7 +101,7 @@ export function useBookingPriceEstimate(
     draft.workerEstimatedTotal,
     draft.workerPriceBreakdown,
     draft.workerUnitPrice,
-    draft.selectedTaskUnitLabel,
+    unitLabel,
     isPerUnit,
     hasQuantity,
     quantity,
@@ -108,8 +115,7 @@ export function useBookingPriceEstimate(
 /**
  * The estimate for the draft as it stands, from the ranges Step 1 saved to
  * the store — the same inputs Step 4 uses — for steps that don't compute
- * their own (Steps 2-3's footer). Null for custom-quote jobs, which have no
- * upfront price.
+ * their own (Steps 2-3's footer).
  */
 export function useDraftPriceEstimate(): BookingPriceEstimate | null {
   const draft = useBookingStore((s) => s.draft);
@@ -117,5 +123,5 @@ export function useDraftPriceEstimate(): BookingPriceEstimate | null {
     min: draft.selectedTaskPriceRangeMin ?? draft.categoryPriceRangeMin ?? draft.categoryBasePrice ?? 0,
     max: draft.selectedTaskPriceRangeMax ?? draft.categoryPriceRangeMax ?? draft.categoryBasePrice ?? 0,
   });
-  return draft.selectedTaskPricingModel === 'CUSTOM_QUOTE' ? null : estimate;
+  return estimate;
 }

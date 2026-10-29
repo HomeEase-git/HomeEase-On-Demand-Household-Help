@@ -4,5 +4,5 @@ export const PAYMENTS_SUB_NAV = [
   { to: '/payments/refunds', label: 'Refunds' },
   { to: '/payments/payouts', label: 'Payout Distribution' },
   { to: '/payments/books', label: 'Books' },
-  { to: '/payments/commission', label: 'Commission & Debt' },
+  { to: '/payments/commission', label: 'Service Fee & Debt' },
 ]

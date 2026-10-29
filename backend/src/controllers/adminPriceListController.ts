@@ -106,13 +106,6 @@ export const updatePriceList = async (req: AuthRequest, res: Response) => {
       return res.status(404).json(errorResponse(404, 'Some of these jobs or categories no longer exist. Reload the Price List.'));
     }
 
-    // Custom-quote jobs have no upfront price (the worker quotes on site), so
-    // there's nothing here to set.
-    const quoteJob = taskChanges.map((c) => taskById.get(c.id)!).find((t) => t.pricingModel === 'CUSTOM_QUOTE');
-    if (quoteJob) {
-      return res.status(400).json(errorResponse(400, `"${quoteJob.name}" is a custom-quote job and has no set price.`));
-    }
-
     // Same minimum-wage guardrail as the job order editor. One reason covers
     // every below-floor job in the save, since a bulk change is one decision.
     const dole = getHighestDoleWageReference();

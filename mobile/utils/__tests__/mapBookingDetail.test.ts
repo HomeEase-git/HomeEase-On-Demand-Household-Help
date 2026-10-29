@@ -6,8 +6,8 @@ import { mapApiBookingDetail, type ApiBookingDetail } from "../mapBookingDetail"
 const base = {
   id: "b1",
   worker: null,
-  service: "Plumbing",
-  status: "QUOTE_SUBMITTED",
+  service: "Outlet Installation",
+  status: "PENDING_COMPLETION",
   location: "Somewhere",
   scheduledDate: "2026-10-07T00:00:00.000Z",
   scheduledTime: "09:00",
@@ -17,21 +17,16 @@ const base = {
   review: null,
 } as unknown as ApiBookingDetail;
 
-describe("mapApiBookingDetail quote total", () => {
-  it("falls back to labor + materials when finalPrice is not set yet", () => {
-    const b = mapApiBookingDetail({
-      ...base,
-      quote: { laborCost: 500, materialsCost: 120, notes: null, quotedAt: null },
-    });
-    expect(b.quote?.totalAmount).toBe(620);
+describe("mapApiBookingDetail amount", () => {
+  it("falls back to the booked price before the invoice total is set", () => {
+    expect(mapApiBookingDetail(base).amount).toBe(500);
   });
 
-  it("prefers finalPrice", () => {
-    const b = mapApiBookingDetail({
-      ...base,
-      finalPrice: 700,
-      quote: { laborCost: 500, materialsCost: 120, notes: null, quotedAt: null },
-    });
-    expect(b.quote?.totalAmount).toBe(700);
+  it("prefers the invoice total (finalPrice) once it's sent", () => {
+    expect(mapApiBookingDetail({ ...base, finalPrice: 920 }).amount).toBe(920);
+  });
+
+  it("maps a sent invoice to Payment due", () => {
+    expect(mapApiBookingDetail(base).status).toBe("PendingCompletion");
   });
 });

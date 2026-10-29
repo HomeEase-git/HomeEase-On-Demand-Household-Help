@@ -5,7 +5,6 @@ import {
   BOOKING_PHOTO_BUCKET,
   CHAT_IMAGE_BUCKET,
   KYC_DOCUMENT_BUCKET,
-  TAX_CERTIFICATE_BUCKET,
   PROMO_BANNER_BUCKET,
 } from '@config/supabase';
 
@@ -30,8 +29,7 @@ export const ensureStorageBuckets = async () => {
   }
 
   const existingNames = new Set((buckets ?? []).map((bucket) => bucket.name));
-  // Private buckets (tax certificates carry TINs and income figures) are
-  // served only via short-lived signed URLs.
+  // Private buckets are served only via short-lived signed URLs.
   const bucketVisibility: Array<[string, boolean]> = [
     [AVATAR_BUCKET, true],
     [BOOKING_PHOTO_BUCKET, true],
@@ -39,7 +37,6 @@ export const ensureStorageBuckets = async () => {
     [KYC_DOCUMENT_BUCKET, false],
     [RESUME_BUCKET, false],
     [CHAT_IMAGE_BUCKET, false],
-    [TAX_CERTIFICATE_BUCKET, false],
   ];
 
   for (const [bucketName, isPublic] of bucketVisibility) {

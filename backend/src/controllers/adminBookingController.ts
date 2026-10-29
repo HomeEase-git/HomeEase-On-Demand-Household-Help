@@ -14,6 +14,7 @@ import { updateBookingIfStatus, isBookingStatusConflict } from '@services/bookin
 import { cancelPendingExpiryJob } from '@queues/bookingQueue';
 import { describeDistanceFee } from '@utils/pricing';
 import { getAppSettings } from '@services/appSettingsService';
+import { invoiceLines, invoiceStatus } from '@utils/invoiceItems';
 import type { JwtPayload } from '@/types/index';
 
 interface AuthRequest extends Request {
@@ -148,6 +149,8 @@ export const getBookingById = async (req: Request, res: Response) => {
         serviceTask: { select: { name: true } },
         cancellation: true,
         visits: { orderBy: [{ scheduledDate: 'asc' }, { scheduledTime: 'asc' }] },
+        addOns: { orderBy: { createdAt: 'asc' } },
+        quoteItems: { orderBy: { createdAt: 'asc' } },
         pricingLogs: { orderBy: { createdAt: 'asc' }, take: 1 },
       },
     });
@@ -204,19 +207,13 @@ export const getBookingById = async (req: Request, res: Response) => {
           status: v.status,
           notes: v.notes,
         })),
-        quote:
-          booking.laborCost != null || booking.quoteStatus
-            ? {
-                status: booking.quoteStatus,
-                laborCost: booking.laborCost,
-                materialsCost: booking.materialsCost,
-                notes: booking.quoteNotes,
-                receiptUrls: booking.quoteReceiptUrls,
-                proofOfUseUrls: booking.quoteProofOfUseUrls,
-                rejectionReason: booking.quoteRejectionReason,
-                revision: booking.quoteRevision,
-              }
-            : null,
+        // The worker's invoice (sent at completion): the job, packages, parts
+        // and extra work, with their photos.
+        invoice: {
+          status: invoiceStatus(booking.status, booking.workerCompletedAt),
+          sentAt: booking.workerCompletedAt,
+          lines: invoiceLines(booking),
+        },
         cancellation: booking.cancellation
           ? {
               cancelledBy: booking.cancellation.cancelledBy,

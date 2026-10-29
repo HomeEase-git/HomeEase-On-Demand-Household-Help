@@ -22,7 +22,6 @@ export interface AppSettingsConfig {
   freeDistanceKm: number;
   perKmFee: number;
   workerDebtHoldLimit: number;
-  atcCode: string | null;
   workerMinAge: number;
   workerMaxAge: number;
   rushFeeRate: number;
@@ -45,7 +44,7 @@ const FALLBACK_DEFAULTS: AppSettingsConfig = {
   supportEmail: 'support@homeease.dev',
   notificationsEnabled: true,
   commissionRate: 0.1,
-  withholdingTaxRate: 0.02,
+  withholdingTaxRate: 0,
   pendingExpiryMinutes: 60,
   geofenceRadiusMeters: 100,
   maxDeclinesBeforeCooldown: 3,
@@ -62,7 +61,6 @@ const FALLBACK_DEFAULTS: AppSettingsConfig = {
   freeDistanceKm: 5,
   perKmFee: 10,
   workerDebtHoldLimit: 2500,
-  atcCode: null,
   workerMinAge: 18,
   workerMaxAge: 60,
   rushFeeRate: 0.25,
@@ -86,10 +84,11 @@ const CACHE_TTL_MS = 60_000;
 let cached: AppSettingsConfig | null = null;
 let cachedAt = 0;
 
-// Fixed by the business, not admin-editable: 2% expanded withholding tax and
-// BIR ATC WI120 ("income payments to certain contractors"). The DB columns
-// stay for history but are ignored. Change here (and redeploy) if BIR rules do.
-const FIXED_TAX = { withholdingTaxRate: 0.02, atcCode: 'WI120' } as const;
+// Workers file their own taxes (2026-10 panel revision), so HomeEase
+// withholds nothing: a rate of 0 makes every withholding amount 0, and the
+// ledger skips zero lines. Payments made before keep their recorded
+// withholding. Not admin-editable and not stored.
+const FIXED_TAX = { withholdingTaxRate: 0 } as const;
 
 /**
  * Reads the singleton AppSettings row, creating it with schema defaults on

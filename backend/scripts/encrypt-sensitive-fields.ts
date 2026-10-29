@@ -1,10 +1,8 @@
-// One-off backfill: encrypts payout account numbers and TINs written before
-// field encryption existed (see src/utils/fieldEncryption.ts), and fills
-// WorkerProfile.tinHash for existing TINs. Idempotent — values already
-// carrying the `enc:v1:` prefix are skipped, so it's safe to re-run.
+// One-off backfill: encrypts payout account numbers written before field
+// encryption existed (see src/utils/fieldEncryption.ts). Idempotent — values
+// already carrying the `enc:v1:` prefix are skipped, so it's safe to re-run.
 //
-// Covers WorkerProfile.payoutAccountNumber, WorkerProfile.tin (+ tinHash),
-// Payout.accountNumber and TaxCertificate.workerTin.
+// Covers WorkerProfile.payoutAccountNumber and Payout.accountNumber.
 //
 // Usage (from backend/):
 //   npx tsx scripts/encrypt-sensitive-fields.ts --dry     # report only, no writes
@@ -20,8 +18,7 @@ import 'dotenv/config';
 import { PrismaClient } from '@prisma/client';
 import { PrismaPg } from '@prisma/adapter-pg';
 import { Pool } from 'pg';
-import { encryptField, hashTin, isEncryptedField } from '../src/utils/fieldEncryption';
-import { normalizeTin } from '../src/utils/taxId';
+import { encryptField, isEncryptedField } from '../src/utils/fieldEncryption';
 
 const DRY_RUN = process.argv.includes('--dry');
 const NEON_WEBSOCKET = process.argv.includes('--neon-websocket');
@@ -45,27 +42,16 @@ function makeNeonWebsocketClient(): PrismaClient {
 
 async function main() {
   const profiles = await prisma.workerProfile.findMany({
-    where: { OR: [{ payoutAccountNumber: { not: null } }, { tin: { not: null } }] },
-    select: { id: true, payoutAccountNumber: true, tin: true, tinHash: true },
+    where: { payoutAccountNumber: { not: null } },
+    select: { id: true, payoutAccountNumber: true },
   });
-
-  let profilesUpdated = 0;
-  for (const profile of profiles) {
-    const data: { payoutAccountNumber?: string; tin?: string; tinHash?: string } = {};
-
-    if (profile.payoutAccountNumber && !isEncryptedField(profile.payoutAccountNumber)) {
-      data.payoutAccountNumber = encryptField(profile.payoutAccountNumber);
-    }
-    if (profile.tin && !isEncryptedField(profile.tin)) {
-      const normalized = normalizeTin(profile.tin);
-      data.tin = encryptField(normalized);
-      data.tinHash = hashTin(normalized);
-    }
-
-    if (Object.keys(data).length === 0) continue;
-    profilesUpdated++;
-    if (!DRY_RUN) {
-      await prisma.workerProfile.update({ where: { id: profile.id }, data });
+  const plainProfiles = profiles.filter((p) => !isEncryptedField(p.payoutAccountNumber!));
+  if (!DRY_RUN) {
+    for (const profile of plainProfiles) {
+      await prisma.workerProfile.update({
+        where: { id: profile.id },
+        data: { payoutAccountNumber: encryptField(profile.payoutAccountNumber!) },
+      });
     }
   }
 
@@ -80,19 +66,8 @@ async function main() {
     }
   }
 
-  const certificates = await prisma.taxCertificate.findMany({ select: { id: true, workerTin: true } });
-  const plainCertificates = certificates.filter((c) => !isEncryptedField(c.workerTin));
-  if (!DRY_RUN) {
-    for (const certificate of plainCertificates) {
-      await prisma.taxCertificate.update({
-        where: { id: certificate.id },
-        data: { workerTin: encryptField(certificate.workerTin) },
-      });
-    }
-  }
-
   const verb = DRY_RUN ? 'Would encrypt' : 'Encrypted';
-  console.log(`${verb}: ${profilesUpdated} worker profile(s), ${plainPayouts.length} payout(s), ${plainCertificates.length} tax certificate(s).`);
+  console.log(`${verb}: ${plainProfiles.length} worker profile(s), ${plainPayouts.length} payout(s).`);
   if (DRY_RUN) console.log('Dry run — no changes written. Re-run without --dry to apply.');
 }
 

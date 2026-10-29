@@ -18,7 +18,7 @@ import { usePullToRefresh } from "../../../hooks/usePullToRefresh";
 
 const MENU_GROUPS = [
   {
-    title: "Professional Profile",
+    title: "Worker Profile",
     items: [
       { label: "Edit Profile", path: "/(worker)/profile/edit", icon: "person-outline" },
       { label: "Digital ID", path: "/(worker)/profile/digital-id", icon: "card-outline" },
@@ -34,7 +34,6 @@ const MENU_GROUPS = [
     title: "Earnings",
     items: [
       { label: "Payout Method", path: "/(worker)/earnings/payout", icon: "wallet-outline" },
-      { label: "Tax & VAT", path: "/(worker)/earnings/tax-info", icon: "receipt-outline" },
     ],
   },
   {
@@ -176,7 +175,7 @@ export default function WorkerProfileScreen() {
               className="text-xs"
               style={{ color: verified ? colors.success : colors.warning }}
             >
-              {verified ? "Verified Professional" : "Verification Pending"}
+              {verified ? "Verified Worker" : "Verification Pending"}
             </Text>
             <View className="flex-row items-center mt-1">
               <StarRating rating={detail?.rating ?? 0} size={14} />

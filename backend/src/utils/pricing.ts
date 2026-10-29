@@ -223,8 +223,8 @@ export const formatPrice = (amount: number): string => {
  * guess); keeping the math in one place means a worker's Step 3 price can
  * never drift from what they're actually charged for the same job.
  *
- * Condition is deliberately not a factor here — it's an ordinary
- * admin-defined scope field now, not a platform-wide surcharge.
+ * Condition is deliberately not a factor here — it's no longer a booking
+ * input.
  *
  * Urgency (STANDARD/URGENT/EMERGENCY) used to add a surcharge here too, but
  * was removed as a platform concept (2026-09-14); `urgencyFee` stays (always
@@ -274,7 +274,7 @@ export const computeJobPricing = (input: JobPricingInput): JobPricingResult => {
   return { basePrice: input.basePrice, distanceFee, urgencyFee, rushFee, tierFee, estimatedPrice };
 };
 /**
- * "8.2 km from the pro; first 5 km free, then ₱10/km" — explains a booking's
+ * "8.2 km from the worker; first 5 km free, then ₱10/km" — explains a booking's
  * distance fee from its booking-time PricingLog. The free radius and per-km
  * rate are stored in the log since 2026-10-14; older logs fall back to the
  * live settings, which only differ if an admin changed them since.
@@ -285,7 +285,7 @@ export function describeDistanceFee(
 ): string | null {
   if (!log?.distanceFee) return null;
   const b = (log.breakdown ?? {}) as { distanceKm?: number | null; freeDistanceKm?: number; perKmFee?: number };
-  const km = b.distanceKm != null ? `${b.distanceKm.toFixed(1)} km from the pro; ` : '';
+  const km = b.distanceKm != null ? `${b.distanceKm.toFixed(1)} km from the worker; ` : '';
   return `${km}first ${b.freeDistanceKm ?? live.freeDistanceKm} km free, then ₱${b.perKmFee ?? live.perKmFee}/km`;
 }
 

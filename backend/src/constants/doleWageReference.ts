@@ -71,8 +71,7 @@ export function getDoleWageReference(cityInput: string | undefined | null): Dole
  * The highest wage floor across every region this app operates in —
  * computed rather than hardcoded to NCR so it stays correct if a future
  * wage order ever pushes another region above it. Used for city-agnostic
- * bounds like ServiceTask.minPrice/maxPrice, which (unlike PricingRule)
- * apply to a task platform-wide with no per-city variant: checking against
+ * bounds like ServiceTask.minPrice/maxPrice, which apply to a task platform-wide with no per-city variant: checking against
  * the single highest floor is the only check that can't be dodged by
  * pricing for a cheaper-labor region while a worker in the priciest one
  * ends up underpaid.

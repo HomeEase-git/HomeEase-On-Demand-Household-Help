@@ -20,8 +20,8 @@ function formatPeso(amount) {
 }
 
 /**
- * Service Catalog list. Adding or editing a category (its details, job order
- * matrix and each job's booking questions) happens on ServiceCatalogEditor.
+ * Service Catalog list. Adding or editing a category (its details and job
+ * order matrix) happens on ServiceCatalogEditor.
  */
 export default function ServiceCatalog() {
   const [query, setQuery] = useState('')
@@ -63,7 +63,7 @@ export default function ServiceCatalog() {
     <>
       <PageHeader
         title="Service Catalog"
-        subtitle="Each service's job order matrix and the booking questions for every job."
+        subtitle="Each service's job order matrix and prices."
         actions={(
           <Link to="/service-catalog/new" className="btn btn-primary">
             <i className="fas fa-plus" /> Add Service
@@ -87,15 +87,12 @@ export default function ServiceCatalog() {
                   <th>Name</th>
                   <th>Starting price</th>
                   <th>Jobs</th>
-                  <th>Questions</th>
                   <th>Status</th>
                   <th>Actions</th>
                 </tr>
               </thead>
               <tbody>
                 {pagedServices.map((s) => {
-                  const fieldCount = (s.scopeFields || []).length
-                  const matchingCount = (s.scopeFields || []).filter((f) => f.usedForMatching).length
                   const activeJobs = (s.tasks || []).filter((t) => t.isActive).length
                   return (
                     <tr key={s.id}>
@@ -115,14 +112,6 @@ export default function ServiceCatalog() {
                       <td>{formatPeso(s.basePrice)}</td>
                       <td>{activeJobs} active</td>
                       <td>
-                        {fieldCount} question{fieldCount === 1 ? '' : 's'}
-                        {matchingCount > 0 && (
-                          <span className="badge badge-pending" style={{ marginLeft: '0.4rem' }}>
-                            {matchingCount} match{matchingCount === 1 ? '' : 'es'} workers
-                          </span>
-                        )}
-                      </td>
-                      <td>
                         <span className={`badge ${s.isActive ? 'badge-active' : 'badge-suspended'}`}>
                           {s.isActive ? 'Active' : 'Inactive'}
                         </span>
@@ -132,7 +121,7 @@ export default function ServiceCatalog() {
                           <Link
                             to={`/service-catalog/${s.id}`}
                             className="action-btn view"
-                            title="Edit jobs and questions"
+                            title="Edit jobs"
                             aria-label={`Edit ${s.name}`}
                           >
                             <i className="fas fa-pen" />
@@ -154,7 +143,7 @@ export default function ServiceCatalog() {
                 })}
                 {filteredServices.length === 0 && (
                   <tr>
-                    <td colSpan={7} style={{ color: 'var(--text-muted)', padding: '1rem' }}>
+                    <td colSpan={6} style={{ color: 'var(--text-muted)', padding: '1rem' }}>
                       No services found.
                     </td>
                   </tr>

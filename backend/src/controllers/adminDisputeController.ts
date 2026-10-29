@@ -7,6 +7,7 @@ import { writeAuditLog } from '@utils/auditLog';
 import { formatDisplayId, formatPeso } from '@utils/formatters';
 import { buildPaginationMeta, getPaginationParams } from '@utils/pagination';
 import { createCompletionInvoice, settlePlatformFundedPayment } from '@services/paymentLifecycleService';
+import { computeBookingFinalTotal } from '@utils/pricing';
 import { requestRefund } from '@services/refundRequestService';
 import { updateBookingIfStatus, isBookingStatusConflict, BookingStatusConflictError } from '@services/bookingStatusWrite';
 import type { JwtPayload } from '@/types/index';
@@ -16,8 +17,11 @@ interface AuthRequest extends Request {
 }
 
 const RESOLVE_ACTIONS = [
-  'APPROVE_QUOTE',
-  'REQUEST_NEW_QUOTE',
+  // A reported invoice (bookingController.reportInvoice): keep it as sent,
+  // or take off the parts and extra work the worker added. Either way the
+  // client is asked to pay again.
+  'KEEP_INVOICE',
+  'REMOVE_INVOICE_EXTRAS',
   'CANCEL_BOOKING',
   // Post-completion non-payment (the 72h auto-escalation case: the worker
   // did the job, the client never paid). Neither fits the fixed
@@ -26,7 +30,7 @@ const RESOLVE_ACTIONS = [
   // in a separate branch of resolveDispute.
   'RESOLVE_FOR_WORKER',
   'PAY_WORKER_FROM_PLATFORM',
-  // Closes a dispute the booking has already moved past (e.g. a stale quote
+  // Closes a dispute the booking has already moved past (e.g. a stale
   // dispute whose booking later left DISPUTED some other way, or a
   // reschedule escalation support handled by hand) without touching the
   // booking or any money. Not allowed while the booking is still DISPUTED —
@@ -36,10 +40,12 @@ const RESOLVE_ACTIONS = [
 type ResolveAction = (typeof RESOLVE_ACTIONS)[number];
 
 const RESOLVED_STATUS_BY_ACTION = {
-  APPROVE_QUOTE: 'RESOLVED_APPROVED',
-  REQUEST_NEW_QUOTE: 'RESOLVED_NEW_QUOTE_REQUESTED',
+  KEEP_INVOICE: 'RESOLVED_INVOICE_KEPT',
+  REMOVE_INVOICE_EXTRAS: 'RESOLVED_INVOICE_ADJUSTED',
   CANCEL_BOOKING: 'RESOLVED_CANCELLED',
 } as const satisfies Partial<Record<ResolveAction, string>>;
+
+const isInvoiceAction = (action: string) => action === 'KEEP_INVOICE' || action === 'REMOVE_INVOICE_EXTRAS';
 
 export const disputeInclude = {
   booking: {
@@ -67,6 +73,8 @@ export function formatDispute(record: DisputeRecord) {
     // actions are rejected server-side for any other booking status anyway,
     // this just keeps the buttons from being offered when they'd just 409.
     bookingStatus: booking.status,
+    // The worker sent an invoice, so KEEP_INVOICE / REMOVE_INVOICE_EXTRAS apply.
+    hasInvoice: booking.workerCompletedAt != null,
     client: booking.client?.fullName ?? '—',
     clientId: booking.client?.id ?? null,
     worker: booking.worker?.fullName ?? '—',
@@ -405,12 +413,12 @@ async function resolveNonPaymentDispute(
  * PATCH /api/admin/disputes/:id/resolve
  * Body: { action: ResolveAction, resolution?: string }
  *
- *  - APPROVE_QUOTE: proceeds the booking to QUOTE_APPROVED (final price =
- *    laborCost + materialsCost) and re-affirms the payment hold — the actual
- *    capture still happens at confirm-completion, matching the normal
- *    non-disputed quote-approval flow.
- *  - REQUEST_NEW_QUOTE: resets quoteStatus to PENDING and sends the booking
- *    back to ACCEPTED so the worker can resubmit via POST .../quote.
+ *  - KEEP_INVOICE: the reported invoice stands. The booking goes back to
+ *    PENDING_COMPLETION (cash: the worker collects and taps Cash received)
+ *    or, for GCash/Maya, a fresh Xendit invoice is raised (AWAITING_PAYMENT).
+ *  - REMOVE_INVOICE_EXTRAS: the parts and extra work the worker added are
+ *    taken off (clientRejectedAt), the total is recomputed, and the client is
+ *    asked to pay the rest the same way as KEEP_INVOICE.
  *  - CANCEL_BOOKING: cancels the booking, writes a Cancellation record, and
  *    releases/refunds the held escrow.
  *  - RESOLVE_FOR_WORKER: for a completed job the client never paid for
@@ -452,7 +460,7 @@ export const resolveDispute = async (req: AuthRequest, res: Response) => {
     if (action === 'DISMISS') {
       if (booking.status === 'DISPUTED') {
         return res.status(409).json(
-          errorResponse(409, 'Booking is still DISPUTED — approve, re-quote, or cancel it instead of dismissing')
+          errorResponse(409, 'Booking is still DISPUTED — keep or adjust the invoice, or cancel it, instead of dismissing')
         );
       }
       if (!resolution || !resolution.trim()) {
@@ -477,9 +485,10 @@ export const resolveDispute = async (req: AuthRequest, res: Response) => {
 
     const isPaymentAction = action === 'RESOLVE_FOR_WORKER' || action === 'PAY_WORKER_FROM_PLATFORM';
 
-    // Quote actions only make sense on a quote dispute; CANCEL_BOOKING can also
+    // Invoice actions only make sense on a reported invoice; CANCEL_BOOKING can also
     // resolve a payment-overdue or refund-request dispute (booking still in
-    // PENDING_COMPLETION / AWAITING_PAYMENT / COMPLETED); the payment actions
+    // PENDING_COMPLETION / AWAITING_PAYMENT / COMPLETED) or a client problem
+    // report before the invoice (ACCEPTED / IN_PROGRESS); the payment actions
     // only make sense on a completed-but-unpaid job.
     if (isPaymentAction) {
       if (booking.status !== 'AWAITING_PAYMENT') {
@@ -497,9 +506,12 @@ export const resolveDispute = async (req: AuthRequest, res: Response) => {
     if (action !== 'CANCEL_BOOKING' && booking.status !== 'DISPUTED') {
       return res.status(409).json(errorResponse(409, 'Booking is not currently disputed'));
     }
+    if (isInvoiceAction(action) && !booking.workerCompletedAt) {
+      return res.status(409).json(errorResponse(409, 'This booking has no invoice yet — cancel it instead'));
+    }
     if (
       action === 'CANCEL_BOOKING' &&
-      !['DISPUTED', 'PENDING_COMPLETION', 'AWAITING_PAYMENT', 'COMPLETED'].includes(booking.status)
+      !['ACCEPTED', 'IN_PROGRESS', 'DISPUTED', 'PENDING_COMPLETION', 'AWAITING_PAYMENT', 'COMPLETED'].includes(booking.status)
     ) {
       return res.status(409).json(errorResponse(409, `Cannot resolve — booking is ${booking.status}`));
     }
@@ -509,26 +521,22 @@ export const resolveDispute = async (req: AuthRequest, res: Response) => {
     const cancelKeepsStatus = action === 'CANCEL_BOOKING' && booking.status === 'COMPLETED';
 
     await prisma.$transaction(async (tx) => {
-      if (action === 'APPROVE_QUOTE') {
-        if (booking.laborCost == null || booking.materialsCost == null) {
-          throw new Error('NO_QUOTE');
+      if (isInvoiceAction(action)) {
+        if (action === 'REMOVE_INVOICE_EXTRAS') {
+          await tx.bookingAddOn.updateMany({
+            where: { bookingId: booking.id, kind: { in: ['PART', 'EXTRA_WORK'] }, clientApprovedAt: { not: null } },
+            data: { clientApprovedAt: null, clientRejectedAt: new Date() },
+          });
         }
-        await updateBookingIfStatus(tx, booking.id, booking.status, {
-          status: 'QUOTE_APPROVED',
-          quoteStatus: 'APPROVED',
-          approvedAt: new Date(),
-          finalPrice: booking.laborCost + booking.materialsCost,
-          disputeResolvedById: adminId,
-          disputeResolvedAt: new Date(),
+        const billed = await tx.bookingAddOn.findMany({
+          where: { bookingId: booking.id, clientApprovedAt: { not: null } },
+          select: { price: true },
         });
-      } else if (action === 'REQUEST_NEW_QUOTE') {
-        await updateBookingIfStatus(tx, booking.id, booking.status, {
-          status: 'ACCEPTED',
-          quoteStatus: 'PENDING',
-          laborCost: null,
-          materialsCost: null,
-          quoteNotes: null,
-          quotedAt: null,
+        const { subtotal } = computeBookingFinalTotal({ ...booking, addOns: billed });
+        // Back to "invoice sent"; a GCash/Maya invoice is raised again below.
+        await updateBookingIfStatus(tx, booking.id, 'DISPUTED', {
+          status: 'PENDING_COMPLETION',
+          finalPrice: subtotal,
           disputeResolvedById: adminId,
           disputeResolvedAt: new Date(),
         });
@@ -581,6 +589,14 @@ export const resolveDispute = async (req: AuthRequest, res: Response) => {
       });
       if (claimed.count === 0) throw new BookingStatusConflictError(booking.id, [booking.status]);
     });
+
+    // The client pays the kept or adjusted invoice: cash to the worker, or a
+    // fresh Xendit invoice. If raising it fails, the client's Pay now retries.
+    if (isInvoiceAction(action) && (booking.paymentMethodType ?? 'CASH') !== 'CASH') {
+      await createCompletionInvoice(booking.id).catch((error) => {
+        console.error('Raising the payment invoice failed after resolving dispute %s:', id, error);
+      });
+    }
 
     // Refund/void outcome, tracked separately from the dispute's own
     // resolution — the booking-cancel transaction above already committed
@@ -676,9 +692,6 @@ export const resolveDispute = async (req: AuthRequest, res: Response) => {
     const updated = await prisma.dispute.findUniqueOrThrow({ where: { id }, include: disputeInclude });
     return res.json({ success: true, data: formatDispute(updated) });
   } catch (error: any) {
-    if (error.message === 'NO_QUOTE') {
-      return res.status(400).json(errorResponse(400, 'No quote exists on this booking to approve'));
-    }
     if (isBookingStatusConflict(error)) {
       return res.status(409).json(errorResponse(409, 'This dispute or its booking was just updated. Refresh and try again.'));
     }

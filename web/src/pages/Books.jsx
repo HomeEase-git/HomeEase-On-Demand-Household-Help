@@ -24,7 +24,7 @@ const ACCOUNTS = {
   MANUAL_SETTLEMENTS: { label: 'Settled outside the app', normal: 'Dr' },
   WORKER_BALANCE: { label: 'Worker balances (owed to workers)', normal: 'Cr' },
   CLIENT_RECEIVABLE: { label: 'Client fees owed', normal: 'Dr' },
-  COMMISSION_REVENUE: { label: 'Commission revenue', normal: 'Cr' },
+  COMMISSION_REVENUE: { label: 'Service fee revenue', normal: 'Cr' },
   PENALTY_REVENUE: { label: 'Penalty revenue', normal: 'Cr' },
   WITHHOLDING_TAX_PAYABLE: { label: 'Withholding tax owed to BIR', normal: 'Cr' },
   XENDIT_FEES: { label: 'Xendit fees', normal: 'Dr' },

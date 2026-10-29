@@ -37,9 +37,10 @@ reminders. Treat Redis as a hard dependency and watch `GET /health/ready`.
   service + Redis together.
 - **Vercel account**, repo connected, Root Directory set to `web`.
 - **Supabase** project + storage buckets: `kyc-documents`, `resumes`,
-  `chat-images`, `avatars`, `booking-photos`, `tax-certificates` (the backend
+  `chat-images`, `avatars`, `booking-photos`, `promo-banners` (the backend
   calls `ensureStorageBuckets()` on boot and will create missing ones if the
-  service key allows it).
+  service key allows it). An existing `tax-certificates` bucket holds the
+  retired Form 2307 PDFs; nothing reads it any more.
 - **Xendit** — a **live** secret key (`xnd_production_…`) and a webhook token.
   Point the Xendit dashboard webhook at `https://<render-url>/api/payments/xendit/invoice-webhook`
   and `.../payout-webhook` (see `backend/src/routes/payments.ts`).
@@ -103,7 +104,7 @@ payment reminders) down with it. Two pieces close that gap:
    pending-booking-expiry sweep (`expireOverduePendingBookings`,
    `backend/src/services/pendingExpirySweep.ts`) standing in for the
    per-booking delayed job BullMQ would otherwise handle. Tasks:
-   `settle-completions`, `approve-quotes`, `flag-no-shows`,
+   `settle-completions`, `flag-no-shows`,
    `expire-pending`, `purge-expired-data` (retention, see
    [docs/DATA-RESILIENCE.md](docs/DATA-RESILIENCE.md)) and the rest listed
    in `TASKS` there, or `all`. Authenticated by an `x-cron-secret` header
@@ -138,7 +139,7 @@ Prisma, then exits. Budget is `SHUTDOWN_TIMEOUT_MS` (default 15s).
 Neither the image nor the Blueprint ships seeds. After the first deploy,
 create via the admin dashboard (or a one-off `npm run prisma:seed:complete`
 pointed at the prod DB): service types, pricing rules, and the `AppSettings`
-row (commission + withholding rate). Create the first `ADMIN` user directly in
+row (commission rate; HomeEase withholds no tax). Create the first `ADMIN` user directly in
 the DB or with a seed script.
 
 ## 3. Web (admin dashboard) — Vercel

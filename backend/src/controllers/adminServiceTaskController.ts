@@ -11,12 +11,10 @@ interface AuthRequest extends Request {
   user?: JwtPayload;
 }
 
-// TIERED (worker-defined price steps) is retired — prices are admin-set only.
-const VALID_PRICING_MODELS: TaskPricingModel[] = ['FIXED', 'PER_UNIT', 'CUSTOM_QUOTE'];
-
-const taskInclude = {
-  quantityScopeField: { select: { id: true, label: true } },
-};
+// Two ways to price a job: a flat price, or a price per piece the client
+// counts. TIERED (worker price steps) and CUSTOM_QUOTE (worker quotes on site)
+// are retired; extras and parts go on the worker's invoice instead.
+const VALID_PRICING_MODELS: TaskPricingModel[] = ['FIXED', 'PER_UNIT'];
 
 export type TaskInputBody = {
   name?: string;
@@ -24,7 +22,9 @@ export type TaskInputBody = {
   basePrice?: number;
   pricingModel?: string;
   unitLabel?: string | null;
-  quantityScopeFieldId?: string | null;
+  // Per-unit only: the fewest/most units a client can book (null = 1 / no maximum).
+  minQuantity?: number | null;
+  maxQuantity?: number | null;
   durationHours?: number | null;
   isActive?: boolean;
   // Inspection/diagnosis job — the client can ask for a follow-up job after it.
@@ -34,11 +34,11 @@ export type TaskInputBody = {
 
 /**
  * The admin's price (basePrice) is what every client pays and every worker
- * earns — FIXED: the flat price, PER_UNIT: the rate per unit. CUSTOM_QUOTE
- * has no upfront price at all (worker quotes on-site via submitQuote), so it
- * must NOT carry a unit/quantity field.
+ * earns — FIXED: the flat price, PER_UNIT: the price per piece. A switched-off
+ * job may have no price yet (former custom-quote jobs); it needs one before
+ * it can be switched back on.
  */
-export function validateTaskInput(body: TaskInputBody, existingNumberFieldIds: Set<string>): string | null {
+export function validateTaskInput(body: TaskInputBody): string | null {
   if (!body.name?.trim()) {
     return 'Name is required.';
   }
@@ -55,14 +55,7 @@ export function validateTaskInput(body: TaskInputBody, existingNumberFieldIds: S
     return 'allowsFollowUp must be true or false.';
   }
 
-  if (body.pricingModel === 'CUSTOM_QUOTE') {
-    if (body.quantityScopeFieldId) {
-      return 'Custom-quote tasks cannot have a quantity field.';
-    }
-    return null;
-  }
-
-  if (body.basePrice <= 0) {
+  if (body.isActive !== false && body.basePrice <= 0) {
     return 'Price must be above ₱0.';
   }
 
@@ -70,22 +63,20 @@ export function validateTaskInput(body: TaskInputBody, existingNumberFieldIds: S
     if (!body.unitLabel?.trim()) {
       return 'unitLabel is required for a per-unit task (e.g. "kilo", "sq.m.").';
     }
-    if (!body.quantityScopeFieldId || !existingNumberFieldIds.has(body.quantityScopeFieldId)) {
-      return 'quantityScopeFieldId must reference a NUMBER-type field on this service category.';
+    for (const key of ['minQuantity', 'maxQuantity'] as const) {
+      const value = body[key];
+      if (value != null && (typeof value !== 'number' || !Number.isFinite(value) || value < 1)) {
+        return `${key} must be a number of at least 1.`;
+      }
     }
-  } else if (body.quantityScopeFieldId) {
-    return 'quantityScopeFieldId only applies to per-unit tasks.';
+    if (body.minQuantity != null && body.maxQuantity != null && body.minQuantity > body.maxQuantity) {
+      return 'minQuantity cannot be more than maxQuantity.';
+    }
+  } else if (body.minQuantity != null || body.maxQuantity != null) {
+    return 'minQuantity/maxQuantity only apply to per-unit tasks.';
   }
 
   return null;
-}
-
-async function getNumberFieldIds(serviceTypeId: string): Promise<Set<string>> {
-  const fields = await prisma.serviceScopeField.findMany({
-    where: { serviceTypeId, fieldType: 'NUMBER' },
-    select: { id: true },
-  });
-  return new Set(fields.map((f) => f.id));
 }
 
 export const listTasksForServiceType = async (req: Request, res: Response) => {
@@ -93,7 +84,6 @@ export const listTasksForServiceType = async (req: Request, res: Response) => {
     const serviceTypeId = req.params.serviceTypeId as string;
     const tasks = await prisma.serviceTask.findMany({
       where: { serviceTypeId },
-      include: taskInclude,
       orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }],
     });
     return res.json({ success: true, data: tasks });
@@ -113,20 +103,15 @@ export const createTask = async (req: AuthRequest, res: Response) => {
       return res.status(404).json(errorResponse(404, 'Service type not found'));
     }
 
-    const numberFieldIds = await getNumberFieldIds(serviceTypeId);
-    const validationError = validateTaskInput(body, numberFieldIds);
+    const validationError = validateTaskInput(body);
     if (validationError) {
       return res.status(400).json(errorResponse(400, validationError));
     }
 
-    const isCustomQuote = body.pricingModel === 'CUSTOM_QUOTE';
-
     // Minimum-wage guardrail on the admin price — applies platform-wide (no
     // per-city variant), so it's checked against the highest region-wide
     // DOLE floor since there's no city here to look up.
-    const doleCheck = isCustomQuote
-      ? ({ blocked: false, note: null } as const)
-      : checkDoleFloor(getHighestDoleWageReference(), body.basePrice!, body.overrideReason);
+    const doleCheck = checkDoleFloor(getHighestDoleWageReference(), body.basePrice!, body.overrideReason);
     if (doleCheck.blocked) {
       return res.status(400).json(errorResponse(400, doleCheck.message));
     }
@@ -140,14 +125,13 @@ export const createTask = async (req: AuthRequest, res: Response) => {
         pricingModel: body.pricingModel as TaskPricingModel,
         minPrice: null,
         maxPrice: null,
-        // Display-only for FIXED/CUSTOM_QUOTE (the matrix's "per visit").
+        // Display-only for FIXED (the matrix's "per visit").
         unitLabel: body.unitLabel?.trim() || null,
-        quantityScopeFieldId:
-          body.pricingModel === 'PER_UNIT' ? body.quantityScopeFieldId! : null,
-        durationHours: isCustomQuote ? null : body.durationHours ?? null,
+        minQuantity: body.pricingModel === 'PER_UNIT' ? (body.minQuantity ?? null) : null,
+        maxQuantity: body.pricingModel === 'PER_UNIT' ? (body.maxQuantity ?? null) : null,
+        durationHours: body.durationHours ?? null,
         allowsFollowUp: body.allowsFollowUp ?? false,
       },
-      include: taskInclude,
     });
 
     await writeAuditLog({
@@ -181,20 +165,19 @@ export const updateTask = async (req: AuthRequest, res: Response) => {
       return res.status(404).json(errorResponse(404, 'Task not found'));
     }
 
-    const numberFieldIds = await getNumberFieldIds(serviceTypeId);
-    const validationError = validateTaskInput(body, numberFieldIds);
-    if (validationError) {
-      return res.status(400).json(errorResponse(400, validationError));
-    }
     if (body.isActive !== undefined && typeof body.isActive !== 'boolean') {
       return res.status(400).json(errorResponse(400, 'isActive must be a boolean.'));
     }
+    const isActive = body.isActive ?? existing.isActive;
 
-    const isCustomQuote = body.pricingModel === 'CUSTOM_QUOTE';
+    const validationError = validateTaskInput({ ...body, isActive });
+    if (validationError) {
+      return res.status(400).json(errorResponse(400, validationError));
+    }
 
-    const doleCheck = isCustomQuote
-      ? ({ blocked: false, note: null } as const)
-      : checkDoleFloor(getHighestDoleWageReference(), body.basePrice!, body.overrideReason);
+    const doleCheck = isActive
+      ? checkDoleFloor(getHighestDoleWageReference(), body.basePrice!, body.overrideReason)
+      : ({ blocked: false, note: null } as const);
     if (doleCheck.blocked) {
       return res.status(400).json(errorResponse(400, doleCheck.message));
     }
@@ -209,15 +192,14 @@ export const updateTask = async (req: AuthRequest, res: Response) => {
           pricingModel: body.pricingModel as TaskPricingModel,
           minPrice: null,
           maxPrice: null,
-          // Display-only for FIXED/CUSTOM_QUOTE (the matrix's "per visit").
+          // Display-only for FIXED (the matrix's "per visit").
           unitLabel: body.unitLabel?.trim() || null,
-          quantityScopeFieldId:
-            body.pricingModel === 'PER_UNIT' ? body.quantityScopeFieldId! : null,
-          durationHours: isCustomQuote ? null : body.durationHours ?? null,
-          isActive: body.isActive ?? existing.isActive,
+          minQuantity: body.pricingModel === 'PER_UNIT' ? (body.minQuantity ?? null) : null,
+          maxQuantity: body.pricingModel === 'PER_UNIT' ? (body.maxQuantity ?? null) : null,
+          durationHours: body.durationHours ?? null,
+          isActive,
           ...(body.allowsFollowUp !== undefined ? { allowsFollowUp: body.allowsFollowUp } : {}),
         },
-        include: taskInclude,
       });
     });
 
@@ -255,11 +237,14 @@ export const toggleTaskActive = async (req: AuthRequest, res: Response) => {
     if (!existing) {
       return res.status(404).json(errorResponse(404, 'Task not found'));
     }
+    // A former custom-quote job has no price; it needs one before clients can book it.
+    if (isActive && !(existing.basePrice > 0)) {
+      return res.status(400).json(errorResponse(400, 'Give this job a price before switching it on.'));
+    }
 
     const task = await prisma.serviceTask.update({
       where: { id: taskId },
       data: { isActive },
-      include: taskInclude,
     });
 
     await writeAuditLog({

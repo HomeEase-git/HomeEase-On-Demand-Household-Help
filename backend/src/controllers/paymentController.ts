@@ -6,6 +6,7 @@ import { errorResponse } from '@utils/errorResponse';
 import { notifyUser } from '@utils/notify';
 import { sendSmsToUser } from '@utils/smsService';
 import { writeAuditLog } from '@utils/auditLog';
+import { toOwnedBookingPhotoUrls } from '@utils/storageUrls';
 import type { JwtPayload } from '@/types/index';
 import {
   refundOrVoidPayment,
@@ -266,9 +267,10 @@ export const refundPayment = async (req: AuthRequest, res: Response) => {
     // Optional — already-uploaded image URLs (see uploadController's
     // upload-then-attach pattern). Never required to file a legitimate
     // refund/dispute.
-    const cleanEvidenceUrls: string[] = Array.isArray(evidenceUrls)
-      ? evidenceUrls.filter((url): url is string => typeof url === 'string')
-      : [];
+    const cleanEvidenceUrls = toOwnedBookingPhotoUrls(evidenceUrls ?? [], currentUserId);
+    if (!cleanEvidenceUrls) {
+      return res.status(400).json(errorResponse(400, 'Upload the photos again — one of them could not be verified'));
+    }
 
     const payment = await prisma.payment.findUnique({
       where: { id },
@@ -500,6 +502,22 @@ async function handleInvoicePaid(invoice: any) {
     const remoteStatus = (remote?.status as string | undefined)?.toUpperCase();
     if (remoteStatus !== 'PAID' && remoteStatus !== 'SETTLED') return;
     await finalizeDebtPayment(debtPayment.id, remote.paid_amount ?? null, remote.paid_at ? new Date(remote.paid_at) : null);
+    return;
+  }
+  if (payment.status === 'FAILED') {
+    // Money that landed on a voided invoice (the checkout couldn't be
+    // expired in time). Not auto-settled: the booking was cancelled or is
+    // under review, so an admin refunds or applies it.
+    const remote = await retrieveInvoice(invoiceId);
+    const remoteStatus = (remote?.status as string | undefined)?.toUpperCase();
+    if (remoteStatus !== 'PAID' && remoteStatus !== 'SETTLED') return;
+    await writeAuditLog({
+      action: 'PAYMENT_AFTER_VOID',
+      category: 'SYSTEM_ERROR',
+      level: 'ERROR',
+      message: `Xendit invoice ${invoiceId} was paid after payment ${payment.id} was voided (booking ${payment.bookingId}) — refund or apply it manually.`,
+      metadata: { paymentId: payment.id, bookingId: payment.bookingId, invoiceId, paidAmount: remote.paid_amount ?? null },
+    });
     return;
   }
   if (payment.status !== 'PENDING') return;

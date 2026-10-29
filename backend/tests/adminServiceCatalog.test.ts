@@ -1,12 +1,10 @@
 import request from 'supertest';
 import app from '@/app';
 import prisma from '@config/database';
-import { buildCapabilityFilters } from '@services/matchingService';
 import { createTestUser, deleteTestUser } from './helpers';
 
-// The job order editor saves a whole category — details, jobs and each job's
-// own booking questions — in one request, with new jobs/questions referenced
-// by temporary keys until they have ids.
+// The job order editor saves a whole category — details and jobs — in one
+// request, with new jobs referenced by temporary keys until they have ids.
 describe('Admin service catalog save', () => {
   const createdUserIds: string[] = [];
   const createdServiceTypeIds: string[] = [];
@@ -33,7 +31,7 @@ describe('Admin service catalog save', () => {
     ...extra,
   });
 
-  const newCatalog = () => ({
+  const newCatalog = (): { name: string; description: string; basePrice: number; tasks: Record<string, unknown>[] } => ({
     name: `E2E Aircon ${Date.now()}`,
     description: 'Aircon cleaning and repair',
     basePrice: 350,
@@ -43,34 +41,15 @@ describe('Admin service catalog save', () => {
         basePrice: 1500,
         pricingModel: 'PER_UNIT',
         unitLabel: 'unit',
-        quantityFieldRef: 'f-units',
+        maxQuantity: 10,
       }),
-      job('t-window', 'Aircon Cleaning – Window Type', {
+      job('t-wall', 'Wall Painting', {
+        basePrice: 100,
         pricingModel: 'PER_UNIT',
-        unitLabel: 'unit',
-        quantityFieldRef: 'f-units-window',
+        unitLabel: 'sq.m.',
+        minQuantity: 10,
+        maxQuantity: 1000,
       }),
-    ],
-    scopeFields: [
-      { key: 'f-brand', label: 'Brand', fieldType: 'TEXT', required: false, taskRefs: [] },
-      {
-        key: 'f-symptom',
-        label: 'Symptom',
-        fieldType: 'SELECT',
-        options: ['Not cooling', 'Leaking'],
-        taskRefs: ['t-diag'],
-      },
-      { key: 'f-units', label: 'How many units?', fieldType: 'NUMBER', minValue: 1, maxValue: 10, taskRefs: ['t-split'] },
-      {
-        key: 'f-hp',
-        label: 'HP',
-        helpText: 'Check the sticker on the indoor unit.',
-        fieldType: 'SELECT',
-        options: ['1 HP', '1.5 HP', '2 HP+'],
-        taskRefs: ['t-split'],
-      },
-      // Same text as the split-type count, on a different job — allowed.
-      { key: 'f-units-window', label: 'How many units?', fieldType: 'NUMBER', minValue: 1, maxValue: 10, taskRefs: ['t-window'] },
     ],
   });
 
@@ -79,7 +58,7 @@ describe('Admin service catalog save', () => {
   const update = (id: string, body: object) =>
     request(app).put(`/api/admin/service-types/${id}/catalog`).set('Authorization', `Bearer ${adminToken}`).send(body);
 
-  it('creates a category with its jobs, per-job questions and count questions in one save', async () => {
+  it('creates a category with its jobs and per-unit count limits in one save', async () => {
     const res = await create(newCatalog());
     expect(res.status).toBe(201);
     const cat = res.body.data;
@@ -88,115 +67,58 @@ describe('Admin service catalog save', () => {
     expect(cat.tasks.map((t: { name: string }) => t.name)).toEqual([
       'Diagnosis Fee',
       'Aircon Cleaning – Split Type',
-      'Aircon Cleaning – Window Type',
+      'Wall Painting',
     ]);
-    const split = cat.tasks[1];
-    const window = cat.tasks[2];
-    const byLabelAndJob = (label: string, taskId?: string) =>
-      cat.scopeFields.find(
-        (f: { label: string; taskLinks: { serviceTaskId: string }[] }) =>
-          f.label === label && (taskId ? f.taskLinks.some((l) => l.serviceTaskId === taskId) : f.taskLinks.length === 0)
-      );
-
-    expect(byLabelAndJob('Brand')).toBeDefined();
-    expect(byLabelAndJob('Symptom', cat.tasks[0].id)).toBeDefined();
-    expect(byLabelAndJob('HP', split.id).helpText).toBe('Check the sticker on the indoor unit.');
-    expect(split.quantityScopeFieldId).toBe(byLabelAndJob('How many units?', split.id).id);
-    expect(window.quantityScopeFieldId).toBe(byLabelAndJob('How many units?', window.id).id);
-    expect(split.quantityScopeFieldId).not.toBe(window.quantityScopeFieldId);
+    expect(cat.tasks[0]).toMatchObject({ minQuantity: null, maxQuantity: null });
+    expect(cat.tasks[1]).toMatchObject({ minQuantity: null, maxQuantity: 10 });
+    expect(cat.tasks[2]).toMatchObject({ minQuantity: 10, maxQuantity: 1000 });
+    expect(cat).not.toHaveProperty('scopeFields');
   });
 
-  it('updates in place: keeps ids, moves a question between jobs, deletes a removed one, adds a new job', async () => {
+  it('updates in place: keeps ids, deactivates a job, adds a new job', async () => {
     const created = (await create(newCatalog())).body.data;
     createdServiceTypeIds.push(created.id);
-    const [diag, split, window] = created.tasks;
-    const field = (label: string) => created.scopeFields.find((f: { label: string }) => f.label === label);
-    const splitUnits = created.scopeFields.find((f: { id: string }) => f.id === split.quantityScopeFieldId);
-    const windowUnits = created.scopeFields.find((f: { id: string }) => f.id === window.quantityScopeFieldId);
-    const hpOptionIds = field('HP').options.map((o: { id: string }) => o.id);
+    const [diag, split, wall] = created.tasks;
 
     const res = await update(created.id, {
       name: created.name,
       basePrice: 350,
       tasks: [
         { id: diag.id, name: diag.name, basePrice: 350, pricingModel: 'FIXED', isActive: false },
-        {
-          id: split.id,
-          name: split.name,
-          basePrice: 1500,
-          pricingModel: 'PER_UNIT',
-          unitLabel: 'unit',
-          quantityFieldRef: splitUnits.id,
-        },
-        {
-          id: window.id,
-          name: window.name,
-          basePrice: 800,
-          pricingModel: 'PER_UNIT',
-          unitLabel: 'unit',
-          quantityFieldRef: windowUnits.id,
-        },
+        { id: split.id, name: split.name, basePrice: 1500, pricingModel: 'PER_UNIT', unitLabel: 'unit', maxQuantity: 5 },
+        { id: wall.id, name: wall.name, basePrice: 100, pricingModel: 'PER_UNIT', unitLabel: 'sq.m.' },
         job('t-new', 'Freon Recharge', { basePrice: 1800 }),
-      ],
-      scopeFields: [
-        // Symptom dropped; HP now asked for both cleaning jobs, text reworded.
-        { id: field('Brand').id, label: 'Brand', fieldType: 'TEXT', required: false, taskRefs: [] },
-        { id: splitUnits.id, label: 'How many units?', fieldType: 'NUMBER', minValue: 1, maxValue: 10, taskRefs: [split.id] },
-        { id: windowUnits.id, label: 'How many units?', fieldType: 'NUMBER', minValue: 1, maxValue: 10, taskRefs: [window.id] },
-        {
-          id: field('HP').id,
-          label: 'Horsepower (HP)',
-          fieldType: 'SELECT',
-          options: ['1 HP', '1.5 HP', '2 HP+'],
-          taskRefs: [split.id, window.id],
-        },
-        { key: 'f-refrigerant', label: 'Refrigerant', fieldType: 'SELECT', options: ['R22', 'R410A', 'R32'], taskRefs: ['t-new'] },
       ],
     });
     expect(res.status).toBe(200);
     const saved = res.body.data;
 
-    const hp = saved.scopeFields.find((f: { id: string }) => f.id === field('HP').id);
-    expect(hp.label).toBe('Horsepower (HP)');
-    expect(hp.options.map((o: { id: string }) => o.id)).toEqual(hpOptionIds);
-    expect(hp.taskLinks.map((l: { serviceTaskId: string }) => l.serviceTaskId).sort()).toEqual([split.id, window.id].sort());
-    expect(saved.scopeFields.some((f: { label: string }) => f.label === 'Symptom')).toBe(false);
-
-    const freon = saved.tasks.find((t: { name: string }) => t.name === 'Freon Recharge');
-    const refrigerant = saved.scopeFields.find((f: { label: string }) => f.label === 'Refrigerant');
-    expect(refrigerant.taskLinks).toEqual([{ serviceTaskId: freon.id }]);
     expect(saved.tasks.find((t: { id: string }) => t.id === diag.id).isActive).toBe(false);
-    expect(saved.tasks.find((t: { id: string }) => t.id === split.id).quantityScopeFieldId).toBe(splitUnits.id);
+    expect(saved.tasks.find((t: { id: string }) => t.id === split.id).maxQuantity).toBe(5);
+    expect(saved.tasks.find((t: { id: string }) => t.id === wall.id)).toMatchObject({ minQuantity: null, maxQuantity: null });
+    expect(saved.tasks.some((t: { name: string }) => t.name === 'Freon Recharge')).toBe(true);
   });
 
-  it('rejects two questions with the same text on the same job', async () => {
+  it('rejects a count limit below 1, since the count sets the price', async () => {
     const body = newCatalog();
-    body.scopeFields.push({ key: 'f-dup', label: 'hp', fieldType: 'TEXT', taskRefs: ['t-split'] } as never);
+    body.tasks[1] = { ...body.tasks[1], minQuantity: 0 };
     const res = await create(body);
     expect(res.status).toBe(400);
-    expect(res.body.message).toMatch(/Aircon Cleaning – Split Type/);
+    expect(res.body.message).toMatch(/minQuantity must be a number of at least 1/);
   });
 
-  it('rejects a common question whose text a job question repeats', async () => {
+  it('rejects a minimum above the maximum', async () => {
     const body = newCatalog();
-    body.scopeFields.push({ key: 'f-dup', label: 'Symptom', fieldType: 'TEXT', taskRefs: [] } as never);
+    body.tasks[2] = { ...body.tasks[2], minQuantity: 2000 };
+    const res = await create(body);
+    expect(res.status).toBe(400);
+    expect(res.body.message).toMatch(/minQuantity cannot be more than maxQuantity/);
+  });
+
+  it('rejects count limits on a flat-priced job', async () => {
+    const body = newCatalog();
+    body.tasks[0] = { ...body.tasks[0], maxQuantity: 3 };
     expect((await create(body)).status).toBe(400);
-  });
-
-  it('rejects a per-unit job without a count question', async () => {
-    const body = newCatalog();
-    body.tasks[1] = { ...body.tasks[1], quantityFieldRef: undefined } as never;
-    const res = await create(body);
-    expect(res.status).toBe(400);
-    expect(res.body.message).toMatch(/count question/);
-  });
-
-  it('rejects a count question whose minimum is below 1, since it sets the price', async () => {
-    const body = newCatalog();
-    body.scopeFields = body.scopeFields.map((f) => (f.key === 'f-units' ? { ...f, minValue: 0 } : f)) as never;
-    const res = await create(body);
-    expect(res.status).toBe(400);
-    expect(res.body.message).toMatch(/minimum must be at least 1/);
   });
 
   it("rejects ids from another category, so a save can't reach outside it", async () => {
@@ -207,22 +129,7 @@ describe('Admin service catalog save', () => {
     expect(res.status).toBe(400);
   });
 
-  it('only narrows workers by a matching question asked for the booked job', async () => {
-    const body = newCatalog();
-    body.scopeFields.push(
-      { key: 'f-brand-diag', label: 'Unit brand', fieldType: 'SELECT', options: ['Carrier', 'Koppel'], usedForMatching: true, taskRefs: ['t-diag'] } as never,
-      { key: 'f-brand-split', label: 'Unit brand', fieldType: 'SELECT', options: ['Carrier', 'Koppel'], usedForMatching: true, taskRefs: ['t-split'] } as never
-    );
-    const cat = (await create(body)).body.data;
-    createdServiceTypeIds.push(cat.id);
-    const answers = { 'Unit brand': 'Carrier' };
-
-    expect(await buildCapabilityFilters(cat.name, answers)).toHaveLength(2);
-    expect(await buildCapabilityFilters(cat.name, answers, cat.tasks[0].id)).toHaveLength(1);
-    expect(await buildCapabilityFilters(cat.name, answers, cat.tasks[2].id)).toHaveLength(0);
-  });
-
-  it("stores one admin price per job and no worker price range", async () => {
+  it('stores one admin price per job and no worker price range', async () => {
     const cat = (await create(newCatalog())).body.data;
     createdServiceTypeIds.push(cat.id);
     const diag = cat.tasks.find((t: { name: string }) => t.name === 'Diagnosis Fee');
@@ -239,4 +146,3 @@ describe('Admin service catalog save', () => {
     expect(res.body.message).toMatch(/pricingModel/);
   });
 });
-

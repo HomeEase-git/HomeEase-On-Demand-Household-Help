@@ -7,9 +7,8 @@ export const BOOKING_QUEUE_NAME = 'booking-lifecycle';
 export const JOB_NAMES = {
   EXPIRE_PENDING: 'expire-pending-booking',
   AUTO_SETTLE_COMPLETED: 'auto-settle-completed-bookings',
-  QUOTE_TIMEOUT_SWEEP: 'quote-timeout-sweep',
-  ADDON_TIMEOUT_SWEEP: 'addon-timeout-sweep',
   NO_SHOW_SWEEP: 'worker-no-show-sweep',
+  STUCK_BOOKING_SWEEP: 'stuck-booking-sweep',
   DISPUTE_SLA_SWEEP: 'dispute-sla-sweep',
   RESCHEDULE_TIMEOUT_SWEEP: 'reschedule-timeout-sweep',
   RESCHEDULE_REQUEST_TIMEOUT_SWEEP: 'reschedule-request-timeout-sweep',
@@ -23,9 +22,8 @@ export const JOB_NAMES = {
 // boot (see index.ts) upserts the schedule instead of piling up duplicates.
 export const REPEATABLE_JOB_IDS = {
   AUTO_SETTLE_COMPLETED: 'auto-settle-completed-bookings-hourly',
-  QUOTE_TIMEOUT_SWEEP: 'quote-timeout-sweep-hourly',
-  ADDON_TIMEOUT_SWEEP: 'addon-timeout-sweep-hourly',
   NO_SHOW_SWEEP: 'worker-no-show-sweep-hourly',
+  STUCK_BOOKING_SWEEP: 'stuck-booking-sweep-10min',
   DISPUTE_SLA_SWEEP: 'dispute-sla-sweep-hourly',
   RESCHEDULE_TIMEOUT_SWEEP: 'reschedule-timeout-sweep-hourly',
   RESCHEDULE_REQUEST_TIMEOUT_SWEEP: 'reschedule-request-timeout-sweep-hourly',
@@ -90,7 +88,7 @@ export async function cancelPendingExpiryJob(bookingId: string): Promise<void> {
 }
 
 /**
- * Registers the repeatable ticks (hourly settle, hourly quote sweep, the
+ * Registers the repeatable ticks (hourly settle, the
  * 10-minute no-show sweep, ...) via BullMQ v6's Job Scheduler API. Idempotent —
  * upsertJobScheduler upserts by jobSchedulerId (REPEATABLE_JOB_IDS.*), so
  * calling this on every server boot is safe and keeps the schedule in sync
@@ -100,9 +98,15 @@ export async function cancelPendingExpiryJob(bookingId: string): Promise<void> {
  * `repeat` is no longer a valid JobsOptions field; repeatable/scheduled jobs
  * now go through this dedicated scheduler API instead.
  */
-// Schedulers for sweeps that no longer exist (time slots were removed) —
-// deleted on boot so an old deployment's registrations don't keep firing.
-const RETIRED_JOB_SCHEDULER_IDS = ['reset-expired-availability-slots-daily', 'materialize-availability-templates-daily'];
+// Schedulers for sweeps that no longer exist (time slots, then quotes and
+// mid-job extra approvals, were removed) — deleted on boot so an old
+// deployment's registrations don't keep firing.
+const RETIRED_JOB_SCHEDULER_IDS = [
+  'reset-expired-availability-slots-daily',
+  'materialize-availability-templates-daily',
+  'quote-timeout-sweep-hourly',
+  'addon-timeout-sweep-hourly',
+];
 
 export async function registerRepeatableBookingJobs(): Promise<void> {
   for (const id of RETIRED_JOB_SCHEDULER_IDS) {
@@ -120,32 +124,22 @@ export async function registerRepeatableBookingJobs(): Promise<void> {
   );
 
   await bookingQueue.upsertJobScheduler(
-    REPEATABLE_JOB_IDS.QUOTE_TIMEOUT_SWEEP,
-    { pattern: '0 * * * *' }, // every hour, on the hour
-    {
-      name: JOB_NAMES.QUOTE_TIMEOUT_SWEEP,
-      data: {},
-      opts: { removeOnComplete: true, removeOnFail: true },
-    }
-  );
-
-  await bookingQueue.upsertJobScheduler(
-    REPEATABLE_JOB_IDS.ADDON_TIMEOUT_SWEEP,
-    { pattern: '0 * * * *' }, // every hour, on the hour
-    {
-      name: JOB_NAMES.ADDON_TIMEOUT_SWEEP,
-      data: {},
-      opts: { removeOnComplete: true, removeOnFail: true },
-    }
-  );
-
-  await bookingQueue.upsertJobScheduler(
     REPEATABLE_JOB_IDS.NO_SHOW_SWEEP,
     // Every 10 minutes — a no-show is cancelled AppSettings.noShowGraceMinutes
     // after the start time, so an hourly tick could be up to an hour late.
     { pattern: '*/10 * * * *' },
     {
       name: JOB_NAMES.NO_SHOW_SWEEP,
+      data: {},
+      opts: { removeOnComplete: true, removeOnFail: true },
+    }
+  );
+
+  await bookingQueue.upsertJobScheduler(
+    REPEATABLE_JOB_IDS.STUCK_BOOKING_SWEEP,
+    { pattern: '*/10 * * * *' },
+    {
+      name: JOB_NAMES.STUCK_BOOKING_SWEEP,
       data: {},
       opts: { removeOnComplete: true, removeOnFail: true },
     }

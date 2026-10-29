@@ -71,7 +71,7 @@ export const RequestCard: React.FC<Props> = ({ request, onPress }) => {
             </View>
           )}
           <View className="mt-1">
-            <StatusBadge status={request.status as StatusType} />
+            <StatusBadge status={request.status as StatusType} variant="booking" />
           </View>
         </View>
       </View>

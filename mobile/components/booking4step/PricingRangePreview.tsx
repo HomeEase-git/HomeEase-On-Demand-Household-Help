@@ -36,7 +36,7 @@ export default function PricingRangePreview({ estimate }: Props) {
           {estimate.unitLabel
             ? "Enter the quantity above to see the total"
             : hasSelection
-              ? "Exact price is shown once you pick a time and pro"
+              ? "Exact price is shown once you pick a time and worker"
               : "Select a service to see pricing"}
         </Text>
       </View>
@@ -66,7 +66,7 @@ export default function PricingRangePreview({ estimate }: Props) {
             )}
             {priceBreakdown.tierFee > 0 && (
               <Text className="text-white/60 text-xs">
-                Pro tier ₱{Math.round(priceBreakdown.tierFee)}
+                Skilled tier ₱{Math.round(priceBreakdown.tierFee)}
               </Text>
             )}
             {(priceBreakdown.rushFee ?? 0) > 0 && (

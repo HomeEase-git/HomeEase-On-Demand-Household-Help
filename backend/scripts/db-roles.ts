@@ -57,11 +57,11 @@ const READ_WRITE = [
   'AppSettings', 'ArrivalVerification', 'DebtPayment', 'AuthToken', 'Booking', 'BookingAddOn', 'BookingGroup', 'BookingQuoteItem', 'BookingVisit',
   'Cancellation', 'Certification', 'ClientProfile', 'ContractAcceptance', 'DeclinedWorker', 'Dispute', 'KycDocument',
   'LedgerReconciliation', 'LedgerState', 'Message', 'MfaBackupCode', 'MfaSecret', 'Notification', 'Payment', 'Payout',
-  'PricingRule', 'PromoBanner', 'RefundRequest', 'ResumeParseResult', 'Review', 'SavedPaymentMethod',
+  'PromoBanner', 'RefundRequest', 'ResumeParseResult', 'Review', 'SavedPaymentMethod',
   'ServiceScopeField', 'ServiceScopeFieldOption', 'ServiceScopeFieldTask', 'ServiceTask', 'ServiceType',
-  'TaxCertificate', 'TaxRemittance', 'User', 'UserAddress', 'UserBlock', 'VatCollectionSummary', 'VerificationRequest',
-  'WorkerAvailability', 'WorkerAvailabilityTemplate', 'WorkerDateOverride', 'WorkerPackage', 'WorkerProfile',
-  'WorkerScopeFieldCapability', 'WorkerServiceCategory', 'WorkerTaskPrice', 'WorkerTaskSelection', 'WorkerTaskTierPrice',
+  'TaxRemittance', 'User', 'UserAddress', 'UserBlock', 'VerificationRequest',
+  'WorkerDateOverride', 'WorkerPackage', 'WorkerProfile',
+  'WorkerScopeFieldCapability', 'WorkerServiceCategory', 'WorkerTaskSelection',
 ];
 const MIGRATIONS_TABLE = '_prisma_migrations';
 

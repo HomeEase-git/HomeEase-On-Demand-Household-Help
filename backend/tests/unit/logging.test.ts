@@ -74,6 +74,7 @@ describe('structured console', () => {
         requestContext(req, res, () => {
           console.log('saved', { password: 'nope', ok: 1 });
           console.error('failed', new Error('Bearer secret-token-value'));
+          console.warn('booking %s failed:', 'b-1\nforged', new Error('boom'));
         });
       });
     } finally {
@@ -82,7 +83,10 @@ describe('structured console', () => {
       Object.assign(console, originals);
     }
 
-    const [info, error] = lines.map((line) => JSON.parse(line));
+    // One line per call: a newline in a value can't forge a second entry.
+    expect(lines).toHaveLength(3);
+    const [info, error, warn] = lines.map((line) => JSON.parse(line));
+    expect(warn.msg).toBe('booking b-1\nforged failed: boom');
     expect(requestId).toMatch(/^[0-9a-f-]{36}$/); // generated here, not the caller's
     expect(info).toMatchObject({ level: 'info', msg: 'saved', requestId, data: { password: '[REDACTED]', ok: 1 } });
     expect(error.level).toBe('error');

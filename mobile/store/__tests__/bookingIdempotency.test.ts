@@ -14,7 +14,7 @@ describe("draft idempotency key", () => {
     ["packages", { selectedPackageIds: ["p1"] }],
     ["worker", { workerId: "w1" }],
     ["payment method", { paymentMethod: "gcash" }],
-    ["scope answers", { scopeAnswers: { Rooms: "3" } }],
+    ["quantity", { quantity: 3 }],
     ["task", { serviceTaskId: "t1" }],
   ])("is dropped when %s changes after a submit attempt", (_name, patch) => {
     useBookingStore.getState().clearDraft();

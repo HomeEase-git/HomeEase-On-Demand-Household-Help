@@ -38,14 +38,6 @@ export const API_STATUS_MAP: Record<string, BookingStatus> = {
   CANCELLED: 'Cancelled',
 };
 
-export type Quote = {
-  laborCost: number;
-  materialsCost: number;
-  totalAmount: number;
-  notes: string;
-  submittedAt: string;
-};
-
 export type BookingPayment = {
   methodType: string;
   accountIdentifier?: string;
@@ -63,7 +55,6 @@ export type Booking = {
   payment?: BookingPayment;
   rating?: number;
   reviewText?: string;
-  quote?: Quote;
   address?: string;
   time?: string;
   workerId?: string;
@@ -130,9 +121,6 @@ export type DraftBooking = {
   tip?: number;
   taxRate?: number;
   estimatedPrice: number;
-  // True when the selected task's price is only an estimate until the
-  // worker inspects the job and submits a quote (see utils/pricing.ts).
-  quoteRequired?: boolean;
   // New metadata
   entrySource?: 'worker_profile' | 'new_booking' | 'book_again' | 're_offer' | null;
   workerLocked?: boolean;
@@ -156,33 +144,32 @@ export type DraftBooking = {
   categoryPriceRangeMin?: number | null; // ServiceType-derived marketplace-wide price range for Steps 1-2's preview
   categoryPriceRangeMax?: number | null;
   // The specific job within the category (e.g. "Toilet Repair" under
-  // "Plumbing Repair") a worker prices individually — see ServiceTask /
-  // WorkerTaskPrice. Null when the category has no tasks defined yet (falls
+  // "Plumbing Repair"), priced by the admin — see ServiceTask. Null when the category has no tasks defined yet (falls
   // back to today's flat category-price booking). Metadata alongside it is
   // needed downstream (PER_UNIT's live price preview, quantity lookup) without
   // re-fetching the category's task list at every step.
   serviceTaskId?: string | null;
   selectedTaskName?: string | null;
-  selectedTaskPricingModel?: 'FIXED' | 'PER_UNIT' | 'TIERED' | 'CUSTOM_QUOTE' | null;
+  selectedTaskPricingModel?: 'FIXED' | 'PER_UNIT' | 'TIERED' | null;
   selectedTaskUnitLabel?: string | null;
   // The task's own admin-set bound — tighter/more accurate than the
   // category-wide range once a specific task is picked. Null for
   // CUSTOM_QUOTE (no upfront range at all).
   selectedTaskPriceRangeMin?: number | null;
   selectedTaskPriceRangeMax?: number | null;
-  // ServiceScopeField.label of the NUMBER field that supplies a PER_UNIT
-  // task's quantity — its answer already lives in scopeAnswers under this
-  // same label (it's an ordinary scope field), this just says which one.
-  selectedTaskQuantityFieldLabel?: string | null;
-  selectedPackageIds: string[]; // WorkerPackage ids selected in Step 4 — resolved to priced add-ons server-side
-  scopeAnswers?: Record<string, string | string[]>; // scope-step answers, keyed by ScopeField.label
+  // A per-unit task's own limits on the quantity (null = 1 / no maximum).
+  selectedTaskMinQuantity?: number | null;
+  selectedTaskMaxQuantity?: number | null;
+  selectedPackageIds: string[]; // WorkerPackage ids picked with the worker (Step 1 for a locked worker, else the worker picker) — resolved to priced add-ons server-side
+  selectedPackagesTotal?: number; // price of selectedPackageIds, for the review screen's estimate
+  quantity?: number | null; // how many units, for a per-unit task (Step 1)
   issuePhotoUrls?: string[]; // photos of the issue the client attached in Step 1, uploaded via POST /bookings/issue-photo/upload
   time: string | null; // exact start time "HH:00" (PH), see utils/bookingTime.ts
   // Set when this is a follow-up job after an inspection (same worker).
   parentBookingId?: string | null;
-  priorities: string[]; // Step 4 submits ['Pet-friendly'] when the "I have pets" toggle is on; empty otherwise
+  priorities: string[]; // ['Pet-friendly'] when Step 1's "I have pets" toggle is on; empty otherwise
 
-  addOnToggles: string[]; // AddOnToggleKey[] — free preference toggles, sent as zero-priced addOns
+  addOnToggles: string[]; // Retired "job preferences" toggles; always [] now, kept for old saved drafts
   // Worker selected via Step 3 (WHO) — separate from workerId/workerName above,
   // which pre-date this flow and are still used by the "book from profile" /
   // "book again" entry points that lock a worker before Step 1.
@@ -273,7 +260,7 @@ export type DeclinedBookingDetail = {
   scheduledDate?: string | null;
   scheduledTime?: string | null;
   timeSlot?: TimeSlot | null;
-  scopeAnswers?: Record<string, string | string[]> | null;
+  quantity?: number | null;
 };
 
 export type BookingState = {
@@ -304,12 +291,8 @@ export type BookingState = {
   restoreDraft: () => Promise<void>;
   prefillFromBooking: (booking: Booking) => void;
   prefillFromDeclinedBooking: (detail: DeclinedBookingDetail) => void;
-  // Quote flow actions
-  submitQuote: (bookingId: string, quote: Quote) => void;
-  approveQuote: (bookingId: string) => void;
-  disputeQuote: (bookingId: string, reason: string) => void;
   // Client keeps the new date for a booking the old "Continue Tomorrow"
-  // spillover moved — status-preserving, mirrors approveQuote's shape.
+  // spillover moved — status-preserving.
   acknowledgeReschedule: (bookingId: string) => void;
 };
 
@@ -327,7 +310,6 @@ const initialDraft: DraftBooking = {
   tip: 0,
   taxRate: 0.12,
   estimatedPrice: 0,
-  quoteRequired: false,
   entrySource: null,
   workerLocked: false,
   workerName: null,
@@ -345,11 +327,13 @@ const initialDraft: DraftBooking = {
   selectedTaskName: null,
   selectedTaskPricingModel: null,
   selectedTaskUnitLabel: null,
-  selectedTaskQuantityFieldLabel: null,
+  selectedTaskMinQuantity: null,
+  selectedTaskMaxQuantity: null,
   selectedTaskPriceRangeMin: null,
   selectedTaskPriceRangeMax: null,
   selectedPackageIds: [],
-  scopeAnswers: {},
+  selectedPackagesTotal: 0,
+  quantity: null,
   issuePhotoUrls: [],
   time: null,
   parentBookingId: null,
@@ -370,7 +354,7 @@ const SUBMITTED_FIELDS = [
   'isAutoMatched',
   'serviceTaskId',
   'description',
-  'scopeAnswers',
+  'quantity',
   'issuePhotoUrls',
   'selectedPackageIds',
   'addOnToggles',
@@ -481,7 +465,7 @@ export const useBookingStore: UseBoundStore<StoreApi<BookingState>> = create<Boo
       // worker's estimate and unit price were computed for the old scope.
       const scopeChanged =
         (draft.serviceTaskId !== undefined && draft.serviceTaskId !== prev.serviceTaskId) ||
-        (draft.scopeAnswers !== undefined && JSON.stringify(draft.scopeAnswers) !== JSON.stringify(prev.scopeAnswers));
+        (draft.quantity !== undefined && draft.quantity !== prev.quantity);
       const clearingWorkerForNewSlot =
         (dateChanged || scopeChanged) &&
         !updatedDraft.workerLocked &&
@@ -498,7 +482,7 @@ export const useBookingStore: UseBoundStore<StoreApi<BookingState>> = create<Boo
         updatedDraft.holdStartedAt = null;
         updatedDraft.lastInvalidationReason = dateChanged
           ? "Your worker isn't confirmed for the new date/time, so we cleared your selection."
-          : "Your job details changed, so please pick your pro again.";
+          : "Your job details changed, so please pick your worker again.";
       }
 
       // idempotencyKey exists so a retried submit (bad wifi, app backgrounded
@@ -583,48 +567,6 @@ export const useBookingStore: UseBoundStore<StoreApi<BookingState>> = create<Boo
       return { bookings: updatedBookings, selectedBooking: updatedSelected };
     }),
 
-  submitQuote: (bookingId, quote) =>
-    set((state) => {
-      const updatedBookings = state.bookings.map((b) =>
-        b.id === bookingId
-          ? { ...b, status: 'QuoteSubmitted' as BookingStatus, quote, amount: quote.totalAmount }
-          : b,
-      );
-      const updatedSelected =
-        state.selectedBooking?.id === bookingId
-          ? { ...state.selectedBooking, status: 'QuoteSubmitted' as BookingStatus, quote, amount: quote.totalAmount }
-          : state.selectedBooking;
-      return { bookings: updatedBookings, selectedBooking: updatedSelected };
-    }),
-
-  approveQuote: (bookingId) =>
-    set((state) => {
-      const updatedBookings = state.bookings.map((b) =>
-        b.id === bookingId
-          ? { ...b, status: 'QuoteApproved' as BookingStatus }
-          : b,
-      );
-      const updatedSelected =
-        state.selectedBooking?.id === bookingId
-          ? { ...state.selectedBooking, status: 'QuoteApproved' as BookingStatus }
-          : state.selectedBooking;
-      return { bookings: updatedBookings, selectedBooking: updatedSelected };
-    }),
-
-  disputeQuote: (bookingId, _reason) =>
-    set((state) => {
-      const updatedBookings = state.bookings.map((b) =>
-        b.id === bookingId
-          ? { ...b, status: 'Disputed' as BookingStatus }
-          : b,
-      );
-      const updatedSelected =
-        state.selectedBooking?.id === bookingId
-          ? { ...state.selectedBooking, status: 'Disputed' as BookingStatus }
-          : state.selectedBooking;
-      return { bookings: updatedBookings, selectedBooking: updatedSelected };
-    }),
-
   acknowledgeReschedule: (bookingId) =>
     set((state) => {
       const acknowledgedAt = new Date().toISOString();
@@ -678,8 +620,8 @@ export const useBookingStore: UseBoundStore<StoreApi<BookingState>> = create<Boo
   // A worker declining leaves the booking terminally REJECTED — there's no
   // reviving it, so this builds a fresh draft from its scope+schedule and
   // routes back through Step 1 (see the booking-detail screen's "Find
-  // Another Pro"), rather than making the client re-enter everything.
-  // Deliberately does NOT resolve serviceTypeId/categoryBasePrice/scopeFields
+  // Another Worker"), rather than making the client re-enter everything.
+  // Deliberately does NOT resolve serviceTypeId/categoryBasePrice/tasks
   // here — Step 1's own category loader already does that name-match
   // lookup against the live catalog for a restored draft, so duplicating it
   // here would just be a second, driftable copy of the same logic.
@@ -699,7 +641,7 @@ export const useBookingStore: UseBoundStore<StoreApi<BookingState>> = create<Boo
         // its YYYY-MM-DD, matching what DateGridPicker/step-2 expect.
         date: detail.scheduledDate ? detail.scheduledDate.slice(0, 10) : null,
         time: bookingStartTime(detail),
-        scopeAnswers: detail.scopeAnswers ?? {},
+        quantity: detail.quantity ?? null,
         entrySource: 're_offer',
         workerLocked: false,
         workerId: null,

@@ -1,3 +1,4 @@
+import { format } from 'node:util';
 import { redactString, redactValue } from './logRedaction';
 import type { RequestContext } from './requestContext';
 
@@ -66,7 +67,8 @@ function toLine(args: unknown[]): { msg: string; fields: Record<string, unknown>
   if (err !== undefined) fields.err = err;
   if (data.length === 1) fields.data = data[0];
   else if (data.length > 1) fields.data = data;
-  return { msg: parts.join(' '), fields };
+  // format() fills `%s` placeholders like console does and joins the rest with spaces.
+  return { msg: format(...parts), fields };
 }
 
 const METHODS: Array<[keyof Console, LogLevel]> = [

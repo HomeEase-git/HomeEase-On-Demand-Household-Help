@@ -6,6 +6,7 @@ import * as ImagePicker from "expo-image-picker";
 import * as DocumentPicker from "expo-document-picker";
 import ScreenHeader from "../../components/ui/ScreenHeader";
 import StepperHorizontal from "../../components/steppers/StepperHorizontal";
+import { KYC_STEPS } from "../../constants";
 import UploadCard from "../../components/ui/UploadCard";
 import PrimaryButton from "../../components/ui/PrimaryButton";
 import InputField from "../../components/ui/InputField";
@@ -102,9 +103,7 @@ export default function UploadIdScreen() {
     [documents],
   );
 
-  const stepperSteps = isWorker
-    ? ["ID", "Selfie", "Documents", "Resume", "Contract"]
-    : ["ID", "Selfie", "Contract"];
+  const stepperSteps = isWorker ? KYC_STEPS.worker : KYC_STEPS.client;
 
   const applyAsset = async (
     key: KycDocumentKey,

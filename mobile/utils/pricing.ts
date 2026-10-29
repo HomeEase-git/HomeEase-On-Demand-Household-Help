@@ -29,20 +29,6 @@ export function formatPrice(amount: number): string {
   return `₱${amount.toFixed(2)}`;
 }
 
-const QUOTE_REQUIRED_KEYWORDS = ["inspection", "diagnos", "assessment", "estimate"];
-
-/**
- * Best-effort signal that a task's price is only an estimate until the
- * worker inspects the job and submits a quote (e.g. "General Appliance
- * Diagnosis", "Panel Inspection"). Service tasks are managed server-side
- * with no explicit pricing-type field, so this matches on the task's own
- * name/description rather than a fixed id.
- */
-export function isLikelyQuoteRequired(name: string | null | undefined, description?: string | null): boolean {
-  const haystack = `${name ?? ""} ${description ?? ""}`.toLowerCase();
-  return QUOTE_REQUIRED_KEYWORDS.some((keyword) => haystack.includes(keyword));
-}
-
 /**
  * Calculate tip suggestions based on subtotal
  */
@@ -97,4 +83,18 @@ export function getWorkerNetAmount(job: WorkerPayoutSource): number {
     job.workerPayoutEstimate ??
     gross * (1 - DEFAULT_COMMISSION_RATE)
   );
+}
+
+/**
+ * A per-unit job's unit in the plural ("item" → "items"). Only plain words
+ * get an "s"; abbreviations like "sq.m." are left as they are.
+ */
+export function pluralUnit(unit: string): string {
+  return /^[a-z]+$/i.test(unit) && !/s$/i.test(unit) ? `${unit}s` : unit;
+}
+
+/** "1 item", "3 items" — the booked quantity with its unit. */
+export function formatQuantity(quantity: number, unit: string | null | undefined): string {
+  const u = unit || "unit";
+  return `${quantity} ${quantity === 1 ? u : pluralUnit(u)}`;
 }

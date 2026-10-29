@@ -9,7 +9,6 @@ type Props = {
 };
 
 function taskPriceLabel(task: ServiceTaskOption): string {
-  if (task.pricingModel === "CUSTOM_QUOTE") return "Quote after inspection";
   const suffix = task.pricingModel === "PER_UNIT" || task.pricingModel === "TIERED" ? `/${task.unitLabel}` : "";
   if (task.minPrice == null || task.maxPrice == null) return "";
   return task.minPrice === task.maxPrice

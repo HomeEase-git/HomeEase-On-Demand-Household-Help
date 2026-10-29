@@ -122,7 +122,7 @@ export default function Dashboard() {
     { label: 'Avg. Rating', sublabel: 'All reviews', value: analytics ? analytics.avgRating.toFixed(1) : '—', icon: 'fa-star', color: 'purple', to: '/reviews' },
     // Revenue is the platform's commission (not what clients paid); payouts
     // are money actually sent to workers.
-    { label: 'Platform Revenue', sublabel: stats.revenueFromCashJobs && stats.revenueFromCashJobs !== '₱0.00' ? `Commission · ${stats.revenueFromCashJobs} owed from cash jobs` : 'Commission earned', value: stats.totalRevenue, icon: 'fa-peso-sign', color: 'green', to: '/payments', trend: describeTrend(trends?.revenue, rangeDays, (n) => pesoFormatter.format(n)) },
+    { label: 'Platform Revenue', sublabel: stats.revenueFromCashJobs && stats.revenueFromCashJobs !== '₱0.00' ? `Service fees · ${stats.revenueFromCashJobs} owed from cash jobs` : 'Service fees earned', value: stats.totalRevenue, icon: 'fa-peso-sign', color: 'green', to: '/payments', trend: describeTrend(trends?.revenue, rangeDays, (n) => pesoFormatter.format(n)) },
     { label: 'Paid to Workers', sublabel: 'GCash/Maya payouts sent', value: stats.totalPayouts, icon: 'fa-money-bill-transfer', color: 'green', to: '/payments/payouts', trend: describeTrend(trends?.payouts, rangeDays, (n) => pesoFormatter.format(n)) },
   ]
 

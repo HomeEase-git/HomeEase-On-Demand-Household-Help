@@ -133,7 +133,7 @@ export default function EarningsScreen() {
               </Text>
             </View>
             <Text className="text-text-muted text-xs mt-1">
-              After 10% platform fee
+              After the service fee
             </Text>
             <View className="flex-row gap-2 mt-3">
               <View className="flex-1 bg-card-dark rounded-xl p-3">
@@ -161,7 +161,7 @@ export default function EarningsScreen() {
               </View>
               <Text className="text-text-primary font-bold text-2xl mt-2">₱{platformDues.toFixed(2)}</Text>
               <Text className="text-text-secondary text-xs mt-1">
-                This is HomeEase&apos;s platform fee for jobs the client paid you in cash, plus any penalties. It&apos;s
+                This is HomeEase&apos;s service fee for jobs the client paid you in cash, plus any penalties. It&apos;s
                 taken out of your next online payout automatically, or you can pay it now.
               </Text>
               <Pressable

@@ -19,8 +19,8 @@ type Props = {
 };
 
 /**
- * A row of uploaded evidence photos for a job (quote receipts, materials in
- * use, proof for a cancellation). Each photo uploads straight away; the
+ * A row of uploaded evidence photos for a job (invoice receipts, extra work,
+ * proof for a cancellation). Each photo uploads straight away; the
  * parent gets the stored URLs. Camera or gallery is chosen in the alert
  * modal (not a bottom sheet) so several of these can sit in one form.
  */

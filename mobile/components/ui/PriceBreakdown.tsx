@@ -12,7 +12,7 @@ export interface PriceBreakdownAddOn {
 interface PriceBreakdownCardProps {
   subtotal: number;
   // When provided, rendered as their own line items ("Base rate" / "Distance
-  // fee" / "Pro tier surcharge") instead of collapsing everything but add-ons
+  // fee" / "Skilled tier surcharge") instead of collapsing everything but add-ons
   // into one "Service" number. Omit to fall back to the old collapsed view.
   basePrice?: number | null;
   distanceFee?: number | null;
@@ -21,7 +21,7 @@ interface PriceBreakdownCardProps {
   tierFee?: number | null;
   // Same-day booking surcharge.
   rushFee?: number | null;
-  // Materials the pro quoted on top of the agreed price (receipt-backed).
+  // Materials from a quote on a booking made before invoices (receipt-backed).
   materialsCost?: number | null;
   addOns?: PriceBreakdownAddOn[];
   vatApplicable?: boolean | null;
@@ -101,7 +101,7 @@ export default function PriceBreakdownCard({
           )}
           {!!tierFee && (
             <View className="flex-row items-center justify-between mb-2">
-              <Text className="text-text-secondary text-sm">Pro tier surcharge</Text>
+              <Text className="text-text-secondary text-sm">Skilled tier surcharge</Text>
               <Text className="text-brand font-semibold">{formatPrice(tierFee)}</Text>
             </View>
           )}

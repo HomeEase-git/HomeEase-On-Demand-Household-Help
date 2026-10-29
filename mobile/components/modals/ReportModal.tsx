@@ -8,11 +8,13 @@ import OutlinedButton from "../ui/OutlinedButton";
 type Props = {
   visible: boolean;
   title: string;
-  // Defaults are the review-report wording; the client's "request extra
-  // work" prompt reuses this modal with its own text.
+  // Defaults are the review-report wording; the client's invoice report
+  // reuses this modal with its own text.
   message?: string;
   confirmLabel?: string;
   placeholder?: string;
+  // Fewest characters the server accepts for this report.
+  minLength?: number;
   loading?: boolean;
   onConfirm: (reason: string) => void;
   onCancel: () => void;
@@ -26,12 +28,13 @@ export const ReportModal: React.FC<Props> = ({
   message = "Tell us what breaks the rules (rude, false, or private information). An admin will review it.",
   confirmLabel = "Report",
   placeholder = "What is wrong with it?",
+  minLength = 5,
   loading,
   onConfirm,
   onCancel,
 }) => {
   const [reason, setReason] = useState("");
-  const canConfirm = reason.trim().length >= 5;
+  const canConfirm = reason.trim().length >= minLength;
 
   return (
     <ModalWrapper visible={visible} onClose={onCancel} title={title}>

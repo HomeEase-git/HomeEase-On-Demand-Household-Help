@@ -2,7 +2,7 @@
 //
 // The "everything" seed — every model in schema.prisma gets rows, and every
 // nullable/optional column gets a real value on at least one row (soft
-// deletes, disputes, refunds, payouts, worker packages, scope fields,
+// deletes, disputes, refunds, payouts, worker packages,
 // pricing rules, audit logs, the works). seed-full.ts covers the common
 // screen states; this one exists to exercise admin tooling and reports that
 // read from tables seed-full.ts never touches (Payout, PricingRule,
@@ -33,7 +33,6 @@ import {
   RoomType,
   ConditionType,
   TimeSlot,
-  ScopeFieldType,
   ServiceScopeType,
 } from "@prisma/client";
 import { faker } from "@faker-js/faker";
@@ -66,14 +65,6 @@ const PRIORITY_POOL = [
   "Prefers eco-friendly products", "Needs same-day service", "Elderly household member",
 ];
 
-type ScopeFieldSeed = {
-  label: string;
-  fieldType: ScopeFieldType;
-  required: boolean;
-  sortOrder: number;
-  options?: string[];
-};
-
 const CATEGORIES: Array<{
   name: string;
   description: string;
@@ -81,7 +72,6 @@ const CATEGORIES: Array<{
   tasks: { name: string; basePrice: number; durationHours: number }[];
   scopeType?: ServiceScopeType;
   hasCondition?: boolean;
-  scopeFields?: ScopeFieldSeed[];
 }> = [
   {
     name: "Plumbing",
@@ -144,15 +134,6 @@ const CATEGORIES: Array<{
     ],
     scopeType: ServiceScopeType.CUSTOM,
     hasCondition: false,
-    scopeFields: [
-      {
-        label: "Appliance Type",
-        fieldType: ScopeFieldType.SELECT,
-        required: true,
-        sortOrder: 0,
-        options: ["Washing Machine", "Refrigerator", "Oven/Stove", "Air Conditioner", "Microwave"],
-      },
-    ],
   },
   {
     name: "Pest Control",
@@ -165,16 +146,6 @@ const CATEGORIES: Array<{
     ],
     scopeType: ServiceScopeType.CUSTOM,
     hasCondition: true,
-    scopeFields: [
-      {
-        label: "Pest Type",
-        fieldType: ScopeFieldType.MULTI_SELECT,
-        required: true,
-        sortOrder: 0,
-        options: ["Termites", "Rodents", "Cockroaches", "Ants", "Bed Bugs"],
-      },
-      { label: "Affected Areas", fieldType: ScopeFieldType.TEXT, required: false, sortOrder: 1 },
-    ],
   },
 ];
 
@@ -277,21 +248,8 @@ async function createServiceTypes() {
         scopeType: cat.scopeType ?? ServiceScopeType.ROOM_BASED,
         hasCondition: cat.hasCondition ?? true,
         tasks: { create: cat.tasks },
-        scopeFields: cat.scopeFields
-          ? {
-              create: cat.scopeFields.map((f) => ({
-                label: f.label,
-                fieldType: f.fieldType,
-                required: f.required,
-                sortOrder: f.sortOrder,
-                options: f.options
-                  ? { create: f.options.map((label, i) => ({ label, sortOrder: i })) }
-                  : undefined,
-              })),
-            }
-          : undefined,
       },
-      include: { tasks: true, scopeFields: { include: { options: true } } },
+      include: { tasks: true },
     });
     created.push(serviceType);
   }
@@ -306,7 +264,7 @@ async function createServiceTypes() {
         create: [{ name: "Lawn Mowing", basePrice: 400, durationHours: 2, isActive: false }],
       },
     },
-    include: { tasks: true, scopeFields: { include: { options: true } } },
+    include: { tasks: true },
   });
   created.push(inactive);
   return created;
@@ -835,8 +793,6 @@ async function createBookingsAndPayments(
     { status: BookingStatus.ACCEPTED },
     { status: BookingStatus.REJECTED },
     { status: BookingStatus.IN_PROGRESS },
-    { status: BookingStatus.QUOTE_SUBMITTED },
-    { status: BookingStatus.QUOTE_APPROVED },
     { status: BookingStatus.PENDING_COMPLETION },
     { status: BookingStatus.DISPUTED, disputeStatus: "OPEN" },
     { status: BookingStatus.DISPUTED, disputeStatus: "UNDER_REVIEW" },
@@ -907,17 +863,6 @@ async function createBookingsAndPayments(
 
     const rooms = !isCustomScope ? faker.helpers.arrayElements(ROOM_TYPES, { min: 1, max: 3 }) : [];
     const condition = !isCustomScope ? faker.helpers.arrayElement(CONDITION_TYPES) : null;
-    const scopeAnswers = isCustomScope
-      ? Object.fromEntries(
-          serviceType.scopeFields.map((f: { label: string; fieldType: ScopeFieldType; options: { label: string }[] }) =>
-            f.fieldType === ScopeFieldType.MULTI_SELECT
-              ? [f.label, faker.helpers.arrayElements(f.options.map((o) => o.label), { min: 1, max: 2 })]
-              : f.fieldType === ScopeFieldType.SELECT
-              ? [f.label, faker.helpers.arrayElement(f.options.map((o) => o.label))]
-              : [f.label, faker.lorem.sentence(6)]
-          )
-        )
-      : null;
     const priorities = faker.helpers.arrayElements(PRIORITY_POOL, { min: 0, max: 2 });
 
     const isCompletedLike = status === BookingStatus.COMPLETED || status === BookingStatus.PENDING_COMPLETION;
@@ -938,7 +883,6 @@ async function createBookingsAndPayments(
           rooms,
           condition,
           priorities,
-          scopeAnswers: scopeAnswers ?? undefined,
           scheduledDate: faker.date.soon({ days: 14 }),
           scheduledTime: timeSlotChoice?.label ?? null,
           timeSlot: timeSlotChoice?.slot ?? null,
@@ -1269,7 +1213,7 @@ async function main() {
   console.log("Clearing existing data...");
   await clearData();
 
-  console.log("Creating service categories (including scope fields and one inactive)...");
+  console.log("Creating service categories (including one inactive)...");
   const serviceTypes = await createServiceTypes();
 
   console.log("Creating pricing rules...");

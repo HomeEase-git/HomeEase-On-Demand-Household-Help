@@ -28,8 +28,6 @@ const RECOMMENDED: Array<[string, string]> = [
   ['SUPABASE_SERVICE_KEY', 'uploads (IDs, photos, certificates) are off'],
   ['GOOGLE_MAPS_API_KEY', 'address search and distance fees are off'],
   ['SENTRY_DSN', 'errors are not reported to Sentry'],
-  ['PLATFORM_LEGAL_NAME', 'tax certificates show a placeholder business name'],
-  ['PLATFORM_TIN', 'tax certificates show no withholding agent TIN'],
 ];
 
 export interface EnvReport {

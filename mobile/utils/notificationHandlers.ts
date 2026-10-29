@@ -1,6 +1,6 @@
 import { router } from 'expo-router';
 import { notificationService } from '../services/notificationService';
-import { useNotificationStore, notificationCategory, clientNotificationRoute } from '../store/notificationStore';
+import { useNotificationStore, notificationCategory, clientNotificationRoute, workerNotificationRoute } from '../store/notificationStore';
 import { useAuthStore } from '../store/authStore';
 
 /**
@@ -69,7 +69,7 @@ export function setupNotificationInteractionHandler(): void {
       const isWorker = useAuthStore.getState().user?.role === 'worker';
       router.push(
         (isWorker
-          ? `/(worker)/inbox/notification/${notificationId}`
+          ? workerNotificationRoute(type ?? "", relatedId, notificationId)
           : clientNotificationRoute(type ?? "", relatedId, notificationId)) as any,
       );
 

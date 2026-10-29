@@ -21,7 +21,7 @@ export function useListQuery(
   // Lists with filters/paging keep them in the URL, so a refresh, Back from a
   // detail page, or a shared link lands on the same view. Only values that
   // differ from initialParams are written, to keep URLs short. Lists without
-  // initialParams stay out of the URL (VatRegistrations has two lists on one
+  // initialParams stay out of the URL (a page with two lists on one
   // route; only the paged one owns the query string).
   const syncUrl = Object.keys(initialParams).length > 0;
   const search = syncUrl ? searchParams.toString() : '';

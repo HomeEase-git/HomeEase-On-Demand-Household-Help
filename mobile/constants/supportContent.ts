@@ -32,7 +32,7 @@ export const PLAY_STORE_URL =
 
 export const CONTACT_TOPICS: Record<SupportRole, string[]> = {
   client: ["Booking", "Payment or refund", "A worker", "My account", "App problem", "Other"],
-  worker: ["Verification", "Jobs", "Payouts or dues", "Taxes", "My account", "App problem", "Other"],
+  worker: ["Verification", "Jobs", "Payouts or dues", "My account", "App problem", "Other"],
 };
 
 const ACCOUNT_FAQ: FaqItem[] = [
@@ -80,12 +80,12 @@ export const CLIENT_FAQ: FaqCategory[] = [
         a: "You can ask the worker to reschedule from the booking. If they don't respond within 48 hours, your original date stays. If a worker needs to move your booking, you can accept the new date or cancel for free; if you don't respond within 24 hours, the new date is confirmed.",
       },
       {
-        q: "What is a quote, and do I have to accept it?",
-        a: "Some jobs need the worker to see the problem first. They send a quote, with photos of receipts for any materials. You can approve it, refuse it so they revise it, or open a dispute. If you don't respond within 24 hours, it's approved automatically.",
+        q: "How do I pay, and what is the invoice?",
+        a: "When the job is done, your worker sends an invoice: the job, plus any parts they bought (with a photo of the receipt) or extra work they did (with a photo). Pay it in cash to your worker or with GCash or Maya in the app. If something on the invoice is wrong, report it before you pay and HomeEase reviews it.",
       },
       {
-        q: "The worker added something to the job. What should I do?",
-        a: "Add-ons need your approval in the app before they're added to the price. If you don't respond within 6 hours, the add-on is approved automatically, so check your notifications during the job.",
+        q: "The invoice has something I didn't agree to. What should I do?",
+        a: "Don't pay yet. On the booking, tap \"Something's wrong with the invoice?\" and tell us what's wrong. HomeEase checks the photos and either keeps the invoice, removes the lines that shouldn't be there, or cancels the booking.",
       },
       {
         q: "Can I see where my worker is?",
@@ -99,11 +99,11 @@ export const CLIENT_FAQ: FaqCategory[] = [
     items: [
       {
         q: "How are prices set?",
-        a: "HomeEase sets a fixed price for each job. The total you see before confirming can also include a tier fee for Pro or Expert workers, a same-day fee, a distance fee for longer trips, 12% VAT if the worker is VAT-registered, and any tip you add.",
+        a: "HomeEase sets a fixed price for each job. The total you see before confirming can also include a tier fee for Skilled or Expert workers, a same-day fee, a distance fee for longer trips, and any tip you add.",
       },
       {
         q: "When and how do I pay?",
-        a: "You pay after the job is done, with GCash, Maya or cash. When the worker marks the job complete, you confirm it and pay. If you don't respond within 24 hours, completion is confirmed automatically.",
+        a: "You pay after the job is done, with GCash, Maya or cash. When the worker sends the invoice, pay it in the app or pay your worker in cash. If a cash invoice isn't confirmed or reported within 3 days (72 hours), it's recorded as paid.",
       },
       {
         q: "Is it safe to pay with GCash or Maya?",
@@ -141,7 +141,7 @@ export const CLIENT_FAQ: FaqCategory[] = [
       },
       {
         q: "I'm not happy with the work. What can I do?",
-        a: "Contact us from Help & Support → Contact Us, choose a topic and add your booking ID. If the problem is with a quote, you can also tap Dispute Quote on the quote screen. A HomeEase admin reviews the booking, chat, photos, quotes and the worker's check-in, and decides the outcome, which can include a refund.",
+        a: "Contact us from Help & Support → Contact Us, choose a topic and add your booking ID. If you haven't paid yet, you can also report the invoice on the booking. A HomeEase admin reviews the booking, chat, photos, invoice and the worker's check-in, and decides the outcome, which can include a refund.",
       },
       {
         q: "How do refunds work?",
@@ -158,8 +158,8 @@ export const CLIENT_FAQ: FaqCategory[] = [
         a: "A HomeEase admin has reviewed the worker's government ID, a selfie matched against it, and a police, NBI or barangay clearance. It confirms who they are. It isn't a guarantee of the quality of their work.",
       },
       {
-        q: "What are Pro and Expert workers?",
-        a: "Tiers based on a worker's rating, completed jobs and years of experience. Pro and Expert workers add a tier fee to the price.",
+        q: "What are Skilled and Expert workers?",
+        a: "Tiers based on a worker's rating, completed jobs and years of experience. Skilled and Expert workers add a tier fee to the price.",
       },
       {
         q: "Can I pay a worker outside the app?",
@@ -211,7 +211,7 @@ export const WORKER_FAQ: FaqCategory[] = [
       },
       {
         q: "Can I set my own prices?",
-        a: "No. HomeEase sets the price of each job. It changes only with add-ons, distance, your tier, the number of units and the same-day fee. Pro and Expert tiers add a tier fee.",
+        a: "No. HomeEase sets the price of each job. It changes only with the number of pieces, distance, your tier, the same-day fee, and the parts and extra work on your invoice. Skilled and Expert tiers add a tier fee.",
       },
       {
         q: "Can I decline a request?",
@@ -222,8 +222,8 @@ export const WORKER_FAQ: FaqCategory[] = [
         a: "While you travel to a job, the client can see your live location. You must be at the client's address to check in, and your live location stops being shared once you do. Fake-GPS apps are detected and block check-in.",
       },
       {
-        q: "How do quotes and add-ons work?",
-        a: "For jobs that need a quote, send it from the booking. Attach photos of the receipt and of the materials for any materials you add. The client can approve it or ask you to revise it. Add-ons during a job also need the client's approval.",
+        q: "How do I bill parts and extra work?",
+        a: "When the job is done, send the invoice from the job screen. Add each part with a photo of the receipt and any extra work with a photo of the work. The client sees every line and pays the total. For cash jobs, tap Cash received once they pay you.",
       },
       {
         q: "Two of my jobs overlap. What do I do?",
@@ -255,7 +255,7 @@ export const WORKER_FAQ: FaqCategory[] = [
     items: [
       {
         q: "How much does HomeEase keep?",
-        a: "A 10% commission on the job price, fixed when you accept the job. 2% withholding tax is also deducted and paid to the BIR for you. Tips go to you in full.",
+        a: "A service fee on the job price, set by HomeEase and fixed when you accept the job. The job request shows the exact amount before you accept. Tips go to you in full. HomeEase doesn't withhold tax; you file your own.",
       },
       {
         q: "When do I get paid?",
@@ -267,11 +267,11 @@ export const WORKER_FAQ: FaqCategory[] = [
       },
       {
         q: "What are dues?",
-        a: "For cash jobs, the commission and withholding tax are recorded as an amount you owe HomeEase, along with any penalties. Dues are deducted from your next payouts. If you owe more than ₱500, you can't accept new jobs until you settle them.",
+        a: "For cash jobs, the service fee is recorded as an amount you owe HomeEase, along with any penalties. Dues are deducted from your next payouts. If you owe more than ₱500, you can't accept new jobs until you settle them.",
       },
       {
-        q: "Will I get a BIR Form 2307?",
-        a: "Yes, each quarter, if your TIN is on file. Registering for and paying your own taxes is still your responsibility.",
+        q: "Who handles my taxes?",
+        a: "You do. HomeEase doesn't withhold tax or issue tax forms. Register for, file and pay your own taxes with the BIR.",
       },
     ],
   },
@@ -289,7 +289,7 @@ export const WORKER_FAQ: FaqCategory[] = [
       },
       {
         q: "How are disputes decided?",
-        a: "Clients can dispute a quote in the app, and either side can raise a problem with a booking by contacting us with the booking ID. A HomeEase admin reviews the chat, booking records, quotes, photos and check-in location, and decides. If you think a decision is wrong, contact us to ask for it to be reconsidered.",
+        a: "Clients can report an invoice in the app before paying, and either side can raise a problem with a booking by contacting us with the booking ID. A HomeEase admin reviews the chat, booking records, invoice, photos and check-in location, and decides. If you think a decision is wrong, contact us to ask for it to be reconsidered.",
       },
     ],
   },
@@ -344,11 +344,6 @@ export const ABOUT_CONTENT: Record<
         icon: "wallet-outline",
         title: "Fast payouts",
         body: "GCash and Maya earnings go straight to your account.",
-      },
-      {
-        icon: "document-text-outline",
-        title: "Taxes handled",
-        body: "Withholding tax is filed for you, with a quarterly BIR Form 2307.",
       },
     ],
   },

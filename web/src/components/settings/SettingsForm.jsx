@@ -8,7 +8,7 @@ import { useDetailQuery } from '../../hooks/useListQuery'
 import { useToast } from '../../context/ToastContext'
 
 // Shared by every page that edits a slice of the AppSettings singleton
-// (Settings, Price Adjustments, Commission & Debt, Tax Settings). Each page only ever sends its own
+// (Settings, Price Adjustments, Service Fee & Debt). Each page only ever sends its own
 // fields, so saving one page can never overwrite a value another page owns.
 
 export function AdornedNumberField({ id, label, hint, value, onChange, min, max, step, error, prefix, suffix }) {
