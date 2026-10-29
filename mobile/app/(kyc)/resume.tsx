@@ -5,6 +5,7 @@ import { useRouter } from "expo-router";
 import * as DocumentPicker from "expo-document-picker";
 import ScreenHeader from "../../components/ui/ScreenHeader";
 import StepperHorizontal from "../../components/steppers/StepperHorizontal";
+import { KYC_STEPS } from "../../constants";
 import PrimaryButton from "../../components/ui/PrimaryButton";
 import UploadCard from "../../components/ui/UploadCard";
 import InputField from "../../components/ui/InputField";
@@ -134,7 +135,7 @@ export default function ResumeScreen() {
         contentContainerStyle={{ paddingHorizontal: 24, paddingBottom: 40 }}
       >
         <StepperHorizontal
-          steps={["ID", "Selfie", "Documents", "Resume", "Contract"]}
+          steps={KYC_STEPS.worker}
           currentStep={3}
         />
         <Text className="text-text-secondary text-sm mb-4">

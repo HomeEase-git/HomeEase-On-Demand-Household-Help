@@ -1,6 +1,4 @@
 import prisma from '@config/database';
-import { fieldAppliesToTask } from '@utils/scopeFields';
-import type { Prisma } from '@prisma/client';
 import { isWithinRadiusKm } from '@utils/geo';
 import { offersTaskFilter } from '@services/taskPriceService';
 import { workerSetupCompleteWhere } from '@services/workerSetupService';
@@ -99,63 +97,10 @@ export function selectBestCandidate(
   return scored.reduce((best, current) => (current.score > best.score ? current : best));
 }
 
-/**
- * Fields the admin flagged usedForMatching on the given category, filtered
- * down to the ones the client actually answered, resolved to real
- * ServiceScopeFieldOption ids. Shared by findAutoMatchWorker and
- * workerController.searchWorkers so "does this worker handle what the
- * client asked for" is enforced identically on both discovery paths.
- *
- * A worker with zero WorkerScopeFieldCapability rows for a given field is
- * left unrestricted for it — same "empty declaration = no preference" rule
- * WorkerProfile.preferredRoomTypes used before this replaced it. A field the
- * client didn't answer imposes no constraint at all. When a job is given,
- * only fields asked for that job count (see utils/scopeFields) — a question
- * limited to another job can share this one's text without narrowing it.
- */
-export async function buildCapabilityFilters(
-  serviceType: string,
-  scopeAnswers: Record<string, string | string[]> | null | undefined,
-  serviceTaskId?: string | null
-): Promise<Prisma.WorkerProfileWhereInput[]> {
-  if (!scopeAnswers || typeof scopeAnswers !== 'object') return [];
-
-  const matchingFields = await prisma.serviceScopeField.findMany({
-    where: {
-      usedForMatching: true,
-      serviceType: { name: { equals: serviceType, mode: 'insensitive' } },
-    },
-    include: { options: true, taskLinks: { select: { serviceTaskId: true } } },
-  });
-  if (matchingFields.length === 0) return [];
-  const task = serviceTaskId ? { id: serviceTaskId } : null;
-
-  const filters: Prisma.WorkerProfileWhereInput[] = [];
-  for (const field of matchingFields) {
-    if (task && !fieldAppliesToTask(field, task)) continue;
-    const answer = scopeAnswers[field.label];
-    if (answer == null) continue;
-    const answeredLabels = Array.isArray(answer) ? answer : [answer];
-    const requiredOptionIds = field.options
-      .filter((o) => answeredLabels.includes(o.label))
-      .map((o) => o.id);
-    if (requiredOptionIds.length === 0) continue;
-
-    filters.push({
-      OR: [
-        { scopeCapabilities: { none: { option: { fieldId: field.id } } } },
-        { scopeCapabilities: { some: { optionId: { in: requiredOptionIds } } } },
-      ],
-    });
-  }
-  return filters;
-}
-
 export interface AutoMatchParams {
   serviceType: string;
   serviceTaskId?: string | null;
   date: Date;
-  scopeAnswers?: Record<string, string | string[]> | null;
   hasPets?: boolean;
   excludeWorkerIds?: string[];
   // Booking address — when given (and a candidate has WorkerProfile.
@@ -181,8 +126,6 @@ export interface AutoMatchResult {
  *  - available on the date (weekly schedule + date overrides, see
  *    workerAvailabilityService.availableOnDateWhere)
  *  - accepts pets if the booking involves pets
- *  - matches every usedForMatching scope field the client answered (see
- *    buildCapabilityFilters)
  *  - not in excludeWorkerIds (declined workers on a re-match attempt)
  */
 export async function findAutoMatchWorker(params: AutoMatchParams): Promise<AutoMatchResult | null> {
@@ -190,14 +133,11 @@ export async function findAutoMatchWorker(params: AutoMatchParams): Promise<Auto
     serviceType,
     serviceTaskId,
     date,
-    scopeAnswers,
     hasPets,
     excludeWorkerIds = [],
     clientLat,
     clientLng,
   } = params;
-
-  const capabilityFilters = await buildCapabilityFilters(serviceType, scopeAnswers, serviceTaskId);
 
   // A specific task is only bookable through a worker who has ticked it as
   // one they do (WorkerTaskSelection). Prices are admin-set, so there's
@@ -217,7 +157,7 @@ export async function findAutoMatchWorker(params: AutoMatchParams): Promise<Auto
       serviceCategories: { some: { status: 'VERIFIED', serviceType: { name: { equals: serviceType, mode: 'insensitive' } } } },
       ...(hasPets ? { acceptsPets: true } : {}),
       ...(serviceTaskId ? offersTaskFilter(serviceTaskId) : {}),
-      AND: [...capabilityFilters, workerSetupCompleteWhere(), availableOnDateWhere(date)],
+      AND: [workerSetupCompleteWhere(), availableOnDateWhere(date)],
     },
     select: {
       id: true,

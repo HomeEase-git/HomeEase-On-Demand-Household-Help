@@ -20,7 +20,6 @@ import { parseWorkerResume } from '@services/resumeParseService';
 import { computeWorkerTier, tierMultiplier } from '@utils/workerTier';
 import { computeJobPricing } from '@utils/pricing';
 import { resolveDrivingDistancesKm } from '@services/googleDistanceService';
-import { buildCapabilityFilters } from '@services/matchingService';
 import { isPerUnitModel, offersTaskFilter } from '@services/taskPriceService';
 import { getWorkerSetupStatus, workerSetupCompleteWhere } from '@services/workerSetupService';
 import { comparePassword } from '@utils/passwordHash';
@@ -37,17 +36,14 @@ interface AuthRequest extends Request {
 /**
  * GET /api/workers
  * Worker discovery search (public). Query params:
- *   serviceType, date (YYYY-MM-DD), hasPets, scopeAnswers (JSON
- *   object string, keyed by ServiceScopeField.label), serviceTaskId,
+ *   serviceType, date (YYYY-MM-DD), hasPets, serviceTaskId,
  *   lat, lng, page, limit
  *   — plus legacy category/minRating/maxPrice, kept for existing callers.
  *
  * Filters to isAvailable + kycStatus APPROVED workers, available on `date`
- * when given (weekly schedule + date overrides), offering serviceType, and
- * — via buildCapabilityFilters — matching whatever the client answered for
- * any usedForMatching scope field (see matchingService.ts's docblock on that
- * function; it's the same filter findAutoMatchWorker uses, so Step 3's list
- * and "surprise me" never disagree on eligibility). Sorted by rating —
+ * when given (weekly schedule + date overrides) and offering serviceType —
+ * the same eligibility findAutoMatchWorker uses, so Step 3's list and
+ * "surprise me" never disagree. Sorted by rating —
  * there's no reliable worker location data to sort/filter by proximity (see
  * matchingService.ts for the same reasoning on auto-match).
  */
@@ -58,7 +54,6 @@ export const searchWorkers = async (req: AuthRequest, res: Response) => {
       category,
       date,
       hasPets,
-      scopeAnswers,
       serviceTaskId,
       lat,
       lng,
@@ -76,26 +71,8 @@ export const searchWorkers = async (req: AuthRequest, res: Response) => {
       return res.status(400).json(errorResponse(400, 'date must be a valid YYYY-MM-DD date'));
     }
 
-    let parsedScopeAnswers: Record<string, string | string[]> | undefined;
-    if (typeof scopeAnswers === 'string' && scopeAnswers.trim()) {
-      try {
-        const parsed = JSON.parse(scopeAnswers);
-        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) parsedScopeAnswers = parsed;
-      } catch {
-        return res.status(400).json(errorResponse(400, 'scopeAnswers must be a JSON object'));
-      }
-    }
-
     const serviceTypeName = typeof serviceType === 'string' ? serviceType : typeof category === 'string' ? category : undefined;
     const hasPetsBool = hasPets === 'true' || hasPets === '1';
-
-    const capabilityFilters = serviceTypeName
-      ? await buildCapabilityFilters(
-          serviceTypeName,
-          parsedScopeAnswers,
-          typeof serviceTaskId === 'string' ? serviceTaskId : null
-        )
-      : [];
 
     // A specific task is only bookable through a worker who has ticked it
     // (WorkerTaskSelection) — must agree with matchingService.
@@ -113,7 +90,7 @@ export const searchWorkers = async (req: AuthRequest, res: Response) => {
       debtHoldAt: null,
       // Workers who haven't finished account setup aren't discoverable (see
       // workerSetupService).
-      AND: [...capabilityFilters, workerSetupCompleteWhere()],
+      AND: [workerSetupCompleteWhere()],
       ...(serviceTask ? offersTaskFilter(serviceTask.id) : {}),
     };
 
@@ -252,7 +229,7 @@ export const searchWorkers = async (req: AuthRequest, res: Response) => {
 
       // Admin-set task price (see taskPriceService). PER_UNIT has no
       // meaningful total until a quantity is known (collected later, in the
-      // booking form's scope-answer step) — expose the raw rate instead so
+      // booking form) — expose the raw rate instead so
       // mobile can compute total × quantity client-side (see
       // bookingPriceEstimate.ts) rather than showing a misleading total here.
       const perUnitTask = !!serviceTask && isPerUnitModel(serviceTask.pricingModel);
@@ -1851,113 +1828,6 @@ export const getWorkerPackages = async (req: Request, res: Response) => {
   } catch (error) {
     console.error('Error fetching worker packages:', error);
     return res.status(500).json(errorResponse(500, 'Failed to fetch packages'));
-  }
-};
-
-/**
- * GET /api/workers/me/capabilities
- * List the authenticated worker's declared ServiceScopeFieldOption ids
- * (worker only) — replaces the old free-text Skill list. Nothing here is
- * typed by the worker; every id traces back to a real admin-defined option.
- */
-export const listMyCapabilities = async (req: AuthRequest, res: Response) => {
-  try {
-    if (!req.user) {
-      return res.status(401).json(errorResponse(401, 'Not authenticated'));
-    }
-
-    const workerProfile = await prisma.workerProfile.findUnique({
-      where: { userId: req.user.userId },
-      select: { id: true },
-    });
-
-    if (!workerProfile) {
-      return res.status(404).json(errorResponse(404, 'Worker profile not found'));
-    }
-
-    const capabilities = await prisma.workerScopeFieldCapability.findMany({
-      where: { workerProfileId: workerProfile.id },
-      select: { optionId: true },
-    });
-
-    return res.status(200).json({
-      success: true,
-      message: 'Capabilities retrieved successfully',
-      data: { optionIds: capabilities.map((c) => c.optionId) },
-    });
-  } catch (error) {
-    console.error('Error fetching capabilities:', error);
-    return res.status(500).json(errorResponse(500, 'Failed to fetch capabilities'));
-  }
-};
-
-/**
- * PUT /api/workers/me/capabilities
- * Body: { optionIds: string[] } — replace-all, same pattern
- * adminServiceTypeController.updateServiceType uses for scope fields
- * (delete-then-recreate in a transaction). Every id must be a real
- * ServiceScopeFieldOption belonging to a ServiceType this worker actually
- * offers — a worker can't declare a capability for a category they haven't
- * added.
- */
-export const replaceMyCapabilities = async (req: AuthRequest, res: Response) => {
-  try {
-    if (!req.user) {
-      return res.status(401).json(errorResponse(401, 'Not authenticated'));
-    }
-
-    const { optionIds } = req.body as { optionIds?: unknown };
-    if (!Array.isArray(optionIds) || !optionIds.every((id) => typeof id === 'string')) {
-      return res.status(400).json(errorResponse(400, 'optionIds must be an array of strings'));
-    }
-
-    const workerProfile = await prisma.workerProfile.findUnique({
-      where: { userId: req.user.userId },
-      select: { id: true, serviceCategories: { where: { status: 'VERIFIED' }, select: { serviceTypeId: true } } },
-    });
-
-    if (!workerProfile) {
-      return res.status(404).json(errorResponse(404, 'Worker profile not found'));
-    }
-
-    const offeredServiceTypeIds = new Set(workerProfile.serviceCategories.map((c) => c.serviceTypeId));
-
-    const uniqueOptionIds = Array.from(new Set(optionIds));
-    if (uniqueOptionIds.length > 0) {
-      const options = await prisma.serviceScopeFieldOption.findMany({
-        where: { id: { in: uniqueOptionIds } },
-        select: { id: true, field: { select: { serviceTypeId: true, usedForMatching: true } } },
-      });
-      if (options.length !== uniqueOptionIds.length) {
-        return res.status(400).json(errorResponse(400, 'One or more options do not exist'));
-      }
-      const invalid = options.find(
-        (o) => !o.field.usedForMatching || !offeredServiceTypeIds.has(o.field.serviceTypeId)
-      );
-      if (invalid) {
-        return res
-          .status(400)
-          .json(errorResponse(400, 'One or more options are not available to declare a capability for'));
-      }
-    }
-
-    await prisma.$transaction(async (tx) => {
-      await tx.workerScopeFieldCapability.deleteMany({ where: { workerProfileId: workerProfile.id } });
-      if (uniqueOptionIds.length > 0) {
-        await tx.workerScopeFieldCapability.createMany({
-          data: uniqueOptionIds.map((optionId) => ({ workerProfileId: workerProfile.id, optionId })),
-        });
-      }
-    });
-
-    return res.status(200).json({
-      success: true,
-      message: 'Capabilities updated successfully',
-      data: { optionIds: uniqueOptionIds },
-    });
-  } catch (error) {
-    console.error('Error updating capabilities:', error);
-    return res.status(500).json(errorResponse(500, 'Failed to update capabilities'));
   }
 };
 

@@ -6,6 +6,7 @@ import { AppIcon as Ionicons } from "../../components/icons/AppIcon";
 import { useRouter } from "expo-router";
 import ScreenHeader from "../../components/ui/ScreenHeader";
 import StepperHorizontal from "../../components/steppers/StepperHorizontal";
+import { KYC_STEPS } from "../../constants";
 import PrimaryButton from "../../components/ui/PrimaryButton";
 import OutlinedButton from "../../components/ui/OutlinedButton";
 import { useAuthStore } from "../../store/authStore";
@@ -28,9 +29,7 @@ export default function SelfieScreen() {
 
   // Clients only need ID + selfie; workers continue on to
   // clearances/certifications, resume, then the contract.
-  const stepperSteps = isWorker
-    ? ["ID", "Selfie", "Certifications", "Resume", "Contract"]
-    : ["ID", "Selfie", "Contract"];
+  const stepperSteps = isWorker ? KYC_STEPS.worker : KYC_STEPS.client;
 
   useEffect(() => {
     if (!permission) {

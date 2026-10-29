@@ -37,7 +37,6 @@ export default function BookingStep3Screen() {
       serviceType: draft.serviceType ?? undefined,
       serviceTaskId: draft.serviceTaskId ?? undefined,
       date: draft.date ?? undefined,
-      scopeAnswers: draft.scopeAnswers,
       lat: draft.lat,
       lng: draft.lng,
       limit: 20,

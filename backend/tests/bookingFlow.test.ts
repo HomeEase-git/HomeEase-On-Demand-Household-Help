@@ -220,17 +220,34 @@ describe('Booking flow — arrival geofencing, the invoice after the job, disput
     const photo = (owner: string, name: string) =>
       `${process.env.SUPABASE_URL}/storage/v1/object/public/${BOOKING_PHOTO_BUCKET}/${owner}/${name}.jpg`;
 
-    it('needs a before photo to start the job', async () => {
+    it('starts without a before photo, which is posted after the start', async () => {
+      const booking = await createTestBooking({ clientId, workerId, status: 'ACCEPTED', workerArrivedAt: new Date() });
+      createdBookingIds.push(booking.id);
+      const before = (urls: string[]) =>
+        request(app)
+          .post(`/api/bookings/${booking.id}/before-photos`)
+          .set('Authorization', `Bearer ${workerToken}`)
+          .send({ photoUrls: urls });
+
+      expect((await before([photo(workerId, 'before')])).status).toBe(409);
+      const start = await request(app).patch(`/api/bookings/${booking.id}/start`).set('Authorization', `Bearer ${workerToken}`).send({});
+      expect(start.status).toBe(200);
+      expect((await before([photo(clientId, 'x')])).status).toBe(400);
+      expect((await before([photo(workerId, 'before')])).status).toBe(201);
+      const db = await prisma.booking.findUnique({ where: { id: booking.id } });
+      expect(db?.status).toBe('IN_PROGRESS');
+      expect(db?.beforePhotoUrls).toHaveLength(1);
+    });
+
+    it('still stores before photos sent with the start (older app builds)', async () => {
       const booking = await createTestBooking({ clientId, workerId, status: 'ACCEPTED', workerArrivedAt: new Date() });
       createdBookingIds.push(booking.id);
       const start = (body: Record<string, unknown>) =>
         request(app).patch(`/api/bookings/${booking.id}/start`).set('Authorization', `Bearer ${workerToken}`).send(body);
 
-      expect((await start({})).status).toBe(400);
       expect((await start({ beforePhotoUrls: [photo(clientId, 'x')] })).status).toBe(400);
       expect((await start({ beforePhotoUrls: [photo(workerId, 'before')] })).status).toBe(200);
       const db = await prisma.booking.findUnique({ where: { id: booking.id } });
-      expect(db?.status).toBe('IN_PROGRESS');
       expect(db?.beforePhotoUrls).toHaveLength(1);
     });
 
@@ -267,7 +284,10 @@ describe('Booking flow — arrival geofencing, the invoice after the job, disput
     const started = async () => {
       const booking = await createTestBooking({ clientId, workerId, status: 'IN_PROGRESS', estimatedPrice: 1000 });
       createdBookingIds.push(booking.id);
-      await prisma.booking.update({ where: { id: booking.id }, data: { progressPhotoUrls: [photo(workerId, 'midway')] } });
+      await prisma.booking.update({
+        where: { id: booking.id },
+        data: { beforePhotoUrls: [photo(workerId, 'before')], progressPhotoUrls: [photo(workerId, 'midway')] },
+      });
       return booking;
     };
     const complete = (id: string, body: Record<string, unknown>) =>
@@ -301,8 +321,19 @@ describe('Booking flow — arrival geofencing, the invoice after the job, disput
     it('needs a progress photo before the job can be marked done', async () => {
       const booking = await createTestBooking({ clientId, workerId, status: 'IN_PROGRESS' });
       createdBookingIds.push(booking.id);
+      await prisma.booking.update({ where: { id: booking.id }, data: { beforePhotoUrls: [photo(workerId, 'before')] } });
 
       expect((await complete(booking.id, { completionPhotoUrl: done })).status).toBe(409);
+    });
+
+    it('needs a before photo before the job can be marked done', async () => {
+      const booking = await createTestBooking({ clientId, workerId, status: 'IN_PROGRESS' });
+      createdBookingIds.push(booking.id);
+      await prisma.booking.update({ where: { id: booking.id }, data: { progressPhotoUrls: [photo(workerId, 'midway')] } });
+
+      const res = await complete(booking.id, { completionPhotoUrl: done });
+      expect(res.status).toBe(409);
+      expect(res.body.message).toMatch(/before photo/);
     });
 
     it('sends a cash invoice with parts and extra work, and waits for Cash received', async () => {
@@ -401,7 +432,7 @@ describe('Booking flow — arrival geofencing, the invoice after the job, disput
     async function seedReportedInvoice() {
       const booking = await createTestBooking({ clientId, workerId, status: 'IN_PROGRESS', estimatedPrice: 1000 });
       createdBookingIds.push(booking.id);
-      await prisma.booking.update({ where: { id: booking.id }, data: { progressPhotoUrls: [photo(workerId, 'midway')] } });
+      await prisma.booking.update({ where: { id: booking.id }, data: { beforePhotoUrls: [photo(workerId, 'before')], progressPhotoUrls: [photo(workerId, 'midway')] } });
 
       const sent = await request(app)
         .patch(`/api/bookings/${booking.id}/complete`)

@@ -7,26 +7,17 @@ import path from 'path';
 import type { ServiceTask } from '@prisma/client';
 import type { CatalogBody } from '../../../src/controllers/adminCatalogController';
 
-export type MatrixQuestion = {
-  label: string;
-  helpText?: string;
-  fieldType: 'TEXT' | 'NUMBER' | 'SELECT' | 'MULTI_SELECT';
-  required: boolean;
-  options?: string[];
-  minValue?: number;
-  maxValue?: number;
-  usedForMatching?: boolean;
-  setsPrice?: boolean;
-};
 export type MatrixJob = {
   name: string;
   unit: string;
   pricingModel: 'FIXED' | 'PER_UNIT';
   price: number;
   replaces?: string;
-  questions: MatrixQuestion[];
+  // Per-unit only: the fewest/most units a client can book (default 1 / no maximum).
+  minQuantity?: number;
+  maxQuantity?: number;
 };
-export type MatrixCategory = { name: string; commonQuestions: MatrixQuestion[]; jobs: MatrixJob[] };
+export type MatrixCategory = { name: string; jobs: MatrixJob[] };
 
 export function loadMatrix(): MatrixCategory[] {
   const file = path.join(__dirname, '..', 'data', 'jobOrderMatrix.json');
@@ -53,23 +44,7 @@ export function buildMatrixPayload(
 ) {
   const liveByName = new Map(liveTasks.map((t) => [t.name, t]));
   const warnings: string[] = [];
-  let keySeq = 0;
-  const qKey = () => `q:${++keySeq}`;
-  const fieldPayload = (q: MatrixQuestion, taskRefs: string[], key: string) => ({
-    key,
-    label: q.label,
-    helpText: q.helpText ?? null,
-    fieldType: q.fieldType,
-    required: q.required,
-    options: q.options ?? [],
-    minValue: q.minValue ?? null,
-    maxValue: q.maxValue ?? null,
-    usedForMatching: !!q.usedForMatching,
-    taskRefs,
-  });
-
   const tasks: NonNullable<CatalogBody['tasks']> = [];
-  const scopeFields: NonNullable<CatalogBody['scopeFields']> = matrix.commonQuestions.map((q) => fieldPayload(q, [], qKey()));
   const usedLive = new Set<string>();
   const liveFor: (ServiceTask | undefined)[] = [];
 
@@ -79,12 +54,6 @@ export function buildMatrixPayload(
     if (live) usedLive.add(live.id);
     liveFor.push(live);
     const ref = live?.id ?? `job:${i}`;
-    let quantityFieldRef: string | null = null;
-    for (const q of job.questions) {
-      const key = qKey();
-      if (q.setsPrice) quantityFieldRef = key;
-      scopeFields.push(fieldPayload(q, [ref], key));
-    }
     tasks.push({
       ...(live ? { id: live.id } : { key: ref }),
       name: job.name,
@@ -92,7 +61,8 @@ export function buildMatrixPayload(
       basePrice: job.price,
       pricingModel: job.pricingModel,
       unitLabel: job.unit,
-      quantityFieldRef: job.pricingModel === 'PER_UNIT' ? quantityFieldRef : null,
+      minQuantity: job.pricingModel === 'PER_UNIT' ? (job.minQuantity ?? null) : null,
+      maxQuantity: job.pricingModel === 'PER_UNIT' ? (job.maxQuantity ?? null) : null,
       durationHours: live?.durationHours ?? null,
       isActive: true,
     });
@@ -108,7 +78,8 @@ export function buildMatrixPayload(
       basePrice: live.basePrice,
       pricingModel: live.pricingModel,
       unitLabel: live.unitLabel,
-      quantityFieldRef: null,
+      minQuantity: live.minQuantity,
+      maxQuantity: live.maxQuantity,
       durationHours: live.durationHours,
       isActive: false,
     });
@@ -121,7 +92,6 @@ export function buildMatrixPayload(
     icon: category.icon,
     requiresCertification: category.requiresCertification,
     tasks,
-    scopeFields,
   };
   return { body, warnings, unmatched, liveFor, jobRef: (i: number) => liveFor[i]?.id ?? `job:${i}` };
 }

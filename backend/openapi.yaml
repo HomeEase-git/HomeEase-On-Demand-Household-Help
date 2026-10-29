@@ -55,14 +55,6 @@ paths:
         - name: timeSlot
           in: query
           schema: { $ref: '#/components/schemas/TimeSlot' }
-        - name: scopeAnswers
-          in: query
-          schema: { type: string }
-          description: >-
-            JSON object string, keyed by ServiceScopeField.label (e.g.
-            {"Appliance Type":"Air Conditioner"}). Only fields the admin
-            flagged usedForMatching actually filter candidates — see
-            matchingService.buildCapabilityFilters.
         - name: hasPets
           in: query
           schema: { type: boolean }
@@ -315,7 +307,7 @@ paths:
   /bookings/{id}/start:
     patch:
       tags: [Bookings]
-      summary: Worker starts the job from ACCEPTED (requires a prior verified arrival and a before photo), at the price the client booked
+      summary: Worker starts the job from ACCEPTED (requires a prior verified arrival), at the price the client booked. Before photos are posted after the start (/before-photos); an optional beforePhotoUrls body is still stored for older app builds.
       parameters: [{ $ref: '#/components/parameters/BookingId' }]
       responses:
         '200': { description: Started }
@@ -1257,66 +1249,6 @@ paths:
         '200': { description: Deselected }
         '404': { $ref: '#/components/responses/NotFound' }
 
-  /workers/me/capabilities:
-    get:
-      tags: [Worker Profile]
-      summary: List the ServiceScopeFieldOption ids this worker has declared they handle
-      description: >-
-        Replaces the old free-text skill list. Every id here is a real
-        admin-defined option (see ServiceScopeField.usedForMatching) — nothing
-        is typed by the worker. Used by worker discovery
-        (GET /workers, and "surprise me" auto-match) to only show/match
-        workers who've declared the option a client asked for; a worker with
-        no declarations for a given field is left unrestricted for it.
-      responses:
-        '200':
-          description: OK
-          content:
-            application/json:
-              schema:
-                allOf:
-                  - $ref: '#/components/schemas/SuccessEnvelope'
-                  - type: object
-                    properties:
-                      data:
-                        type: object
-                        properties:
-                          optionIds: { type: array, items: { type: string } }
-        '401': { $ref: '#/components/responses/Unauthorized' }
-    put:
-      tags: [Worker Profile]
-      summary: Replace this worker's declared capability option ids
-      description: >-
-        Replace-all — pass every option id currently declared. Every id must
-        belong to a ServiceScopeField.usedForMatching field on a ServiceType
-        this worker already offers (see /workers/me/service-types), or the
-        request is rejected.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [optionIds]
-              properties:
-                optionIds: { type: array, items: { type: string } }
-      responses:
-        '200':
-          description: Updated
-          content:
-            application/json:
-              schema:
-                allOf:
-                  - $ref: '#/components/schemas/SuccessEnvelope'
-                  - type: object
-                    properties:
-                      data:
-                        type: object
-                        properties:
-                          optionIds: { type: array, items: { type: string } }
-        '400': { $ref: '#/components/responses/BadRequest' }
-        '401': { $ref: '#/components/responses/Unauthorized' }
-
   /workers/me/certifications:
     get:
       tags: [Worker Profile]
@@ -1867,10 +1799,38 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorEnvelope' }
 
+  /bookings/{id}/before-photos:
+    post:
+      tags: [Bookings]
+      summary: Worker posts photos of the job as found, right after starting (IN_PROGRESS). At least one is required before /complete; at most 5 per job.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [photoUrls]
+              properties:
+                photoUrls: { type: array, items: { type: string }, minItems: 1, maxItems: 5 }
+      responses:
+        '201': { description: Posted }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: Job not in progress, or the 5-photo cap was reached
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+
   /bookings/{id}/progress-photos:
     post:
       tags: [Bookings]
-      summary: Worker posts "ongoing" proof photos while IN_PROGRESS (at least one is required before /complete). /start now requires beforePhotoUrls (1-5 of the worker's own job photos).
+      summary: Worker posts "ongoing" proof photos while IN_PROGRESS (at least one is required before /complete).
       parameters:
         - name: id
           in: path

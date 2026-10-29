@@ -59,14 +59,12 @@ import {
   VAT_RATE,
 } from '@utils/pricing';
 import { roundToCentavo } from '@utils/money';
-import { buildCapabilityFilters } from '@services/matchingService';
 import { schedulePendingExpiry, cancelPendingExpiryJob } from '@queues/bookingQueue';
 import { finalizeCancellationTx, afterCancellation } from '@services/bookingCancellationService';
 import { applyClientFaultCompensationTx } from '@services/cancellationCompensationService';
 import { VALID_TRANSITIONS, isValidTransition } from '@services/bookingStateMachine';
 import { getAppSettings } from '@services/appSettingsService';
 import { computeWorkerTier, tierMultiplier } from '@utils/workerTier';
-import { validateScopeAnswers } from '@utils/scopeFields';
 import { getIO } from '../socket';
 import type { JwtPayload } from '@/types/index';
 
@@ -79,17 +77,8 @@ interface AuthRequest extends Request {
 // Local alias — see backend/src/utils/money.ts for the shared money-rounding helper.
 const round2 = roundToCentavo;
 
-const scopeFieldInclude = { options: true, taskLinks: { select: { serviceTaskId: true } } } as const;
-
 async function resolveServiceTypeConfig(name: string) {
-  return prisma.serviceType.findFirst({
-    where: { name: { equals: name, mode: 'insensitive' } },
-    include: { scopeFields: { include: scopeFieldInclude } },
-  });
-}
-
-async function loadScopeFields(serviceTypeId: string) {
-  return prisma.serviceScopeField.findMany({ where: { serviceTypeId }, include: scopeFieldInclude });
+  return prisma.serviceType.findFirst({ where: { name: { equals: name, mode: 'insensitive' } } });
 }
 
 // A follow-up job can be requested once the inspection/diagnosis job's work
@@ -168,7 +157,7 @@ export const createBooking = async (req: AuthRequest, res: Response) => {
       notes,
       paymentMethodType,
       paymentAccountIdentifier,
-      scopeAnswers,
+      quantity,
       issuePhotoUrls,
       idempotencyKey,
     } = req.body as {
@@ -191,7 +180,7 @@ export const createBooking = async (req: AuthRequest, res: Response) => {
       notes?: string;
       paymentMethodType?: PaymentMethodType;
       paymentAccountIdentifier?: string;
-      scopeAnswers?: Record<string, string | string[]>;
+      quantity?: number;
       issuePhotoUrls?: string[];
       idempotencyKey?: string;
     };
@@ -277,7 +266,7 @@ export const createBooking = async (req: AuthRequest, res: Response) => {
     const serviceTask = serviceTaskId
       ? await prisma.serviceTask.findUnique({
           where: { id: serviceTaskId },
-          include: { serviceType: true, quantityScopeField: true },
+          include: { serviceType: true },
         })
       : null;
 
@@ -326,18 +315,13 @@ export const createBooking = async (req: AuthRequest, res: Response) => {
       return res.status(404).json(errorResponse(404, 'Service type not found'));
     }
 
-    const effectiveScopeAnswers =
-      scopeAnswers && typeof scopeAnswers === 'object' && !Array.isArray(scopeAnswers) ? scopeAnswers : undefined;
-
-    // Only the fields that apply to the chosen task are enforced (see
-    // utils/scopeFields.fieldAppliesToTask).
-    const scopeFields = serviceTask
-      ? await loadScopeFields(serviceTask.serviceTypeId)
-      : serviceTypeConfig!.scopeFields;
-    const scopeError = validateScopeAnswers(scopeFields, effectiveScopeAnswers ?? {}, serviceTask);
-    if (scopeError) {
-      return res.status(400).json(errorResponse(400, scopeError));
+    // A per-unit job is priced from the client's quantity; checked once here,
+    // before any worker is matched.
+    const taskPrice = serviceTask ? taskBasePrice(serviceTask, quantity) : null;
+    if (taskPrice && !taskPrice.ok) {
+      return res.status(400).json(errorResponse(400, taskPrice.message));
     }
+    const bookedQuantity = taskPrice?.ok ? (taskPrice.quantity ?? null) : null;
 
     // Condition is no longer a platform-wide concept — new bookings don't
     // collect it. The Booking.condition column is kept only for historical rows.
@@ -373,7 +357,6 @@ export const createBooking = async (req: AuthRequest, res: Response) => {
       serviceType: resolvedServiceTypeName,
       serviceTaskId,
       date: scheduledDate,
-      scopeAnswers: effectiveScopeAnswers,
       hasPets,
       clientLat: lat,
       clientLng: lng,
@@ -434,23 +417,10 @@ export const createBooking = async (req: AuthRequest, res: Response) => {
         return true;
       };
 
-      // A client picking a specific worker (not auto-match) could otherwise
-      // bypass the capability filter Step 3 already applied — re-check
-      // server-side so a stale/tampered request can't book a worker who
-      // doesn't actually handle what was asked for, or whose category is
-      // still PENDING_VERIFICATION.
+      // A client picking a specific worker (not auto-match) is re-checked
+      // server-side, so a stale/tampered request can't book a worker whose
+      // category is still PENDING_VERIFICATION.
       if (!isAutoMatched) {
-        const capabilityFilters = await buildCapabilityFilters(resolvedServiceTypeName, effectiveScopeAnswers, serviceTask?.id);
-        if (capabilityFilters.length > 0) {
-          const eligible = await prisma.workerProfile.findFirst({
-            where: { userId: resolvedWorkerId, AND: capabilityFilters },
-            select: { id: true },
-          });
-          if (!eligible) {
-            return res.status(409).json(errorResponse(409, 'This worker does not handle the selected option for this service'));
-          }
-        }
-
         const bookedCategory = workerProfile.serviceCategories.find(
           (c) => c.serviceType.name.toLowerCase() === resolvedServiceTypeName.toLowerCase()
         );
@@ -499,11 +469,7 @@ export const createBooking = async (req: AuthRequest, res: Response) => {
           if (await tryNextAutoMatchCandidate()) continue;
           return res.status(409).json(errorResponse(409, 'This worker does not offer this specific service'));
         }
-        const priced = taskBasePrice(serviceTask, effectiveScopeAnswers);
-        if (!priced.ok) {
-          return res.status(400).json(errorResponse(400, priced.message));
-        }
-        basePrice = priced.basePrice;
+        basePrice = taskPrice!.ok ? taskPrice!.basePrice : 0;
       } else {
         basePrice = serviceTypeConfig!.basePrice;
       }
@@ -589,7 +555,7 @@ export const createBooking = async (req: AuthRequest, res: Response) => {
               condition: effectiveCondition,
               priorities: Array.isArray(priorities) ? priorities : [],
               addOnsSnapshot: addOnsList.length > 0 ? addOnsList : undefined,
-              scopeAnswers: effectiveScopeAnswers,
+              quantity: bookedQuantity,
               issuePhotoUrls: effectiveIssuePhotoUrls,
               scheduledDate,
               scheduledTime: time,
@@ -851,6 +817,7 @@ export const listBookings = async (req: AuthRequest, res: Response) => {
       urgencyLevel: b.urgencyLevel,
       rooms: b.rooms,
       condition: b.condition,
+      quantity: b.quantity,
       location: b.location,
       city: b.city,
       distanceMeters: b.distanceMeters,
@@ -1180,7 +1147,10 @@ export const getBookingDetail = async (req: AuthRequest, res: Response) => {
         hasOpenDispute: booking.disputes.some((d) => d.status === 'OPEN' || d.status === 'UNDER_REVIEW'),
         rooms: booking.rooms,
         condition: booking.condition,
+        // Old bookings only: answers to the retired booking questions.
         scopeAnswers: booking.scopeAnswers,
+        quantity: booking.quantity,
+        quantityUnit: booking.serviceTask?.unitLabel ?? null,
         priorities: booking.priorities,
         isAutoMatched: booking.isAutoMatched,
         estimatedPrice: booking.estimatedPrice,
@@ -1562,7 +1532,6 @@ export const declineBooking = async (req: AuthRequest, res: Response) => {
       serviceType: updated.serviceType,
       serviceTaskId: updated.serviceTaskId,
       date: updated.scheduledDate,
-      scopeAnswers: updated.scopeAnswers as Record<string, string | string[]> | null,
       excludeWorkerIds: [...updatedDeclinedWorkerIds, ...(await blockedUserIds(updated.clientId))],
       clientLat: updated.clientLat,
       clientLng: updated.clientLng,
@@ -1938,9 +1907,11 @@ export const updateWorkerLiveLocation = async (req: AuthRequest, res: Response) 
 
 /**
  * PATCH /api/bookings/:id/start
- * Worker starts the job — requires a prior verified arrival and photos of
- * the job before any work. The price is the one the client booked; parts and
- * extra work go on the invoice at the end (completeBooking).
+ * Worker starts the job — requires a prior verified arrival. The before
+ * photos come after the start (POST /before-photos) and are required by
+ * completeBooking; older app builds still send them here, so they're stored
+ * when present. The price is the one the client booked; parts and extra work
+ * go on the invoice at the end (completeBooking).
  */
 export const startBooking = async (req: AuthRequest, res: Response) => {
   try {
@@ -1968,13 +1939,13 @@ export const startBooking = async (req: AuthRequest, res: Response) => {
       return res.status(409).json(errorResponse(409, 'You must check in as arrived before starting this job'));
     }
 
-    // Proof of the job before any work: 1 to MAX_PROOF_PHOTOS of the worker's own uploads.
+    // Optional here (see above); when sent, up to MAX_PROOF_PHOTOS of the worker's own uploads.
     const beforePhotoUrls = toOwnedBookingPhotoUrls(req.body?.beforePhotoUrls ?? [], req.user.userId);
     if (!beforePhotoUrls) {
       return res.status(400).json(errorResponse(400, 'Upload the before photos again — one of them could not be verified'));
     }
-    if (beforePhotoUrls.length === 0 || beforePhotoUrls.length > MAX_PROOF_PHOTOS) {
-      return res.status(400).json(errorResponse(400, `Add 1 to ${MAX_PROOF_PHOTOS} photos of the job before you start`));
+    if (beforePhotoUrls.length > MAX_PROOF_PHOTOS) {
+      return res.status(400).json(errorResponse(400, `Add at most ${MAX_PROOF_PHOTOS} photos of the job before you start`));
     }
 
     await updateBookingIfStatus(prisma, id, booking.status, {
@@ -2524,15 +2495,40 @@ export const respondToRescheduleRequest = async (req: AuthRequest, res: Response
 const MAX_PROOF_PHOTOS = 5;
 const MAX_PROGRESS_PHOTOS = 20;
 
+// The two kinds of photo a worker posts while the job is IN_PROGRESS. Each
+// needs at least one before completeBooking; the client sees both.
+const JOB_PHOTO_KINDS = {
+  before: {
+    field: 'beforePhotoUrls',
+    max: MAX_PROOF_PHOTOS,
+    label: 'before photos',
+    notice: 'Your worker posted a photo of the job before starting work.',
+  },
+  progress: {
+    field: 'progressPhotoUrls',
+    max: MAX_PROGRESS_PHOTOS,
+    label: 'progress photos',
+    notice: 'Your worker posted a progress photo of the job.',
+  },
+} as const;
+
+/**
+ * POST /api/bookings/:id/before-photos  { photoUrls }
+ * Worker posts photos of the job as found, right after starting it.
+ */
+export const addBeforePhotos = (req: AuthRequest, res: Response) => addJobPhotos(req, res, 'before');
+
 /**
  * POST /api/bookings/:id/progress-photos  { photoUrls }
- * Worker posts an "ongoing" update while the job is IN_PROGRESS. At least one
- * is required before completeBooking. The client sees them on the booking.
+ * Worker posts an "ongoing" update while the job is IN_PROGRESS.
  */
-export const addProgressPhotos = async (req: AuthRequest, res: Response) => {
+export const addProgressPhotos = (req: AuthRequest, res: Response) => addJobPhotos(req, res, 'progress');
+
+async function addJobPhotos(req: AuthRequest, res: Response, kind: keyof typeof JOB_PHOTO_KINDS) {
+  const { field, max, label, notice } = JOB_PHOTO_KINDS[kind];
   try {
     if (!req.user || req.user.role !== 'WORKER') {
-      return res.status(403).json(errorResponse(403, 'Only workers can post progress photos'));
+      return res.status(403).json(errorResponse(403, `Only workers can post ${label}`));
     }
     const id = req.params.id as string;
     const workerId = req.user.userId;
@@ -2550,15 +2546,15 @@ export const addProgressPhotos = async (req: AuthRequest, res: Response) => {
       const booking = await lockBooking(tx, id);
       if (!booking || booking.workerId !== workerId) return { status: 404, message: 'Booking not found' } as const;
       if (booking.status !== 'IN_PROGRESS') {
-        return { status: 409, message: 'Progress photos can only be posted while the job is in progress' } as const;
+        return { status: 409, message: `The ${label} can only be posted while the job is in progress` } as const;
       }
-      if (booking.progressPhotoUrls.length + photoUrls.length > MAX_PROGRESS_PHOTOS) {
-        return { status: 409, message: `A job can have at most ${MAX_PROGRESS_PHOTOS} progress photos` } as const;
+      if (booking[field].length + photoUrls.length > max) {
+        return { status: 409, message: `A job can have at most ${max} ${label}` } as const;
       }
       const updated = await tx.booking.update({
         where: { id },
-        data: { progressPhotoUrls: { push: photoUrls } },
-        select: { progressPhotoUrls: true },
+        data: { [field]: { push: photoUrls } },
+        select: { beforePhotoUrls: true, progressPhotoUrls: true },
       });
       return { status: 201, updated, clientId: booking.clientId } as const;
     });
@@ -2572,16 +2568,16 @@ export const addProgressPhotos = async (req: AuthRequest, res: Response) => {
       // No dedicated type; same choice as startBooking's "Service Started".
       type: 'BOOKING_ACCEPTED',
       title: 'Job update',
-      message: 'Your worker posted a progress photo of the job.',
+      message: notice,
       relatedId: id,
     });
 
     return res.status(201).json({ success: true, data: updated });
   } catch (error) {
-    console.error('Error adding progress photos:', error);
-    return res.status(500).json(errorResponse(500, 'Failed to post progress photos'));
+    console.error(`Error adding ${label}:`, error);
+    return res.status(500).json(errorResponse(500, `Failed to post ${label}`));
   }
-};
+}
 
 /**
  * PATCH /api/bookings/:id/complete  { completionPhotoUrl, items? }
@@ -2644,6 +2640,9 @@ export const completeBooking = async (req: AuthRequest, res: Response) => {
       return res.status(400).json(errorResponse(400, 'Upload the completion photo again — it could not be verified'));
     }
 
+    if (booking.beforePhotoUrls.length === 0) {
+      return res.status(409).json(errorResponse(409, 'Post a before photo of the job before marking it done'));
+    }
     if (booking.progressPhotoUrls.length === 0) {
       return res.status(409).json(errorResponse(409, 'Post at least one progress photo before marking the job done'));
     }

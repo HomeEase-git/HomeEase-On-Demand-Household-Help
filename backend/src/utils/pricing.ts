@@ -223,8 +223,8 @@ export const formatPrice = (amount: number): string => {
  * guess); keeping the math in one place means a worker's Step 3 price can
  * never drift from what they're actually charged for the same job.
  *
- * Condition is deliberately not a factor here — it's an ordinary
- * admin-defined scope field now, not a platform-wide surcharge.
+ * Condition is deliberately not a factor here — it's no longer a booking
+ * input.
  *
  * Urgency (STANDARD/URGENT/EMERGENCY) used to add a surcharge here too, but
  * was removed as a platform concept (2026-09-14); `urgencyFee` stays (always

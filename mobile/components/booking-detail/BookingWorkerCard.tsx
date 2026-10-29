@@ -35,7 +35,7 @@ export const BookingWorkerCard: React.FC<Props> = ({ name, avatarUrl, verified, 
             )}
           </View>
           <Text className="text-text-secondary text-xs">
-            {verified ? "Verified Professional" : "Professional"}
+            {verified ? "Verified Worker" : "Worker"}
           </Text>
         </View>
       </View>

@@ -16,6 +16,7 @@ import ImageSourcePickerBottomSheet from "../../../../components/bottom-sheets/I
 import ProofPhotosField from "../../../../components/booking/ProofPhotosField";
 import InvoiceLineModal from "../../../../components/modals/InvoiceLineModal";
 import { InvoiceCard } from "../../../../components/booking-detail/InvoiceCard";
+import { BookingAnswers } from "../../../../components/booking-detail/BookingAnswers";
 import type { ApiInvoice } from "../../../../utils/mapBookingDetail";
 import type { BottomSheetHandle } from "../../../../components/bottom-sheets/BottomSheetWrapper";
 import { Skeleton } from "../../../../components/ui/Skeleton";
@@ -42,6 +43,11 @@ type BookingDetail = {
   id: string;
   client: { id: string; fullName: string; phone?: string | null };
   service: string;
+  // How many units (per-unit jobs), old bookings' question answers, and the client's note.
+  quantity?: number | null;
+  quantityUnit?: string | null;
+  scopeAnswers?: Record<string, string | string[]> | null;
+  description?: string | null;
   status: string;
   scheduledDate: string;
   scheduledTime?: string | null;
@@ -92,15 +98,14 @@ type BookingDetail = {
     workerPayout?: number;
     capturedAmount?: number | null;
   } | null;
+  // The worker's take-home from the server, at the real service-fee rate.
+  earnings?: {
+    subtotal: number;
+    commissionAmount: number;
+    withholdingTaxAmount: number;
+    workerPayout: number;
+  } | null;
 };
-
-function formatElapsed(ms: number): string {
-  const totalSeconds = Math.floor(ms / 1000);
-  const h = Math.floor(totalSeconds / 3600);
-  const m = Math.floor((totalSeconds % 3600) / 60);
-  const s = totalSeconds % 60;
-  return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
-}
 
 // Dates arrive as UTC-midnight ISO strings; show them as "Oct 18, 2026".
 const formatJobDate = (iso: string) =>
@@ -116,8 +121,10 @@ export default function JobDetailScreen() {
   const [completionPhotoUri, setCompletionPhotoUri] = useState<string | null>(null);
   const [completionPhotoUrl, setCompletionPhotoUrl] = useState<string | null>(null);
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
-  // Proof photos: before (needed to start) and progress (needed to finish).
-  const [beforePhotoUrls, setBeforePhotoUrls] = useState<string[]>([]);
+  // Proof photos, both posted after the start and both needed to finish:
+  // before (the job as found) and progress.
+  const [beforeDraft, setBeforeDraft] = useState<string[]>([]);
+  const [postingBefore, setPostingBefore] = useState(false);
   const [progressDraft, setProgressDraft] = useState<string[]>([]);
   const [postingProgress, setPostingProgress] = useState(false);
   // Parts and extra work added to the invoice before it's sent.
@@ -126,7 +133,6 @@ export default function JobDetailScreen() {
   const [confirmingCash, setConfirmingCash] = useState(false);
   // Which of the new one-tap controls is mid-request, to block double taps.
   const [busyAction, setBusyAction] = useState<null | "agree" | "decline" | "notHere" | "noShowCancel" | "notPaid">(null);
-  const [elapsedMs, setElapsedMs] = useState(0);
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     const id = setInterval(() => setNow(Date.now()), 30000);
@@ -166,17 +172,7 @@ export default function JobDetailScreen() {
   // dispute, or the client cancelling) without requiring a screen refocus.
   usePolling(() => load(true), POLL_INTERVAL_MS, { paused: !focused });
 
-  const workerStartedAt = job?.timeline?.workerStartedAt;
-  useEffect(() => {
-    if (!workerStartedAt) return;
-    const startedAt = new Date(workerStartedAt).getTime();
-    const tick = () => setElapsedMs(Date.now() - startedAt);
-    tick();
-    const interval = setInterval(tick, 1000);
-    return () => clearInterval(interval);
-  }, [workerStartedAt]);
-  const displayedElapsedMs = workerStartedAt ? elapsedMs : 0;
-  const jobTime = formatJobTime(workerStartedAt, job?.timeline?.workerCompletedAt);
+  const jobTime = formatJobTime(job?.timeline?.workerStartedAt, job?.timeline?.workerCompletedAt);
 
   // Streams live GPS to the client while en route (ACCEPTED, not yet checked
   // in) so their "Track Service" map can show a moving marker. Stops as soon
@@ -296,16 +292,18 @@ export default function JobDetailScreen() {
       }`
     : "a new date"
 
-  // Prefer the real settled amounts off the Payment row once one exists;
-  // fall back to a rough 10%-commission estimate for jobs still pre-payout.
-  // Tip is never commissioned or taxed (see utils/pricing.ts
-  // calculateWorkerPayout) so it's added on top, not folded into the 90%.
-  const payoutEstimate = job.payment?.workerPayout ?? amount * 0.9 + tip;
-  const commissionEstimate = job.payment?.commissionAmount ?? amount * 0.1;
-  const taxEstimate = job.payment?.withholdingTaxAmount ?? 0;
+  // The server's earnings use the settled Payment once one exists, else the
+  // service-fee rate settlement will use (same numbers as the request screen).
+  // The 10% fallback only covers an old server that doesn't send earnings.
+  // Tip is never commissioned or taxed, so it's added on top.
+  const earnings = job.earnings;
+  const payoutEstimate = earnings?.workerPayout ?? job.payment?.workerPayout ?? amount * 0.9 + tip;
+  const commissionEstimate = earnings?.commissionAmount ?? job.payment?.commissionAmount ?? amount * 0.1;
+  const taxEstimate = earnings?.withholdingTaxAmount ?? job.payment?.withholdingTaxAmount ?? 0;
+  const feeSubtotal = earnings?.subtotal ?? job.payment?.subtotal ?? amount;
 
   const steps = [
-    { label: "Accepted", timestamp: formatJobDate(job.scheduledDate), status: "done" as const },
+    { label: "Confirmed", timestamp: formatJobDate(job.scheduledDate), status: "done" as const },
     {
       label: "Arrived",
       timestamp: "",
@@ -345,11 +343,10 @@ export default function JobDetailScreen() {
     try {
       // One tap checks in and starts a job with a set price.
       if (!hasArrived && !(await checkIn())) return;
-      await api.startBooking(job.id, beforePhotoUrls);
-      setBeforePhotoUrls([]);
+      await api.startBooking(job.id);
       alertModal.success(
         "Job Started",
-        "Post at least one progress photo while you work, then mark it complete with a photo of the finished job.",
+        "Take a photo of the job before you begin, post a progress photo while you work, then send the invoice with a photo of the finished job.",
       );
       load();
     } catch (error) {
@@ -360,6 +357,20 @@ export default function JobDetailScreen() {
       alertModal.error("Can't start this job", message);
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  const handlePostBefore = async () => {
+    setPostingBefore(true);
+    try {
+      await api.addBeforePhotos(job.id, beforeDraft);
+      setBeforeDraft([]);
+      load(true);
+    } catch (error) {
+      console.error("Post before photos error:", error);
+      alertModal.error("Error", "Failed to save the photo. Please try again.");
+    } finally {
+      setPostingBefore(false);
     }
   };
 
@@ -587,7 +598,7 @@ export default function JobDetailScreen() {
       `Client: ${job.client.fullName}`,
       `Date: ${formatJobDate(job.scheduledDate)}`,
       ``,
-      `Subtotal: ₱${(job.payment?.subtotal ?? amount).toFixed(2)}`,
+      `Subtotal: ₱${feeSubtotal.toFixed(2)}`,
       `Service fee: -₱${commissionEstimate.toFixed(2)}`,
       taxEstimate > 0 ? `Withholding tax: -₱${taxEstimate.toFixed(2)}` : null,
       tip > 0 ? `Tip (yours in full): +₱${tip.toFixed(2)}` : null,
@@ -710,17 +721,9 @@ export default function JobDetailScreen() {
               </Text>
             </View>
           ))}
+          <BookingAnswers quantity={job.quantity} unit={job.quantityUnit} answers={job.scopeAnswers} note={job.description} />
         </View>
 
-        {/* Live working timer */}
-        {isInProgress && (
-          <View className="bg-brand rounded-2xl p-4 mb-3 items-center">
-            <Text className="text-white/70 text-xs font-medium">Time on job</Text>
-            <Text className="text-white font-bold text-3xl mt-1" style={{ fontVariant: ["tabular-nums"] }}>
-              {formatElapsed(displayedElapsedMs)}
-            </Text>
-          </View>
-        )}
         {!isInProgress && jobTime && (
           <View className="bg-card rounded-2xl p-4 mb-3">
             <Text className="text-text-secondary text-xs mb-1">Job time</Text>
@@ -735,7 +738,7 @@ export default function JobDetailScreen() {
           </Text>
           <Text className="text-success font-bold text-2xl">₱{payoutEstimate.toFixed(2)}</Text>
           <Text className="text-text-muted text-xs mt-1">
-            Service ₱{(job.payment?.subtotal ?? amount).toFixed(2)} − service fee ₱{commissionEstimate.toFixed(2)}
+            Service ₱{feeSubtotal.toFixed(2)} − service fee ₱{commissionEstimate.toFixed(2)}
             {taxEstimate > 0 ? ` − tax ₱${taxEstimate.toFixed(2)}` : ""}
           </Text>
           {tip > 0 && (
@@ -826,19 +829,11 @@ export default function JobDetailScreen() {
           )}
           {canStartNow && (
             <View>
-              <ProofPhotosField
-                bookingId={job.id}
-                label="Photos of the job before you start"
-                hint="Required. Show the area or item as you found it."
-                urls={beforePhotoUrls}
-                onChange={setBeforePhotoUrls}
-                required
-              />
               <PrimaryButton
                 label={hasArrived ? "Start Job" : "I've Arrived, Start Job"}
                 fullWidth
                 onPress={handleStart}
-                disabled={submitting || busyAction != null || beforePhotoUrls.length === 0}
+                disabled={submitting || busyAction != null}
                 loading={submitting}
               />
               {!hasArrived && (
@@ -890,6 +885,38 @@ export default function JobDetailScreen() {
           )}
           {isInProgress && (
             <View className="gap-3">
+              <View className="bg-card rounded-2xl p-4">
+                <Text className="text-text-primary font-bold mb-1">Before you begin</Text>
+                <Text className="text-text-muted text-xs mb-3">
+                  Take a photo of the area or item as you found it. The client sees it.
+                </Text>
+                {job.beforePhotoUrls?.length ? (
+                  <View className="flex-row flex-wrap gap-2">
+                    {job.beforePhotoUrls.map((url) => (
+                      <RemoteImage key={url} source={{ uri: url }} className="w-16 h-16 rounded-lg bg-card-dark" />
+                    ))}
+                  </View>
+                ) : (
+                  <>
+                    <ProofPhotosField
+                      bookingId={job.id}
+                      label="Photo of the job before you start"
+                      urls={beforeDraft}
+                      onChange={setBeforeDraft}
+                      required
+                    />
+                    {beforeDraft.length > 0 && (
+                      <PrimaryButton
+                        label="Save Photo"
+                        fullWidth
+                        onPress={handlePostBefore}
+                        disabled={postingBefore}
+                        loading={postingBefore}
+                      />
+                    )}
+                  </>
+                )}
+              </View>
               <View className="bg-card rounded-2xl p-4">
                 <Text className="text-text-primary font-bold mb-1">Progress updates</Text>
                 <Text className="text-text-muted text-xs mb-3">
@@ -995,12 +1022,16 @@ export default function JobDetailScreen() {
                 label="Send Invoice"
                 fullWidth
                 onPress={handleSendInvoice}
-                disabled={submitting || uploadingPhoto || !completionPhotoUrl || !job.progressPhotoUrls?.length}
+                disabled={
+                  submitting || uploadingPhoto || !completionPhotoUrl || !job.beforePhotoUrls?.length || !job.progressPhotoUrls?.length
+                }
                 loading={submitting}
               />
-              {!job.progressPhotoUrls?.length && (
+              {!job.beforePhotoUrls?.length ? (
+                <Text className="text-text-muted text-xs text-center">Save a before photo first.</Text>
+              ) : !job.progressPhotoUrls?.length ? (
                 <Text className="text-text-muted text-xs text-center">Post a progress update first.</Text>
-              )}
+              ) : null}
             </View>
           )}
           {isPendingCompletion && isCash && (

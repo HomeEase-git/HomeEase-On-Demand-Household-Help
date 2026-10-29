@@ -13,14 +13,13 @@
 //               `npm i --no-save @prisma/adapter-neon @neondatabase/serverless ws`.
 //
 // What --category does, per the rollout decisions (2026-09-25):
-//   - Writes the category's jobs and questions through the same code as the
+//   - Writes the category's jobs through the same code as the
 //     admin editor (adminCatalogController.writeCatalog). A live job listed as
 //     a row's "replaces" is renamed in place, so worker selections and past
 //     bookings stay attached; live jobs with no row are deactivated.
 //   - Every worker offering a renamed job keeps offering it; every VERIFIED
 //     worker in the category is signed up for the new jobs.
-//   - Worker "match" choices (e.g. Appliance type) are carried over to the
-//     new matching question by option text.
+//   - Booking questions are retired: old question rows are left as they are.
 import 'dotenv/config';
 import fs from 'fs';
 import path from 'path';
@@ -30,12 +29,6 @@ import { validateCatalog, writeCatalog } from '@controllers/adminCatalogControll
 import { checkDoleFloor } from '@services/pricingRuleService';
 import { getHighestDoleWageReference } from '@/constants/doleWageReference';
 import { buildMatrixPayload, loadMatrix, type MatrixCategory } from '../prisma/seeds/lib/jobMatrix';
-
-// Old matching-option text -> new option text, where the wording changed.
-const OPTION_ALIASES: Record<string, string> = {
-  'oven/stove': 'stove or oven',
-  'air conditioner': 'aircon',
-};
 
 class DryRunRollback extends Error {}
 
@@ -74,10 +67,7 @@ const peso = (n: number) => `₱${n.toLocaleString('en-PH', { maximumFractionDig
 async function loadCategory(tx: Prisma.TransactionClient, name: string) {
   const category = await tx.serviceType.findFirst({
     where: { name },
-    include: {
-      tasks: true,
-      scopeFields: { include: { options: { include: { workerCapabilities: true } }, taskLinks: true } },
-    },
+    include: { tasks: true },
   });
   if (!category) throw new Error(`No service category named "${name}".`);
   const taskIds = category.tasks.map((t) => t.id);
@@ -96,7 +86,7 @@ async function applyCategory(tx: Prisma.TransactionClient, matrix: MatrixCategor
 
   // --- build the same payload the admin editor would send ---------------------
   const { body, warnings, unmatched, jobRef } = buildMatrixPayload(matrix, category, category.tasks);
-  const { tasks, scopeFields } = body as Required<typeof body>;
+  const { tasks } = body as Required<typeof body>;
   const usedLive = new Set(category.tasks.filter((t) => !unmatched.includes(t)).map((t) => t.id));
   for (const w of warnings) report.push(`  ! ${w}`);
   const unmatchedCounted = unmatched.filter((t) => t.pricingModel === 'PER_UNIT' || t.pricingModel === 'TIERED');
@@ -104,11 +94,7 @@ async function applyCategory(tx: Prisma.TransactionClient, matrix: MatrixCategor
     throw new Error(`Live per-unit job(s) with no matrix row need a manual decision: ${unmatchedCounted.map((t) => t.name).join(', ')}.`);
   }
 
-  const invalid = validateCatalog(
-    body,
-    new Set(category.tasks.map((t) => t.id)),
-    new Set(category.scopeFields.map((f) => f.id))
-  );
+  const invalid = validateCatalog(body, new Set(category.tasks.map((t) => t.id)));
   if (invalid) throw new Error(`Matrix fails the editor's validation: ${invalid}`);
   for (const t of tasks) {
     if (t.isActive === false) continue;
@@ -116,7 +102,7 @@ async function applyCategory(tx: Prisma.TransactionClient, matrix: MatrixCategor
     if (dole.blocked) throw new Error(`Job "${t.name}": ${dole.message}`);
   }
 
-  // --- write jobs + questions ---------------------------------------------------
+  // --- write jobs ---------------------------------------------------
   const { taskIdByRef } = await writeCatalog(
     tx,
     { id: category.id, tasks: category.tasks.map((t) => ({ id: t.id, pricingModel: t.pricingModel })) },
@@ -133,32 +119,6 @@ async function applyCategory(tx: Prisma.TransactionClient, matrix: MatrixCategor
   for (const live of category.tasks.filter((t) => !usedLive.has(t.id))) {
     report.push(`    –  ${live.name} — deactivated (no matching row)`);
   }
-  report.push(`  Questions: ${category.scopeFields.length} old removed, ${scopeFields.length} new (${matrix.commonQuestions.length} common).`);
-
-  // --- carry worker "match" choices to the new matching questions ---------------
-  const newFields = await tx.serviceScopeField.findMany({
-    where: { serviceTypeId: category.id, usedForMatching: true },
-    include: { options: true },
-  });
-  let kept = 0;
-  const lost: string[] = [];
-  const capabilityRows: { workerProfileId: string; optionId: string }[] = [];
-  for (const oldField of before.category.scopeFields.filter((f) => f.usedForMatching)) {
-    const target = newFields.find((f) => f.label.toLowerCase() === oldField.label.toLowerCase());
-    for (const opt of oldField.options) {
-      if (!opt.workerCapabilities.length) continue;
-      const wanted = OPTION_ALIASES[opt.label.toLowerCase()] ?? opt.label.toLowerCase();
-      const newOpt = target?.options.find((o) => o.label.toLowerCase() === wanted);
-      if (!newOpt) {
-        lost.push(`${oldField.label}: ${opt.label} (${opt.workerCapabilities.length} worker${opt.workerCapabilities.length === 1 ? '' : 's'})`);
-        continue;
-      }
-      for (const cap of opt.workerCapabilities) capabilityRows.push({ workerProfileId: cap.workerProfileId, optionId: newOpt.id });
-    }
-  }
-  if (capabilityRows.length) kept = (await tx.workerScopeFieldCapability.createMany({ data: capabilityRows, skipDuplicates: true })).count;
-  report.push(`  Worker match choices: ${kept} carried over${lost.length ? `; not carried (option removed): ${lost.join(', ')}` : ''}.`);
-
   // --- sign workers up: keep renamed jobs' workers; verified workers get new jobs ----
   const verifiedWorkers = before.workerCategories.filter((w) => w.status === 'VERIFIED').map((w) => w.workerProfileId);
   let signedUp = 0;
@@ -198,34 +158,11 @@ async function restoreCategory(tx: Prisma.TransactionClient, backup: Snapshot, r
   // Jobs the apply created can't be deleted if a booking used them: switch them off.
   const created = current.tasks.filter((t) => !oldTaskIds.has(t.id));
   if (created.length) {
-    await tx.serviceTask.updateMany({ where: { id: { in: created.map((t) => t.id) } }, data: { isActive: false, quantityScopeFieldId: null } });
+    await tx.serviceTask.updateMany({ where: { id: { in: created.map((t) => t.id) } }, data: { isActive: false } });
     await tx.workerTaskSelection.updateMany({ where: { serviceTaskId: { in: created.map((t) => t.id) } }, data: { isActive: false } });
   }
 
-  // Questions: drop the current set, recreate the backed-up one with its original ids.
-  await tx.serviceTask.updateMany({ where: { serviceTypeId: old.id }, data: { quantityScopeFieldId: null } });
-  await tx.serviceScopeField.deleteMany({ where: { serviceTypeId: old.id } });
-  for (const f of old.scopeFields) {
-    await tx.serviceScopeField.create({
-      data: {
-        id: f.id,
-        serviceTypeId: old.id,
-        label: f.label,
-        helpText: f.helpText,
-        fieldType: f.fieldType,
-        required: f.required,
-        sortOrder: f.sortOrder,
-        minValue: f.minValue,
-        maxValue: f.maxValue,
-        usedForMatching: f.usedForMatching,
-        options: { create: f.options.map((o) => ({ id: o.id, label: o.label, sortOrder: o.sortOrder })) },
-        taskLinks: { create: f.taskLinks.map((l) => ({ serviceTaskId: l.serviceTaskId })) },
-      },
-    });
-  }
   const workerIds = new Set((await tx.workerProfile.findMany({ select: { id: true } })).map((w) => w.id));
-  const caps = old.scopeFields.flatMap((f) => f.options.flatMap((o) => o.workerCapabilities)).filter((c) => workerIds.has(c.workerProfileId));
-  if (caps.length) await tx.workerScopeFieldCapability.createMany({ data: caps.map((c) => ({ id: c.id, workerProfileId: c.workerProfileId, optionId: c.optionId, createdAt: c.createdAt })), skipDuplicates: true });
 
   // Jobs back to their old details.
   for (const t of old.tasks) {
@@ -239,7 +176,9 @@ async function restoreCategory(tx: Prisma.TransactionClient, backup: Snapshot, r
         minPrice: t.minPrice,
         maxPrice: t.maxPrice,
         unitLabel: t.unitLabel,
-        quantityScopeFieldId: t.quantityScopeFieldId,
+        // Backups from before Booking.quantity have no limits; leave those as they are.
+        ...(t.minQuantity !== undefined ? { minQuantity: t.minQuantity } : {}),
+        ...(t.maxQuantity !== undefined ? { maxQuantity: t.maxQuantity } : {}),
         durationHours: t.durationHours,
         isActive: t.isActive,
         sortOrder: t.sortOrder,
@@ -253,7 +192,7 @@ async function restoreCategory(tx: Prisma.TransactionClient, backup: Snapshot, r
   if (selections.length) await tx.workerTaskSelection.createMany({ data: selections });
 
   report.push(
-    `  Restored ${old.tasks.length} jobs, ${old.scopeFields.length} questions, ${caps.length} match choices, ` +
+    `  Restored ${old.tasks.length} jobs, ` +
       `${selections.length} worker selections; ${created.length} added job(s) switched off.`
   );
 }

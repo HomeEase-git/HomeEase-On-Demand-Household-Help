@@ -140,7 +140,7 @@ export default function RecordDetailScreen() {
           </View>
           {isCompleted && (
             <Text className="text-text-muted text-xs mt-1 text-right">
-              After platform fee
+              After the service fee
             </Text>
           )}
         </View>

@@ -11,7 +11,7 @@ const pickWorker = (extra: object = {}) => {
     draft: {
       ...s.draft,
       serviceTaskId: "t1",
-      scopeAnswers: { Rooms: "2" },
+      quantity: 2,
       workerId: "w1",
       workerName: "Ana",
       workerEstimatedTotal: 900,
@@ -30,16 +30,16 @@ describe("picked worker vs. changed scope", () => {
     expect(draft().workerEstimatedTotal).toBeNull();
   });
 
-  it("is dropped when a scope answer (quantity) changes", () => {
+  it("is dropped when the quantity changes", () => {
     pickWorker();
-    useBookingStore.getState().setDraft({ scopeAnswers: { Rooms: "5" } });
+    useBookingStore.getState().setDraft({ quantity: 5 });
     expect(draft().workerId).toBeNull();
     expect(draft().workerUnitPrice).toBeNull();
   });
 
   it("is kept when nothing changed", () => {
     pickWorker();
-    useBookingStore.getState().setDraft({ serviceTaskId: "t1", scopeAnswers: { Rooms: "2" } });
+    useBookingStore.getState().setDraft({ serviceTaskId: "t1", quantity: 2 });
     expect(draft().workerId).toBe("w1");
     expect(draft().workerEstimatedTotal).toBe(900);
   });

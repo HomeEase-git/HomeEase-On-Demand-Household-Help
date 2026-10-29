@@ -13,3 +13,9 @@ export { cardShadow } from './shadows';
 
 // Configuration
 export { config, type Config } from './config';
+
+// Verification progress bar, shared by every (kyc) screen so the labels can't drift.
+export const KYC_STEPS = {
+  worker: ["ID", "Selfie", "Documents", "Resume", "Contract"],
+  client: ["ID", "Selfie", "Contract"],
+};

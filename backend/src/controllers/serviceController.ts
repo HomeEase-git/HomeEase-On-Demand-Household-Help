@@ -11,14 +11,6 @@ export const getServiceTypes = async (_req: Request, res: Response) => {
       where: { isActive: true },
       include: {
         tasks: { orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }] },
-        scopeFields: {
-          orderBy: { sortOrder: 'asc' },
-          include: {
-            options: { orderBy: { sortOrder: 'asc' } },
-            // Jobs this question is limited to — empty means every job.
-            taskLinks: { select: { serviceTaskId: true } },
-          },
-        },
         // Only a VERIFIED category connection counts — a
         // worker whose 2nd+ category is still PENDING_VERIFICATION isn't
         // actually bookable for it yet (see WorkerServiceCategory's docblock).

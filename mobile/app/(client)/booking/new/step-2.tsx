@@ -189,7 +189,6 @@ export default function BookingStep2Screen() {
       serviceType: draft.serviceType ?? undefined,
       serviceTaskId: draft.serviceTaskId ?? undefined,
       date: date ?? undefined,
-      scopeAnswers: draft.scopeAnswers,
       workerId: lockedWorkerId ?? undefined,
     },
     hasScope && !!date

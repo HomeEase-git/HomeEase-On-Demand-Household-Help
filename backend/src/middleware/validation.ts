@@ -373,7 +373,7 @@ export const validateCreateBooking = (
     tip,
     paymentMethodType,
     paymentAccountIdentifier,
-    scopeAnswers,
+    quantity,
     idempotencyKey,
   } = req.body;
 
@@ -469,18 +469,9 @@ export const validateCreateBooking = (
     return res.status(400).json(errorResponse(400, 'paymentAccountIdentifier must be a string'));
   }
 
-  if (scopeAnswers !== undefined) {
-    const isPlainObject = typeof scopeAnswers === 'object' && scopeAnswers !== null && !Array.isArray(scopeAnswers);
-    const hasValidValues =
-      isPlainObject &&
-      Object.values(scopeAnswers).every(
-        (v: unknown) => typeof v === 'string' || (Array.isArray(v) && v.every((x) => typeof x === 'string'))
-      );
-    if (!hasValidValues) {
-      return res
-        .status(400)
-        .json(errorResponse(400, 'scopeAnswers must be an object mapping field labels to a string or string array'));
-    }
+  // Per-unit jobs only; the job's own limits are checked in createBooking.
+  if (quantity !== undefined && quantity !== null && (typeof quantity !== 'number' || !Number.isFinite(quantity))) {
+    return res.status(400).json(errorResponse(400, 'quantity must be a number'));
   }
 
   const { issuePhotoUrls } = req.body;

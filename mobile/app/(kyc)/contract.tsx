@@ -4,7 +4,8 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import ScreenHeader from "../../components/ui/ScreenHeader";
 import PrimaryButton from "../../components/ui/PrimaryButton";
-import { colors } from "../../constants";
+import { colors, KYC_STEPS } from "../../constants";
+import StepperHorizontal from "../../components/steppers/StepperHorizontal";
 import { useAuthStore } from "../../store/authStore";
 import { useAlertModal } from "../../contexts/AlertModalContext";
 import { useToastContext } from "../../contexts/ToastContext";
@@ -18,6 +19,7 @@ export default function ContractScreen() {
   const toast = useToastContext();
   const user = useAuthStore((s) => s.user);
   const isWorker = user?.role === "worker";
+  const kycSteps = isWorker ? KYC_STEPS.worker : KYC_STEPS.client;
   const scrollViewRef = useRef<ScrollView>(null);
   const [hasScrolled, setHasScrolled] = useState(false);
   const [accepted, setAccepted] = useState(false);
@@ -74,9 +76,12 @@ export default function ContractScreen() {
         showBack
       />
       <View className="flex-1">
+        <View className="mx-4 mt-4">
+          <StepperHorizontal steps={kycSteps} currentStep={kycSteps.length - 1} />
+        </View>
         <ScrollView
           ref={scrollViewRef}
-          className="flex-1 mx-4 mt-4 bg-card rounded-2xl"
+          className="flex-1 mx-4 bg-card rounded-2xl"
           contentContainerStyle={{ padding: 24 }}
           onScroll={handleScroll}
           scrollEventThrottle={16}

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { COMMON_UNITS, PRICING_MODELS, usesCount } from './catalogModel'
+import { COMMON_UNITS, PRICING_MODELS, countLimitsProblem, usesCount } from './catalogModel'
 
 /**
  * Add/edit one row of the job order matrix. The price set here is what every
@@ -14,7 +14,8 @@ export default function JobModal({ initial, doleRef, onSave, onClose }) {
     model: 'FIXED',
     allowsFollowUp: false,
     overrideReason: '',
-    quantityRef: null,
+    minQty: '',
+    maxQty: '',
     ...initial,
   }))
   const [error, setError] = useState('')
@@ -40,6 +41,8 @@ export default function JobModal({ initial, doleRef, onSave, onClose }) {
       return setError('The price is under the DOLE wage reference. Give a reason to keep it.')
     }
     if (usesCount(job.model) && !job.unit.trim()) return setError('Price per piece needs a unit, e.g. outlet, room, kilo.')
+    const limits = countLimitsProblem(job)
+    if (limits) return setError(limits)
     onSave({ ...job, name: job.name.trim(), unit: job.unit.trim().replace(/^per\s+/i, '') })
   }
 
@@ -122,6 +125,33 @@ export default function JobModal({ initial, doleRef, onSave, onClose }) {
               />
             </label>
           </div>
+
+          {usesCount(job.model) && (
+            <div className="sce-grid2">
+              <label className="sce-field">
+                <span>Fewest a client can book</span>
+                <input
+                  className="sce-input"
+                  type="number"
+                  min="1"
+                  value={job.minQty}
+                  onChange={(e) => patch({ minQty: e.target.value })}
+                  placeholder="1"
+                />
+              </label>
+              <label className="sce-field">
+                <span>Most a client can book</span>
+                <input
+                  className="sce-input"
+                  type="number"
+                  min="1"
+                  value={job.maxQty}
+                  onChange={(e) => patch({ maxQty: e.target.value })}
+                  placeholder="No limit"
+                />
+              </label>
+            </div>
+          )}
 
           <div className="sce-note">
             Every client pays this price and every worker earns from it. Workers can't change it; only the

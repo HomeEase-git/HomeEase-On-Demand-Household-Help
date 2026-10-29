@@ -17,6 +17,7 @@ import * as api from "../../../../services/api";
 import { getSocket } from "../../../../services/socket";
 import { colors } from "../../../../constants";
 import { useAlertModal } from "../../../../contexts/AlertModalContext";
+import { TIMELINE_STEPS } from "../../../../utils/bookingTimeline";
 
 type WorkerLocationEvent = {
   bookingId: string;
@@ -138,7 +139,7 @@ export default function TrackBookingScreen() {
   // that fallback was silently mislabeling every other real status
   // (InProgress, QuoteSubmitted, QuoteApproved, PendingCompletion, Disputed)
   // as "Booking cancelled".
-  const steps = ["Waiting", "Confirmed", "Ongoing", "Done"];
+  const steps = TIMELINE_STEPS;
 
   const currentStepIndex = (() => {
     switch (booking.status) {

@@ -582,7 +582,7 @@ export async function createBooking(details: CreateBookingPayload): Promise<Crea
       notes: details.notes || '',
       paymentMethodType: details.paymentMethodType,
       paymentAccountIdentifier: details.paymentAccountIdentifier,
-      scopeAnswers: details.scopeAnswers ?? undefined,
+      quantity: details.quantity ?? undefined,
       issuePhotoUrls: details.issuePhotoUrls ?? [],
       idempotencyKey: details.idempotencyKey ?? undefined,
     });
@@ -675,10 +675,6 @@ export async function getWorkers(filters?: {
 export interface DiscoverWorkersFilters {
   serviceType?: string;
   date?: string; // YYYY-MM-DD
-  // Answers to the selected category's scope fields, keyed by field label —
-  // only fields the admin flagged "use to match workers" actually filter
-  // candidates server-side (see matchingService.buildCapabilityFilters).
-  scopeAnswers?: Record<string, string | string[]>;
   hasPets?: boolean;
   serviceTaskId?: string;
   lat?: number;
@@ -707,9 +703,6 @@ export async function discoverWorkers(filters: DiscoverWorkersFilters): Promise<
     const params: Record<string, string | number> = {};
     if (filters.serviceType) params.serviceType = filters.serviceType;
     if (filters.date) params.date = filters.date;
-    if (filters.scopeAnswers && Object.keys(filters.scopeAnswers).length > 0) {
-      params.scopeAnswers = JSON.stringify(filters.scopeAnswers);
-    }
     if (filters.hasPets) params.hasPets = 'true';
     if (filters.serviceTaskId) params.serviceTaskId = filters.serviceTaskId;
     if (filters.lat != null) params.lat = filters.lat;
@@ -1582,14 +1575,19 @@ export async function declineBooking(bookingId: string, reason?: string) {
   }
 }
 
-export async function startBooking(bookingId: string, beforePhotoUrls: string[]) {
+export async function startBooking(bookingId: string) {
   try {
-    const response = await api.patch(`/bookings/${bookingId}/start`, { beforePhotoUrls });
+    const response = await api.patch(`/bookings/${bookingId}/start`);
     return response;
   } catch (error) {
     console.error('Start booking error:', error);
     throw error;
   }
+}
+
+// Worker's photos of the job as found, posted right after starting.
+export async function addBeforePhotos(bookingId: string, photoUrls: string[]) {
+  return api.post(`/bookings/${bookingId}/before-photos`, { photoUrls });
 }
 
 // Worker's "ongoing" proof photos while the job is IN_PROGRESS.
@@ -2018,36 +2016,6 @@ export async function updateWorkerProfileDetails(data: {
     return response;
   } catch (error) {
     console.error('Update worker profile error:', error);
-    throw error;
-  }
-}
-
-/**
- * Which specific ServiceScopeFieldOption ids this worker has declared they
- * handle (e.g. "Air Conditioner" under a category's "Appliance Type"
- * field) — replaces the old free-text Skill list. Nothing here is typed by
- * the worker; every id traces back to a real admin-defined option, fetched
- * from getServiceTypes()'s scopeFields for the categories this worker
- * offers. Used by discovery (see matchingService.buildCapabilityFilters) to
- * only show/match workers who've declared the option the client asked for.
- */
-export async function getMyCapabilities(): Promise<string[]> {
-  try {
-    const response = await api.get('/workers/me/capabilities');
-    return response.optionIds ?? [];
-  } catch (error) {
-    console.error('Get capabilities error:', error);
-    throw error;
-  }
-}
-
-/** Replace-all — pass every option id this worker currently declares. */
-export async function replaceMyCapabilities(optionIds: string[]): Promise<string[]> {
-  try {
-    const response = await api.put('/workers/me/capabilities', { optionIds });
-    return response.optionIds ?? [];
-  } catch (error) {
-    console.error('Update capabilities error:', error);
     throw error;
   }
 }

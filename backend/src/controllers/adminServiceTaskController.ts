@@ -16,17 +16,15 @@ interface AuthRequest extends Request {
 // are retired; extras and parts go on the worker's invoice instead.
 const VALID_PRICING_MODELS: TaskPricingModel[] = ['FIXED', 'PER_UNIT'];
 
-const taskInclude = {
-  quantityScopeField: { select: { id: true, label: true } },
-};
-
 export type TaskInputBody = {
   name?: string;
   description?: string | null;
   basePrice?: number;
   pricingModel?: string;
   unitLabel?: string | null;
-  quantityScopeFieldId?: string | null;
+  // Per-unit only: the fewest/most units a client can book (null = 1 / no maximum).
+  minQuantity?: number | null;
+  maxQuantity?: number | null;
   durationHours?: number | null;
   isActive?: boolean;
   // Inspection/diagnosis job — the client can ask for a follow-up job after it.
@@ -40,7 +38,7 @@ export type TaskInputBody = {
  * job may have no price yet (former custom-quote jobs); it needs one before
  * it can be switched back on.
  */
-export function validateTaskInput(body: TaskInputBody, existingNumberFieldIds: Set<string>): string | null {
+export function validateTaskInput(body: TaskInputBody): string | null {
   if (!body.name?.trim()) {
     return 'Name is required.';
   }
@@ -65,22 +63,20 @@ export function validateTaskInput(body: TaskInputBody, existingNumberFieldIds: S
     if (!body.unitLabel?.trim()) {
       return 'unitLabel is required for a per-unit task (e.g. "kilo", "sq.m.").';
     }
-    if (!body.quantityScopeFieldId || !existingNumberFieldIds.has(body.quantityScopeFieldId)) {
-      return 'quantityScopeFieldId must reference a NUMBER-type field on this service category.';
+    for (const key of ['minQuantity', 'maxQuantity'] as const) {
+      const value = body[key];
+      if (value != null && (typeof value !== 'number' || !Number.isFinite(value) || value < 1)) {
+        return `${key} must be a number of at least 1.`;
+      }
     }
-  } else if (body.quantityScopeFieldId) {
-    return 'quantityScopeFieldId only applies to per-unit tasks.';
+    if (body.minQuantity != null && body.maxQuantity != null && body.minQuantity > body.maxQuantity) {
+      return 'minQuantity cannot be more than maxQuantity.';
+    }
+  } else if (body.minQuantity != null || body.maxQuantity != null) {
+    return 'minQuantity/maxQuantity only apply to per-unit tasks.';
   }
 
   return null;
-}
-
-async function getNumberFieldIds(serviceTypeId: string): Promise<Set<string>> {
-  const fields = await prisma.serviceScopeField.findMany({
-    where: { serviceTypeId, fieldType: 'NUMBER' },
-    select: { id: true },
-  });
-  return new Set(fields.map((f) => f.id));
 }
 
 export const listTasksForServiceType = async (req: Request, res: Response) => {
@@ -88,7 +84,6 @@ export const listTasksForServiceType = async (req: Request, res: Response) => {
     const serviceTypeId = req.params.serviceTypeId as string;
     const tasks = await prisma.serviceTask.findMany({
       where: { serviceTypeId },
-      include: taskInclude,
       orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }],
     });
     return res.json({ success: true, data: tasks });
@@ -108,8 +103,7 @@ export const createTask = async (req: AuthRequest, res: Response) => {
       return res.status(404).json(errorResponse(404, 'Service type not found'));
     }
 
-    const numberFieldIds = await getNumberFieldIds(serviceTypeId);
-    const validationError = validateTaskInput(body, numberFieldIds);
+    const validationError = validateTaskInput(body);
     if (validationError) {
       return res.status(400).json(errorResponse(400, validationError));
     }
@@ -133,12 +127,11 @@ export const createTask = async (req: AuthRequest, res: Response) => {
         maxPrice: null,
         // Display-only for FIXED (the matrix's "per visit").
         unitLabel: body.unitLabel?.trim() || null,
-        quantityScopeFieldId:
-          body.pricingModel === 'PER_UNIT' ? body.quantityScopeFieldId! : null,
+        minQuantity: body.pricingModel === 'PER_UNIT' ? (body.minQuantity ?? null) : null,
+        maxQuantity: body.pricingModel === 'PER_UNIT' ? (body.maxQuantity ?? null) : null,
         durationHours: body.durationHours ?? null,
         allowsFollowUp: body.allowsFollowUp ?? false,
       },
-      include: taskInclude,
     });
 
     await writeAuditLog({
@@ -177,8 +170,7 @@ export const updateTask = async (req: AuthRequest, res: Response) => {
     }
     const isActive = body.isActive ?? existing.isActive;
 
-    const numberFieldIds = await getNumberFieldIds(serviceTypeId);
-    const validationError = validateTaskInput({ ...body, isActive }, numberFieldIds);
+    const validationError = validateTaskInput({ ...body, isActive });
     if (validationError) {
       return res.status(400).json(errorResponse(400, validationError));
     }
@@ -202,13 +194,12 @@ export const updateTask = async (req: AuthRequest, res: Response) => {
           maxPrice: null,
           // Display-only for FIXED (the matrix's "per visit").
           unitLabel: body.unitLabel?.trim() || null,
-          quantityScopeFieldId:
-            body.pricingModel === 'PER_UNIT' ? body.quantityScopeFieldId! : null,
+          minQuantity: body.pricingModel === 'PER_UNIT' ? (body.minQuantity ?? null) : null,
+          maxQuantity: body.pricingModel === 'PER_UNIT' ? (body.maxQuantity ?? null) : null,
           durationHours: body.durationHours ?? null,
           isActive,
           ...(body.allowsFollowUp !== undefined ? { allowsFollowUp: body.allowsFollowUp } : {}),
         },
-        include: taskInclude,
       });
     });
 
@@ -254,7 +245,6 @@ export const toggleTaskActive = async (req: AuthRequest, res: Response) => {
     const task = await prisma.serviceTask.update({
       where: { id: taskId },
       data: { isActive },
-      include: taskInclude,
     });
 
     await writeAuditLog({

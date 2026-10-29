@@ -4,21 +4,23 @@ import { RemoteImage } from "../../../../components/ui/RemoteImage";
 import { KeyboardAwareScrollView } from "../../../../components/ui/KeyboardAwareScrollView";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
-import ScreenHeader from "../../../../components/ui/ScreenHeader";
-import StepperHorizontal from "../../../../components/steppers/StepperHorizontal";
-import InputField from "../../../../components/ui/InputField";
-import OutlinedButton from "../../../../components/ui/OutlinedButton";
+import { ScreenHeader } from "../../../../components/ui/ScreenHeader";
+import { StepperHorizontal } from "../../../../components/steppers/StepperHorizontal";
+import { InputField } from "../../../../components/ui/InputField";
+import { OutlinedButton } from "../../../../components/ui/OutlinedButton";
 import InvalidationBanner from "../../../../components/ui/InvalidationBanner";
 import ServiceCategorySelector, {
   type ServiceCategoryOption,
 } from "../../../../components/booking4step/ServiceCategorySelector";
 import TaskSelector from "../../../../components/booking4step/TaskSelector";
-import DynamicScopeFields from "../../../../components/booking4step/DynamicScopeFields";
-import { fieldAppliesToTask, PET_FRIENDLY_PRIORITY, type ServiceTaskOption } from "../../../../types/booking4step.types";
+import {
+  PET_FRIENDLY_PRIORITY,
+  type ServiceTaskOption,
+} from "../../../../types/booking4step.types";
 import PricingRangePreview from "../../../../components/booking4step/PricingRangePreview";
 import PackageSelector from "../../../../components/booking4step/PackageSelector";
 import { BookingFooterBar } from "../../../../components/booking4step/BookingFooterBar";
-import ImageSourcePickerBottomSheet from "../../../../components/bottom-sheets/ImageSourcePickerBottomSheet";
+import { ImageSourcePickerBottomSheet } from "../../../../components/bottom-sheets/ImageSourcePickerBottomSheet";
 import type { BottomSheetHandle } from "../../../../components/bottom-sheets/BottomSheetWrapper";
 import { AppIcon as Ionicons } from "../../../../components/icons/AppIcon";
 import { colors } from "../../../../constants";
@@ -26,14 +28,11 @@ import { useBookingStore } from "../../../../store/bookingStore";
 import { getServiceTypes, uploadIssuePhoto } from "../../../../services/api";
 import { useBookingPriceEstimate } from "../../../../hooks/useBookingPriceEstimate";
 import { useAlertModal } from "../../../../contexts/AlertModalContext";
+import { pluralUnit } from "../../../../utils/pricing";
 
 const MAX_ISSUE_PHOTOS = 5;
 
 const BOOKING_STEPS = ["Service", "When & where", "Book"];
-
-function hasAnswer(value: string | string[] | undefined): boolean {
-  return Array.isArray(value) ? value.length > 0 : !!value && value.trim().length > 0;
-}
 
 export default function BookingStep1Screen() {
   const router = useRouter();
@@ -44,14 +43,24 @@ export default function BookingStep1Screen() {
   const [categories, setCategories] = useState<ServiceCategoryOption[]>([]);
   const [loadingCategories, setLoadingCategories] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [selectedCategory, setSelectedCategory] = useState<ServiceCategoryOption | null>(null);
-  const [selectedTask, setSelectedTask] = useState<ServiceTaskOption | null>(null);
-  const [scopeAnswers, setScopeAnswers] = useState<Record<string, string | string[]>>({});
+  const [selectedCategory, setSelectedCategory] =
+    useState<ServiceCategoryOption | null>(null);
+  const [selectedTask, setSelectedTask] = useState<ServiceTaskOption | null>(
+    null,
+  );
+  const [quantityText, setQuantityText] = useState(
+    draft.quantity != null ? String(draft.quantity) : "",
+  );
   const [description, setDescription] = useState(draft.description);
-  const [issuePhotos, setIssuePhotos] = useState<string[]>(draft.issuePhotoUrls ?? []);
-  const [hasPets, setHasPets] = useState<boolean>((draft.priorities ?? []).includes(PET_FRIENDLY_PRIORITY));
+  const [issuePhotos, setIssuePhotos] = useState<string[]>(
+    draft.issuePhotoUrls ?? [],
+  );
+  const [hasPets, setHasPets] = useState<boolean>(
+    (draft.priorities ?? []).includes(PET_FRIENDLY_PRIORITY),
+  );
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
   const photoSheetRef = useRef<BottomSheetHandle | null>(null);
+  const initialDraft = useRef(draft);
 
   const loadCategories = useCallback(() => {
     let active = true;
@@ -65,23 +74,12 @@ export default function BookingStep1Screen() {
           id: t.id,
           name: t.name,
           basePrice: t.basePrice,
-          priceRangeMin: typeof t.priceRangeMin === "number" ? t.priceRangeMin : t.basePrice,
-          priceRangeMax: typeof t.priceRangeMax === "number" ? t.priceRangeMax : t.basePrice,
+          priceRangeMin:
+            typeof t.priceRangeMin === "number" ? t.priceRangeMin : t.basePrice,
+          priceRangeMax:
+            typeof t.priceRangeMax === "number" ? t.priceRangeMax : t.basePrice,
           description: t.description,
           icon: t.icon ?? null,
-          scopeFields: Array.isArray(t.scopeFields)
-            ? t.scopeFields.map((f: any) => ({
-                id: f.id,
-                label: f.label,
-                helpText: f.helpText ?? null,
-                fieldType: f.fieldType,
-                required: f.required,
-                options: Array.isArray(f.options) ? f.options.map((o: any) => ({ id: o.id, label: o.label })) : [],
-                minValue: f.minValue ?? null,
-                maxValue: f.maxValue ?? null,
-                taskIds: Array.isArray(f.taskLinks) ? f.taskLinks.map((l: any) => l.serviceTaskId) : [],
-              }))
-            : [],
           tasks: Array.isArray(t.tasks)
             ? t.tasks
                 .filter((task: any) => task.isActive)
@@ -91,41 +89,36 @@ export default function BookingStep1Screen() {
                   description: task.description ?? null,
                   basePrice: task.basePrice,
                   pricingModel: task.pricingModel,
-                  // Prices are admin-set: one price per job, the same at
-                  // every worker (before their tier surcharge and distance fee).
                   minPrice: task.basePrice,
                   maxPrice: task.basePrice,
                   unitLabel: task.unitLabel ?? null,
-                  quantityScopeFieldId: task.quantityScopeFieldId ?? null,
+                  minQuantity: task.minQuantity ?? null,
+                  maxQuantity: task.maxQuantity ?? null,
                   isActive: task.isActive,
                 }))
             : [],
         }));
         setCategories(options);
 
+        const { serviceType, category, serviceTaskId } = initialDraft.current;
         const matched =
-          options.find((o) => o.name === draft.serviceType) ??
-          options.find((o) => o.name.toLowerCase() === draft.category?.toLowerCase()) ??
+          options.find((o) => o.name === serviceType) ??
+          options.find(
+            (o) => o.name.toLowerCase() === category?.toLowerCase(),
+          ) ??
           null;
         if (matched) {
           setSelectedCategory(matched);
-          // Restore previously-answered fields (draft stores them keyed by
-          // label; the picker/UI below keys by field id).
-          if (draft.scopeAnswers) {
-            const byLabel = draft.scopeAnswers;
-            const restored: Record<string, string | string[]> = {};
-            matched.scopeFields.forEach((f) => {
-              if (byLabel[f.label] !== undefined) restored[f.id] = byLabel[f.label];
-            });
-            setScopeAnswers(restored);
-          }
-          if (draft.serviceTaskId) {
-            const matchedTask = matched.tasks.find((task) => task.id === draft.serviceTaskId);
+          if (serviceTaskId) {
+            const matchedTask = matched.tasks.find(
+              (task) => task.id === serviceTaskId,
+            );
             if (matchedTask) setSelectedTask(matchedTask);
           }
         }
       } catch {
-        if (active) setLoadError("Unable to load service categories. Please try again.");
+        if (active)
+          setLoadError("Unable to load service categories. Please try again.");
       } finally {
         if (active) setLoadingCategories(false);
       }
@@ -133,73 +126,87 @@ export default function BookingStep1Screen() {
     return () => {
       active = false;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  useEffect(() => {
-    const cancel = loadCategories();
-    return cancel;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  useEffect(() => loadCategories(), [loadCategories]);
 
-  // When entering via "Book Now" on a worker's profile, only offer the
-  // categories that worker actually provides — picking anything else would
-  // leave step-2/step-4 unable to find this worker available at any slot.
-  // Each tile's price range is also swapped for THIS worker's own spread
-  // (rather than the marketplace-wide one) since we already know who's
-  // doing the job — "the range of what the worker offers", not the category.
   const displayCategories =
-    draft.workerLocked && draft.workerServiceTypes && draft.workerServiceTypes.length > 0
+    draft.workerLocked &&
+    draft.workerServiceTypes &&
+    draft.workerServiceTypes.length > 0
       ? categories
-          .filter((c) => draft.workerServiceTypes!.some((ws) => ws.name.toLowerCase() === c.name.toLowerCase()))
+          .filter((c) =>
+            draft.workerServiceTypes!.some(
+              (ws) => ws.name.toLowerCase() === c.name.toLowerCase(),
+            ),
+          )
           .map((c) => {
             const workerService = draft.workerServiceTypes!.find(
-              (ws) => ws.name.toLowerCase() === c.name.toLowerCase()
+              (ws) => ws.name.toLowerCase() === c.name.toLowerCase(),
             );
-            return workerService?.priceRangeMin != null && workerService?.priceRangeMax != null
-              ? { ...c, priceRangeMin: workerService.priceRangeMin, priceRangeMax: workerService.priceRangeMax }
+            return workerService?.priceRangeMin != null &&
+              workerService?.priceRangeMax != null
+              ? {
+                  ...c,
+                  priceRangeMin: workerService.priceRangeMin,
+                  priceRangeMax: workerService.priceRangeMax,
+                }
               : c;
           })
       : categories;
 
-  // Every active task under the selected category — a category with none
-  // yet keeps today's flat-category-price booking unchanged.
   const activeTasks = selectedCategory?.tasks ?? [];
   const requiresTaskSelection = activeTasks.length > 0;
 
-  // A selected task's own admin price replaces the category's
-  // marketplace-wide range once picked.
-  const priceEstimate = useBookingPriceEstimate({
-    min: selectedTask ? (selectedTask.minPrice ?? 0) : (selectedCategory?.priceRangeMin ?? 0),
-    max: selectedTask ? (selectedTask.maxPrice ?? 0) : (selectedCategory?.priceRangeMax ?? 0),
-  });
+  const isPerUnit =
+    selectedTask?.pricingModel === "PER_UNIT" ||
+    selectedTask?.pricingModel === "TIERED";
+  const minQuantity = Math.max(1, selectedTask?.minQuantity ?? 1);
+  const maxQuantity = selectedTask?.maxQuantity ?? null;
+  const quantity = Number(quantityText);
+  const quantityError =
+    !isPerUnit || !quantityText.trim()
+      ? null
+      : !Number.isFinite(quantity) || quantity < minQuantity
+        ? `At least ${minQuantity}`
+        : maxQuantity != null && quantity > maxQuantity
+          ? `At most ${maxQuantity}`
+          : null;
+  const quantityComplete =
+    !isPerUnit || (!!quantityText.trim() && !quantityError);
 
-  // Only the category's common questions plus the chosen job's own.
-  const visibleFields = selectedCategory
-    ? selectedCategory.scopeFields.filter((f) => fieldAppliesToTask(f, selectedTask))
-    : [];
-
-  const scopeComplete = !selectedCategory
-    ? false
-    : visibleFields.every((f) => !f.required || hasAnswer(scopeAnswers[f.id]));
+  const priceEstimate = useBookingPriceEstimate(
+    {
+      min: selectedTask
+        ? (selectedTask.minPrice ?? 0)
+        : (selectedCategory?.priceRangeMin ?? 0),
+      max: selectedTask
+        ? (selectedTask.maxPrice ?? 0)
+        : (selectedCategory?.priceRangeMax ?? 0),
+    },
+    0,
+    undefined,
+    isPerUnit
+      ? {
+          quantity: quantityComplete ? quantity : undefined,
+          unitLabel: selectedTask?.unitLabel,
+        }
+      : undefined,
+  );
 
   const taskComplete = !requiresTaskSelection || !!selectedTask;
 
-  const canNext = !!selectedCategory && taskComplete && scopeComplete;
+  const canNext = !!selectedCategory && taskComplete && quantityComplete;
 
   const handleCategorySelect = (cat: ServiceCategoryOption) => {
     setSelectedCategory(cat);
     setSelectedTask(null);
-    // Switching category can change its fields entirely — start clean
-    // rather than carrying over answers that no longer apply.
-    setScopeAnswers({});
+    setQuantityText("");
   };
 
   const handleTaskSelect = (task: ServiceTaskOption) => {
     setSelectedTask(task);
-    // A different task can have a different (or no) quantity field — start
-    // clean, same reasoning as switching categories above.
-    setScopeAnswers({});
+    setQuantityText("");
   };
 
   const handlePickIssuePhoto = async (uri: string) => {
@@ -209,7 +216,10 @@ export default function BookingStep1Screen() {
       const { url } = await uploadIssuePhoto(uri);
       setIssuePhotos((prev) => [...prev, url]);
     } catch {
-      alertModal.error("Upload failed", "Could not upload that photo. Please try again.");
+      alertModal.error(
+        "Upload failed",
+        "Could not upload that photo. Please try again.",
+      );
     } finally {
       setUploadingPhoto(false);
     }
@@ -221,45 +231,45 @@ export default function BookingStep1Screen() {
 
   const handleNext = () => {
     if (!canNext) {
-      alertModal.warning("Scope incomplete", "Please choose a service and fill in the required details before continuing.");
+      alertModal.warning(
+        "Almost there",
+        isPerUnit && !quantityComplete
+          ? "Enter how many you need."
+          : "Please choose a service before continuing.",
+      );
       return;
     }
-
-    const labelAnswers: Record<string, string | string[]> = {};
-    visibleFields.forEach((f) => {
-      const value = scopeAnswers[f.id];
-      if (hasAnswer(value)) labelAnswers[f.label] = value;
-    });
 
     setDraft({
       category: selectedCategory!.name,
       serviceType: selectedCategory!.name,
       serviceTypeId: draft.workerLocked
-        ? (draft.workerServiceTypes?.find((ws) => ws.name.toLowerCase() === selectedCategory!.name.toLowerCase())
-            ?.id ?? null)
+        ? (draft.workerServiceTypes?.find(
+            (ws) =>
+              ws.name.toLowerCase() === selectedCategory!.name.toLowerCase(),
+          )?.id ?? null)
         : (draft.serviceTypeId ?? null),
       categoryBasePrice: selectedCategory!.basePrice,
-      // selectedCategory's range is already the worker-specific one when
-      // workerLocked (see displayCategories above), so this is whichever
-      // spread is correct without Step 4 needing to re-derive it.
       categoryPriceRangeMin: selectedCategory!.priceRangeMin,
       categoryPriceRangeMax: selectedCategory!.priceRangeMax,
       serviceTaskId: selectedTask?.id ?? null,
       selectedTaskName: selectedTask?.name ?? null,
       selectedTaskPricingModel: selectedTask?.pricingModel ?? null,
-      // Only a per-unit/tiered job's unit is a rate unit; a flat job's unit
-      // ("per visit") is display-only and would make step 3 show a rate.
       selectedTaskUnitLabel:
-        selectedTask?.pricingModel === "PER_UNIT" || selectedTask?.pricingModel === "TIERED"
+        selectedTask?.pricingModel === "PER_UNIT" ||
+        selectedTask?.pricingModel === "TIERED"
           ? (selectedTask.unitLabel ?? null)
           : null,
       selectedTaskPriceRangeMin: selectedTask?.minPrice ?? null,
       selectedTaskPriceRangeMax: selectedTask?.maxPrice ?? null,
-      selectedTaskQuantityFieldLabel: selectedTask?.quantityScopeFieldId
-        ? (selectedCategory!.scopeFields.find((f) => f.id === selectedTask!.quantityScopeFieldId)?.label ?? null)
+      selectedTaskMinQuantity: isPerUnit
+        ? (selectedTask?.minQuantity ?? null)
+        : null,
+      selectedTaskMaxQuantity: isPerUnit
+        ? (selectedTask?.maxQuantity ?? null)
         : null,
       description,
-      scopeAnswers: labelAnswers,
+      quantity: isPerUnit ? quantity : null,
       issuePhotoUrls: issuePhotos,
     });
     router.push("/(client)/booking/new/step-2");
@@ -268,19 +278,25 @@ export default function BookingStep1Screen() {
   return (
     <SafeAreaView className="flex-1 bg-white">
       <ScreenHeader title="What do you need?" showBack />
-      <KeyboardAwareScrollView className="flex-1" contentContainerStyle={{ padding: 24, paddingBottom: 40 }}>
+      <KeyboardAwareScrollView
+        className="flex-1"
+        contentContainerStyle={{ padding: 24, paddingBottom: 40 }}
+      >
         <StepperHorizontal steps={BOOKING_STEPS} currentStep={0} />
         <InvalidationBanner />
 
         {draft.workerLocked && draft.workerName && (
           <View className="bg-accent/10 rounded-2xl p-3 mb-4 flex-row items-center">
             <Text className="text-accent text-sm flex-1">
-              Booking directly with <Text className="font-bold">{draft.workerName}</Text>
+              Booking directly with{" "}
+              <Text className="font-bold">{draft.workerName}</Text>
             </Text>
           </View>
         )}
 
-        <Text className="text-text-primary font-bold text-lg mt-2 mb-3">Service</Text>
+        <Text className="text-text-primary font-bold text-lg mt-2 mb-3">
+          Service
+        </Text>
         {loadError ? (
           <View className="py-6 items-center">
             <Text className="text-error mb-3">{loadError}</Text>
@@ -295,25 +311,50 @@ export default function BookingStep1Screen() {
           />
         )}
 
-        {draft.workerLocked && draft.workerServiceTypes && draft.workerServiceTypes.length > 0 && !loadingCategories && displayCategories.length === 0 && (
-          <Text className="text-error text-sm mt-2">
-            This worker&apos;s listed services aren&apos;t currently bookable. Please go back and pick a different worker.
-          </Text>
-        )}
+        {draft.workerLocked &&
+          draft.workerServiceTypes &&
+          draft.workerServiceTypes.length > 0 &&
+          !loadingCategories &&
+          displayCategories.length === 0 && (
+            <Text className="text-error text-sm mt-2">
+              This worker&apos;s listed services aren&apos;t currently bookable.
+              Please go back and pick a different worker.
+            </Text>
+          )}
 
         {selectedCategory && requiresTaskSelection && (
           <View className="mt-6">
-            <Text className="text-text-primary font-bold text-lg mb-3">What specifically?</Text>
-            <TaskSelector tasks={activeTasks} selectedId={selectedTask?.id ?? null} onSelect={handleTaskSelect} />
+            <Text className="text-text-primary font-bold text-lg mb-3">
+              What specifically?
+            </Text>
+            <TaskSelector
+              tasks={activeTasks}
+              selectedId={selectedTask?.id ?? null}
+              onSelect={handleTaskSelect}
+            />
           </View>
         )}
 
-        {selectedCategory && (!requiresTaskSelection || selectedTask) && (
+        {isPerUnit && (
           <View className="mt-6">
-            <DynamicScopeFields
-              fields={visibleFields}
-              answers={scopeAnswers}
-              onChange={setScopeAnswers}
+            <Text className="text-text-primary font-bold text-lg mb-1">
+              How many?
+            </Text>
+            <Text className="text-text-muted text-sm mb-2">
+              Priced per {selectedTask!.unitLabel || "unit"}
+              {maxQuantity != null
+                ? ` · ${minQuantity} to ${maxQuantity}`
+                : minQuantity > 1
+                  ? ` · at least ${minQuantity}`
+                  : ""}
+            </Text>
+            <InputField
+              label=""
+              value={quantityText}
+              onChangeText={(t) => setQuantityText(t.replace(/[^0-9.]/g, ""))}
+              placeholder={`Number of ${pluralUnit(selectedTask!.unitLabel || "unit")}`}
+              keyboardType="decimal-pad"
+              error={quantityError}
             />
           </View>
         )}
@@ -322,30 +363,39 @@ export default function BookingStep1Screen() {
           <PricingRangePreview estimate={priceEstimate} />
         </View>
 
-        {/* A worker picked from their profile: their packages are offered here.
-            Otherwise they're offered when the client chooses a worker. */}
         {selectedCategory && draft.workerLocked && draft.workerId && (
           <View className="mt-6">
             <Text className="text-text-primary font-bold text-lg mb-3">
-              {draft.workerName ? `${draft.workerName}'s packages (optional)` : "Packages (optional)"}
+              {draft.workerName
+                ? `${draft.workerName}'s packages (optional)`
+                : "Packages (optional)"}
             </Text>
             <PackageSelector
               workerId={draft.workerId}
               serviceTypeId={
-                draft.workerServiceTypes?.find((ws) => ws.name.toLowerCase() === selectedCategory.name.toLowerCase())?.id ??
-                null
+                draft.workerServiceTypes?.find(
+                  (ws) =>
+                    ws.name.toLowerCase() ===
+                    selectedCategory.name.toLowerCase(),
+                )?.id ?? null
               }
               selected={draft.selectedPackageIds ?? []}
               onChange={(ids) => setDraft({ selectedPackageIds: ids })}
-              onSelectedTotalChange={(total) => setDraft({ selectedPackagesTotal: total })}
+              onSelectedTotalChange={(total) =>
+                setDraft({ selectedPackagesTotal: total })
+              }
             />
           </View>
         )}
 
         <View className="bg-card rounded-xl p-3.5 flex-row items-center mt-6">
           <View className="flex-1 pr-3">
-            <Text className="text-text-primary font-semibold text-base">I have pets at home</Text>
-            <Text className="text-text-muted text-sm mt-0.5">We&apos;ll match you with a pet-friendly worker</Text>
+            <Text className="text-text-primary font-semibold text-base">
+              I have pets at home
+            </Text>
+            <Text className="text-text-muted text-sm mt-0.5">
+              We&apos;ll match you with a pet-friendly worker
+            </Text>
           </View>
           <Switch
             value={hasPets}
@@ -353,12 +403,17 @@ export default function BookingStep1Screen() {
               setHasPets(value);
               setDraft({ priorities: value ? [PET_FRIENDLY_PRIORITY] : [] });
             }}
-            trackColor={{ false: colors.toggleOff, true: colors.accent.DEFAULT }}
+            trackColor={{
+              false: colors.toggleOff,
+              true: colors.accent.DEFAULT,
+            }}
             thumbColor={colors.white}
           />
         </View>
 
-        <Text className="text-text-secondary font-bold text-sm mb-1 mt-6">Description (optional)</Text>
+        <Text className="text-text-secondary font-bold text-sm mb-1 mt-6">
+          Description (optional)
+        </Text>
         <InputField
           label=""
           value={description}
@@ -372,8 +427,14 @@ export default function BookingStep1Screen() {
         <View className="flex-row flex-wrap gap-2 mt-3">
           {issuePhotos.map((url) => (
             <View key={url} className="relative">
-              <RemoteImage source={{ uri: url }} className="w-20 h-20 rounded-xl" />
-              <Pressable accessibilityRole="button" accessibilityLabel="Remove photo" hitSlop={8}
+              <RemoteImage
+                source={{ uri: url }}
+                className="w-20 h-20 rounded-xl"
+              />
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Remove photo"
+                hitSlop={8}
                 className="absolute -top-1.5 -right-1.5 bg-black/70 rounded-full w-5 h-5 items-center justify-center"
                 onPress={() => handleRemoveIssuePhoto(url)}
               >
@@ -392,14 +453,19 @@ export default function BookingStep1Screen() {
                 <ActivityIndicator size="small" />
               ) : (
                 <>
-                  <Ionicons name="camera-outline" size={20} color={colors.text.muted} />
-                  <Text className="text-text-secondary text-xs mt-1">Add photo</Text>
+                  <Ionicons
+                    name="camera-outline"
+                    size={20}
+                    color={colors.text.muted}
+                  />
+                  <Text className="text-text-secondary text-xs mt-1">
+                    Add photo
+                  </Text>
                 </>
               )}
             </Pressable>
           )}
         </View>
-
       </KeyboardAwareScrollView>
       <BookingFooterBar
         estimate={selectedCategory ? priceEstimate : null}
@@ -407,7 +473,10 @@ export default function BookingStep1Screen() {
         disabled={loadingCategories}
         onPress={handleNext}
       />
-      <ImageSourcePickerBottomSheet innerRef={photoSheetRef} onSelect={handlePickIssuePhoto} />
+      <ImageSourcePickerBottomSheet
+        innerRef={photoSheetRef}
+        onSelect={handlePickIssuePhoto}
+      />
     </SafeAreaView>
   );
 }

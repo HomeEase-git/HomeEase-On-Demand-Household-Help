@@ -24,7 +24,7 @@ type Props = {
 
 export const RecordCard: React.FC<Props> = ({ record, onPress }) => {
   const isCompleted = record.status === "Completed";
-  const isOngoing = record.status === "Ongoing";
+  const isOngoing = !isCompleted && record.status !== "Cancelled" && record.status !== "Declined";
 
   return (
     <PressableScale

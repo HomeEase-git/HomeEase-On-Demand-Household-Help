@@ -255,7 +255,7 @@ export const WORKER_FAQ: FaqCategory[] = [
     items: [
       {
         q: "How much does HomeEase keep?",
-        a: "A 10% service fee on the job price, fixed when you accept the job. Tips go to you in full. HomeEase doesn't withhold tax; you file your own.",
+        a: "A service fee on the job price, set by HomeEase and fixed when you accept the job. The job request shows the exact amount before you accept. Tips go to you in full. HomeEase doesn't withhold tax; you file your own.",
       },
       {
         q: "When do I get paid?",

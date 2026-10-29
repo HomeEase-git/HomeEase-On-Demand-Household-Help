@@ -2,8 +2,8 @@
 //
 // Prod-safe catalog bootstrap. Inserts ONLY reference data the app needs to
 // function — service categories built from the job order matrix
-// (prisma/seeds/data/jobOrderMatrix.json: jobs, units, prices, common and
-// per-job booking questions). No users, no bookings,
+// (prisma/seeds/data/jobOrderMatrix.json: jobs, units, prices and per-unit
+// count limits). No users, no bookings,
 // no wipe. Fully idempotent: an existing category is skipped, so
 // re-running it is a no-op. To move an existing category onto the matrix, use
 // scripts/applyJobMatrix.ts instead.
@@ -55,11 +55,11 @@ async function main() {
       console.log(`  = ServiceType "${cat.name}" already exists — skipped`);
     } else {
       const { body } = buildMatrixPayload(cat, { name: cat.name, ...details, requiresCertification: false });
-      const invalid = validateCatalog(body, new Set(), new Set());
+      const invalid = validateCatalog(body, new Set());
       if (invalid) throw new Error(`"${cat.name}" fails the editor's validation: ${invalid}`);
       await prisma.$transaction((tx) => writeCatalog(tx, null, body), { timeout: 120_000, maxWait: 10_000 });
       createdTypes++;
-      console.log(`  + ServiceType "${cat.name}" (${body.tasks!.length} jobs, ${body.scopeFields!.length} questions)`);
+      console.log(`  + ServiceType "${cat.name}" (${body.tasks!.length} jobs)`);
     }
   }
 

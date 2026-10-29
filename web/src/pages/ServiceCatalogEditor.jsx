@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import PageHeader from '../components/common/PageHeader'
 import LoadingState from '../components/common/LoadingState'
@@ -8,17 +8,12 @@ import { fetchServiceTypes, saveServiceCatalog, uploadServiceBackground } from '
 import { useToast } from '../context/ToastContext'
 import { getHighestDoleWageReference } from '../constants/doleWageReference'
 import ClientPreview from '../components/serviceCatalog/ClientPreview'
-import QuestionModal from '../components/serviceCatalog/QuestionModal'
 import JobModal from '../components/serviceCatalog/JobModal'
 import {
-  QUESTION_TYPES,
-  buildLibrary,
-  countQuestionFor,
+  countRange,
   draftToPayload,
   emptyDraft,
-  ensureCountQuestions,
   formatPeso,
-  isChoiceType,
   newKey,
   serviceToDraft,
   usesCount,
@@ -31,13 +26,13 @@ import '../components/serviceCatalog/serviceCatalogEditor.css'
 const DOLE_REF = getHighestDoleWageReference()
 
 const clone = (v) => JSON.parse(JSON.stringify(v))
-const snapshotOf = (draft) => JSON.stringify({ ...draft, splitCount: 0 })
+const snapshotOf = (draft) => JSON.stringify(draft)
 
 /**
- * Service Catalog → Add/Edit service: the category's details, its job order
- * matrix, and each job's own booking questions, saved together in one
- * request (PUT /admin/service-types/:id/catalog). The phone on the right
- * shows what a client sees after picking a job.
+ * Service Catalog → Add/Edit service: the category's details and its job
+ * order matrix, saved together in one request
+ * (PUT /admin/service-types/:id/catalog). The phone on the right shows what a
+ * client sees after picking a job.
  */
 export default function ServiceCatalogEditor() {
   const { id } = useParams()
@@ -46,13 +41,11 @@ export default function ServiceCatalogEditor() {
   const { showSuccess, showError } = useToast()
   const [uploadingBg, setUploadingBg] = useState(false)
 
-  const [services, setServices] = useState([])
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState('')
   const [draft, setDraft] = useState(emptyDraft)
   const [baseline, setBaseline] = useState(() => snapshotOf(emptyDraft()))
   const [isActive, setIsActive] = useState(true)
-  const [open, setOpen] = useState(() => new Set())
   const [previewJob, setPreviewJob] = useState(null)
   const [modal, setModal] = useState(null)
   const [undo, setUndo] = useState(null)
@@ -65,7 +58,6 @@ export default function ServiceCatalogEditor() {
     setLoadError('')
     try {
       const all = await fetchServiceTypes()
-      setServices(all)
       if (isNew) {
         const d = emptyDraft()
         setDraft(d)
@@ -75,9 +67,6 @@ export default function ServiceCatalogEditor() {
         if (!service) throw new Error('This service no longer exists.')
         const d = serviceToDraft(service)
         setBaseline(snapshotOf(d))
-        // Fix leftovers from older saves (a flat job still holding its count
-        // question); it shows as an unsaved change so the admin saves it.
-        ensureCountQuestions(d)
         setDraft(d)
         setIsActive(service.isActive)
         setPreviewJob(d.jobs.find((j) => j.isActive)?.ref ?? null)
@@ -93,7 +82,7 @@ export default function ServiceCatalogEditor() {
     load()
   }, [load])
 
-  const dirty = snapshotOf(draft) !== baseline || draft.splitCount > 0
+  const dirty = snapshotOf(draft) !== baseline
 
   useEffect(() => {
     if (!dirty) return undefined
@@ -107,8 +96,6 @@ export default function ServiceCatalogEditor() {
 
   useEffect(() => () => clearTimeout(undoTimer.current), [])
 
-  const library = useMemo(() => buildLibrary(services, draft), [services, draft])
-
   // --- draft updates ------------------------------------------------------
   // Edits come from discrete clicks, so applying them to the current draft
   // (not a functional updater) is safe, and keeps newKey() calls out of an
@@ -117,7 +104,6 @@ export default function ServiceCatalogEditor() {
     setSaveError('')
     const next = clone(draft)
     fn(next)
-    ensureCountQuestions(next)
     setDraft(next)
   }
   const withUndo = (text, fn) => {
@@ -127,78 +113,15 @@ export default function ServiceCatalogEditor() {
     setUndo({ text, before })
     undoTimer.current = setTimeout(() => setUndo(null), 7000)
   }
-  const listIn = (d, scope) => (scope === 'common' ? d.common : d.jobs.find((j) => j.ref === scope).questions)
   const jobIn = (d, ref) => d.jobs.find((j) => j.ref === ref)
-
-  const saveQuestion = (scope, originalRef, question, setsPrice) => {
-    change((d) => {
-      const list = listIn(d, scope)
-      const ref = originalRef || newKey('q')
-      const next = { ...question, ref }
-      if (originalRef) list[list.findIndex((q) => q.ref === originalRef)] = next
-      else list.push(next)
-      if (scope !== 'common') {
-        const job = jobIn(d, scope)
-        if (setsPrice) {
-          job.quantityRef = ref
-          if (!usesCount(job.model)) {
-            job.model = 'PER_UNIT'
-            if (!job.unit || job.unit === 'job') job.unit = 'unit'
-          }
-        } else if (job.quantityRef === ref) {
-          job.quantityRef = null
-        }
-      }
-      // A question that's no longer a Number can't count anything.
-      if (question.type !== 'NUMBER') d.jobs.forEach((j) => j.quantityRef === ref && (j.quantityRef = null))
-    })
-    if (scope !== 'common') setPreviewJob(scope)
-    setModal(null)
-  }
-
-  const deleteQuestion = (scope, ref) => {
-    const q = listIn(draft, scope).find((x) => x.ref === ref)
-    withUndo(`Deleted “${q.label}”.`, (d) => {
-      const list = listIn(d, scope)
-      list.splice(list.findIndex((x) => x.ref === ref), 1)
-      d.jobs.forEach((j) => j.quantityRef === ref && (j.quantityRef = null))
-    })
-  }
-
-  const moveQuestion = (scope, ref, delta) =>
-    change((d) => {
-      const list = listIn(d, scope)
-      const i = list.findIndex((q) => q.ref === ref)
-      const k = i + delta
-      if (k < 0 || k >= list.length) return
-      ;[list[i], list[k]] = [list[k], list[i]]
-    })
-
-  const copyQuestions = (targetRef, sourceRef) => {
-    const source = jobIn(draft, sourceRef)
-    withUndo(`Copied ${source.questions.length} question${source.questions.length === 1 ? '' : 's'} from “${source.name}”. Edit or delete any that don't fit.`, (d) => {
-      const target = jobIn(d, targetRef)
-      const src = jobIn(d, sourceRef)
-      const taken = new Set([...d.common, ...target.questions].map((q) => q.label.trim().toLowerCase()))
-      for (const q of src.questions) {
-        if (taken.has(q.label.trim().toLowerCase())) continue
-        const copy = { ...clone(q), ref: newKey('q'), id: undefined, sourceId: undefined }
-        target.questions.push(copy)
-        if (src.quantityRef === q.ref && usesCount(target.model) && !target.quantityRef) target.quantityRef = copy.ref
-      }
-    })
-    setPreviewJob(targetRef)
-  }
 
   const saveJob = (originalRef, values) => {
     change((d) => {
       if (originalRef) {
-        const { questions, ...rest } = values
-        Object.assign(jobIn(d, originalRef), rest)
+        Object.assign(jobIn(d, originalRef), values)
       } else {
-        const job = { ...values, ref: newKey('j'), id: undefined, isActive: true, questions: [] }
+        const job = { ...values, ref: newKey('j'), id: undefined, isActive: true }
         d.jobs.push(job)
-        setOpen((prev) => new Set(prev).add(job.ref))
         setPreviewJob(job.ref)
       }
     })
@@ -225,18 +148,6 @@ export default function ServiceCatalogEditor() {
       ;[d.jobs[i], d.jobs[k]] = [d.jobs[k], d.jobs[i]]
     })
 
-  const toggleOpen = (ref) => {
-    setOpen((prev) => {
-      const next = new Set(prev)
-      if (next.has(ref)) next.delete(ref)
-      else {
-        next.add(ref)
-        setPreviewJob(ref)
-      }
-      return next
-    })
-  }
-
   // --- save -----------------------------------------------------------------
   const onSave = async () => {
     const problem = validateDraft(draft, DOLE_REF.hourlyWage)
@@ -248,14 +159,11 @@ export default function ServiceCatalogEditor() {
     setSaveError('')
     try {
       const saved = await saveServiceCatalog(isNew ? null : id, draftToPayload(draft))
-      const openNames = new Set(draft.jobs.filter((j) => open.has(j.ref)).map((j) => j.name))
       const d = serviceToDraft(saved)
       setDraft(d)
       setBaseline(snapshotOf(d))
-      setOpen(new Set(d.jobs.filter((j) => openNames.has(j.name)).map((j) => j.ref)))
       const previewName = draft.jobs.find((j) => j.ref === previewJob)?.name
       setPreviewJob(d.jobs.find((j) => j.name === previewName)?.ref ?? d.jobs[0]?.ref ?? null)
-      setServices((prev) => [...prev.filter((s) => s.id !== saved.id), saved])
       showSuccess(isNew ? 'Service added.' : 'Service saved.')
       if (isNew) navigate(`/service-catalog/${saved.id}`, { replace: true })
     } catch (err) {
@@ -279,61 +187,6 @@ export default function ServiceCatalogEditor() {
   if (loadError) return <ErrorState message={loadError} onRetry={load} />
 
   const d = draft.details
-  const jobQuestionCount = draft.jobs.reduce((n, j) => n + j.questions.length, 0)
-  const countUsers = (ref) => draft.jobs.filter((j) => j.quantityRef === ref).length
-
-  const questionRow = (q, index, list, scope, job) => {
-    const isCount = job ? job.quantityRef === q.ref : countUsers(q.ref) > 0
-    return (
-      <li key={q.ref} className="sce-q">
-        <span className="sce-q__n">{index + 1}</span>
-        <div>
-          <div className="sce-q__label">
-            {q.label}
-            {q.required && <span className="sce-req" aria-label="required">*</span>}
-          </div>
-          <div className="sce-q__meta">
-            <span className="sce-chip">{QUESTION_TYPES[q.type].label}</span>
-            {q.type === 'NUMBER' && <span>{q.min} to {q.max}</span>}
-            {isChoiceType(q.type) && <span className="sce-choices">{q.choices.join(' · ')}</span>}
-            {!q.required && <span className="sce-chip sce-chip--ghost">Optional</span>}
-            {isCount && (
-              <span className="sce-chip sce-chip--price">
-                {job ? 'Sets the price' : `Sets the price for ${countUsers(q.ref)} job${countUsers(q.ref) === 1 ? '' : 's'}`}
-              </span>
-            )}
-            {q.match && <span className="sce-chip sce-chip--match">Matches workers</span>}
-          </div>
-        </div>
-        <div className="sce-q__btns">
-          <button type="button" className="sce-ib" onClick={() => moveQuestion(scope, q.ref, -1)} disabled={index === 0} aria-label={`Move “${q.label}” up`}>
-            <i className="fas fa-chevron-up" />
-          </button>
-          <button type="button" className="sce-ib" onClick={() => moveQuestion(scope, q.ref, 1)} disabled={index === list.length - 1} aria-label={`Move “${q.label}” down`}>
-            <i className="fas fa-chevron-down" />
-          </button>
-          <button type="button" className="sce-ib" onClick={() => setModal({ kind: 'q', scope, qRef: q.ref })} aria-label={`Edit “${q.label}”`}>
-            <i className="fas fa-pen" />
-          </button>
-          <button type="button" className="sce-ib sce-ib--danger" onClick={() => deleteQuestion(scope, q.ref)} aria-label={`Delete “${q.label}”`}>
-            <i className="fas fa-trash" />
-          </button>
-        </div>
-      </li>
-    )
-  }
-
-  const questionList = (list, scope, job) =>
-    list.length ? (
-      <ul className="sce-qlist">{list.map((q, i) => questionRow(q, i, list, scope, job))}</ul>
-    ) : (
-      <div className="sce-empty">
-        {scope === 'common'
-          ? 'No common questions. Add one if every job needs the same answer, like the brand or who supplies parts.'
-          : 'No questions yet. Add what the worker needs to know for this job.'}
-      </div>
-    )
-
   const priceLine = (job) => {
     if (!usesCount(job.model)) {
       return (
@@ -343,43 +196,33 @@ export default function ServiceCatalogEditor() {
         </div>
       )
     }
-    const count = countQuestionFor(draft, job)
-    if (!count) {
-      return (
-        <div className="sce-priceline sce-priceline--bad">
-          <i className="fas fa-triangle-exclamation" />
-          <span>Priced per {job.unit || 'unit'}, but no question sets the count. Add a Number question and tick <b>This number sets the price</b>.</span>
-        </div>
-      )
-    }
+    const range = countRange(job)
     return (
       <div className="sce-priceline">
         <i className="fas fa-calculator" />
         <span>
-          Price = <b>{formatPeso(job.price)}</b> × the answer to <b>“{count.label}”</b>
-          {draft.common.includes(count) ? ' (a common question)' : ''}, the same for every worker.
+          Price = <b>{formatPeso(job.price)}</b> × how many {job.unit || 'units'} the client books
+          {range ? ` (${range})` : ''}, the same for every worker.
         </span>
       </div>
     )
   }
 
   const jobRow = (job, index) => {
-    const isOpen = open.has(job.ref)
-    const missingCount = usesCount(job.model) && !countQuestionFor(draft, job)
-    const others = draft.jobs.filter((o) => o.ref !== job.ref && o.questions.length)
+    const isPreviewed = previewJob === job.ref
     return (
-      <div key={job.ref} className={`sce-job ${isOpen ? 'sce-job--open' : ''} ${job.isActive ? '' : 'sce-job--inactive'}`}>
+      <div key={job.ref} className={`sce-job ${isPreviewed ? 'sce-job--open' : ''} ${job.isActive ? '' : 'sce-job--inactive'}`}>
         <div
           className="sce-job__head"
           role="button"
           tabIndex={0}
-          aria-expanded={isOpen}
-          onClick={() => toggleOpen(job.ref)}
+          aria-pressed={isPreviewed}
+          onClick={() => setPreviewJob(job.ref)}
           onKeyDown={(e) => {
             if (e.target !== e.currentTarget) return
             if (e.key === 'Enter' || e.key === ' ') {
               e.preventDefault()
-              toggleOpen(job.ref)
+              setPreviewJob(job.ref)
             }
           }}
         >
@@ -397,10 +240,10 @@ export default function ServiceCatalogEditor() {
           <span className="sce-job__qs sce-r">
             {!job.isActive ? (
               <span className="sce-chip sce-chip--off">Inactive</span>
-            ) : missingCount ? (
-              <span className="sce-chip sce-chip--warn">Needs count</span>
+            ) : usesCount(job.model) ? (
+              <span className="sce-chip">{countRange(job) || 'Any count'}</span>
             ) : (
-              <span className="sce-chip">{job.questions.length} question{job.questions.length === 1 ? '' : 's'}</span>
+              <span className="sce-chip">Flat</span>
             )}
           </span>
           <span className="sce-job__acts" onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()} role="presentation">
@@ -424,61 +267,18 @@ export default function ServiceCatalogEditor() {
             </button>
           </span>
         </div>
-        {isOpen && (
-          <div className="sce-job__body">
-            {priceLine(job)}
-            {questionList(job.questions, job.ref, job)}
-            <div className="sce-addrow">
-              <button type="button" className="btn btn-primary btn-sm" onClick={() => setModal({ kind: 'q', scope: job.ref })}>
-                <i className="fas fa-plus" /> Add question
-              </button>
-              {others.length > 0 && (
-                <select
-                  className="sce-input sce-input--sm"
-                  value=""
-                  onChange={(e) => e.target.value && copyQuestions(job.ref, e.target.value)}
-                  aria-label={`Copy questions into ${job.name} from another job`}
-                >
-                  <option value="">Copy questions from another job…</option>
-                  {others.map((o) => (
-                    <option key={o.ref} value={o.ref}>{o.name} ({o.questions.length})</option>
-                  ))}
-                </select>
-              )}
-            </div>
-          </div>
-        )}
+        {isPreviewed && <div className="sce-job__body">{priceLine(job)}</div>}
       </div>
     )
   }
 
   // --- modal wiring -------------------------------------------------------------
   let modalEl = null
-  if (modal?.kind === 'q') {
-    const job = modal.scope === 'common' ? null : jobIn(draft, modal.scope)
-    const initial = modal.qRef ? listIn(draft, modal.scope).find((q) => q.ref === modal.qRef) : null
-    const currentCount = job ? countQuestionFor(draft, job) : null
-    modalEl = (
-      <QuestionModal
-        initial={initial}
-        job={job}
-        isCount={!!job && !!initial && job.quantityRef === initial.ref}
-        currentCountLabel={currentCount && currentCount.ref !== initial?.ref ? currentCount.label : null}
-        library={library}
-        onSave={(q, setsPrice) => saveQuestion(modal.scope, modal.qRef, q, setsPrice)}
-        onClose={() => setModal(null)}
-      />
-    )
-  } else if (modal?.kind === 'job') {
+  if (modal?.kind === 'job') {
     const job = modal.jobRef ? jobIn(draft, modal.jobRef) : null
-    const numberQuestions = [
-      ...draft.common.filter((q) => q.type === 'NUMBER').map((q) => ({ ...q, common: true })),
-      ...(job ? job.questions.filter((q) => q.type === 'NUMBER') : []),
-    ]
     modalEl = (
       <JobModal
-        initial={job ? { ...job, questions: undefined } : null}
-        numberQuestions={numberQuestions}
+        initial={job}
         doleRef={DOLE_REF}
         onSave={(values) => saveJob(modal.jobRef, values)}
         onClose={() => setModal(null)}
@@ -490,7 +290,7 @@ export default function ServiceCatalogEditor() {
     <>
       <PageHeader
         title={isNew ? 'Add service' : `Edit service: ${d.name || 'Untitled'}`}
-        subtitle="Set up the job order matrix and the booking questions for each job."
+        subtitle="Set up the job order matrix and each job's price."
         actions={(
           <Link to="/service-catalog" className="btn btn-outline" onClick={onBack}>
             <i className="fas fa-arrow-left" /> Back to catalog
@@ -500,21 +300,11 @@ export default function ServiceCatalogEditor() {
 
       <div className="sce-layout">
         <div className="sce-stack">
-          {draft.splitCount > 0 && (
-            <div className="sce-note sce-note--warn">
-              <i className="fas fa-circle-info" />
-              <span>
-                {draft.splitCount} question{draft.splitCount === 1 ? ' was' : 's were'} shared by several jobs. Each job now has its own
-                copy, so you can edit them separately. Saving stores the copies. Worker “match” choices stay on the first job's copy only.
-              </span>
-            </div>
-          )}
-
           <section className="sce-card">
             <div className="sce-card__head">
               <div>
                 <h2>Details</h2>
-                <p>{isNew ? 'Name the category, then add its jobs and questions.' : isActive ? 'Active. Clients can book this category.' : 'Inactive. Clients can’t book this category.'}</p>
+                <p>{isNew ? 'Name the category, then add its jobs.' : isActive ? 'Active. Clients can book this category.' : 'Inactive. Clients can’t book this category.'}</p>
               </div>
             </div>
             <div className="sce-details">
@@ -579,7 +369,7 @@ export default function ServiceCatalogEditor() {
               </label>
             </div>
             <div className="sce-stats">
-              {draft.jobs.length} job{draft.jobs.length === 1 ? '' : 's'} · {jobQuestionCount} job question{jobQuestionCount === 1 ? '' : 's'}
+              {draft.jobs.length} job{draft.jobs.length === 1 ? '' : 's'}
             </div>
           </section>
 
@@ -587,7 +377,7 @@ export default function ServiceCatalogEditor() {
             <div className="sce-card__head">
               <div>
                 <h2>Jobs</h2>
-                <p>The job order matrix. Open a job to set up its own questions.</p>
+                <p>The job order matrix. Pick a job to see it in the client preview.</p>
               </div>
               <button type="button" className="btn btn-primary btn-sm" onClick={() => setModal({ kind: 'job' })}>
                 <i className="fas fa-plus" /> Add job
@@ -599,7 +389,7 @@ export default function ServiceCatalogEditor() {
                 <span>Job order</span>
                 <span>Unit</span>
                 <span className="sce-r">Price</span>
-                <span className="sce-r">Questions</span>
+                <span className="sce-r">Count</span>
                 <span />
               </div>
             )}

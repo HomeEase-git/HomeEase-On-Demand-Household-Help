@@ -34,50 +34,7 @@ export const ROOM_TYPE_LABELS: Record<RoomType, string> = {
   OTHER: 'Hallway',
 };
 
-// Admin-configured booking "scope" step — every category is just an ordered
-// list of these (Text / Select / Multi-select / Number), configured in the
-// admin Service Catalog page. No special-cased room picker or condition
-// toggle anymore; a category that wants either just defines them as
-// ordinary fields.
-export const SCOPE_FIELD_TYPES = ['TEXT', 'SELECT', 'MULTI_SELECT', 'NUMBER'] as const;
-export type ScopeFieldType = (typeof SCOPE_FIELD_TYPES)[number];
-
-export type ScopeFieldOption = {
-  id: string;
-  label: string;
-};
-
-export type ScopeField = {
-  id: string;
-  label: string;
-  // Optional hint shown under the question.
-  helpText?: string | null;
-  fieldType: ScopeFieldType;
-  required: boolean;
-  options: ScopeFieldOption[];
-  minValue?: number | null;
-  maxValue?: number | null;
-  // Jobs (ServiceTask ids) this question is asked for. Empty = every job.
-  taskIds: string[];
-};
-
-/**
- * Whether a question is asked for the chosen job — mirrors the backend's
- * utils/scopeFields.fieldAppliesToTask. A question with no job links applies
- * to every job, and a per-unit job's own count question always applies.
- */
-export function fieldAppliesToTask(
-  field: Pick<ScopeField, 'id' | 'taskIds'>,
-  task: { id: string; quantityScopeFieldId?: string | null } | null
-): boolean {
-  if (task && task.quantityScopeFieldId === field.id) return true;
-  if (field.taskIds.length === 0) return true;
-  return task ? field.taskIds.includes(task.id) : false;
-}
-
-// Condition is no longer a platform-wide booking input (a category that
-// wants a condition-style question defines it as an ordinary field now) —
-// these are kept only to render Booking.condition on historical bookings
+// Condition is no longer a booking input — these are kept only to render Booking.condition on historical bookings
 // created before this change.
 export const CONDITION_TYPES = ['TIDY', 'NORMAL', 'HEAVY'] as const;
 export type ConditionType = (typeof CONDITION_TYPES)[number];
@@ -132,7 +89,9 @@ export type ServiceTaskOption = {
   minPrice: number | null;
   maxPrice: number | null;
   unitLabel: string | null;
-  quantityScopeFieldId: string | null;
+  // Per-unit only: the fewest/most units a client can book (null = 1 / no maximum).
+  minQuantity: number | null;
+  maxQuantity: number | null;
   isActive: boolean;
 };
 
@@ -162,7 +121,8 @@ export type CreateBookingPayload = {
   notes?: string;
   paymentMethodType?: 'GCASH' | 'MAYA' | 'CASH';
   paymentAccountIdentifier?: string;
-  scopeAnswers?: Record<string, string | string[]>;
+  // How many units, for a per-unit job.
+  quantity?: number | null;
   issuePhotoUrls?: string[];
   idempotencyKey?: string;
 };

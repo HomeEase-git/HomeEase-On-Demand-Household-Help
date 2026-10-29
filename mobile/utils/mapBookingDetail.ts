@@ -74,7 +74,11 @@ export type ApiBookingDetail = {
   rescheduleRequestRespondedAt?: string | null;
   rescheduleRequestAccepted?: boolean | null;
   rooms?: RoomType[];
+  // Old bookings only: answers to the retired booking questions.
   scopeAnswers?: Record<string, string | string[]> | null;
+  // How many units, for a per-unit job.
+  quantity?: number | null;
+  quantityUnit?: string | null;
   scheduledDate: string;
   scheduledTime: string | null;
   estimatedPrice: number;

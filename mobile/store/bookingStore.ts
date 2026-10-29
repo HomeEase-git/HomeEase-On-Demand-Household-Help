@@ -157,13 +157,12 @@ export type DraftBooking = {
   // CUSTOM_QUOTE (no upfront range at all).
   selectedTaskPriceRangeMin?: number | null;
   selectedTaskPriceRangeMax?: number | null;
-  // ServiceScopeField.label of the NUMBER field that supplies a PER_UNIT
-  // task's quantity — its answer already lives in scopeAnswers under this
-  // same label (it's an ordinary scope field), this just says which one.
-  selectedTaskQuantityFieldLabel?: string | null;
+  // A per-unit task's own limits on the quantity (null = 1 / no maximum).
+  selectedTaskMinQuantity?: number | null;
+  selectedTaskMaxQuantity?: number | null;
   selectedPackageIds: string[]; // WorkerPackage ids picked with the worker (Step 1 for a locked worker, else the worker picker) — resolved to priced add-ons server-side
   selectedPackagesTotal?: number; // price of selectedPackageIds, for the review screen's estimate
-  scopeAnswers?: Record<string, string | string[]>; // scope-step answers, keyed by ScopeField.label
+  quantity?: number | null; // how many units, for a per-unit task (Step 1)
   issuePhotoUrls?: string[]; // photos of the issue the client attached in Step 1, uploaded via POST /bookings/issue-photo/upload
   time: string | null; // exact start time "HH:00" (PH), see utils/bookingTime.ts
   // Set when this is a follow-up job after an inspection (same worker).
@@ -261,7 +260,7 @@ export type DeclinedBookingDetail = {
   scheduledDate?: string | null;
   scheduledTime?: string | null;
   timeSlot?: TimeSlot | null;
-  scopeAnswers?: Record<string, string | string[]> | null;
+  quantity?: number | null;
 };
 
 export type BookingState = {
@@ -328,12 +327,13 @@ const initialDraft: DraftBooking = {
   selectedTaskName: null,
   selectedTaskPricingModel: null,
   selectedTaskUnitLabel: null,
-  selectedTaskQuantityFieldLabel: null,
+  selectedTaskMinQuantity: null,
+  selectedTaskMaxQuantity: null,
   selectedTaskPriceRangeMin: null,
   selectedTaskPriceRangeMax: null,
   selectedPackageIds: [],
   selectedPackagesTotal: 0,
-  scopeAnswers: {},
+  quantity: null,
   issuePhotoUrls: [],
   time: null,
   parentBookingId: null,
@@ -354,7 +354,7 @@ const SUBMITTED_FIELDS = [
   'isAutoMatched',
   'serviceTaskId',
   'description',
-  'scopeAnswers',
+  'quantity',
   'issuePhotoUrls',
   'selectedPackageIds',
   'addOnToggles',
@@ -465,7 +465,7 @@ export const useBookingStore: UseBoundStore<StoreApi<BookingState>> = create<Boo
       // worker's estimate and unit price were computed for the old scope.
       const scopeChanged =
         (draft.serviceTaskId !== undefined && draft.serviceTaskId !== prev.serviceTaskId) ||
-        (draft.scopeAnswers !== undefined && JSON.stringify(draft.scopeAnswers) !== JSON.stringify(prev.scopeAnswers));
+        (draft.quantity !== undefined && draft.quantity !== prev.quantity);
       const clearingWorkerForNewSlot =
         (dateChanged || scopeChanged) &&
         !updatedDraft.workerLocked &&
@@ -621,7 +621,7 @@ export const useBookingStore: UseBoundStore<StoreApi<BookingState>> = create<Boo
   // reviving it, so this builds a fresh draft from its scope+schedule and
   // routes back through Step 1 (see the booking-detail screen's "Find
   // Another Worker"), rather than making the client re-enter everything.
-  // Deliberately does NOT resolve serviceTypeId/categoryBasePrice/scopeFields
+  // Deliberately does NOT resolve serviceTypeId/categoryBasePrice/tasks
   // here — Step 1's own category loader already does that name-match
   // lookup against the live catalog for a restored draft, so duplicating it
   // here would just be a second, driftable copy of the same logic.
@@ -641,7 +641,7 @@ export const useBookingStore: UseBoundStore<StoreApi<BookingState>> = create<Boo
         // its YYYY-MM-DD, matching what DateGridPicker/step-2 expect.
         date: detail.scheduledDate ? detail.scheduledDate.slice(0, 10) : null,
         time: bookingStartTime(detail),
-        scopeAnswers: detail.scopeAnswers ?? {},
+        quantity: detail.quantity ?? null,
         entrySource: 're_offer',
         workerLocked: false,
         workerId: null,

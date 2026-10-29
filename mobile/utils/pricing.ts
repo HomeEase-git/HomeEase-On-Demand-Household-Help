@@ -84,3 +84,17 @@ export function getWorkerNetAmount(job: WorkerPayoutSource): number {
     gross * (1 - DEFAULT_COMMISSION_RATE)
   );
 }
+
+/**
+ * A per-unit job's unit in the plural ("item" → "items"). Only plain words
+ * get an "s"; abbreviations like "sq.m." are left as they are.
+ */
+export function pluralUnit(unit: string): string {
+  return /^[a-z]+$/i.test(unit) && !/s$/i.test(unit) ? `${unit}s` : unit;
+}
+
+/** "1 item", "3 items" — the booked quantity with its unit. */
+export function formatQuantity(quantity: number, unit: string | null | undefined): string {
+  const u = unit || "unit";
+  return `${quantity} ${quantity === 1 ? u : pluralUnit(u)}`;
+}

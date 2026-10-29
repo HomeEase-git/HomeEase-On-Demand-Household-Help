@@ -17,8 +17,6 @@ import {
   deselectTask,
   getMyTaskCatalog,
   getMySetupStatus,
-  listMyCapabilities,
-  replaceMyCapabilities,
   listMyCertifications,
   getCertification,
   createCertification,
@@ -113,9 +111,6 @@ router.delete('/me/packages/:packageId', authMiddleware, restrictTo('WORKER'), d
 router.get('/:workerId/packages', getWorkerPackages);
 
 router.post('/me/reviews/:reviewId/response', authMiddleware, restrictTo('WORKER'), respondToReview);
-
-router.get('/me/capabilities', authMiddleware, restrictTo('WORKER'), listMyCapabilities);
-router.put('/me/capabilities', authMiddleware, restrictTo('WORKER'), replaceMyCapabilities);
 
 router.get('/me/certifications', authMiddleware, restrictTo('WORKER'), listMyCertifications);
 router.get('/me/certifications/:certId', authMiddleware, restrictTo('WORKER'), getCertification);

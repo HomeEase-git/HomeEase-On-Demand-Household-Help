@@ -933,11 +933,12 @@ enum WorkerServiceCategoryStatus {
   REJECTED
 }
 
-// Admin-defined question shown in every category's booking "scope" step
-// (e.g. "Appliance Type" for Appliance Repair, "Bedrooms" for Cleaning).
-// Answers are snapshotted onto Booking.scopeAnswers keyed by `label`, not by
-// this row's id, so editing/reordering fields later doesn't orphan past
-// bookings.
+// Retired: booking questions ("scope fields") are no longer asked, used for
+// matching, or used for pricing (a per-unit job's quantity is now
+// Booking.quantity, limited by ServiceTask.minQuantity/maxQuantity). This and
+// the ServiceScopeFieldTask, ServiceScopeFieldOption and
+// WorkerScopeFieldCapability tables are kept, unread, so old rows and
+// backups still load.
 model ServiceScopeField {
   id            String      @id @default(cuid())
   serviceTypeId String
@@ -984,7 +985,7 @@ model ServiceScopeField {
 // toilets?" is only asked when the client picks a toilet job rather than on
 // every Plumbing booking. A field with zero rows here applies to every job;
 // a PER_UNIT/TIERED task's quantityScopeField always applies to that task
-// regardless (see utils/scopeFields.fieldAppliesToTask). Both sides must be
+// regardless. Retired with ServiceScopeField. Both sides must be
 // in the same ServiceType — enforced in application code, not a constraint.
 model ServiceScopeFieldTask {
   fieldId       String
@@ -1093,11 +1094,12 @@ model ServiceTask {
 
   // Display unit (e.g. "kilo", "sq.m.", "visit"), shown as "per <unit>".
   // Required for PER_UNIT/TIERED, where the rate is per this unit; optional
-  // and display-only otherwise. quantityScopeFieldId is PER_UNIT/TIERED only:
-  // the NUMBER-type ServiceScopeField (must belong to this
-  // task's serviceType) whose answer supplies the quantity, multiplied
-  // against basePrice.
+  // and display-only otherwise. minQuantity/maxQuantity bound the quantity
+  // a client can book a per-unit job for (null = at least 1, no maximum).
+  // quantityScopeFieldId is retired (the old quantity question); kept unread.
   unitLabel            String?
+  minQuantity          Float?
+  maxQuantity          Float?
   quantityScopeFieldId String?
   quantityScopeField   ServiceScopeField? @relation(fields: [quantityScopeFieldId], references: [id])
 
@@ -1213,7 +1215,12 @@ model Booking {
   condition              ConditionType?
   priorities             String[]
   addOnsSnapshot         Json? // itemized add-ons as submitted at booking time; BookingAddOn[] below is the normalized/authoritative record
-  scopeAnswers           Json? // { [ServiceScopeField.label]: string | string[] } snapshot of this booking's scope-step answers
+  // Retired: answers to the old booking questions ({ [ServiceScopeField.label]: value }).
+  // Kept for old rows only; new bookings don't write it.
+  scopeAnswers           Json?
+  // How many units a PER_UNIT job was booked for (rate x quantity). Null for
+  // flat-priced jobs. Older per-unit rows were backfilled from scopeAnswers.
+  quantity               Float?
   issuePhotoUrls         String[]       @default([]) // client-attached photos of the issue, uploaded at Step 1 before the booking exists (see POST /bookings/issue-photo/upload)
 
   // Scheduling. scheduledDate is UTC midnight of the PH calendar date;

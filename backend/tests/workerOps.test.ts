@@ -131,6 +131,36 @@ describe('worker operations overhaul', () => {
       }
     });
 
+    it('prices a per-unit job from the quantity the client books, within the job limits', async () => {
+      const original = await prisma.serviceTask.findUniqueOrThrow({ where: { id: serviceTaskId } });
+      await prisma.serviceTask.update({
+        where: { id: serviceTaskId },
+        data: { pricingModel: 'PER_UNIT', unitLabel: 'unit', maxQuantity: 5 },
+      });
+      try {
+        const day = isoDay(addDays(phTodayStart(), 25));
+        const book = (extra: Record<string, unknown>) =>
+          request(app).post('/api/bookings').set('Authorization', `Bearer ${clientToken}`).send(bookingBody(day, '10:00', extra));
+
+        const missing = await book({});
+        expect(missing.status).toBe(400);
+        expect(missing.body.message).toMatch(/how many/i);
+        expect((await book({ quantity: 6 })).status).toBe(400);
+
+        const res = await book({ quantity: 3 });
+        expect(res.status).toBe(201);
+        const saved = await prisma.booking.findUniqueOrThrow({ where: { id: res.body.data.id } });
+        expect(saved.quantity).toBe(3);
+        expect(saved.scopeAnswers).toBeNull();
+        expect(res.body.data.pricing.basePrice).toBe(original.basePrice * 3);
+      } finally {
+        await prisma.serviceTask.update({
+          where: { id: serviceTaskId },
+          data: { pricingModel: original.pricingModel, unitLabel: original.unitLabel, maxQuantity: null },
+        });
+      }
+    });
+
     it('bills a package the client chose at checkout without a second approval, and itemises the worker take-home', async () => {
       const task = await prisma.serviceTask.findUniqueOrThrow({ where: { id: serviceTaskId } });
       const pkg = await prisma.workerPackage.create({

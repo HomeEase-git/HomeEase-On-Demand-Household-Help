@@ -8,6 +8,7 @@ import { Ionicons } from "@expo/vector-icons";
 import ScreenHeader from "../../../../components/ui/ScreenHeader";
 import StatusBadge from "../../../../components/ui/StatusBadge";
 import { BookingStatusHero } from "../../../../components/booking-detail/BookingStatusHero";
+import { BookingAnswers } from "../../../../components/booking-detail/BookingAnswers";
 import { BookingWorkerCard } from "../../../../components/booking-detail/BookingWorkerCard";
 import { InvoiceCard } from "../../../../components/booking-detail/InvoiceCard";
 import { formatJobTime, getBookingTimeline } from "../../../../utils/bookingTimeline";
@@ -292,7 +293,7 @@ export default function BookingDetailScreen() {
       {
         confirmText: "Continue",
         onConfirm: () => {
-          prefillFromDeclinedBooking({ ...rawDetail, scheduledDate: null, scheduledTime: null, timeSlot: null, scopeAnswers: {} });
+          prefillFromDeclinedBooking({ ...rawDetail, scheduledDate: null, scheduledTime: null, timeSlot: null, quantity: null });
           useBookingStore.getState().setDraft({
             entrySource: "book_again",
             parentBookingId: rawDetail.id,
@@ -831,6 +832,12 @@ export default function BookingDetailScreen() {
           <Text className="text-text-primary font-bold text-lg">
             {booking.service}
           </Text>
+          <BookingAnswers
+            quantity={rawDetail?.quantity}
+            unit={rawDetail?.quantityUnit}
+            answers={rawDetail?.scopeAnswers}
+            note={rawDetail?.description}
+          />
         </View>
 
         {/* Date & Address */}

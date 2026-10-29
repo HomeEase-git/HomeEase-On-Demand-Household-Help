@@ -42,7 +42,8 @@ type BookingDetail = {
   estimatedPrice: number;
   rooms?: RoomType[];
   condition?: ConditionType | null;
-  scopeAnswers?: Record<string, string | string[]> | null;
+  quantity?: number | null;
+  quantityUnit?: string | null;
   distanceMeters?: number | null;
   payment?: { commissionAmount?: number; workerPayout?: number } | null;
   // The worker's own take-home, itemised on one basis (settled once a payment
@@ -293,16 +294,12 @@ export default function RequestDetailScreen() {
               </Text>
             </View>
           )}
-          {!!booking.scopeAnswers && Object.keys(booking.scopeAnswers).length > 0 && (
-            <View className="mt-1.5">
-              {Object.entries(booking.scopeAnswers).map(([label, value]) => (
-                <View key={label} className="flex-row items-center mt-1">
-                  <Ionicons name="construct-outline" size={14} color={colors.text.muted} />
-                  <Text className="text-text-secondary text-xs ml-1.5">
-                    {label}: {Array.isArray(value) ? value.join(", ") : value}
-                  </Text>
-                </View>
-              ))}
+          {booking.quantity != null && (
+            <View className="flex-row items-center mt-1.5">
+              <Ionicons name="construct-outline" size={14} color={colors.text.muted} />
+              <Text className="text-text-secondary text-xs ml-1.5">
+                {booking.quantity} {booking.quantityUnit ?? "unit"}
+              </Text>
             </View>
           )}
           {booking.distanceMeters != null && (

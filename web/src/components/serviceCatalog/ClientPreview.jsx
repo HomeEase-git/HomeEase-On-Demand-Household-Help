@@ -1,139 +1,23 @@
 import { useState } from 'react'
-import { countQuestionFor, formatPeso, usesCount } from './catalogModel'
-
-const choicesOf = (q) => (q.type === 'YESNO' ? ['Yes', 'No'] : q.choices.map((c) => c.trim()).filter(Boolean))
-
-/** One question as the client app shows it. `answer`/`onAnswer` omitted = display only. */
-export function PreviewQuestion({ question: q, answer, onAnswer, missing }) {
-  const interactive = !!onAnswer
-  let body
-  if (q.type === 'TEXT') {
-    body = (
-      <input
-        className="sce-input"
-        value={answer || ''}
-        readOnly={!interactive}
-        onChange={(e) => onAnswer?.(e.target.value)}
-        placeholder="Type your answer"
-        aria-label={q.label}
-      />
-    )
-  } else if (q.type === 'NUMBER') {
-    const value = answer ?? q.min ?? 0
-    const step = (delta) => {
-      let next = Number(value) + delta
-      if (q.min !== '' && q.min != null) next = Math.max(Number(q.min), next)
-      if (q.max !== '' && q.max != null) next = Math.min(Number(q.max), next)
-      onAnswer?.(next)
-    }
-    body = (
-      <div className="sce-step">
-        <button type="button" onClick={() => step(-1)} tabIndex={interactive ? 0 : -1} aria-label="Less">−</button>
-        <span>{value}</span>
-        <button type="button" onClick={() => step(1)} tabIndex={interactive ? 0 : -1} aria-label="More">+</button>
-      </div>
-    )
-  } else {
-    const choices = choicesOf(q)
-    const shown = choices.length ? choices : ['Choice 1', 'Choice 2']
-    body = (
-      <div className="sce-pills">
-        {shown.map((c) => {
-          const on = q.type === 'ANY' ? (answer || []).includes(c) : answer === c
-          return (
-            <button
-              key={c}
-              type="button"
-              className={`sce-pill ${on ? 'is-on' : ''}`}
-              aria-pressed={on}
-              tabIndex={interactive ? 0 : -1}
-              onClick={() => {
-                if (!interactive) return
-                if (q.type === 'ANY') {
-                  const set = new Set(answer || [])
-                  if (set.has(c)) set.delete(c)
-                  else set.add(c)
-                  onAnswer([...set])
-                } else {
-                  onAnswer(answer === c ? undefined : c)
-                }
-              }}
-            >
-              {c}
-            </button>
-          )
-        })}
-      </div>
-    )
-  }
-  return (
-    <div className={`sce-pq ${missing ? 'sce-pq--missing' : ''}`}>
-      <div className="sce-pq__l">
-        {q.label || 'Your question'}
-        {q.required && <span className="sce-req"> *</span>}
-      </div>
-      {q.helpText?.trim() && <div className="sce-pq__h">{q.helpText}</div>}
-      {body}
-    </div>
-  )
-}
-
-const isAnswered = (q, a) => {
-  if (q.type === 'NUMBER') return true
-  if (q.type === 'ANY') return Array.isArray(a) && a.length > 0
-  return a != null && String(a).trim() !== ''
-}
+import { countRange, formatPeso, usesCount } from './catalogModel'
 
 /**
- * The client's booking step for the chosen job: the category's common
- * questions, then that job's own. Mirrors mobile step-1's filtering
- * (utils/scopeFields on the backend) so the admin sees what clients get.
+ * The client's booking step for the chosen job: pick the job, and for a
+ * per-piece job enter how many. Mirrors mobile step-1 so the admin sees
+ * what clients get.
  */
 export default function ClientPreview({ draft, jobRef, onJobChange }) {
-  const [answers, setAnswers] = useState({})
-  const [result, setResult] = useState(null)
+  const [count, setCount] = useState(null)
   const jobs = draft.jobs.filter((j) => j.isActive)
   const job = jobs.find((j) => j.ref === jobRef) || jobs[0] || null
-
-  const setAnswer = (ref, value) => {
-    setAnswers((prev) => ({ ...prev, [ref]: value }))
-    setResult((r) => (r && !r.ok ? { ...r, missing: r.missing.filter((m) => m !== ref) } : null))
-  }
-
-  const countQ = job && usesCount(job.model) ? countQuestionFor(draft, job) : null
-  const jobQuestions = job ? job.questions : []
+  const perPiece = job && usesCount(job.model)
+  const min = Math.max(1, Number(job?.minQty) || 1)
+  const max = job?.maxQty === '' || job?.maxQty == null ? null : Number(job.maxQty)
+  const n = perPiece ? Math.min(max ?? Infinity, Math.max(min, count ?? min)) : 1
 
   let estimate = { main: '—', sub: '' }
-  if (job && !usesCount(job.model)) estimate = { main: formatPeso(job.price), sub: job.unit ? `Flat, per ${job.unit}` : 'Flat price' }
-  else if (job) {
-    const n = countQ ? Number(answers[countQ.ref] ?? countQ.min ?? 1) : 1
-    estimate = {
-      main: formatPeso(Number(job.price) * n),
-      sub: countQ ? `${formatPeso(job.price)} × ${n} ${job.unit || ''}`.trim() : 'Count question missing',
-    }
-  }
-
-  const onContinue = () => {
-    if (!job) return
-    const missing = [...draft.common, ...jobQuestions].filter((q) => q.required && !isAnswered(q, answers[q.ref]))
-    setResult(
-      missing.length
-        ? { ok: false, missing: missing.map((q) => q.ref), text: `Answer ${missing.length} more: ${missing.map((q) => q.label).join(', ')}.` }
-        : { ok: true, missing: [], text: 'All set. Next the client picks a worker, date and time.' }
-    )
-  }
-
-  const missing = new Set(result?.missing || [])
-  const renderList = (list) =>
-    list.map((q) => (
-      <PreviewQuestion
-        key={q.ref}
-        question={q}
-        answer={answers[q.ref]}
-        onAnswer={(v) => setAnswer(q.ref, v)}
-        missing={missing.has(q.ref)}
-      />
-    ))
+  if (job && !perPiece) estimate = { main: formatPeso(job.price), sub: 'Flat price' }
+  else if (job) estimate = { main: formatPeso(Number(job.price) * n), sub: `${formatPeso(job.price)} × ${n} ${job.unit || ''}`.trim() }
 
   return (
     <aside className="sce-preview" aria-label="Client app preview">
@@ -153,7 +37,7 @@ export default function ClientPreview({ draft, jobRef, onJobChange }) {
                   value={job?.ref || ''}
                   onChange={(e) => {
                     onJobChange(e.target.value)
-                    setResult(null)
+                    setCount(null)
                   }}
                   disabled={!jobs.length}
                 >
@@ -162,21 +46,25 @@ export default function ClientPreview({ draft, jobRef, onJobChange }) {
               </label>
               {job && (
                 <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginTop: '0.35rem' }}>
-                  {`${formatPeso(job.price)}${job.unit ? ` per ${job.unit}` : ''}`}
+                  {`${formatPeso(job.price)}${perPiece && job.unit ? ` per ${job.unit}` : ''}`}
                 </div>
               )}
             </div>
-            {draft.common.length > 0 && (
-              <>
-                <div className="sce-ph-sec">About your request</div>
-                <div className="sce-ph-card">{renderList(draft.common)}</div>
-              </>
-            )}
-            {jobQuestions.length > 0 && (
-              <>
-                <div className="sce-ph-sec">About this job</div>
-                <div className="sce-ph-card">{renderList(jobQuestions)}</div>
-              </>
+            {perPiece && (
+              <div className="sce-ph-card">
+                <div className="sce-pq">
+                  <div className="sce-pq__l">How many?</div>
+                  <div className="sce-pq__h">
+                    Priced per {job.unit || 'unit'}
+                    {countRange(job) ? ` · ${countRange(job)}` : ''}
+                  </div>
+                  <div className="sce-step">
+                    <button type="button" onClick={() => setCount(Math.max(min, n - 1))} aria-label="Less">−</button>
+                    <span>{n}</span>
+                    <button type="button" onClick={() => setCount(max != null ? Math.min(max, n + 1) : n + 1)} aria-label="More">+</button>
+                  </div>
+                </div>
+              </div>
             )}
           </div>
           <div className="sce-ph-foot">
@@ -188,8 +76,6 @@ export default function ClientPreview({ draft, jobRef, onJobChange }) {
               <small>{estimate.sub}</small>
               <small>+ distance fee</small>
             </div>
-            <button type="button" className="btn btn-primary" onClick={onContinue} disabled={!job}>Continue</button>
-            {result && <div className={`sce-ph-msg ${result.ok ? 'sce-ph-msg--good' : 'sce-ph-msg--bad'}`}>{result.text}</div>}
           </div>
         </div>
       </div>

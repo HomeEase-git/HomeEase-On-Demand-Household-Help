@@ -25,6 +25,7 @@ import {
   cancelBooking,
   submitReview,
   reportReview,
+  addBeforePhotos,
   addProgressPhotos,
 } from '../controllers/bookingController';
 import { bookingPhotoUpload, uploadBookingCompletionPhoto, uploadIssuePhoto, uploadReviewPhoto } from '../controllers/uploadController';
@@ -97,6 +98,9 @@ router.post('/:id/completion-photo/upload', restrictTo('WORKER'), bookingPhotoUp
 // Same upload for the worker's other job photos: invoice receipts, extra
 // work, and proof for a cancellation after arriving.
 router.post('/:id/job-photo/upload', restrictTo('WORKER'), bookingPhotoUpload, uploadBookingCompletionPhoto);
+
+// Worker posts photos of the job as found, right after starting (worker only)
+router.post('/:id/before-photos', restrictTo('WORKER'), addBeforePhotos);
 
 // Worker posts an "ongoing" proof photo update (worker only)
 router.post('/:id/progress-photos', restrictTo('WORKER'), addProgressPhotos);

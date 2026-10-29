@@ -21,6 +21,7 @@ import { PET_FRIENDLY_PRIORITY } from "../../../../types/booking4step.types";
 import { formatTime12h, isRushDate } from "../../../../utils/bookingTime";
 import { generateIdempotencyKey } from "../../../../utils/idempotencyKey";
 import { isPhMobileNumber } from "../../../../utils/paymentAccount";
+import { formatQuantity } from "../../../../utils/pricing";
 import { feedback } from "../../../../utils/feedback";
 import * as api from "../../../../services/api";
 import { useAlertModal } from "../../../../contexts/AlertModalContext";
@@ -86,9 +87,6 @@ export default function BookingStep4Screen() {
   };
 
   const effectiveDraft = { ...draft, paymentMethod, priorities, addOnToggles: [], tip };
-  const scopeAnswersSummary = Object.entries(draft.scopeAnswers ?? {})
-    .map(([label, value]) => `${label}: ${Array.isArray(value) ? value.join(", ") : value}`)
-    .join("\n");
   const validation = validateDraftForSubmit(effectiveDraft);
   // A selected task's own admin range (same source Step 1 used) takes
   // priority over the category-wide spread once one's been picked — only
@@ -122,7 +120,6 @@ export default function BookingStep4Screen() {
       serviceType: draft.serviceType ?? undefined,
       serviceTaskId: draft.serviceTaskId ?? undefined,
       date: draft.date ?? undefined,
-      scopeAnswers: draft.scopeAnswers,
       workerId: draft.isAutoMatched ? undefined : (draft.workerId ?? undefined),
       limit: 1,
     },
@@ -239,7 +236,7 @@ export default function BookingStep4Screen() {
         tip,
         paymentMethodType: PAYMENT_METHOD_TYPE_MAP[paymentMethod!],
         paymentAccountIdentifier: accountValue.trim() || undefined,
-        scopeAnswers: draft.scopeAnswers,
+        quantity: draft.selectedTaskPricingModel === "PER_UNIT" ? draft.quantity : undefined,
         issuePhotoUrls: draft.issuePhotoUrls,
         idempotencyKey,
       });
@@ -342,7 +339,9 @@ export default function BookingStep4Screen() {
             label="Service"
             value={[draft.category, draft.selectedTaskName].filter(Boolean).join(" · ") || "—"}
           />
-          {!!scopeAnswersSummary && <SummaryRow label="Details" value={scopeAnswersSummary} />}
+          {draft.selectedTaskPricingModel === "PER_UNIT" && draft.quantity != null && (
+            <SummaryRow label="How many" value={formatQuantity(Number(draft.quantity), draft.selectedTaskUnitLabel)} />
+          )}
           {!!draft.description?.trim() && <SummaryRow label="Notes" value={draft.description.trim()} />}
           {(draft.issuePhotoUrls?.length ?? 0) > 0 && (
             <SummaryRow
