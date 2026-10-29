@@ -297,6 +297,24 @@ export async function createCompletionInvoice(bookingId: string): Promise<
       // fall through and mint a fresh invoice
     }
   }
+  // A voided invoice (cancel or invoice report) that was paid before Xendit
+  // expired it: re-issuing would drop the only link to that money and bill
+  // the client twice, so an admin settles it instead.
+  if (existing && existing.status === 'FAILED' && existing.xenditInvoiceId) {
+    const old = await retrieveInvoice(existing.xenditInvoiceId);
+    const oldStatus = (old?.status as string | undefined)?.toUpperCase();
+    if (oldStatus === 'PAID' || oldStatus === 'SETTLED') {
+      await writeAuditLog({
+        action: 'PAYMENT_AFTER_VOID',
+        category: 'SYSTEM_ERROR',
+        level: 'ERROR',
+        message: `Voided invoice ${existing.xenditInvoiceId} for booking ${bookingId} was paid — not re-issued, settle it manually.`,
+        metadata: { paymentId: existing.id, bookingId, invoiceId: existing.xenditInvoiceId, paidAmount: old.paid_amount ?? null },
+      });
+      throw new Error(`Booking ${bookingId} has a paid voided invoice that needs a manual review`);
+    }
+  }
+
   // The client already paid part of the old invoice; a fresh full-amount
   // invoice would charge them again.
   if (underpaid) {
