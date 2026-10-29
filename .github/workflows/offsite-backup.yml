@@ -42,6 +42,10 @@ concurrency:
 env:
   AGE_VERSION: 1.3.2
   AGE_SHA256: cbe24006683f8eb669266162894b9a522a1af52f2665fbc63a4bb032ed26ac10
+  # Pinned: the runner's AWS CLI 2.38 fails GetObject on some Supabase Storage
+  # objects (empty error); 2.37.13 copied every file.
+  AWSCLI_VERSION: 2.37.13
+  AWSCLI_SHA256: c92fde59827622889d3d38a44e2089a137894ce151a2c658a3988ecde4860caa
   # apt.postgresql.org signing key
   PGDG_KEY_FINGERPRINT: B97B0AFCAA1A47F044F244A07FCC7D46ACCC4CF8
 
@@ -89,6 +93,11 @@ jobs:
           curl -sSfL -o /tmp/age.tgz "https://github.com/FiloSottile/age/releases/download/v${AGE_VERSION}/age-v${AGE_VERSION}-linux-amd64.tar.gz"
           echo "${AGE_SHA256}  /tmp/age.tgz" | sha256sum -c -
           sudo tar -xzf /tmp/age.tgz -C /usr/local/bin --strip-components=1 age/age age/age-keygen
+          curl -sSfL -o /tmp/awscli.zip "https://awscli.amazonaws.com/awscli-exe-linux-x86_64-${AWSCLI_VERSION}.zip"
+          echo "${AWSCLI_SHA256}  /tmp/awscli.zip" | sha256sum -c -
+          unzip -q /tmp/awscli.zip -d /tmp/awscli
+          sudo /tmp/awscli/aws/install --update
+          aws --version
       - name: Back up
         env:
           BACKUP_DATABASE_URL: ${{ secrets.BACKUP_DATABASE_URL }}
