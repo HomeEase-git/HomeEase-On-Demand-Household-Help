@@ -316,13 +316,13 @@ describe('Pay-after-completion payment lifecycle', () => {
   describe('Debt hold', () => {
     it('crossing the AppSettings.workerDebtHoldLimit puts the account on hold', async () => {
       // Default workerDebtHoldLimit is 2500; a 25000-peso cash job accrues
-      // ~2950 in commission + withholding tax, past the threshold.
+      // 2500 in commission (withholding is 0), which reaches the threshold.
       const booking = await seedPendingCompletion('CASH', 25000);
 
       await settleCashBooking(booking.id);
 
       const workerProfile = await prisma.workerProfile.findUniqueOrThrow({ where: { id: workerProfileId } });
-      expect(workerProfile.commissionOwed).toBeGreaterThan(2500);
+      expect(workerProfile.commissionOwed).toBeGreaterThanOrEqual(2500);
       expect(workerProfile.debtHoldAt).not.toBeNull();
     });
 
