@@ -254,7 +254,8 @@ export default function BookingStep1Screen() {
       categoryPriceRangeMax: selectedCategory!.priceRangeMax,
       serviceTaskId: selectedTask?.id ?? null,
       selectedTaskName: selectedTask?.name ?? null,
-      selectedTaskPricingModel: selectedTask?.pricingModel ?? null,
+      // Retired TIERED rows are priced per unit too (backend isPerUnitModel).
+      selectedTaskPricingModel: isPerUnit ? "PER_UNIT" : (selectedTask?.pricingModel ?? null),
       selectedTaskUnitLabel:
         selectedTask?.pricingModel === "PER_UNIT" ||
         selectedTask?.pricingModel === "TIERED"

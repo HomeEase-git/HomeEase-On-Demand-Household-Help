@@ -104,7 +104,7 @@ const DISMISS_ACTION = {
 // that can actually succeed are offered — invoice actions need the booking
 // still DISPUTED with an invoice sent, CANCEL_BOOKING needs one of the
 // statuses below.
-const CANCELLABLE_BOOKING_STATUSES = ['DISPUTED', 'PENDING_COMPLETION', 'AWAITING_PAYMENT', 'COMPLETED']
+const CANCELLABLE_BOOKING_STATUSES = ['ACCEPTED', 'IN_PROGRESS', 'DISPUTED', 'PENDING_COMPLETION', 'AWAITING_PAYMENT', 'COMPLETED']
 
 function getActionsForDispute(dispute) {
   if (!dispute) return []

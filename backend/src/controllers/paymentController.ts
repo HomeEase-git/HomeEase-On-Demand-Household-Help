@@ -504,6 +504,22 @@ async function handleInvoicePaid(invoice: any) {
     await finalizeDebtPayment(debtPayment.id, remote.paid_amount ?? null, remote.paid_at ? new Date(remote.paid_at) : null);
     return;
   }
+  if (payment.status === 'FAILED') {
+    // Money that landed on a voided invoice (the checkout couldn't be
+    // expired in time). Not auto-settled: the booking was cancelled or is
+    // under review, so an admin refunds or applies it.
+    const remote = await retrieveInvoice(invoiceId);
+    const remoteStatus = (remote?.status as string | undefined)?.toUpperCase();
+    if (remoteStatus !== 'PAID' && remoteStatus !== 'SETTLED') return;
+    await writeAuditLog({
+      action: 'PAYMENT_AFTER_VOID',
+      category: 'SYSTEM_ERROR',
+      level: 'ERROR',
+      message: `Xendit invoice ${invoiceId} was paid after payment ${payment.id} was voided (booking ${payment.bookingId}) — refund or apply it manually.`,
+      metadata: { paymentId: payment.id, bookingId: payment.bookingId, invoiceId, paidAmount: remote.paid_amount ?? null },
+    });
+    return;
+  }
   if (payment.status !== 'PENDING') return;
 
   // The callback token is one static shared secret, so the body only tells

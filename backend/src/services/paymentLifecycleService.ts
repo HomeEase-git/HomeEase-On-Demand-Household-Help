@@ -4,7 +4,7 @@ import {
   calculateWithholdingTax,
   computeBookingFinalTotal,
 } from '@utils/pricing';
-import { createInvoice, retrieveInvoice, createRefund, retrieveRefund, type XenditRefund } from '@services/xenditService';
+import { createInvoice, expireInvoice, retrieveInvoice, createRefund, retrieveRefund, type XenditRefund } from '@services/xenditService';
 import { cancelPayout, retrievePayout } from '@services/xenditDisbursementService';
 import { applyXenditPayoutStatus } from '@services/payoutStatusService';
 import {
@@ -710,13 +710,28 @@ export async function settlePlatformFundedPayment(bookingId: string) {
 }
 
 /**
- * Marks a still-unpaid Payment as FAILED (its Xendit invoice, if any, expires
- * on Xendit's side). Used when a booking is cancelled while awaiting payment.
- * A no-op when there is no Payment row.
+ * Marks a still-unpaid Payment as FAILED after expiring its Xendit checkout,
+ * so a client who already opened it can't pay during review. Used when a
+ * booking is cancelled or its invoice reported. If the checkout was paid
+ * first, the Payment is left PENDING for the paid webhook to settle. A no-op
+ * when there is no Payment row.
  */
 export async function voidUnpaidPayment(bookingId: string, reason: string) {
   const payment = await prisma.payment.findUnique({ where: { bookingId } });
   if (!payment || payment.status !== 'PENDING') return payment ?? null;
+
+  if (payment.xenditInvoiceId) {
+    try {
+      await expireInvoice(payment.xenditInvoiceId);
+    } catch (error) {
+      // Xendit refuses to expire a paid invoice; anything else, void anyway
+      // (handleInvoicePaid flags a payment that lands on a voided row).
+      const remote = await retrieveInvoice(payment.xenditInvoiceId).catch(() => null);
+      const remoteStatus = (remote?.status as string | undefined)?.toUpperCase();
+      if (remoteStatus === 'PAID' || remoteStatus === 'SETTLED') return payment;
+      console.error('Could not expire Xendit invoice %s for booking %s:', payment.xenditInvoiceId, bookingId, error);
+    }
+  }
 
   return prisma.payment.update({
     where: { id: payment.id },

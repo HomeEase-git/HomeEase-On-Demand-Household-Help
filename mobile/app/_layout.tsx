@@ -28,7 +28,6 @@ import {
 } from "../utils/notificationHandlers";
 import { setupGlobalErrorHandler } from "../utils/errorHandling";
 import { colors } from "../constants";
-import { LogBox } from "react-native"; LogBox.ignoreAllLogs(true); // SHOTS-TEMP
 
 // Keep splash screen visible while loading
 SplashScreen.preventAutoHideAsync();
@@ -187,7 +186,7 @@ function RootLayout() {
     const initialize = async () => {
       try {
         // Setup global error handling
-        setupGlobalErrorHandler(); console.warn = () => {}; console.error = () => {}; // SHOTS-TEMP
+        setupGlobalErrorHandler();
 
         // Initialize auth and booking draft
         await initializeAuth();

@@ -2633,6 +2633,13 @@ export const completeBooking = async (req: AuthRequest, res: Response) => {
       return res.status(409).json(errorResponse(409, `Cannot complete booking with status ${booking.status}`));
     }
 
+    // An unanswered cancel request would be dropped once the job leaves
+    // IN_PROGRESS (the sweep and respondToCancelRequest skip it), so the
+    // worker answers it first. A decline escalates it to an admin dispute.
+    if (booking.cancelRequestedAt && !booking.cancelRequestEscalatedAt) {
+      return res.status(409).json(errorResponse(409, "Answer the client's cancel request before finishing the job"));
+    }
+
     // Must be a photo this worker uploaded — otherwise the response layer
     // would hand back a signed URL to someone else's private file.
     const storedCompletionPhotoUrl = toOwnedBookingPhotoUrls([completionPhotoUrl], workerId)?.[0] ?? null;
@@ -2690,12 +2697,19 @@ export const completeBooking = async (req: AuthRequest, res: Response) => {
         vatRate: booking.vatRate,
       });
 
-      await updateBookingIfStatus(tx, id, booking.status, {
-        status: 'PENDING_COMPLETION',
-        completionPhotoUrl: storedCompletionPhotoUrl,
-        workerCompletedAt: sentAt,
-        finalPrice: totals.subtotal,
-      });
+      await updateBookingIfStatus(
+        tx,
+        id,
+        booking.status,
+        {
+          status: 'PENDING_COMPLETION',
+          completionPhotoUrl: storedCompletionPhotoUrl,
+          workerCompletedAt: sentAt,
+          finalPrice: totals.subtotal,
+        },
+        // A cancel request that arrived after the read above wins.
+        { OR: [{ cancelRequestedAt: null }, { cancelRequestEscalatedAt: { not: null } }] }
+      );
       const b = await tx.booking.findUniqueOrThrow({ where: { id } });
 
       // The worker's side of the job is done.

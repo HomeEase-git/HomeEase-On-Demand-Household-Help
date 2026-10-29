@@ -815,6 +815,19 @@ describe('Booking gaps — notifications and detail fields', () => {
       expect(await prisma.cancellation.count({ where: { bookingId: booking.id } })).toBe(0);
     });
 
+    it("won't send the invoice while the client's cancel request is unanswered", async () => {
+      const booking = await seed('IN_PROGRESS');
+      expect((await problem(booking.id, { reason: 'NEED_TO_CANCEL' })).status).toBe(200);
+
+      const res = await request(app)
+        .patch(`/api/bookings/${booking.id}/complete`)
+        .set('Authorization', `Bearer ${workerToken}`)
+        .send({ completionPhotoUrl: 'https://example.com/done.jpg' });
+      expect(res.status).toBe(409);
+      expect(res.body.message).toBe("Answer the client's cancel request before finishing the job");
+      expect((await prisma.booking.findUniqueOrThrow({ where: { id: booking.id } })).status).toBe('IN_PROGRESS');
+    });
+
     it('refuses a problem report once the invoice is sent', async () => {
       const booking = await seed('PENDING_COMPLETION');
       const res = await problem(booking.id, { reason: 'WORKER_STOPPED' });
