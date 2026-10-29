@@ -68,7 +68,7 @@ export async function finalizeCancellationTx(
 /** Best-effort follow-ups once the cancellation has committed. */
 export async function afterCancellation(bookingId: string, reason: string, requestedById?: string): Promise<void> {
   await cancelPendingExpiryJob(bookingId).catch((error) => {
-    console.error(`Failed to cancel pending-expiry job for cancelled booking ${bookingId}:`, error);
+    console.error('Failed to cancel pending-expiry job for cancelled booking %s:', bookingId, error);
   });
   await requestRefund({
     bookingId,
@@ -76,6 +76,6 @@ export async function afterCancellation(bookingId: string, reason: string, reque
     source: 'BOOKING_CANCELLED',
     requestedById,
   }).catch((error) => {
-    console.error(`Failed to void/refund-request payment for cancelled booking ${bookingId}:`, error);
+    console.error('Failed to void/refund-request payment for cancelled booking %s:', bookingId, error);
   });
 }

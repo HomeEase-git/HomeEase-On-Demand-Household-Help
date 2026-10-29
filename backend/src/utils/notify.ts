@@ -24,7 +24,7 @@ export const notifyUser = async (input: NotifyUserInput) => {
   try {
     notification = await prisma.notification.create({ data: input });
   } catch (error) {
-    console.error(`Failed to save a ${input.type} notification for user ${input.userId}:`, error);
+    console.error('Failed to save a %s notification for user %s:', input.type, input.userId, error);
     return null;
   }
 

@@ -1374,7 +1374,7 @@ export const acceptBooking = async (req: AuthRequest, res: Response) => {
       // fires later and no-ops (expirePendingBooking re-checks status is
       // still PENDING before doing anything).
       await cancelPendingExpiryJob(id).catch((error) => {
-        console.error(`Failed to cancel pending-expiry job for accepted booking ${id}:`, error);
+        console.error('Failed to cancel pending-expiry job for accepted booking %s:', id, error);
       });
 
       // Create notification for client
@@ -1507,12 +1507,12 @@ export const declineBooking = async (req: AuthRequest, res: Response) => {
     // createBooking/acceptBooking equivalents for why this must not fail
     // the request).
     await cancelPendingExpiryJob(id).catch((error) => {
-      console.error(`Failed to cancel pending-expiry job for declined booking ${id}:`, error);
+      console.error('Failed to cancel pending-expiry job for declined booking %s:', id, error);
     });
     // A paid booking's refund waits for an admin; an unpaid one is voided.
     await requestRefund({ bookingId: id, reason: 'WORKER_DECLINED', source: 'BOOKING_CANCELLED', requestedById: workerId }).catch(
       (error) => {
-        console.error(`Failed to void/refund-request payment for declined booking ${id}:`, error);
+        console.error('Failed to void/refund-request payment for declined booking %s:', id, error);
       }
     );
 
@@ -2722,7 +2722,7 @@ export const completeBooking = async (req: AuthRequest, res: Response) => {
         const invoice = await createCompletionInvoice(id);
         status = 'alreadyPaid' in invoice ? 'COMPLETED' : 'AWAITING_PAYMENT';
       } catch (error) {
-        console.error(`Raising the payment invoice failed for booking ${id}; left in PENDING_COMPLETION:`, error);
+        console.error('Raising the payment invoice failed for booking %s; left in PENDING_COMPLETION:', id, error);
       }
     }
 
@@ -3037,7 +3037,7 @@ export const reportInvoice = async (req: AuthRequest, res: Response) => {
     });
 
     await voidUnpaidPayment(id, 'Invoice reported by the client').catch((error) => {
-      console.error(`Failed to void the unpaid invoice for reported booking ${id}:`, error);
+      console.error('Failed to void the unpaid invoice for reported booking %s:', id, error);
     });
 
     if (booking.workerId) {

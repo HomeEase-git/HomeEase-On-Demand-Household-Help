@@ -594,7 +594,7 @@ export const resolveDispute = async (req: AuthRequest, res: Response) => {
     // fresh Xendit invoice. If raising it fails, the client's Pay now retries.
     if (isInvoiceAction(action) && (booking.paymentMethodType ?? 'CASH') !== 'CASH') {
       await createCompletionInvoice(booking.id).catch((error) => {
-        console.error(`Raising the payment invoice failed after resolving dispute ${id}:`, error);
+        console.error('Raising the payment invoice failed after resolving dispute %s:', id, error);
       });
     }
 
