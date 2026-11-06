@@ -11,9 +11,6 @@ interface AuthRequest extends Request {
   user?: JwtPayload;
 }
 
-// Two ways to price a job: a flat price, or a price per piece the client
-// counts. TIERED (worker price steps) and CUSTOM_QUOTE (worker quotes on site)
-// are retired; extras and parts go on the worker's invoice instead.
 const VALID_PRICING_MODELS: TaskPricingModel[] = ['FIXED', 'PER_UNIT'];
 
 export type TaskInputBody = {
@@ -22,22 +19,14 @@ export type TaskInputBody = {
   basePrice?: number;
   pricingModel?: string;
   unitLabel?: string | null;
-  // Per-unit only: the fewest/most units a client can book (null = 1 / no maximum).
   minQuantity?: number | null;
   maxQuantity?: number | null;
   durationHours?: number | null;
   isActive?: boolean;
-  // Inspection/diagnosis job — the client can ask for a follow-up job after it.
   allowsFollowUp?: boolean;
   overrideReason?: string;
 };
 
-/**
- * The admin's price (basePrice) is what every client pays and every worker
- * earns — FIXED: the flat price, PER_UNIT: the price per piece. A switched-off
- * job may have no price yet (former custom-quote jobs); it needs one before
- * it can be switched back on.
- */
 export function validateTaskInput(body: TaskInputBody): string | null {
   if (!body.name?.trim()) {
     return 'Name is required.';
@@ -108,9 +97,6 @@ export const createTask = async (req: AuthRequest, res: Response) => {
       return res.status(400).json(errorResponse(400, validationError));
     }
 
-    // Minimum-wage guardrail on the admin price — applies platform-wide (no
-    // per-city variant), so it's checked against the highest region-wide
-    // DOLE floor since there's no city here to look up.
     const doleCheck = checkDoleFloor(getHighestDoleWageReference(), body.basePrice!, body.overrideReason);
     if (doleCheck.blocked) {
       return res.status(400).json(errorResponse(400, doleCheck.message));
@@ -237,7 +223,6 @@ export const toggleTaskActive = async (req: AuthRequest, res: Response) => {
     if (!existing) {
       return res.status(404).json(errorResponse(404, 'Task not found'));
     }
-    // A former custom-quote job has no price; it needs one before clients can book it.
     if (isActive && !(existing.basePrice > 0)) {
       return res.status(400).json(errorResponse(400, 'Give this job a price before switching it on.'));
     }

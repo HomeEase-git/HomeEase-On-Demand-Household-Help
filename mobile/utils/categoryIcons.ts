@@ -3,11 +3,6 @@ import type { Ionicons } from "@expo/vector-icons";
 
 type IoniconName = ComponentProps<typeof Ionicons>["name"];
 
-/**
- * Best-effort icon per category/service name — falls back to a generic icon
- * for whatever else is seeded (categories are DB-driven via GET /services,
- * not hardcoded, so this can't be an exhaustive map).
- */
 const CATEGORY_ICONS: Record<string, IoniconName> = {
   "standard clean": "sparkles-outline",
   "deep clean": "water-outline",

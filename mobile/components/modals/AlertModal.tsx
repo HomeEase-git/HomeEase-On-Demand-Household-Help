@@ -65,8 +65,6 @@ export const AlertModal: React.FC<Props> = ({
       {!!message && (
         <Text className="text-text-secondary text-center mt-2">{message}</Text>
       )}
-      {/* Two buttons sit side by side; one or three-plus stack full width,
-          since three-plus in a row is too narrow for a phone-width modal. */}
       <View className={isRow ? "flex-row gap-3 mt-6" : "gap-3 mt-6"}>
         {resolvedButtons.map((button, index) => {
           const key = `${button.text}-${index}`;

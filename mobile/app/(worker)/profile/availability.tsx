@@ -19,19 +19,12 @@ const MONTHS = [
   "January", "February", "March", "April", "May", "June",
   "July", "August", "September", "October", "November", "December",
 ];
-// How far ahead the worker can scroll (matches the client booking window).
 const MONTHS_AHEAD = 2;
 
 function iso(year: number, month: number, day: number): string {
   return `${year}-${String(month + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
 }
 
-/**
- * The worker's availability calendar. Days follow the weekly schedule (the
- * "Weekly Schedule" button) unless changed here one by one. Each day is tinted
- * by how many accepted jobs / follow-up visits fall on it. Workers aren't
- * limited to a number of jobs a day.
- */
 export default function AvailabilityScreen() {
   const router = useRouter();
   const alertModal = useAlertModal();
@@ -46,7 +39,6 @@ export default function AvailabilityScreen() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [selectedDate, setSelectedDate] = useState<string | null>(todayIso);
-  // Multi-select mode for closing/opening several days at once (e.g. a vacation).
   const [selecting, setSelecting] = useState(false);
   const [selection, setSelection] = useState<string[]>([]);
 

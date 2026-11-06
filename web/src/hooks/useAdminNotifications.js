@@ -7,9 +7,6 @@ import { usePolling } from './usePolling'
 
 const POLL_INTERVAL_MS = 30000
 
-// Each source is a pending-action queue that already exists elsewhere in the
-// admin app; this just surfaces how many items are waiting and where to go
-// resolve them, instead of the header's old hardcoded badge count.
 const SOURCES = [
   {
     key: 'verifications',

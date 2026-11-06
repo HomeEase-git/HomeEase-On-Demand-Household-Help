@@ -1,15 +1,5 @@
 import { supabase, KYC_DOCUMENT_BUCKET, RESUME_BUCKET, CHAT_IMAGE_BUCKET, BOOKING_PHOTO_BUCKET } from '@config/supabase';
 
-// Buckets holding government IDs, NBI clearances, selfies, resumes and chat
-// photos. These are private: their objects are only reachable through
-// short-lived signed URLs, never a permanent public link (Data Privacy Act
-// §20 — a leaked public URL would expose an ID forever).
-//
-// Rows in the DB keep storing the bucket's canonical object URL
-// (`.../storage/v1/object/public/<bucket>/<path>`) purely as an identifier —
-// that's what every existing row already holds, so nothing needs migrating.
-// protectResponseData (middleware) swaps those identifiers for signed
-// URLs on the way out.
 export const PRIVATE_BUCKETS: ReadonlySet<string> = new Set([KYC_DOCUMENT_BUCKET, RESUME_BUCKET, CHAT_IMAGE_BUCKET]);
 
 export const SIGNED_URL_TTL_SECONDS = 60 * 60;
@@ -21,12 +11,6 @@ export interface StorageObjectRef {
   path: string;
 }
 
-/**
- * Parses a URL pointing at an object in THIS project's Supabase Storage —
- * public, signed or authenticated form. Returns null for anything else,
- * including other Supabase projects, so a URL can never be used to reach
- * into a storage account we don't own.
- */
 export function parseStorageUrl(url: unknown): StorageObjectRef | null {
   if (typeof url !== 'string' || !url.includes('/storage/v1/object/')) return null;
   const base = process.env.SUPABASE_URL;
@@ -52,47 +36,25 @@ export function isPrivateStorageUrl(url: unknown): boolean {
   return ref !== null && PRIVATE_BUCKETS.has(ref.bucket);
 }
 
-/** The canonical (token-free) identifier URL for a bucket object. */
 export function canonicalObjectUrl(bucket: string, path: string): string {
   return supabase.storage.from(bucket).getPublicUrl(path).data.publicUrl;
 }
 
-/**
- * Normalizes a client-supplied storage URL before it's persisted: a signed
- * URL (what upload endpoints hand back) is stripped to the canonical form so
- * no expiring token is stored. Non-storage URLs pass through unchanged.
- */
 export function toStoredUrl(url: string): string {
   const ref = parseStorageUrl(url);
   return ref ? canonicalObjectUrl(ref.bucket, ref.path) : url;
 }
 
-/**
- * True unless `url` points at a private-bucket object that doesn't live
- * under `<userId>/` — uploads are always named `<userId>/<uuid>.<ext>`, so
- * this stops a user attaching someone else's ID or chat photo to their own
- * record (and then receiving a signed URL for it).
- */
 export function isOwnedByUser(url: string, userId: string): boolean {
   const ref = parseStorageUrl(url);
   if (!ref || !PRIVATE_BUCKETS.has(ref.bucket)) return true;
   return ref.path.startsWith(`${userId}/`);
 }
 
-/**
- * Combines isOwnedByUser + toStoredUrl for write paths: returns the URL to
- * persist, or null when it points at another user's private object (callers
- * reply 400).
- */
 export function toOwnedStoredUrl(url: string, userId: string): string | null {
   return isOwnedByUser(url, userId) ? toStoredUrl(url) : null;
 }
 
-/**
- * For evidence photos (quote receipts, cancellation proof): every URL must be
- * a booking photo this user uploaded (uploads are named `<userId>/...`).
- * Returns the URLs to persist, or null if any one isn't.
- */
 export function toOwnedBookingPhotoUrls(urls: unknown, userId: string): string[] | null {
   if (!Array.isArray(urls)) return null;
   const out: string[] = [];
@@ -104,7 +66,6 @@ export function toOwnedBookingPhotoUrls(urls: unknown, userId: string): string[]
   return out;
 }
 
-/** Signed URL for a freshly uploaded private object, for the upload response. */
 export async function createSignedObjectUrl(bucket: string, path: string): Promise<string> {
   const { data, error } = await supabase.storage.from(bucket).createSignedUrl(path, SIGNED_URL_TTL_SECONDS);
   if (error || !data?.signedUrl) {
@@ -113,11 +74,6 @@ export async function createSignedObjectUrl(bucket: string, path: string): Promi
   return data.signedUrl;
 }
 
-/**
- * Downloads an object's bytes with the service key — for server-side
- * consumers (AI document review, resume parsing) that used to fetch() the
- * public URL, which stops working once the bucket is private.
- */
 export async function downloadStorageObject(url: string): Promise<Buffer> {
   const ref = parseStorageUrl(url);
   if (ref) {
@@ -141,11 +97,6 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
   return proto === Object.prototype || proto === null;
 }
 
-// Only strings under a URL-named key (fileUrl, imageUrl, photoUrls, url, …)
-// are signed. Free text — chat `content`, notes, descriptions — never is:
-// otherwise pasting another user's KYC object URL into a message would hand
-// back a fresh signed link to it. Write paths for the URL fields themselves
-// go through toOwnedStoredUrl / toOwnedBookingPhotoUrls.
 const URL_KEY_RE = /url/i;
 
 function isUrlKey(key: string | undefined): boolean {
@@ -172,15 +123,9 @@ function replaceUrls(value: unknown, signed: Map<string, string>, depth: number,
     for (const [childKey, item] of Object.entries(value)) copy[childKey] = replaceUrls(item, signed, depth + 1, childKey);
     return copy;
   }
-  // Dates, Prisma Decimals, Buffers etc. — serialize as they always have.
   return value;
 }
 
-/**
- * Returns a copy of `value` with every private-bucket object URL replaced by
- * a signed URL (one createSignedUrls call per bucket). Values containing no
- * such URLs are returned as-is without touching Supabase.
- */
 export async function signStorageUrlsDeep<T>(value: T): Promise<T> {
   const urls = new Set<string>();
   collectPrivateUrls(value, urls, 0);

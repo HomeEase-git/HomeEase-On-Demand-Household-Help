@@ -42,11 +42,6 @@ function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
   });
 }
 
-// Used for the arrival check-in geofence (100m default radius) — needs to be
-// noticeably better than the geofence itself, but doesn't need navigation-grade
-// precision, so `High` (~10-25m outdoors) is enough and returns faster than
-// `BestForNavigation`. A 12s timeout surfaces a clear error instead of the UI
-// hanging indefinitely when GPS can't get a fix (e.g. indoors).
 export async function getCurrentPosition(): Promise<ArrivalPosition> {
   await ensurePermission();
 
@@ -59,21 +54,10 @@ export async function getCurrentPosition(): Promise<ArrivalPosition> {
     lat: position.coords.latitude,
     lng: position.coords.longitude,
     accuracy: position.coords.accuracy ?? null,
-    // Android-only (`Location.isFromMockProvider()` under the hood) —
-    // undefined on iOS, which we surface as null rather than false so the
-    // backend can tell "known not mocked" apart from "platform can't tell".
     mocked: position.mocked ?? null,
   };
 }
 
-// Used for "Use my current location" on the address form, where accuracy
-// matters most — a single `getCurrentPositionAsync` call can return a stale or
-// coarse fused/network fix even at "High" accuracy, especially right after the
-// GPS radio wakes up. This asks for the best the device can give
-// (`BestForNavigation`) and, if the first fix still isn't tight, watches for a
-// few more seconds and keeps the most accurate sample seen — the same
-// "wait for a good fix" approach ride-hailing apps use rather than trusting
-// a single reading.
 const ACCEPTABLE_ACCURACY_METERS = 20;
 const REFINE_WINDOW_MS = 6000;
 const OVERALL_TIMEOUT_MS = 20000;
@@ -115,8 +99,6 @@ export async function getPrecisePosition(): Promise<PositionWithAccuracy> {
           consider(position.coords);
           if (settled) return;
 
-          // First fix wasn't tight enough — keep listening briefly for a
-          // better one rather than accepting a possibly-100m-off reading.
           refineTimer = setTimeout(() => {
             if (best) finish(best);
           }, REFINE_WINDOW_MS);
@@ -143,11 +125,6 @@ export async function getPrecisePosition(): Promise<PositionWithAccuracy> {
 
 export type LiveLocationUpdate = LatLng & { accuracy: number | null };
 
-// Continuous foreground tracking for a worker en route to a job — the caller
-// is responsible for stopping this once the worker checks in as arrived (see
-// mobile/app/(worker)/records/job/[jobId].tsx). `distanceInterval`/`timeInterval`
-// throttle both battery use and how often a POST goes out, independent of
-// however fast the OS itself reports fixes.
 export async function watchLiveLocation(
   onUpdate: (position: LiveLocationUpdate) => void,
 ): Promise<Location.LocationSubscription> {

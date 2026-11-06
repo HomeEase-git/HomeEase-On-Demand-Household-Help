@@ -16,20 +16,13 @@ function filtersKey(filters: DiscoverWorkersFilters): string {
   return JSON.stringify(filters, Object.keys(filters).sort());
 }
 
-/**
- * Debounced GET /workers — used by Step 3 (WHO) for the full worker-card
- * list. Only fires once `serviceType` and `date` are set (the backend needs
- * both to filter to workers who work that day).
- */
 export function useWorkerDiscovery(filters: DiscoverWorkersFilters, enabled: boolean): UseWorkerDiscoveryResult {
   const [workers, setWorkers] = useState<WorkerCard[]>([]);
   const [total, setTotal] = useState(0);
-  const [loading, setLoading] = useState(true); // true: the first fetch is debounced, so "empty" isn't known yet
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [refetchToken, setRefetchToken] = useState(0);
   const key = filtersKey(filters);
-  // Filters the current results belong to. Until the debounced fetch for new
-  // filters settles, the old results are stale, so report loading.
   const [settledKey, setSettledKey] = useState<string | null>(null);
 
   useEffect(() => {
@@ -38,8 +31,6 @@ export function useWorkerDiscovery(filters: DiscoverWorkersFilters, enabled: boo
     let cancelled = false;
 
     const timer = setTimeout(async () => {
-      // Loading/error flip inside this deferred callback rather than
-      // synchronously in the effect body, per react-hooks/set-state-in-effect.
       setLoading(true);
       setError(null);
       try {
@@ -77,17 +68,12 @@ export function useWorkerDiscovery(filters: DiscoverWorkersFilters, enabled: boo
   };
 }
 
-/**
- * One lightweight (limit=1, we only need pagination.total) discovery call so
- * Step 2 can show "3 workers available" for the picked date. Workers take any
- * number of jobs a day, so the start time doesn't change the count.
- */
 export function useDateAvailabilityCount(
   baseFilters: Omit<DiscoverWorkersFilters, 'limit'>,
   enabled: boolean
 ): { count: number | null; loading: boolean } {
   const [count, setCount] = useState<number | null>(null);
-  const [loading, setLoading] = useState(true); // true: the first fetch is debounced, so "empty" isn't known yet
+  const [loading, setLoading] = useState(true);
   const key = filtersKey(baseFilters);
   const [settledKey, setSettledKey] = useState<string | null>(null);
   const requestId = useRef(0);
@@ -121,7 +107,6 @@ export function useDateAvailabilityCount(
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key, enabled]);
 
-  // A count for other filters is not a count for these: hide it until settled.
   const settled = settledKey === key;
   return { count: enabled && settled ? count : null, loading: enabled && (loading || !settled) };
 }

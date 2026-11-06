@@ -7,9 +7,6 @@ import {
   useSettingsForm,
 } from '../components/settings/SettingsForm'
 
-// Live rules enforced by the booking and worker-availability flows. The
-// same-day notice sits with the same-day fee (Price Adjustments), worker age
-// with Trust & Safety (Settings).
 const NUMBER_FIELD_BOUNDS = {
   pendingExpiryMinutes: [5, 10080],
   geofenceRadiusMeters: [0, 5000],

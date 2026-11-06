@@ -1,19 +1,3 @@
-// Resets two-step sign-in for an ADMIN who lost both their authenticator app
-// and their backup codes. There is no in-app way to do this (no admin can
-// reset another's), so it's done from a trusted machine with the database URL.
-//
-//   npx tsx scripts/reset-admin-mfa.ts --email admin@example.com --reason "lost phone"
-//       dry run: shows the admin and what would change
-//   ... add --confirm      to actually reset
-//   ... add --neon-websocket  to connect through Neon's WebSocket proxy (port
-//       443) when the network blocks Postgres' port 5432 — first
-//       `npm i --no-save @prisma/adapter-neon @neondatabase/serverless ws`.
-//
-// Removes the admin's authenticator secret and backup codes, turns MFA off,
-// deletes their sessions (no device can refresh its sign-in; access tokens
-// already issued lapse at their normal expiry) and writes an audit-log entry. They set MFA up
-// again at their next sign-in (it is required for admins). Verify the
-// person's identity out of band before running this.
 import 'dotenv/config';
 import { PrismaClient } from '@prisma/client';
 import { PrismaPg } from '@prisma/adapter-pg';
@@ -71,7 +55,6 @@ async function main() {
       prisma.mfaBackupCode.deleteMany({ where: { userId: user.id } }),
       prisma.mfaSecret.deleteMany({ where: { userId: user.id } }),
       prisma.user.update({ where: { id: user.id }, data: { mfaEnabled: false } }),
-      // End every device's session: each is a refresh-token row.
       prisma.authToken.deleteMany({ where: { userId: user.id, type: 'REFRESH' } }),
       prisma.auditLog.create({
         data: {

@@ -1,28 +1,6 @@
 import prisma from '@config/database';
 import { Prisma, type LedgerAccount, type LedgerEventType } from '@prisma/client';
 
-/**
- * Double-entry ledger of the platform's money, in whole centavos.
- *
- * Every event that moves money posts one balanced transaction (lines sum to
- * exactly zero; debits positive, credits negative) under a unique key, so a
- * retried webhook, sweep or admin click can never post the same money twice.
- * Nothing is posted until an admin opens the ledger (ledgerOpeningService),
- * which records the balances carried in from before.
- *
- * Accounts, from the platform's point of view:
- *  - XENDIT_CASH: money in the Xendit account.
- *  - WORKER_BALANCE (per worker): credit = earnings/credit the platform owes
- *    the worker; debit = dues the worker owes. One account covers both, so
- *    netting dues out of a payout needs no entry of its own.
- *  - CLIENT_RECEIVABLE (per client): cancellation fees owed.
- *  - COMMISSION_REVENUE, PENALTY_REVENUE: income.
- *  - WITHHOLDING_TAX_PAYABLE: owed to BIR.
- *  - XENDIT_FEES, PLATFORM_FUNDED_EXPENSE, REFUND_LOSS: expenses.
- *  - MANUAL_SETTLEMENTS: money that moved outside the app.
- *  - ADJUSTMENTS: admin corrections; OPENING_BALANCE: carried-in balances.
- */
-
 type Client = Prisma.TransactionClient | typeof prisma;
 
 export interface LedgerLineInput {
@@ -43,14 +21,12 @@ export interface LedgerPosting {
   lines: LedgerLineInput[];
 }
 
-/** Pesos (as stored on Payment/Payout) to whole centavos. */
 export function toCentavos(pesos: number | null | undefined): number {
   return Math.round((pesos ?? 0) * 100);
 }
 
 let openCache = false;
 
-/** Whether the ledger has been opened. Cached once true — it never closes. */
 export async function isLedgerOpen(client: Client = prisma): Promise<boolean> {
   if (openCache) return true;
   const state = await client.ledgerState.findUnique({ where: { id: 'singleton' }, select: { openedAt: true } });
@@ -63,11 +39,6 @@ export function resetLedgerOpenCache() {
   openCache = false;
 }
 
-/**
- * Posts one balanced transaction. Returns false (and posts nothing) when the
- * ledger isn't open yet or this key was already posted. Throws if the lines
- * don't balance — a bug to fix, never something to paper over.
- */
 export async function postLedger(client: Client, posting: LedgerPosting): Promise<boolean> {
   const lines = posting.lines.filter((l) => l.amountCentavos !== 0);
   if (lines.some((l) => !Number.isInteger(l.amountCentavos))) {
@@ -105,17 +76,10 @@ export async function postLedger(client: Client, posting: LedgerPosting): Promis
     });
     return true;
   } catch (error) {
-    // Two posts of the same event racing: the other one won, which is fine.
     if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') return false;
     throw error;
   }
 }
-
-// ---------------------------------------------------------------------------
-// One function per money event. Amounts come from the stored per-payment
-// split; the worker's share is derived as the remainder so every entry
-// balances to the centavo.
-// ---------------------------------------------------------------------------
 
 interface PaymentSplit {
   id: string;
@@ -128,12 +92,6 @@ interface PaymentSplit {
   capturedAt?: Date | null;
 }
 
-/**
- * How a captured online payment divides. The worker's share is of the
- * invoice; anything paid over it is owed back to the client (the payout only
- * ever sends workerPayout, so crediting it to the worker would leave a
- * balance that never clears).
- */
 function splitCapture(payment: PaymentSplit) {
   const captured = toCentavos(payment.capturedAmount ?? payment.totalAmount);
   const invoiced = Math.min(captured, toCentavos(payment.totalAmount));
@@ -142,7 +100,6 @@ function splitCapture(payment: PaymentSplit) {
   return { captured, overpaid: captured - invoiced, commission, withholding, workerShare: invoiced - commission - withholding };
 }
 
-/** Client paid online (GCash/Maya): the money lands at Xendit. */
 export function postPaymentCaptured(client: Client, payment: PaymentSplit, workerId: string | null, clientId: string | null = null) {
   const { captured, overpaid, commission, withholding, workerShare } = splitCapture(payment);
   return postLedger(client, {
@@ -156,14 +113,12 @@ export function postPaymentCaptured(client: Client, payment: PaymentSplit, worke
       { account: 'XENDIT_CASH', amountCentavos: captured },
       { account: 'COMMISSION_REVENUE', amountCentavos: -commission },
       { account: 'WITHHOLDING_TAX_PAYABLE', amountCentavos: -withholding },
-      // The rest (service price after commission/tax, tip, VAT) is the worker's.
       { account: 'WORKER_BALANCE', amountCentavos: -workerShare, workerId },
       ...(overpaid > 0 ? [{ account: 'CLIENT_RECEIVABLE' as const, amountCentavos: -overpaid, clientId }] : []),
     ],
   });
 }
 
-/** Cash job: the client paid the worker; the worker now owes commission + tax. */
 export function postCashJobSettled(client: Client, payment: PaymentSplit, workerId: string) {
   const commission = toCentavos(payment.commissionAmount);
   const withholding = toCentavos(payment.withholdingTaxAmount);
@@ -182,7 +137,6 @@ export function postCashJobSettled(client: Client, payment: PaymentSplit, worker
   });
 }
 
-/** Client never paid; the platform pays the worker's earnings itself. */
 export function postPlatformFunded(client: Client, payment: PaymentSplit, workerId: string) {
   const worker = toCentavos(payment.workerPayout);
   const withholding = toCentavos(payment.withholdingTaxAmount);
@@ -221,10 +175,6 @@ export function postPayoutSent(
   });
 }
 
-/**
- * An online payment refunded through Xendit (the worker's payout was stopped
- * first, so their share simply comes back off their balance).
- */
 export function postRefundSent(client: Client, payment: PaymentSplit, workerId: string | null, clientId: string | null = null) {
   const { captured, overpaid, commission, withholding, workerShare } = splitCapture(payment);
   return postLedger(client, {
@@ -238,13 +188,11 @@ export function postRefundSent(client: Client, payment: PaymentSplit, workerId: 
       { account: 'COMMISSION_REVENUE', amountCentavos: commission },
       { account: 'WITHHOLDING_TAX_PAYABLE', amountCentavos: withholding },
       { account: 'WORKER_BALANCE', amountCentavos: workerShare, workerId },
-      // The overpayment went back with the refund, so the client is no longer owed it.
       ...(overpaid > 0 ? [{ account: 'CLIENT_RECEIVABLE' as const, amountCentavos: overpaid, clientId }] : []),
     ],
   });
 }
 
-/** A cash job refunded: the worker's commission + tax dues are reversed. */
 export function postCashJobRefunded(client: Client, payment: PaymentSplit, workerId: string) {
   const commission = toCentavos(payment.commissionAmount);
   const withholding = toCentavos(payment.withholdingTaxAmount);
@@ -262,12 +210,6 @@ export function postCashJobRefunded(client: Client, payment: PaymentSplit, worke
   });
 }
 
-/**
- * An admin refunded an online payment outside the app. If the worker's
- * payout was still stopped in time, their share comes off their balance;
- * if it had already been sent, it's a loss unless the admin recovers it
- * (Adjust Dues posts that separately).
- */
 export function postManualRefund(
   client: Client,
   payment: PaymentSplit,
@@ -308,7 +250,6 @@ export function postPenalty(client: Client, workerId: string, amountPesos: numbe
   });
 }
 
-/** Client-fault cancellation: the client owes the fee, the worker is credited it. */
 export function postCancellationFee(
   client: Client,
   clientId: string,
@@ -329,7 +270,6 @@ export function postCancellationFee(
   });
 }
 
-/** An admin cleared a client's fee hold (paid to support, or waived). */
 export function postClientFeeCleared(client: Client, clientId: string, amountPesos: number, key: string) {
   const amount = toCentavos(amountPesos);
   return postLedger(client, {
@@ -343,7 +283,6 @@ export function postClientFeeCleared(client: Client, clientId: string, amountPes
   });
 }
 
-/** Admin dues correction. Positive = the worker owes more. */
 export function postAdminAdjustment(client: Client, workerId: string, owedDeltaPesos: number, key: string, note: string) {
   const amount = toCentavos(owedDeltaPesos);
   return postLedger(client, {
@@ -357,7 +296,6 @@ export function postAdminAdjustment(client: Client, workerId: string, owedDeltaP
   });
 }
 
-/** A worker paid some of what they owe through Xendit: cash in, dues down. */
 export function postDebtPayment(client: Client, workerId: string, amountPesos: number, debtPaymentId: string, occurredAt?: Date) {
   const amount = toCentavos(amountPesos);
   return postLedger(client, {
@@ -372,7 +310,6 @@ export function postDebtPayment(client: Client, workerId: string, amountPesos: n
   });
 }
 
-/** A fee Xendit charged on one of its transactions (it hits the balance). */
 export function postXenditFee(
   client: Client,
   fee: { xenditTransactionId: string; centavos: number; occurredAt: Date; memo: string; paymentId?: string | null; payoutId?: string | null }

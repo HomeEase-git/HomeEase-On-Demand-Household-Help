@@ -12,7 +12,6 @@ type Props = {
   onOpen: () => void;
 };
 
-/** The worker's next job, with Directions to the client's address. */
 export const NextJobCard: React.FC<Props> = ({ job, onOpen }) => {
   const when = new Date(job.scheduledDate).toLocaleDateString("en-PH", { weekday: "short", month: "short", day: "numeric" });
   const address = job.location || job.city;

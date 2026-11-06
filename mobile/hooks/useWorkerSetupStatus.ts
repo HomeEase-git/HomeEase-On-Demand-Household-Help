@@ -3,12 +3,6 @@ import { usePathname } from "expo-router";
 import * as api from "../services/api";
 import type { WorkerSetupStatus } from "../services/api";
 
-/**
- * The worker's account-setup checklist (see backend workerSetupService).
- * Re-checked whenever the worker moves to another screen, so finishing an
- * item (e.g. saving a payout method) clears it as soon as they navigate
- * back. Null until the first load.
- */
 export function useWorkerSetupStatus() {
   const pathname = usePathname();
   const [status, setStatus] = useState<WorkerSetupStatus | null>(null);
@@ -17,7 +11,6 @@ export function useWorkerSetupStatus() {
     try {
       setStatus(await api.getMySetupStatus());
     } catch {
-      // Keep the last known status; a failed check shouldn't flash the banner.
     }
   }, []);
 

@@ -5,9 +5,6 @@ import ProtectedRoute from './components/auth/ProtectedRoute'
 import LoadingState from './components/common/LoadingState'
 import Login from './pages/Login'
 
-// Every other page is lazy-loaded so the initial bundle only ships what's
-// needed to reach the login/dashboard shell — a page's code downloads the
-// first time it's actually navigated to, not all 24 of them upfront.
 const Dashboard = lazy(() => import('./pages/Dashboard'))
 const Users = lazy(() => import('./pages/Users'))
 const ClientDetail = lazy(() => import('./pages/ClientDetail'))
@@ -58,7 +55,6 @@ export default function App() {
         />
         {[
           { path: 'dashboard', element: <Dashboard /> },
-          // Analytics was folded into the Dashboard — kept so bookmarks still resolve.
           { path: 'analytics', element: <Navigate to="/dashboard" replace /> },
           { path: 'users', element: <Users /> },
           { path: 'users/clients', element: <Users /> },
@@ -80,7 +76,6 @@ export default function App() {
           { path: 'payments/payouts', element: <Payouts /> },
           { path: 'payments/books', element: <Books /> },
           { path: 'payments/commission', element: <CommissionSettings /> },
-          // Tax pages were removed (workers file their own taxes); old bookmarks land on Payments.
           { path: 'tax/*', element: <Navigate to="/payments" replace /> },
           { path: 'payments/tax-certificates', element: <Navigate to="/payments" replace /> },
           { path: 'payments/vat-registrations', element: <Navigate to="/payments" replace /> },
@@ -94,7 +89,6 @@ export default function App() {
           { path: 'reports/export', element: <Reports /> },
           { path: 'price-list', element: <PriceList /> },
           { path: 'price-adjustments', element: <PriceAdjustments /> },
-          // Old name, from before city price rules were retired — kept so bookmarks still resolve.
           { path: 'pricing-rules', element: <Navigate to="/price-adjustments" replace /> },
           { path: 'service-catalog', element: <ServiceCatalog /> },
           { path: 'service-catalog/new', element: <ServiceCatalogEditor /> },

@@ -1,11 +1,3 @@
-// Runs against a real (ephemeral) Redis via redis-memory-server — separate
-// from the main suite (see jest.integration.config.js) because the main
-// suite mocks these exact modules out. This is the only automated check
-// that would have caught the "BullMQ rejects ':' in custom jobIds" bug:
-// bookingQueue.ts and payoutQueue.ts both built their jobId as
-// `${jobName}:${id}`, which threw on every real .add() call once a real
-// Redis was reachable, but never on the mocked queue the rest of the suite
-// uses.
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
 let redisServer: any;
@@ -17,8 +9,6 @@ beforeAll(async () => {
   const { RedisMemoryServer } = require('redis-memory-server');
   redisServer = new RedisMemoryServer();
 
-  // config/redis.ts reads REDIS_HOST/REDIS_PORT at module-load time, so
-  // these must be set before the queue modules below are first required.
   process.env.REDIS_HOST = await redisServer.getHost();
   process.env.REDIS_PORT = String(await redisServer.getPort());
 

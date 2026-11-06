@@ -35,7 +35,6 @@ async function callWith(query: Record<string, string>) {
   return json.mock.calls[0][0];
 }
 
-// A count/aggregate call's createdAt/releasedAt window, whichever it filters on.
 function windowOf(call: [{ where: Record<string, any> }]) {
   const where = call[0].where;
   return where.createdAt ?? where.releasedAt;
@@ -70,7 +69,6 @@ describe('getDashboardStats range and trends', () => {
       if (where.role === 'CLIENT') return current ? 12 : 10;
       return current ? 3 : 4;
     });
-    // No period = all-time; a period with `lt` = the previous window.
     mockPlatformRevenue.mockImplementation(async (period?: { lt?: Date }) => ({
       revenue: !period ? 5000 : period.lt ? 1000 : 1500,
       fromCashJobs: 0,

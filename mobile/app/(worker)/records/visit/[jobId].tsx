@@ -13,13 +13,6 @@ import { colors } from "../../../../constants";
 import { useAlertModal } from "../../../../contexts/AlertModalContext";
 import { MAX_BOOKING_DAYS_AHEAD, earliestStartTime, formatTime12h } from "../../../../utils/bookingTime";
 
-/**
- * "Follow Up Date": when a job needs more than one day, the worker picks the
- * next visit's date and start time. The job stays one booking with one
- * price; the client is told and the visit shows on both calendars. The
- * worker sees their other jobs that day so they don't double-book
- * themselves.
- */
 export default function ScheduleVisitScreen() {
   const router = useRouter();
   const alertModal = useAlertModal();
@@ -46,7 +39,6 @@ export default function ScheduleVisitScreen() {
     };
   }, [date, jobId]);
 
-  // No lead time for the worker's own plan — any later time today is fine.
   const minTime = useMemo(() => earliestStartTime(date, 0), [date]);
 
   const handleSave = async () => {

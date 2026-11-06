@@ -2,12 +2,6 @@ import React from "react";
 import { View, Text } from "react-native";
 import { formatQuantity } from "../../utils/pricing";
 
-/**
- * What the client booked beyond the service name: how many units (per-unit
- * jobs) and their optional note. Bookings made before booking questions were
- * retired also list their answers (Booking.scopeAnswers). Renders nothing
- * when there's none of these.
- */
 export const BookingAnswers: React.FC<{
   quantity?: number | null;
   unit?: string | null;

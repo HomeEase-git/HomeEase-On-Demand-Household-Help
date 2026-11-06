@@ -15,8 +15,6 @@ interface AuditLogEntry {
   metadata?: Record<string, unknown>;
 }
 
-// Best-effort — a logging failure must never break the primary action it's
-// attached to, so this swallows its own errors instead of throwing.
 export async function writeAuditLog(entry: AuditLogEntry): Promise<void> {
   try {
     await prisma.auditLog.create({

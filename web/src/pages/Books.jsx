@@ -17,8 +17,6 @@ import {
   fetchLedgerTransactions,
 } from '../services/ledger'
 
-// Plain-language names; "normal" is the side the account usually sits on,
-// so balances read as positive amounts.
 const ACCOUNTS = {
   XENDIT_CASH: { label: 'Money at Xendit', normal: 'Dr' },
   MANUAL_SETTLEMENTS: { label: 'Settled outside the app', normal: 'Dr' },
@@ -63,7 +61,6 @@ function peso(centavos) {
   return `₱${(Math.abs(centavos) / 100).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
 }
 
-// A signed debit-positive amount shown on the account's usual side.
 function natural(centavos, normal) {
   if (centavos === 0) return '—'
   const onNormalSide = normal === 'Dr' ? centavos > 0 : centavos < 0
@@ -80,7 +77,6 @@ function monthLabel(key) {
   return new Date(Date.UTC(y, m - 1, 15)).toLocaleDateString('en-PH', { month: 'long', year: 'numeric', timeZone: 'UTC' })
 }
 
-// Months from the one the ledger opened in up to the current one, newest first.
 function monthsSince(openedAt) {
   const out = []
   const current = monthKey(new Date())
@@ -135,10 +131,6 @@ function CheckRow({ check }) {
   )
 }
 
-/**
- * The platform's books: a double-entry ledger of every peso (see the
- * backend's ledgerService), with a monthly reconciliation an admin signs off.
- */
 export default function Books() {
   const { showSuccess, showError } = useToast()
   const [status, setStatus] = useState(null)

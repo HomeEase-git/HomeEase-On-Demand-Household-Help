@@ -11,11 +11,6 @@ export const getServiceTypes = async (_req: Request, res: Response) => {
       where: { isActive: true },
       include: {
         tasks: { orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }] },
-        // Only a VERIFIED category connection counts — a
-        // worker whose 2nd+ category is still PENDING_VERIFICATION isn't
-        // actually bookable for it yet (see WorkerServiceCategory's docblock).
-        // Same eligibility as workerController.searchWorkers, setup gate
-        // included, so a tile never counts a worker the list won't show.
         workerCategories: {
           where: {
             status: 'VERIFIED',
@@ -34,12 +29,6 @@ export const getServiceTypes = async (_req: Request, res: Response) => {
       orderBy: { name: 'asc' },
     });
 
-    // Batch-compute each worker's tier (same rating/completed-jobs/years formula as
-    // workerController's searchWorkers) so the price range below reflects
-    // what a client could actually be charged — cheapest task at the
-    // cheapest available worker's tier, up to the priciest task at the
-    // priciest tier — instead of the old single admin-set basePrice, which
-    // didn't even match the cheapest task in most categories.
     const allWorkerIds = Array.from(
       new Set(services.flatMap((s) => s.workerCategories.map((c) => c.workerProfile.userId)))
     );
@@ -57,8 +46,6 @@ export const getServiceTypes = async (_req: Request, res: Response) => {
 
     const servicesWithWorkerCount = services.map(({ workerCategories, tasks, ...service }) => {
       const workers = workerCategories.map((c) => c.workerProfile);
-      // A switched-off former custom-quote job has no price (0), so it'd pull
-      // the tile's range down to ₱0.
       const activeTaskPrices = tasks
         .filter((t) => t.isActive && t.basePrice > 0)
         .map((t) => t.basePrice);

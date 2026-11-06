@@ -5,12 +5,6 @@ import { platformRevenue } from '@services/financeReportService';
 import { expectedWorkerBalances } from '@services/ledgerOpeningService';
 import { listXenditTransactions, balanceEffectCentavos, type XenditTransaction } from '@services/xenditTransactionsService';
 
-/**
- * The month-end check an accountant would do, for one Manila calendar month:
- * account balances (opening, debits, credits, closing) and a set of checks
- * that each either pass or list exactly what doesn't agree.
- */
-
 const ACCOUNTS: LedgerAccount[] = [
   'XENDIT_CASH',
   'MANUAL_SETTLEMENTS',
@@ -91,10 +85,8 @@ export async function buildReconciliation(month: string) {
     items: unbalanced.map((u) => ({ transaction: u.id, memo: u.memo, offBy: peso(Number(u.off)) })),
   });
 
-  // 2. Xendit: the ledger's cash movement vs Xendit's own transaction list.
   checks.push(await checkXendit(start, end));
 
-  // 3. Commission vs the revenue report (only meaningful for whole months after opening).
   const ledgerCommission = (credits.get('COMMISSION_REVENUE') ?? 0) - (debits.get('COMMISSION_REVENUE') ?? 0);
   if (state.openedAt > start) {
     checks.push({
@@ -114,7 +106,6 @@ export async function buildReconciliation(month: string) {
     });
   }
 
-  // 4. Worker balances: ledger vs what the operational records say is owed (as of now).
   const [ledgerWorkers, expected] = await Promise.all([
     prisma.ledgerLine.groupBy({ by: ['workerId'], where: { account: 'WORKER_BALANCE' }, _sum: { amountCentavos: true } }),
     expectedWorkerBalances(),
@@ -145,7 +136,6 @@ export async function buildReconciliation(month: string) {
     })),
   });
 
-  // 5. Withholding tax booked in the month vs captured in the month.
   const whtBooked = await prisma.ledgerLine.aggregate({
     where: { ...inMonth, account: 'WITHHOLDING_TAX_PAYABLE', transaction: { occurredAt: { gte: start, lt: end }, type: { in: ['PAYMENT_CAPTURED', 'CASH_JOB_SETTLED', 'PLATFORM_FUNDED'] } } },
     _sum: { amountCentavos: true },
@@ -196,14 +186,12 @@ async function checkXendit(start: Date, end: Date): Promise<ReconciliationCheck>
   }
 
   const xenditNet = transactions.reduce((sum, t) => sum + balanceEffectCentavos(t), 0);
-  // The opening balance isn't a Xendit movement, so it's left out here.
   const ledgerCash = await prisma.ledgerLine.aggregate({
     where: { account: 'XENDIT_CASH', transaction: { occurredAt: { gte: start, lt: end }, type: { not: 'OPENING' } } },
     _sum: { amountCentavos: true },
   });
   const ledgerNet = ledgerCash._sum.amountCentavos ?? 0;
 
-  // Which Xendit movements have a matching ledger posting?
   const keysFor = (t: XenditTransaction) =>
     t.type === 'PAYMENT'
       ? [`capture:${t.referenceId}`]

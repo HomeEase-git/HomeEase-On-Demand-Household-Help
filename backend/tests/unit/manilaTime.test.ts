@@ -46,7 +46,6 @@ describe('Manila tax-period time', () => {
     expect(q('2026-08-01', '2026-11-01')).toBe(false); // not quarter-aligned
     expect(q('2026-07-01', '2026-09-30')).toBe(false); // short
     expect(q('2026-01-01', '2027-01-01')).toBe(false); // a year
-    // Old UTC-midnight boundaries are not a Manila quarter.
     expect(isManilaQuarter(new Date('2026-07-01T00:00:00Z'), new Date('2026-10-01T00:00:00Z'))).toBe(false);
   });
 

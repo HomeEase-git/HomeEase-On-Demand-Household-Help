@@ -10,7 +10,6 @@ const ACTION = 'RETENTION_TEST';
 describe('purgeExpiredData', () => {
   let userId: string;
 
-  // Audit rows can only be deleted by the owner (see tests/ownerDb.ts).
   const clearAuditRows = () => ownerDb.auditLog.deleteMany({ where: { action: ACTION } });
 
   beforeAll(async () => {

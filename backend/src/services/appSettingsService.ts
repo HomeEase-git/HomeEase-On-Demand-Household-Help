@@ -35,10 +35,6 @@ export interface AppSettingsConfig {
   autoSuspendDisputeCountWindowDays: number | null;
 }
 
-// Mirrors the AppSettings model's own @default values — used only if the
-// columns backing this migration haven't been applied to the database yet,
-// so core flows (booking payment, availability, arrival check-in) that now
-// depend on this getter keep working against an un-migrated database.
 const FALLBACK_DEFAULTS: AppSettingsConfig = {
   siteName: 'HomeEaseAdmin',
   supportEmail: 'support@homeease.dev',
@@ -74,29 +70,12 @@ const FALLBACK_DEFAULTS: AppSettingsConfig = {
   autoSuspendDisputeCountWindowDays: null,
 };
 
-// getAppSettings is called on nearly every request path (search, booking,
-// payments, ...). Without a cache each call is a DB round-trip — and an
-// upsert (write) at that — to the remote Neon instance, which measurably
-// adds up. Settings only change via an admin action (see
-// settingsController.invalidateAppSettingsCache), so a short TTL is enough
-// to keep this fresh without paying for a query on every request.
 const CACHE_TTL_MS = 60_000;
 let cached: AppSettingsConfig | null = null;
 let cachedAt = 0;
 
-// Workers file their own taxes (2026-10 panel revision), so HomeEase
-// withholds nothing: a rate of 0 makes every withholding amount 0, and the
-// ledger skips zero lines. Payments made before keep their recorded
-// withholding. Not admin-editable and not stored.
 const FIXED_TAX = { withholdingTaxRate: 0 } as const;
 
-/**
- * Reads the singleton AppSettings row, creating it with schema defaults on
- * first access. Business rules that must react to an admin's live setting
- * change (arrival geofence radius, pending-booking hold
- * timeout, platform commission/tax split) read through this getter instead
- * of a static config constant.
- */
 export async function getAppSettings(): Promise<AppSettingsConfig> {
   if (cached && Date.now() - cachedAt < CACHE_TTL_MS) {
     return cached;
@@ -117,7 +96,6 @@ export async function getAppSettings(): Promise<AppSettingsConfig> {
   }
 }
 
-/** Called after an admin updates AppSettings so the next read isn't stale for up to CACHE_TTL_MS. */
 export function invalidateAppSettingsCache(): void {
   cached = null;
 }

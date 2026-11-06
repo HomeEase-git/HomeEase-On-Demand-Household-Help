@@ -14,11 +14,6 @@ type Props = {
   onChange: (id: string) => void;
 };
 
-/**
- * Inline payment method grid (Step 4: CONFIRM) — GCash/Maya go through a
- * Xendit-hosted checkout; Cash is bookkeeping-only. Only these three methods
- * are supported.
- */
 export default function PaymentMethodSelector({ value, onChange }: Props) {
   return (
     <View className="flex-row flex-wrap gap-2">

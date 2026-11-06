@@ -37,7 +37,6 @@ async function wipeLedger() {
   resetLedgerOpenCache();
 }
 
-/** What the ledger says the platform owes a worker, in centavos. */
 async function ledgerOwed(workerId: string) {
   const r = await prisma.ledgerLine.aggregate({ where: { account: 'WORKER_BALANCE', workerId }, _sum: { amountCentavos: true } });
   return 0 - (r._sum.amountCentavos ?? 0);
@@ -86,7 +85,6 @@ describe('Double-entry ledger', () => {
     workerB = b.id;
     await prisma.workerProfile.update({
       where: { userId: a.id },
-      // Dues from before the ledger existed, and a payout account.
       data: { commissionOwed: 118, payoutMethod: 'GCASH', payoutAccountNumber: '09170000000', payoutAccountName: 'A' },
     });
     workerBProfileId = (await prisma.workerProfile.findUniqueOrThrow({ where: { userId: b.id } })).id;
@@ -124,7 +122,6 @@ describe('Double-entry ledger', () => {
   it('opens with the balances carried in from before', async () => {
     const result = await openLedger(userIds[0]);
     expect(result.xenditCentavos).toBe(1_000_000);
-    // Worker A owed ₱118 of dues before the ledger existed.
     expect(await ledgerOwed(workerA)).toBe(-11800);
     await expect(openLedger(userIds[0])).rejects.toBeInstanceOf(LedgerAlreadyOpenError);
   });
@@ -134,7 +131,6 @@ describe('Double-entry ledger', () => {
     await finalizePaidBooking(payment.id, 'ewc_1', 1000, new Date());
     tx('PAYMENT', payment.id, 'MONEY_IN', 1000, 987.68); // Xendit kept ₱12.32
 
-    // Capture credits the worker ₱882; the ₱118 dues netting needs no entry of its own.
     expect(await ledgerOwed(workerA)).toBe(88200 - 11800);
     const payout = await prisma.payout.findUniqueOrThrow({ where: { paymentId: payment.id } });
     expect(payout.amount).toBeCloseTo(764, 2);
@@ -203,7 +199,6 @@ describe('Double-entry ledger', () => {
     await postClientFeeCleared(prisma, clientId, 200, 'ledger-test-clear');
     const receivable = await prisma.ledgerLine.aggregate({ where: { account: 'CLIENT_RECEIVABLE', clientId }, _sum: { amountCentavos: true } });
     expect(receivable._sum.amountCentavos).toBe(0);
-    // Keep the operational side in step so the worker check below still agrees.
     await prisma.workerProfile.update({ where: { id: workerBProfileId }, data: { commissionOwed: { decrement: 200 } } });
   });
 
@@ -217,7 +212,6 @@ describe('Double-entry ledger', () => {
     expect(byKey.balanced.status).toBe('PASS');
     expect(byKey.workers.status).toBe('PASS');
     expect(byKey.xendit.status).toBe('PASS');
-    // Opened this month, so the month-level comparisons aren't meaningful yet.
     expect(byKey.commission.status).toBe('UNAVAILABLE');
 
     // The books as a whole balance.
@@ -250,14 +244,11 @@ describe('Double-entry ledger', () => {
     const payment = await onlinePayment(workerA, 1000);
     await finalizePaidBooking(payment.id, 'ewc_over', 1010, new Date());
 
-    // The worker is credited the ₱882 share of the invoice, not of the ₱1,010 paid.
     expect((await ledgerOwed(workerA)) - before).toBe(88200);
     const lines = await prisma.ledgerLine.findMany({ where: { transaction: { paymentId: payment.id } } });
     expect(lines.find((l) => l.account === 'XENDIT_CASH')?.amountCentavos).toBe(101000);
     expect(lines.find((l) => l.account === 'CLIENT_RECEIVABLE')).toMatchObject({ amountCentavos: -1000, clientId });
 
-    // Refunding it in full sends the overpayment back too: nothing is left
-    // owed to the client or credited to the worker for this payment.
     await postRefundSent(prisma, await prisma.payment.findUniqueOrThrow({ where: { id: payment.id } }), workerA, clientId);
     const sums = await prisma.ledgerLine.groupBy({
       by: ['account'],

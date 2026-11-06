@@ -1,14 +1,6 @@
-// Converts between the admin API's service-type shape and the job order
-// editor's draft. See backend/src/controllers/adminCatalogController.ts for
-// the save endpoint this feeds. Booking questions are retired: a per-piece
-// job asks the client only how many, within the job's own limits.
-
 let seq = 0
 export const newKey = (prefix) => `${prefix}-${Date.now().toString(36)}-${++seq}`
 
-// Prices are set here only; workers can't change them. Two ways to price a
-// job. (The old "worker price steps" model is retired — a saved one opens as
-// price per piece; custom quotes are gone, extras go on the worker's invoice.)
 export const PRICING_MODELS = {
   FIXED: { label: 'Flat price', hint: 'One price for the whole job or visit.' },
   PER_UNIT: { label: 'Price per piece', hint: 'The client enters how many, e.g. outlets, rooms, kilos.' },
@@ -26,7 +18,6 @@ export function formatPeso(amount) {
 
 const blankToNull = (v) => (v === '' || v == null ? null : Number(v))
 
-/** "1 to 5", "at least 10", or "" — the count a client can book. */
 export function countRange(job) {
   const min = blankToNull(job.minQty)
   const max = blankToNull(job.maxQty)
@@ -50,7 +41,6 @@ export function serviceToDraft(service) {
     description: t.description || '',
     unit: t.unitLabel || '',
     price: t.basePrice,
-    // TIERED opens as per piece; a leftover custom quote (switched off, no price) as flat.
     model: t.pricingModel === 'TIERED' ? 'PER_UNIT' : t.pricingModel === 'CUSTOM_QUOTE' ? 'FIXED' : t.pricingModel,
     minQty: t.minQuantity ?? '',
     maxQty: t.maxQuantity ?? '',
@@ -100,7 +90,6 @@ export function draftToPayload(draft) {
   }
 }
 
-/** First problem with a per-piece job's count limits, or null. */
 export function countLimitsProblem(job) {
   if (!usesCount(job.model)) return null
   const min = blankToNull(job.minQty)
@@ -110,7 +99,6 @@ export function countLimitsProblem(job) {
   return null
 }
 
-/** First problem that would stop a save, in the admin's words, or null. */
 export function validateDraft(draft, doleFloor) {
   const d = draft.details
   if (!d.name.trim()) return 'Give the category a name.'
@@ -119,7 +107,6 @@ export function validateDraft(draft, doleFloor) {
   for (const j of draft.jobs) {
     const name = j.name.trim() || 'Untitled job'
     if (!j.name.trim()) return 'A job has no name.'
-    // A switched-off job may have no price yet (a former custom-quote job).
     if (j.isActive) {
       if (!(Number(j.price) > 0)) return `“${name}” needs a price above ₱0 before it can be switched on.`
       if (doleFloor && Number(j.price) < doleFloor && !j.overrideReason.trim()) {

@@ -2,8 +2,6 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { NAV_PAGES } from '../../constants/navigation'
 
-// Pages reached through a page's own tabs rather than the sidebar, plus
-// extra words people are likely to type for sidebar pages.
 const EXTRA_PAGES = [
   { to: '/bookings/dispute', icon: 'fa-triangle-exclamation', label: 'Disputes', group: 'Bookings' },
   { to: '/payments/refunds', icon: 'fa-rotate-left', label: 'Refunds', group: 'Payments' },
@@ -28,10 +26,6 @@ const KEYWORDS = {
 
 export const OPEN_COMMAND_PALETTE_EVENT = 'homeease:open-command-palette'
 
-/**
- * Ctrl/Cmd+K: type to jump to any admin page. Also opened by the search
- * button in the header (via OPEN_COMMAND_PALETTE_EVENT).
- */
 export default function CommandPalette() {
   const navigate = useNavigate()
   const [open, setOpen] = useState(false)

@@ -29,8 +29,6 @@ export default function CategoryIndexScreen() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Runs on every tab focus (new workers change the counts); `loading` starts
-  // true so only the first load shows the spinner.
   const loadCategories = useCallback(async () => {
     setError(null);
     try {

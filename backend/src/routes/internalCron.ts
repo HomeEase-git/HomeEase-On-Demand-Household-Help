@@ -31,18 +31,11 @@ const TASKS = {
   'auto-suspend-workers': autoSuspendUnderperformingWorkers,
   'clear-stale-locations': clearStaleWorkerLocations,
   'purge-expired-data': purgeExpiredData,
-  // Books Xendit's fees into the ledger (no-op until the ledger is opened).
   'sync-xendit-fees': syncXenditFees,
 } satisfies Record<string, () => Promise<unknown>>;
 
 type TaskName = keyof typeof TASKS;
 
-/**
- * Constant-time comparison against CRON_SECRET (same pattern as
- * paymentController's Xendit webhook token check) — a shared-secret header,
- * not a signed/timestamped scheme, so timingSafeEqual is what stands between
- * this and a timing side-channel on the secret value.
- */
 function isAuthorized(req: Request): boolean {
   const secret = process.env.CRON_SECRET;
   if (!secret) return false; // misconfigured — fail closed, never open
@@ -57,21 +50,6 @@ function isAuthorized(req: Request): boolean {
   return crypto.timingSafeEqual(headerBuffer, secretBuffer);
 }
 
-/**
- * Runs the booking-lifecycle sweeps that normally fire from BullMQ's
- * repeatable jobs (registerRepeatableBookingJobs, index.ts) plus the
- * per-booking delayed expiry job (pendingExpirySweep.ts). Exists because a
- * host that sleeps on idle (Render's free tier — see DEPLOY.md's free-tier
- * section) takes the in-process BullMQ worker down with it, so those jobs
- * silently stop firing. Meant to be hit hourly by a GitHub Actions
- * workflow; timing tolerance here is "within the hour", so drift/retries on
- * the caller's side don't matter — unlike a keep-alive ping, which needs a
- * tight interval and belongs in an external uptime monitor instead.
- *
- * Deliberately outside /api (see app.ts) so it isn't subject to the broad
- * API rate limiter or CORS allow-list — it's server-to-server, authenticated
- * by CRON_SECRET rather than a user session.
- */
 router.post('/:task', authLimiter, async (req: Request, res: Response) => {
   if (!isAuthorized(req)) {
     await raiseSecurityAlert({

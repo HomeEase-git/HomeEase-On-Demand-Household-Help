@@ -1,11 +1,3 @@
-// Reference-only DOLE regional daily minimum wage figures, shown next to a
-// city's pricing rule so admins have a fairness benchmark when setting a
-// price floor. Purely informational — nothing here is read by the booking
-// or pricing engine, and it enforces nothing.
-//
-// Source: DOLE Regional Tripartite Wages and Productivity Boards.
-// Update the two entries below whenever a new wage order is issued for a
-// region this app operates in (NCR or Region III / Central Luzon).
 const WAGE_REGIONS = {
   NCR: {
     label: 'NCR',
@@ -22,8 +14,6 @@ const WAGE_REGIONS = {
   },
 }
 
-// Normalized (lowercase, trimmed) city name -> wage region key. Covers the
-// cities this app currently prices for (see prisma/seeds/seed-catalog.ts).
 const CITY_TO_REGION = {
   'quezon city': 'NCR',
   manila: 'NCR',
@@ -45,8 +35,6 @@ function buildReference(region) {
   return { ...info, region, hourlyWage }
 }
 
-// Returns the DOLE wage reference for a city, or null if the city isn't in
-// CITY_TO_REGION (free-text city names won't always match).
 export function getDoleWageReference(cityInput) {
   const key = (cityInput || '').trim().toLowerCase()
   const region = CITY_TO_REGION[key]
@@ -54,9 +42,6 @@ export function getDoleWageReference(cityInput) {
   return buildReference(region)
 }
 
-// The highest wage floor across every region — used for platform-wide
-// bounds with no city dimension (ServiceTask.minPrice/maxPrice), same
-// reasoning as the backend's getHighestDoleWageReference (keep in sync).
 export function getHighestDoleWageReference() {
   return Object.keys(WAGE_REGIONS)
     .map(buildReference)

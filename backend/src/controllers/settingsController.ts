@@ -10,10 +10,6 @@ interface AuthRequest extends Request {
   user?: JwtPayload;
 }
 
-// Every admin-editable number, with its allowed range. Every field is
-// optional on update so each admin page (Settings, Price Adjustments, Commission & Debt, Booking
-// Rules) can save just its own slice of this singleton. Withholding tax and
-// the ATC code are fixed in appSettingsService, so they aren't here.
 const NUMERIC_FIELDS = {
   commissionRate: [0, 1],
   pendingExpiryMinutes: [5, 10080],
@@ -42,7 +38,6 @@ const NUMERIC_FIELDS = {
   disputeEscalationHours: [1, 720],
 } as const satisfies Partial<Record<keyof AppSettings, readonly [number, number]>>;
 
-// Nullable "off by default" thresholds — null means disabled.
 const NULLABLE_NUMERIC_FIELDS = {
   autoSuspendRatingThreshold: [0, 5],
   autoSuspendDisputeCountThreshold: [1, 1000],
@@ -87,7 +82,6 @@ export const updateSettings = async (req: AuthRequest, res: Response) => {
       notificationsEnabled?: boolean;
     };
 
-    // A field that IS sent can't be blanked, since both are shown publicly.
     if ((siteName !== undefined && !siteName?.trim()) || (supportEmail !== undefined && !supportEmail?.trim())) {
       return res.status(400).json(errorResponse(400, 'Site Name and Support Email are required.'));
     }

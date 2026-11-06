@@ -18,9 +18,6 @@ import { revokeSessionIds, revokeUserSessions } from '@utils/tokenRevocation';
 import { authenticateSocket, initSocket } from '../src/socket';
 import { createTestUser, deleteTestUser } from './helpers';
 
-// The real limiter and revocation store live in Redis, which this suite
-// doesn't run (they fail open without it). In-memory stand-ins with the
-// same contract let the behaviour itself be tested.
 jest.mock('@utils/otpAttemptLimiter', () => {
   const counts = new Map<string, number>();
   const key = (id: string, type: string) => `${id}:${type}`;
@@ -104,7 +101,6 @@ describe('Session & login hardening', () => {
       const second = await refresh(refreshToken);
       expect(second.status).toBe(401);
       expect(second.body.code).toBe('REFRESH_RACE');
-      // The session survives: the winner's token still works.
       expect((await refresh(first.body.data.refreshToken)).status).toBe(200);
     });
 
@@ -167,7 +163,6 @@ describe('Session & login hardening', () => {
     it('ends an admin session 12 hours after sign-in, however active', async () => {
       const { refreshToken } = await adminSignIn('admin-max');
       const row = await prisma.authToken.findFirst({ where: { token: hashRefreshToken(refreshToken) } });
-      // Signed in 13 hours ago; this token was just issued by a recent refresh.
       await prisma.authToken.update({ where: { id: row!.id }, data: { createdAt: new Date(Date.now() - 13 * 60 * 60 * 1000) } });
 
       const res = await refresh(refreshToken);
@@ -179,7 +174,6 @@ describe('Session & login hardening', () => {
     it('never lets a renewed admin token outlive the 12-hour limit', async () => {
       const { refreshToken } = await adminSignIn('admin-cap');
       const row = await prisma.authToken.findFirst({ where: { token: hashRefreshToken(refreshToken) } });
-      // Signed in 11h50m ago: the renewed token must stop at the 12h mark (10 min), not run 45 min.
       await prisma.authToken.update({ where: { id: row!.id }, data: { createdAt: new Date(Date.now() - (11 * 60 + 50) * 60 * 1000) } });
 
       const res = await refresh(refreshToken);
@@ -275,7 +269,6 @@ describe('Session & login hardening', () => {
       for (const weak of ['Password123', 'P@ssw0rd2024', 'Qwerty12345', 'Welcome12345', 'Homeease2025']) {
         expect(await checkNewPassword(weak)).toBe(BREACHED_PASSWORD_MESSAGE);
       }
-      // A common word buried in something longer is not a common password.
       expect(await checkNewPassword('Tr4mpoline-Kettle-92')).toBeNull();
     });
 
@@ -284,7 +277,6 @@ describe('Session & login hardening', () => {
       expect(await checkNewPassword('Delacruz2025x!', info)).toBe(PERSONAL_INFO_PASSWORD_MESSAGE);
       expect(await checkNewPassword('Zq8delacruz88Wp', info)).toBe(PERSONAL_INFO_PASSWORD_MESSAGE);
       expect(await checkNewPassword('Xk1171234567Qz', info)).toBe(PERSONAL_INFO_PASSWORD_MESSAGE);
-      // Short name parts ("Juan", "Dela") alone are not enough to trip it.
       expect(await checkNewPassword('Juan-Kettle-Orbit-71', info)).toBeNull();
     });
 
@@ -307,20 +299,17 @@ describe('Session & login hardening', () => {
       const reset = (email: string, newPassword: string, otp = '123456') =>
         request(app).post('/api/auth/reset-password').send({ email, otp, newPassword });
 
-      // Right code, password with their surname: refused, code still usable.
       const refused = await reset(user.email, 'Villanueva2025!');
       expect(refused.status).toBe(400);
       expect(refused.body.message).toBe(PERSONAL_INFO_PASSWORD_MESSAGE);
       expect(await prisma.authToken.count({ where: { userId: user.id, type: TokenType.PASSWORD_RESET } })).toBe(1);
 
-      // Wrong code: the same generic answer as for an unknown account, never the personal-info one.
       const wrongCode = await reset(user.email, 'Villanueva2025!', '000000');
       expect(wrongCode.status).toBe(400);
       expect(wrongCode.body.message).toBe('Invalid or expired OTP');
       const unknown = await reset('e2etest.nobody@homeease.invalid', 'Villanueva2025!');
       expect(unknown.body.message).toBe('Invalid or expired OTP');
 
-      // A good password with the same code goes through and uses the code up.
       const ok = await reset(user.email, 'Tr4mpoline-Kettle-92');
       expect(ok.status).toBe(200);
       expect(await prisma.authToken.count({ where: { userId: user.id, type: TokenType.PASSWORD_RESET } })).toBe(0);

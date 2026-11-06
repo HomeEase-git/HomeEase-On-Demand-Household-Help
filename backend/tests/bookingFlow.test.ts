@@ -5,8 +5,6 @@ import { invalidateAppSettingsCache } from '@services/appSettingsService';
 import { BOOKING_PHOTO_BUCKET } from '@config/supabase';
 import { createTestUser, deleteTestUser, createTestBooking, deleteTestBooking } from './helpers';
 
-// Manila coordinates, mirroring tests/unit/geo.test.ts's known-good deltas:
-// ~55m away is inside the default 100m geofence, ~1.2km away is outside it.
 const CLIENT_LOCATION = { lat: 14.5995, lng: 120.9842 };
 const NEARBY_WORKER_LOCATION = { lat: 14.5995 + 0.0005, lng: 120.9842 };
 const FAR_WORKER_LOCATION = { lat: 14.61, lng: 120.9842 };
@@ -50,8 +48,6 @@ describe('Booking flow — arrival geofencing, the invoice after the job, disput
 
   describe('arrival geofencing', () => {
     it('rejects check-in when the worker is outside the geofence radius', async () => {
-      // The radius is an admin setting (0 turns the check off), so pin it here
-      // instead of relying on whatever the database currently holds.
       const settings = await prisma.appSettings.upsert({ where: { id: 'singleton' }, update: {}, create: { id: 'singleton' } });
       await prisma.appSettings.update({ where: { id: 'singleton' }, data: { geofenceRadiusMeters: 150 } });
       invalidateAppSettingsCache();
@@ -292,7 +288,6 @@ describe('Booking flow — arrival geofencing, the invoice after the job, disput
     };
     const complete = (id: string, body: Record<string, unknown>) =>
       request(app).patch(`/api/bookings/${id}/complete`).set('Authorization', `Bearer ${workerToken}`).send(body);
-    // Built in beforeAll: workerId isn't set yet when this describe body runs.
     let done: string;
     let part: Record<string, unknown>;
     let extra: Record<string, unknown>;
@@ -428,7 +423,6 @@ describe('Booking flow — arrival geofencing, the invoice after the job, disput
     const photo = (owner: string, name: string) =>
       `${process.env.SUPABASE_URL}/storage/v1/object/public/${BOOKING_PHOTO_BUCKET}/${owner}/${name}.jpg`;
 
-    // A cash job whose invoice (₱1000 job + ₱300 extra work) the client reported.
     async function seedReportedInvoice() {
       const booking = await createTestBooking({ clientId, workerId, status: 'IN_PROGRESS', estimatedPrice: 1000 });
       createdBookingIds.push(booking.id);

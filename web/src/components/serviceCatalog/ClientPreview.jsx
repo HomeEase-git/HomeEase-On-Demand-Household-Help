@@ -1,11 +1,6 @@
 import { useState } from 'react'
 import { countRange, formatPeso, usesCount } from './catalogModel'
 
-/**
- * The client's booking step for the chosen job: pick the job, and for a
- * per-piece job enter how many. Mirrors mobile step-1 so the admin sees
- * what clients get.
- */
 export default function ClientPreview({ draft, jobRef, onJobChange }) {
   const [count, setCount] = useState(null)
   const jobs = draft.jobs.filter((j) => j.isActive)

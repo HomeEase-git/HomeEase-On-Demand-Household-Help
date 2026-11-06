@@ -12,14 +12,6 @@ import {
 } from '@services/paymentLifecycleService';
 import { postManualRefund } from '@services/ledgerService';
 
-/**
- * Money that was actually paid is never refunded automatically: anything that
- * would refund a paid booking (a cancellation, an admin force-cancel, a
- * dispute resolved with Cancel & Refund) files a RefundRequest instead, and an
- * admin approves, rejects, or records it as refunded manually. Voiding an
- * unpaid payment still happens right away — no money has moved.
- */
-
 export class RefundRequestError extends Error {
   constructor(
     message: string,
@@ -50,8 +42,6 @@ export async function requestRefund(input: {
   }
   if (payment.status !== 'COMPLETED') return { kind: 'none' };
 
-  // One open request per payment: lock the payment row so two cancellations
-  // at once can't file two requests.
   const { request, created } = await prisma.$transaction(async (tx) => {
     await tx.$queryRaw`SELECT "id" FROM "Payment" WHERE "id" = ${payment.id} FOR UPDATE`;
     const open = await tx.refundRequest.findFirst({
@@ -95,13 +85,6 @@ export async function requestRefund(input: {
   return { kind: 'requested', request };
 }
 
-/**
- * Approves a PENDING (or retries a FAILED) request and sends the refund. The
- * status claim means two admins clicking at once only refund once. If the
- * refund can't go through, the request is FAILED with the reason — when the
- * worker's payout was already sent, the admin settles it and uses
- * markRefundedManually.
- */
 export async function approveRefundRequest(id: string, adminId: string, note?: string | null) {
   const claim = await prisma.refundRequest.updateMany({
     where: { id, status: { in: ['PENDING', 'FAILED'] } },
@@ -163,13 +146,6 @@ export async function rejectRefundRequest(id: string, adminId: string, note: str
   return request;
 }
 
-/**
- * Records a refund the admin settled outside the app (typically because the
- * worker's payout was already sent). The payment is marked refunded for the
- * books; a payout that hasn't gone out yet is still stopped so the worker
- * isn't paid on top. Recovering money from a worker who was already paid is
- * done with Adjust Dues on the worker's page.
- */
 export async function markRefundedManually(id: string, adminId: string, note: string) {
   const request = await prisma.refundRequest.findUnique({ where: { id } });
   if (!request) throw new RefundRequestError('Refund request not found', 404);
@@ -186,8 +162,6 @@ export async function markRefundedManually(id: string, adminId: string, note: st
       await undoWorkerSettlement(payment.id);
     } catch (error) {
       workerAlreadyPaid = error instanceof PayoutAlreadySentError;
-      // Already sent is the usual reason for a manual refund; anything else
-      // (a payout mid-send) should be retried rather than recorded.
       if (!(error instanceof PayoutAlreadySentError)) {
         throw new RefundRequestError(error instanceof Error ? error.message : 'Could not stop the payout', 409);
       }
@@ -210,7 +184,6 @@ export async function markRefundedManually(id: string, adminId: string, note: st
         refundedAt: new Date(),
       },
     });
-    // Cash jobs never had the client's money on the platform's books.
     if (payment.methodType !== 'CASH') {
       await postManualRefund(prisma, payment, payment.booking.workerId, workerAlreadyPaid, payment.booking.clientId);
     }

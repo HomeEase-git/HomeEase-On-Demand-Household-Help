@@ -1,10 +1,3 @@
-// Local dev Redis with no Docker/WSL required.
-//
-// Spins up the same redis-memory-server binary the integration suite
-// (tests/integration/queues.test.ts) already downloads and uses, bound to
-// the port backend/.env expects (REDIS_PORT, default 6379) so `npm run dev`'s
-// BullMQ queues/workers (bookingQueue, payoutQueue, verificationQueue) have
-// a real Redis to talk to. Run this in its own terminal alongside `npm run dev`.
 import "dotenv/config";
 import { RedisMemoryServer } from "redis-memory-server";
 

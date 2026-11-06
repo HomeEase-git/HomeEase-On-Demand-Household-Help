@@ -11,9 +11,6 @@ import { useToastContext } from "../../contexts/ToastContext";
 import { acceptContract } from "../../services/api";
 import { useAuthStore } from "../../store/authStore";
 
-// Short-form privacy notice shown at the point the most sensitive data is
-// collected (Data Privacy Act §16(b)): what, why, who sees it, how long.
-// Keep in sync with the Privacy Policy's KYC section.
 const KYC_NOTICE = [
   {
     title: "What we collect",
@@ -47,8 +44,6 @@ export default function KycLandingScreen() {
       await acceptContract("KYC_CONSENT");
       router.push("/(kyc)/upload-id");
     } catch (err: any) {
-      // Sign-up logs the worker in before the email code is entered, so someone
-      // who quit at that step comes back here unverified.
       if (err?.response?.data?.code === "EMAIL_NOT_VERIFIED" && email) {
         toast.info("Please verify your email first.");
         router.push({ pathname: "/(auth)/otp-verification", params: { email } });

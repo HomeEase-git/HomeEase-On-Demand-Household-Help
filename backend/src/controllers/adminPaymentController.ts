@@ -28,10 +28,7 @@ type PaymentRecord = Prisma.PaymentGetPayload<{ include: typeof paymentInclude }
 function formatPayment(record: PaymentRecord) {
   const totalAmount = record.totalAmount ?? 0;
   const commissionAmount = record.commissionAmount ?? 0;
-  // The stored share (after commission and withholding tax), not total minus
-  // commission — that would count VAT and withheld tax as the worker's.
   const workerAmount = record.workerPayout ?? 0;
-  // When the money came in, for a paid payment; otherwise when it was created.
   const paymentDate = record.capturedAt ?? record.createdAt;
 
   return {
@@ -81,12 +78,9 @@ function buildPaymentWhere(search: string, status?: string): Prisma.PaymentWhere
 export const listPayments = async (req: Request, res: Response) => {
   try {
     const { page, limit, skip } = getPaginationParams(req.query);
-    // Server-side so the order covers every page, not just the visible one.
     const { orderBy } = parseListSort<Prisma.PaymentOrderByWithRelationInput>(
       req.query,
       {
-        // Matches the Date column: when the money came in. Unpaid payments
-        // (no capture yet) sit with the newest.
         date: (dir) => ({ capturedAt: { sort: dir, nulls: dir === 'desc' ? 'first' : 'last' } }),
         client: (dir) => ({ booking: { client: { fullName: dir } } }),
         worker: (dir) => ({ booking: { worker: { fullName: dir } } }),
@@ -100,9 +94,6 @@ export const listPayments = async (req: Request, res: Response) => {
     const status = typeof req.query.status === 'string' ? req.query.status.trim() : 'all';
 
     const where = buildPaymentWhere(search, status);
-    // Commission Overview is always a Completed-payments summary regardless
-    // of which status tab is selected — computed over the full matching set,
-    // not just the current page. See financeReportService.paymentBreakdown.
     const completedWhere = buildPaymentWhere(search, 'completed');
 
     const [total, records, breakdown] = await Promise.all([
@@ -122,8 +113,6 @@ export const listPayments = async (req: Request, res: Response) => {
       data: records.map(formatPayment),
       meta: {
         ...buildPaginationMeta(total, page, limit),
-        // Where completed client payments went. Withholding tax and VAT are
-        // held for BIR — neither is the platform's or the worker's money.
         completedGrossVolume: breakdown.clientPaid,
         completedWorkerEarnings: breakdown.workerEarnings,
         completedPlatformCommission: breakdown.platformCommission,
@@ -158,14 +147,6 @@ export const getPaymentById = async (req: Request, res: Response) => {
   }
 };
 
-/**
- * Payout Distribution — tracks the real Xendit payout lifecycle via
- * the Payout table (created once the client's payment clears, see
- * paymentLifecycleService.settleWorkerEarnings). Payment.escrowStatus
- * RELEASED means "the worker's cut is owed"; Payout.status PAID means "the
- * worker has actually been sent the money." Cash jobs have no Payout — the
- * platform's cut is booked as worker commission debt instead.
- */
 const payoutInclude = {
   payment: {
     include: {
@@ -258,10 +239,6 @@ export const listPayouts = async (req: Request, res: Response) => {
       prisma.payout.aggregate({ where, _sum: { amount: true } }),
     ]);
 
-    // Paid jobs whose worker earnings haven't been settled into a Payout yet —
-    // in practice the worker has no payout account (settleWorkerEarnings holds
-    // the payment until they add one). Cash jobs are settled worker-side up
-    // front and never get a Payout by design, so workerSettledAt excludes them.
     const heldPayoutCount = await prisma.payment.count({
       where: { escrowStatus: 'RELEASED', payout: null, workerSettledAt: null },
     });
@@ -282,10 +259,6 @@ export const listPayouts = async (req: Request, res: Response) => {
   }
 };
 
-/**
- * PATCH /api/admin/payments/payouts/:id/retry
- * Re-queues a FAILED payout for another disbursement attempt.
- */
 export const retryPayout = async (req: AuthRequest, res: Response) => {
   try {
     const id = req.params.id as string;
@@ -299,22 +272,14 @@ export const retryPayout = async (req: AuthRequest, res: Response) => {
       return res.status(400).json(errorResponse(400, 'Only a failed payout can be retried'));
     }
 
-    // Guarded: a refund may have cancelled this payout since the read above.
     const reopened = await prisma.payout.updateMany({
       where: { id, status: 'FAILED' },
-      // New retry generation → new Xendit Idempotency-key (see payoutWorker).
       data: { status: 'PENDING', failureReason: null, failedAt: null, retryGeneration: { increment: 1 } },
     });
     if (reopened.count === 0) {
       return res.status(409).json(errorResponse(409, 'This payout changed and can no longer be retried'));
     }
 
-    // Unlike the booking-flow expiry-job calls elsewhere, this one can't be
-    // a silent best-effort catch: the update above already flipped this
-    // payout to PENDING, so a Redis hiccup here would otherwise leave it
-    // stuck looking "in flight" with no job actually queued to process it —
-    // an admin has no way to notice that from the outside. Revert it back
-    // to FAILED (still visibly retriable) instead of leaving that gap.
     try {
       await schedulePayout(id);
     } catch (error) {

@@ -1,28 +1,16 @@
 import type { BookingStatus } from "../store/bookingStore";
 
-/**
- * Where a client's booking is in its life, for the status summary at the
- * top of the booking detail screen.
- *
- * Four plain steps, whatever the backend status: the client books (Waiting),
- * a worker takes it (Confirmed), the work happens (Ongoing) and it ends
- * (Done). At the end the worker sends an invoice and the client pays it:
- * cash to the worker, or GCash/Maya in the app. The quote statuses only
- * appear on bookings from before invoices.
- */
 export const TIMELINE_STEPS = ["Waiting", "Confirmed", "Ongoing", "Done"] as const;
 
 export type TimelineTone = "normal" | "action" | "issue" | "stopped";
 
 export type BookingTimeline = {
-  /** Index into TIMELINE_STEPS of the step happening now; steps before it are done. */
   current: number;
   headline: string;
   detail: string;
   tone: TimelineTone;
 };
 
-/** "2:10 PM – 4:35 PM (2h 25m)" from the worker's start/finish stamps; null until both exist. */
 export function formatJobTime(startIso?: string | null, endIso?: string | null): string | null {
   if (!startIso || !endIso) return null;
   const start = new Date(startIso);

@@ -8,9 +8,6 @@ describe('Admin verification approve/reject', () => {
   let adminToken: string;
 
   beforeAll(async () => {
-    // Warm up the Neon connection pool before the timing-sensitive
-    // $transaction calls in approve/reject — a cold first connection can
-    // occasionally push those past Prisma's 5s interactive-transaction timeout.
     await prisma.user.count();
 
     const { user, plainPassword } = await createTestUser('verif-admin', { role: 'ADMIN' });
@@ -36,8 +33,6 @@ describe('Admin verification approve/reject', () => {
     const { user: worker } = await createTestUser(label, { role: 'WORKER' });
     createdUserIds.push(worker.id);
 
-    // Realistic, complete worker profile. The geocoded address is not part
-    // of the approval gate (workers add it from profile edit).
     await prisma.workerProfile.update({
       where: { userId: worker.id },
       data: {
@@ -57,9 +52,6 @@ describe('Admin verification approve/reject', () => {
         type: 'WORKER_ONBOARDING',
         status,
         documents: {
-          // All Tier 1 required types (see documents.MD / adminVerificationController's
-          // approval completeness gate) so approval tests reflect a realistic, complete
-          // submission — the incomplete-submission path is covered separately in kycUpload.test.ts.
           create: [
             { documentType: 'GOVERNMENT_ID_FRONT', fileUrl: 'https://example.invalid/id-front.jpg' },
             { documentType: 'GOVERNMENT_ID_BACK', fileUrl: 'https://example.invalid/id-back.jpg' },
@@ -143,10 +135,6 @@ describe('Admin verification approve/reject', () => {
   });
 
   it('includes SUBMITTED (a completed worker application) when the queue is filtered to PENDING', async () => {
-    // A worker's request only ever reaches SUBMITTED once they finish
-    // onboarding (userController.acceptContract) and never moves back to
-    // PENDING — the Verification Management page's Pending filter includes
-    // SUBMITTED so a completed application remains visible to admins.
     const { worker, verification } = await seedPendingVerification('submitted', 'SUBMITTED');
 
     const res = await request(app)
@@ -310,7 +298,6 @@ describe('Admin verification approve/reject', () => {
 
   it('blocks non-admin tokens from the approve endpoint', async () => {
     const { worker, verification } = await seedPendingVerification('gate');
-    // worker itself trying to approve its own verification
     const login = await request(app)
       .post('/api/auth/login')
       .send({ email: worker.email, password: 'TestPass123!' });

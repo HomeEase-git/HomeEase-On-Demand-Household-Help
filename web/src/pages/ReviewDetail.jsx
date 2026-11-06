@@ -27,9 +27,6 @@ export default function ReviewDetail() {
 
   const dismissFlag = async () => {
     try {
-      // Clears the flag only — no change to status/visibility. For a report
-      // that turns out to be nothing; anything serious enough to act on
-      // goes through Warn User instead.
       await updateReview(id, { flagged: false })
       await reload()
       showSuccess('Flag dismissed.')

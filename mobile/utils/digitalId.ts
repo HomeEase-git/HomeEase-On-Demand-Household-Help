@@ -11,7 +11,6 @@ export type DigitalIdCardData = {
   licenseNumber?: string;
   memberSince?: string | null;
   kycApprovedAt?: string | null;
-  /** Base URL the QR code points at, e.g. the API/web origin. */
   verificationBaseUrl?: string;
 };
 
@@ -29,7 +28,6 @@ export type DigitalIdCard = {
   licenseNumber?: string;
   /** "Sep 2026" style label, or "—" when unknown. */
   memberSinceLabel: string;
-  /** "02 Sep 2026" style label, or "Pending review" when not yet approved. */
   kycApprovedLabel: string;
   /** URL encoded into the scan-to-verify QR code. */
   verificationUrl: string;
@@ -48,7 +46,6 @@ export const formatMonthYear = (value?: string | null): string => {
   return `${MONTHS[d.getMonth()]} ${d.getFullYear()}`;
 };
 
-/** "02 Sep 2026" — zero-padded day, short month, year. */
 export const formatFullDate = (value?: string | null): string => {
   if (!value) return "—";
   const d = new Date(value);

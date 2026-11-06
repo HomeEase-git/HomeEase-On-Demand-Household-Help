@@ -83,8 +83,6 @@ function formatBooking(record: {
         }),
     amount: amount != null ? formatPeso(amount) : '—',
     status: record.status.charAt(0) + record.status.slice(1).toLowerCase(),
-    // Client and assigned worker share a phone number — see
-    // Booking.selfDealingFlag's schema comment. Advisory only.
     selfDealingFlag: record.selfDealingFlag ?? false,
     archived: record.archivedAt != null,
   };
@@ -93,7 +91,6 @@ function formatBooking(record: {
 export const listBookings = async (req: Request, res: Response) => {
   try {
     const { page, limit, skip } = getPaginationParams(req.query);
-    // Server-side so the order covers every page, not just the visible one.
     const { orderBy } = parseListSort<Prisma.BookingOrderByWithRelationInput>(
       req.query,
       {
@@ -179,11 +176,9 @@ export const getBookingById = async (req: Request, res: Response) => {
             ? formatPeso(booking.finalPrice ?? booking.estimatedPrice)
             : '—',
         selfDealingFlag: booking.selfDealingFlag,
-        // Exact PH start time (bookings before exact times show their old slot's start).
         startTime: bookingStartTime(booking),
         isRush: booking.isRush,
         rushFee: bookingLog?.rushFee ?? 0,
-        // Booking-time price split, shown for every status (cancelled too).
         pricing: bookingLog
           ? {
               basePrice: bookingLog.basePrice,
@@ -207,8 +202,6 @@ export const getBookingById = async (req: Request, res: Response) => {
           status: v.status,
           notes: v.notes,
         })),
-        // The worker's invoice (sent at completion): the job, packages, parts
-        // and extra work, with their photos.
         invoice: {
           status: invoiceStatus(booking.status, booking.workerCompletedAt),
           sentAt: booking.workerCompletedAt,
@@ -236,11 +229,6 @@ export const getBookingById = async (req: Request, res: Response) => {
 
 const TERMINAL_STATUSES = ['COMPLETED', 'CANCELLED', 'REJECTED'];
 
-/**
- * PATCH /api/admin/bookings/:id/archive  { archived: boolean }
- * Hides (or restores) a finished booking in the admin list. Active bookings
- * can't be archived, so nothing in progress drops out of view.
- */
 export const setBookingArchived = async (req: AuthRequest, res: Response) => {
   try {
     const id = req.params.id as string;
@@ -275,12 +263,6 @@ export const setBookingArchived = async (req: AuthRequest, res: Response) => {
   }
 };
 
-/**
- * PATCH /api/admin/bookings/:id/cancel
- * Admin override — cancels a booking in any non-terminal state, writes a
- * Cancellation audit record, frees the worker's capacity/calendar slot if
- * one was held, and releases/refunds the payment hold.
- */
 export const cancelBookingAdmin = async (req: AuthRequest, res: Response) => {
   try {
     const id = req.params.id as string;
@@ -305,8 +287,6 @@ export const cancelBookingAdmin = async (req: AuthRequest, res: Response) => {
       }
       await tx.bookingVisit.updateMany({ where: { bookingId: id, status: 'SCHEDULED' }, data: { status: 'CANCELLED' } });
 
-      // Same as bookingController.cancelBooking — an open dispute on a
-      // booking cancelled from here has nothing left to resolve.
       await tx.dispute.updateMany({
         where: { bookingId: id, status: { in: ['OPEN', 'UNDER_REVIEW'] } },
         data: {
@@ -326,17 +306,12 @@ export const cancelBookingAdmin = async (req: AuthRequest, res: Response) => {
         },
       });
 
-      // Status-guarded: rolls the whole cancel back if the booking moved on
-      // (e.g. completed or paid) since it was read.
       await updateBookingIfStatus(tx, id, booking.status, { status: 'CANCELLED', notes: reason?.trim() || booking.notes });
     });
 
-    // Best-effort — the cancel already committed above, same reasoning as
-    // the client-facing cancelBooking/acceptBooking/declineBooking handlers.
     await cancelPendingExpiryJob(id).catch((error) => {
       console.error(`Failed to cancel pending-expiry job for admin-cancelled booking ${id}:`, error);
     });
-    // A paid booking's refund goes to the Refunds page for approval.
     await requestRefund({
       bookingId: id,
       reason: reason?.trim() || 'Cancelled by admin',

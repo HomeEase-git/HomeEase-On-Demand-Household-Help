@@ -1,5 +1,3 @@
-// The PAID handler re-fetches the invoice from Xendit; each test says what
-// Xendit "reports" for it.
 jest.mock('@services/xenditService', () => ({
   ...jest.requireActual('@services/xenditService'),
   retrieveInvoice: jest.fn(),
@@ -98,8 +96,6 @@ describe('Xendit invoice webhook — token verification and event handling', () 
     const invoiceId = `inv_test_paid_${Date.now()}`;
     const { payment } = await seedPendingPayment(invoiceId);
 
-    // Capture is atomic on Xendit's side — no separate "charge" call to
-    // mock, the webhook payload itself carries the paid amount/payment id.
     const payload = {
       id: invoiceId,
       status: 'PAID',

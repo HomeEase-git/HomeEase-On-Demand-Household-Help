@@ -7,7 +7,6 @@ const router = Router();
 
 router.use(authMiddleware, restrictTo('ADMIN'));
 
-// On-site cancellations where the worker blamed the client and attached proof.
 router.get('/', listCancellationReviews);
 router.patch('/:bookingId/review', reviewCancellation);
 

@@ -7,9 +7,6 @@ export interface LatLng {
 
 const toRadians = (degrees: number): number => (degrees * Math.PI) / 180;
 
-/**
- * Great-circle distance between two coordinates, in meters.
- */
 export const distanceMeters = (a: LatLng, b: LatLng): number => {
   const dLat = toRadians(b.lat - a.lat);
   const dLng = toRadians(b.lng - a.lng);

@@ -9,19 +9,12 @@ import * as api from "../../services/api";
 
 const POLL_INTERVAL_MS = 20000;
 
-// Waiting screen a worker lands on once their KYC docs are submitted but not
-// yet decided by an admin. Deliberately has no buttons and no menu/tab bar —
-// there is nothing to do here but wait, so it auto-advances itself the
-// moment the status changes (via socket push, polled as a fallback) rather
-// than offering any way to navigate onward.
 export default function KycPendingScreen() {
   const router = useRouter();
   const user = useAuthStore((s) => s.user);
   const kycStatus = user?.kycStatus;
 
   useEffect(() => {
-    // Swallow the Android hardware back button — there's no screen this
-    // waiting state should ever let a worker escape to.
     const subscription = BackHandler.addEventListener(
       "hardwareBackPress",
       () => true,

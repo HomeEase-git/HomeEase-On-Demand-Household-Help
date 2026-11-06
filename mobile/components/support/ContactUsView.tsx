@@ -84,7 +84,6 @@ export function ContactUsView({ role }: Props) {
     }
 
     const fullSubject = `[${topic}] ${subject.trim() || topic}`;
-    // Account details help support find the user without a back-and-forth.
     const details = [
       "---",
       user ? `Account: ${user.email} (${role}, ID ${user.id})` : `Account: not signed in (${role})`,

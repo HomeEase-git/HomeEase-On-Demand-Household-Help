@@ -17,8 +17,6 @@ type Props = {
 
 const OTHER_MIN = 10;
 
-// One tap to pick what went wrong, one to send. The server decides what
-// happens next (ping, cancel, ask the worker, or report to HomeEase).
 export const ProblemReportSheet: React.FC<Props> = ({
   visible,
   workerArrived,
@@ -30,8 +28,6 @@ export const ProblemReportSheet: React.FC<Props> = ({
   const [reason, setReason] = useState<ProblemReason | null>(null);
   const [note, setNote] = useState("");
 
-  // Reopening starts clean: reset on the open transition, so nothing changes
-  // while the sheet fades out (during render, not in an effect).
   const [wasVisible, setWasVisible] = useState(visible);
   if (wasVisible !== visible) {
     setWasVisible(visible);

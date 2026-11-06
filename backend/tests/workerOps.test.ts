@@ -19,7 +19,6 @@ async function login(email: string, password = PASSWORD) {
   return res;
 }
 
-/** A booking photo URL "uploaded" by this user (see utils/storageUrls). */
 function photoUrl(userId: string, name: string) {
   return `${process.env.SUPABASE_URL}/storage/v1/object/public/${BOOKING_PHOTO_BUCKET}/${userId}/${name}.jpg`;
 }
@@ -114,13 +113,11 @@ describe('worker operations overhaul', () => {
       expect(later.body.data).toMatchObject({ scheduledTime: '10:00', isRush: false });
       expect(later.body.data.pricing.rushFee).toBe(0);
 
-      // Same day, as late as allowed so the 2-hour lead time is met.
       const today = await request(app)
         .post('/api/bookings')
         .set('Authorization', `Bearer ${clientToken}`)
         .send(bookingBody(isoDay(phTodayStart()), '18:00'));
       if (today.status === 400) {
-        // It's already past 16:00 in the Philippines — no same-day slot left.
         expect(today.body.message).toMatch(/at least 2 hours/);
       } else {
         expect(today.status).toBe(201);
@@ -180,7 +177,6 @@ describe('worker operations overhaul', () => {
         .send(bookingBody(isoDay(addDays(phTodayStart(), 22)), '10:00', { packageIds: [pkg.id] }));
       expect(res.status).toBe(201);
 
-      // The client's choice is the consent: the row starts approved, not pending.
       const rows = await prisma.bookingAddOn.findMany({ where: { bookingId: res.body.data.id } });
       expect(rows).toHaveLength(1);
       expect(rows[0]).toMatchObject({ name: 'Deep Clean Package', price: 1600 });
@@ -198,7 +194,6 @@ describe('worker operations overhaul', () => {
       expect(asClient.body.data.priceBreakdown.subtotal).toBe(estimated + 1600);
       expect(asClient.body.data.earnings).toBeNull(); // worker-only
 
-      // Worker's card is built on that same subtotal, and its lines add up.
       const asWorker = await request(app)
         .get(`/api/bookings/${res.body.data.id}`)
         .set('Authorization', `Bearer ${workerToken}`);
@@ -566,8 +561,6 @@ describe('worker operations overhaul', () => {
       ]);
 
       const row = await prisma.booking.findUniqueOrThrow({ where: { id: booking.id } });
-      // Either the accept won (moved before the arrival) or it was refused —
-      // but never both "moved" and "arrived".
       if (answer.status === 200) {
         expect(row.scheduledTime).toBe('14:00');
       } else {
@@ -644,7 +637,6 @@ describe('worker operations overhaul', () => {
       expect(out.status).toBe(200);
       expect(out.body.data.signedOutCurrent).toBe(false);
 
-      // The other device can no longer refresh; this one can.
       const otherRefresh = await request(app).post('/api/auth/refresh').send({ refreshToken: second.body.data.refreshToken });
       expect(otherRefresh.status).toBe(401);
       const thisRefresh = await request(app).post('/api/auth/refresh').send({ refreshToken: first.body.data.refreshToken });

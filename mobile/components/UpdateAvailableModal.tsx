@@ -8,16 +8,11 @@ import OutlinedButton from "./ui/OutlinedButton";
 import { useAppUpdate } from "../hooks/useAppUpdate";
 import { colors } from "../constants";
 
-// Tab home screens and sign-in: places where a prompt can't interrupt a
-// booking, checkout, or form. 
 const IDLE_PATHS = new Set(["/", "/sign-in", "/home", "/category", "/booking", "/inbox", "/profile", "/requests", "/records", "/earnings"]);
 
-/** Mounted once in the root layout; see useAppUpdate for what triggers it. */
 export default function UpdateAvailableModal() {
   const pathname = usePathname();
   const { otaAvailable, installOta } = useAppUpdate();
-  // "Later" lasts until the app is restarted. An OTA update still applies on
-  // the next cold start on its own.
   const [dismissed, setDismissed] = useState(false);
   const [installing, setInstalling] = useState(false);
 

@@ -7,10 +7,6 @@ interface AuthRequest extends Request {
   user?: JwtPayload;
 }
 
-/**
- * GET /api/blocks
- * The users the caller has blocked, newest first.
- */
 export const listBlocks = async (req: AuthRequest, res: Response) => {
   try {
     if (!req.user) {
@@ -39,10 +35,6 @@ export const listBlocks = async (req: AuthRequest, res: Response) => {
   }
 };
 
-/**
- * POST /api/blocks/:userId
- * Block a user. Repeating it is a no-op.
- */
 export const blockUser = async (req: AuthRequest, res: Response) => {
   try {
     if (!req.user) {
@@ -69,9 +61,6 @@ export const blockUser = async (req: AuthRequest, res: Response) => {
   }
 };
 
-/**
- * DELETE /api/blocks/:userId
- */
 export const unblockUser = async (req: AuthRequest, res: Response) => {
   try {
     if (!req.user) {

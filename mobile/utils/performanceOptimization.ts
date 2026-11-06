@@ -1,31 +1,6 @@
 import { useRef, useEffect, useCallback, useState } from 'react';
 import { Animated, Easing } from 'react-native';
 
-/**
- * Performance & Animation Utilities
- * 
- * Features:
- * - Interruptible animations (can be cancelled/reversed)
- * - Staggered animations (avoid heavy simultaneous animations)
- * - List rendering optimizations (memoization, virtualization hints)
- * - Memory leak prevention
- */
-
-/**
- * useInterruptibleAnimation
- * 
- * Create an animation that can be interrupted or reversed.
- * Prevents janky animations and allows smooth transitions.
- * 
- * Usage:
- *   const { value, animate, cancel } = useInterruptibleAnimation(0, 1, 300);
- *   
- *   return (
- *     <Animated.View style={{ opacity: value }}>
- *       <Content />
- *     </Animated.View>
- *   );
- */
 export function useInterruptibleAnimation(
   fromValue: number,
   toValue: number,
@@ -81,27 +56,6 @@ export function useInterruptibleAnimation(
   };
 }
 
-/**
- * useStaggeredAnimation
- * 
- * Animate multiple elements sequentially to avoid simultaneous heavy animations.
- * 
- * Usage:
- *   const stagger = useStaggeredAnimation();
- *   
- *   return (
- *     <>
- *       {items.map((item, i) => (
- *         <Animated.View
- *           key={i}
- *           style={stagger.getAnimationStyle(i)}
- *         >
- *           {item}
- *         </Animated.View>
- *       ))}
- *     </>
- *   );
- */
 export function useStaggeredAnimation(
   itemCount: number,
   itemDuration: number = 100,
@@ -152,20 +106,6 @@ export function useStaggeredAnimation(
   };
 }
 
-/**
- * useFlatListOptimization
- * 
- * Returns optimized props for FlatList performance.
- * Handles:
- * - Item layout estimation
- * - Rendering optimization
- * - Memory management
- * 
- * Usage:
- *   const optimizedProps = useFlatListOptimization();
- *   
- *   <FlatList {...optimizedProps} />
- */
 export function useFlatListOptimization(
   itemHeight: number = 100,
   options: {
@@ -206,21 +146,6 @@ export function useFlatListOptimization(
   };
 }
 
-/**
- * useImageOptimization
- * 
- * Progressive image loading with fade-in animation.
- * Shows placeholder while loading.
- * 
- * Usage:
- *   const { imageOpacity, handleImageLoad } = useImageOptimization();
- *   
- *   <Animated.Image
- *     source={...}
- *     style={{ opacity: imageOpacity }}
- *     onLoad={handleImageLoad}
- *   />
- */
 export function useImageOptimization() {
   const [opacity] = useState(() => new Animated.Value(0));
 
@@ -239,18 +164,6 @@ export function useImageOptimization() {
   };
 }
 
-/**
- * useDebouncedCallback
- * 
- * Debounce a callback to avoid excessive calls.
- * Useful for search, resize handlers, etc.
- * 
- * Usage:
- *   const handleSearch = useDebouncedCallback(
- *     (text) => performSearch(text),
- *     500
- *   );
- */
 export function useDebouncedCallback<T extends (...args: any[]) => any>(
   callback: T,
   delay: number = 300
@@ -276,18 +189,6 @@ export function useDebouncedCallback<T extends (...args: any[]) => any>(
   };
 }
 
-/**
- * useThrottledCallback
- * 
- * Throttle a callback to limit how often it can be called.
- * Useful for scroll events, drag handlers, etc.
- * 
- * Usage:
- *   const handleScroll = useThrottledCallback(
- *     (offset) => checkNeedMoreData(offset),
- *     100
- *   );
- */
 export function useThrottledCallback<T extends (...args: any[]) => any>(
   callback: T,
   delay: number = 100
@@ -322,16 +223,8 @@ export function useThrottledCallback<T extends (...args: any[]) => any>(
   };
 }
 
-/**
- * useMemoryWarning
- * 
- * Monitor memory usage and trigger cleanup when threshold exceeded.
- * (Native implementation depends on platform capabilities)
- */
 export function useMemoryWarning(onMemoryWarning?: () => void) {
   useEffect(() => {
-    // Note: React Native doesn't have built-in memory warnings
-    // This would need platform-specific implementation
     console.log('[Performance] Memory monitoring initialized');
 
     return () => {
@@ -340,9 +233,6 @@ export function useMemoryWarning(onMemoryWarning?: () => void) {
   }, [onMemoryWarning]);
 }
 
-/**
- * Performance monitoring utility for debugging
- */
 export const performanceMonitor = {
   measureStart: (label: string) => {
     if (__DEV__) {

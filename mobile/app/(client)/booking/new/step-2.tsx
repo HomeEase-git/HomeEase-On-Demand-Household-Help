@@ -39,8 +39,6 @@ export default function BookingStep2Screen() {
   const [city, setCity] = useState<string | undefined>(draft.city);
   const [date, setDate] = useState<string | null>(draft.date);
   const [time, setTime] = useState<string | null>(draft.time);
-  // A profile-picked (locked) worker: the dates they don't work, and the
-  // start times of jobs they already have on the picked date.
   const [workerClosedDates, setWorkerClosedDates] = useState<string[]>([]);
   const [workerBusyTimes, setWorkerBusyTimes] = useState<string[]>([]);
 
@@ -80,10 +78,6 @@ export default function BookingStep2Screen() {
       setAddressOpen(false);
     };
 
-    // Backend-persisted coordinates (set when the address was last
-    // saved/geocoded — see UserAddress.lat/lng) are the most trustworthy
-    // source and need no network round-trip; the on-device cache is a
-    // fallback for addresses saved before that column existed.
     if (item.lat != null && item.lng != null) {
       applySelection(item.lat, item.lng);
       return;
@@ -124,9 +118,6 @@ export default function BookingStep2Screen() {
     }
   };
 
-  // Start from the default saved address so a repeat booking is one tap less.
-  // "Book again" brings the old address text but no coordinates, so a shown
-  // address without a pin is re-resolved from the matching saved address.
   const defaultTried = useRef(false);
   useEffect(() => {
     if (defaultTried.current || (address && lat != null && lng != null)) return;
@@ -134,7 +125,6 @@ export default function BookingStep2Screen() {
       addresses.find((a) => !!address && displayAddress(a) === address) ??
       addresses.find((a) => a.isDefault);
     if (!preferred) return;
-    // Deferred: selecting sets state, which the effect rule disallows synchronously.
     const timer = setTimeout(() => {
       defaultTried.current = true;
       handleSelectAddress(preferred);
@@ -181,8 +171,6 @@ export default function BookingStep2Screen() {
     };
   }, [lockedWorkerId, date]);
 
-  // How many workers work on the picked date (for a locked worker: 0 or 1).
-  // Workers take several jobs a day, so the start time doesn't change this.
   const { count: prosAvailable, loading: loadingCount } = useDateAvailabilityCount(
     {
       serviceType: draft.serviceType ?? undefined,
@@ -193,8 +181,6 @@ export default function BookingStep2Screen() {
     hasScope && !!date
   );
 
-  // Same-day booking: only start times at least RUSH_MIN_LEAD_HOURS away,
-  // and today is closed once none are left.
   const today = phTodayIso();
   const todayHasTimes = earliestStartTime(today) != null;
   const minTime = useMemo(() => earliestStartTime(date), [date]);
@@ -204,8 +190,6 @@ export default function BookingStep2Screen() {
     [workerClosedDates, todayHasTimes, today],
   );
 
-  // The time picker re-checks the entered time against the new date's
-  // earliest start and clears it if it's no longer allowed.
   const handleSelectDate = (iso: string) => setDate(iso);
 
   const noProsOnDate = !!date && !loadingCount && prosAvailable === 0;
@@ -227,9 +211,6 @@ export default function BookingStep2Screen() {
       return;
     }
 
-    // Straight to the review screen: unless the client already picked or
-    // locked in a worker, the best available one is matched for them
-    // (they can still choose one from the review screen).
     const keepWorker = !!draft.workerId && (draft.workerLocked || !draft.isAutoMatched);
     setDraft({
       address,

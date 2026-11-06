@@ -33,20 +33,6 @@ interface AuthRequest extends Request {
   user?: JwtPayload;
 }
 
-/**
- * GET /api/workers
- * Worker discovery search (public). Query params:
- *   serviceType, date (YYYY-MM-DD), hasPets, serviceTaskId,
- *   lat, lng, page, limit
- *   — plus legacy category/minRating/maxPrice, kept for existing callers.
- *
- * Filters to isAvailable + kycStatus APPROVED workers, available on `date`
- * when given (weekly schedule + date overrides) and offering serviceType —
- * the same eligibility findAutoMatchWorker uses, so Step 3's list and
- * "surprise me" never disagree. Sorted by rating —
- * there's no reliable worker location data to sort/filter by proximity (see
- * matchingService.ts for the same reasoning on auto-match).
- */
 export const searchWorkers = async (req: AuthRequest, res: Response) => {
   try {
     const {
@@ -74,11 +60,6 @@ export const searchWorkers = async (req: AuthRequest, res: Response) => {
     const serviceTypeName = typeof serviceType === 'string' ? serviceType : typeof category === 'string' ? category : undefined;
     const hasPetsBool = hasPets === 'true' || hasPets === '1';
 
-    // A specific task is only bookable through a worker who has ticked it
-    // (WorkerTaskSelection) — must agree with matchingService.
-    // findAutoMatchWorker so Step 3's list and auto-match never disagree on
-    // eligibility. Prices are admin-set (see taskPriceService), so there's
-    // no per-worker price to gate on.
     const serviceTask =
       typeof serviceTaskId === 'string' && serviceTaskId
         ? await prisma.serviceTask.findUnique({ where: { id: serviceTaskId } })
@@ -88,26 +69,14 @@ export const searchWorkers = async (req: AuthRequest, res: Response) => {
       isAvailable: true,
       kycStatus: 'APPROVED',
       debtHoldAt: null,
-      // Workers who haven't finished account setup aren't discoverable (see
-      // workerSetupService).
       AND: [workerSetupCompleteWhere()],
       ...(serviceTask ? offersTaskFilter(serviceTask.id) : {}),
     };
 
-    // Scopes discovery to a single already-known worker — used by the client
-    // app to check whether a specific (e.g. profile-locked) worker is
-    // available on a date, via the same filtering as everyone else.
     if (typeof workerId === 'string' && workerId) {
       whereClause.userId = workerId;
     }
 
-    // Exact match, not substring — a "contains" match here could pull in an
-    // unrelated category whose name happens to include this one as a
-    // substring (e.g. "Repair"), and it must agree with
-    // matchingService.findAutoMatchWorker's equals check so Step 3's list and
-    // auto-match never disagree on who's eligible. Only a VERIFIED category
-    // connection counts — a 2nd+ category still PENDING_VERIFICATION (see
-    // WorkerServiceCategory's docblock) must never surface in search.
     const serviceTypeWhere: Prisma.ServiceTypeWhereInput = {};
     if (serviceTypeName) {
       serviceTypeWhere.name = { equals: serviceTypeName, mode: 'insensitive' };
@@ -131,8 +100,6 @@ export const searchWorkers = async (req: AuthRequest, res: Response) => {
       whereClause.acceptsPets = true;
     }
 
-    // Workers take any number of jobs a day; the date only has to be one
-    // they work (see workerAvailabilityService.availableOnDateWhere).
     const isRush = typeof date === 'string' && isRushDate(date);
     if (typeof date === 'string') {
       (whereClause.AND as Prisma.WorkerProfileWhereInput[]).push(availableOnDateWhere(date));
@@ -153,9 +120,6 @@ export const searchWorkers = async (req: AuthRequest, res: Response) => {
           },
         },
       },
-      // Bounded candidate pool — the rating sort below runs in memory (see
-      // file header comment), so this caps how much a single request can
-      // pull before that pass.
       take: 500,
     });
 
@@ -174,16 +138,10 @@ export const searchWorkers = async (req: AuthRequest, res: Response) => {
     const clientLng = typeof lng === 'string' ? parseFloat(lng) : NaN;
     const hasClientLocation = !isNaN(clientLat) && !isNaN(clientLng);
 
-    // Distance-eligible candidates on this page — resolved as one batched
-    // Routes API matrix call (real driving distance, falling back to
-    // straight-line per-worker) rather than one request per card.
     const workersWithAddress = hasClientLocation
       ? page_.filter((w) => w.addressLat != null && w.addressLng != null)
       : [];
 
-    // Expertise tier — computed live from rating + completed-job count (see
-    // utils/workerTier.ts). Batched over just this page, not all candidates.
-    // Independent of each other, so run in parallel rather than serially.
     const [tierSettings, completedCounts, workerDistancesKm] = await Promise.all([
       getAppSettings(),
       prisma.booking.groupBy({
@@ -201,9 +159,6 @@ export const searchWorkers = async (req: AuthRequest, res: Response) => {
       workersWithAddress.map((w, i) => [w.id, workerDistancesKm[i]])
     );
 
-    // The category-level task preview below only shows tasks the worker has
-    // actually selected (see WorkerTaskSelection) — a client shouldn't see a
-    // price/range for a task the worker never agreed to perform.
     const allTaskIds = Array.from(
       new Set(page_.flatMap((w) => w.serviceCategories.flatMap((c) => c.serviceType.tasks.map((t) => t.id))))
     );
@@ -227,11 +182,6 @@ export const searchWorkers = async (req: AuthRequest, res: Response) => {
         categories[0];
       const selectedTaskIds = selectedTaskIdsByWorker.get(worker.id) ?? new Set<string>();
 
-      // Admin-set task price (see taskPriceService). PER_UNIT has no
-      // meaningful total until a quantity is known (collected later, in the
-      // booking form) — expose the raw rate instead so
-      // mobile can compute total × quantity client-side (see
-      // bookingPriceEstimate.ts) rather than showing a misleading total here.
       const perUnitTask = !!serviceTask && isPerUnitModel(serviceTask.pricingModel);
       const basePrice = !serviceTask ? matchedServiceType?.basePrice ?? null : perUnitTask ? null : serviceTask.basePrice;
       const unitPriceForTask = perUnitTask ? serviceTask!.basePrice : null;
@@ -248,9 +198,6 @@ export const searchWorkers = async (req: AuthRequest, res: Response) => {
       if (tier === 'PRO') badges.push('PRO_TIER');
       if (tier === 'EXPERT') badges.push('EXPERT_TIER');
 
-      // Same formula bookingController.createBooking uses for the real
-      // charge (see utils/pricing.computeJobPricing) — this is a genuine
-      // per-job preview, not a separate hourly-rate guess.
       const multiplier = tierMultiplier(tier, tierSettings);
       const workerDistanceKm = distanceKmByWorkerId.get(worker.id) ?? null;
       const jobPricing =
@@ -258,7 +205,6 @@ export const searchWorkers = async (req: AuthRequest, res: Response) => {
           ? computeJobPricing({
               basePrice,
               tierMultiplier: multiplier,
-              // Same-day search: preview the rush fee the booking will carry.
               rushFeeRate: isRush ? tierSettings.rushFeeRate : 0,
               distanceKm: workerDistanceKm,
               freeDistanceKm: tierSettings.freeDistanceKm,
@@ -267,11 +213,6 @@ export const searchWorkers = async (req: AuthRequest, res: Response) => {
           : null;
       const estimatedTotal = jobPricing?.estimatedPrice ?? null;
 
-      // Browse-time price range for this worker's matched category — the
-      // spread across the admin prices of the tasks THIS worker offers, at
-      // THIS worker's own tier. Distance isn't factored in here (unlike
-      // estimatedTotal above) since browsing lists don't scope to one client
-      // address/booking yet. Unpriced (switched-off) jobs are skipped.
       const matchedTaskPrices = (matchedServiceType?.tasks ?? [])
         .filter((t) => selectedTaskIds.has(t.id) && t.basePrice > 0)
         .map((t) => t.basePrice);
@@ -286,10 +227,6 @@ export const searchWorkers = async (req: AuthRequest, res: Response) => {
         rating: worker.rating,
         totalReviews: worker.totalReviews,
         estimatedTotal,
-        // Itemized version of estimatedTotal — lets the booking flow show a
-        // live "Base rate / Distance fee / Tier surcharge" breakdown instead
-        // of one lumped number, before a booking even exists. Null under the
-        // same conditions estimatedTotal is (PER_UNIT task, or no base price).
         priceBreakdown: jobPricing
           ? {
               basePrice: jobPricing.basePrice,
@@ -298,25 +235,15 @@ export const searchWorkers = async (req: AuthRequest, res: Response) => {
               rushFee: jobPricing.rushFee,
             }
           : null,
-        // Only populated for a PER_UNIT task search — the tier-adjusted
-        // per-unit rate, for mobile to multiply by quantity once the client
-        // enters one (see bookingPriceEstimate.ts / Stage 4 of the task-
-        // pricing plan). Null for every other pricing model.
-        // Includes the same-day rush share, so rate x quantity is the whole
-        // job price before the distance fee.
         unitPrice:
           unitPriceForTask != null
             ? Math.round(unitPriceForTask * (multiplier + (isRush ? tierSettings.rushFeeRate : 0)) * 100) / 100
             : null,
-        // Same-day booking: the rush fee is this share of the service price
-        // (for mobile's per-unit estimate). 0 otherwise.
         rushFeeRate: isRush ? tierSettings.rushFeeRate : 0,
         yearsExperience: worker.yearsExperience,
         priceRangeMin,
         priceRangeMax,
         tier,
-        // Lets the client fetch this worker's packages for the selected
-        // category later in the booking flow without an extra round-trip.
         matchedServiceTypeId: matchedServiceType?.id ?? null,
         service: matchedServiceType?.name ?? 'General service',
         serviceTypeNames: categories.map((st) => st.name),
@@ -344,10 +271,6 @@ export const searchWorkers = async (req: AuthRequest, res: Response) => {
   }
 };
 
-/**
- * GET /api/workers/:workerId
- * Get detailed worker profile including ResumeParseResult fields
- */
 export const getWorkerDetail = async (req: AuthRequest, res: Response) => {
   try {
     const workerId = req.params.workerId as string;
@@ -364,10 +287,6 @@ export const getWorkerDetail = async (req: AuthRequest, res: Response) => {
         serviceAreaRadius: true,
         activeJobCount: true,
         availableDays: true,
-        // Public, unauthenticated endpoint: never select contact details or
-        // the street address. Clients get the worker's phone only through a
-        // booking (see bookingController), and city/province is enough to
-        // show where they work.
         city: true,
         state: true,
         kycStatus: true,
@@ -394,23 +313,10 @@ export const getWorkerDetail = async (req: AuthRequest, res: Response) => {
             },
           },
         },
-        // Only the count is used below (reviewCount) — select just that
-        // instead of pulling every review row (comment, photos, etc.) for it.
         _count: { select: { reviews: true } },
-        // Client-facing: only certifications the worker has both gotten
-        // approved AND opted to show (visibleToClients) belong on a public
-        // profile — a PENDING/REJECTED claim or one the worker toggled off
-        // has no business reaching a client's device at all.
         certifications: {
           where: { verificationStatus: 'APPROVED', visibleToClients: true },
         },
-        // resumeUrl and resumeParseResult.rawText are deliberately excluded
-        // here — the raw file/text carry the worker's phone/email, which a
-        // client has no legitimate need to see (and it invites going
-        // off-platform to contact them directly). Only the derived,
-        // non-identifying fields the profile screen actually renders are
-        // selected; the worker's own resume-preview screen fetches the full
-        // record through a different (self-only) endpoint.
         resumeParseResult: {
           select: {
             parsedSkills: true,
@@ -450,11 +356,6 @@ export const getWorkerDetail = async (req: AuthRequest, res: Response) => {
       : [];
     const selectedTaskIds = new Set(workerTaskSelections.map((s) => s.serviceTaskId));
 
-    // Per-category price range across the admin prices of the tasks this
-    // worker offers, at this worker's own tier — mirrors serviceController's
-    // marketplace-wide range but narrowed to just this one worker. A client
-    // shouldn't see a price for a task the worker never agreed to perform,
-    // and unpriced (switched-off) jobs are skipped.
     const services = categories.map((st) => {
       const pricedTasks = st.tasks.filter((t) => selectedTaskIds.has(t.id) && t.basePrice > 0);
       const taskPrices = pricedTasks.length ? pricedTasks.map((t) => t.basePrice) : [st.basePrice];
@@ -491,9 +392,6 @@ export const getWorkerDetail = async (req: AuthRequest, res: Response) => {
         resumeParseResult: worker.resumeParseResult,
         certifications: worker.certifications,
         services,
-        // Aggregate across every category this worker offers — the overall
-        // "range of what this worker offers" shown on their profile before
-        // a specific category is picked.
         priceRangeMin: services.length ? Math.min(...services.map((s) => s.priceRangeMin)) : null,
         priceRangeMax: services.length ? Math.max(...services.map((s) => s.priceRangeMax)) : null,
         verificationStatus: worker.kycStatus === 'APPROVED' ? 'VERIFIED' : 'PENDING',
@@ -507,12 +405,6 @@ export const getWorkerDetail = async (req: AuthRequest, res: Response) => {
   }
 };
 
-/**
- * GET /api/workers/me/digital-id
- * Self-serve digital ID card data for the logged-in worker. Unlike the public
- * getWorkerDetail above, this does NOT gate on kycStatus === 'APPROVED' — a
- * worker needs to see their own pending state, not a 404.
- */
 export const getMyDigitalId = async (req: AuthRequest, res: Response) => {
   try {
     if (!req.user) {
@@ -570,10 +462,6 @@ export const getMyDigitalId = async (req: AuthRequest, res: Response) => {
   }
 };
 
-/**
- * GET /api/workers/:workerId/reviews
- * Get paginated reviews for a worker
- */
 export const getWorkerReviews = async (req: AuthRequest, res: Response) => {
   try {
     const workerId = req.params.workerId as string;
@@ -583,7 +471,6 @@ export const getWorkerReviews = async (req: AuthRequest, res: Response) => {
     const limitNum = Math.min(100, Math.max(1, parseInt(limit as string) || 10));
     const skip = (pageNum - 1) * limitNum;
 
-    // Check if worker exists — workerId param is the User.id (userId on WorkerProfile)
     const workerProfile = await prisma.workerProfile.findUnique({
       where: { userId: workerId },
       select: { id: true, kycStatus: true },
@@ -593,11 +480,6 @@ export const getWorkerReviews = async (req: AuthRequest, res: Response) => {
       return res.status(404).json(errorResponse(404, 'Worker not found'));
     }
 
-    // Review.workerId references WorkerProfile.id, not User.id. status:
-    // VISIBLE excludes anything an admin has HIDDEN/WARNED (see
-    // ReviewStatus) — previously this filter didn't exist at all, so a
-    // review an admin explicitly hid for, say, containing personal
-    // information or being fraudulent stayed fully visible to the public.
     const [reviews, total] = await Promise.all([
       prisma.review.findMany({
         where: { workerId: workerProfile.id, status: 'VISIBLE' },
@@ -636,9 +518,6 @@ export const getWorkerReviews = async (req: AuthRequest, res: Response) => {
         avatar: review.client.avatar,
       },
       serviceType: review.booking?.serviceTask?.name || 'Service',
-      // Added so the frontend can link "view booking" from a review without
-      // fabricating an id — booking was already fetched above, just wasn't
-      // surfaced in the formatted output.
       bookingId: review.booking?.id ?? null,
       workerResponse: maskProfanity(review.workerResponse),
       createdAt: review.createdAt,
@@ -663,13 +542,6 @@ export const getWorkerReviews = async (req: AuthRequest, res: Response) => {
   }
 };
 
-/**
- * POST /api/workers/me/reviews/:reviewId/response
- * Lets a worker post a one-time public reply to a review left on their
- * profile — previously there was no way to respond to an unfair or
- * inaccurate review at all. Settable once; not editable after (mirrors the
- * review itself being immutable once submitted).
- */
 export const respondToReview = async (req: AuthRequest, res: Response) => {
   try {
     if (!req.user) {
@@ -726,11 +598,6 @@ export const respondToReview = async (req: AuthRequest, res: Response) => {
   }
 };
 
-/**
- * GET /api/workers/:workerId/availability?date=YYYY-MM-DD
- * Whether the worker works that date, and the start times of the jobs they
- * already have on it (shown to the client as a hint; overlapping is allowed).
- */
 export const getWorkerAvailability = async (req: AuthRequest, res: Response) => {
   try {
     const workerId = req.params.workerId as string;
@@ -766,11 +633,6 @@ export const getWorkerAvailability = async (req: AuthRequest, res: Response) => 
   }
 };
 
-/**
- * GET /api/workers/:workerId/blocked-dates
- * Dates within the client booking window the worker doesn't work (their
- * weekly schedule plus date overrides) — the client calendar disables them.
- */
 export const getWorkerBlockedDates = async (req: AuthRequest, res: Response) => {
   try {
     const workerId = req.params.workerId as string;
@@ -798,10 +660,6 @@ export const getWorkerBlockedDates = async (req: AuthRequest, res: Response) => 
   }
 };
 
-/**
- * PATCH /api/workers/me/availability
- * Toggle isAvailable and set availableDays (worker only)
- */
 export const updateAvailability = async (req: AuthRequest, res: Response) => {
   try {
     if (!req.user) {
@@ -816,8 +674,6 @@ export const updateAvailability = async (req: AuthRequest, res: Response) => {
         select: { debtHoldAt: true },
       });
       if (current?.debtHoldAt) {
-        // 402, not 403 — see the matching comment in bookingController's
-        // acceptBooking (403 triggers the app's auth-clearing interceptor).
         return res
           .status(402)
           .json(
@@ -851,13 +707,6 @@ export const updateAvailability = async (req: AuthRequest, res: Response) => {
   }
 };
 
-/**
- * GET /api/workers/me/profile
- * Self-service profile read (worker only) — unlike GET /workers/:workerId
- * (the public detail view), this includes addressLat/addressLng, which
- * should never be exposed on the public endpoint since it's the worker's
- * precise home/service coordinates, not just a text address.
- */
 export const getMyWorkerProfile = async (req: AuthRequest, res: Response) => {
   try {
     if (!req.user) {
@@ -903,10 +752,6 @@ export const getMyWorkerProfile = async (req: AuthRequest, res: Response) => {
   }
 };
 
-/**
- * PATCH /api/workers/me/profile
- * Update worker profile fields (worker only)
- */
 export const updateWorkerProfile = async (req: AuthRequest, res: Response) => {
   try {
     if (!req.user) {
@@ -928,16 +773,9 @@ export const updateWorkerProfile = async (req: AuthRequest, res: Response) => {
       licenseNumber,
       birthDate,
       yearsExperience,
-      // kycStatus/kycSubmittedAt/kycApprovedAt are deliberately NOT accepted
-      // here — this is a worker self-service endpoint, and those fields
-      // must only ever be set by admin review (adminVerificationController)
-      // or the server-side contract-acceptance flow (userController.
-      // acceptContract), never by the worker's own request body.
     } = req.body;
 
     const updateData: any = {};
-    // Age and experience are checked by the admin against the worker's ID
-    // and resume at KYC approval, so they're locked once approved.
     if (birthDate !== undefined || yearsExperience !== undefined) {
       const current = await prisma.workerProfile.findUnique({
         where: { userId: req.user.userId },
@@ -968,9 +806,6 @@ export const updateWorkerProfile = async (req: AuthRequest, res: Response) => {
     if (city !== undefined) updateData.city = city;
     if (state !== undefined) updateData.state = state;
     if (zipCode !== undefined) updateData.zipCode = zipCode;
-    // addressLat/addressLng are the geocoded coordinates for the address
-    // above — used to compute the distance-based pricing fee at booking
-    // time (see bookingController.createBooking). Not matching/search input.
     if (addressLat !== undefined) updateData.addressLat = addressLat;
     if (addressLng !== undefined) updateData.addressLng = addressLng;
     if (resumeUrl !== undefined) {
@@ -1031,22 +866,6 @@ type CategoryGateResult =
 
 const MAX_REQUEST_DOCUMENTS = 5;
 
-/**
- * Connects a worker to a service category (the "request a new service"
- * action, see addServiceCategory). A worker's FIRST category is VERIFIED
- * immediately unless the admin flagged it requiresCertification. Every other
- * request (2nd+ category, a certification-gated one, or retrying a REJECTED
- * one) starts PENDING_VERIFICATION until an admin approves it
- * (adminServiceRequestController, or approving one of its documents in
- * adminCertificationController). An already-APPROVED certification tagged to
- * the category unlocks it straight away.
- *
- * Certificates are where they belong: here, per service — not in KYC. They're
- * required only for a service the admin flagged requiresCertification (e.g.
- * electrical); for everything else (e.g. laundry, where no common
- * certificate exists) they're optional but encouraged, since an approved
- * certificate shows on the worker's profile.
- */
 async function runCategoryGate(
   workerProfileId: string,
   serviceTypeId: string,
@@ -1101,7 +920,6 @@ async function runCategoryGate(
       return { error: 'Document dates must be valid dates.', status: 400 };
     }
   }
-  // Every file must be one this worker uploaded (see utils/storageUrls).
   if (newDocs.length > 0) {
     const owner = await prisma.workerProfile.findUnique({ where: { id: workerProfileId }, select: { userId: true } });
     for (const doc of newDocs) {
@@ -1113,8 +931,6 @@ async function runCategoryGate(
     }
   }
 
-  // An existing, still-pending document the worker already uploaded for this
-  // category counts too (e.g. one from My Certifications).
   const pendingCert = input.certificationId
     ? await prisma.certification.findFirst({
         where: { id: input.certificationId, workerProfileId, serviceTypeId, verificationStatus: 'PENDING' },
@@ -1133,8 +949,6 @@ async function runCategoryGate(
     };
   }
 
-  // Documents + category are written atomically so the two are never
-  // observed half-written by a concurrent request.
   const category = await prisma.$transaction(async (tx) => {
     const created = [];
     for (const doc of newDocs) {
@@ -1153,7 +967,6 @@ async function runCategoryGate(
         })
       );
     }
-    // Null when the worker attached nothing (optional for this service).
     const gatingId = (pendingCert ?? created[0])?.id ?? null;
 
     return tx.workerServiceCategory.upsert({
@@ -1166,14 +979,6 @@ async function runCategoryGate(
   return { category };
 }
 
-/**
- * POST /api/workers/me/service-types
- * Request a service category (worker only). Body: { serviceTypeId,
- * certifications?: [{ title, issuer, issueDate, expiryDate?, documentUrl }],
- * certificationId? } — the documents are only consulted when the request
- * needs admin review (see runCategoryGate). Tasks under the category can be
- * picked once it's VERIFIED (see selectTask).
- */
 export const addServiceCategory = async (req: AuthRequest, res: Response) => {
   try {
     if (!req.user) {
@@ -1219,12 +1024,6 @@ export const addServiceCategory = async (req: AuthRequest, res: Response) => {
   }
 };
 
-/**
- * GET /api/workers/me/service-types
- * List the authenticated worker's service category connections, including
- * ones still PENDING_VERIFICATION or REJECTED (worker only) — the mobile
- * skills screen needs the full picture to render each category's status.
- */
 export const listMyServiceTypes = async (req: AuthRequest, res: Response) => {
   try {
     if (!req.user) {
@@ -1253,12 +1052,6 @@ export const listMyServiceTypes = async (req: AuthRequest, res: Response) => {
   }
 };
 
-/**
- * DELETE /api/workers/me/service-types/:serviceTypeId
- * Remove a service category (worker only) — also withdraws a request that's
- * still pending review. Deactivates every task selection under it and
- * deletes the WorkerServiceCategory row.
- */
 export const removeServiceType = async (req: AuthRequest, res: Response) => {
   try {
     if (!req.user) {
@@ -1306,12 +1099,6 @@ export const removeServiceType = async (req: AuthRequest, res: Response) => {
   }
 };
 
-/**
- * PUT /api/workers/me/task-selections/:serviceTaskId
- * "I do this task" (worker only). Only allowed under a service category the
- * worker is registered and approved for — a new category is requested
- * first (see addServiceCategory).
- */
 export const selectTask = async (req: AuthRequest, res: Response) => {
   try {
     if (!req.user) {
@@ -1359,12 +1146,6 @@ export const selectTask = async (req: AuthRequest, res: Response) => {
   }
 };
 
-/**
- * DELETE /api/workers/me/task-selections/:serviceTaskId
- * Untick a task (worker only). The worker stays registered for the service
- * even with no tasks ticked — an admin approved it, so it isn't thrown away
- * (see removeServiceType to drop a service on purpose).
- */
 export const deselectTask = async (req: AuthRequest, res: Response) => {
   try {
     if (!req.user) {
@@ -1405,13 +1186,6 @@ export const deselectTask = async (req: AuthRequest, res: Response) => {
   }
 };
 
-/**
- * GET /api/workers/me/task-catalog
- * One consolidated read for the mobile "Skills & Services" screen: every
- * active ServiceType/ServiceTask in the admin catalog, annotated with this
- * worker's own registration status for the category and whether they've
- * ticked each task. Prices are the admin's (read-only for the worker).
- */
 export const getMyTaskCatalog = async (req: AuthRequest, res: Response) => {
   try {
     if (!req.user) {
@@ -1482,11 +1256,6 @@ export const getMyTaskCatalog = async (req: AuthRequest, res: Response) => {
   }
 };
 
-/**
- * GET /api/workers/me/setup-status
- * The worker's account-setup checklist (see workerSetupService). Until it's
- * complete the worker is hidden from clients and can't accept requests.
- */
 export const getMySetupStatus = async (req: AuthRequest, res: Response) => {
   try {
     if (!req.user) {
@@ -1503,14 +1272,6 @@ export const getMySetupStatus = async (req: AuthRequest, res: Response) => {
   }
 };
 
-/**
- * POST /api/workers/me/resume/parse
- * Runs (or re-runs, with { force: true }) AI resume parsing against the
- * worker's already-uploaded resume PDF and persists the result. Returns the
- * cached ResumeParseResult without re-calling the AI if one already exists
- * and force isn't set — resume-preview.tsx calls this on mount, so repeat
- * screen visits shouldn't burn an API call each time.
- */
 export const parseMyResume = async (req: AuthRequest, res: Response) => {
   try {
     if (!req.user) {
@@ -1555,10 +1316,6 @@ export const parseMyResume = async (req: AuthRequest, res: Response) => {
   }
 };
 
-/**
- * GET /api/workers/me/packages
- * List the authenticated worker's own priced service packages (worker only)
- */
 export const listMyPackages = async (req: AuthRequest, res: Response) => {
   try {
     if (!req.user) {
@@ -1591,13 +1348,6 @@ export const listMyPackages = async (req: AuthRequest, res: Response) => {
   }
 };
 
-/**
- * POST /api/workers/me/packages
- * Create a priced package for one of the worker's own service categories
- * (worker only). serviceTypeId must already be connected to the worker via
- * the service-categories self-serve feature — a worker can't create a
- * package for a category they don't offer.
- */
 export const createPackage = async (req: AuthRequest, res: Response) => {
   try {
     if (!req.user) {
@@ -1632,8 +1382,6 @@ export const createPackage = async (req: AuthRequest, res: Response) => {
       );
     }
 
-    // Starts PENDING — clients only see a package once an admin approves it
-    // (see adminPackageController).
     const created = await prisma.workerPackage.create({
       data: {
         workerProfileId: workerProfile.id,
@@ -1657,11 +1405,6 @@ export const createPackage = async (req: AuthRequest, res: Response) => {
   }
 };
 
-/**
- * PATCH /api/workers/me/packages/:packageId
- * Update a package's name/description/price/isActive/serviceTypeId (worker
- * only, ownership-checked). Content changes send it back for admin approval.
- */
 export const updatePackage = async (req: AuthRequest, res: Response) => {
   try {
     if (!req.user) {
@@ -1717,8 +1460,6 @@ export const updatePackage = async (req: AuthRequest, res: Response) => {
     if (description !== undefined) updateData.description = typeof description === 'string' ? description.trim() : null;
     if (price !== undefined) updateData.price = price;
     if (isActive !== undefined) updateData.isActive = isActive;
-    // Any change to what the client is sold (name, details, price, service)
-    // goes back to the admin for approval. Pausing/resuming doesn't.
     if (serviceTypeId !== undefined || name !== undefined || description !== undefined || price !== undefined) {
       updateData.status = 'PENDING';
       updateData.rejectionReason = null;
@@ -1743,13 +1484,6 @@ export const updatePackage = async (req: AuthRequest, res: Response) => {
   }
 };
 
-/**
- * DELETE /api/workers/me/packages/:packageId
- * Remove a package from the authenticated worker's profile (worker only,
- * ownership-checked). Historical bookings that included this package keep
- * their own BookingAddOn snapshot (name/price copied at booking time, no FK
- * back to WorkerPackage), so deleting it doesn't affect past bookings.
- */
 export const deletePackage = async (req: AuthRequest, res: Response) => {
   try {
     if (!req.user) {
@@ -1789,12 +1523,6 @@ export const deletePackage = async (req: AuthRequest, res: Response) => {
   }
 };
 
-/**
- * GET /api/workers/:workerId/packages
- * Public — a client browsing/booking a worker can see that worker's active,
- * admin-approved packages, optionally scoped to a specific service type (the one selected
- * earlier in the booking flow).
- */
 export const getWorkerPackages = async (req: Request, res: Response) => {
   try {
     const workerId = req.params.workerId as string;
@@ -1831,8 +1559,6 @@ export const getWorkerPackages = async (req: Request, res: Response) => {
   }
 };
 
-// Maps the Certification model's DB shape onto the field names the mobile
-// app's certifications screens already expect (name/status vs title/verificationStatus).
 const formatCertification = (cert: {
   id: string;
   title: string;
@@ -1865,10 +1591,6 @@ const formatCertification = (cert: {
   };
 };
 
-/**
- * GET /api/workers/me/certifications
- * List the authenticated worker's certifications (worker only)
- */
 export const listMyCertifications = async (req: AuthRequest, res: Response) => {
   try {
     if (!req.user) {
@@ -1900,10 +1622,6 @@ export const listMyCertifications = async (req: AuthRequest, res: Response) => {
   }
 };
 
-/**
- * GET /api/workers/me/certifications/:certId
- * Get a single certification belonging to the authenticated worker (worker only)
- */
 export const getCertification = async (req: AuthRequest, res: Response) => {
   try {
     if (!req.user) {
@@ -1937,13 +1655,6 @@ export const getCertification = async (req: AuthRequest, res: Response) => {
   }
 };
 
-/**
- * POST /api/workers/me/certifications
- * Add a certification to the authenticated worker's profile (worker only).
- * The document itself is uploaded separately via
- * POST /api/users/me/kyc-documents/upload (documentType=CERTIFICATION), which
- * returns the documentUrl passed in here.
- */
 export const createCertification = async (req: AuthRequest, res: Response) => {
   try {
     if (!req.user) {
@@ -2005,12 +1716,6 @@ export const createCertification = async (req: AuthRequest, res: Response) => {
   }
 };
 
-/**
- * PATCH /api/workers/me/certifications/:certId
- * Update an existing certification belonging to the authenticated worker
- * (worker only). Editing resets verificationStatus back to PENDING since the
- * content changed and needs re-review, clearing any prior rejection.
- */
 export const updateCertification = async (req: AuthRequest, res: Response) => {
   try {
     if (!req.user) {
@@ -2081,14 +1786,6 @@ export const updateCertification = async (req: AuthRequest, res: Response) => {
   }
 };
 
-/**
- * PATCH /api/workers/me/certifications/:certId/visibility
- * Toggle whether an existing certification is shown on the worker's public
- * profile (worker only). Deliberately separate from updateCertification —
- * this is a display preference, not a change to the underlying claim, so it
- * does NOT reset verificationStatus back to PENDING the way editing the
- * title/issuer/dates does.
- */
 export const updateCertificationVisibility = async (req: AuthRequest, res: Response) => {
   try {
     if (!req.user) {
@@ -2128,10 +1825,6 @@ export const updateCertificationVisibility = async (req: AuthRequest, res: Respo
   }
 };
 
-/**
- * DELETE /api/workers/me/certifications/:certId
- * Remove a certification from the authenticated worker's profile (worker only)
- */
 export const deleteCertification = async (req: AuthRequest, res: Response) => {
   try {
     if (!req.user) {
@@ -2167,10 +1860,6 @@ export const deleteCertification = async (req: AuthRequest, res: Response) => {
   }
 };
 
-/**
- * GET /api/workers/me/payout
- * Get the authenticated worker's payout method (worker only)
- */
 export const getPayoutMethod = async (req: AuthRequest, res: Response) => {
   try {
     if (!req.user) {
@@ -2193,7 +1882,6 @@ export const getPayoutMethod = async (req: AuthRequest, res: Response) => {
     return res.status(200).json({
       success: true,
       message: 'Payout method retrieved successfully',
-      // The worker's own number, shown in full so they can check it.
       data: { ...worker, payoutAccountNumber: decryptOptionalField(worker.payoutAccountNumber) ?? null },
     });
   } catch (error) {
@@ -2202,15 +1890,6 @@ export const getPayoutMethod = async (req: AuthRequest, res: Response) => {
   }
 };
 
-/**
- * PATCH /api/workers/me/payout
- * Set the authenticated worker's payout method (worker only)
- */
-// Below this, a payoutAccountName is treated as "clearly a different person"
-// from the account holder's own registered name rather than a minor
-// mismatch (nickname, middle initial, maiden name) — flagged for admin
-// review, never blocked outright, since it's a heuristic against
-// User.fullName, not a real identity check (see nameSimilarity.ts).
 const PAYOUT_NAME_MISMATCH_THRESHOLD = 0.34;
 
 export const updatePayoutMethod = async (req: AuthRequest, res: Response) => {
@@ -2221,10 +1900,6 @@ export const updatePayoutMethod = async (req: AuthRequest, res: Response) => {
 
     const { payoutMethod, payoutAccountName, payoutAccountNumber, password } = req.body;
 
-    // A payout-destination change is exactly the kind of account takeover a
-    // phished/compromised session would use to redirect a worker's earnings
-    // — previously this endpoint accepted the change from any authenticated
-    // request with no re-auth and no notification to the real owner.
     if (!password || typeof password !== 'string') {
       return res.status(400).json(errorResponse(400, 'Current password is required to change payout details'));
     }
@@ -2297,7 +1972,6 @@ export const updatePayoutMethod = async (req: AuthRequest, res: Response) => {
   }
 };
 
-// Longest range one calendar request may cover (about three months).
 const MAX_CALENDAR_RANGE_DAYS = 93;
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -2306,12 +1980,6 @@ function parseDay(value: unknown): Date | null {
   return toDayStart(value);
 }
 
-/**
- * GET /api/workers/me/calendar?from=YYYY-MM-DD&to=YYYY-MM-DD
- * The worker's availability calendar: their weekly schedule, and for each
- * day whether they're available and which accepted jobs / follow-up visits
- * fall on it. Defaults to today through the next 6 weeks.
- */
 export const getMyCalendar = async (req: AuthRequest, res: Response) => {
   try {
     if (!req.user) {
@@ -2353,12 +2021,6 @@ export const getMyCalendar = async (req: AuthRequest, res: Response) => {
   }
 };
 
-/**
- * PUT /api/workers/me/weekly-schedule
- * Body: { availableDays: number[] } — the weekdays the worker normally works
- * (0=Sun ... 6=Sat), e.g. Monday to Friday = [1,2,3,4,5]. Dates the worker
- * changed by hand on the calendar keep their override.
- */
 export const updateWeeklySchedule = async (req: AuthRequest, res: Response) => {
   try {
     if (!req.user) {
@@ -2387,13 +2049,6 @@ export const updateWeeklySchedule = async (req: AuthRequest, res: Response) => {
   }
 };
 
-/**
- * PUT /api/workers/me/date-overrides
- * Body: { dates: string[], isAvailable: boolean | null } — open or close
- * specific dates regardless of the weekly schedule; null puts the dates back
- * on the weekly schedule. A date with an accepted job can't be closed (the
- * worker reschedules or cancels that job first).
- */
 export const updateDateOverrides = async (req: AuthRequest, res: Response) => {
   try {
     if (!req.user) {
@@ -2426,8 +2081,6 @@ export const updateDateOverrides = async (req: AuthRequest, res: Response) => {
       return res.status(404).json(errorResponse(404, 'Worker profile not found'));
     }
 
-    // Closing a day (explicitly, or by returning it to a weekly schedule
-    // that has it off) must not strand an accepted job.
     const closing = days.filter((d) =>
       isAvailable === false ? true : isAvailable === null ? !workerProfile.availableDays.includes(d.getUTCDay()) : false
     );

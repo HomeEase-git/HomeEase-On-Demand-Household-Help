@@ -20,7 +20,6 @@ export async function fetchWorkerById(id) {
   return response.data;
 }
 
-/** Every file the worker uploaded (KYC, resume, certificates). Audit-logged on the server. */
 export async function fetchWorkerDocuments(id) {
   const response = await apiRequest(`/admin/users/workers/${id}/documents`);
   return response.data;
@@ -31,7 +30,6 @@ export async function fetchWorkerDebt(id) {
   return response.data;
 }
 
-/** PATCH /admin/users/workers/:id/debt/adjust — signed amount (positive reduces what's owed, negative increases it). */
 export async function adjustWorkerDebt(id, amount, reason) {
   const response = await apiRequest(`/admin/users/workers/${id}/debt/adjust`, {
     method: 'PATCH',
@@ -40,7 +38,6 @@ export async function adjustWorkerDebt(id, amount, reason) {
   return response.data;
 }
 
-/** PATCH /admin/users/workers/:id/debt/release — lifts an account hold. */
 export async function releaseWorkerHold(id, note) {
   const response = await apiRequest(`/admin/users/workers/${id}/debt/release`, {
     method: 'PATCH',

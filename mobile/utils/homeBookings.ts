@@ -1,6 +1,5 @@
 import type { Booking, BookingStatus } from "../store/bookingStore";
 
-// Statuses where the booking is still going on (not finished or cancelled).
 const ONGOING: BookingStatus[] = [
   "Pending",
   "Accepted",
@@ -15,12 +14,6 @@ function startOfDay(d: Date): number {
   return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
 }
 
-/**
- * The booking to feature on the client home screen: the soonest ongoing
- * booking scheduled today or later, or — if every ongoing one is dated in
- * the past (e.g. work that started earlier and isn't finished) — the most
- * recent of those. Null when nothing is ongoing.
- */
 export function pickUpcomingBooking(bookings: Booking[], now = new Date()): Booking | null {
   const ongoing = bookings
     .filter((b) => ONGOING.includes(b.status) && !Number.isNaN(new Date(b.date).getTime()))
@@ -37,7 +30,6 @@ export type BookAgainWorker = {
   service: string;
 };
 
-/** Workers from the client's completed bookings, most recent first, one entry each. */
 export function pickBookAgainWorkers(bookings: Booking[], limit = 6): BookAgainWorker[] {
   const seen = new Set<string>();
   const out: BookAgainWorker[] = [];

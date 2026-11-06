@@ -14,12 +14,9 @@ type Banner = {
   title: string;
   subtitle?: string | null;
   color?: string;
-  /** Admin-chosen title/subtitle styling; see BANNER_FONTS in the backend. */
   textColor?: string | null;
   fontFamily?: string | null;
-  /** A bundled image, or a remote URL (admin-managed banners). */
   image?: ImageSourcePropType | string;
-  /** Tapping the banner; omitted for display-only banners. */
   onPress?: () => void;
 };
 
@@ -30,7 +27,6 @@ type Props = {
 const { width } = Dimensions.get("window");
 const CARD_WIDTH = width - 48;
 const AUTO_SCROLL_INTERVAL = 4000;
-// No bundled fonts, so these are Android system families.
 const FONT_FAMILIES: Record<string, string> = {
   SERIF: "serif",
   MONOSPACE: "monospace",

@@ -37,7 +37,6 @@ export default function NotificationDetailScreen() {
 
   const category = notificationCategory(notification.type);
 
-  // Payment notifications (reminders, receipts) also point at a booking.
   const isBookingRelated = (category === "booking" || category === "payment") && notification.relatedId;
 
   return (

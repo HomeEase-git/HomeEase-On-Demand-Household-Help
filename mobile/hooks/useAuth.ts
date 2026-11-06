@@ -21,13 +21,9 @@ export function useAuth() {
     try {
       const response = await postLogin(email, password);
 
-      // MFA-enabled account — no session yet; caller renders a code-entry
-      // step and calls completeMfaChallenge below instead of routing in.
       if ('mfaRequired' in response && response.mfaRequired) {
         return { success: true, data: response };
       }
-      // Two-step sign-in (email/SMS code) — same idea; the caller calls
-      // completeLoginCode with the code.
       if ('twoFactorRequired' in response && response.twoFactorRequired) {
         return { success: true, data: response };
       }
@@ -36,8 +32,6 @@ export function useAuth() {
         id: response.id,
         name: response.name,
         email: response.email,
-        // The Profile tab reads the phone from here; without it an edited
-        // phone looked lost after every fresh sign-in.
         phone: response.phone ?? undefined,
         role: response.role,
         avatar: response.avatar,
@@ -56,8 +50,6 @@ export function useAuth() {
     }
   }, [store]);
 
-  // Second step of MFA login — exchanges login's challengeToken plus a
-  // TOTP/backup code for the real session.
   const completeMfaChallenge = useCallback(async (challengeToken: string, code: string) => {
     store.setLoading(true);
     store.setError(null);
@@ -69,8 +61,6 @@ export function useAuth() {
         id: response.id,
         name: response.name,
         email: response.email,
-        // The Profile tab reads the phone from here; without it an edited
-        // phone looked lost after every fresh sign-in.
         phone: response.phone ?? undefined,
         role: response.role,
         avatar: response.avatar,
@@ -101,8 +91,6 @@ export function useAuth() {
         id: response.id,
         name: response.name,
         email: response.email,
-        // The Profile tab reads the phone from here; without it an edited
-        // phone looked lost after every fresh sign-in.
         phone: response.phone ?? undefined,
         role: response.role,
         avatar: response.avatar,
@@ -147,11 +135,6 @@ export function useAuth() {
       });
       store.setToken(response.token, response.refreshToken);
 
-      // Send OTP email for clients
-      // if (response.role === 'client') {
-      //   await sendOtpEmail(userData.email);
-      // }
-      
       return { success: true, data: response };
     } catch (err) {
       const error = normalizeError(err);

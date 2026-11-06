@@ -11,19 +11,11 @@ interface ExtractedResume {
   summary: string | null;
 }
 
-/**
- * Downloads a worker's uploaded resume (PDF) and asks Claude to extract
- * structured skill/experience data from it, then persists the result.
- * Mirrors the Anthropic call pattern in verificationAiService.ts, but
- * targets a PDF document block instead of images (resumes are PDF-only,
- * see mobile/utils/kycDocumentConfig.ts).
- */
 export async function parseWorkerResume(workerProfileId: string, resumeUrl: string) {
   if (!process.env.ANTHROPIC_API_KEY) {
     throw new Error('Resume parsing is not configured (ANTHROPIC_API_KEY missing)');
   }
 
-  // Service-key download: the resumes bucket is private.
   const buffer = await downloadStorageObject(resumeUrl).catch((error: unknown) => {
     throw new Error(`Failed to fetch resume file (${error instanceof Error ? error.message : 'unknown error'})`);
   });

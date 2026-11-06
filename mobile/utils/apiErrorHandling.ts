@@ -1,9 +1,3 @@
-/**
- * API Error Handling & Recovery Utilities
- * 
- * Enhanced error handling for API calls with recovery strategies
- */
-
 import { useCallback, useState } from 'react';
 import axios from 'axios';
 import { 
@@ -24,26 +18,16 @@ const getResponseMessage = (data: unknown, fallback: string): string => {
   return typeof message === 'string' && message.trim() ? message : fallback;
 };
 
-/**
- * Classify axios errors into standard API errors
- */
 export function classifyAxiosError(error: unknown): ApiError {
-  // Delegate to the central normalizer so axios handling is consistent
   return normalizeError(error);
 }
 
-/**
- * Enhanced API error handler with logging
- */
 export function handleApiError(error: unknown, context?: Record<string, any>) {
   const apiError = classifyAxiosError(error);
   errorLogger.log(apiError, context);
   return apiError;
 }
 
-/**
- * Safe API call wrapper with automatic error handling
- */
 export async function safeApiCall<T>(
   fn: () => Promise<T>,
   options?: RetryOptions & { context?: Record<string, any> }
@@ -92,10 +76,6 @@ export function useApiCall<T>(
   return { call, data, error, loading };
 }
 
-/**
- * Memory leak prevention utilities
- */
-
 export class AbortableRequest {
   private abortController: AbortController | null = null;
 
@@ -117,10 +97,6 @@ export class AbortableRequest {
     this.abort();
   }
 }
-
-/**
- * API contract validation
- */
 
 export interface ApiContract {
   endpoint: string;
@@ -153,10 +129,6 @@ export function validateApiContract(
   return { valid: errors.length === 0, errors };
 }
 
-/**
- * Request timeout wrapper
- */
-
 export async function withTimeout<T>(
   promise: Promise<T>,
   timeoutMs: number = 30000
@@ -177,10 +149,6 @@ export async function withTimeout<T>(
     }
   }
 }
-
-/**
- * Batch error handling for multiple requests
- */
 
 export interface BatchResult<T> {
   successes: T[];

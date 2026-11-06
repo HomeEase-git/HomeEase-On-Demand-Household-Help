@@ -7,16 +7,13 @@ import { colors } from "../../constants";
 
 type Props = {
   label: string;
-  /** Opens the picker, to add a file or replace the current one. */
   onPress: () => void;
   /** The current image. Tapping it opens it full size. */
   imageUri?: string | null;
-  /** The file name, for a file with no image preview such as a PDF. */
   preview?: string | null;
   subtitle?: string;
   /** Prompt on the empty card. */
   hint?: string;
-  /** Badge on a filled card. Use "Added" until the file is actually sent. */
   statusLabel?: string;
   required?: boolean;
   disabled?: boolean;
@@ -75,7 +72,6 @@ export const UploadCard: React.FC<Props> = ({
           disabled={uploading}
           className="h-[182px] rounded-[10px] overflow-hidden bg-card-dark"
         >
-          {/* contain, not cover: the edges of a document must stay visible */}
           <RemoteImage
             source={{ uri: imageUri }}
             style={{ width: "100%", height: "100%", opacity: uploading ? 0.35 : 1 }}

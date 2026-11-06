@@ -1,8 +1,3 @@
-// Tax periods are Philippine calendar quarters. "Now" is taken in Manila time
-// (UTC+8, no daylight saving) so the current quarter flips at midnight
-// Manila, not 8 AM. Boundaries are sent as plain dates ("2026-07-01"), which
-// the backend reads as midnight Manila.
-
 const MANILA_OFFSET_MS = 8 * 60 * 60 * 1000
 
 function dateKey(year, month0) {
@@ -10,10 +5,6 @@ function dateKey(year, month0) {
   return d.toISOString().slice(0, 10)
 }
 
-/**
- * The most recent `count` closed calendar quarters, newest first:
- * [{ periodStart: '2026-04-01', periodEnd: '2026-07-01', label: 'Q2 2026' }, ...]
- */
 export function recentClosedQuarters(count = 8) {
   const manilaNow = new Date(Date.now() + MANILA_OFFSET_MS)
   let year = manilaNow.getUTCFullYear()

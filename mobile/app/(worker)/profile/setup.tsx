@@ -7,10 +7,6 @@ import ScreenHeader from "../../../components/ui/ScreenHeader";
 import { colors } from "../../../constants";
 import { useWorkerSetupStatus, SETUP_ITEM_ROUTES } from "../../../hooks/useWorkerSetupStatus";
 
-/**
- * The worker's account-setup checklist. Clients can't find or book the
- * worker, and the worker can't accept requests, until every item is done.
- */
 export default function WorkerSetupScreen() {
   const router = useRouter();
   const { status, refresh } = useWorkerSetupStatus();

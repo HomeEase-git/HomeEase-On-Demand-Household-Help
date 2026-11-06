@@ -1,14 +1,3 @@
-// prisma/seeds/seed-full.ts
-//
-// Comprehensive seed — populates EVERY model and exercises every enum value
-// and nullable column at least once (soft-deletes, disputes, refunds,
-// tokens, messages, notifications, saved payment methods, add-ons, etc).
-// seed.ts is the lightweight "happy path" seed used by `prisma db seed`;
-// this one is for exercising every screen state / admin edge case.
-//
-// Run with: npx tsx prisma/seeds/seed-full.ts   (from the backend folder)
-// Requires: @faker-js/faker, bcryptjs, @prisma/adapter-pg, pg
-
 import "dotenv/config";
 import {
   PrismaClient,
@@ -157,7 +146,6 @@ async function clearData() {
   await prisma.notification.deleteMany();
   await prisma.message.deleteMany();
   await prisma.review.deleteMany();
-  // Payouts, refunds and dues are onDelete: Restrict: clear them before their parents.
   await prisma.payout.deleteMany();
   await prisma.refundRequest.deleteMany();
   await prisma.payment.deleteMany();
@@ -194,7 +182,6 @@ async function createServiceTypes() {
     });
     created.push(serviceType);
   }
-  // One inactive service type, to exercise isActive=false on both models.
   const inactive = await prisma.serviceType.create({
     data: {
       name: "Landscaping (Retired)",
@@ -235,8 +222,6 @@ async function createClient(index: number) {
   const password = await hashPassword(DEFAULT_PASSWORD);
   const city = faker.helpers.arrayElement(CITIES);
 
-  // Sprinkle in every UserStatus / soft-delete combination so admin screens
-  // and "excluded from active queries" logic have real rows to hit.
   let status: UserStatus = UserStatus.ACTIVE;
   let isDeleted = false;
   let deletedAt: Date | null = null;
@@ -288,7 +273,6 @@ async function createClient(index: number) {
             state: "Philippines",
             zipCode: faker.location.zipCode("####"),
             isDefault: false,
-            // one soft-deleted address to exercise UserAddress soft-delete
             isDeleted: index === 5,
             deletedAt: index === 5 ? faker.date.recent({ days: 10 }) : null,
           },
@@ -306,8 +290,6 @@ async function createClient(index: number) {
     include: { clientProfile: true },
   });
 
-  // Saved payment methods — cover every PaymentMethodType at least once
-  // across the client base.
   const methodType = faker.helpers.arrayElement(Object.values(PaymentMethodType));
   await prisma.savedPaymentMethod.create({
     data: {
@@ -408,11 +390,6 @@ async function createWorker(
     data: {
       userId: user.id,
       type: "WORKER_ONBOARDING",
-      // Distinct from WorkerProfile.kycStatus — the real app only ever
-      // writes PENDING/APPROVED/REJECTED here (never SUBMITTED), since a
-      // VerificationRequest starts PENDING and only leaves that state via
-      // admin decision. See verificationController.uploadVerificationDocuments
-      // and adminVerificationController.approve/rejectVerification.
       status: isApproved ? KYCStatus.APPROVED : isRejected ? KYCStatus.REJECTED : KYCStatus.PENDING,
       rejectionReason: isRejected ? "Government ID photo was blurry and unreadable." : null,
       adminOverrideReason: fullDocSet ? "Manually approved after in-person verification." : null,
@@ -480,7 +457,6 @@ async function createWorker(
 
 async function createAuthTokens(users: { id: string }[]) {
   const tokenTypes = Object.values(TokenType);
-  // Guarantee every TokenType appears, then pad with random ones.
   const assignments = users.slice(0, tokenTypes.length).map((user, i) => ({
     user,
     type: tokenTypes[i],
@@ -505,8 +481,6 @@ async function createAuthTokens(users: { id: string }[]) {
 }
 
 async function createMessages(clients: { id: string }[], workers: { id: string }[]) {
-  // A few full conversations so both directions, read/unread, and image
-  // attachments are all represented.
   for (let i = 0; i < 6; i++) {
     const client = faker.helpers.arrayElement(clients);
     const worker = faker.helpers.arrayElement(workers);
@@ -577,8 +551,6 @@ async function createBookingsAndPayments(
   const timeSlots = ["09:00 AM", "01:00 PM", "03:30 PM", "05:00 PM"];
   const bookingIds: string[] = [];
 
-  // Payment enum combinations we want guaranteed coverage for, consumed in
-  // order as COMPLETED bookings are created.
   const paymentPlans: Array<{
     status: PaymentStatus;
     escrowStatus: EscrowStatus;
@@ -596,8 +568,6 @@ async function createBookingsAndPayments(
 
   for (const status of allStatuses) {
     const client = faker.helpers.arrayElement(clients);
-    // Every 5th booking is left unassigned (open marketplace request), which
-    // exercises Booking.workerId being nullable.
     const isUnassigned = status === BookingStatus.PENDING && Math.random() < 0.4;
     const worker = isUnassigned ? null : faker.helpers.arrayElement(workers);
     const serviceType = faker.helpers.arrayElement(serviceTypes.filter((s) => s.tasks.length));
@@ -659,7 +629,6 @@ async function createBookingsAndPayments(
         },
       });
     } catch {
-      // Skip rare worker/date/time collisions (worker_slot_unique constraint)
       continue;
     }
 
@@ -714,7 +683,6 @@ async function createBookingsAndPayments(
         },
       });
 
-      // Vary review moderation state across VISIBLE / HIDDEN / WARNED.
       const reviewStatus = faker.helpers.arrayElement([
         ReviewStatus.VISIBLE,
         ReviewStatus.VISIBLE,
@@ -741,8 +709,6 @@ async function createBookingsAndPayments(
   return bookingIds;
 }
 
-// Clients verify identity only (no trade credentials), so this is a lighter
-// version of the worker verification block — just the 3 identity docs.
 async function createClientVerification(
   client: Awaited<ReturnType<typeof createClient>>,
   status: typeof KYCStatus.PENDING | typeof KYCStatus.APPROVED | typeof KYCStatus.REJECTED
@@ -803,9 +769,6 @@ async function main() {
   }
 
   console.log("Creating client identity verification requests...");
-  // Indices 6-9 are plain active/verified clients (0-2 have status variety,
-  // 4 is the intentionally-unverified one) — safe picks for a status mix so
-  // the admin Verification Management "Clients" tab has real states to review.
   await createClientVerification(clients[6], KYCStatus.PENDING);
   await createClientVerification(clients[7], KYCStatus.PENDING);
   await createClientVerification(clients[8], KYCStatus.APPROVED);

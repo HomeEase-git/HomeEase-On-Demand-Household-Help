@@ -7,9 +7,6 @@ import { colors } from "../../constants";
 
 type Props = {
   address?: string | null;
-  // Pass this whenever the caller already has resolved coordinates (e.g. a
-  // booking's persisted clientLat/clientLng) — skips geocoding entirely
-  // instead of re-resolving the same address from text on every render/view.
   coords?: LatLng | null;
   height?: string;
   zoom?: number;
@@ -28,9 +25,6 @@ export const AddressMap: React.FC<Props> = ({
 }) => {
   const [geocodedCoords, setGeocodedCoords] = useState<LatLng | null>(null);
   const [status, setStatus] = useState<Status>(() => initialStatus(address, coords));
-  // Re-derive state when either input changes, same pattern as the address
-  // string alone used to use — comparing a combined key during render avoids
-  // a flash of stale content before an effect would otherwise catch up.
   const [prevKey, setPrevKey] = useState(`${coords?.lat ?? ""},${coords?.lng ?? ""}|${address ?? ""}`);
   const key = `${coords?.lat ?? ""},${coords?.lng ?? ""}|${address ?? ""}`;
 

@@ -1,15 +1,3 @@
-// Manual end-to-end smoke test against a REAL Xendit sandbox — creates a
-// throwaway client + worker, runs a full booking through completion,
-// payment (real Xendit Invoice), and payout (real Xendit Payout), and
-// checks the commission/withholding-tax bookkeeping. `npm test` mocks
-// bookingQueue/verificationQueue/Xendit entirely, so this is the only thing
-// that actually exercises those integrations — run it (`npm run
-// test:e2e:sandbox`, or via the "E2E Sandbox" GitHub Actions workflow)
-// after touching paymentLifecycleService.ts, bookingWorker.ts, or either
-// Xendit webhook handler in paymentController.ts. Needs: a running dev
-// server (`npm run dev`), a real XENDIT_SECRET_KEY/XENDIT_WEBHOOK_TOKEN in
-// .env, and Redis actually reachable (REDIS_HOST/REDIS_PORT) — booking
-// creation hangs indefinitely without it (see config/redis.ts).
 require('dotenv').config();
 const axios = require('axios');
 const { Client } = require('pg');
@@ -18,10 +6,6 @@ const BASE = 'http://localhost:3000/api';
 const WEBHOOK_TOKEN = process.env.XENDIT_WEBHOOK_TOKEN;
 const STAMP = Date.now();
 
-// Neon suspends/kills idle direct connections — a single long-lived Client
-// crashes the process on that (unhandled 'error' event) if it sits idle for
-// a while between queries (which happens a lot here, between HTTP calls).
-// Open a fresh connection per query instead.
 const db = {
   async query(sql, params) {
     const c = new Client({ connectionString: process.env.DIRECT_URL || process.env.DATABASE_URL });
@@ -84,13 +68,9 @@ async function getOtp(userId) {
 
 async function main() {
   await db.connect();
-  const results = {}; // running record of what happened, for the final report
+  const results = {};
 
-  // ---------------------------------------------------------------
   log('0', 'Admin login');
-  // Dedicated E2E test-admin account (not the real admin@homeease.dev, whose
-  // real password this script doesn't know) — override via env if you'd
-  // rather point this at a different admin.
   const ADMIN_EMAIL = process.env.E2E_ADMIN_EMAIL || 'e2e.admin@homeease.invalid';
   const ADMIN_PASSWORD = process.env.E2E_ADMIN_PASSWORD || 'E2eAdminPass123!';
   let r = await api('post', '/auth/login', { email: ADMIN_EMAIL, password: ADMIN_PASSWORD });
@@ -98,7 +78,6 @@ async function main() {
   const adminToken = r.data.data.token;
   info('admin logged in');
 
-  // ---------------------------------------------------------------
   log('1', 'Register client + worker accounts');
   const clientEmail = `e2e.client.${STAMP}@example.com`;
   const workerEmail = `e2e.worker.${STAMP}@example.com`;
@@ -128,7 +107,6 @@ async function main() {
   let workerToken = r.data.data.token;
   info(`worker created: ${workerEmail} (${workerId})`);
 
-  // ---------------------------------------------------------------
   log('2', 'Verify OTP for both accounts (fetched from AuthToken table — no real inbox access)');
   const clientOtp = await getOtp(clientId);
   const workerOtp = await getOtp(workerId);
@@ -144,7 +122,6 @@ async function main() {
   workerToken = r.data.data.token;
   info('worker email verified');
 
-  // ---------------------------------------------------------------
   log('3', 'Worker profile setup: service type, availability slot, address, payout method');
 
   r = await api('get', '/services', null, workerToken);
@@ -189,12 +166,6 @@ async function main() {
   if (r.status !== 200) throw new Error(`Set payout method failed: ${r.status} ${JSON.stringify(r.data)}`);
   info('payout method set (GCASH)');
 
-  // ---------------------------------------------------------------
-  // Step 4 used to pre-fund the worker's wallet to cover a flat per-job
-  // admin fee — that fee (and the wallet) was removed; booking acceptance
-  // no longer requires any prepaid balance.
-
-  // ---------------------------------------------------------------
   log('5', 'Worker KYC: upload Tier-1 document(s), admin verifies via the admin-verification API (the same action the web Verification/VerificationDetail admin pages call)');
   const fakeImage = Buffer.from(
     'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
@@ -233,12 +204,6 @@ async function main() {
     if (r.status !== 200) throw new Error(`Admin approve failed: ${r.status} ${JSON.stringify(r.data)}`);
     info('worker KYC APPROVED by admin');
   } else {
-    // No VerificationRequest row — the upload itself failed before it got
-    // that far (e.g. the SUPABASE_KYC_BUCKET bucket doesn't exist in this
-    // environment). That's a storage/env concern unrelated to what this
-    // script exists to verify (the payment lifecycle), so fall back to
-    // setting the same end-state the real approve flow would (see
-    // adminVerificationController.ts) directly.
     info(`no VerificationRequest row was created (upload failed: ${JSON.stringify(uploadRes.data)}) — setting kycStatus=APPROVED directly instead`);
     await db.query(
       `UPDATE "WorkerProfile" SET "kycStatus"='APPROVED', "kycApprovedAt"=now() WHERE "userId"=$1`,
@@ -247,7 +212,6 @@ async function main() {
     info('worker KYC APPROVED (direct DB fallback)');
   }
 
-  // ---------------------------------------------------------------
   log('6', 'Client creates a booking for the worker\'s Home Cleaning service');
   r = await api(
     'post',
@@ -255,8 +219,6 @@ async function main() {
     {
       workerId,
       serviceType: 'Home Cleaning',
-      // Home Cleaning's required scope fields (see seed-catalog.ts) — no
-      // more rooms/condition, every category is just field answers now.
       scopeAnswers: {
         'Clean Type': 'Standard Maintenance',
         Bedrooms: '2',
@@ -282,7 +244,6 @@ async function main() {
   results.bookingId = bookingId;
   results.estimatedPrice = estimatedPrice;
 
-  // ---------------------------------------------------------------
   log('7', 'Worker accepts');
   r = await api('patch', `/bookings/${bookingId}/accept`, {}, workerToken);
   if (r.status !== 200) throw new Error(`Accept failed: ${r.status} ${JSON.stringify(r.data)}`);
@@ -308,12 +269,6 @@ async function main() {
   if (r.status !== 200) throw new Error(`Quote approve failed: ${r.status} ${JSON.stringify(r.data)}`);
   info(`status -> ${r.data.data.status}, finalPrice=₱${r.data.data.finalPrice}`);
 
-  // ---------------------------------------------------------------
-  // Pay-after-completion: no Payment row and no Xendit invoice exist yet at
-  // this point — completion confirmation is what raises the invoice (see
-  // bookingController.confirmCompletion / paymentLifecycleService.
-  // createCompletionInvoice). There's nothing to check out or pay before the
-  // job is actually done.
   log('12', 'Worker submits completion photo');
   r = await api(
     'patch',
@@ -353,9 +308,6 @@ async function main() {
   }
   info('booking confirmed COMPLETED');
 
-  // Give the (failing, redis-less) schedulePayout call time to time out and
-  // get caught inside finalizePaidBooking, so the Payout row it created
-  // beforehand is stable before we read it.
   await new Promise((res) => setTimeout(res, 12000));
 
   const payoutRow = await db.query(
@@ -367,7 +319,6 @@ async function main() {
   info(`payout row created: id=${payout.id} amount=₱${payout.amount} channel=${payout.channel} status=${payout.status}`);
   results.payout = payout;
 
-  // ---------------------------------------------------------------
   log('15', 'Send the real payout to Xendit sandbox (replicating xenditDisbursementService.createPayout — the BullMQ worker that would normally do this has no Redis to consume from locally)');
   const secretClient = axios.create({
     baseURL: 'https://api.xendit.co',
@@ -417,7 +368,6 @@ async function main() {
   const finalPayout = await db.query(`SELECT status, "xenditStatus", "xenditDisbursementId" FROM "Payout" WHERE id=$1`, [payout.id]);
   info(`final payout status: ${JSON.stringify(finalPayout.rows[0])}`);
 
-  // ---------------------------------------------------------------
   log('17', 'Verify commission / platform fee bookkeeping');
 
   r = await api('get', `/payments/${bookingId}`, null, clientToken);

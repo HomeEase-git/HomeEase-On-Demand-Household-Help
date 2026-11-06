@@ -1,11 +1,6 @@
 import type { PrismaClient } from '@prisma/client';
 import prisma from '@config/database';
 
-// The server should reach the database as a role that can read and write
-// rows but not change the schema or rewrite the audit trail (homeease_app,
-// set up by scripts/db-roles.ts). Migrations use DIRECT_URL, a separate
-// owner login. Returns a warning for each way the current login has more
-// rights than that; empty when it's set up as intended.
 export async function checkDatabasePrivileges(db: PrismaClient = prisma): Promise<string[]> {
   const [row] = await db.$queryRaw<
     [{ role: string; superuser: boolean; canCreate: boolean; ownsTables: boolean; canEditAudit: boolean }]

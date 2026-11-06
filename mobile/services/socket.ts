@@ -11,8 +11,6 @@ export function connectSocket(): Socket {
     socket.disconnect();
   }
 
-  // Read the token on every (re)connect: access tokens are short-lived and
-  // get replaced by refreshSession while the socket stays up.
   socket = io(config.API_URL, {
     auth: (cb) => {
       authStorage.getToken().then((token) => cb({ token }));
@@ -20,8 +18,6 @@ export function connectSocket(): Socket {
     transports: ["websocket"],
   });
 
-  // The server rejects an expired token at the handshake, and socket.io
-  // doesn't retry after that on its own — refresh once, then reconnect.
   let refreshedForThisAttempt = false;
   const current = socket;
   current.on("connect", () => {

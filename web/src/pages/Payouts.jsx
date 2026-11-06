@@ -23,7 +23,6 @@ const STATUS_BADGE_VARIANT = {
   Processing: 'pending',
   Pending: 'pending',
   Failed: 'flagged',
-  // Stopped because the client was refunded — never sent, never retried.
   Cancelled: 'suspended',
 }
 
@@ -51,7 +50,6 @@ export default function Payouts() {
     { initialParams: { page: 1, dateFrom: '', dateTo: '' }, pollIntervalMs: 25000 }
   )
 
-  // Seeded from the URL so a restored filter shows in the date inputs too.
   const [dateFrom, setDateFrom] = useState(params.dateFrom || '')
   const [dateTo, setDateTo] = useState(params.dateTo || '')
 

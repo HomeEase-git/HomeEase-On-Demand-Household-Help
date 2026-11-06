@@ -5,10 +5,6 @@ import homeEaseLogo from '../components/Assets/home-ease-logo.png'
 
 const PAGE_SIZE = 50 // the admin API's maximum page size
 
-// The logo import resolves to a URL (it's well over Vite's 4KB inline
-// threshold, so it's never a data: URI), but jsPDF's addImage needs actual
-// image bytes — fetched and converted to a data URL once, then reused for
-// every export in the session.
 let logoDataUrlPromise = null
 function getLogoDataUrl() {
   if (!logoDataUrlPromise) {
@@ -27,9 +23,6 @@ function getLogoDataUrl() {
   return logoDataUrlPromise
 }
 
-// Every exported report shares this letterhead: the HomeEase logo centered
-// at the top, the company name/tagline under it, then the report title and
-// who/when generated it — before any table data starts.
 async function drawLetterhead(doc, { title, subtitle, generatedBy }) {
   const pageWidth = doc.internal.pageSize.getWidth()
   const logoSize = 20
@@ -39,8 +32,6 @@ async function drawLetterhead(doc, { title, subtitle, generatedBy }) {
     const logoDataUrl = await getLogoDataUrl()
     doc.addImage(logoDataUrl, 'PNG', (pageWidth - logoSize) / 2, y, logoSize, logoSize)
   } catch {
-    // Logo failed to load (offline, blocked request) — still produce the
-    // report, just without the image.
   }
   y += logoSize + 6
 
@@ -88,10 +79,6 @@ async function drawLetterhead(doc, { title, subtitle, generatedBy }) {
   return y + 6
 }
 
-/**
- * Renders rows already in hand as a letterhead PDF (logo, company name,
- * report title/filters, generated-by line, then the data table).
- */
 export async function downloadPdf({ filename, title, subtitle, generatedBy, columns, rows, orientation }) {
   if (!rows.length) return
 
@@ -111,12 +98,6 @@ export async function downloadPdf({ filename, title, subtitle, generatedBy, colu
   doc.save(filename)
 }
 
-/**
- * Downloads every row matching the list's current filters/sort as a
- * letterhead PDF, fetching page by page (up to maxRows) the same way
- * exportListToCsv does. Returns how many rows were saved and whether the
- * cap cut the export short.
- */
 export async function exportListToPdf({
   fetchPage,
   filename,

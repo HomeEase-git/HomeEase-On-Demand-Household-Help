@@ -13,10 +13,6 @@ const TONE: Record<TimelineTone, { card: string; accent: string; icon: IconName;
   stopped: { card: "bg-card border-divider", accent: colors.text.muted, icon: "close-circle", iconColor: colors.error },
 };
 
-/**
- * Top-of-screen summary of where a booking is: a headline, one line of
- * detail, and a five-step progress bar. See utils/bookingTimeline.ts.
- */
 export const BookingStatusHero: React.FC<{ timeline: BookingTimeline }> = ({ timeline }) => {
   const tone = TONE[timeline.tone];
   const allDone = timeline.current >= TIMELINE_STEPS.length;

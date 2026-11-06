@@ -60,11 +60,9 @@ export default function CategoryDetailScreen() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [filters, setFilters] = useState<SearchFilters>(DEFAULT_FILTERS);
-  // Admin-uploaded photo for this service (Service Catalog), shown blurred.
   const [backgroundUrl, setBackgroundUrl] = useState<string | null>(null);
 
   useEffect(() => {
-    // Cached list, same slug the services grid builds the route from.
     getServiceTypes()
       .then((types: any[]) => {
         const match = types.find((t) => t.name.toLowerCase().replace(/\s+/g, "-") === categoryId);

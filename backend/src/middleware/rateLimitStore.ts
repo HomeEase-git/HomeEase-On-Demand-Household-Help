@@ -2,16 +2,6 @@ import Redis from 'ioredis';
 import { MemoryStore, type IncrementResponse, type Options, type Store } from 'express-rate-limit';
 import { redisConnection } from '@config/redis';
 
-// Rate-limit counters shared through Redis, so every backend instance (and
-// the old + new instance during a deploy) counts against the same limit —
-// with per-instance memory counters, N instances means N× the allowance.
-//
-// If Redis is unreachable the counters fall back to this instance's memory
-// rather than letting everything through: limits get looser (per instance),
-// never switched off. Same short-timeout, bounded-retry, circuit-breaker
-// approach as utils/tokenRevocation.ts, and nothing here can reject
-// unhandled (index.ts treats that as fatal).
-
 const redisConfigured = Boolean(process.env.REDIS_URL || process.env.REDIS_HOST);
 
 let client: Redis | null = null;
@@ -62,11 +52,6 @@ function recordSuccess(): void {
   circuitOpenUntil = 0;
 }
 
-/**
- * Fixed-window counter: INCR the key, and give it the window as its expiry
- * the first time it's seen (PTTL < 0), which also repairs a key whose expiry
- * was lost between the two commands.
- */
 export class RedisFallbackStore implements Store {
   prefix: string;
   localKeys = false;
@@ -103,10 +88,6 @@ export class RedisFallbackStore implements Store {
     }
   }
 
-  // Undoes a hit (express-rate-limit's skipSuccessfulRequests). If this key
-  // has hits in memory, the hit being undone may have been counted there while
-  // Redis was down — take it from memory. Getting this wrong can then only
-  // leave the shared count too high (stricter), never too low.
   async decrement(key: string): Promise<void> {
     const inMemory = await this.memory.get(key);
     if (circuitIsOpen() || (inMemory && inMemory.totalHits > 0)) return this.memory.decrement(key);
@@ -135,7 +116,6 @@ export class RedisFallbackStore implements Store {
   }
 }
 
-/** A shared Redis store when Redis is configured; otherwise this instance's memory (the default). */
 export const rateLimitStore = (prefix: string): Store | undefined =>
   redisConfigured ? new RedisFallbackStore(prefix) : undefined;
 

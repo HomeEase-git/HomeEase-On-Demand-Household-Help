@@ -16,7 +16,6 @@ const router = Router();
 // All message routes require auth
 router.use(authMiddleware);
 
-// Get unread count (put before other routes to avoid route conflict)
 router.get('/unread-count', getUnreadCount);
 
 // Get all conversations
@@ -34,7 +33,6 @@ router.post('/upload-image', chatImageUpload, uploadChatImage);
 // Send message
 router.post('/', validateSendMessage, sendMessage);
 
-// Report a message you received (moderation flag-for-admin, not a block-list)
 router.post('/:id/report', validateReportMessage, reportMessage);
 
 export default router;

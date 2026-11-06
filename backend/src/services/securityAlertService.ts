@@ -4,18 +4,6 @@ import { writeAuditLog } from '@utils/auditLog';
 import { sendAccountSecurityEmail, sendSecurityAlertEmail } from '@utils/emailService';
 import { getRequestContext } from '@utils/requestContext';
 
-/**
- * Security alerts: things that may mean an attack or a compromised account.
- * Every alert is written to the audit log (category SECURITY — admin site →
- * Reports → Logs → Security). The first of each kind in a 15-minute window is
- * also emailed to the security contacts and reported to Sentry; repeats inside
- * the window are counted and mentioned in the next email instead, so an
- * attack can't flood the inbox or use up the Sentry quota.
- *
- * Recipients: SECURITY_ALERT_EMAIL (comma-separated), or every active admin
- * if that's unset. What each alert means and what to do: docs/MONITORING.md.
- */
-
 export type SecurityAlertType =
   | 'REFRESH_TOKEN_REUSE'
   | 'LOGIN_LOCKOUT'
@@ -29,35 +17,22 @@ export type SecurityAlertType =
 
 export interface SecurityAlert {
   type: SecurityAlertType;
-  /** high: likely a compromised account or credential. medium: probing or misconfiguration. */
   severity: 'high' | 'medium';
-  /** One plain sentence; goes in the email and the audit log. */
   message: string;
   actor?: { id?: string | null; email?: string | null; role?: string | null; name?: string | null };
-  /**
-   * Alerts of one type share a throttle window per key: e.g. per account for
-   * a lockout, so a second account locking out still sends its own email.
-   */
   throttleKey?: string;
   metadata?: Record<string, unknown>;
 }
 
 const THROTTLE_MS = 15 * 60 * 1000;
 
-// In-process: the backend runs as one instance. With several, each would send
-// at most one email per window — still bounded.
 const throttle = new Map<string, { until: number; suppressed: number }>();
 
 const pending = new Set<Promise<void>>();
 
-// Tests run without real email; they opt in and mock emailService.
 const deliveryEnabled = (): boolean =>
   process.env.NODE_ENV !== 'test' || process.env.SECURITY_ALERT_TEST_DELIVERY === 'true';
 
-/**
- * Waits for every in-flight alert — audit write, recipient lookup and emails —
- * including ones started while waiting (tests, graceful shutdown).
- */
 export async function waitForSecurityAlerts(): Promise<void> {
   while (pending.size > 0) await Promise.allSettled([...pending]);
 }
@@ -79,7 +54,6 @@ async function alertRecipients(): Promise<string[]> {
   return admins.map((admin) => admin.email);
 }
 
-/** Returns how many earlier alerts were suppressed, or null if this one is throttled. */
 function passThrottle(key: string): number | null {
   const now = Date.now();
   const entry = throttle.get(key);
@@ -92,10 +66,6 @@ function passThrottle(key: string): number | null {
   return suppressed;
 }
 
-/**
- * Nobody was told: reopen the window so the next alert of this kind is sent,
- * and have it mention this one.
- */
 function releaseThrottle(key: string, undelivered: number): void {
   const entry = throttle.get(key);
   if (entry) {
@@ -110,7 +80,6 @@ function track<T>(work: Promise<T>): Promise<T> {
   return work;
 }
 
-/** Tracked so graceful shutdown waits for the whole alert, not just its email. */
 export function raiseSecurityAlert(alert: SecurityAlert): Promise<void> {
   return track(raise(alert));
 }
@@ -164,7 +133,6 @@ async function raise(alert: SecurityAlert): Promise<void> {
 
       const subject = `${alert.severity === 'high' ? 'Action needed: ' : ''}${alert.type.replace(/_/g, ' ').toLowerCase()}`;
       const recipients = await alertRecipients();
-      // Each recipient separately: one bad address mustn't stop the rest.
       const results = await Promise.allSettled(
         recipients.map((to) => sendSecurityAlertEmail(to, subject, alert.message, details)),
       );
@@ -182,11 +150,6 @@ async function raise(alert: SecurityAlert): Promise<void> {
   );
 }
 
-/**
- * Emails a user about a security change on their own account (password
- * changed, a session ended because its token was copied). Best-effort and
- * not throttled — each is a single, user-triggered event.
- */
 export function notifyAccountSecurityEvent(email: string, subject: string, message: string): void {
   if (!deliveryEnabled()) return;
   track(
@@ -196,11 +159,6 @@ export function notifyAccountSecurityEvent(email: string, subject: string, messa
   );
 }
 
-/**
- * Audit-logs a password change or reset and emails the account owner, so a
- * takeover doesn't go unnoticed. An admin's change also alerts the security
- * contacts.
- */
 export const recordPasswordChange = async (
   user: { id: string; email: string; role: string; fullName: string },
   how: 'changed' | 'reset',

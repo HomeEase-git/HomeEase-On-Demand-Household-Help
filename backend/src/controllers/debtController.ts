@@ -11,11 +11,6 @@ interface AuthRequest extends Request {
   user?: JwtPayload;
 }
 
-/**
- * GET /api/admin/users/workers/:id/debt
- * A worker's outstanding platform dues + recent ledger history, for the
- * admin worker-detail screen.
- */
 export const getWorkerDebtAdmin = async (req: AuthRequest, res: Response) => {
   try {
     const id = req.params.id as string;
@@ -34,7 +29,6 @@ export const getWorkerDebtAdmin = async (req: AuthRequest, res: Response) => {
       success: true,
       data: {
         commissionOwed: workerProfile.commissionOwed,
-        // Owed TO the worker: paid with their next online payout.
         compensationCredit: workerProfile.compensationCredit,
         debtHoldAt: workerProfile.debtHoldAt,
         debtHoldNote: workerProfile.debtHoldNote,
@@ -55,12 +49,6 @@ export const getWorkerDebtAdmin = async (req: AuthRequest, res: Response) => {
   }
 };
 
-/**
- * PATCH /api/admin/users/workers/:id/debt/adjust
- * Manual correction with a required reason — for support cases (waiving
- * debt, correcting a bad accrual). `amount` is signed: positive reduces what
- * the worker owes, negative increases it.
- */
 export const adjustWorkerDebtAdmin = async (req: AuthRequest, res: Response) => {
   try {
     const id = req.params.id as string;
@@ -80,11 +68,6 @@ export const adjustWorkerDebtAdmin = async (req: AuthRequest, res: Response) => 
 
     const { workerProfile: updated } = await adminAdjustDebt(workerProfile.id, amount, reason.trim());
 
-    // Every other sensitive admin mutation in this codebase writes an audit
-    // log (KYC/VAT approve-reject, dispute resolve, payout retry, user
-    // status change) — this one and releaseWorkerHold below were the
-    // outliers, letting an admin waive or inflate a worker's owed platform
-    // commission with no trace in the actual audit trail.
     await writeAuditLog({
       actorId: req.user?.userId,
       actorName: req.user?.email,
@@ -105,12 +88,6 @@ export const adjustWorkerDebtAdmin = async (req: AuthRequest, res: Response) => 
   }
 };
 
-/**
- * PATCH /api/admin/users/workers/:id/debt/release
- * Lifts an account hold — the only way one is ever lifted (see
- * debtLedgerService.releaseDebtHold). `note` is optional but recommended
- * (what was agreed with the worker).
- */
 export const releaseWorkerHold = async (req: AuthRequest, res: Response) => {
   try {
     const id = req.params.id as string;
@@ -143,11 +120,6 @@ export const releaseWorkerHold = async (req: AuthRequest, res: Response) => {
   }
 };
 
-/**
- * GET /api/admin/users/clients/:id/payment-hold
- * A client's outstanding-payment hold, if any — set by
- * adminDisputeController.resolveDispute's RESOLVE_FOR_WORKER action.
- */
 export const getClientPaymentHoldAdmin = async (req: AuthRequest, res: Response) => {
   try {
     const id = req.params.id as string;
@@ -170,16 +142,6 @@ export const getClientPaymentHoldAdmin = async (req: AuthRequest, res: Response)
   }
 };
 
-/**
- * PATCH /api/admin/users/clients/:id/payment-hold/release
- * Lifts a client's payment hold — same shape as releaseWorkerHold above, for
- * the client side of the same "unpaid, on hold" mechanism (see
- * ClientProfile.paymentHoldAt). Use once the client has actually paid out
- * of band, or an admin decides to write the balance off (see also
- * PAY_WORKER_FROM_PLATFORM in adminDisputeController, which leaves the hold
- * in place on purpose since the platform then owns the collection problem —
- * this is the explicit "we're done chasing it" release).
- */
 export const releaseClientPaymentHold = async (req: AuthRequest, res: Response) => {
   try {
     const id = req.params.id as string;
@@ -198,9 +160,6 @@ export const releaseClientPaymentHold = async (req: AuthRequest, res: Response) 
       data: { paymentHoldAt: null, paymentHoldNote: note?.trim() ?? null, outstandingBalance: 0 },
     });
 
-    // Book the cancellation fees this client owed as settled outside the app.
-    // Uses the ledger's own figure: outstandingBalance can also hold an
-    // unpaid booking, which was never booked as income.
     const owed = await prisma.ledgerLine.aggregate({
       where: { account: 'CLIENT_RECEIVABLE', clientId: id },
       _sum: { amountCentavos: true },

@@ -13,11 +13,6 @@ import { useAlertModal } from "../../../contexts/AlertModalContext";
 import { colors } from "../../../constants";
 import * as api from "../../../services/api";
 
-/**
- * A worker takes a break: they're hidden from search, can't be booked and
- * are signed out everywhere, but nothing is deleted. Signing in again offers
- * to reactivate. The server refuses while a job or request is still open.
- */
 export default function DeactivateAccountScreen() {
   const router = useRouter();
   const alertModal = useAlertModal();

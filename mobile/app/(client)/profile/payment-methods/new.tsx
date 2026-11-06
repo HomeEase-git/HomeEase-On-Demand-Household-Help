@@ -28,7 +28,6 @@ export default function AddPaymentMethodScreen() {
       alertModal.error("Error", "Enter a valid mobile number, e.g. 09XXXXXXXXX.");
       return;
     }
-    // The server requires an identifier; cash has no account, so it gets a fixed one.
     const identifier = isCash ? "cash" : accountIdentifier.trim();
 
     setLoading(true);

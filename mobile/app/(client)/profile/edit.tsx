@@ -55,8 +55,6 @@ export default function EditProfileScreen() {
         fullName: name.trim(),
         phone: phone.trim(),
       });
-      // Merge: the API shape lacks hasAcceptedTerms, and dropping it sends the
-      // client back to the agreement screen.
       if (user) setUser({ ...user, ...updatedUser });
       alertModal.success("Success", "Profile updated");
       router.back();

@@ -1,22 +1,3 @@
-// prisma/seeds/seed-catalog.ts
-//
-// Prod-safe catalog bootstrap. Inserts ONLY reference data the app needs to
-// function — service categories built from the job order matrix
-// (prisma/seeds/data/jobOrderMatrix.json: jobs, units, prices and per-unit
-// count limits). No users, no bookings,
-// no wipe. Fully idempotent: an existing category is skipped, so
-// re-running it is a no-op. To move an existing category onto the matrix, use
-// scripts/applyJobMatrix.ts instead.
-//
-// Categories are written through the admin editor's own save
-// (adminCatalogController.writeCatalog), so they come out exactly as if an
-// admin had entered them.
-//
-// AppSettings is deliberately NOT touched here — if the singleton row is
-// missing, seed elsewhere or let the app create it.
-//
-// Run with: npx tsx prisma/seeds/seed-catalog.ts   (from the backend folder)
-
 import "dotenv/config";
 import { PrismaClient } from "@prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";

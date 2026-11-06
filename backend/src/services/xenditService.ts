@@ -16,8 +16,8 @@ function secretClient() {
 }
 
 interface CreateInvoiceParams {
-  externalId: string; // Payment.id — echoed back on the webhook as external_id
-  amountPesos: number; // decimal PHP pesos — Xendit invoices do NOT use centavos, unlike PayMongo
+  externalId: string;
+  amountPesos: number;
   description: string;
   payerEmail?: string;
   successRedirectUrl: string;
@@ -30,12 +30,6 @@ interface XenditInvoice {
   invoiceUrl: string;
 }
 
-/**
- * Creates a Xendit hosted Invoice covering all PH payment methods
- * (GCash/Maya/GrabPay/ShopeePay/card/QRPH/etc in one checkout) and returns
- * its hosted checkout URL. Replaces PayMongo's Source->Payment two-step —
- * Xendit invoices capture atomically, there is no separate "charge" call.
- */
 export async function createInvoice(params: CreateInvoiceParams): Promise<XenditInvoice> {
   const res = await secretClient().post('/v2/invoices', {
     external_id: params.externalId,
@@ -54,7 +48,6 @@ export async function createInvoice(params: CreateInvoiceParams): Promise<Xendit
   };
 }
 
-/** Closes a hosted checkout so it can no longer be paid. */
 export async function expireInvoice(invoiceId: string) {
   const res = await secretClient().post(`/invoices/${invoiceId}/expire!`);
   return res.data;
@@ -65,15 +58,6 @@ export async function retrieveInvoice(invoiceId: string) {
   return res.data;
 }
 
-/**
- * The invoice created for one of our rows, found by the external_id it was
- * created with — for a row whose invoice id was never saved (the server stopped
- * between createInvoice and saving it). Returns null when Xendit has none.
- *
- * UNCONFIRMED against a live response: this uses Xendit's list-invoices
- * `external_id` filter and tolerates both a bare array and a `{ data: [...] }`
- * wrapper. Try it in test mode before relying on it.
- */
 export async function findInvoiceByExternalId(externalId: string): Promise<{ id: string; status?: string; invoice_url?: string } | null> {
   const res = await secretClient().get('/v2/invoices', { params: { external_id: externalId } });
   const list: Array<{ id?: string; external_id?: string; status?: string; invoice_url?: string }> = Array.isArray(res.data)
@@ -85,19 +69,12 @@ export async function findInvoiceByExternalId(externalId: string): Promise<{ id:
   return match ? { id: match.id as string, status: match.status, invoice_url: match.invoice_url } : null;
 }
 
-// Xendit's fixed reason enum for the Refunds API — arbitrary client-supplied
-// text (e.g. a client's free-text cancellation reason) does not fit here and
-// must be mapped to 'OTHERS'; the free text itself still belongs in our own
-// Payment.refundReason column, not in this API call.
 export type XenditRefundReason = 'FRAUDULENT' | 'DUPLICATE' | 'REQUESTED_BY_CUSTOMER' | 'CANCELLATION' | 'OTHERS';
 
 interface CreateRefundParams {
   xenditInvoiceId: string;
   amountPesos: number;
   reason?: XenditRefundReason;
-  // Sent as the Idempotency-key header: a retry after a timeout (where the
-  // first request may still have gone through) gets the original refund
-  // back instead of refunding the client twice.
   idempotencyKey: string;
 }
 
@@ -110,13 +87,6 @@ export interface XenditRefund {
   failure_code: string | null;
 }
 
-/**
- * Request/response shape confirmed 2026-08-22 against Xendit's public API
- * reference and official Node SDK docs (POST /refunds, keyed by invoice_id,
- * fixed `reason` enum, `currency` required alongside `amount`). Not yet
- * exercised against a live sandbox call — do one real test-mode refund with
- * real API keys before fully trusting this in production.
- */
 export async function createRefund(params: CreateRefundParams): Promise<XenditRefund> {
   const res = await secretClient().post(
     '/refunds',

@@ -45,7 +45,6 @@ export const getLedgerStatus = async (_req: Request, res: Response) => {
   }
 };
 
-/** POST /api/admin/ledger/open — one-time: records opening balances and starts the ledger. */
 export const openLedgerAdmin = async (req: AuthRequest, res: Response) => {
   try {
     const adminId = req.user?.userId as string;
@@ -67,7 +66,6 @@ export const openLedgerAdmin = async (req: AuthRequest, res: Response) => {
   }
 };
 
-/** POST /api/admin/ledger/sync-fees — pull Xendit fees now (also runs hourly). */
 export const syncFeesAdmin = async (_req: Request, res: Response) => {
   try {
     const result = await syncXenditFees();
@@ -92,11 +90,6 @@ export const getReconciliation = async (req: Request, res: Response) => {
   }
 };
 
-/**
- * POST /api/admin/ledger/reconciliation { month, note }
- * Signs a month off with a snapshot of the report. A note is always
- * required, and must explain any check that didn't pass.
- */
 export const signOffReconciliation = async (req: AuthRequest, res: Response) => {
   try {
     const { month, note } = req.body as { month?: string; note?: string };
@@ -130,7 +123,6 @@ export const signOffReconciliation = async (req: AuthRequest, res: Response) => 
   }
 };
 
-/** GET /api/admin/ledger/transactions?month=YYYY-MM — the journal for a month. */
 export const listLedgerTransactions = async (req: Request, res: Response) => {
   try {
     const month = typeof req.query.month === 'string' ? req.query.month : currentMonth();

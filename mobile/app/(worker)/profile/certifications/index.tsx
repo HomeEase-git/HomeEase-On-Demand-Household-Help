@@ -67,7 +67,6 @@ export default function MyDocumentsScreen() {
   };
 
   const handleToggleVisibility = async (id: string, next: boolean) => {
-    // Optimistic — flip immediately, roll back if the request fails.
     setCerts((prev) => prev.map((c) => (c.id === id ? { ...c, visibleToClients: next } : c)));
     try {
       await api.updateCertificationVisibility(id, next);

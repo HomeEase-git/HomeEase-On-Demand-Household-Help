@@ -34,7 +34,6 @@ export default function WorkerHomeScreen() {
   const setJobs = useWorkerStore((s) => s.setJobs);
   const user = useAuthStore((s) => s.user);
   const unreadCount = useNotificationStore((s) => s.unreadCount);
-  // The next 7 days from the calendar — tinted by how many jobs fall on each.
   const [week, setWeek] = React.useState<api.CalendarDay[] | null>(null);
   const [declineCooldownUntil, setDeclineCooldownUntil] = React.useState<string | null>(null);
   const [accountHold, setAccountHold] = React.useState<{ since: string; amountOwed: number } | null>(null);
@@ -73,7 +72,6 @@ export default function WorkerHomeScreen() {
     } catch (error) {
       console.error("Load worker home error:", error);
     }
-    // Separate so a failure here doesn't blank the rest of the screen.
     try {
       const detail = await api.getWorkerDetail(userId);
       if (detail) setIsAvailable(Boolean(detail.isAvailable));

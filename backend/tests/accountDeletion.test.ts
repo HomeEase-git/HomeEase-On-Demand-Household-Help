@@ -10,7 +10,6 @@ jest.mock('@utils/emailService', () => ({
   sendOtpEmail: jest.fn().mockResolvedValue(undefined),
 }));
 
-/** Steps 2-3 of the delete flow: ask for the emailed code and read it back. */
 async function requestDeletionCode(token: string, _userId: string): Promise<string> {
   const res = await request(app).post('/api/users/me/delete-code').set('Authorization', `Bearer ${token}`);
   expect(res.status).toBe(200);

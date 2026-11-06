@@ -5,9 +5,6 @@ import { isRunningInExpoGo } from 'expo';
 import { authStorage } from '../utils/storage';
 import { updatePushToken, removePushToken } from './api';
 
-/**
- * Push Notification Types
- */
 export type NotificationType = 'booking' | 'payment' | 'message' | 'review' | 'system';
 
 export type NotificationPayload = {
@@ -24,13 +21,6 @@ export type PushNotificationToken = {
   obtainedAt: number;
 };
 
-/**
- * expo-notifications registers a push-token listener as soon as the module is
- * imported, which logs a warning/error whenever the app is running in Expo Go
- * (remote push was removed from Expo Go in SDK 53). Loading the module lazily,
- * and only outside Expo Go, keeps that log out of the Expo Go dev workflow
- * while leaving full functionality intact in development builds/production.
- */
 let notificationsModulePromise: Promise<typeof Notifications | null> | null = null;
 
 function getNotificationsModule(): Promise<typeof Notifications | null> {
@@ -42,29 +32,6 @@ function getNotificationsModule(): Promise<typeof Notifications | null> {
   return notificationsModulePromise;
 }
 
-/**
- * NotificationService
- *
- * Handles Firebase Cloud Messaging setup and local notification management.
- *
- * Features:
- * - Request user permissions
- * - Obtain and store push token
- * - Handle local notifications (foreground)
- * - Setup deep linking for notification taps
- * - Log and debug notification events
- *
- * No-ops when running in Expo Go — use a development build to test push
- * notifications and other native-only behavior.
- */
-/**
- * Android notification channels, each with its own sound. The backend picks
- * the channel per notification type (CHANNEL_FOR_TYPE in
- * backend/src/services/pushNotificationService.ts) — keep the ids in sync.
- * Android fixes a channel's sound when the channel is first created, so to
- * change a sound later, give the channel a new id rather than editing it.
- * The sound files are bundled by the expo-notifications plugin in app.json.
- */
 export const NOTIFICATION_CHANNELS = [
   { id: 'new-job', name: 'New job requests', sound: 'new_job.wav' },
   { id: 'messages', name: 'Messages', sound: 'message.wav' },
@@ -78,11 +45,6 @@ class NotificationService {
     callback: (notification: Notifications.Notification) => void;
   }> = [];
 
-  /**
-   * Initialize notifications service
-   *
-   * Call this once on app startup
-   */
   async initialize(): Promise<void> {
     try {
       const Notifications = await getNotificationsModule();
@@ -112,11 +74,6 @@ class NotificationService {
     }
   }
 
-  /**
-   * Request notification permissions from user
-   *
-   * @returns true if permission granted
-   */
   async requestPermissions(): Promise<boolean> {
     try {
       const Notifications = await getNotificationsModule();
@@ -147,26 +104,11 @@ class NotificationService {
     }
   }
 
-  /**
-   * Obtain and store push token
-   *
-   * Token should be sent to backend when user logs in
-   * Use notificationService.getToken() to retrieve it
-   */
   private async obtainPushToken(): Promise<void> {
     try {
       const Notifications = await getNotificationsModule();
       if (!Notifications) return;
 
-      // Push tokens need Firebase Cloud Messaging on Android, wired up via
-      // app.json's android.googleServicesFile — never configured for this
-      // app. Calling getExpoPushTokenAsync() without it doesn't just reject
-      // cleanly like the try/catch here would normally handle: it was
-      // observed causing a native crash (not a catchable JS rejection) the
-      // first time a fresh install's notification permission is granted.
-      // Skip the call entirely until Firebase is set up — this re-enables
-      // itself automatically the moment googleServicesFile is configured,
-      // no need to remember to revert this guard.
       if (Platform.OS === 'android' && !Constants.expoConfig?.android?.googleServicesFile) {
         console.log('[Notifications] Skipping push token fetch — Firebase not configured (no googleServicesFile in app.json)');
         return;
@@ -181,8 +123,6 @@ class NotificationService {
         return;
       }
 
-      // Get Expo push token (can be used with Expo Push Service)
-      // For Firebase FCM, this needs to be converted server-side
       const expoPushToken = await Notifications.getExpoPushTokenAsync({
         projectId,
       });
@@ -201,20 +141,10 @@ class NotificationService {
     }
   }
 
-  /**
-   * Get current push token
-   */
   getToken(): PushNotificationToken | null {
     return this.token;
   }
 
-  /**
-   * Send the obtained push token to the backend so server-initiated events
-   * (new booking, message, payment, etc.) can reach this device even while
-   * the app is closed. No-ops if there's no logged-in session yet — this can
-   * run on a cold boot before auth restores, and the token gets (re)sent
-   * right after a successful login/verification anyway (see useAuth.ts).
-   */
   async sendTokenToBackend(token: PushNotificationToken): Promise<void> {
     try {
       const authToken = await authStorage.getToken();
@@ -229,10 +159,6 @@ class NotificationService {
     }
   }
 
-  /**
-   * Clear the push token both locally and on the backend — call on logout so
-   * a signed-out device stops receiving pushes meant for the next user.
-   */
   async clearTokenFromBackend(): Promise<void> {
     try {
       await removePushToken();
@@ -243,10 +169,6 @@ class NotificationService {
     }
   }
 
-  /**
-   * Create the Android channels that give pushes their custom sounds.
-   * Idempotent — safe to call on every launch.
-   */
   private async setupAndroidChannels(Notifications: typeof import('expo-notifications')): Promise<void> {
     if (Platform.OS !== 'android') return;
     try {
@@ -263,11 +185,6 @@ class NotificationService {
     }
   }
 
-  /**
-   * Setup notification handlers
-   *
-   * Configures default notification behavior
-   */
   private setupNotificationHandlers(Notifications: typeof import('expo-notifications')): void {
     // Set default notification behavior
     Notifications.setNotificationHandler({
@@ -281,9 +198,6 @@ class NotificationService {
           shouldShowAlert: true,
           shouldShowBanner: true,
           shouldShowList: true,
-          // Silent while the app is open: utils/sounds.ts plays the in-app
-          // sound instead (and can skip e.g. the chat already on screen), so
-          // this avoids hearing two sounds for one notification.
           shouldPlaySound: false,
           shouldSetBadge: true,
         };
@@ -291,9 +205,6 @@ class NotificationService {
     });
   }
 
-  /**
-   * Listen for notifications received while app is in foreground
-   */
   onNotificationReceived(
     callback: (notification: Notifications.Notification) => void
   ): () => void {
@@ -314,9 +225,6 @@ class NotificationService {
     };
   }
 
-  /**
-   * Listen for notification interactions (taps)
-   */
   onNotificationInteraction(
     callback: (notification: Notifications.Notification) => void
   ): () => void {
@@ -337,9 +245,6 @@ class NotificationService {
     };
   }
 
-  /**
-   * Send local notification (for testing)
-   */
   async sendLocalNotification(payload: NotificationPayload): Promise<void> {
     try {
       const Notifications = await getNotificationsModule();
@@ -365,9 +270,6 @@ class NotificationService {
     }
   }
 
-  /**
-   * Clear all notifications
-   */
   async clearAllNotifications(): Promise<void> {
     try {
       const Notifications = await getNotificationsModule();
@@ -380,9 +282,6 @@ class NotificationService {
     }
   }
 
-  /**
-   * Get notification badge count
-   */
   async getNotificationBadgeCount(): Promise<number> {
     try {
       const Notifications = await getNotificationsModule();
@@ -396,9 +295,6 @@ class NotificationService {
     }
   }
 
-  /**
-   * Set notification badge count
-   */
   async setNotificationBadgeCount(count: number): Promise<void> {
     try {
       const Notifications = await getNotificationsModule();
@@ -411,9 +307,6 @@ class NotificationService {
     }
   }
 
-  /**
-   * Get platform identifier
-   */
   private getPlatform(): 'ios' | 'android' | 'web' {
     if (Constants.platform?.ios) return 'ios';
     if (Constants.platform?.android) return 'android';
@@ -424,14 +317,6 @@ class NotificationService {
 // Singleton instance
 export const notificationService = new NotificationService();
 
-/**
- * Initialize notification service on app startup
- *
- * Usage in app._layout.tsx:
- *   useEffect(() => {
- *     notificationService.initialize();
- *   }, []);
- */
 export async function initializeNotificationService(): Promise<void> {
   await notificationService.initialize();
 }

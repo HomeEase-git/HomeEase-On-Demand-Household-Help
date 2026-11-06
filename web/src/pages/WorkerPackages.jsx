@@ -17,11 +17,6 @@ function formatDate(value) {
   return new Date(value).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
 }
 
-/**
- * Packages workers propose (a bundle + price). Clients only see approved
- * ones. The admin can approve at the proposed price or set a different one;
- * a worker editing an approved package sends it back here.
- */
 export default function WorkerPackages() {
   const { showError, showSuccess } = useToast()
   const [statusFilter, setStatusFilter] = useState('PENDING')

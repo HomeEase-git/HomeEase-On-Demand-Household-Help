@@ -2,7 +2,6 @@ import type Redis from 'ioredis';
 import type { Options } from 'express-rate-limit';
 import { RedisFallbackStore, resetRateLimitCircuit } from '@middleware/rateLimitStore';
 
-// Just enough of ioredis for the store: INCR/PTTL in a MULTI, PEXPIRE, DECR, DEL.
 function fakeRedis() {
   const counts = new Map<string, number>();
   const expiries = new Map<string, number>();

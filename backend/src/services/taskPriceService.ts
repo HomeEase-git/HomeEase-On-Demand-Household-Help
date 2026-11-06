@@ -1,18 +1,3 @@
-/**
- * Task prices are set by the admin only. ServiceTask.basePrice is the price
- * every client pays and every worker earns for that job (before the worker's
- * expertise-tier surcharge and the distance fee, see utils/pricing.ts):
- *  - FIXED: basePrice is the flat price.
- *  - PER_UNIT: basePrice is the rate per unit, times the client's quantity
- *    (Booking.quantity), within the job's minQuantity/maxQuantity.
- *  - TIERED: retired (it was worker-defined price steps); any leftover task
- *    is charged like PER_UNIT so it never becomes unbookable.
- *  - CUSTOM_QUOTE: retired. Former custom-quote jobs were switched off and
- *    are refused at booking (see createBooking).
- *
- * Workers no longer set prices, so ServiceTask.minPrice/maxPrice are ignored.
- */
-
 export function isPerUnitModel(pricingModel: string): boolean {
   return pricingModel === 'PER_UNIT' || pricingModel === 'TIERED';
 }
@@ -22,12 +7,6 @@ export type TaskPriceResult = { ok: true; basePrice: number; quantity?: number }
 /** The fewest units a per-unit job can be booked for. */
 export const MIN_BOOKABLE_QUANTITY = 1;
 
-/**
- * The job's base price for a booking. Per-unit tasks need the client's
- * quantity. A missing, non-numeric, infinite or below-minimum count is
- * refused, so a per-unit job can never price at ₱0 or below; the job's own
- * minQuantity/maxQuantity (set by the admin) narrow it further.
- */
 export function taskBasePrice(
   task: {
     basePrice: number;
@@ -55,7 +34,6 @@ export function taskBasePrice(
   return { ok: true, basePrice: Math.round(task.basePrice * count * 100) / 100, quantity: count };
 }
 
-/** Prisma filter: the worker has ticked this task as one they do. */
 export function offersTaskFilter(serviceTaskId: string) {
   return { taskSelections: { some: { serviceTaskId, isActive: true } } };
 }

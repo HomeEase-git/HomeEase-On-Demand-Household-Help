@@ -5,23 +5,6 @@ import { parseStorageUrl } from '@utils/storageUrls';
 import { revokeUserSessions } from '@utils/tokenRevocation';
 import { revokeAllRefreshTokens } from '@utils/otpService';
 
-// What "delete my account" does (Data Privacy Act §§11, 16(e)), and what the
-// app tells the user it does — keep the two in sync with the delete-account
-// screens and the Privacy Policy's retention section.
-//
-// ERASED: name, email, phone, avatar, push token, notification settings,
-// saved addresses, profile addresses and coordinates, live location, bio,
-// resume (file + AI parse), KYC files (IDs, selfie, clearances),
-// certification files, VAT document, chat images the user sent, payout
-// account, TIN, MFA secrets, login tokens and notifications.
-//
-// KEPT (legal/accounting obligations and the other party's records):
-// bookings, payments, payouts, tax certificates (BIR requires the payee
-// name/TIN as issued), disputes, reviews (shown as "Deleted user"), chat
-// text, contract acceptance records and audit logs. The KYC/certification
-// rows themselves stay (document type + review outcome, no file) as the
-// record of what was verified.
-
 export const DELETED_USER_NAME = 'Deleted user';
 
 const OPEN_BOOKING_STATUSES = [
@@ -35,7 +18,6 @@ const OPEN_BOOKING_STATUSES = [
   'AWAITING_PAYMENT',
 ] as const;
 
-/** Reasons the account can't be deleted yet, as user-facing sentences. */
 export async function findDeletionBlockers(userId: string): Promise<string[]> {
   const [openBookings, clientProfile, workerProfile, unpaidPayouts] = await Promise.all([
     prisma.booking.count({
@@ -97,17 +79,12 @@ async function removeStoredFiles(urls: string[]): Promise<void> {
     [...byBucket.entries()].map(async ([bucket, paths]) => {
       const { error } = await supabase.storage.from(bucket).remove(paths);
       if (error) {
-        // DB side is already erased; log so orphaned files can be purged by hand.
         console.error(`Account deletion: failed to remove ${paths.length} file(s) from "${bucket}":`, error);
       }
     })
   );
 }
 
-/**
- * Erases a user's personal data (see the header comment for exactly what).
- * Callers must check findDeletionBlockers first.
- */
 export async function eraseAccount(userId: string, sessionTtlSeconds: number): Promise<void> {
   const files = await collectStoredFiles(userId);
   const workerProfile = await prisma.workerProfile.findUnique({ where: { userId }, select: { id: true } });
@@ -119,7 +96,6 @@ export async function eraseAccount(userId: string, sessionTtlSeconds: number): P
         email: `deleted+${userId}@deleted.homeease.invalid`,
         phone: null,
         fullName: DELETED_USER_NAME,
-        // Not a valid bcrypt hash, so no password can ever match it.
         password: '!deleted',
         avatar: null,
         pushToken: null,

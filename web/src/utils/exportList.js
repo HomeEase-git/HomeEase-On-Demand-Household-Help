@@ -2,11 +2,6 @@ import { downloadCsv } from './csvExport'
 
 const PAGE_SIZE = 50 // the admin API's maximum page size
 
-/**
- * Downloads every row matching the list's current filters and sort as CSV,
- * fetching page by page (up to maxRows). Returns how many rows were saved
- * and whether the cap cut the export short.
- */
 export async function exportListToCsv({ fetchPage, filename, mapRow, maxRows = 2000 }) {
   const rows = []
   let total = 0

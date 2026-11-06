@@ -2,19 +2,6 @@ import dns from 'node:dns';
 import net from 'node:net';
 import nodemailer, { Transporter } from 'nodemailer';
 
-// Pluggable email transport. EMAIL_PROVIDER selects one of:
-//   - "smtp"      (default) nodemailer over SMTP. Host/port/secure are env-
-//                 configurable so 465 vs 587 can be tried without a code change.
-//   - "gmail-api" Gmail REST API over HTTPS (port 443) using an OAuth2 refresh
-//                 token — sends genuinely from the Gmail account, no SMTP port.
-//   - "brevo"     Brevo (Sendinblue) HTTP API — send from a "single sender"
-//                 verified address (a plain Gmail address is allowed).
-// All three send FROM the same identity: `${EMAIL_FROM_NAME} <${EMAIL_FROM_ADDRESS}>`
-// (falling back to the legacy SMTP_* / provider-specific sender vars).
-//
-// All config is read once at module load (consts below) — env is static after
-// boot, and the unit tests drive config via jest.isolateModules import-time env.
-
 const PROVIDER = (process.env.EMAIL_PROVIDER || 'smtp').toLowerCase();
 
 const FROM_NAME = process.env.EMAIL_FROM_NAME || process.env.SMTP_FROM_NAME || 'HomeEase';
@@ -32,18 +19,7 @@ const SMTP_PASS = process.env.SMTP_PASS;
 const SMTP_HOST = process.env.SMTP_HOST || 'smtp.gmail.com';
 const SMTP_PORT = Number(process.env.SMTP_PORT) || 465;
 const SMTP_SECURE = process.env.SMTP_SECURE ? process.env.SMTP_SECURE === 'true' : SMTP_PORT === 465;
-// Force IPv4 by default. nodemailer 10 resolves BOTH A and AAAA records and
-// then picks one at random (shared/index.js formatDNSValue) — it does not
-// honour a `family` option — so on the Render host (which has an IPv6
-// interface but no IPv6 route) roughly half its connections die with
-// ENETUNREACH. When SMTP_FAMILY=4 we resolve the host to an A record
-// ourselves and hand nodemailer the IPv4 literal (+ TLS servername), which
-// short-circuits its resolver entirely. SMTP_FAMILY=0 restores "let
-// nodemailer resolve", 6 forces its IPv6 path.
 const SMTP_FAMILY = process.env.SMTP_FAMILY !== undefined ? Number(process.env.SMTP_FAMILY) : 4;
-// Fail fast on a blocked port / unreachable host instead of hanging ~2 min on
-// nodemailer's default connectionTimeout (which was blocking the whole signup
-// response on Render).
 const SMTP_TIMEOUTS = { connectionTimeout: 15_000, greetingTimeout: 10_000, socketTimeout: 20_000 };
 
 // Gmail API
@@ -60,7 +36,6 @@ const HTTP_TIMEOUT_MS = 15_000;
 
 export const getEmailProviderName = (): string => PROVIDER;
 
-// Snapshot of the effective transport config, for POST /internal/diag/email-test.
 export const getEmailDiagInfo = async (): Promise<Record<string, unknown>> => {
   const info: Record<string, unknown> = { provider: PROVIDER, from: FROM };
   if (PROVIDER === 'smtp') {
@@ -85,13 +60,6 @@ export const getEmailDiagInfo = async (): Promise<Record<string, unknown>> => {
   return info;
 };
 
-// ---------------------------------------------------------------------------
-// Transports — each returns a provider messageId string (or undefined) and
-// throws with a clear message on misconfiguration or send failure.
-// ---------------------------------------------------------------------------
-
-// Resolve SMTP_HOST to an IPv4 literal when SMTP_FAMILY=4, so nodemailer's
-// own (randomising) resolver never gets a chance to pick an AAAA record.
 export const resolveSmtpTarget = async (): Promise<{ host: string; servername?: string }> => {
   if (SMTP_FAMILY === 4 && SMTP_HOST && net.isIP(SMTP_HOST) === 0) {
     const addrs = await dns.promises.resolve4(SMTP_HOST);
@@ -220,8 +188,6 @@ const sendViaBrevo = async (to: string, subject: string, html: string): Promise<
   return data.messageId;
 };
 
-// ---------------------------------------------------------------------------
-
 const send = async (to: string, subject: string, html: string, label: string): Promise<string | undefined> => {
   try {
     let messageId: string | undefined;
@@ -240,12 +206,9 @@ const send = async (to: string, subject: string, html: string, label: string): P
   }
 };
 
-// User-supplied text (names) must not become markup in an email.
 const escapeHtml = (value: string): string =>
   value.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
 
-// Diagnostic — used by POST /internal/diag/email-test to exercise the active
-// transport without creating a signup. Not a user-facing template.
 export const sendTestEmail = async (to: string): Promise<{ provider: string; messageId?: string }> => {
   const messageId = await send(
     to,
@@ -308,10 +271,6 @@ export const sendWelcomeEmail = async (email: string, fullName: string): Promise
   );
 };
 
-/**
- * Security alert for the platform's admins (services/securityAlertService.ts).
- * `details` are label/value rows; values are escaped.
- */
 export const sendSecurityAlertEmail = async (
   to: string,
   subject: string,
@@ -337,7 +296,6 @@ export const sendSecurityAlertEmail = async (
   );
 };
 
-/** Tells a user about a change to their own account's security. */
 export const sendAccountSecurityEmail = async (to: string, subject: string, message: string): Promise<void> => {
   await send(
     to,

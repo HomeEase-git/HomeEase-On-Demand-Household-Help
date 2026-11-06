@@ -9,23 +9,6 @@ export type CompressionResult = {
   compressionRatio: number;
 };
 
-/**
- * Compresses an image by resizing and reducing quality.
- *
- * Targets:
- * - Max width/height: 1600px (matches the backend's normalizeImage target, so
- *   documents aren't downscaled twice; keeps small print on IDs legible)
- * - Quality: 0.7 (70% quality for good balance of size/quality)
- * - Format: JPEG for lossy compression (also converts iOS HEIC to JPEG, which
- *   the backend upload filter rejects)
- *
- * @param uri - Image URI (file:// or content://)
- * @param maxDimension - Maximum width or height (default 1600)
- * @param quality - Compression quality 0-1 (default 0.7)
- * @param size - The image's pixel size if already known (the picker reports
- *   it); otherwise it's read from the file
- * @returns Compressed image URI and size info
- */
 export async function compressImage(
   uri: string,
   maxDimension: number = 1600,
@@ -36,9 +19,6 @@ export async function compressImage(
     // Get original file size
     const originalSize = await getFileSizeFromUri(uri);
 
-    // Shrink only the longer side, and only when it's over the limit. Passing
-    // both width and height to resize would stretch every photo into a
-    // maxDimension x maxDimension square (and blow small ones up).
     const resize = await resizeAction(uri, maxDimension, size);
     const manipulatedImage = await ImageManipulator.manipulateAsync(uri, resize ? [resize] : [], {
       compress: quality,
@@ -73,7 +53,6 @@ async function resizeAction(
         Image.getSize(uri, (w, h) => resolve({ width: w, height: h }), reject)
       ));
     } catch {
-      // Size unknown: cap the width, which keeps the aspect ratio.
       return { resize: { width: maxDimension } };
     }
   }
@@ -81,13 +60,6 @@ async function resizeAction(
   return width >= height ? { resize: { width: maxDimension } } : { resize: { height: maxDimension } };
 }
 
-/**
- * Validates image file size.
- * 
- * @param uri - Image URI
- * @param maxSizeBytes - Maximum allowed size (default 5MB)
- * @returns true if file is within size limit
- */
 export async function validateImageSize(
   uri: string,
   maxSizeBytes: number = 5 * 1024 * 1024, // 5MB default
@@ -117,14 +89,6 @@ export async function validateImageSize(
   }
 }
 
-/**
- * Get file size in bytes from URI.
- *
- * Uses expo-file-system's File class to read the actual file size.
- *
- * @param uri - File URI
- * @returns File size in bytes (0 if the file doesn't exist or can't be read)
- */
 async function getFileSizeFromUri(uri: string): Promise<number> {
   if (!/^[a-z][a-z0-9+.-]*:\/\//i.test(uri)) {
     throw new Error('Invalid image URI');
@@ -133,12 +97,6 @@ async function getFileSizeFromUri(uri: string): Promise<number> {
   return new File(uri).size;
 }
 
-/**
- * Format bytes to human-readable size.
- * 
- * @param bytes - Size in bytes
- * @returns Formatted string (e.g., "2.5 MB")
- */
 export function formatFileSize(bytes: number): string {
   if (bytes === 0) return '0 B';
   const k = 1024;

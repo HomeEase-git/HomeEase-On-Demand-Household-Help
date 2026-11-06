@@ -39,7 +39,6 @@ describe('Worker pays platform dues through Xendit', () => {
   beforeEach(async () => {
     (createInvoice as jest.Mock).mockReset();
     (retrieveInvoice as jest.Mock).mockReset();
-    // Unless a test says otherwise, Xendit can't be asked, so nothing is retired by accident.
     (findInvoiceByExternalId as jest.Mock).mockReset().mockRejectedValue(new Error('xendit unreachable'));
     let n = 0;
     (createInvoice as jest.Mock).mockImplementation(async () => ({
@@ -171,7 +170,6 @@ describe('Worker pays platform dues through Xendit', () => {
 
   describe('an interrupted checkout (row saved, invoice id never saved)', () => {
     const MIN = 60 * 1000;
-    /** A PENDING row with no invoice id, as left behind by a server that stopped mid-checkout. */
     const stuckRow = (ageMinutes: number, amount = 150) =>
       ownerDb.debtPayment.create({
         data: { workerProfileId, amount, createdAt: new Date(Date.now() - ageMinutes * MIN) },
@@ -284,7 +282,6 @@ describe('Worker pays platform dues through Xendit', () => {
 
       expect(await reconcileStalePendingDebtPayments(cutoff())).toContainEqual({ debtPaymentId: oldId, result: 'paid' });
 
-      // A fresh row is newer than the cutoff and is not touched.
       const freshId = await openInvoice(300, 150);
       const again = await reconcileStalePendingDebtPayments(cutoff());
       expect(again.find((c) => c.debtPaymentId === freshId)).toBeUndefined();

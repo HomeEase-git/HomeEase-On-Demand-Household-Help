@@ -10,17 +10,6 @@ export interface HoldTimerState {
   isExpired: boolean;
 }
 
-/**
- * Client-side-only countdown shown after a worker is selected in Step 3.
- * NOT a real server-side reservation — the backend has no "hold this worker
- * before the booking exists" concept, only the 1-hour PENDING-booking expiry
- * that starts once POST /bookings actually succeeds (see
- * queues/bookingQueue.schedulePendingExpiry on the backend). This timer is
- * purely a UX nudge to get the client through Step 4 promptly; letting it
- * expire doesn't cancel/release anything server-side — it just resets the
- * "confidence" affordance and lets the caller decide whether to re-prompt
- * the user to confirm the worker is still their pick.
- */
 export function useBookingHoldTimer(holdStartedAt: number | null | undefined): HoldTimerState {
   const [now, setNow] = useState(() => Date.now());
 

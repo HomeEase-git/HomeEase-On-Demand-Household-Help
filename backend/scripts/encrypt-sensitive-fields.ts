@@ -1,19 +1,3 @@
-// One-off backfill: encrypts payout account numbers written before field
-// encryption existed (see src/utils/fieldEncryption.ts). Idempotent — values
-// already carrying the `enc:v1:` prefix are skipped, so it's safe to re-run.
-//
-// Covers WorkerProfile.payoutAccountNumber and Payout.accountNumber.
-//
-// Usage (from backend/):
-//   npx tsx scripts/encrypt-sensitive-fields.ts --dry     # report only, no writes
-//   npx tsx scripts/encrypt-sensitive-fields.ts           # apply
-//   add --neon-websocket  to connect through Neon's WebSocket proxy (port 443)
-//     when the network blocks raw Postgres connections to Neon; needs
-//     `npm i --no-save @prisma/adapter-neon @neondatabase/serverless ws`.
-//
-// DATA_ENCRYPTION_KEY must be set to the SAME value the deployed backend
-// uses — values encrypted with a different key can't be read by the app.
-// Respects backend/.env DATABASE_URL. Run against dev first.
 import 'dotenv/config';
 import { PrismaClient } from '@prisma/client';
 import { PrismaPg } from '@prisma/adapter-pg';

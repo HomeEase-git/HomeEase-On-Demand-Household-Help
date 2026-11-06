@@ -4,9 +4,6 @@ import { ROLES } from '@shared/constants/index.js';
 export async function login(email, password) {
   const user = await loginUser(email, password);
 
-  // MFA-enabled admin — no session yet, just a challenge to complete. Let
-  // the caller (Login.jsx) show the code-entry step; nothing to validate
-  // or store until completeMfaChallenge succeeds.
   if (user.mfaRequired) {
     return user;
   }

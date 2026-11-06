@@ -1,8 +1,3 @@
-// Real bookingQueue.ts connects to Redis via BullMQ. Tests don't have a
-// Redis instance available, so this stand-in is swapped in via jest's
-// moduleNameMapper — no test currently exercises the expiry/auto-settle/
-// availability-reset job scheduling path itself, only the HTTP-level
-// behavior of the endpoints that call these functions as side effects.
 export const BOOKING_QUEUE_NAME = 'booking-lifecycle';
 
 export const JOB_NAMES = {

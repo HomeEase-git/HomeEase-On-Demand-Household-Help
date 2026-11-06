@@ -22,30 +22,7 @@ import { recoverDebtTx, accrueDebtTx, reverseDebtTx, lockDuesTx, restoreSettleme
 import { roundToCentavo } from '@utils/money';
 import { updateBookingIfStatus, isBookingStatusConflict } from '@services/bookingStatusWrite';
 
-// Statuses a booking may be finalized to COMPLETED from (see bookingStateMachine).
 const COMPLETABLE_STATUSES = ['PENDING_COMPLETION', 'AWAITING_PAYMENT', 'DISPUTED'] as const;
-
-/**
- * PAYMENT MODEL: pay-after-completion, no escrow.
- *
- * No Payment row exists until the worker sends the invoice at the end of the
- * job (bookingController.completeBooking). Then:
- *
- *   CASH   -> settleCashBooking, once the worker taps "Cash received"
- *             (bookingController.markCashReceived): the booking is finalized
- *             and the platform's service fee is accrued onto the worker's
- *             commissionOwed tab (netted from their next online payout).
- *
- *   GCASH  -> createCompletionInvoice: a Xendit invoice for the full final
- *   /MAYA     total is raised and the booking moves to AWAITING_PAYMENT. The
- *             invoice-paid webhook calls finalizePaidBooking, which finalizes
- *             the booking, nets any outstanding commissionOwed, and schedules
- *             the worker's payout for the remainder.
- *
- * `Payment.escrowStatus` is vestigial (see schema): HELD = unsettled,
- * RELEASED = settled, REFUNDED = refunded. Nothing is ever held by the
- * platform.
- */
 
 interface BookingWithAddOns {
   id: string;
@@ -69,27 +46,12 @@ interface BookingWithAddOns {
 async function loadBooking(bookingId: string): Promise<BookingWithAddOns> {
   const booking = await prisma.booking.findUnique({
     where: { id: bookingId },
-    // Only approved add-ons count toward settlement — see
-    // BookingAddOn.clientApprovedAt's schema comment. By the time a booking
-    // reaches settlement, add-ons are already frozen (completeBooking
-    // auto-rejects anything still pending), so this should already match
-    // what was locked into Booking.finalPrice — filtering here too keeps
-    // this the single source of truth rather than trusting that agreement.
     include: { addOns: { where: { clientApprovedAt: { not: null } } } },
   });
   if (!booking) throw new Error(`Booking ${bookingId} not found`);
   return booking as unknown as BookingWithAddOns;
 }
 
-/**
- * The commission/withholding-tax rate a booking actually settles at.
- * Prefers the snapshot pinned in bookingController.acceptBooking (see
- * Booking.commissionRateSnapshot's schema comment) over the live
- * AppSettings value, so an admin changing the platform rate after a worker
- * already accepted a job can't retroactively change their split. Falls
- * back to the live settings only for bookings accepted before this field
- * existed (snapshot null) — identical to the old, always-live behavior.
- */
 function resolveRates(
   booking: Pick<BookingWithAddOns, 'commissionRateSnapshot' | 'withholdingTaxRateSnapshot'>,
   liveSettings: { commissionRate: number; withholdingTaxRate: number }
@@ -100,10 +62,6 @@ function resolveRates(
   };
 }
 
-/**
- * vatApplicable/vatRate are always read from the booking's own frozen
- * snapshot (see Booking.vatApplicable/vatRate); new bookings carry none.
- */
 function priceBooking(booking: BookingWithAddOns, commissionRate: number, withholdingTaxRate: number) {
   const { subtotal, tip, vatAmount, totalAmount } = computeBookingFinalTotal({
     estimatedPrice: booking.estimatedPrice,
@@ -116,9 +74,6 @@ function priceBooking(booking: BookingWithAddOns, commissionRate: number, withho
   });
   const commissionAmount = calculateCommission(subtotal, commissionRate);
   const withholdingTaxAmount = calculateWithholdingTax(subtotal, commissionRate, withholdingTaxRate);
-  // VAT is never the worker's or platform's revenue (it's collected on BIR's
-  // behalf) — added back after commission/withholding are taken out, never
-  // taxed or commissioned itself.
   const workerPayout = roundToCentavo(subtotal - commissionAmount - withholdingTaxAmount + tip + vatAmount);
   return {
     subtotal,
@@ -133,11 +88,6 @@ function priceBooking(booking: BookingWithAddOns, commissionRate: number, withho
   };
 }
 
-/**
- * CASH completion. The client has paid the worker directly, so this only
- * records the transaction and books the platform's uncollected cut as worker
- * debt. No gateway call, no Payout.
- */
 function cashJobDuesMessage(collected: number, platformCut: number, coveredByCredit: number): string {
   const owed = roundToCentavo(platformCut - coveredByCredit);
   const intro = `You collected ₱${collected.toFixed(2)} in cash. The ₱${platformCut.toFixed(2)} service fee`;
@@ -151,11 +101,6 @@ function cashJobDuesMessage(collected: number, platformCut: number, coveredByCre
   return `${intro} will be deducted from your next online-job payout.`;
 }
 
-/**
- * `fromStatuses` narrows which statuses may complete: the worker's "Cash
- * received" passes PENDING_COMPLETION only, so a client report that lands in
- * between (DISPUTED) wins instead of being settled over.
- */
 export async function settleCashBooking(
   bookingId: string,
   fromStatuses: readonly (typeof COMPLETABLE_STATUSES)[number][] = COMPLETABLE_STATUSES
@@ -188,9 +133,6 @@ export async function settleCashBooking(
       capturedAmount: priced.totalAmount,
       capturedAt: new Date(),
       releasedAt: new Date(),
-      // Cash is settled worker-to-hand — no Payout is ever owed, so mark the
-      // worker side settled up front (blocks settleWorkerEarnings / the
-      // self-heal sweep from ever creating a disbursement for this payment).
       workerSettledAt: new Date(),
       methodType: 'CASH' as const,
       accountIdentifier: booking.paymentAccountIdentifier ?? null,
@@ -238,12 +180,6 @@ export async function settleCashBooking(
   return payment;
 }
 
-/**
- * GCASH/MAYA completion. Raises a Xendit invoice for the full final total and
- * moves the booking to AWAITING_PAYMENT. Idempotent: if a still-PENDING
- * Payment with a live invoice already exists (client abandoned an earlier
- * checkout), its URL is returned instead of creating a duplicate.
- */
 export async function createCompletionInvoice(bookingId: string): Promise<
   | { checkoutUrl: string; invoiceId: string; paymentId: string; amount: number }
   | { alreadyPaid: true }
@@ -266,10 +202,6 @@ export async function createCompletionInvoice(bookingId: string): Promise<
     throw new Error(`Booking ${bookingId} is already paid`);
   }
 
-  // Reuse a still-open invoice from an abandoned checkout — or, if Xendit
-  // already shows it PAID (the invoice-paid webhook was missed/delayed),
-  // self-heal right here instead of minting a duplicate invoice and charging
-  // the client a second time.
   let underpaid = false;
   if (existing && existing.status === 'PENDING' && existing.xenditInvoiceId) {
     try {
@@ -297,9 +229,6 @@ export async function createCompletionInvoice(bookingId: string): Promise<
       // fall through and mint a fresh invoice
     }
   }
-  // A voided invoice (cancel or invoice report) that was paid before Xendit
-  // expired it: re-issuing would drop the only link to that money and bill
-  // the client twice, so an admin settles it instead.
   if (existing && existing.status === 'FAILED' && existing.xenditInvoiceId) {
     const old = await retrieveInvoice(existing.xenditInvoiceId);
     const oldStatus = (old?.status as string | undefined)?.toUpperCase();
@@ -315,8 +244,6 @@ export async function createCompletionInvoice(bookingId: string): Promise<
     }
   }
 
-  // The client already paid part of the old invoice; a fresh full-amount
-  // invoice would charge them again.
   if (underpaid) {
     throw new Error(`Booking ${bookingId} has a partly paid invoice that needs a manual review`);
   }
@@ -382,12 +309,6 @@ export async function createCompletionInvoice(bookingId: string): Promise<
     data: { xenditInvoiceId: invoice.id },
   });
 
-  // Status-guarded: a fast invoice-paid webhook may already have moved the
-  // booking to COMPLETED between createInvoice and here — never drag it back.
-  // awaitingPaymentSince only set on the first entry into this status —
-  // a retried/resumed checkout (existing PENDING invoice reused above, or
-  // a fresh one minted after a failure) shouldn't push the reminder clock
-  // back out, since the client has been waiting since the original one.
   await updateBookingIfStatus(prisma, bookingId, ['PENDING_COMPLETION', 'AWAITING_PAYMENT'], {
     status: 'AWAITING_PAYMENT',
     finalPrice: priced.subtotal,
@@ -397,17 +318,6 @@ export async function createCompletionInvoice(bookingId: string): Promise<
   return { checkoutUrl: invoice.invoiceUrl, invoiceId: invoice.id, paymentId: payment.id, amount: priced.totalAmount };
 }
 
-/**
- * Nets any outstanding worker commission dues against this payment's workerPayout
- * and creates a Payout row for the remainder, then enqueues the disbursement.
- *
- * The claim + debt-netting + Payout-row insert all happen in ONE transaction
- * guarded by `Payment.workerSettledAt`, so a replayed webhook or the
- * bookingWorker self-heal sweep can never net the debt or create a second
- * payout. Only `schedulePayout` (the BullMQ enqueue) runs afterwards — if that
- * fails the Payout row is left PENDING and the reconciliation sweep re-enqueues
- * it (jobId dedup makes that safe).
- */
 class PayoutHeldNoMethodError extends Error {
   constructor(
     readonly bookingId: string,
@@ -419,11 +329,6 @@ class PayoutHeldNoMethodError extends Error {
   }
 }
 
-/**
- * Audit + tell the worker, once per booking — the self-heal sweep retries a
- * held payment every run, so without the dedup the worker would be re-notified
- * hourly until they add a payout account.
- */
 async function flagPayoutHeldNoMethod(held: PayoutHeldNoMethodError): Promise<void> {
   const alreadyFlagged = await prisma.auditLog.findFirst({
     where: { action: 'PAYOUT_BLOCKED_NO_METHOD', metadata: { path: ['bookingId'], equals: held.bookingId } },
@@ -448,7 +353,6 @@ async function flagPayoutHeldNoMethod(held: PayoutHeldNoMethodError): Promise<vo
 
 export async function settleWorkerEarnings(paymentId: string): Promise<void> {
   const outcome = await prisma.$transaction(async (tx) => {
-    // Atomic claim — only the first caller flips workerSettledAt from null.
     const claim = await tx.payment.updateMany({
       where: { id: paymentId, status: 'COMPLETED', workerSettledAt: null },
       data: { workerSettledAt: new Date() },
@@ -474,18 +378,12 @@ export async function settleWorkerEarnings(paymentId: string): Promise<void> {
 
     let payoutAmount = payment.workerPayout;
     if (workerProfile) {
-      // recoverDebtTx locks the worker's dues row and takes at most what's
-      // owed right now, so a penalty or refund landing concurrently can't be
-      // lost or double-counted.
       const recovered = await recoverDebtTx(tx, workerProfile.id, payoutAmount, {
         bookingId: payment.bookingId,
         note: 'Withheld from payout to clear outstanding platform dues',
       });
       payoutAmount = roundToCentavo(payoutAmount - recovered);
 
-      // Approved client-fault cancellation compensation (and credit left
-      // over from refunds) rides along with the next online payout. Recorded
-      // on the payment so a refund of this job can put it back.
       const { compensationCredit } = await lockDuesTx(tx, workerProfile.id);
       if (compensationCredit > 0) {
         payoutAmount = roundToCentavo(payoutAmount + compensationCredit);
@@ -500,9 +398,6 @@ export async function settleWorkerEarnings(paymentId: string): Promise<void> {
     let payoutId: string | null = null;
     if (payoutAmount > 0) {
       if (!workerProfile?.payoutMethod || !workerProfile.payoutAccountNumber) {
-        // Roll back the claim (and any debt netting) so the payment stays
-        // unsettled — the self-heal sweep retries it once the worker adds a
-        // payout account, instead of the earnings being silently dropped.
         throw new PayoutHeldNoMethodError(payment.bookingId, workerUserId, payoutAmount, payment.totalAmount);
       }
       const payout = await tx.payout.create({
@@ -530,7 +425,6 @@ export async function settleWorkerEarnings(paymentId: string): Promise<void> {
 
   if (outcome.payoutId) {
     await schedulePayout(outcome.payoutId).catch((error) => {
-      // Payout row is PENDING; the reconciliation sweep will re-enqueue it.
       console.error(`Failed to enqueue payout ${outcome.payoutId}:`, error);
     });
   }
@@ -549,17 +443,6 @@ export async function settleWorkerEarnings(paymentId: string): Promise<void> {
   }
 }
 
-/**
- * Called by the Xendit invoice-paid webhook (paymentController.handleInvoicePaid)
- * and by the reconciliation sweep. Marks the Payment COMPLETED, finalizes the
- * booking, then settles the worker's earnings. Idempotent — a Payment already
- * COMPLETED short-circuits to settleWorkerEarnings so a missing payout still
- * self-heals.
- *
- * Returns null (and changes nothing) when Xendit reports less money paid than
- * the invoice total — the booking is not marked paid and no payout is made
- * until an admin has looked at it.
- */
 export async function finalizePaidBooking(
   paymentId: string,
   xenditPaymentRef?: string | null,
@@ -577,7 +460,6 @@ export async function finalizePaidBooking(
     return payment;
   }
 
-  // A missing paid amount is held for review too, not taken as paid in full.
   if (paidAmount == null || roundToCentavo(paidAmount) < roundToCentavo(payment.totalAmount)) {
     await writeAuditLog({
       action: 'PAYMENT_UNDERPAID',
@@ -594,8 +476,6 @@ export async function finalizePaidBooking(
   let updated;
   try {
     updated = await prisma.$transaction(async (tx) => {
-      // Claim the payment: a concurrent webhook/reconcile for the same invoice
-      // that already marked it COMPLETED makes this one a no-op.
       const claim = await tx.payment.updateMany({
         where: { id: payment.id, status: { not: 'COMPLETED' } },
         data: {
@@ -619,8 +499,6 @@ export async function finalizePaidBooking(
 
       await postPaymentCaptured(tx, p, payment.booking.workerId, payment.booking.clientId);
 
-      // If the payment-overdue sweep already opened a dispute and the client
-      // then paid, close it out.
       await tx.dispute.updateMany({
         where: {
           bookingId: payment.bookingId,
@@ -634,9 +512,6 @@ export async function finalizePaidBooking(
     });
   } catch (error) {
     if (isBookingStatusConflict(error)) {
-      // Money arrived for a booking that was cancelled (or otherwise moved
-      // on) in the meantime. Don't mark it completed — leave the payment
-      // PENDING and flag it so an admin refunds or reinstates it.
       await writeAuditLog({
         action: 'PAYMENT_FOR_INACTIVE_BOOKING',
         category: 'SYSTEM_ERROR',
@@ -649,7 +524,6 @@ export async function finalizePaidBooking(
   }
 
   if (updated === null) {
-    // Lost the race to another finalizer — it settles; this just self-heals.
     await settleWorkerEarnings(payment.id);
     return prisma.payment.findUniqueOrThrow({ where: { id: payment.id } });
   }
@@ -667,21 +541,6 @@ export async function finalizePaidBooking(
   return updated;
 }
 
-/**
- * Admin override for a post-completion non-payment dispute (see
- * adminDisputeController's PAY_WORKER_FROM_PLATFORM action) — the platform
- * settles the worker's earnings out of its own funds rather than continue
- * chasing a client who confirmed the job but never paid. Requires an
- * existing Payment (created by createCompletionInvoice when the booking
- * entered AWAITING_PAYMENT) so this can reuse its already-computed
- * subtotal/commission/withholdingTax/VAT/workerPayout split — the worker
- * still received real taxable income regardless of who funded it, so 2307/
- * withholding reporting stays correct — but marks `platformFunded` so
- * vatSummaryService excludes it from "VAT collected from clients"
- * reporting, since no client payment ever happened. Idempotent the same way
- * finalizePaidBooking is: an already-COMPLETED payment just re-runs
- * settleWorkerEarnings (safe no-op if already settled).
- */
 export async function settlePlatformFundedPayment(bookingId: string) {
   const payment = await prisma.payment.findUnique({ where: { bookingId } });
   if (!payment) {
@@ -727,13 +586,6 @@ export async function settlePlatformFundedPayment(bookingId: string) {
   return updated;
 }
 
-/**
- * Marks a still-unpaid Payment as FAILED after expiring its Xendit checkout,
- * so a client who already opened it can't pay during review. Used when a
- * booking is cancelled or its invoice reported. If the checkout was paid
- * first, the Payment is left PENDING for the paid webhook to settle. A no-op
- * when there is no Payment row.
- */
 export async function voidUnpaidPayment(bookingId: string, reason: string) {
   const payment = await prisma.payment.findUnique({ where: { bookingId } });
   if (!payment || payment.status !== 'PENDING') return payment ?? null;
@@ -742,8 +594,6 @@ export async function voidUnpaidPayment(bookingId: string, reason: string) {
     try {
       await expireInvoice(payment.xenditInvoiceId);
     } catch (error) {
-      // Xendit refuses to expire a paid invoice; anything else, void anyway
-      // (handleInvoicePaid flags a payment that lands on a voided row).
       const remote = await retrieveInvoice(payment.xenditInvoiceId).catch(() => null);
       const remoteStatus = (remote?.status as string | undefined)?.toUpperCase();
       if (remoteStatus === 'PAID' || remoteStatus === 'SETTLED') return payment;
@@ -757,26 +607,12 @@ export async function voidUnpaidPayment(bookingId: string, reason: string) {
   });
 }
 
-/**
- * Refund/void for cancellations and dispute resolutions.
- *
- *  - No Payment / PENDING Payment  -> nothing was collected; void it.
- *  - COMPLETED + GCASH/MAYA        -> real Xendit refund (only mark REFUNDED on
- *                                     SUCCEEDED; throw otherwise for manual
- *                                     follow-up). Refused if the worker payout
- *                                     already went out (needs manual clawback).
- *  - COMPLETED + CASH             -> reverse the worker's commission-debt
- *                                     accrual; the worker returns the cash
- *                                     out-of-band.
- */
-/** The worker's payout already left — the refund has to be settled manually. */
 export class PayoutAlreadySentError extends Error {
   constructor(bookingId: string) {
     super(`Payout for booking ${bookingId} has already been disbursed — this refund needs a manual clawback.`);
   }
 }
 
-/** The payout worker is mid-send; the refund can simply be retried shortly. */
 export class PayoutInFlightError extends Error {
   constructor(bookingId: string) {
     super(`Payout for booking ${bookingId} is being sent right now — retry the refund in a minute.`);
@@ -787,19 +623,6 @@ function manualClawbackError(bookingId: string) {
   return new PayoutAlreadySentError(bookingId);
 }
 
-/**
- * Makes sure no worker payout goes out for a payment that is about to be
- * refunded. In order:
- *  - not settled yet: take the same `workerSettledAt` claim settleWorkerEarnings
- *    uses, so a payout is never created for it;
- *  - payout queued (PENDING) or FAILED: cancel it here — the payout worker and
- *    admin retry only ever send PENDING/FAILED rows;
- *  - payout already at Xendit (PROCESSING): cancel it at Xendit, which only
- *    works while Xendit still holds it;
- *  - otherwise the money is gone and the refund is refused (manual clawback).
- * The lock stays even if the refund then fails, so a retried refund can't
- * race a payout either.
- */
 export async function stopWorkerPayout(paymentId: string, bookingId: string, reason: string): Promise<void> {
   const claim = await prisma.payment.updateMany({
     where: { id: paymentId, workerSettledAt: null },
@@ -813,7 +636,6 @@ export async function stopWorkerPayout(paymentId: string, bookingId: string, rea
       data: { status: 'CANCELLED', failureReason: `Booking refunded: ${reason}`, failedAt: new Date() },
     });
 
-  // No Payout row: the whole amount went to the worker's dues.
   const payout = await prisma.payout.findUnique({ where: { paymentId } });
   if (!payout || payout.status === 'CANCELLED') return;
   if (payout.status === 'PAID') throw manualClawbackError(bookingId);
@@ -824,13 +646,11 @@ export async function stopWorkerPayout(paymentId: string, bookingId: string, rea
   if (inFlight.status !== 'PROCESSING') throw manualClawbackError(bookingId);
   const xenditPayoutId = inFlight.xenditDisbursementId;
   if (!xenditPayoutId) {
-    // The payout worker is between claiming it and hearing back from Xendit.
     throw new PayoutInFlightError(bookingId);
   }
 
   const remoteStatus = await cancelPayout(xenditPayoutId)
     .then((r) => r.status)
-    // Xendit refuses the cancel once it has handed the money on — find out where it is.
     .catch(() =>
       retrievePayout(xenditPayoutId)
         .then((r) => r.status)
@@ -843,11 +663,6 @@ export async function stopWorkerPayout(paymentId: string, bookingId: string, rea
   if (final.status !== 'CANCELLED') throw manualClawbackError(bookingId);
 }
 
-/**
- * Refunds the client through Xendit at most once. An earlier refund that is
- * PENDING or SUCCEEDED is reused; only a FAILED/CANCELLED one is retried,
- * under a new idempotency key (Xendit would otherwise replay the failure).
- */
 async function requestXenditRefund(payment: {
   id: string;
   xenditInvoiceId: string;
@@ -870,20 +685,12 @@ async function requestXenditRefund(payment: {
     data: { xenditRefundId: refund.id, xenditRefundStatus: refund.status },
   });
 
-  // PENDING is normal for e-wallets: Xendit has accepted it and the sweep
-  // follows it up (reconcilePendingRefund).
   if (refund.status !== 'SUCCEEDED' && refund.status !== 'PENDING') {
     throw new Error(`Xendit refund for invoice ${payment.xenditInvoiceId} did not succeed (status: ${refund.status})`);
   }
   return refund;
 }
 
-/**
- * Sweep follow-up for a refund Xendit accepted as PENDING. If it later
- * fails, the client never got their money: the payment goes back to
- * COMPLETED (the worker's payout stays stopped) so the refund can be retried,
- * and the failure is logged for an admin.
- */
 export async function reconcilePendingRefund(paymentId: string): Promise<'succeeded' | 'failed' | 'pending'> {
   const payment = await prisma.payment.findUnique({ where: { id: paymentId } });
   if (!payment?.xenditRefundId || payment.xenditRefundStatus !== 'PENDING') return 'pending';
@@ -928,12 +735,6 @@ export async function reconcilePendingRefund(paymentId: string): Promise<'succee
   return 'failed';
 }
 
-/**
- * Undoes an online payment's worker settlement after its payout was stopped
- * for a refund: dues recovered from that payout go back on the worker's tab
- * and compensation credit that rode along is restored. Runs once per payment
- * (claim on settlementReversedAt); a no-op when nothing was settled.
- */
 export async function undoWorkerSettlement(paymentId: string): Promise<void> {
   await prisma.$transaction(async (tx) => {
     const claim = await tx.payment.updateMany({
@@ -982,8 +783,6 @@ export async function refundOrVoidPayment(bookingId: string, reason: string) {
 
   let refund: XenditRefund | null = null;
   if (payment.methodType === 'GCASH' || payment.methodType === 'MAYA') {
-    // Stop the worker's payout BEFORE money goes back to the client, so the
-    // same peso can never leave twice. Throws if it has already been sent.
     await stopWorkerPayout(payment.id, bookingId, reason);
     if (payment.xenditInvoiceId) {
       refund = await requestXenditRefund({
@@ -993,11 +792,6 @@ export async function refundOrVoidPayment(bookingId: string, reason: string) {
         amountPesos: payment.capturedAmount ?? payment.totalAmount,
       });
     }
-    // Dues netted from this job's (now stopped) payout weren't really paid
-    // once the client has their money back — so undo the settlement only
-    // when the refund has actually succeeded. A PENDING refund is undone by
-    // the sweep when it completes (reconcilePendingRefund); one that fails
-    // leaves the worker's dues untouched.
     if (!refund || refund.status === 'SUCCEEDED') {
       await undoWorkerSettlement(payment.id);
     }
@@ -1005,9 +799,6 @@ export async function refundOrVoidPayment(bookingId: string, reason: string) {
       await postRefundSent(prisma, payment, payment.booking.workerId, payment.booking.clientId);
     }
   } else if (payment.methodType === 'CASH') {
-    // Reverse the commission-debt accrual; the worker returns the cash
-    // directly. The status claim and the reversal commit together, so a
-    // repeated refund call can't reverse the dues twice.
     const workerUserId = payment.booking.workerId;
     const workerProfile = workerUserId
       ? await prisma.workerProfile.findUnique({ where: { userId: workerUserId }, select: { id: true } })
@@ -1045,10 +836,6 @@ export async function refundOrVoidPayment(bookingId: string, reason: string) {
   return refunded;
 }
 
-/**
- * Reconciliation helper (bookingWorker sweep): pull the real invoice state
- * from Xendit for a Payment stuck PENDING and self-heal a missed webhook.
- */
 export async function reconcilePendingPayment(paymentId: string): Promise<'paid' | 'failed' | 'pending'> {
   const payment = await prisma.payment.findUnique({ where: { id: paymentId } });
   if (!payment || payment.status !== 'PENDING' || !payment.xenditInvoiceId) return 'pending';

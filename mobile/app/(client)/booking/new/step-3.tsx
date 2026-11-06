@@ -17,14 +17,8 @@ import { useAlertModal } from "../../../../contexts/AlertModalContext";
 import { now } from "../../../../utils/now";
 import type { WorkerCard } from "../../../../types/booking4step.types";
 
-/**
- * Optional: the client books with the best available worker by default
- * (step 2 goes straight to the review screen). This picker opens only from
- * the review screen's "Choose a worker" and returns there.
- */
 export default function BookingStep3Screen() {
   const router = useRouter();
-  // Same estimate as the review screen, from what Step 1 saved.
   const draftEstimate = useDraftPriceEstimate();
   const alertModal = useAlertModal();
   const draft = useBookingStore((s) => s.draft);
@@ -55,7 +49,6 @@ export default function BookingStep3Screen() {
       workerAvatar: worker.avatar,
       workerRating: worker.rating,
       serviceTypeId: worker.matchedServiceTypeId,
-      // Packages belong to a worker, so picking another one clears them.
       selectedPackageIds: draft.workerId === worker.id ? draft.selectedPackageIds : [],
       selectedPackagesTotal: draft.workerId === worker.id ? draft.selectedPackagesTotal : 0,
       isAutoMatched: false,
@@ -129,7 +122,6 @@ export default function BookingStep3Screen() {
                 onSelect={() => selectWorker(worker)}
                 unitLabel={draft.selectedTaskUnitLabel}
               />
-              {/* The chosen worker's own packages (optional add-ons with a price). */}
               {selected && (
                 <View className="mb-4 -mt-1">
                   <Text className="text-text-primary font-bold text-base mb-2">

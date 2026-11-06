@@ -8,20 +8,15 @@ import OutlinedButton from "../ui/OutlinedButton";
 type Props = {
   visible: boolean;
   title: string;
-  // Defaults are the review-report wording; the client's invoice report
-  // reuses this modal with its own text.
   message?: string;
   confirmLabel?: string;
   placeholder?: string;
-  // Fewest characters the server accepts for this report.
   minLength?: number;
   loading?: boolean;
   onConfirm: (reason: string) => void;
   onCancel: () => void;
 };
 
-// Reporting a review (worker) or a worker's reply (client) — sends it to the
-// admin Flagged queue with the reporter's reason.
 export const ReportModal: React.FC<Props> = ({
   visible,
   title,

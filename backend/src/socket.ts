@@ -3,8 +3,6 @@ import { Server, Socket } from 'socket.io';
 import { verifyToken } from '@utils/jwt';
 import { isUserSessionRevoked, isSessionRevoked, setRevocationListener } from '@utils/tokenRevocation';
 
-// Room holding one signed-in device's sockets, so revoking that session
-// (log out, "log out other devices", refresh-token theft) can drop them.
 const sessionRoom = (sessionId: string) => `session:${sessionId}`;
 
 let io: Server | null = null;
@@ -15,8 +13,6 @@ const getAllowedOrigins = () =>
     .map((origin) => origin.trim())
     .filter(Boolean);
 
-// Same checks as middleware/auth.ts: a real session token (not an MFA /
-// login-code challenge token) that hasn't been revoked.
 export const authenticateSocket = async (socket: Socket, next: (err?: Error) => void): Promise<void> => {
   try {
     const token = socket.handshake.auth?.token as string | undefined;

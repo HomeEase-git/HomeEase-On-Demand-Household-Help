@@ -19,8 +19,6 @@ type Props = {
   worker: WorkerCard;
   selected: boolean;
   onSelect: () => void;
-  // Set only when the search was scoped to a PER_UNIT task — labels
-  // worker.unitPrice as a rate rather than implying it's a total.
   unitLabel?: string | null;
 };
 

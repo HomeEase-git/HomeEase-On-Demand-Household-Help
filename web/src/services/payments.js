@@ -30,8 +30,6 @@ export async function retryPayout(id) {
   return response.data;
 }
 
-/** Downloads the CSV via a raw fetch (apiRequest always parses JSON) and saves it client-side. */
-// Refund approval queue. `status` is a comma-separated RefundRequestStatus list.
 export async function fetchRefundRequests(params = {}) {
   const response = await apiRequest(`/admin/payments/refund-requests?${buildQuery(params)}`);
   return { data: response.data, meta: response.meta };
@@ -47,7 +45,6 @@ export async function decideRefundRequest(id, action, note) {
 }
 
 export async function downloadPayoutsCsv(params = {}) {
-  // apiFetch, not a bare fetch: it renews an expired session token.
   const response = await apiFetch(`/admin/payments/payouts/export?${buildQuery(params)}`);
 
   if (!response.ok) {

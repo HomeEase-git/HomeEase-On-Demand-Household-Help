@@ -62,7 +62,6 @@ export default function WorkerProfileScreen() {
       try {
         const [detail, reviewsResult] = await Promise.all([
           api.getWorkerDetail(workerId),
-          // More than the 3 shown below, so there are photos to collect.
           api.getWorkerReviews(workerId, 20),
         ]);
         if (!active) return;
@@ -416,9 +415,6 @@ export default function WorkerProfileScreen() {
             label="Book Now"
             fullWidth
             onPress={() => {
-              // Start from a clean draft — otherwise an abandoned booking
-              // attempt (different category/address/payment method) would
-              // leak into this new worker-locked booking.
               clearDraft();
               const normalizedCategory = mapServiceToCategory(worker.service);
               const primaryServiceType = worker.services[0];

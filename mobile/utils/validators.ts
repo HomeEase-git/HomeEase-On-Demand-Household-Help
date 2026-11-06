@@ -14,8 +14,6 @@ export function validateEmail(email: string): { valid: boolean; error?: string }
   return { valid: true };
 }
 
-// Password validation — keep in step with backend/src/utils/passwordPolicy.ts
-// (the server also rejects passwords that are too common or easy to guess).
 export const PASSWORD_MIN_LENGTH = 10;
 
 export function isValidPassword(password: string): boolean {
@@ -153,8 +151,6 @@ export function validatePasswordMatch(
   return { valid: true };
 }
 
-// Workers must be 18-60 (the admin can adjust the range; the backend is the
-// authority — this only gives an immediate message instead of a round trip).
 export const WORKER_MIN_AGE = 18;
 export const WORKER_MAX_AGE = 60;
 

@@ -196,7 +196,6 @@ describe('Refunds — pay-after-completion model', () => {
         xenditInvoiceId: `inv_svc_reuse_${Date.now()}`,
         capturedAmount: 1000,
       });
-      // A previous attempt reached Xendit but crashed before marking the payment refunded.
       await prisma.payment.update({
         where: { id: payment.id },
         data: { xenditRefundId: 'refund_earlier', xenditRefundStatus: 'PENDING' },
@@ -238,7 +237,6 @@ describe('Refunds — pay-after-completion model', () => {
         methodType: 'CASH',
       });
 
-      // Simulate the debt that settleCashBooking would have accrued.
       const workerProfile = await prisma.workerProfile.findUniqueOrThrow({ where: { userId: workerId } });
       await prisma.workerProfile.update({
         where: { id: workerProfile.id },

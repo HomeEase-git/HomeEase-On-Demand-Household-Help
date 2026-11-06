@@ -4,9 +4,6 @@ import { AppIcon as Ionicons } from "../icons/AppIcon";
 import { colors } from "../../constants";
 import { MAX_BOOKING_DAYS_AHEAD } from "../../utils/bookingTime";
 
-// Today through MAX_BOOKING_DAYS_AHEAD days out (mirrors the backend's
-// workerAvailabilityService.checkBookingStart). Same-day booking is allowed
-// (with a rush fee), so there's no minimum lead in days.
 const DAYS_AHEAD = MAX_BOOKING_DAYS_AHEAD + 1;
 const MIN_LEAD_DAYS = 0;
 const DAY_LABELS = ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"];
@@ -15,9 +12,6 @@ const MONTHS = [
   "July", "August", "September", "October", "November", "December",
 ];
 
-// Local-calendar formatting, not toISOString() — that converts through UTC
-// first, which silently rolls the date back a day for any UTC+ timezone
-// (e.g. PH, UTC+8) when called on a local midnight Date.
 function toIsoDate(d: Date): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
@@ -47,21 +41,11 @@ type Props = {
   selectedDate: string | null;
   onSelect: (isoDate: string) => void;
   unavailableDates?: string[];
-  // Tiny label under a date, e.g. { "2026-09-27": "Rush" }.
   dateBadges?: Record<string, string>;
-  // Overrides for non-client-booking reuse (e.g. a worker's own vacation-range
-  // picker, which has no minimum lead time and wants a longer horizon).
-  // Default to the booking-flow constants above when omitted.
   minLeadDays?: number;
   daysAhead?: number;
 };
 
-/**
- * Month-grid date picker, capped to the next DAYS_AHEAD days to match the
- * booking flow's near-term-only scheduling window (dates outside that
- * window render dimmed/disabled rather than being hidden, so the calendar
- * shape stays intact).
- */
 export default function DateGridPicker({
   selectedDate,
   onSelect,

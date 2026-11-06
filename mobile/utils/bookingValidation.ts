@@ -17,7 +17,6 @@ export function validateDraftForSubmit(draft: DraftBooking): { ok: boolean; erro
 export function getDraftInvalidationReasons(draft: DraftBooking): string[] {
   const reasons: string[] = [];
   if (draft.lastInvalidationReason) reasons.push(draft.lastInvalidationReason);
-  // Additional programmatic reasons could be pushed here in future.
   return reasons;
 }
 

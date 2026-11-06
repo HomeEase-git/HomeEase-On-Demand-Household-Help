@@ -37,7 +37,6 @@ type BookingDetail = {
   isRush?: boolean;
   // Follow-up job after this worker's own inspection.
   parentBooking?: { id: string; scheduledDate: string; service: string } | null;
-  // This worker's other jobs starting close to this one (overlap warning).
   nearbyJobs?: { bookingId: string; time: string; service: string }[];
   estimatedPrice: number;
   rooms?: RoomType[];
@@ -46,8 +45,6 @@ type BookingDetail = {
   quantityUnit?: string | null;
   distanceMeters?: number | null;
   payment?: { commissionAmount?: number; workerPayout?: number } | null;
-  // The worker's own take-home, itemised on one basis (settled once a payment
-  // exists, an estimate before that). Sent only to the assigned worker.
   earnings?: {
     isEstimate: boolean;
     subtotal: number;
@@ -58,8 +55,6 @@ type BookingDetail = {
     vatAmount: number;
     workerPayout: number;
   } | null;
-  // Multi-day upfront booking (see backend createMultiDayBooking) — null for
-  // an ordinary single-day job. Sibling list is date-ordered.
   groupId?: string | null;
   group?: { totalDays: number; bookings: { id: string; scheduledDate: string; status: string }[] } | null;
 };
@@ -71,11 +66,8 @@ export default function RequestDetailScreen() {
   const [booking, setBooking] = useState<BookingDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
-  // Full-screen "waiting" state while accept/decline is in flight.
   const [waitingLabel, setWaitingLabel] = useState<string | null>(null);
   const [declineVisible, setDeclineVisible] = useState(false);
-  // Plays right after a successful accept; `accepted` holds what the prompt
-  // that follows it needs.
   const [celebrating, setCelebrating] = useState(false);
   const [accepted, setAccepted] = useState<{ debtWarning: string | null } | null>(null);
   const alertModal = useAlertModal();
@@ -182,8 +174,6 @@ export default function RequestDetailScreen() {
     }
   };
 
-  // The celebration ran; now the usual prompt (with any dues warning) and the
-  // choice of where to go next.
   const handleCelebrationFinish = () => {
     setCelebrating(false);
     alertModal.success(
@@ -201,8 +191,6 @@ export default function RequestDetailScreen() {
     );
   };
 
-  // A follow-up job asks twice: once to accept, then to confirm it's a new,
-  // separately paid job at this date and time.
   const handleAccept = () => {
     if (!isFollowUp) {
       acceptNow();
@@ -323,7 +311,6 @@ export default function RequestDetailScreen() {
           </View>
         )}
 
-        {/* Other jobs close to this one — a heads-up, not a block */}
         {status === "Pending" && nearbyJobs.length > 0 && (
           <View className="bg-warning/10 border border-warning/30 rounded-2xl p-4 mb-3">
             <Text className="text-warning font-bold text-sm">You have other jobs around this time</Text>
@@ -391,7 +378,6 @@ export default function RequestDetailScreen() {
                 </Text>
                 <Text className="text-text-secondary text-xs">-₱{booking.earnings.commissionAmount.toFixed(2)}</Text>
               </View>
-              {/* Only on jobs paid before HomeEase stopped withholding tax. */}
               {booking.earnings.withholdingTaxAmount > 0 && (
                 <View className="flex-row justify-between py-1">
                   <Text className="text-text-muted text-xs">Withholding tax</Text>

@@ -51,11 +51,6 @@ function ItemBody({ item, highlighted }: { item: SelectDropdownItem; highlighted
   );
 }
 
-/**
- * Collapsible single-select picker (Step 1: SCOPE). The closed state shows
- * the current pick with its icon and price; tapping expands the options
- * inline, so it stays inside the screen's own scroll view.
- */
 export default function SelectDropdown({ items, selectedId, placeholder, onSelect, loading, accessibilityLabel }: Props) {
   const [open, setOpen] = useState(false);
   const selected = items.find((i) => i.id === selectedId) ?? null;

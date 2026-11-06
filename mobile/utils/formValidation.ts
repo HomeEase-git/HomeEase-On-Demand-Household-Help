@@ -1,9 +1,3 @@
-/**
- * Enhanced Form Validation Error Handling
- * 
- * Comprehensive form validation with error management
- */
-
 import { useState, useCallback } from 'react';
 import { ValidationError } from './errorHandling';
 import * as validators from './validators';
@@ -26,9 +20,6 @@ export interface ValidationResult {
   errorCount: number;
 }
 
-/**
- * Field-level validation
- */
 function validateFieldModule(field: ValidationField): { valid: boolean; error?: string } {
   const { value, rules } = field;
 
@@ -94,16 +85,10 @@ function validateFieldModule(field: ValidationField): { valid: boolean; error?: 
   return { valid: true };
 }
 
-/**
- * Export the field validation function
- */
 export function validateField(field: ValidationField): { valid: boolean; error?: string } {
   return validateFieldModule(field);
 }
 
-/**
- * Form-level validation
- */
 export function validateForm(
   fields: Record<string, ValidationField>
 ): ValidationResult {
@@ -123,9 +108,6 @@ export function validateForm(
   };
 }
 
-/**
- * Async field validation (for checking availability, etc.)
- */
 export async function validateFieldAsync(
   field: ValidationField,
   asyncValidator: (value: any) => Promise<boolean>
@@ -157,9 +139,6 @@ export async function validateFieldAsync(
   return { valid: true };
 }
 
-/**
- * Real-time validation hook
- */
 export function useFormValidation(
   initialValues: Record<string, any>,
   initialRules: Record<string, ValidationRule[]>
@@ -292,18 +271,12 @@ export function useFormValidation(
   };
 }
 
-/**
- * Helper to throw validation errors
- */
 export function throwValidationError(
   fields: Record<string, string>
 ): never {
   throw new ValidationError('Form validation failed', fields);
 }
 
-/**
- * Helper to format validation errors for display
- */
 export function formatValidationErrors(errors: Record<string, string>): string[] {
   return Object.values(errors);
 }

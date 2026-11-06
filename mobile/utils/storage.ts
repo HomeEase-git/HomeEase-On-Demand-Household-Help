@@ -3,8 +3,6 @@ import * as SecureStore from 'expo-secure-store';
 import { Platform } from 'react-native';
 
 const STORAGE_KEYS = {
-  // Sign-in data lives in SecureStore, whose keys may only contain
-  // [A-Za-z0-9._-].
   ACCESS_TOKEN: 'homeease_access_token',
   AUTH_USER: 'homeease_auth_user',
   REFRESH_TOKEN: 'homeease_refresh_token',
@@ -42,15 +40,8 @@ const writeStoredValue = async (key: string, value: unknown) => {
   memoryStore[key] = value;
 };
 
-// In-memory cache for the auth token specifically — it's read by the API
-// client's request interceptor on every single network call (~60+ call
-// sites), so a per-call AsyncStorage round-trip there is a real, constant
-// tax on every screen. `undefined` = not loaded yet from disk this session;
-// `null` = loaded, no token. Kept in sync by saveToken/clearAuth below.
 let cachedToken: string | null | undefined;
 
-// Android Keystore-backed storage for sign-in data. SecureStore has no web
-// implementation — the web build (dev/testing only) falls back.
 const secureStore = {
   async get(key: string): Promise<string | null> {
     return Platform.OS === 'web' ? AsyncStorage.getItem(key) : SecureStore.getItemAsync(key);
@@ -65,9 +56,6 @@ const secureStore = {
   },
 };
 
-// Where the access token and signed-in user were kept (plain AsyncStorage)
-// before they moved to SecureStore. Read once to carry an existing sign-in
-// over, then deleted.
 const LEGACY_AUTH_KEYS = {
   ACCESS_TOKEN: '@homeease_auth_token',
   AUTH_USER: '@homeease_auth_user',
@@ -83,8 +71,6 @@ async function readSecureOrMigrate(key: string, legacyKey: string): Promise<stri
   return legacy;
 }
 
-// Auth Storage — everything that identifies or signs in the user is kept in
-// the Android Keystore (SecureStore), not plain AsyncStorage.
 export const authStorage = {
   async saveToken(token: string) {
     cachedToken = token;
@@ -264,9 +250,6 @@ export const addressStorage = {
     }
   },
 
-  // Writes/merges an entry keyed by an externally-supplied id (the real
-  // backend-returned address id), so the local lat/lng cache stays linked to
-  // the same address the backend knows about instead of drifting to its own id.
   async upsert(id: string, payload: { label: string; address: string; lat?: number; lng?: number; isDefault?: boolean }) {
     try {
       const addresses = await this.list();
@@ -382,8 +365,6 @@ export const profileStorage = {
   },
 };
 
-// Local-only privacy preferences. There is no backend model for these yet,
-// so they're device-local (not synced across a user's other devices).
 export const privacySettingsStorage = {
   async get() {
     return readStoredValue(STORAGE_KEYS.PRIVACY_SETTINGS, {

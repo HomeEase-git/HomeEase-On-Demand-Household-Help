@@ -83,7 +83,6 @@ describe('structured console', () => {
       Object.assign(console, originals);
     }
 
-    // One line per call: a newline in a value can't forge a second entry.
     expect(lines).toHaveLength(3);
     const [info, error, warn] = lines.map((line) => JSON.parse(line));
     expect(warn.msg).toBe('booking b-1\nforged failed: boom');

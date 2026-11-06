@@ -5,8 +5,6 @@ module.exports = {
   theme: {
     extend: {
       colors: {
-        // BRAND PALETTE - Royal Blue (renamed from `primary` to avoid colliding
-        // with the `text.primary` semantic token — text-primary vs text-brand)
         brand: {
           DEFAULT: "#4169E1",
           dark: "#2E50B2",
@@ -18,8 +16,6 @@ module.exports = {
           light: "#FFA950",
           muted: "#E57E1A",
         },
-        // CARD & CONTAINER - darkened off the page's white background so cards
-        // read as distinct, elevated surfaces instead of blending into the page
         card: {
           DEFAULT: "#F3F4F6",
           light: "#F9FAFB",
@@ -28,8 +24,6 @@ module.exports = {
         // SURFACE & BACKGROUND
         surface: "#F3F4F6",
         white: "#FFFFFF",
-        // NEUTRAL GRAY SCALE - single ramp backing text/surface/divider aliases
-        // below, instead of independently-guessed hex values
         neutral: {
           50: "#F9FAFB",
           100: "#F3F4F6",
@@ -42,10 +36,6 @@ module.exports = {
           800: "#1F2937",
           900: "#111827",
         },
-        // TEXT & TYPOGRAPHY - `primary` is a dark navy derived from the brand
-        // blue (not pure black) so headings/body carry a subtle brand
-        // undertone; `black` stays available for the rare case true black is
-        // wanted.
         text: {
           primary: "#1E3A8A",
           secondary: "#6B7280",
@@ -63,7 +53,6 @@ module.exports = {
         completed: "#10B981",
         cancelled: "#EF4444",
         divider: "#E5E7EB",
-        // Hardcoded "off" track color reused across Switch components
         toggleOff: "#2A3080",
         // ADDITIONAL COLORS
         banner1: "#FFE2BC",

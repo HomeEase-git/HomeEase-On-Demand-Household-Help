@@ -15,8 +15,6 @@ type TransactionDetail = Awaited<ReturnType<typeof api.getTransactionDetail>>;
 
 export default function ReceiptScreen() {
   const router = useRouter();
-  // The route segment is historically named `transactionId`, but the value
-  // is a bookingId — GET /payments/:bookingId is how the backend looks up a payment.
   const { transactionId: bookingId } = useLocalSearchParams<{
     transactionId: string;
   }>();

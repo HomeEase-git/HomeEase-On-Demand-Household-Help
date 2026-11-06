@@ -38,10 +38,6 @@ export const chatImageUpload = multer({
   },
 }).single('image');
 
-/**
- * POST /api/messages/upload-image
- * Uploads a chat image to Supabase Storage and returns its public URL
- */
 export const uploadChatImage = async (req: AuthRequest, res: Response) => {
   try {
     if (!req.user) {
@@ -96,11 +92,6 @@ export const avatarUpload = multer({
   },
 }).single('avatar');
 
-/**
- * POST /api/users/me/avatar
- * Uploads a profile picture to Supabase Storage and returns its public URL.
- * Does not persist the URL — call PATCH /api/users/me with { avatar } after.
- */
 export const uploadAvatar = async (req: AuthRequest, res: Response) => {
   try {
     if (!req.user) {
@@ -155,12 +146,6 @@ export const bookingPhotoUpload = multer({
   },
 }).single('photo');
 
-/**
- * POST /api/bookings/:id/completion-photo/upload
- * Uploads a job-completion proof photo to Supabase Storage and returns its
- * public URL. Does not persist the URL — call PATCH /api/bookings/:id/complete
- * with { completionPhotoUrl } after.
- */
 export const uploadBookingCompletionPhoto = async (req: AuthRequest, res: Response) => {
   try {
     if (!req.user) {
@@ -203,13 +188,6 @@ export const uploadBookingCompletionPhoto = async (req: AuthRequest, res: Respon
   }
 };
 
-/**
- * POST /api/bookings/issue-photo/upload
- * Uploads a client-attached photo of the issue to Supabase Storage and
- * returns its public URL. Runs during booking Step 1, before the booking
- * exists — the returned URL is collected client-side and included in the
- * `POST /bookings` payload as `issuePhotoUrls`, not persisted here.
- */
 export const uploadIssuePhoto = async (req: AuthRequest, res: Response) => {
   try {
     if (!req.user) {
@@ -252,14 +230,6 @@ export const uploadIssuePhoto = async (req: AuthRequest, res: Response) => {
   }
 };
 
-/**
- * POST /api/bookings/:id/review-photo/upload
- * Uploads a client-attached review photo to Supabase Storage and returns its
- * public URL. Reuses the booking-photos bucket (same media category, no new
- * bucket to provision). Not persisted here — the returned URL is collected
- * client-side and included in the `POST /bookings/:id/review` payload as
- * `photoUrls`.
- */
 export const uploadReviewPhoto = async (req: AuthRequest, res: Response) => {
   try {
     if (!req.user) {
@@ -318,12 +288,6 @@ export const kycFileUpload = multer({
   },
 }).single('file');
 
-/**
- * POST /api/users/me/kyc-documents/upload
- * Uploads a KYC/resume document to Supabase Storage and returns its public URL.
- * Does not persist any DB row — call POST /api/users/me/kyc-documents with the
- * returned URL to attach it to the user's verification request.
- */
 export const uploadKycFile = async (req: AuthRequest, res: Response) => {
   try {
     if (!req.user) {
@@ -346,9 +310,6 @@ export const uploadKycFile = async (req: AuthRequest, res: Response) => {
 
     const bucket = documentType === 'RESUME' ? RESUME_BUCKET : KYC_DOCUMENT_BUCKET;
 
-    // Normalise images (auto-orient + downscale + JPEG) before storing; leave
-    // PDFs untouched. Keeps the KYC bucket and the downstream AI-review payload
-    // small and consistently encoded.
     let body: Buffer = req.file.buffer;
     let contentType = sniffed;
     let extension = sniffed.split('/')[1] || 'bin';

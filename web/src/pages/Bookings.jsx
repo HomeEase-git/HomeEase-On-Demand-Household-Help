@@ -32,8 +32,6 @@ const STATUS_MAP = {
 
 const TERMINAL_STATUSES = ['Completed', 'Cancelled', 'Rejected']
 
-// The filters and sort behind the table, shared by the table and the CSV export
-// so an export always matches what's on screen.
 function toApiParams(params) {
   return {
     sortBy: params.sortBy || '',
@@ -70,12 +68,9 @@ export default function Bookings() {
     setSort,
   } = useListQuery(fetchFn, {
     initialParams: { page: 1, statusTab: 'All', dateFrom: '', dateTo: '' },
-    // Paused while the force-cancel modal is open so a background refresh
-    // can't swap the row out from under the admin mid-action.
     pollIntervalMs: cancelTarget ? null : 25000,
   })
 
-  // Seeded from the URL so a restored filter shows in the date inputs too.
   const [dateFrom, setDateFrom] = useState(params.dateFrom || '')
   const [dateTo, setDateTo] = useState(params.dateTo || '')
 

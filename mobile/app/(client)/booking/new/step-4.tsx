@@ -51,14 +51,10 @@ export default function BookingStep4Screen() {
   const setDraft = useBookingStore((s) => s.setDraft);
   const setBookingCreated = useBookingStore((s) => s.setBookingCreated);
 
-  // Pets and packages are picked earlier (Step 1 / the worker picker); this
-  // screen only adds payment and an optional tip.
   const priorities = draft.priorities ?? [];
   const hasPets = priorities.includes(PET_FRIENDLY_PRIORITY);
   const selectedPackageIds = draft.selectedPackageIds ?? [];
   const packagesTotal = draft.selectedPackagesTotal ?? 0;
-  // Cash unless the client has a saved default (picked up below) — one less
-  // choice before booking.
   const [paymentMethod, setPaymentMethod] = useState<string | null>(draft.paymentMethod ?? "cash");
   const [accountValue, setAccountValue] = useState(draft.paymentAccountIdentifier ?? "");
   const [tip, setTip] = useState<number>(draft.tip ?? 0);
@@ -67,12 +63,6 @@ export default function BookingStep4Screen() {
   const isRush = isRushDate(draft.date);
   const isFollowUp = !!draft.parentBookingId;
 
-  // Unlike Steps 1-3 (which each commit their fields to the draft store the
-  // moment the user taps "Next"), Step 4 is the last screen before submit —
-  // there's no forward transition to hang a commit off of. Without writing
-  // these through immediately, navigating back to Step 3/2 (e.g. to change
-  // worker or slot) and returning here remounts this screen and silently resets
-  // payment method/account number/tip back to the draft's last saved values.
   const updatePaymentMethod = (value: string) => {
     setPaymentMethod(value);
     setDraft({ paymentMethod: value });
@@ -88,10 +78,6 @@ export default function BookingStep4Screen() {
 
   const effectiveDraft = { ...draft, paymentMethod, priorities, addOnToggles: [], tip };
   const validation = validateDraftForSubmit(effectiveDraft);
-  // A selected task's own admin range (same source Step 1 used) takes
-  // priority over the category-wide spread once one's been picked — only
-  // matters pre-worker-known (auto-match); a picked worker's real rate
-  // always wins inside the hook regardless of what's passed here.
   const priceEstimate = useBookingPriceEstimate(
     {
       min: draft.selectedTaskPriceRangeMin ?? draft.categoryPriceRangeMin ?? draft.categoryBasePrice ?? 0,
@@ -101,14 +87,6 @@ export default function BookingStep4Screen() {
     tip
   );
 
-  // Re-verify the held worker is still available that day right before the
-  // user commits — the HoldTimerBadge in Step 3 is a UX countdown only, not
-  // a real server-side reservation, so the first sign it died could
-  // otherwise be a 409 at submit, after filling in packages/payment/tip.
-  // Scoped to this specific worker (workerId filter) when one was picked or
-  // locked in; unscoped (any worker) for an auto-matched booking.
-  // A follow-up job goes to the same worker regardless of their schedule (they
-  // accept or decline it), so there's nothing to re-check.
   const readyToCheckAvailability = !!draft.serviceType && !!draft.date && !!draft.time && !isFollowUp;
   const {
     workers: availabilityCheck,
@@ -128,9 +106,6 @@ export default function BookingStep4Screen() {
   const slotNoLongerAvailable =
     readyToCheckAvailability && !checkingAvailability && !availabilityError && availabilityCheck.length === 0;
 
-  // Runs on every focus (not just mount) — catches a slot dying while the
-  // user was away from this screen (backgrounded, or navigated back and
-  // forth), not just at first load.
   useFocusEffect(
     useCallback(() => {
       recheckAvailability();
@@ -138,7 +113,6 @@ export default function BookingStep4Screen() {
     }, [draft.serviceType, draft.date, draft.workerId, draft.isAutoMatched])
   );
 
-  // Preselect the default saved payment method (and its number) when none is chosen yet.
   useEffect(() => {
     if (draft.paymentMethod) return;
     let active = true;
@@ -150,7 +124,6 @@ export default function BookingStep4Screen() {
         const id = String(preferred.type).toLowerCase();
         if (!PAYMENT_METHOD_TYPE_MAP[id]) return;
         updatePaymentMethod(id);
-        // Only a usable number; a masked value would just fail validation.
         if (id !== "cash" && isPhMobileNumber(String(preferred.accountIdentifier ?? ""))) {
           updateAccountValue(String(preferred.accountIdentifier).trim());
         }
@@ -193,8 +166,6 @@ export default function BookingStep4Screen() {
       alertModal.error("Booking incomplete", validation.errors.join("\n"));
       return;
     }
-    // No second "are you sure" step: nothing is charged now, and the client
-    // can cancel for free until a worker confirms.
     submit();
   };
 
@@ -202,11 +173,6 @@ export default function BookingStep4Screen() {
     setLoading(true);
 
     try {
-      // Reuse the key already on the draft (a retry after a failed/hung
-      // attempt) rather than generating a fresh one each time — that's what
-      // lets the backend recognize a retried submit as the same request.
-      // Persisted immediately (setDraft writes through to storage) so it
-      // survives the app being backgrounded/killed mid-request too.
       const idempotencyKey = draft.idempotencyKey ?? generateIdempotencyKey();
       setDraft({
         paymentMethod,
@@ -261,8 +227,6 @@ export default function BookingStep4Screen() {
               rushFee: response.pricing.rushFee,
               addOns: response.pricing.addOns,
               subtotal: response.pricing.finalEstimate,
-              // VAT isn't known until settlement (see backend
-              // Booking.vatAmount schema comment) — nothing to show yet.
               vatApplicable: false,
               vatRate: null,
               vatAmount: 0,

@@ -6,8 +6,6 @@ export type ApiErrorShape = {
   type: ApiErrorType;
   message: string;
   statusCode?: number;
-  // Machine-readable reason from the backend, when it sends one
-  // (e.g. "ACCOUNT_SUSPENDED" on login).
   code?: string;
 };
 
@@ -40,10 +38,6 @@ export function normalizeError(err: unknown): ApiErrorShape {
 
   if (isAxiosError(err)) {
     const status = err.response?.status;
-    // api.ts's response interceptor already rewrites err.message to the
-    // backend's reason (or a sensible network/timeout default), so reuse it
-    // instead of falling back to axios's generic "Request failed with
-    // status code N" text.
     const message = err.message || "There was a problem with your request.";
 
     if (!err.response) {

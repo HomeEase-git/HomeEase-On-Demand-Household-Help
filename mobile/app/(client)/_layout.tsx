@@ -17,9 +17,6 @@ export default function ClientLayout() {
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
   const triggerRefresh = useTabRefreshStore((s) => s.triggerRefresh);
 
-  // Role gate — runs on every entry into the (client) group, including deep
-  // links: a signed-out user goes to landing, and a worker gets their own tabs
-  // instead of client screens whose API calls would all be refused.
   if (isInitializing) return null;
   if (!isAuthenticated || !user) {
     return <Redirect href="/landing" />;
@@ -28,15 +25,10 @@ export default function ClientLayout() {
     return <Redirect href="/(worker)/home" />;
   }
 
-  // Gate the client tabs behind accepting the user agreement — this runs on
-  // every entry into the (client) group, not just the sign-in redirect, so
-  // there's no route into the app for a client who hasn't accepted yet.
   if (!user.hasAcceptedTerms) {
     return <Redirect href="/(auth)/client-agreement" />;
   }
 
-  // Re-tapping the already-active tab pops its stack back to the root screen
-  // and triggers a refresh, instead of doing nothing (the default behavior).
   const refreshOnRepeatTap = ({ navigation, route }: any) => ({
     tabPress: (e: any) => {
       feedback.tap();

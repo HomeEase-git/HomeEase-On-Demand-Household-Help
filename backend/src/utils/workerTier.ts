@@ -15,17 +15,9 @@ export interface WorkerTierStats {
   rating: number;
   // Jobs completed on HomeEase.
   completedJobs: number;
-  // Years in the trade, including work outside the platform
-  // (WorkerProfile.yearsExperience). Unknown counts as 0.
   yearsExperience: number | null | undefined;
 }
 
-/**
- * Tier is computed on the fly from live rating, completed-job count and
- * years of experience rather than stored on WorkerProfile, so it never
- * drifts from those numbers. A tier needs every one of its requirements.
- * EXPERT is checked first since its thresholds are a superset of PRO's.
- */
 export function computeWorkerTier(stats: WorkerTierStats, settings: WorkerTierSettings): WorkerTier {
   const years = stats.yearsExperience ?? 0;
   if (

@@ -1,13 +1,6 @@
 import crypto from 'crypto';
 
-// Rules for any new password (sign-up, reset, change). Length does most of
-// the work; the breach check rejects passwords already in public dumps,
-// which is what credential stuffing actually uses (OWASP ASVS 6.1.2 / NIST
-// 800-63B 3.1.1.2).
-
 export const PASSWORD_MIN_LENGTH = 10;
-// bcrypt ignores everything past 72 bytes — reject rather than silently
-// truncate.
 export const PASSWORD_MAX_BYTES = 72;
 
 export const PASSWORD_RULES_MESSAGE =
@@ -24,11 +17,6 @@ export const meetsPasswordRules = (password: string): boolean =>
   /[A-Z]/.test(password) &&
   /\d/.test(password);
 
-/**
- * Have I Been Pwned range lookup (k-anonymity): only the first 5 hex chars
- * of the SHA-1 leave this server. Fails open — an outage there must not
- * block sign-ups. Off when PASSWORD_BREACH_CHECK=false (tests, offline dev).
- */
 export async function isPasswordBreached(password: string): Promise<boolean> {
   if (process.env.PASSWORD_BREACH_CHECK === 'false') return false;
 
@@ -57,8 +45,6 @@ export async function isPasswordBreached(password: string): Promise<boolean> {
 export const PERSONAL_INFO_PASSWORD_MESSAGE =
   "Your password can't contain your name, email or phone number. Please choose a different one.";
 
-// The most common base words, matched after normalising (see commonStem). This
-// is the offline fallback for when the breach lookup above is down.
 const COMMON_PASSWORD_STEMS = new Set([
   'password', 'passwords', 'qwerty', 'qwertyuiop', 'qwertyuiopasdfghjkl', 'asdfghjkl', 'zxcvbnm',
   'welcome', 'letmein', 'iloveyou', 'monkey', 'dragon', 'football', 'baseball', 'basketball',
@@ -69,14 +55,7 @@ const COMMON_PASSWORD_STEMS = new Set([
   'maganda', 'kumusta', 'marikina', 'cebu', 'davao', 'test', 'testing', 'testpassword',
 ]);
 
-/**
- * "P@ssw0rd2024!" → "password": common look-alike characters are mapped back to
- * letters, then everything that isn't a letter is dropped.
- */
 function commonStem(password: string): string {
-  // Leading/trailing digits and symbols ("…2024!") go first so they aren't
-  // mistaken for look-alike letters below. Trimmed with a loop rather than an
-  // end-anchored regex, which backtracks badly on long untrusted input.
   const isLetterOrLookalike = (ch: string) => (ch >= 'a' && ch <= 'z') || ch === '@' || ch === '$';
   const lowered = password.toLowerCase();
   let start = 0;
@@ -110,7 +89,6 @@ function withoutTrailingDigits(value: string): string {
   return value.slice(0, end);
 }
 
-/** True when the password contains a real chunk of the person's own name, email or phone. */
 export function containsPersonalInfo(password: string, info: PasswordPersonalInfo): boolean {
   const lowered = password.toLowerCase();
   const nameParts = (info.fullName ?? '').toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
@@ -129,13 +107,11 @@ export function containsPersonalInfo(password: string, info: PasswordPersonalInf
   const phoneDigits = (info.phone ?? '').replace(/\D/g, '');
   const passwordDigits = password.replace(/\D/g, '');
   if (phoneDigits.length >= MIN_PHONE_DIGITS) {
-    // Compare the last 7 digits so 0917… and +63917… both match.
     return passwordDigits.includes(phoneDigits.slice(-MIN_PHONE_DIGITS));
   }
   return false;
 }
 
-/** Error message for a new password, or null if it's acceptable. */
 export async function checkNewPassword(password: string, personalInfo?: PasswordPersonalInfo): Promise<string | null> {
   if (!meetsPasswordRules(password)) {
     return Buffer.byteLength(password, 'utf8') > PASSWORD_MAX_BYTES

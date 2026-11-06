@@ -38,7 +38,6 @@ describe('start times', () => {
   });
 
   it("uses the PH calendar for today, not UTC's", () => {
-    // 23:30 UTC on the 26th is already the 27th in the Philippines.
     expect(phTodayStart(new Date('2026-09-26T23:30:00Z')).toISOString()).toBe('2026-09-27T00:00:00.000Z');
   });
 });

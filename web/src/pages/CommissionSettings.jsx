@@ -8,8 +8,6 @@ import {
   useSettingsForm,
 } from '../components/settings/SettingsForm'
 
-// The platform's side of each payment. Neither setting changes what a client
-// pays, which is why they live under Payments rather than Price Adjustments.
 const NUMBER_FIELD_BOUNDS = {
   workerDebtHoldLimit: [0, 100000],
 }

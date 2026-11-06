@@ -1,17 +1,8 @@
-// Minimal, idempotent seed for _e2e_test_run.js — just the two fixed
-// pieces of data it depends on but never creates itself: the E2E
-// test-admin account it logs in as, and a "Cleaning" ServiceType to book
-// against. Deliberately lighter than seed.ts/seed-full.ts/seed-complete.ts
-// (which seed a full demo dataset) — this is only for standing up a fresh
-// DB (e.g. a CI runner's Postgres container) enough to run that one script.
 import 'dotenv/config';
 import { PrismaClient, Role } from '@prisma/client';
 import { PrismaPg } from '@prisma/adapter-pg';
 import bcrypt from 'bcryptjs';
 
-// This creates an ADMIN with a password committed to the repo — it must never
-// run against production. Refuse a production NODE_ENV outright, and any
-// non-local database unless the operator opts in explicitly.
 function assertSandboxDatabase(): void {
   if (process.env.NODE_ENV === 'production') {
     throw new Error('Refusing to run the e2e sandbox seed with NODE_ENV=production.');
@@ -28,7 +19,6 @@ const adapter = new PrismaPg({ connectionString: process.env.DATABASE_URL });
 const prisma = new PrismaClient({ adapter });
 
 async function main() {
-  // Matches _e2e_test_run.js's E2E_ADMIN_EMAIL/E2E_ADMIN_PASSWORD defaults.
   const email = process.env.E2E_ADMIN_EMAIL ?? 'e2e.admin@homeease.invalid';
   const password = process.env.E2E_ADMIN_PASSWORD ?? 'E2eAdminPass123!';
 

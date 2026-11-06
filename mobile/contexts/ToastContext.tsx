@@ -45,15 +45,6 @@ const TOAST_COLORS: Record<ToastType, string> = {
 
 let nextToastId = 0;
 
-// Custom, minimal toast implementation.
-//
-// The previous implementation used `react-native-toast-notifications`, whose
-// container internally renders the deprecated core-RN `SafeAreaView` (not
-// `react-native-safe-area-context`'s). That component is persistently
-// mounted at the app root, and under the New Architecture (Fabric) it
-// triggers a reproducible native crash ("addViewAt: ... specified child
-// already has a parent") on the very first render, unrelated to when a toast
-// is actually shown. This implementation avoids that dependency entirely.
 export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({
   children,
 }) => {

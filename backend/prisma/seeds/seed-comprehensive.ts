@@ -1,24 +1,3 @@
-// prisma/seeds/seed-comprehensive.ts
-//
-// The current "everything" seed — every model in schema.prisma gets rows,
-// every nullable/optional column gets a real value on at least one row, and
-// every role gets exactly 20 users (20 admins, 20 clients, 20 workers).
-//
-// Supersedes seed-complete.ts, which predates the pay-after-completion
-// payment rework and the TIN/2307/debt-ledger tax-compliance build — this
-// file models the CURRENT business logic (see paymentLifecycleService.ts,
-// debtLedgerService.ts, taxCertificateService.ts, bookingWorker.ts):
-//   - No Payment row exists until a booking is confirmed complete. CASH
-//     settles immediately; GCASH/MAYA moves the booking to AWAITING_PAYMENT
-//     with a Xendit invoice outstanding.
-//   - WorkerProfile.commissionOwed / debtHoldAt / DebtLedgerEntry track
-//     platform dues accrued on cash jobs and recovered from online payouts.
-//   - WorkerProfile.tin backs BIR Form 2307 TaxCertificate generation and
-//     platform-level TaxRemittance bookkeeping.
-//
-// Run with: npx tsx prisma/seeds/seed-comprehensive.ts   (from the backend folder)
-// Requires: @faker-js/faker, bcryptjs, @prisma/adapter-pg, pg
-
 import "dotenv/config";
 import {
   PrismaClient,
@@ -217,7 +196,6 @@ function randomTin() {
   return `${faker.string.numeric(3)}-${faker.string.numeric(3)}-${faker.string.numeric(3)}`;
 }
 
-// Rough bounding box covering Metro Manila / Bulacan / Pampanga, matching CITIES.
 function randomLatLng() {
   return {
     lat: faker.number.float({ min: 14.4, max: 15.2, fractionDigits: 6 }),
@@ -284,8 +262,6 @@ async function createServiceTypes() {
     });
     created.push(serviceType);
   }
-  // One inactive service type, to exercise isActive=false on both models and
-  // a ServiceType with no icon assigned (predates the icon picker).
   const inactive = await prisma.serviceType.create({
     data: {
       name: "Landscaping (Retired)",
@@ -345,8 +321,6 @@ async function createAdmin(index: number) {
     .email({ firstName: fullName.split(" ")[0], provider: "homeease.dev" })
     .toLowerCase();
 
-  // A little status/soft-delete variety in the back-office roster too, so
-  // admin-facing "manage admins" screens have real edge cases to show.
   let status: UserStatus = UserStatus.ACTIVE;
   let isDeleted = false;
   let deletedAt: Date | null = null;
@@ -382,8 +356,6 @@ async function createClient(index: number) {
   const password = await hashPassword(DEFAULT_PASSWORD);
   const city = faker.helpers.arrayElement(CITIES);
 
-  // Sprinkle in every UserStatus / soft-delete combination so admin screens
-  // and "excluded from active queries" logic have real rows to hit.
   let status: UserStatus = UserStatus.ACTIVE;
   let isDeleted = false;
   let deletedAt: Date | null = null;
@@ -436,7 +408,6 @@ async function createClient(index: number) {
             state: "Philippines",
             zipCode: faker.location.zipCode("####"),
             isDefault: false,
-            // one soft-deleted address to exercise UserAddress soft-delete
             isDeleted: index === 5,
             deletedAt: index === 5 ? faker.date.recent({ days: 10 }) : null,
           },
@@ -454,8 +425,6 @@ async function createClient(index: number) {
     include: { clientProfile: true },
   });
 
-  // Saved payment methods — cover every PaymentMethodType at least once
-  // across the client base.
   const methodType = faker.helpers.arrayElement(Object.values(PaymentMethodType));
   await prisma.savedPaymentMethod.create({
     data: {
@@ -469,11 +438,6 @@ async function createClient(index: number) {
   return client;
 }
 
-// Specific, narratively-consistent commissionOwed / debtHoldAt / DebtLedgerEntry
-// histories for a handful of workers — guarantees every DebtLedgerEntryType
-// and every debt-hold state (never held, currently held, held-then-released)
-// shows up at least once. Numbers are chosen relative to the
-// AppSettings.workerDebtHoldLimit = 600 seeded below.
 type DebtOverride = {
   commissionOwed: number;
   debtHoldAt: Date | null;
@@ -484,7 +448,6 @@ type DebtOverride = {
 
 function debtScenarioFor(workerIndex: number): DebtOverride | null {
   if (workerIndex === 2) {
-    // Accrued debt from a cash job, then partially forgiven by an admin.
     return {
       commissionOwed: 270,
       debtHoldAt: null,
@@ -506,7 +469,6 @@ function debtScenarioFor(workerIndex: number): DebtOverride | null {
     };
   }
   if (workerIndex === 3) {
-    // Crossed the hold limit — account currently on hold.
     return {
       commissionOwed: 650,
       debtHoldAt: faker.date.recent({ days: 5 }),
@@ -523,7 +485,6 @@ function debtScenarioFor(workerIndex: number): DebtOverride | null {
     };
   }
   if (workerIndex === 4) {
-    // Was held, paid it down, admin explicitly released the hold.
     return {
       commissionOwed: 0,
       debtHoldAt: null,
@@ -594,8 +555,6 @@ async function createWorker(
   const debtHoldNote = debtOverride?.debtHoldNote ?? null;
   const heldByDebt = !!debtOverride?.forceUnavailable;
 
-  // TIN coverage: every approved worker (payout/tax eligible) plus a couple
-  // of others, so tinVerifiedAt=null (submitted, not yet checked) also shows up.
   const hasTin = isApproved || workerIndex % 7 === 1;
   const tin = hasTin ? randomTin() : null;
   const tinVerifiedAt = hasTin && workerIndex % 2 === 0 ? faker.date.recent({ days: 60 }) : null;
@@ -705,11 +664,6 @@ async function createWorker(
     data: {
       userId: user.id,
       type: "WORKER_ONBOARDING",
-      // Distinct from WorkerProfile.kycStatus — the real app only ever
-      // writes PENDING/APPROVED/REJECTED here (never SUBMITTED), since a
-      // VerificationRequest starts PENDING and only leaves that state via
-      // admin decision. See verificationController.uploadVerificationDocuments
-      // and adminVerificationController.approve/rejectVerification.
       status: isApproved ? KYCStatus.APPROVED : isRejected ? KYCStatus.REJECTED : KYCStatus.PENDING,
       rejectionReason: isRejected ? "Government ID photo was blurry and unreadable." : null,
       adminOverrideReason: fullDocSet ? "Manually approved after in-person verification." : null,
@@ -772,7 +726,6 @@ async function createWorker(
     },
   });
 
-  // Skills — a couple of named, priced skills per worker.
   const skillNames = faker.helpers.arrayElements(SKILL_POOL, { min: 2, max: 3 });
   for (const name of skillNames) {
     await prisma.skill.create({
@@ -785,7 +738,6 @@ async function createWorker(
     });
   }
 
-  // Availability — a mix of open, blocked, and booked slots over the next few days.
   const slotCycle: TimeSlot[] = [TimeSlot.MORNING, TimeSlot.AFTERNOON, TimeSlot.EVENING];
   for (let d = 1; d <= 5; d++) {
     const date = new Date();
@@ -807,7 +759,6 @@ async function createWorker(
 
 async function createAuthTokens(users: { id: string }[]) {
   const tokenTypes = Object.values(TokenType);
-  // Guarantee every TokenType appears, then pad with random ones.
   const assignments = users.slice(0, tokenTypes.length).map((user, i) => ({
     user,
     type: tokenTypes[i],
@@ -1103,7 +1054,6 @@ async function createBookingsAndPayments(
     { status: BookingStatus.REJECTED },
     { status: BookingStatus.IN_PROGRESS, urgencyLevel: UrgencyLevel.URGENT },
     { status: BookingStatus.PENDING_COMPLETION, completionReminderSent: true },
-    // AWAITING_PAYMENT — pay-after-completion, GCash/Maya invoice outstanding.
     { status: BookingStatus.AWAITING_PAYMENT, forceMethod: "GATEWAY" },
     {
       status: BookingStatus.AWAITING_PAYMENT,
@@ -1123,7 +1073,6 @@ async function createBookingsAndPayments(
     { status: BookingStatus.DISPUTED, disputeStatus: "UNDER_REVIEW" },
     { status: BookingStatus.DISPUTED, disputeStatus: "RESOLVED" },
     { status: BookingStatus.DISPUTED, disputeStatus: "REJECTED" },
-    // COMPLETED — every settlement shape the pay-after-completion model produces.
     { status: BookingStatus.COMPLETED, forceMethod: "CASH", isAutoMatched: true },
     { status: BookingStatus.COMPLETED, forceMethod: "GATEWAY", payoutStatus: PayoutStatus.PENDING },
     { status: BookingStatus.COMPLETED, forceMethod: "GATEWAY", payoutStatus: PayoutStatus.PROCESSING },
@@ -1211,10 +1160,6 @@ async function createBookingsAndPayments(
     const isCompleted = status === BookingStatus.COMPLETED;
     const isCompletedLike = isCompleted || status === BookingStatus.PENDING_COMPLETION || isAwaitingPayment;
 
-    // acceptedAt — stamped once a worker accepts a PENDING request. Never set
-    // for a still-PENDING/REJECTED booking, nor for a booking a client
-    // cancelled pre-accept (blocked from cancelling post-accept — see
-    // bookingController).
     const acceptedAt =
       worker && status !== BookingStatus.PENDING && status !== BookingStatus.REJECTED &&
       !(status === BookingStatus.CANCELLED && scenario.cancelledBy === Role.CLIENT)
@@ -1297,13 +1242,11 @@ async function createBookingsAndPayments(
         },
       });
     } catch {
-      // Skip rare worker/date/time collisions (worker_slot_unique constraint)
       continue;
     }
 
     bookingIds.push(booking.id);
 
-    // DeclinedWorker audit rows to back declinedWorkerIds.
     for (const declinedId of declinedIds) {
       await prisma.declinedWorker.create({
         data: {
@@ -1318,7 +1261,6 @@ async function createBookingsAndPayments(
       });
     }
 
-    // Add-ons on roughly a third of bookings, snapshotted onto the booking too.
     let addOnsSnapshot: Array<{ name: string; price: number }> | null = null;
     if (faker.datatype.boolean() && faker.datatype.boolean()) {
       const addOnCount = faker.number.int({ min: 1, max: 2 });
@@ -1335,7 +1277,6 @@ async function createBookingsAndPayments(
       });
     }
 
-    // Arrival verification for any booking where the worker has checked in.
     if (hasArrived && distanceMeters !== null) {
       await prisma.arrivalVerification.create({
         data: {
@@ -1348,8 +1289,6 @@ async function createBookingsAndPayments(
       });
     }
 
-    // Pricing log — itemized snapshot of how the estimate was computed,
-    // mirroring bookingController.createBooking's fee stack.
     const conditionFee = condition === ConditionType.HEAVY ? 150 : condition === ConditionType.NORMAL ? 50 : 0;
     const distanceFee = distanceMeters ? Math.round((distanceMeters / 1000) * 5) : 0;
     const urgencyFee = Math.round(estimatedPrice * URGENCY_FEE_MULTIPLIER[urgencyLevel] * 100) / 100;
@@ -1398,7 +1337,6 @@ async function createBookingsAndPayments(
       });
     }
 
-    // Dispute record (separate from the summary fields already on Booking).
     if (isDisputed && scenario.disputeStatus) {
       const raisedById = faker.helpers.arrayElement([client.id, worker!.id]);
       const resolved = scenario.disputeStatus === "RESOLVED" || scenario.disputeStatus === "REJECTED";
@@ -1420,10 +1358,6 @@ async function createBookingsAndPayments(
       });
     }
 
-    // The 72h-unpaid-online-job self-heal: an OPEN dispute auto-raised
-    // against a still-AWAITING_PAYMENT booking (see bookingWorker.escalateOverduePayment).
-    // Deliberately NOT tied to a booking-status change — the booking stays
-    // AWAITING_PAYMENT so the client can still finish the checkout.
     if (isAwaitingPayment && scenario.awaitingPaymentOverdueDispute) {
       await prisma.dispute.create({
         data: {
@@ -1436,8 +1370,6 @@ async function createBookingsAndPayments(
       });
     }
 
-    // Payment — only created once a booking has actually been confirmed
-    // complete (pay-after-completion model: no escrow/authorization upfront).
     if (worker && (isAwaitingPayment || isCompleted) && paymentMethodType) {
       const subtotal = estimatedPrice;
       const tip = booking.tip ?? 0;
@@ -1472,8 +1404,6 @@ async function createBookingsAndPayments(
         });
       } else if (isCompleted) {
         if (paymentMethodType === PaymentMethodType.CASH) {
-          // settleCashBooking: settled immediately, in person, no gateway,
-          // never a Payout (CASH is not a valid payout channel).
           await prisma.payment.create({
             data: {
               bookingId: booking.id,
@@ -1496,9 +1426,6 @@ async function createBookingsAndPayments(
             },
           });
         } else if (scenario.refundedAfterCompletion) {
-          // Job paid via gateway, later refunded — settlement had already
-          // been claimed (workerSettledAt set) before the refund cancelled
-          // the not-yet-sent Payout (see paymentLifecycleService.refundOrVoidPayment).
           const payment = await prisma.payment.create({
             data: {
               bookingId: booking.id,
@@ -1520,9 +1447,6 @@ async function createBookingsAndPayments(
               capturedAt: faker.date.recent({ days: 3 }),
               releasedAt: faker.date.recent({ days: 3 }),
               workerSettledAt: faker.date.recent({ days: 3 }),
-              // Legacy/deprecated CARD-era authorize-capture fields — no
-              // longer written by current code, populated here only so the
-              // columns have at least one real historical-looking row.
               authorizedAmount: subtotal,
               authorizedAt: faker.date.recent({ days: 4 }),
               authorizationId: `auth_${faker.string.alphanumeric(20)}`,
@@ -1552,11 +1476,6 @@ async function createBookingsAndPayments(
             },
           });
         } else {
-          // Gateway-paid via finalizePaidBooking. escrowStatus is always
-          // flipped to RELEASED in that same call; workerSettledAt is set by
-          // the settleWorkerEarnings call immediately after — UNLESS that
-          // second step never ran (noSettleYet models exactly that gap,
-          // which the reconciliation self-heal sweep exists to catch).
           const settled = !scenario.noSettleYet;
           const payment = await prisma.payment.create({
             data: {
@@ -1656,8 +1575,6 @@ async function createBookingsAndPayments(
   return bookingIds;
 }
 
-// Clients verify identity only (no trade credentials), so this is a lighter
-// version of the worker verification block — just the 3 identity docs.
 async function createClientVerification(
   client: Awaited<ReturnType<typeof createClient>>,
   status: typeof KYCStatus.PENDING | typeof KYCStatus.APPROVED | typeof KYCStatus.REJECTED
@@ -1740,7 +1657,6 @@ async function main() {
     const fullDocSet = workerIndex === 0; // first worker gets every KycDocumentType
     const worker = await createWorker(category, kycOverride, fullDocSet, workerIndex);
 
-    // Worker packages — priced bundles under the worker's own category.
     const packageCount = workerIndex % 3 === 0 ? 1 : 2;
     for (let p = 0; p < packageCount; p++) {
       await prisma.workerPackage.create({

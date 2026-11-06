@@ -3,10 +3,6 @@ import crypto from 'node:crypto';
 import { authLimiter } from '@middleware/rateLimit';
 import { sendTestEmail, getEmailProviderName, getEmailDiagInfo } from '@utils/emailService';
 
-// Server-to-server diagnostics, deliberately outside /api (see app.ts) — same
-// CRON_SECRET shared-secret auth as internalCron.ts. OFF unless
-// ENABLE_EMAIL_DIAG=true, since /email-test can send mail to an arbitrary
-// address: enable it only while validating an email provider, then unset it.
 const router = Router();
 
 function isAuthorized(req: Request): boolean {
@@ -23,13 +19,6 @@ function isAuthorized(req: Request): boolean {
   return crypto.timingSafeEqual(headerBuffer, secretBuffer);
 }
 
-/**
- * POST /internal/diag/email-test   body: { "to": "someone@example.com" }
- * Sends one test message through the currently-configured email transport and
- * reports which provider was used, the elapsed time, and the provider message
- * id (or the failure reason). Lets us confirm EMAIL_PROVIDER / SMTP_PORT /
- * gmail-api / brevo config on the real host without creating a signup.
- */
 router.post('/email-test', authLimiter, async (req: Request, res: Response) => {
   if (process.env.ENABLE_EMAIL_DIAG !== 'true') {
     res.status(404).json({ ok: false, message: 'Not found' });

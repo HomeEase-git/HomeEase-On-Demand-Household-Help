@@ -28,7 +28,6 @@ export default function SignUpScreen() {
   const [phone, setPhone] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
-  // Workers only: must be 18-60, checked against their ID at KYC.
   const [birthDate, setBirthDate] = useState("");
   const [birthDateError, setBirthDateError] = useState("");
   const [acceptedTerms, setAcceptedTerms] = useState(false);
@@ -293,8 +292,6 @@ export default function SignUpScreen() {
           </Text>
         </Pressable>
 
-        {/* Privacy consent — a separate checkbox, not bundled into the
-            Terms (Data Privacy Act; NPC consent guidance). */}
         <Pressable
           className="flex-row items-center mb-6"
           onPress={() => setAcceptedPrivacy(!acceptedPrivacy)}

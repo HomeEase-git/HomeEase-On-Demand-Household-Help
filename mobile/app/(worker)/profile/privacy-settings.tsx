@@ -34,7 +34,6 @@ export default function WorkerPrivacySettingsScreen() {
     setLocationEnabled(status === "granted");
   };
 
-  // "Log out of other devices" only makes sense with more than one.
   const [sessionCount, setSessionCount] = useState(1);
 
   useFocusEffect(

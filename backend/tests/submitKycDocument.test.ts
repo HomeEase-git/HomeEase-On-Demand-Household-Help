@@ -4,12 +4,6 @@ import prisma from '@config/database';
 import { verificationQueue } from '@queues/verificationQueue';
 import { createTestUser, deleteTestUser } from './helpers';
 
-// POST /api/users/me/kyc-documents records a KycDocument row from a URL returned
-// by the earlier /kyc-documents/upload call. It used to store only documentType
-// + fileUrl, leaving mimeType null (so the AI review filtered the doc out) and
-// never queuing a review. It now derives mimeType/fileName from the URL and
-// enqueues an analyze-verification job.
-
 const PATH = '/api/users/me/kyc-documents';
 const BASE = 'https://proj.supabase.co/storage/v1/object/public/kyc-documents';
 

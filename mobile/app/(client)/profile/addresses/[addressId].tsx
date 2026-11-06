@@ -33,11 +33,6 @@ import LocationPickerMap, {
 
 const LABEL_OPTIONS = ["Home", "Work", "Other"];
 
-// The address is one free-text line plus the map pin. The pin (lat/lng) is the
-// location — bookings, distance fees and the worker's navigation all use it —
-// so the text is never geocoded; it's just what the client and worker read.
-// Google's structured parts for the pinned spot ride along silently (city is
-// what bookings are grouped by in admin reports).
 export default function AddressEditScreen() {
   const router = useRouter();
   const alertModal = useAlertModal();
@@ -49,11 +44,7 @@ export default function AddressEditScreen() {
   const [landmark, setLandmark] = useState("");
   const [pin, setPin] = useState<LatLng | null>(null);
   const [components, setComponents] = useState<AddressComponents>({});
-  // True when the pin is only an area's center (a search result for a whole
-  // barangay or city), so the client is nudged to drag it to their gate.
   const [approximate, setApproximate] = useState(false);
-  // Once the client has typed in the address box, moving the pin no longer
-  // overwrites their text — it's offered instead (see pinAddressOffer).
   const [textEdited, setTextEdited] = useState(false);
   const [pinAddressOffer, setPinAddressOffer] = useState<PlaceResult | null>(
     null,
@@ -66,15 +57,8 @@ export default function AddressEditScreen() {
   const [resolvingPlaceId, setResolvingPlaceId] = useState<string | null>(null);
   const pickerMapRef = useRef<LocationPickerMapHandle>(null);
 
-  // One Places Autocomplete session = every keystroke + the Place Details
-  // call for the suggestion picked, billed as a single lookup. Created on the
-  // first keystroke, dropped once a suggestion is resolved.
   const sessionTokenRef = useRef<string | null>(null);
-  // The latest query typed — a slow response for an older query must not
-  // overwrite suggestions for what's in the box now.
   const latestQueryRef = useRef("");
-  // Where the device last was (only if location permission was ALREADY
-  // granted — never prompts), to rank nearby suggestions first.
   const searchBiasRef = useRef<LatLng | undefined>(undefined);
 
   useEffect(() => {
@@ -172,12 +156,10 @@ export default function AddressEditScreen() {
     location: LatLng,
     place: PlaceResult | null,
   ) => {
-    // A drag or GPS fix is the client putting the pin exactly where they are.
     setPin(location);
     setApproximate(false);
     if (!place) return;
     if (textEdited && fullAddress.trim()) {
-      // Keep what they typed; the parts still follow the pin.
       setComponents(place.components ?? {});
       setPinAddressOffer(place);
     } else {
@@ -204,9 +186,6 @@ export default function AddressEditScreen() {
       setPin(place.geometry.location);
       setApproximate(!!place.approximate);
       pickerMapRef.current?.animateTo(place.geometry.location);
-      // For a named place (a mall, a school), Google's address leaves the
-      // name out — e.g. "SM City Marikina" resolves to just "Marikina, 1800
-      // Metro Manila" — so keep the name as the landmark for the worker.
       const isNamedPlace = !place.formatted_address
         .toLowerCase()
         .includes(suggestion.mainText.toLowerCase());
@@ -244,8 +223,6 @@ export default function AddressEditScreen() {
 
     setSaving(true);
     try {
-      // Bookings need a city. It almost always comes with the pin's address;
-      // if not (e.g. the reverse lookup failed mid-drag), look it up once more.
       let parts = components;
       if (!parts.city) {
         const place = await reverseGeocodeDetailed(pin.lat, pin.lng).catch(
@@ -268,8 +245,6 @@ export default function AddressEditScreen() {
         fullAddress: address,
         lat: pin.lat,
         lng: pin.lng,
-        // Sent even when blank so an edit that moves the pin doesn't leave the
-        // previous spot's street/barangay behind.
         houseNumber: parts.houseNumber ?? "",
         street: parts.street ?? "",
         barangay: parts.barangay ?? "",

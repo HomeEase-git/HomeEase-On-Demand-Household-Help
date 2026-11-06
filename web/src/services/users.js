@@ -28,7 +28,6 @@ export async function updateUserStatus(id, status, reason, notes) {
   return response.data;
 }
 
-/** PATCH /admin/users/:id/suspend — thin convenience wrapper (same effect as updateUserStatus(id, 'SUSPENDED', ...)). */
 export async function suspendUser(id, reason, notes) {
   const response = await apiRequest(`/admin/users/${id}/suspend`, {
     method: 'PATCH',
@@ -37,7 +36,6 @@ export async function suspendUser(id, reason, notes) {
   return response.data;
 }
 
-/** PATCH /admin/users/:id/reinstate — clears a suspension/ban, restoring ACTIVE status. */
 export async function reinstateUser(id, reason, notes) {
   const response = await apiRequest(`/admin/users/${id}/reinstate`, {
     method: 'PATCH',
@@ -46,17 +44,11 @@ export async function reinstateUser(id, reason, notes) {
   return response.data;
 }
 
-/**
- * GET /admin/users/clients/:id/payment-hold — set by a dispute resolved via
- * RESOLVE_FOR_WORKER (see disputes.js): the client confirmed a job but never
- * paid, so their account is blocked from new bookings until this is cleared.
- */
 export async function fetchClientPaymentHold(id) {
   const response = await apiRequest(`/admin/users/clients/${id}/payment-hold`);
   return response.data;
 }
 
-/** PATCH /admin/users/clients/:id/payment-hold/release */
 export async function releaseClientPaymentHold(id, note) {
   const response = await apiRequest(`/admin/users/clients/${id}/payment-hold/release`, {
     method: 'PATCH',

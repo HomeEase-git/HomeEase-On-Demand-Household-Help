@@ -103,7 +103,6 @@ export default function BookingDetail() {
       ),
     },
     { label: 'Amount', value: booking.amount },
-    // Booking-time estimate split — kept for cancelled bookings too.
     ...(booking.pricing
       ? [
           {

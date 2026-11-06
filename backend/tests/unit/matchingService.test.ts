@@ -7,7 +7,6 @@ import {
   type MatchCandidate,
 } from '@services/matchingService';
 
-// Fixed "random" source so scores (and therefore selection) are deterministic.
 const noRandomness = () => 0;
 const maxRandomness = () => 1;
 
@@ -25,7 +24,6 @@ describe('matchingService — auto-match scoring (pure)', () => {
   it('scores a perfect candidate (max rating, most jobs) at the weight ceiling', () => {
     const candidates: MatchCandidate[] = [{ workerId: 'a', rating: 5, completedJobs: 100 }];
     const [scored] = scoreCandidates(candidates, noRandomness);
-    // rating(1.0)*0.6 + completed(1.0)*0.3 + random(0)*0.1
     expect(scored.score).toBeCloseTo(0.6 + 0.3, 10);
   });
 
@@ -45,7 +43,6 @@ describe('matchingService — auto-match scoring (pure)', () => {
     const veteran = scored.find((c) => c.workerId === 'veteran')!;
     const rookie = scored.find((c) => c.workerId === 'rookie')!;
     expect(veteran.score).toBeGreaterThan(rookie.score);
-    // veteran is the pool max, so its completedJobs component alone should hit the full 30% weight
     expect(veteran.score - rookie.score).toBeCloseTo(MATCH_WEIGHTS.completedJobs, 10);
   });
 
@@ -53,10 +50,8 @@ describe('matchingService — auto-match scoring (pure)', () => {
     const a: MatchCandidate = { workerId: 'a', rating: 4, completedJobs: 5 };
     const b: MatchCandidate = { workerId: 'b', rating: 4, completedJobs: 5 };
 
-    // Same tie-break input: no randomness -> equal scores -> first candidate wins (stable reduce)
     expect(selectBestCandidate([a, b], noRandomness)?.workerId).toBe('a');
 
-    // Asymmetric randomness: second call gets the max roll and should win instead
     let call = 0;
     const alternating = () => (call++ === 0 ? 0 : 1);
     expect(selectBestCandidate([a, b], alternating)?.workerId).toBe('b');
@@ -95,7 +90,6 @@ describe('matchingService — B6 late-cancel penalty', () => {
   it('the penalty caps out and never pushes a score negative for realistic inputs', () => {
     const veryFlaky: MatchCandidate = { workerId: 'a', rating: 5, completedJobs: 100, lateCancelCount: 999 };
     const [scored] = scoreCandidates([veryFlaky], noRandomness);
-    // rating(1.0)*0.6 + completed(1.0)*0.3 - penalty(capped at LATE_CANCEL_PENALTY_WEIGHT)
     expect(scored.score).toBeCloseTo(0.6 + 0.3 - LATE_CANCEL_PENALTY_WEIGHT, 10);
   });
 

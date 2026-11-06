@@ -51,10 +51,6 @@ function parseOptionalDate(value: unknown, field: string): Date | null | string 
   return Number.isNaN(date.getTime()) ? `${field} is not a valid date.` : date;
 }
 
-/**
- * Checks and normalises a banner body. `partial` (updates) only validates
- * the fields that were sent. Returns the cleaned data or an error message.
- */
 export function validatePromoBannerInput(
   body: PromoBannerInput,
   { partial = false }: { partial?: boolean } = {},
@@ -117,7 +113,6 @@ function actor(req: AuthRequest) {
   return { actorId: req.user?.userId, actorName: req.user?.email, actorRole: req.user?.role };
 }
 
-/** GET /api/promo-banners — what the client app's home screen shows right now. */
 export const listActivePromoBanners = async (_req: Request, res: Response) => {
   try {
     const now = new Date();
@@ -139,7 +134,6 @@ export const listActivePromoBanners = async (_req: Request, res: Response) => {
   }
 };
 
-/** GET /api/admin/promo-banners — every banner, including inactive and scheduled ones. */
 export const adminListPromoBanners = async (_req: Request, res: Response) => {
   try {
     const banners = await prisma.promoBanner.findMany({ orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }] });
@@ -150,7 +144,6 @@ export const adminListPromoBanners = async (_req: Request, res: Response) => {
   }
 };
 
-/** POST /api/admin/promo-banners — new banners go to the end of the list. */
 export const createPromoBanner = async (req: AuthRequest, res: Response) => {
   try {
     const result = validatePromoBannerInput(req.body ?? {});
@@ -160,7 +153,6 @@ export const createPromoBanner = async (req: AuthRequest, res: Response) => {
     const banner = await prisma.promoBanner.create({
       data: {
         ...result.data,
-        // Both are guaranteed by the full (non-partial) validation above.
         title: result.data.title!,
         imageUrl: result.data.imageUrl!,
         sortOrder: (last?.sortOrder ?? -1) + 1,
@@ -190,7 +182,6 @@ export const updatePromoBanner = async (req: AuthRequest, res: Response) => {
     const result = validatePromoBannerInput(req.body ?? {}, { partial: true });
     if ('error' in result) return res.status(400).json(errorResponse(400, result.error));
 
-    // Check the date order against the stored value when only one side changes.
     const startsAt = result.data.startsAt !== undefined ? result.data.startsAt : existing.startsAt;
     const endsAt = result.data.endsAt !== undefined ? result.data.endsAt : existing.endsAt;
     if (startsAt && endsAt && endsAt <= startsAt) {
@@ -212,7 +203,6 @@ export const updatePromoBanner = async (req: AuthRequest, res: Response) => {
   }
 };
 
-/** PUT /api/admin/promo-banners/order — body { ids: [...] } in display order. */
 export const reorderPromoBanners = async (req: AuthRequest, res: Response) => {
   try {
     const ids = (req.body ?? {}).ids;
@@ -239,7 +229,6 @@ export const reorderPromoBanners = async (req: AuthRequest, res: Response) => {
   }
 };
 
-/** DELETE /api/admin/promo-banners/:id — also removes its image from storage (best effort). */
 export const deletePromoBanner = async (req: AuthRequest, res: Response) => {
   try {
     const existing = await prisma.promoBanner.findUnique({ where: { id: req.params.id as string } });
@@ -281,7 +270,6 @@ export const promoBannerImageUpload = multer({
   },
 }).single('image');
 
-/** POST /api/admin/promo-banners/upload-image — returns the public URL to save on a banner. */
 export const uploadPromoBannerImage = async (req: AuthRequest, res: Response) => {
   try {
     if (!req.file) return res.status(400).json(errorResponse(400, 'No image file provided'));

@@ -17,7 +17,6 @@ type Props = {
   onPress: () => void;
 };
 
-// "3:45 PM" for today, "Oct 12" for any other day, "" if it isn't a date.
 const formatTime = (value: string) => {
   const d = dayjs(value);
   if (!value || !d.isValid()) return "";

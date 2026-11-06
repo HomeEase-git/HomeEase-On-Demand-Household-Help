@@ -9,7 +9,6 @@ describe('booking state machine — valid transitions', () => {
     ['ACCEPTED', 'CANCELLED'],
     ['IN_PROGRESS', 'PENDING_COMPLETION'],
     ['IN_PROGRESS', 'CANCELLED'],
-    // The invoice is sent: cash waits for "Cash received", GCash/Maya is billed.
     ['PENDING_COMPLETION', 'COMPLETED'],
     ['PENDING_COMPLETION', 'AWAITING_PAYMENT'],
     ['PENDING_COMPLETION', 'CANCELLED'],

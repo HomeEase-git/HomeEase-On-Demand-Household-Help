@@ -12,7 +12,6 @@ describe('Worker search & detail — KYC visibility gate', () => {
     const { user: worker } = await createTestUser('worker-visibility', { role: 'WORKER' });
     createdUserIds.push(worker.id);
     workerUserId = worker.id;
-    // createTestUser leaves kycStatus at its schema default (PENDING).
   });
 
   afterAll(async () => {

@@ -44,7 +44,6 @@ describe('encryption key rotation (unit)', () => {
     const fresh = encryptField('09171234567');
     expect(isUnderPreviousDataKey(fresh)).toBe(false);
 
-    // Without the previous key, old values no longer read — hence the script.
     useKeys({ data: NEW_DATA });
     expect(() => decryptField(old)).toThrow();
     expect(decryptField(fresh)).toBe('09171234567');
@@ -63,8 +62,6 @@ describe('encryption key rotation (unit)', () => {
 describe('encryption key rotation (database)', () => {
   const createdUserIds: string[] = [];
 
-  // Scoped to this file's users: the dev database is shared and holds other
-  // people's rows under the real key, which the script must not touch.
   const runScript = (extraArgs: string[] = []) => {
     const script = path.join(__dirname, '../scripts/rotate-encryption-keys.ts');
     const users = createdUserIds.flatMap((id) => ['--user', id]);
@@ -82,7 +79,6 @@ describe('encryption key rotation (database)', () => {
     });
   };
 
-  /** Runs the script expecting failure; returns its combined output. */
   const runScriptExpectingFailure = (): string => {
     try {
       runScript();

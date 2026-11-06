@@ -55,7 +55,6 @@ export default function CancelBookingScreen() {
       );
     } catch (error) {
       console.error("Cancel booking error:", error);
-      // The server says why (e.g. already accepted); fall back to a generic line.
       alertModal.error("Couldn't cancel", error instanceof Error && error.message ? error.message : "Failed to cancel booking. Please try again.");
     } finally {
       setLoading(false);

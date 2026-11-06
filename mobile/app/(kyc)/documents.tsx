@@ -17,10 +17,6 @@ import {
 } from "../../utils/kycDocumentConfig";
 import { useAlertModal } from "../../contexts/AlertModalContext";
 
-// Worker-only screen: clearances + the health certificate. (Certifications
-// are added later, when registering for a service.)
-// Clients never reach this screen (selfie.tsx sends them straight
-// to the contract), but we guard against direct navigation anyway.
 const DOCUMENT_KEYS: KycDocumentKey[] = [
   "nbiClearance",
   "barangayClearance",
@@ -56,7 +52,6 @@ export default function DocumentsScreen() {
   const isWorker = user?.role === "worker";
   const [documents, setDocuments] = useState(initialDocuments);
   const { pick } = useMediaPicker();
-  // The picked file while it uploads, so the card can show it straight away.
   const [pending, setPending] = useState<(UploadedDocument & { key: KycDocumentKey }) | null>(null);
 
   useEffect(() => {

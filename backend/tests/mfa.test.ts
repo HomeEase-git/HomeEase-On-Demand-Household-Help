@@ -5,13 +5,11 @@ import prisma from '@config/database';
 import { sendOtpEmail } from '@utils/emailService';
 import { createTestUser, deleteTestUser } from './helpers';
 
-// Two-step sign-in codes go out by email; nothing is really sent in tests.
 jest.mock('@utils/emailService', () => ({
   ...jest.requireActual('@utils/emailService'),
   sendOtpEmail: jest.fn().mockResolvedValue(undefined),
 }));
 
-/** The code the server just emailed (codes are stored hashed and single-use). */
 async function latestCode(_userId: string, _type: 'LOGIN_2FA' | 'ACCOUNT_ACTION'): Promise<string> {
   const calls = jest.mocked(sendOtpEmail).mock.calls;
   return calls[calls.length - 1][1];
@@ -27,10 +25,6 @@ describe('Admin MFA', () => {
     await prisma.$disconnect();
   });
 
-  // Full setup -> enable -> login-challenge -> backup-code lifecycle for one
-  // admin, since each step depends on state the previous one created
-  // (pending secret, then confirmed secret + backup codes, then a
-  // challengeToken minted by a real login call).
   describe('setup, login challenge, and backup codes', () => {
     let adminId: string;
     let adminEmail: string;
@@ -51,8 +45,6 @@ describe('Admin MFA', () => {
         .send({ email: adminEmail, password: adminPassword });
 
       expect(login.status).toBe(200);
-      // No MFA enrolled yet — the account still gets a normal session, but
-      // flagged so the admin web app force-routes into setup once.
       expect(login.body.data.mfaSetupRequired).toBe(true);
       expect(login.body.data.token).toEqual(expect.any(String));
       sessionToken = login.body.data.token;
@@ -89,7 +81,6 @@ describe('Admin MFA', () => {
       const updated = await prisma.user.findUnique({ where: { id: adminId } });
       expect(updated?.mfaEnabled).toBe(true);
 
-      // The setup code is spent, so it can't also be used to sign in.
       const secret = await prisma.mfaSecret.findUnique({ where: { userId: adminId } });
       expect(secret?.lastTotpStep).toEqual(expect.any(Number));
     });
@@ -124,12 +115,6 @@ describe('Admin MFA', () => {
       });
       expect(auditEntry).not.toBeNull();
 
-      // authLimiter itself is disabled repo-wide for this suite (see
-      // tests/setupEnv.ts — many requests from one loopback IP would
-      // otherwise trip it and break unrelated assertions); the route wiring
-      // that applies it to /mfa/challenge is exercised the same way every
-      // other authLimiter route in this repo is: by being mounted, not by
-      // asserting a live 429 here.
     });
 
     it('challenge with a correct TOTP code succeeds and issues a real session', async () => {
@@ -138,8 +123,6 @@ describe('Admin MFA', () => {
         .send({ email: adminEmail, password: adminPassword });
       const challengeToken = login.body.data.challengeToken;
 
-      // Next step's code (accepted within the ±1 window): the current one may
-      // be the very code verify-setup just spent.
       const code = authenticator.clone({ epoch: Date.now() + 30_000 }).generate(totpSecret);
       const res = await request(app)
         .post('/api/auth/mfa/challenge')
@@ -163,8 +146,6 @@ describe('Admin MFA', () => {
         .post('/api/auth/mfa/challenge')
         .send({ challengeToken: login.body.data.challengeToken, code });
 
-      // Either this exact code was just used above, or it's a fresh step and
-      // this use spends it; a second use of it must fail either way.
       if (res.status === 200) {
         const again = await request(app).post('/api/auth/login').send({ email: adminEmail, password: adminPassword });
         const replay = await request(app)
@@ -243,8 +224,6 @@ describe('Admin MFA', () => {
     });
   });
 
-  // Clients and workers use an email/SMS code instead of an authenticator
-  // app (see routes/auth.ts /2fa). Opt-in; never forced.
   describe('Two-step sign-in for CLIENT/WORKER accounts', () => {
     it('no longer offers authenticator-app setup to a CLIENT', async () => {
       const { user, plainPassword } = await createTestUser('mfa-client-totp', { role: 'CLIENT' });

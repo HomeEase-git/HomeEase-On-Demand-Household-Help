@@ -14,7 +14,6 @@ import { colors } from "../../constants";
 
 type Props = {
   visible: boolean;
-  /** Called once, after the animation has had time to play. */
   onFinish: () => void;
   title?: string;
   subtitle?: string;
@@ -25,7 +24,6 @@ const CIRCLE_SIZE = 96;
 const SPARK_COUNT = 8;
 const SPARK_DISTANCE = 78;
 
-/** One small dot that flies out from the circle's centre and fades. */
 function Spark({ index, progress }: { index: number; progress: { value: number } }) {
   const angle = (index / SPARK_COUNT) * Math.PI * 2;
   const style = useAnimatedStyle(() => ({
@@ -52,12 +50,6 @@ function Spark({ index, progress }: { index: number; progress: { value: number }
   );
 }
 
-/**
- * Full-screen "you got the job" moment: the circle springs in, the check pops,
- * a ring pulses outward and a few sparks burst. With reduced motion on it shows
- * the finished state with no movement. The caller moves on from `onFinish`,
- * which runs on a plain timer so it never depends on the animation itself.
- */
 export default function JobAcceptedCelebration({
   visible,
   onFinish,
@@ -88,7 +80,6 @@ export default function JobAcceptedCelebration({
     }
     const timer = setTimeout(onFinish, durationMs);
     return () => clearTimeout(timer);
-    // onFinish is intentionally not a dependency: the timer is armed once per showing.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visible]);
 

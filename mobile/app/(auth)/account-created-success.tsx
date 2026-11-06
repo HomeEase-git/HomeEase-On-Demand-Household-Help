@@ -13,7 +13,6 @@ export default function AccountCreatedSuccessScreen() {
   const [scaleAnim] = useState(() => new Animated.Value(0));
 
   useEffect(() => {
-    // One-time pop-in for the icon; it stays still afterwards.
     Animated.timing(scaleAnim, {
       toValue: 1,
       duration: 600,
@@ -23,8 +22,6 @@ export default function AccountCreatedSuccessScreen() {
   }, [scaleAnim]);
 
   const handleGetStarted = () => {
-    // Clients don't go through worker identity verification — they get a
-    // one-time gated agreement screen instead.
     if (user?.role === "client") {
       router.replace("/(auth)/client-agreement");
     } else {

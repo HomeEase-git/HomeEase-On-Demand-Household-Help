@@ -44,7 +44,6 @@ describe('Admin suspend user', () => {
 
     const dbUser = await prisma.user.findUnique({ where: { id: client.id } });
     expect(dbUser?.status).toBe('SUSPENDED');
-    // Suspension is not deletion — the account stays visible to admins.
     expect(dbUser?.isDeleted).toBe(false);
 
     const postLogin = await request(app)

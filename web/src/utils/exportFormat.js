@@ -1,11 +1,8 @@
-// Shared cleanup so CSV and PDF exports read like the screen, not like raw API data.
-
 /** "Pending_completion" -> "Pending completion". */
 export function prettyStatus(value) {
   return typeof value === 'string' ? value.replace(/_/g, ' ') : value
 }
 
-// Internal fields that mean nothing to someone reading a report.
 const HIDDEN_KEYS = new Set(['id', 'urgencyLevel', 'selfDealingFlag', 'archived', 'xenditInvoiceId'])
 const isInternalId = (key) => key !== 'displayId' && /Id$/.test(key)
 
@@ -18,7 +15,6 @@ export function exportHeader(key) {
   return spaced.charAt(0).toUpperCase() + spaced.slice(1)
 }
 
-/** Drops internal columns, renames the rest to readable headings, tidies status text. */
 export function friendlyExportRow(row) {
   const out = {}
   for (const [key, value] of Object.entries(row)) {
@@ -28,10 +24,6 @@ export function friendlyExportRow(row) {
   return out
 }
 
-/**
- * The PDF's built-in font has no peso sign (it prints as a stray "±" and
- * garbles the spacing of the number after it), so spell it out there.
- */
 export function pdfSafeText(value) {
   return typeof value === 'string' ? value.replace(/₱\s?/g, 'PHP ') : value
 }

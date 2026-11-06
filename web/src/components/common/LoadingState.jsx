@@ -1,12 +1,3 @@
-// Grey placeholder shapes in the layout that's about to load, instead of a
-// spinner, so the page doesn't jump when data arrives. The message is kept
-// for screen readers.
-//
-// variant:
-//   table     - rows of a list/table (default; list pages)
-//   detail    - header card + two columns of fields (detail pages)
-//   dashboard - stat cards, a chart and two side-by-side cards
-//   block     - a few lines, for a small section inside a page
 function Bar({ width = '100%', height = 12 }) {
   return <span className="skeleton" style={{ width, height }} />
 }

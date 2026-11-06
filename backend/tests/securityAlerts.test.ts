@@ -9,8 +9,6 @@ import { ownerDb } from './ownerDb';
 
 jest.mock('@utils/emailService');
 
-// In-memory stand-in for the Redis attempt counter (the suite has no Redis),
-// with the real contract: recordFailedOtpAttempt returns the running count.
 jest.mock('@utils/otpAttemptLimiter', () => {
   const counts = new Map<string, number>();
   const key = (id: string, type: string) => `${id}:${type}`;

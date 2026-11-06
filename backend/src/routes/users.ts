@@ -83,9 +83,6 @@ router.patch(
 // Avatar upload
 router.post('/me/avatar', avatarUpload, uploadAvatar);
 
-// KYC documents — matches verificationController.uploadVerificationDocuments's
-// existing role gate; previously any authenticated role (including ADMIN)
-// could create a bogus WORKER_ONBOARDING verification request for themselves.
 router.get('/me/kyc-documents', getKYCDocuments);
 router.post('/me/kyc-documents', restrictTo('CLIENT', 'WORKER'), requireVerifiedEmail, validateSubmitKYCDocument, submitKYCDocument);
 router.post('/me/kyc-documents/upload', restrictTo('CLIENT', 'WORKER'), requireVerifiedEmail, kycFileUpload, uploadKycFile);

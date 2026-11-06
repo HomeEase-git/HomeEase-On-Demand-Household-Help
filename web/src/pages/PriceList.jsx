@@ -13,8 +13,6 @@ import { useToast } from '../context/ToastContext'
 
 const ROUNDING = [1, 5, 10, 50]
 
-// Edits are kept as strings (exactly what the admin typed) and only become
-// numbers when checked or saved.
 const parsePrice = (raw) => (raw === '' || raw == null ? NaN : Number(raw))
 
 function chargedAs(task) {
@@ -28,11 +26,6 @@ function percentChange(from, to) {
   return `${pct > 0 ? '+' : ''}${Math.round(pct * 10) / 10}%`
 }
 
-/**
- * Every job's price on one screen. Edit in place or apply a bulk change to
- * the rows shown, review, then save everything at once. Only prices change
- * here; a job's name, pricing model and questions stay in the Service Catalog.
- */
 export default function PriceList() {
   const { showError, showSuccess } = useToast()
   const { data, loading, error, reload } = useDetailQuery(fetchPriceList, 'all')
@@ -52,7 +45,6 @@ export default function PriceList() {
   const categories = data?.categories ?? []
   const floor = data?.doleFloor
 
-  // Rows the filters leave on screen; the bulk change applies to exactly these.
   const visible = useMemo(() => {
     const q = search.trim().toLowerCase()
     return categories
@@ -70,7 +62,6 @@ export default function PriceList() {
 
   const shownValue = (id, saved, drafts) => (id in drafts ? drafts[id] : String(saved))
 
-  // Everything that differs from what's saved, for the save bar and review.
   const changes = useMemo(() => {
     const tasks = []
     const cats = []

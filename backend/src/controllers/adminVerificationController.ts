@@ -16,11 +16,6 @@ interface AuthRequest extends Request {
   user?: JwtPayload;
 }
 
-// An admin overriding a missing-requirements gate (approveVerification) has
-// to explain why in more than a token word — "ok" or "approved" technically
-// passed the old any-non-empty-string check, which made the reason
-// requirement close to decorative. 20 chars is enough for a real sentence
-// fragment without being onerous.
 const MIN_OVERRIDE_REASON_LENGTH = 20;
 
 function titleFromDocumentName(originalName: string | null): string {
@@ -28,19 +23,6 @@ function titleFromDocumentName(originalName: string | null): string {
   return base || 'Certification (from KYC submission)';
 }
 
-// A worker's onboarding "Certification" KYC document only ever fed this
-// admin review queue — approving the verification never touched the
-// separate Certification model that Profile > My Certifications reads from,
-// so a worker who submitted proof of a certification during onboarding saw
-// nothing on their profile and had to re-upload the same file through
-// "Add Certification" just to have any record of it. This backfills a
-// placeholder Certification per submitted CERTIFICATION document (title
-// guessed from the filename, everything else left for the worker to fill
-// in) the moment the whole verification is approved, so nothing submitted
-// is silently lost. verificationStatus stays PENDING — only the file itself
-// was reviewed here, not the issuer/date claims a real Certification
-// carries — and updateCertification is how the worker (or a later admin
-// review via adminCertificationController) moves it forward.
 async function backfillCertificationsFromKycDocuments(
   tx: Prisma.TransactionClient,
   userId: string,
@@ -54,9 +36,6 @@ async function backfillCertificationsFromKycDocuments(
 
   const created: Array<{ id: string; title: string }> = [];
   for (const doc of certDocs) {
-    // Guards against double-creation if this ever runs twice for the same
-    // document (it shouldn't — approveVerification only transitions a
-    // request to APPROVED once — but the check is cheap insurance).
     const existing = await tx.certification.findFirst({
       where: { workerProfileId: workerProfile.id, documentUrl: doc.fileUrl },
       select: { id: true },
@@ -84,12 +63,6 @@ export const listVerifications = async (req: Request, res: Response) => {
     const type = typeof req.query.type === 'string' ? req.query.type.toLowerCase() : 'all';
     const search = typeof req.query.search === 'string' ? req.query.search.trim() : '';
 
-    // A worker's request only ever reaches SUBMITTED once they finish
-    // onboarding (see userController.acceptContract) — it never moves back to
-    // PENDING. Treat "PENDING" here as "awaiting admin action" and include
-    // SUBMITTED too, or a completed worker application would never surface in
-    // the default admin queue (see the app's Verification Management page,
-    // which always requests status=PENDING with no way to change it).
     const statusFilter =
       status === 'ALL'
         ? undefined
@@ -145,15 +118,9 @@ export const getVerificationById = async (req: Request, res: Response) => {
       success: true,
       data: {
         ...formatVerification(record),
-        // For the admin to compare against the ID (accepted age range).
         birthDate: record.user.workerProfile?.birthDate?.toISOString().slice(0, 10) ?? null,
         age: record.user.workerProfile?.birthDate ? ageInYears(record.user.workerProfile.birthDate) : null,
-        // Declared by the worker; the admin confirms or corrects it against
-        // the resume when approving (it's an expertise-tier requirement).
         yearsExperience: record.user.workerProfile?.yearsExperience ?? null,
-        // Only VERIFIED categories — a still-PENDING_VERIFICATION 2nd+
-        // category isn't live yet and has nothing to do with this
-        // (onboarding) verification request anyway.
         serviceCategories:
           record.user.workerProfile?.serviceCategories
             .filter((c) => c.status === 'VERIFIED')
@@ -191,11 +158,6 @@ export const approveVerification = async (req: AuthRequest, res: Response) => {
       return res.status(400).json(errorResponse(400, 'Verification already approved'));
     }
 
-    // Defense-in-depth — not exploitable today (this route is admin-only,
-    // and a user's own account can't hold the ADMIN role), but the audit
-    // found this guard applied inconsistently across similar admin actions
-    // elsewhere, so it's added here too rather than relying solely on the
-    // role gate.
     if (record.userId === req.user?.userId) {
       return res.status(403).json(errorResponse(403, 'You cannot approve your own verification request'));
     }
@@ -210,13 +172,6 @@ export const approveVerification = async (req: AuthRequest, res: Response) => {
       const submittedTypes = new Set(record.documents.map((d) => d.documentType));
       const missingTypes = TIER_1_REQUIRED_DOCUMENT_TYPES.filter((t) => !submittedTypes.has(t));
 
-      // Without a geocoded address, the distance-based pricing fee
-      // (bookingController.createBooking) silently computes as ₱0 for this
-      // worker forever — a free ride relative to every other worker who did
-      // set one, and a real, easy-to-miss revenue leak. Folded into the
-      // same missing-requirements/override gate as the document check above
-      // rather than a separate hard block, since an admin may legitimately
-      // need to approve someone who'll add their address moments later.
       const workerProfile = record.user.role === 'WORKER'
         ? await prisma.workerProfile.findUnique({
             where: { userId: record.userId },
@@ -224,10 +179,6 @@ export const approveVerification = async (req: AuthRequest, res: Response) => {
           })
         : null;
 
-      // Outside the accepted age range (AppSettings.workerMinAge/MaxAge) is a
-      // hard stop — no override. A missing date of birth (older
-      // applications, before it was collected) can be overridden once the
-      // admin has confirmed the age from the ID itself.
       const ageError = workerProfile?.birthDate
         ? workerAgeError(ageInYears(workerProfile.birthDate), await getAppSettings())
         : null;
@@ -254,10 +205,6 @@ export const approveVerification = async (req: AuthRequest, res: Response) => {
     }
 
     const { verification: updated, backfilledCertifications } = await prisma.$transaction(async (tx) => {
-      // Approving the whole request implicitly approves any document the
-      // admin didn't review individually, so none are left showing PENDING.
-      // Documents already approved/rejected one-by-one keep their decision.
-      // Per-document because each clearance type has its own expiresAt.
       const reviewedAt = new Date();
       for (const doc of record.documents.filter((d) => d.status === 'PENDING')) {
         const validityDays = CLEARANCE_VALIDITY_DAYS[doc.documentType];
@@ -315,9 +262,6 @@ export const approveVerification = async (req: AuthRequest, res: Response) => {
       message: verificationApprovedMessage,
       relatedId: record.id,
     });
-    // A worker's KYC approval unlocks their ability to earn and they're
-    // actively waiting on it — worth the SMS even though this only fires
-    // once per account.
     void sendSmsToUser({
       userId: record.userId,
       message: `HomeEase: ${verificationApprovedMessage}`,
@@ -376,8 +320,6 @@ export const rejectVerification = async (req: AuthRequest, res: Response) => {
     }
 
     const updated = await prisma.$transaction(async (tx) => {
-      // Mirror of approveVerification: documents the admin didn't review
-      // individually take the request's rejection so none stay PENDING.
       await tx.kycDocument.updateMany({
         where: { verificationRequestId: id, status: 'PENDING' },
         data: {
@@ -437,12 +379,6 @@ export const rejectVerification = async (req: AuthRequest, res: Response) => {
   }
 };
 
-/**
- * PATCH /api/admin/verifications/:id/documents/:documentId/approve
- * Approves a single document within a verification submission, without
- * approving the whole request — lets an admin accept the ID while still
- * waiting on/rejecting the selfie or a clearance, for example.
- */
 export const approveDocument = async (req: AuthRequest, res: Response) => {
   try {
     const { id, documentId } = req.params as { id: string; documentId: string };
@@ -455,11 +391,6 @@ export const approveDocument = async (req: AuthRequest, res: Response) => {
       return res.status(404).json(errorResponse(404, 'Document not found on this verification request'));
     }
 
-    // Government clearances actually expire — auto-computed from each
-    // type's real-world validity period (see CLEARANCE_VALIDITY_DAYS) so
-    // approval doesn't silently create a permanently-valid credential.
-    // bookingWorker.flagExpiredKycDocuments reads this to require
-    // re-verification once it passes.
     const validityDays = CLEARANCE_VALIDITY_DAYS[document.documentType];
     const expiresAt = validityDays
       ? new Date(Date.now() + validityDays * 24 * 60 * 60 * 1000)
@@ -493,9 +424,6 @@ export const approveDocument = async (req: AuthRequest, res: Response) => {
   }
 };
 
-/**
- * PATCH /api/admin/verifications/:id/documents/:documentId/reject
- */
 export const rejectDocument = async (req: AuthRequest, res: Response) => {
   try {
     const { id, documentId } = req.params as { id: string; documentId: string };

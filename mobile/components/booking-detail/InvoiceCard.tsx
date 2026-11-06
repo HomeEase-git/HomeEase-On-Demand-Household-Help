@@ -15,15 +15,9 @@ const peso = (n: number) => `₱${n.toLocaleString("en-PH", { minimumFractionDig
 
 type Props = {
   invoice: ApiInvoice;
-  // Omit to show the photos without opening them full screen.
   onOpenPhoto?: (url: string) => void;
 };
 
-/**
- * The bill the worker sends when the job is done: the job, then any package,
- * part (with its receipt) or extra work (with a photo), the tip and the total.
- * Shared by the client's booking screen and the worker's job screen.
- */
 export const InvoiceCard: React.FC<Props> = ({ invoice, onOpenPhoto }) => (
   <View className="bg-card rounded-2xl p-4 mb-3">
     <View className="flex-row items-center justify-between mb-3">

@@ -3,11 +3,6 @@ import prisma from '@config/database';
 
 type Db = Prisma.TransactionClient | typeof prisma;
 
-/**
- * Thrown when a booking's status changed between the request reading it and
- * writing the transition — e.g. the pending-expiry job cancelled it while the
- * worker was accepting. Controllers answer 409; workers treat it as a no-op.
- */
 export class BookingStatusConflictError extends Error {
   constructor(
     readonly bookingId: string,
@@ -22,30 +17,11 @@ export function isBookingStatusConflict(error: unknown): error is BookingStatusC
   return error instanceof BookingStatusConflictError;
 }
 
-/**
- * Row-locks the booking until the surrounding transaction ends, then returns
- * its current state. For check-then-write flows that touch rows other than the
- * booking (add-ons, photo arrays): every such flow takes this lock first, so
- * e.g. adding an extra can't slip in between completion reading the extras and
- * locking the bill.
- */
 export async function lockBooking(tx: Prisma.TransactionClient, id: string) {
   await tx.$queryRaw`SELECT "id" FROM "Booking" WHERE "id" = ${id} FOR UPDATE`;
   return tx.booking.findUnique({ where: { id }, include: { addOns: true } });
 }
 
-/**
- * Compare-and-set booking write: applies `data` only while the row is still
- * in one of the `expected` statuses, in a single UPDATE … WHERE status IN (…).
- * A plain update({ where: { id } }) after an earlier status read lets two
- * racing transitions both succeed (last writer wins); this makes the loser
- * fail with BookingStatusConflictError instead. Inside a $transaction the
- * throw also rolls back the transaction's other writes.
- *
- * `data` can't hold nested relation writes (updateMany limitation) — do those
- * separately after this succeeds. `alsoWhere` adds further conditions the row
- * must still meet (e.g. the quote revision the client actually looked at).
- */
 export async function updateBookingIfStatus(
   db: Db,
   id: string,

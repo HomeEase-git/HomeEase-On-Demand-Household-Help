@@ -7,7 +7,6 @@ describe('geo distance utilities', () => {
   });
 
   it('computes a known great-circle distance within tolerance', () => {
-    // Manila <-> Cebu City, real-world distance is ~570km
     const manila = { lat: 14.5995, lng: 120.9842 };
     const cebu = { lat: 10.3157, lng: 123.8854 };
     const km = distanceKm(manila, cebu);

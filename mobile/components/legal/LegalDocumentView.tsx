@@ -4,7 +4,6 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { ScreenHeader } from "../ui/ScreenHeader";
 import type { LegalDocument } from "../../constants/legalDocuments";
 
-/** The sections of a legal document, for embedding in an existing ScrollView. */
 export function LegalSections({ document }: { document: LegalDocument }) {
   return (
     <View>

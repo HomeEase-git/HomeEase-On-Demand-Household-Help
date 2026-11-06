@@ -1,19 +1,5 @@
-// Google Places API (New) — the only server-side address provider for this
-// app. Replaces the Geocoding API entirely:
-//   - address autocomplete  → Autocomplete (New) + Place Details (New), billed
-//     per session (sessionToken) instead of per keystroke
-//   - free-text address → coordinates → Text Search (New)
-//   - GPS fix → address (reverse geocode) happens ON DEVICE via Android's
-//     native geocoder (expo-location), so there's no server equivalent here.
-// Every function here returns null/[] when GOOGLE_MAPS_API_KEY isn't set, the
-// query doesn't resolve, or the request fails — callers treat all three the
-// same way (prompt the user to fill the address in manually) rather than
-// branching on which case it was.
 const PLACES_BASE_URL = 'https://places.googleapis.com/v1';
 
-// Text Search (New) only takes a rectangle for a hard restriction (no
-// country filter), so this is the Philippines' bounding box. Autocomplete
-// uses includedRegionCodes instead.
 const PH_BOUNDS = {
   rectangle: {
     low: { latitude: 4.2, longitude: 116.1 },
@@ -27,12 +13,7 @@ export type GooglePlaceResult = {
   formattedAddress: string;
   lat: number;
   lng: number;
-  // Kept in the Geocoding API's vocabulary (ROOFTOP/GEOMETRIC_CENTER/
-  // APPROXIMATE) so app builds that predate the Places migration still read
-  // it correctly — see precisionFromTypes for how it's derived.
   locationType: string;
-  // Places has no partial-match flag; always false. Kept for the same
-  // backward-compatibility reason as locationType.
   partialMatch: boolean;
   components: {
     houseNumber?: string;
@@ -65,8 +46,6 @@ function parseComponents(addressComponents: any[]): AddressComponents {
   return {
     houseNumber: getComponent(addressComponents, 'street_number'),
     street: getComponent(addressComponents, 'route'),
-    // PH barangays land under different Google types depending on how
-    // detailed the area's mapping is — check from most to least specific.
     barangay:
       getComponent(addressComponents, 'sublocality_level_1') ||
       getComponent(addressComponents, 'sublocality') ||
@@ -74,13 +53,6 @@ function parseComponents(addressComponents: any[]): AddressComponents {
     city:
       getComponent(addressComponents, 'locality') ||
       getComponent(addressComponents, 'administrative_area_level_3'),
-    // For Philippine addresses, Google's `administrative_area_level_1` is the
-    // REGION (e.g. "Central Luzon", "Calabarzon") and the actual PROVINCE
-    // (e.g. "Bulacan", "Laguna") lands one level down, at
-    // `administrative_area_level_2`. Using level_1 alone put the region's
-    // name in what's shown to users as "Province/State". Metro Manila cities
-    // have no province — they sit directly under level_1 ("Metro Manila"/
-    // "National Capital Region") with no level_2 at all — hence the fallback.
     state:
       getComponent(addressComponents, 'administrative_area_level_2') ||
       getComponent(addressComponents, 'administrative_area_level_1'),
@@ -88,10 +60,6 @@ function parseComponents(addressComponents: any[]): AddressComponents {
   };
 }
 
-// A place whose own type is an AREA (city, barangay, province, postcode) has
-// its location at that area's center — approximate for a service address. A
-// road is a line, so its point is only its midpoint. Anything else (street
-// address, building, establishment) is an actual spot.
 const AREA_TYPES = new Set([
   'country',
   'administrative_area_level_1',
@@ -150,7 +118,6 @@ async function placesRequest(path: string, init: { method: 'GET' | 'POST'; field
   return data;
 }
 
-/** Free-text address → up to `limit` candidate places (Text Search (New)). */
 export async function googleSearchAddresses(query: string, limit = 5): Promise<GooglePlaceResult[]> {
   const data = await placesRequest('/places:searchText', {
     method: 'POST',
@@ -173,12 +140,6 @@ export async function googleGeocodeAddress(address: string): Promise<GooglePlace
   return best ?? null;
 }
 
-/**
- * Autocomplete (New). `sessionToken` groups this call with the keystrokes
- * before it and the Place Details call that ends the session, so the whole
- * session is billed once. `near` (the user's rough location, when known)
- * biases — never restricts — results toward nearby places.
- */
 export async function googleAutocomplete(
   input: string,
   sessionToken: string,
@@ -210,7 +171,6 @@ export async function googleAutocomplete(
     }));
 }
 
-/** Place Details (New) — ends the autocomplete session started with `sessionToken`. */
 export async function googlePlaceDetails(placeId: string, sessionToken?: string): Promise<GooglePlaceResult | null> {
   const params = new URLSearchParams({ languageCode: 'en', regionCode: 'ph' });
   if (sessionToken) params.set('sessionToken', sessionToken);

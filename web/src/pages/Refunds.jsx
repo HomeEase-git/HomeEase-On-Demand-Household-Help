@@ -35,7 +35,6 @@ const SOURCE_LABELS = {
   DISPUTE_RESOLUTION: 'Dispute',
 }
 
-// What each decision does, shown in the confirm dialog.
 const ACTIONS = {
   approve: {
     title: 'Approve refund',
@@ -66,12 +65,6 @@ function formatPeso(amount) {
   return `₱${Number(amount ?? 0).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
 }
 
-/**
- * Refund approval queue. Refunds of paid bookings never happen on their own —
- * cancellations, admin force-cancels and disputes resolved with Cancel &
- * Refund all land here, and an admin approves, rejects, or records the refund
- * as done manually.
- */
 export default function Refunds() {
   const { showSuccess, showError } = useToast()
   const [pending, setPending] = useState(null) // { request, action }

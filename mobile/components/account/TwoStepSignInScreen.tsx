@@ -18,12 +18,6 @@ const METHODS: { value: TwoFactorMethod; label: string; icon: string; hint: stri
   { value: "SMS", label: "Text message", icon: "chatbubble-outline", hint: "We text a code to your mobile number" },
 ];
 
-/**
- * Optional two-step sign-in for clients and workers: after the password, a
- * 6-digit code is sent by email or SMS. (Admins use an authenticator app on
- * the web panel.) Older accounts that set up an authenticator app before can
- * still turn it off here.
- */
 export default function TwoStepSignInScreen() {
   const alertModal = useAlertModal();
 
@@ -32,14 +26,12 @@ export default function TwoStepSignInScreen() {
   const [method, setMethod] = useState<TwoFactorMethod | null>(null);
   const [legacyAuthenticator, setLegacyAuthenticator] = useState(false);
 
-  // Turning on (or switching): the chosen channel, then the code sent to it.
   const [choice, setChoice] = useState<TwoFactorMethod>("EMAIL");
   const [sentTo, setSentTo] = useState<string | null>(null);
   const [code, setCode] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
-  // "off" = turning it off (password + code sent to the current channel).
   const [mode, setMode] = useState<"idle" | "on" | "off">("idle");
 
   useEffect(() => {
@@ -145,7 +137,6 @@ export default function TwoStepSignInScreen() {
   const isOn = Boolean(method);
   const errorText = error ? <Text className="text-error text-sm mb-3">{error}</Text> : null;
 
-  // An authenticator app from before — the only thing left to do is turn it off.
   if (legacyAuthenticator && !isOn) {
     return (
       <SafeAreaView className="flex-1 bg-white">

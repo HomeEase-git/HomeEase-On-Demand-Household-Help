@@ -40,7 +40,6 @@ describe("kyc document configuration", () => {
       healthCertificate: { uri: null },
     });
 
-    // Certifications are optional and not part of KYC any more.
     expect(missing).toEqual(["governmentIdBack", "resume", "healthCertificate"]);
   });
 });

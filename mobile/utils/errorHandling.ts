@@ -1,14 +1,3 @@
-/**
- * Comprehensive Error Handling & Logging
- * 
- * Handles:
- * - API error normalization
- * - Network error detection
- * - User-friendly error messages
- * - Error logging and reporting
- * - Retry strategies
- */
-
 import axios from 'axios';
 
 export type ApiErrorType = 'network' | 'validation' | 'server' | 'timeout' | 'unknown' | 'auth';
@@ -31,9 +20,6 @@ const API_ERROR_TYPES: ApiErrorType[] = [
   'auth',
 ];
 
-/**
- * Normalize any error into a standard ApiError format
- */
 export function normalizeError(error: unknown): ApiError {
   if (isNormalizedApiError(error)) {
     return error;
@@ -111,14 +97,12 @@ export function normalizeError(error: unknown): ApiError {
     }
   }
 
-  // Handle axios errors so retry logic can see axios-specific details
   try {
     if (axios.isAxiosError(error)) {
       const axiosErr: any = error;
 
       // No response -> network or timeout
       if (!axiosErr.response) {
-        // Axios uses ECONNABORTED for timeout and ERR_CANCELED for AbortController cancellation
         if (axiosErr.code === 'ECONNABORTED' || axiosErr.code === 'ERR_CANCELED') {
           return {
             type: 'timeout',
@@ -185,7 +169,6 @@ export function normalizeError(error: unknown): ApiError {
       };
     }
   } catch (_) {
-    // ignore any errors while trying to classify axios errors
   }
 
   // Handle Error instances
@@ -218,10 +201,6 @@ export function normalizeError(error: unknown): ApiError {
   };
 }
 
-/**
- * Custom error classes
- */
-
 export class NetworkError extends Error {
   constructor(message: string = 'Network error') {
     super(message);
@@ -252,10 +231,6 @@ export class ValidationError extends Error {
     this.fields = fields;
   }
 }
-
-/**
- * Type guards
- */
 
 export interface ApiErrorResponse {
   status: number;
@@ -298,10 +273,6 @@ export function isTimeoutError(error: unknown): error is TimeoutError {
   return error instanceof TimeoutError;
 }
 
-/**
- * Error logging utilities
- */
-
 export type ErrorLog = {
   timestamp: number;
   type: ApiErrorType;
@@ -340,8 +311,6 @@ class ErrorLogger {
       );
     }
 
-    // Could send to Sentry or other error reporting service
-    // this.reportToErrorService(log);
   }
 
   getLogs(): ErrorLog[] {
@@ -359,10 +328,6 @@ class ErrorLogger {
 
 export const errorLogger = new ErrorLogger();
 
-/**
- * Error boundary utilities
- */
-
 export interface ErrorBoundaryState {
   hasError: boolean;
   error: Error | null;
@@ -376,10 +341,6 @@ export function captureErrorBoundary(error: Error, errorInfo: any): ErrorBoundar
     errorInfo,
   };
 }
-
-/**
- * Retry strategy helper
- */
 
 export type RetryOptions = {
   maxRetries?: number;
@@ -409,7 +370,6 @@ export async function withRetry<T>(
     } catch (error) {
       lastError = normalizeError(error);
 
-      // Don't retry if not retryable or if we've exhausted retries
       if (!shouldRetry(lastError) || attempt === maxRetries) {
         throw lastError;
       }
@@ -429,13 +389,8 @@ export async function withRetry<T>(
     }
   }
 
-  // This should never be reached, but TypeScript needs it
   throw lastError || new Error('Retry failed');
 }
-
-/**
- * Global error handler
- */
 
 export function setupGlobalErrorHandler(): void {
   // Handle unhandled promise rejections
@@ -455,9 +410,6 @@ export function setupGlobalErrorHandler(): void {
   console.log('[ErrorHandler] Global error handler initialized');
 }
 
-/**
- * Format error for user display
- */
 export function formatErrorForUser(error: ApiError): string {
   // Prefer user message, fall back to general message
   return error.userMessage || error.message || 'An error occurred. Please try again.';

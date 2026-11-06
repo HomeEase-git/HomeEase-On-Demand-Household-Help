@@ -1,7 +1,3 @@
-/**
- * Form Validation Error Handling Tests
- */
-
 import {
   validateField,
   validateForm,
@@ -245,7 +241,6 @@ describe('Form Validation', () => {
       try {
         throw new Error('Validation test');
       } catch (error) {
-        // Just testing that ValidationError structure is correct
       }
     });
   });

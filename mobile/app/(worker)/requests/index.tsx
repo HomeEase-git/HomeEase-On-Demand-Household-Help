@@ -13,9 +13,6 @@ import { usePolling } from "../../../hooks/usePolling";
 import { useTabRefresh } from "../../../hooks/useTabRefresh";
 import { usePullToRefresh } from "../../../hooks/usePullToRefresh";
 
-// A real-time socket layer already pushes updates here — this poll is a
-// belt-and-suspenders fallback, not the primary refresh path, so it doesn't
-// need to be this frequent.
 const POLL_INTERVAL_MS = 25000;
 
 export default function RequestsScreen() {
@@ -25,8 +22,6 @@ export default function RequestsScreen() {
   const [loading, setLoading] = useState(true);
   const [focused, setFocused] = useState(false);
 
-  // `silent` skips the loading flag so a background poll refresh doesn't
-  // flash the skeleton over an already-rendered list.
   const load = useCallback(
     async (silent = false) => {
       if (!silent) setLoading(true);
@@ -50,16 +45,11 @@ export default function RequestsScreen() {
     }, [load]),
   );
 
-  // New incoming requests should show up without the worker having to
-  // background/foreground the screen to trigger the focus refresh above.
   usePolling(() => load(true), POLL_INTERVAL_MS, { paused: !focused });
 
   useTabRefresh("worker:requests", load);
-  // Pull refreshes silently so the list stays put under the spinner.
   const refreshControl = usePullToRefresh(useCallback(() => load(true), [load]));
 
-  // Only new requests live here — once accepted, a job moves to Records
-  // (Ongoing), where the worker runs it.
   const filtered = jobs.filter((j) => j.status === "Pending");
 
   const handleRequestPress = useCallback(

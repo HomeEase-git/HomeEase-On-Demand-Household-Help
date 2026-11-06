@@ -2,12 +2,6 @@ import React from "react";
 import { View } from "react-native";
 import { Skeleton, SkeletonCircle, SkeletonGroup } from "../ui/Skeleton";
 
-/**
- * Placeholder for a screen whose content is still loading — grey shapes in
- * the rough layout of a detail screen, instead of a lone spinner, so the
- * page doesn't jump when the data arrives. "profile" adds the large header
- * photo the worker profile has.
- */
 export const ScreenSkeleton: React.FC<{ variant?: "detail" | "profile" }> = ({ variant = "detail" }) => (
   <SkeletonGroup className="flex-1">
     {variant === "profile" && <Skeleton width="100%" height={256} borderRadius={0} marginBottom={0} />}

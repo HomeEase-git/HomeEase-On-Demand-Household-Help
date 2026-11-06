@@ -26,8 +26,6 @@ import { ownerDb } from './ownerDb';
 const { createInvoice } = require('@services/xenditService');
 const { schedulePayout } = require('@queues/payoutQueue');
 
-// All call sites below invoice a freshly-seeded booking with no prior Payment
-// row, so the alreadyPaid self-heal branch never applies here — narrow it away.
 function expectInvoice(result: Awaited<ReturnType<typeof createCompletionInvoice>>) {
   if ('alreadyPaid' in result) throw new Error('Expected a fresh invoice, got alreadyPaid');
   return result;
@@ -111,7 +109,6 @@ describe('Pay-after-completion payment lifecycle', () => {
     expect(payment?.status).toBe('COMPLETED');
     expect(payment?.methodType).toBe('CASH');
 
-    // 10% commission + 2% withholding on the post-commission amount = 100 + 18
     const platformCut = payment!.commissionAmount + payment!.withholdingTaxAmount;
     const workerProfile = await prisma.workerProfile.findUniqueOrThrow({ where: { id: workerProfileId } });
     expect(workerProfile.commissionOwed).toBeCloseTo(platformCut, 2);
@@ -150,8 +147,6 @@ describe('Pay-after-completion payment lifecycle', () => {
     });
     await createCompletionInvoice(booking.id);
 
-    // Xendit shows PAID (the client actually completed checkout), but the
-    // invoice-paid webhook never landed, so the local Payment is still PENDING.
     const { retrieveInvoice } = require('@services/xenditService');
     (retrieveInvoice as jest.Mock).mockResolvedValueOnce({
       status: 'PAID',
@@ -259,8 +254,6 @@ describe('Pay-after-completion payment lifecycle', () => {
 
       await finalizePaidBooking(paymentId, 'ewc_pac_held', 1000, new Date());
 
-      // Booking still completes, but the worker side stays unsettled and the
-      // debt netting is rolled back with it.
       expect((await prisma.booking.findUniqueOrThrow({ where: { id: booking.id } })).status).toBe('COMPLETED');
       let payment = await prisma.payment.findUniqueOrThrow({ where: { id: paymentId } });
       expect(payment.workerSettledAt).toBeNull();
@@ -274,7 +267,6 @@ describe('Pay-after-completion payment lifecycle', () => {
       });
       expect(heldNotices).toBe(1);
 
-      // Once the worker adds an account, the next settle pays out (net of dues).
       await prisma.workerProfile.update({
         where: { id: workerProfileId },
         data: { payoutMethod: 'GCASH', payoutAccountNumber: '09171234567' },
@@ -315,8 +307,6 @@ describe('Pay-after-completion payment lifecycle', () => {
 
   describe('Debt hold', () => {
     it('crossing the AppSettings.workerDebtHoldLimit puts the account on hold', async () => {
-      // Default workerDebtHoldLimit is 2500; a 25000-peso cash job accrues
-      // 2500 in commission (withholding is 0), which reaches the threshold.
       const booking = await seedPendingCompletion('CASH', 25000);
 
       await settleCashBooking(booking.id);
@@ -368,7 +358,6 @@ describe('Pay-after-completion payment lifecycle', () => {
 
       const released = await prisma.workerProfile.findUniqueOrThrow({ where: { id: workerProfileId } });
       expect(released.debtHoldAt).toBeNull();
-      // Releasing the hold does not itself forgive the debt.
       expect(released.commissionOwed).toBeCloseTo(600, 2);
 
       const booking = await prisma.booking.create({

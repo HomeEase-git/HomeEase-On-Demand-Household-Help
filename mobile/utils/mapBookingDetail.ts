@@ -1,10 +1,6 @@
 import { API_STATUS_MAP, type Booking } from "../store/bookingStore";
 import type { ConditionType, RoomType, TimeSlot } from "../types/booking4step.types";
 
-// The client booking detail API response and its mapping to the app's
-// Booking shape. Moved out of app/(client)/booking/[bookingId]/index.tsx.
-
-/** One line of the worker's invoice (backend utils/invoiceItems.invoiceLines). */
 export type InvoiceLine = {
   id: string | null;
   kind: "JOB" | "PACKAGE" | "PREFERENCE" | "PART" | "EXTRA_WORK";
@@ -13,11 +9,6 @@ export type InvoiceLine = {
   photoUrls: string[];
 };
 
-/**
- * The bill the worker sends when the job is done. NOT_SENT: the lines show
- * what was booked. DUE: waiting for payment. REPORTED: the client reported
- * it and HomeEase is reviewing it.
- */
 export type ApiInvoice = {
   status: "NOT_SENT" | "DUE" | "REPORTED" | "PAID" | "CANCELLED";
   sentAt: string | null;
@@ -41,24 +32,13 @@ export type ApiBookingDetail = {
   clientLng?: number | null;
   timeSlot?: TimeSlot | null;
   condition?: ConditionType | null;
-  // Reschedule-on-conflict (from the retired "Continue Tomorrow") —
-  // rescheduleAcknowledgedAt null means this is still an open episode
-  // awaiting the client's explicit response.
   rescheduledAt?: string | null;
   previousScheduledDate?: string | null;
   previousTimeSlot?: TimeSlot | null;
-  // The true original date, surviving multiple reschedule hops — differs
-  // from previousScheduledDate only after a second+ hop (see backend
-  // Booking.originalScheduledDate).
   originalScheduledDate?: string | null;
   rescheduleAcknowledgedAt?: string | null;
-  // Set when the worker never checked in (backend
-  // bookingWorker.cancelWorkerNoShows cancels the booking at the same time).
   workerNoShowFlaggedAt?: string | null;
   isRush?: boolean;
-  // Reschedule-on-REQUEST (see backend requestReschedule) — either side
-  // asks (rescheduleRequestedBy), the other answers. Null
-  // rescheduleRequestRespondedAt means still waiting.
   rescheduleRequestedAt?: string | null;
   clientNotHereAt?: string | null;
   clientNoShowCancelAt?: string | null;
@@ -74,7 +54,6 @@ export type ApiBookingDetail = {
   rescheduleRequestRespondedAt?: string | null;
   rescheduleRequestAccepted?: boolean | null;
   rooms?: RoomType[];
-  // Old bookings only: answers to the retired booking questions.
   scopeAnswers?: Record<string, string | string[]> | null;
   // How many units, for a per-unit job.
   quantity?: number | null;
@@ -103,8 +82,6 @@ export type ApiBookingDetail = {
   beforePhotoUrls?: string[];
   progressPhotoUrls?: string[];
   timeline?: { workerArrivedAt?: string | null; workerStartedAt?: string | null; workerCompletedAt?: string | null } | null;
-  // Settled at booking time — used to auto-process payment after completion
-  // is confirmed, without asking the client to pick a method again.
   paymentMethodType?: string | null;
   paymentAccountIdentifier?: string | null;
   payment: {
@@ -116,18 +93,13 @@ export type ApiBookingDetail = {
     tip?: number;
   } | null;
   addOns?: { id: string; name: string; price: number; clientApprovedAt: string | null; clientRejectedAt: string | null }[];
-  // Multi-day upfront booking (see backend createMultiDayBooking) — null for
-  // an ordinary single-day booking. Sibling list is date-ordered.
   groupId?: string | null;
   group?: { totalDays: number; bookings: { id: string; scheduledDate: string; status: string }[] } | null;
   invoice?: ApiInvoice;
   review: { rating: number; comment: string | null; workerResponse?: string | null } | null;
-  // Follow-up jobs: this booking's inspection (parent), and follow-up jobs
-  // requested after it. allowsFollowUp = this is an inspection/diagnosis job.
   parentBooking?: { id: string; scheduledDate: string; service: string } | null;
   followUps?: { id: string; status: string; scheduledDate: string; service: string }[];
   allowsFollowUp?: boolean;
-  // "Follow Up Date" visits the worker scheduled for this job.
   visits?: { id: string; scheduledDate: string; scheduledTime: string; notes: string | null; status: string }[];
   cancellation?: {
     fault?: "CLIENT" | "WORKER" | null;
@@ -136,7 +108,6 @@ export type ApiBookingDetail = {
     compensationAmount?: number | null;
     cancelledBy?: string;
   } | null;
-  // Set when a worker declined (status REJECTED): their stated reason.
   declineReason?: string | null;
   declinedAt?: string | null;
 };

@@ -2,7 +2,6 @@ import { Link } from 'react-router-dom'
 
 const TREND_ICON = { up: 'fa-arrow-trend-up', down: 'fa-arrow-trend-down', flat: 'fa-minus' }
 
-// trend (optional): { direction: 'up' | 'down' | 'flat', change: '20%', detail: '+12 in 7 days' }
 export default function StatCard({ label, value, sublabel, icon, color = 'blue', to, trend }) {
   const content = (
     <>

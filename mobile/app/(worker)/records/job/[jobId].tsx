@@ -29,20 +29,15 @@ import { colors } from "../../../../constants";
 import { bookingStartTime, formatTime12h, startInstant } from "../../../../utils/bookingTime";
 import { formatJobTime } from "../../../../utils/bookingTimeline";
 
-// Mirrors AppSettings.noShowGraceMinutes / noShowPenaltyAmount defaults —
-// only used for the on-screen warning; the server decides.
 const NO_SHOW_GRACE_MINUTES = 60;
 const NO_SHOW_PENALTY = 200;
 
-// A real-time socket layer already pushes updates here — this poll is a
-// belt-and-suspenders fallback, not the primary refresh path.
 const POLL_INTERVAL_MS = 25000;
 
 type BookingDetail = {
   id: string;
   client: { id: string; fullName: string; phone?: string | null };
   service: string;
-  // How many units (per-unit jobs), old bookings' question answers, and the client's note.
   quantity?: number | null;
   quantityUnit?: string | null;
   scopeAnswers?: Record<string, string | string[]> | null;
@@ -61,24 +56,17 @@ type BookingDetail = {
   addOns?: { id: string; kind: string | null; name: string; price: number; clientApprovedAt: string | null; clientRejectedAt: string | null }[];
   workerArrivedAt?: string | null;
   timeline?: { workerArrivedAt?: string | null; workerStartedAt?: string | null; workerCompletedAt?: string | null } | null;
-  // Set when a no-show cancelled this job (see backend
-  // bookingWorker.cancelWorkerNoShows).
   workerNoShowFlaggedAt?: string | null;
   review?: { rating: number; comment: string | null } | null;
-  // Reschedule request (see backend requestReschedule) — either side asks,
-  // the other answers; rescheduleRequestRespondedAt null means still open.
   rescheduleRequestedAt?: string | null;
   rescheduleRequestedBy?: "CLIENT" | "WORKER" | null;
   requestedScheduledDate?: string | null;
   requestedScheduledTime?: string | null;
   requestedTimeSlot?: string | null;
   rescheduleRequestRespondedAt?: string | null;
-  // "Follow Up Date" visits (see scheduleFollowUpVisit).
   visits?: { id: string; scheduledDate: string; scheduledTime: string; notes: string | null; status: string }[];
-  // The bill the worker sends at the end of the job (see backend completeBooking).
   invoice?: ApiInvoice;
   paymentMethodType?: "CASH" | "GCASH" | "MAYA" | null;
-  // Client no-show and cancel-request state (see backend clientNotHere / requestCancel).
   clientNotHereAt?: string | null;
   clientNoShowCancelAt?: string | null;
   clientFaultFeeAmount?: number;
@@ -97,7 +85,6 @@ type BookingDetail = {
     workerPayout?: number;
     capturedAmount?: number | null;
   } | null;
-  // The worker's take-home from the server, at the real service-fee rate.
   earnings?: {
     subtotal: number;
     commissionAmount: number;
@@ -106,7 +93,6 @@ type BookingDetail = {
   } | null;
 };
 
-// Dates arrive as UTC-midnight ISO strings; show them as "Oct 18, 2026".
 const formatJobDate = (iso: string) =>
   iso ? new Date(iso).toLocaleDateString("en-PH", { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" }) : "";
 
@@ -120,17 +106,13 @@ export default function JobDetailScreen() {
   const [completionPhotoUri, setCompletionPhotoUri] = useState<string | null>(null);
   const [completionPhotoUrl, setCompletionPhotoUrl] = useState<string | null>(null);
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
-  // Proof photos, both posted after the start and both needed to finish:
-  // before (the job as found) and progress.
   const [beforeDraft, setBeforeDraft] = useState<string[]>([]);
   const [postingBefore, setPostingBefore] = useState(false);
   const [progressDraft, setProgressDraft] = useState<string[]>([]);
   const [postingProgress, setPostingProgress] = useState(false);
-  // Parts and extra work added to the invoice before it's sent.
   const [invoiceItems, setInvoiceItems] = useState<api.InvoiceItemPayload[]>([]);
   const [lineModalKind, setLineModalKind] = useState<api.InvoiceItemPayload["kind"] | null>(null);
   const [confirmingCash, setConfirmingCash] = useState(false);
-  // Which of the new one-tap controls is mid-request, to block double taps.
   const [busyAction, setBusyAction] = useState<null | "agree" | "decline" | "notHere" | "noShowCancel" | "notPaid">(null);
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
@@ -141,8 +123,6 @@ export default function JobDetailScreen() {
   const { pickImage } = useMediaPicker();
   const alertModal = useAlertModal();
 
-  // `silent` skips the loading flag so a background poll refresh doesn't
-  // flash the skeleton over an already-rendered screen.
   const load = useCallback(
     async (silent = false) => {
       if (!jobId) return;
@@ -167,17 +147,10 @@ export default function JobDetailScreen() {
     }, [load]),
   );
 
-  // Picks up status changes made elsewhere (e.g. an admin resolving a
-  // dispute, or the client cancelling) without requiring a screen refocus.
   usePolling(() => load(true), POLL_INTERVAL_MS, { paused: !focused });
 
   const jobTime = formatJobTime(job?.timeline?.workerStartedAt, job?.timeline?.workerCompletedAt);
 
-  // Streams live GPS to the client while en route (ACCEPTED, not yet checked
-  // in) so their "Track Service" map can show a moving marker. Stops as soon
-  // as the worker checks in as arrived, the job leaves ACCEPTED, or the
-  // screen loses focus — there's nothing left worth tracking once on-site,
-  // and no reason to burn battery watching GPS from a backgrounded screen.
   const jobStatus = job ? API_STATUS_MAP[job.status] ?? "Pending" : null;
   const hasArrivedForTracking = !!(job?.workerArrivedAt || job?.timeline?.workerArrivedAt);
   const shouldShareLocation = focused && jobStatus === "Accepted" && !hasArrivedForTracking;
@@ -251,38 +224,27 @@ export default function JobDetailScreen() {
   const isAwaitingPayment = status === "AwaitingPayment";
   const isCompleted = status === "Completed";
   const amount = job.finalPrice ?? job.estimatedPrice;
-  // `payment.tip` once a Payment row exists (post-completion), else the raw
-  // tip the client committed at booking time — available from Pending on,
-  // so it's visible before the worker even accepts the job.
   const tip = job.payment?.tip ?? job.tip ?? 0;
   const hasArrived = !!(job.workerArrivedAt || job.timeline?.workerArrivedAt);
   const hasOpenRescheduleRequest = !!job.rescheduleRequestedAt && !job.rescheduleRequestRespondedAt;
-  // The client asked (or an older request from before either side could ask).
   const hasPendingRescheduleRequest = hasOpenRescheduleRequest && job.rescheduleRequestedBy !== "WORKER";
   const iAskedToReschedule = hasOpenRescheduleRequest && job.rescheduleRequestedBy === "WORKER";
   const canRequestReschedule = isAccepted && !hasArrived && !hasOpenRescheduleRequest;
-  // Work under way — another visit can be planned for a job that needs more days.
   const canScheduleVisit = isInProgress;
   const isCash = (job.paymentMethodType ?? "CASH") === "CASH";
-  // The job starts right after check-in, or with check-in in the same tap.
   const canStartNow = isAccepted;
   const invoice = job.invoice;
   const invoiceSent = !!invoice && (invoice.status === "DUE" || invoice.status === "REPORTED" || invoice.status === "PAID");
-  // What the client will be asked to pay: the booked price (packages
-  // included), the lines added here, and the tip.
   const draftInvoiceTotal = amount + invoiceItems.reduce((sum, item) => sum + item.price, 0) + tip;
   const bookedPackages = (job.addOns ?? []).filter((a) => a.clientApprovedAt && a.price > 0 && a.kind !== "PART" && a.kind !== "EXTRA_WORK");
-  // Open jobs only: an agreed request stays on the row after the cancel.
   const hasCancelRequest = (isAccepted || isInProgress) && !!job.cancelRequestedAt && !job.cancelRequestEscalatedAt;
   const waitingForClient = isAccepted && hasArrived && !!job.clientNotHereAt && !!job.clientNoShowCancelAt;
   const noShowCancelOpen = waitingForClient && now >= new Date(job.clientNoShowCancelAt!).getTime();
-  // Hidden while a better path exists: the client's cancel request, or the no-show cancel.
   const canCancelJob = (isAccepted || isInProgress) && !hasCancelRequest && !noShowCancelOpen;
   const startTime = bookingStartTime(job);
   const startsAt = startTime ? startInstant(job.scheduledDate.slice(0, 10), startTime) : null;
   const startPassed = !!startsAt && now >= startsAt.getTime();
   const graceMinutes = job.noShowGraceMinutes ?? NO_SHOW_GRACE_MINUTES;
-  // Past start + grace without a check-in, the worker is the late one.
   const pastGrace = !!startsAt && now > startsAt.getTime() + graceMinutes * 60_000;
   const upcomingVisits = (job.visits ?? []).filter((v) => v.status === "SCHEDULED");
   const requestedWhen = job.requestedScheduledDate
@@ -291,10 +253,6 @@ export default function JobDetailScreen() {
       }`
     : "a new date"
 
-  // The server's earnings use the settled Payment once one exists, else the
-  // service-fee rate settlement will use (same numbers as the request screen).
-  // The 10% fallback only covers an old server that doesn't send earnings.
-  // Tip is never commissioned or taxed, so it's added on top.
   const earnings = job.earnings;
   const payoutEstimate = earnings?.workerPayout ?? job.payment?.workerPayout ?? amount * 0.9 + tip;
   const commissionEstimate = earnings?.commissionAmount ?? job.payment?.commissionAmount ?? amount * 0.1;
@@ -320,7 +278,6 @@ export default function JobDetailScreen() {
     },
   ];
 
-  // GPS check-in. Shows its own error and returns false when it fails.
   const checkIn = async () => {
     try {
       const position = await getCurrentPosition();
@@ -340,7 +297,6 @@ export default function JobDetailScreen() {
   const handleStart = async () => {
     setSubmitting(true);
     try {
-      // One tap checks in and starts a job with a set price.
       if (!hasArrived && !(await checkIn())) return;
       await api.startBooking(job.id);
       alertModal.success(
@@ -350,8 +306,6 @@ export default function JobDetailScreen() {
       load();
     } catch (error) {
       console.error("Start booking error:", error);
-      // Show the server's reason (no before photo, not checked in yet…);
-      // the generic text hid what the worker needs to do.
       const message = error instanceof Error && error.message ? error.message : "Failed to start this job. Please try again.";
       alertModal.error("Can't start this job", message);
     } finally {
@@ -520,7 +474,6 @@ export default function JobDetailScreen() {
   const timeOf = (iso: string) =>
     new Date(iso).toLocaleTimeString("en-PH", { hour: "numeric", minute: "2-digit" });
 
-  // Runs one action with a busy flag; errors show the server's reason.
   const runAction = async (key: NonNullable<typeof busyAction>, fn: () => Promise<void>) => {
     setBusyAction(key);
     try {
@@ -550,7 +503,6 @@ export default function JobDetailScreen() {
 
   const handleClientNotHere = () =>
     runAction("notHere", async () => {
-      // Not checked in yet (locked door): check in first, stop if that fails.
       if (!hasArrived && !(await checkIn())) return;
       const { canCancelAt } = await api.reportClientNotHere(job.id);
       alertModal.success(
@@ -780,7 +732,6 @@ export default function JobDetailScreen() {
           </View>
         )}
 
-        {/* No-show warning: the job is cancelled with a penalty if the worker never checks in */}
         {isAccepted && !hasArrived && startPassed && (
           <View className="bg-warning/10 border border-warning/30 rounded-2xl p-4 mb-3 flex-row items-center">
             <Ionicons name="alert-circle" size={24} color={colors.warning} />
@@ -944,7 +895,6 @@ export default function JobDetailScreen() {
                   />
                 )}
               </View>
-              {/* The invoice: the booked job, then anything added here */}
               <View className="bg-card rounded-2xl p-4">
                 <Text className="text-text-primary font-bold mb-1">Invoice</Text>
                 <Text className="text-text-muted text-xs mb-3">

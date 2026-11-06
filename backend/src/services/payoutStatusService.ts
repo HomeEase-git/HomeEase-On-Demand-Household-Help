@@ -5,30 +5,17 @@ import { sendSmsToUser } from '@utils/smsService';
 import { writeAuditLog } from '@utils/auditLog';
 import { postPayoutSent } from '@services/ledgerService';
 
-// Xendit's payout states. SUCCEEDED is the documented terminal success;
-// COMPLETED is kept because the original integration assumed it — prune once
-// real sandbox payloads are observed.
 const SUCCESS_STATUSES = new Set(['SUCCEEDED', 'COMPLETED']);
 const FAILURE_STATUSES = new Set(['FAILED', 'REVERSED']);
 
 export type PayoutTransition = 'paid' | 'failed' | 'cancelled' | 'paid-after-cancel' | 'unchanged';
 
-/**
- * Applies a status Xendit reported for a payout (webhook, reconciliation
- * sweep, or the synchronous create response). Every write is guarded on the
- * payout's current status, so a duplicate webhook can't re-notify the worker
- * and a payout cancelled because its payment was refunded is never flipped
- * back to PAID. If Xendit says a cancelled payout went through anyway, the
- * money left twice — that is logged as an error for a manual clawback instead
- * of being silently recorded.
- */
 export async function applyXenditPayoutStatus(
   payout: Pick<Payout, 'id' | 'workerId' | 'bookingId' | 'amount' | 'channel' | 'xenditDisbursementId'>,
   rawStatus: string | undefined,
   details: {
     xenditDisbursementId?: string | null;
     failureReason?: string | null;
-    // Worker-facing explanation appended to the failure notice.
     failureNotice?: string;
   } = {}
 ): Promise<PayoutTransition> {
@@ -38,8 +25,6 @@ export async function applyXenditPayoutStatus(
   const xenditDisbursementId = details.xenditDisbursementId ?? payout.xenditDisbursementId;
 
   if (SUCCESS_STATUSES.has(status)) {
-    // FAILED is included: a send that timed out on our side may still have
-    // gone through at Xendit, and the money really did reach the worker.
     const updated = await transition(payout.id, ['PENDING', 'PROCESSING', 'FAILED'], {
       status: 'PAID',
       xenditStatus: rawStatus,
@@ -65,8 +50,6 @@ export async function applyXenditPayoutStatus(
     const current = await prisma.payout.findUnique({ where: { id: payout.id }, select: { status: true } });
     if (current?.status === 'CANCELLED') {
       await prisma.payout.update({ where: { id: payout.id }, data: { xenditStatus: rawStatus } });
-      // The money did leave: book it, so the worker's balance shows they now
-      // owe it back (reconciliation flags it until an admin sorts it out).
       await postPayoutSent(prisma, payout, 'Payout sent after it was cancelled for a refund — recover from the worker');
       await writeAuditLog({
         action: 'PAYOUT_PAID_AFTER_CANCEL',
@@ -113,7 +96,6 @@ export async function applyXenditPayoutStatus(
     return updated ? 'cancelled' : 'unchanged';
   }
 
-  // ACCEPTED / REQUESTED / anything else: still in flight.
   if (xenditDisbursementId !== payout.xenditDisbursementId) {
     await prisma.payout.update({ where: { id: payout.id }, data: { xenditDisbursementId, xenditStatus: rawStatus } });
   }

@@ -8,7 +8,6 @@ type Props = {
   showBack?: boolean;
   rightIcon?: keyof typeof Ionicons.glyphMap;
   onRightPress?: () => void;
-  /** What the right-hand icon button does, for screen readers. */
   rightLabel?: string;
 };
 

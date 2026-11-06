@@ -10,14 +10,6 @@ type SendPushInput = {
   data?: Record<string, unknown>;
 };
 
-/**
- * Android notification channel per notification type — the channel decides
- * which sound plays when the app is closed or in the background. The mobile
- * app creates these channels on startup (NOTIFICATION_CHANNELS in
- * mobile/services/notificationService.ts), so keep the ids in sync. Types not
- * listed use the default channel and sound. On an older app build that
- * doesn't have the channel yet, Android falls back to the default channel.
- */
 const CHANNEL_FOR_TYPE: Record<string, string> = {
   BOOKING_REQUEST: 'new-job',
   MESSAGE_RECEIVED: 'messages',
@@ -28,17 +20,6 @@ type ExpoPushTicket =
   | { status: 'ok'; id: string }
   | { status: 'error'; message: string; details?: { error?: string } };
 
-/**
- * Sends a remote push notification to a user's registered device via Expo's
- * push HTTP API (https://exp.host/--/api/v2/push/send), so notifications
- * reach a user even while the app is closed or backgrounded (in-app delivery
- * via Socket.IO only reaches an open app). Called with a single recipient at
- * a time, so this skips the expo-server-sdk package entirely — its main
- * value (batching many recipients into chunks) doesn't apply here, and it
- * ships ESM-only, which fights this project's CommonJS/ts-jest test setup.
- * Best-effort: swallows all errors so a push failure never breaks the
- * caller's main flow (notification creation already succeeded by this point).
- */
 export async function sendPushToUser({ userId, title, body, data }: SendPushInput): Promise<void> {
   try {
     const user = await prisma.user.findUnique({
@@ -70,9 +51,6 @@ export async function sendPushToUser({ userId, title, body, data }: SendPushInpu
         sound: 'default',
         ...channelFor(data),
       }),
-      // This runs fire-and-forget off the main request path (see notify.ts),
-      // but an unbounded call still leaks a pending connection if Expo's
-      // service is slow/unreachable — bound it defensively.
       signal: AbortSignal.timeout(10000),
     });
 

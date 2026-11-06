@@ -34,11 +34,6 @@ export async function fetchDisputeHistory(userId) {
   return response.data;
 }
 
-/**
- * PATCH /admin/disputes/:id/resolve — action must be one of DISPUTE_ACTIONS.
- * `resolution` is the admin's audit note; the backend stores it on both the
- * Dispute row and (appended) the booking's disputeReason.
- */
 export async function resolveDispute(id, action, resolution) {
   const response = await apiRequest(`/admin/disputes/${id}/resolve`, {
     method: 'PATCH',

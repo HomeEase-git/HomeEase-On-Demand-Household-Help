@@ -5,9 +5,6 @@ import { shouldRefetchRoute, type LastRouteFetch } from "../utils/trackingRoute"
 
 export type TrackedRoute = RouteResult & { fetchedAt: number };
 
-// Route + ETA from the worker's live position to the booking address. Feed it
-// every position; it decides (shouldRefetchRoute) when a new route is worth
-// paying for, and only re-renders when one arrives.
 export function useTrackingRoute(destination: LatLng | null) {
   const [isOnline, setIsOnline] = useState(true);
   useEffect(() => NetInfo.addEventListener((s) => setIsOnline(s.isConnected ?? true)), []);
@@ -36,7 +33,6 @@ export function useTrackingRoute(destination: LatLng | null) {
           }
         })
         .catch(() => {
-          // Network/server error: same as an empty route, and retry next position.
           lastRef.current = { at: now, from: null };
           setRouteFailed(true);
         })

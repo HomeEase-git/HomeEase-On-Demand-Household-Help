@@ -1,15 +1,3 @@
-/**
- * API Types & Interfaces
- * 
- * Defines request/response shapes for all HomeEase API endpoints.
- * These types ensure type safety across the frontend and provide
- * a contract that the backend must implement.
- */
-
-// ============================================================================
-// COMMON TYPES
-// ============================================================================
-
 export interface ApiResponse<T = any> {
   data?: T;
   success?: boolean;
@@ -23,10 +11,6 @@ export interface PaginatedResponse<T> {
   page: number;
   limit?: number;
 }
-
-// ============================================================================
-// AUTH TYPES
-// ============================================================================
 
 export interface SignUpRequest {
   fullName: string;
@@ -64,10 +48,6 @@ export interface OtpVerificationRequest {
   email: string;
   otp: string;
 }
-
-// ============================================================================
-// BOOKING TYPES
-// ============================================================================
 
 export type BookingStatus = 'Pending' | 'Accepted' | 'InProgress' |
                             'QuoteSubmitted' | 'QuoteApproved' | 'Disputed' |
@@ -119,10 +99,6 @@ export interface CancelBookingRequest {
   reason?: string;
 }
 
-// ============================================================================
-// WORKER DISCOVERY TYPES
-// ============================================================================
-
 export interface Worker {
   id: string;
   name: string;
@@ -161,15 +137,7 @@ export interface WorkerDetail extends Worker {
   isAvailable: boolean;
   availableDays: string[];
   maxConcurrentJobs: number;
-  // Every ServiceType this worker offers (not just the primary `service`
-  // shown on the card) — lets a "book this worker" entry point (the profile
-  // screen) restrict the booking flow's category picker to services this
-  // worker actually offers, and resolve the right ServiceType id per pick.
-  // priceRangeMin/Max are this worker's own price spread for that category
-  // (task price range at their fixed tier) — not the marketplace-wide range.
   services: { id: string; name: string; basePrice: number; priceRangeMin: number; priceRangeMax: number }[];
-  // Aggregate across all `services` above — the overall range shown on the
-  // profile before a specific category is picked.
   priceRangeMin?: number | null;
   priceRangeMax?: number | null;
   tier?: 'STANDARD' | 'PRO' | 'EXPERT';
@@ -215,13 +183,8 @@ export interface WorkerReview {
   date: string;
   bookingId: string;
   workerResponse: string | null;
-  /** Photos the client attached to the review (visible reviews only). */
   photoUrls?: string[];
 }
-
-// ============================================================================
-// PAYMENT METHOD TYPES
-// ============================================================================
 
 export type PaymentMethodType = 'gcash' | 'maya' | 'cash';
 
@@ -239,10 +202,6 @@ export interface AddPaymentMethodRequest {
   accountIdentifier: string;
   label?: string;
 }
-
-// ============================================================================
-// ADDRESS TYPES
-// ============================================================================
 
 export interface Address {
   id: string;
@@ -264,10 +223,6 @@ export interface AddAddressRequest {
   };
 }
 
-// ============================================================================
-// TRANSACTION TYPES
-// ============================================================================
-
 export interface Transaction {
   id: string;
   bookingId: string;
@@ -287,10 +242,6 @@ export interface TransactionDetail extends Transaction {
   booking?: Booking;
 }
 
-// ============================================================================
-// REVIEW TYPES
-// ============================================================================
-
 export interface ClientReview {
   id: string;
   bookingId: string;
@@ -304,10 +255,6 @@ export interface SubmitReviewRequest {
   rating: number;
   comment: string;
 }
-
-// ============================================================================
-// MESSAGING TYPES
-// ============================================================================
 
 export interface Conversation {
   id: string;
@@ -337,10 +284,6 @@ export interface SendMessageRequest {
   text: string;
 }
 
-// ============================================================================
-// WORKER JOB REQUEST TYPES
-// ============================================================================
-
 export type JobRequestStatus = 'Pending' | 'Accepted' | 'Completed' | 'Declined';
 
 export interface JobRequest {
@@ -360,10 +303,6 @@ export interface JobRequestDetail extends JobRequest {
   clientAvatar?: string;
   address: string;
 }
-
-// ============================================================================
-// EARNINGS & PAYOUT TYPES
-// ============================================================================
 
 export interface EarningsDetails {
   totalBalance: number;
@@ -398,10 +337,6 @@ export interface WithdrawalResponse {
   message: string;
 }
 
-// ============================================================================
-// WORKER SKILL & PROFILE TYPES
-// ============================================================================
-
 export interface WorkerSkill {
   id: string;
   name: string;
@@ -434,10 +369,6 @@ export interface ParsedResume {
   parsedAt?: string;
   modelUsed?: string;
 }
-
-// ============================================================================
-// PROFILE & SETTINGS TYPES
-// ============================================================================
 
 export interface UpdateProfileRequest {
   name?: string;

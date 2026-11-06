@@ -1,8 +1,3 @@
-// prisma/seed.ts
-//
-// Run with: npx prisma db seed   (from the backend folder)
-// Requires: @faker-js/faker, bcryptjs, @prisma/adapter-pg, pg
-
 import "dotenv/config";
 import {
   PrismaClient,
@@ -123,7 +118,6 @@ async function hashPassword(password: string) {
 
 async function clearData() {
   await prisma.review.deleteMany();
-  // Payouts, refunds and dues are onDelete: Restrict: clear them before their parents.
   await prisma.payout.deleteMany();
   await prisma.refundRequest.deleteMany();
   await prisma.payment.deleteMany();
@@ -275,11 +269,6 @@ async function createWorker(
     data: {
       userId: user.id,
       type: "WORKER_ONBOARDING",
-      // Distinct from WorkerProfile.kycStatus — the real app only ever
-      // writes PENDING/APPROVED/REJECTED here (never SUBMITTED), since a
-      // VerificationRequest starts PENDING and only leaves that state via
-      // admin decision. See verificationController.uploadVerificationDocuments
-      // and adminVerificationController.approve/rejectVerification.
       status: isApproved ? KYCStatus.APPROVED : KYCStatus.PENDING,
       reviewedAt: isApproved ? faker.date.recent({ days: 10 }) : null,
       aiStatus: isApproved ? "MATCH" : null,
@@ -339,8 +328,6 @@ async function createBookingsAndPayments(
   workers: Awaited<ReturnType<typeof createWorker>>[],
   serviceTypes: Awaited<ReturnType<typeof createServiceTypes>>
 ) {
-  // Every status gets at least one booking so every UI screen state has
-  // something real to render, plus extra randomized ones on top.
   const allStatuses: BookingStatus[] = [
     BookingStatus.PENDING,
     BookingStatus.ACCEPTED,
@@ -413,7 +400,6 @@ async function createBookingsAndPayments(
         },
       });
     } catch {
-      // Skip rare worker/date/time collisions (worker_slot_unique constraint)
       continue;
     }
 
@@ -457,8 +443,6 @@ async function createBookingsAndPayments(
   }
 }
 
-// Clients verify identity only (no trade credentials), so this is a lighter
-// version of createWorker's verification block — just the 3 identity docs.
 async function createClientVerification(
   client: Awaited<ReturnType<typeof createClient>>,
   status: typeof KYCStatus.PENDING | typeof KYCStatus.APPROVED | typeof KYCStatus.REJECTED
@@ -516,9 +500,6 @@ async function main() {
   }
 
   console.log("Creating client identity verification requests...");
-  // A few clients have gone through identity verification, spanning every
-  // status so the admin Verification Management "Clients" tab has real
-  // states to review — most clients stay unverified, matching real usage.
   await createClientVerification(clients[0], KYCStatus.PENDING);
   await createClientVerification(clients[1], KYCStatus.PENDING);
   await createClientVerification(clients[2], KYCStatus.APPROVED);
@@ -528,8 +509,6 @@ async function main() {
   const workers = [];
   for (const [catIndex, category] of serviceTypes.entries()) {
     for (let i = 0; i < WORKERS_PER_CATEGORY; i++) {
-      // First category's second worker is left SUBMITTED/pending so the
-      // admin KYC review queue has at least one real case to test.
       const kycOverride =
         catIndex === 0 && i === 1 ? KYCStatus.SUBMITTED : undefined;
       workers.push(await createWorker(category, kycOverride));

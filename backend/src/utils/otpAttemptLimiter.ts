@@ -1,30 +1,6 @@
 import Redis from 'ioredis';
 import { redisConnection } from '@config/redis';
 
-// Per-account OTP brute-force guard. The only other protection on
-// verifyOtp today is the IP-keyed `authLimiter` middleware — that stops
-// nothing for an attacker who rotates IPs, since it has no memory of which
-// *account* is being guessed against. This adds an independent,
-// account-scoped attempt counter on top, keyed by userId + OTP type so a
-// PASSWORD_RESET lockout doesn't also block EMAIL_VERIFICATION and vice
-// versa.
-//
-// Deliberately Redis-only (no Prisma/schema field): the counter is
-// inherently ephemeral (its TTL matches the OTP's own validity window —
-// once the OTP expires, there's nothing left to brute-force and the
-// counter should disappear with it), so a durable DB row would just be
-// dead weight and, per this repo's current DB-migration caution, an
-// avoidable migration.
-//
-// Mirrors utils/tokenRevocation.ts's connection pattern: a dedicated
-// ioredis client (separate from the BullMQ queue/worker connections in
-// config/redis.ts), lazyConnect + a bounded retryStrategy so a doomed
-// connection attempt (no Redis reachable, e.g. this backend's own test
-// suite) fails fast instead of retrying forever and keeping the process
-// alive, and a small circuit breaker so a Redis outage doesn't add a
-// doomed-connection delay to every single OTP verification. Like that
-// module, a Redis error never blocks a request: during an outage the
-// in-memory counter below keeps the per-account limit on this instance.
 const client = new Redis({
   ...redisConnection,
   lazyConnect: true,
@@ -75,15 +51,7 @@ function attemptKey(userId: string, type: string): string {
   return `${ATTEMPT_KEY_PREFIX}${userId}:${type}`;
 }
 
-/**
- * Failed attempts are also counted in this process's memory, so a Redis
- * outage doesn't reopen unlimited per-account guessing on this instance.
- * Only consulted while Redis is unreachable: when it is up, Redis is the
- * one shared truth, so a clear (successful code, password reset) on one
- * instance isn't undone by a stale count held by another.
- */
 // ponytail: per-process counter — covers the single Render instance; with
-// several instances, each one allows MAX_OTP_ATTEMPTS during an outage.
 const localAttempts = new Map<string, { count: number; expiresAt: number }>();
 
 function localCount(key: string): number {
@@ -101,30 +69,15 @@ function countLocally(key: string, ttlSeconds: number): number {
   }
   const count = localCount(key) + 1;
   let expiresAt = count === 1 ? now + ttlSeconds * 1000 : localAttempts.get(key)!.expiresAt;
-  // The lockout window starts at the attempt that trips it.
   if (count === MAX_OTP_ATTEMPTS) expiresAt = now + OTP_LOCKOUT_SECONDS * 1000;
   localAttempts.set(key, { count, expiresAt });
   return count;
 }
 
-/**
- * How many wrong OTPs are tolerated for a given userId+type before further
- * attempts are locked out for the rest of the counter's TTL window.
- */
 export const MAX_OTP_ATTEMPTS = 5;
 
-/**
- * How long a userId+type stays locked once MAX_OTP_ATTEMPTS wrong codes have
- * been entered. Counted from the lockout itself (the 5th wrong code), not from
- * the first wrong guess, so the user always waits the full period.
- */
 export const OTP_LOCKOUT_SECONDS = 10 * 60;
 
-/**
- * True if this userId+type has already hit MAX_OTP_ATTEMPTS wrong guesses
- * within the current window. Fails open (returns false) on a Redis error
- * or while the circuit breaker is open.
- */
 export async function isOtpAttemptLocked(userId: string, type: string, maxAttempts: number = MAX_OTP_ATTEMPTS): Promise<boolean> {
   const lockedLocally = localCount(attemptKey(userId, type)) >= maxAttempts;
   if (circuitIsOpen()) return lockedLocally;
@@ -138,15 +91,6 @@ export async function isOtpAttemptLocked(userId: string, type: string, maxAttemp
   }
 }
 
-/**
- * Records one failed OTP attempt for this userId+type. `ttlSeconds` should
- * match the OTP's own validity window (OTP_EXPIRY_MINUTES in
- * otpService.ts) — the counter is only ever refreshed on the *first*
- * failure in a window (INCR then EXPIRE NX-style via a check on the
- * post-increment value), so it always expires at "OTP window from the
- * first wrong guess", not sliding forward on every retry.
- */
-/** Returns the failed-attempt count so far (Redis's, or this process's during an outage). */
 export async function recordFailedOtpAttempt(userId: string, type: string, ttlSeconds: number): Promise<number> {
   const key = attemptKey(userId, type);
   const local = countLocally(key, ttlSeconds);
@@ -160,9 +104,6 @@ export async function recordFailedOtpAttempt(userId: string, type: string, ttlSe
       await client.expire(key, OTP_LOCKOUT_SECONDS);
     }
     recordSuccess();
-    // Redis's count alone: it steps by exactly one, so callers comparing
-    // `=== MAX` see the lockout exactly once. Mixing in `local` let it jump
-    // past MAX and skip the alert.
     return attempts;
   } catch (error) {
     recordFailure('recordFailedOtpAttempt', error);
@@ -170,10 +111,6 @@ export async function recordFailedOtpAttempt(userId: string, type: string, ttlSe
   }
 }
 
-/**
- * Seconds left on this userId+type's lockout, or 0 when not locked. Fails open
- * (0) on a Redis error or while the circuit breaker is open.
- */
 export async function otpLockRemainingSeconds(
   userId: string,
   type: string,
@@ -199,7 +136,6 @@ export async function otpLockRemainingSeconds(
   }
 }
 
-/** Clears the counter on a successful OTP verification. */
 export async function clearOtpAttempts(userId: string, type: string): Promise<void> {
   localAttempts.delete(attemptKey(userId, type));
   if (circuitIsOpen()) return;

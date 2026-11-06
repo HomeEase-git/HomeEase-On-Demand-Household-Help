@@ -27,8 +27,6 @@ jest.mock("expo-secure-store", () => {
 const asyncStore = (AsyncStorage as unknown as { __store: Map<string, string> }).__store;
 const secureStore = (SecureStore as unknown as { __store: Map<string, string> }).__store;
 
-// storage.ts caches the access token per app session, so each test loads a
-// fresh copy of the module, like a fresh app launch.
 const freshAuthStorage = () => {
   let mod: typeof import("../storage") | undefined;
   jest.isolateModules(() => {

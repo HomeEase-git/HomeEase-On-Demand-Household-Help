@@ -1,10 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
 
-/**
- * "Export" button with a CSV/PDF choice. Reuses the header-dropdown styling
- * (generic positioned-panel classes, not actually header-specific) so it
- * matches the rest of the admin UI's menus.
- */
 export default function ExportMenu({ onExportCsv, onExportPdf, exporting, label = 'Export' }) {
   const [open, setOpen] = useState(false)
   const wrapRef = useRef(null)

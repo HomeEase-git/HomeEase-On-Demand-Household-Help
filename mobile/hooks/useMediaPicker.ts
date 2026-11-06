@@ -8,7 +8,6 @@ export type MediaSource = "camera" | "gallery" | "files";
 
 export type PickedMedia = {
   uri: string;
-  /** Type of the file at `uri`. An image is re-encoded, so this is image/jpeg. */
   mimeType: string;
   /** Type the picker reported, before any re-encoding. */
   originalMimeType: string;
@@ -18,7 +17,6 @@ export type PickedMedia = {
 type PickOptions = {
   title: string;
   message?: string;
-  /** Shown in this order. A single source skips the choice and opens it. */
   sources?: MediaSource[];
   /** Types the Files source accepts. */
   fileTypes?: string[];
@@ -27,12 +25,6 @@ type PickOptions = {
 
 const SOURCE_LABEL: Record<MediaSource, string> = { camera: "Camera", gallery: "Gallery", files: "Files" };
 
-/**
- * The one way the app picks a photo or file: asks Camera / Gallery / Files in
- * the alert modal, never crops, and shrinks images to 1600px JPEG (the upload
- * endpoints take JPEG/PNG/WebP up to 5 MB, and phone photos are 3-12 MB, often
- * HEIC). PDFs pass through untouched.
- */
 export function useMediaPicker() {
   const alertModal = useAlertModal();
 
@@ -81,7 +73,6 @@ export function useMediaPicker() {
             return;
           }
         }
-        // No allowsEditing: the photo is used as taken, with no crop step.
         const options: ImagePicker.ImagePickerOptions = {
           mediaTypes: ImagePicker.MediaTypeOptions.Images,
           quality: 0.8,
@@ -117,7 +108,6 @@ export function useMediaPicker() {
     [alertModal, open],
   );
 
-  /** Camera or Gallery; hands back just the (compressed) image URI. */
   const pickImage = useCallback(
     (title: string, onSelect: (uri: string) => void | Promise<void>) =>
       pick({ title, onPick: (media) => onSelect(media.uri) }),

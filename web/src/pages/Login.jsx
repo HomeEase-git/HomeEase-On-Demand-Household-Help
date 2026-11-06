@@ -13,8 +13,6 @@ export default function Login() {
   const [signOutReason] = useState(takeSignOutReason)
   const [fieldErrors, setFieldErrors] = useState({})
   const [isSubmitting, setIsSubmitting] = useState(false)
-  // Set once the backend responds with `mfaRequired: true` — while this is
-  // set, the form below renders the code-entry step instead of email/password.
   const [challengeToken, setChallengeToken] = useState(null)
   const [mfaCode, setMfaCode] = useState('')
   const [mfaError, setMfaError] = useState('')
@@ -29,10 +27,6 @@ export default function Login() {
     return <Navigate to={from} replace />
   }
 
-  // An admin with MFA enabled, or one who still needs to set it up, both
-  // land here right after a successful login/challenge — mfaSetupRequired
-  // force-routes a first-time (or reset) admin into enrollment instead of
-  // straight into the dashboard.
   const routeAfterLogin = (result) => {
     if (result?.mfaSetupRequired) {
       navigate('/mfa-setup', { replace: true })

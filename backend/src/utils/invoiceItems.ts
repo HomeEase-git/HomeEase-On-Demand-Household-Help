@@ -11,20 +11,12 @@ export type InvoiceItemInput = {
 
 const MAX_ITEMS = 20;
 const MAX_PHOTOS = 5;
-// Fat-finger backstop; the client still sees every line before paying.
 const MAX_PRICE = 100_000;
 
-// Each line is stored and shown to the centavo, so the lines add up to the
-// total the client pays.
 const isCentavos = (n: number) => Math.abs(n * 100 - Math.round(n * 100)) < 1e-6;
 
 type Result = { ok: true; items: InvoiceItemInput[] } | { ok: false; error: string };
 
-/**
- * Shape and proof rules for the lines a worker adds to the invoice: parts need
- * a photo of the receipt, extra work a photo of the work. Ownership of the
- * photo URLs is checked separately (utils/storageUrls).
- */
 export function validateInvoiceItems(raw: unknown): Result {
   if (raw === undefined || raw === null) return { ok: true, items: [] };
   if (!Array.isArray(raw)) return { ok: false, error: 'items must be a list' };
@@ -57,11 +49,6 @@ export function sumInvoiceItems(items: { price: number }[]): number {
 
 export type InvoiceLine = { id: string | null; kind: string; name: string; price: number; photoUrls: string[] };
 
-/**
- * The lines of a booking's invoice: the job, then every line that counts
- * toward the bill. A booking quoted before invoices existed shows its agreed
- * labor as the job and its quoted materials as parts.
- */
 export function invoiceLines(booking: {
   serviceType: string;
   serviceTask: { name: string } | null;
@@ -87,11 +74,9 @@ export function invoiceLines(booking: {
     }
   }
   for (const addon of booking.addOns) {
-    // Free job preferences aren't bill lines; unapproved or removed lines don't count.
     if (addon.clientApprovedAt == null || addon.price <= 0) continue;
     lines.push({
       id: addon.id,
-      // Older rows have no kind: a priced one was a package or an approved extra.
       kind: addon.kind ?? 'EXTRA_WORK',
       name: addon.name,
       price: addon.price,
@@ -101,7 +86,6 @@ export function invoiceLines(booking: {
   return lines;
 }
 
-/** Where the invoice stands, in the words the apps show. */
 export function invoiceStatus(status: string, workerCompletedAt: Date | null): 'NOT_SENT' | 'DUE' | 'REPORTED' | 'PAID' | 'CANCELLED' {
   if (status === 'COMPLETED') return 'PAID';
   if (status === 'CANCELLED' || status === 'REJECTED') return 'CANCELLED';

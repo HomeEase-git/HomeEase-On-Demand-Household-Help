@@ -24,7 +24,6 @@ export default function PrivacySettingsScreen() {
     setLocationEnabled(status === "granted");
   };
 
-  // "Log out of other devices" only makes sense with more than one.
   const [sessionCount, setSessionCount] = useState(1);
 
   useFocusEffect(
@@ -41,7 +40,6 @@ export default function PrivacySettingsScreen() {
       const { status } = await Location.requestForegroundPermissionsAsync();
       setLocationEnabled(status === "granted");
       if (status !== "granted") {
-        // Once denied, Android won't prompt again; only Settings can turn it on.
         alertModal.error("Location is off", "Turn on location for HomeEase in your phone settings.", [
           { text: "Not now", style: "cancel" },
           { text: "Open Settings", onPress: () => Linking.openSettings().catch(() => {}) },

@@ -8,20 +8,14 @@ function groupIsActive(group, pathname) {
   return group.children.some((child) => pathname.startsWith(child.to))
 }
 
-// Key of the group containing the current page, or null.
 function activeGroupKey(pathname) {
   return NAV_STRUCTURE.find((item) => item.type === 'group' && groupIsActive(item, pathname))?.key ?? null
 }
 
 export default function Sidebar({ isOpen, onClose }) {
   const { pathname } = useLocation()
-  // Accordion: at most one group is open, so the sidebar never fills up with
-  // expanded dropdowns and has to scroll. Starts on the group holding the
-  // current page, if any.
   const [openGroup, setOpenGroup] = useState(() => activeGroupKey(pathname))
 
-  // Navigating into a group's page opens that group (and closes any other).
-  // Pages outside every group leave the sidebar as the admin left it.
   useEffect(() => {
     const key = activeGroupKey(pathname)
     if (key) setOpenGroup(key)
@@ -84,9 +78,6 @@ export default function Sidebar({ isOpen, onClose }) {
                   <span>{item.label}</span>
                   <i className={`fas fa-chevron-down nav-group__chevron ${expanded ? 'is-open' : ''}`} />
                 </button>
-                {/* Always rendered so it can animate open/closed; `inert` keeps
-                    the hidden links out of the tab order and screen readers.
-                    Set on the DOM node because React 18 ignores an `inert` prop. */}
                 <div
                   className={`nav-group__panel ${expanded ? 'is-open' : ''}`}
                   ref={(el) => {

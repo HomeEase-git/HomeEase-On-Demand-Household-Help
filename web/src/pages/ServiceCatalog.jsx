@@ -19,10 +19,6 @@ function formatPeso(amount) {
   return `₱${num.toLocaleString()}`
 }
 
-/**
- * Service Catalog list. Adding or editing a category (its details and job
- * order matrix) happens on ServiceCatalogEditor.
- */
 export default function ServiceCatalog() {
   const [query, setQuery] = useState('')
   const [page, setPage] = useState(1)

@@ -19,11 +19,6 @@ const CARD: Record<NonNullable<LoadingSkeletonProps["type"]>, React.FC> = {
   search: WorkerCardSkeleton,
 };
 
-/**
- * Placeholder for a card list while it loads. Padded like the FlatLists it
- * stands in for (padding 16), so the cards land exactly where the grey ones
- * were.
- */
 export const LoadingSkeleton: React.FC<LoadingSkeletonProps> = ({
   type = "booking",
   count = type === "search" ? 5 : 4,

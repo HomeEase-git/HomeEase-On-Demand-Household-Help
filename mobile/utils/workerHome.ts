@@ -1,18 +1,12 @@
 import type { WorkerJob } from "../store/workerStore";
 import type { BookingStatus } from "../store/bookingStore";
 
-// Jobs the worker has taken on and hasn't finished yet.
 const COMMITTED: BookingStatus[] = ["Accepted", "InProgress", "QuoteSubmitted", "QuoteApproved"];
 
 function startOfDay(d: Date): number {
   return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
 }
 
-/**
- * The job to put front and centre on the worker's home: the soonest
- * committed job from today on, or — if they're all dated earlier (work that
- * started before today and isn't finished) — the latest of those.
- */
 export function pickNextJob(jobs: WorkerJob[], now = new Date()): WorkerJob | null {
   const committed = jobs
     .filter((j) => COMMITTED.includes(j.status) && !Number.isNaN(new Date(j.scheduledDate).getTime()))
@@ -22,7 +16,6 @@ export function pickNextJob(jobs: WorkerJob[], now = new Date()): WorkerJob | nu
   return committed.find((j) => new Date(j.scheduledDate).getTime() >= today) ?? committed[committed.length - 1];
 }
 
-/** Google Maps directions to a job address (opens the Maps app when installed). */
 export function directionsUrl(address: string): string {
   return `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(address)}`;
 }
@@ -33,10 +26,6 @@ function dayKey(d: Date): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
-/**
- * Completed earnings per day for the 7 days ending today (oldest first), in
- * the phone's local time zone.
- */
 export function weeklyEarnings(
   transactions: { amount: number; status: string; date: string }[],
   now = new Date(),

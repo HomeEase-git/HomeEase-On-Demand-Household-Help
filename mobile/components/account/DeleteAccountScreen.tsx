@@ -14,7 +14,6 @@ import { useAlertModal } from "../../contexts/AlertModalContext";
 import { colors } from "../../constants";
 import * as api from "../../services/api";
 
-// Must match DELETE_CONFIRMATION_TEXT in the backend's userController.
 const CONFIRMATION_TEXT = "DELETE MY ACCOUNT";
 
 const REASONS = [
@@ -26,16 +25,9 @@ const REASONS = [
 ];
 
 type Props = {
-  /** Workers can take a break instead — shown as an alternative on step 1. */
   deactivatePath?: string;
 };
 
-/**
- * Deleting an account is deliberately slow: (1) read what's erased and pick
- * a reason, (2) get a code by email — the server refuses here while a
- * booking or payment is still open, (3) password + code + typing the
- * confirmation phrase in full.
- */
 export default function DeleteAccountScreen({ deactivatePath }: Props) {
   const router = useRouter();
   const alertModal = useAlertModal();
@@ -60,8 +52,6 @@ export default function DeleteAccountScreen({ deactivatePath }: Props) {
       await api.requestAccountDeletionCode();
       setStep(2);
     } catch (error: any) {
-      // 409 = something still open (a booking in progress, unpaid balance
-      // or earnings not yet paid out); the server says what.
       alertModal.error("You can't delete your account yet", error?.message || "Please try again.");
     } finally {
       setSending(false);

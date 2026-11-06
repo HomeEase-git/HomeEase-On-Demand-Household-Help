@@ -53,8 +53,6 @@ export default function ContractScreen() {
         isWorker ? "WORKER_SERVICE_AGREEMENT" : "CLIENT_USER_AGREEMENT",
       );
 
-      // This is what flips the worker's account into "awaiting admin
-      // review" — without it the waiting screen's status would stay stale.
       if (isWorker) {
         useAuthStore.getState().setKycStatus("SUBMITTED");
       }

@@ -17,10 +17,8 @@ export const OtpInput: React.FC<Props> = ({
   const refs = useRef<(TextInput | null)[]>([]);
 
   const handleChange = (text: string, index: number) => {
-    // Handle paste: if text length > 1, it's a paste operation
     if (text.length > 1) {
       const digits = text.replace(/[^0-9]/g, "").slice(0, length);
-      // Spread pasted digits across slots starting from current index
       const next = value.split("");
       for (let i = 0; i < digits.length && index + i < length; i++) {
         next[index + i] = digits[i];

@@ -36,8 +36,6 @@ describe("PressableScale", () => {
   });
 
   it("stays silent when inert but still forwards the press", async () => {
-    // Inert buttons keep their Pressable enabled (Android touch fix) and
-    // guard in their own handler, so the press must still reach onPress.
     const onPress = jest.fn();
     const { getByText } = await render(
       <PressableScale haptic inert onPress={onPress}>

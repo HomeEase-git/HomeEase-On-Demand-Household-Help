@@ -1,10 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { COMMON_UNITS, PRICING_MODELS, countLimitsProblem, usesCount } from './catalogModel'
 
-/**
- * Add/edit one row of the job order matrix. The price set here is what every
- * client pays and every worker earns; workers can't change it.
- */
 export default function JobModal({ initial, doleRef, onSave, onClose }) {
   const [job, setJob] = useState(() => ({
     name: '',

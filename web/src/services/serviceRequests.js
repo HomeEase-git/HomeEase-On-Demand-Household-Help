@@ -1,6 +1,5 @@
 import { apiRequest } from './apiClient';
 
-// Worker requests to offer another service, with the documents they attached.
 export async function fetchServiceRequests(status = 'PENDING_VERIFICATION') {
   const response = await apiRequest(`/admin/service-requests?status=${encodeURIComponent(status)}`);
   return response.data;

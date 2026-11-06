@@ -25,7 +25,6 @@ export default function VerificationDetail() {
   const [mode, setMode] = useState(null)
   const [rejectReason, setRejectReason] = useState('')
   const [adminOverrideReason, setAdminOverrideReason] = useState('')
-  // Pre-filled with the worker's declared years when the approve modal opens.
   const [yearsExperience, setYearsExperience] = useState('')
   const [rerunError, setRerunError] = useState(null)
   const [actionError, setActionError] = useState(null)
@@ -115,11 +114,6 @@ export default function VerificationDetail() {
     )
   }
 
-  // VerificationRequest.status holds PENDING/SUBMITTED/APPROVED/REJECTED —
-  // a worker's request flips PENDING -> SUBMITTED once onboarding is
-  // complete and never moves back, so both count as "awaiting admin action"
-  // (mirrors listVerifications' PENDING filter in adminVerificationController).
-  // 'AI_REVIEWED' is a value of the separate aiStatus field, never of status.
   const isPending = verification.status === 'PENDING' || verification.status === 'SUBMITTED'
 
   const details = [
@@ -127,7 +121,6 @@ export default function VerificationDetail() {
     { label: 'Email', value: verification.email },
     verification.type === 'WORKER_ONBOARDING'
       ? {
-          // Workers must be 18+. Compare with the date of birth on the ID.
           label: 'Date of Birth',
           value: verification.birthDate
             ? `${verification.birthDate} (age ${verification.age}) — check it matches the ID`
@@ -136,7 +129,6 @@ export default function VerificationDetail() {
       : null,
     verification.type === 'WORKER_ONBOARDING'
       ? {
-          // Declared at KYC; confirmed or corrected on approval (tier requirement).
           label: 'Years of Experience',
           value:
             verification.yearsExperience != null
@@ -172,7 +164,6 @@ export default function VerificationDetail() {
         title="Verification Detail Review"
         subtitle="Review documents and approve or reject"
       />
-      {/* Personal data stays collapsed until the admin opens it (adviser note). */}
       <details className="section-card" style={{ marginBottom: '1rem' }}>
         <summary style={{ cursor: 'pointer', fontWeight: 600 }}>
           Applicant details: {verification.name} ({verification.status})
