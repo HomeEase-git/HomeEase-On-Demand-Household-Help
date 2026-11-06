@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { View, Text, Pressable } from "react-native";
-import BottomSheetWrapper, { BottomSheetHandle } from "./BottomSheetWrapper";
+import ModalWrapper from "./ModalWrapper";
 import PrimaryButton from "../ui/PrimaryButton";
 import OutlinedButton from "../ui/OutlinedButton";
 import { cardShadow } from "../../constants";
@@ -15,13 +15,15 @@ export type SearchFilters = {
 const DEFAULT_FILTERS: SearchFilters = { sort: "rating", availableOnly: false };
 
 type Props = {
-  innerRef: React.RefObject<BottomSheetHandle | null>;
+  visible: boolean;
+  onClose: () => void;
   value?: SearchFilters;
   onApply?: (filters: SearchFilters) => void;
 };
 
-export const FilterSortBottomSheet: React.FC<Props> = ({
-  innerRef,
+export const FilterSortModal: React.FC<Props> = ({
+  visible,
+  onClose,
   value = DEFAULT_FILTERS,
   onApply,
 }) => {
@@ -37,22 +39,18 @@ export const FilterSortBottomSheet: React.FC<Props> = ({
 
   const handleApply = () => {
     onApply?.({ sort, availableOnly });
-    innerRef.current?.close();
+    onClose();
   };
 
   const handleReset = () => {
     setSort("rating");
     setAvailableOnly(false);
     onApply?.({ sort: "rating", availableOnly: false });
-    innerRef.current?.close();
+    onClose();
   };
 
   return (
-    <BottomSheetWrapper
-      innerRef={innerRef}
-      snapPoints={["60%"]}
-      title="Filter & Sort"
-    >
+    <ModalWrapper visible={visible} onClose={onClose} title="Filter & Sort">
       <Text className="text-text-muted text-xs font-semibold uppercase tracking-wide mb-2">
         Sort by
       </Text>
@@ -102,8 +100,8 @@ export const FilterSortBottomSheet: React.FC<Props> = ({
       <View className="mt-3">
         <OutlinedButton label="Reset" fullWidth onPress={handleReset} />
       </View>
-    </BottomSheetWrapper>
+    </ModalWrapper>
   );
 };
 
-export default FilterSortBottomSheet;
+export default FilterSortModal;

@@ -5,7 +5,7 @@ import InputField from "../ui/InputField";
 import PrimaryButton from "../ui/PrimaryButton";
 import OutlinedButton from "../ui/OutlinedButton";
 import ProofPhotosField from "../booking/ProofPhotosField";
-import { getMyTaskCatalog, type InvoiceItemPayload } from "../../services/api";
+import { getMyTaskCatalog, uploadJobPhoto, type InvoiceItemPayload } from "../../services/api";
 
 type Props = {
   visible: boolean;
@@ -91,7 +91,13 @@ export const InvoiceLineModal: React.FC<Props> = ({ visible, bookingId, kind, on
         <InputField label="Price (₱)" value={price} onChangeText={setPrice} placeholder="0" keyboardType="numeric" />
       </View>
       <View className="mt-3">
-        <ProofPhotosField bookingId={bookingId} label={copy.photoLabel} urls={photoUrls} onChange={setPhotoUrls} required />
+        <ProofPhotosField
+          upload={(uri) => uploadJobPhoto(bookingId, uri, "image/jpeg")}
+          label={copy.photoLabel}
+          urls={photoUrls}
+          onChange={setPhotoUrls}
+          required
+        />
       </View>
       <View className="flex-row gap-3 mt-2">
         <View className="flex-1">

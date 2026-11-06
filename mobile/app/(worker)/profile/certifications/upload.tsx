@@ -7,8 +7,7 @@ import ScreenHeader from "../../../../components/ui/ScreenHeader";
 import InputField from "../../../../components/ui/InputField";
 import UploadCard from "../../../../components/ui/UploadCard";
 import PrimaryButton from "../../../../components/ui/PrimaryButton";
-import ImageSourcePickerBottomSheet from "../../../../components/bottom-sheets/ImageSourcePickerBottomSheet";
-import type { BottomSheetHandle } from "../../../../components/bottom-sheets/BottomSheetWrapper";
+import { useMediaPicker } from "../../../../hooks/useMediaPicker";
 import * as api from "../../../../services/api";
 import { useAlertModal } from "../../../../contexts/AlertModalContext";
 
@@ -30,7 +29,7 @@ export default function UploadCertificationScreen() {
   const alertModal = useAlertModal();
   const { certId } = useLocalSearchParams<{ certId?: string }>();
   const isEditMode = !!certId;
-  const sheetRef = React.useRef<BottomSheetHandle | null>(null);
+  const { pickImage } = useMediaPicker();
   const [name, setName] = useState("");
   const [issuer, setIssuer] = useState("");
   const [issueDate, setIssueDate] = useState("");
@@ -212,15 +211,11 @@ export default function UploadCertificationScreen() {
           </View>
         )}
         <UploadCard
-          label="Tap to upload document photo"
-          onPress={() => sheetRef.current?.expand()}
-          preview={
-            documentUri
-              ? "Document uploaded ✓"
-              : existingDocumentUrl
-                ? "Current document on file (tap to replace)"
-                : null
-          }
+          label="Document photo"
+          required
+          onPress={() => pickImage("Certification document", handleSelect)}
+          imageUri={documentUri ?? existingDocumentUrl}
+          statusLabel={documentUri ? "Added" : "On file"}
         />
         <View className="mt-4">
           <PrimaryButton
@@ -232,10 +227,6 @@ export default function UploadCertificationScreen() {
           />
         </View>
       </KeyboardAwareScrollView>
-      <ImageSourcePickerBottomSheet
-        innerRef={sheetRef}
-        onSelect={handleSelect}
-      />
     </SafeAreaView>
   );
 }

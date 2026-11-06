@@ -1,12 +1,11 @@
-import React, { useRef, useState } from "react";
+import React, { useState } from "react";
 import { View, Text, ScrollView, Pressable, ActivityIndicator } from "react-native";
 import { RemoteImage } from "../../../components/ui/RemoteImage";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { AppIcon as Ionicons } from "../../../components/icons/AppIcon";
 import { useRouter } from "expo-router";
-import ImageSourcePickerBottomSheet from "../../../components/bottom-sheets/ImageSourcePickerBottomSheet";
+import { useMediaPicker } from "../../../hooks/useMediaPicker";
 import LogoutConfirmationModal from "../../../components/modals/LogoutConfirmationModal";
-import type { BottomSheetHandle } from "../../../components/bottom-sheets/BottomSheetWrapper";
 import { useAuthStore } from "../../../store/authStore";
 import { colors, cardShadow } from "../../../constants";
 import { uploadAvatar, updateUserProfile } from "../../../services/api";
@@ -55,7 +54,7 @@ const MENU_GROUPS = [
 export default function ClientProfileScreen() {
   const router = useRouter();
   const alertModal = useAlertModal();
-  const imageSheetRef = useRef<BottomSheetHandle | null>(null);
+  const { pickImage } = useMediaPicker();
   const [logoutVisible, setLogoutVisible] = useState(false);
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
   const user = useAuthStore((s) => s.user);
@@ -112,7 +111,7 @@ export default function ClientProfileScreen() {
             </View>
             <Pressable accessibilityRole="button" accessibilityLabel="Change profile photo"
               className="absolute bottom-0 left-14 w-8 h-8 bg-brand rounded-full items-center justify-center"
-              onPress={() => imageSheetRef.current?.expand()}
+              onPress={() => pickImage("Profile photo", handleAvatarSelected)}
               disabled={uploadingAvatar}
             >
               <Ionicons name="camera" size={16} color={colors.white} />
@@ -187,10 +186,6 @@ export default function ClientProfileScreen() {
           </Pressable>
         </View>
       </ScrollView>
-      <ImageSourcePickerBottomSheet
-        innerRef={imageSheetRef}
-        onSelect={handleAvatarSelected}
-      />
       <LogoutConfirmationModal
         visible={logoutVisible}
         onConfirm={async () => {

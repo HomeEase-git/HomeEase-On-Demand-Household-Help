@@ -10,10 +10,9 @@ import StepperHorizontal from "../../../../components/steppers/StepperHorizontal
 import { BookingFooterBar } from "../../../../components/booking4step/BookingFooterBar";
 import { useDraftPriceEstimate } from "../../../../hooks/useBookingPriceEstimate";
 import InvalidationBanner from "../../../../components/ui/InvalidationBanner";
-import AddressPickerBottomSheet, {
+import AddressPickerModal, {
   type SavedAddress,
-} from "../../../../components/bottom-sheets/AddressPickerBottomSheet";
-import type { BottomSheetHandle } from "../../../../components/bottom-sheets/BottomSheetWrapper";
+} from "../../../../components/modals/AddressPickerModal";
 import DateGridPicker from "../../../../components/booking4step/DateGridPicker";
 import StartTimePicker from "../../../../components/ui/StartTimePicker";
 import { useBookingStore } from "../../../../store/bookingStore";
@@ -32,7 +31,7 @@ export default function BookingStep2Screen() {
   const alertModal = useAlertModal();
   const draft = useBookingStore((s) => s.draft);
   const setDraft = useBookingStore((s) => s.setDraft);
-  const addressSheetRef = useRef<BottomSheetHandle>(null);
+  const [addressOpen, setAddressOpen] = useState(false);
 
   const [address, setAddress] = useState<string | null>(draft.address);
   const [lat, setLat] = useState<number | undefined>(draft.lat);
@@ -78,7 +77,7 @@ export default function BookingStep2Screen() {
       setLng(selLng);
       setCity(item.city);
       setSelectedAddressId(item.id);
-      addressSheetRef.current?.close();
+      setAddressOpen(false);
     };
 
     // Backend-persisted coordinates (set when the address was last
@@ -145,7 +144,7 @@ export default function BookingStep2Screen() {
   }, [addresses]);
 
   const handleAddNew = () => {
-    addressSheetRef.current?.close();
+    setAddressOpen(false);
     router.push("/(client)/profile/addresses/new");
   };
 
@@ -268,7 +267,7 @@ export default function BookingStep2Screen() {
 
         <Text className="text-text-primary font-bold text-lg mt-2 mb-3">Service address</Text>
         <Pressable
-          onPress={() => addressSheetRef.current?.expand()}
+          onPress={() => setAddressOpen(true)}
           className="bg-card rounded-xl px-4 py-4 flex-row items-center"
         >
           <Ionicons name="location-outline" size={20} color={colors.accent.DEFAULT} />
@@ -322,8 +321,9 @@ export default function BookingStep2Screen() {
       </ScrollView>
       <BookingFooterBar estimate={draftEstimate} buttonLabel="Next" onPress={handleNext} />
 
-      <AddressPickerBottomSheet
-        innerRef={addressSheetRef}
+      <AddressPickerModal
+        visible={addressOpen}
+        onClose={() => setAddressOpen(false)}
         addresses={addresses}
         loading={loadingAddresses}
         selectedAddressId={selectedAddressId}

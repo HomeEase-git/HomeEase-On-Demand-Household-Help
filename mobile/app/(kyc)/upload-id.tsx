@@ -2,8 +2,6 @@ import React, { useEffect, useMemo, useState } from "react";
 import { View, Text, ScrollView } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
-import * as ImagePicker from "expo-image-picker";
-import * as DocumentPicker from "expo-document-picker";
 import ScreenHeader from "../../components/ui/ScreenHeader";
 import StepperHorizontal from "../../components/steppers/StepperHorizontal";
 import { KYC_STEPS } from "../../constants";
@@ -18,7 +16,7 @@ import {
   uploadKycFile,
 } from "../../services/api";
 import { validateWorkerBirthDate } from "../../utils/validators";
-import { compressImage } from "../../utils/imageCompressor";
+import { useMediaPicker, type PickedMedia } from "../../hooks/useMediaPicker";
 import {
   documentRequirements,
   isDocumentTypeAllowed,
@@ -60,7 +58,9 @@ export default function UploadIdScreen() {
   const user = useAuthStore((s) => s.user);
   const isWorker = user?.role === "worker";
   const [documents, setDocuments] = useState(initialDocuments);
-  const [uploadingKey, setUploadingKey] = useState<KycDocumentKey | null>(null);
+  const { pick } = useMediaPicker();
+  // The picked photo while it uploads, so the card can show it straight away.
+  const [pending, setPending] = useState<{ key: KycDocumentKey; uri: string } | null>(null);
   const [birthDate, setBirthDate] = useState("");
   const [savingBirthDate, setSavingBirthDate] = useState(false);
   const birthDateInvalid = isWorker ? birthDateError(birthDate.trim()) : null;
@@ -105,13 +105,8 @@ export default function UploadIdScreen() {
 
   const stepperSteps = isWorker ? KYC_STEPS.worker : KYC_STEPS.client;
 
-  const applyAsset = async (
-    key: KycDocumentKey,
-    uri: string,
-    mimeType: string,
-    name: string,
-  ) => {
-    if (!isDocumentTypeAllowed(key, mimeType)) {
+  const applyAsset = async (key: KycDocumentKey, media: PickedMedia) => {
+    if (!isDocumentTypeAllowed(key, media.originalMimeType)) {
       alertModal.error(
         "Invalid file type",
         "Government ID images must be JPG, JPEG, or PNG.",
@@ -119,27 +114,14 @@ export default function UploadIdScreen() {
       return;
     }
 
+    setPending({ key, uri: media.uri });
     try {
-      // Shrink + re-encode as JPEG before upload: smaller payloads, and it
-      // converts iOS HEIC (which the backend rejects). Fall back to the
-      // original if compression fails.
-      let uploadUri = uri;
-      let uploadMime = mimeType;
-      try {
-        const compressed = await compressImage(uri);
-        uploadUri = compressed.uri;
-        uploadMime = "image/jpeg";
-      } catch (err) {
-        console.error("KYC ID compression failed, using original", err);
-      }
-
-      const { url } = await uploadKycFile(key, uploadUri, uploadMime);
+      const { url } = await uploadKycFile(key, media.uri, media.mimeType);
       await submitKycDocument(key, url);
       setDocuments((prev) => ({
         ...prev,
-        [key]: { uri, mimeType, name },
+        [key]: { uri: media.uri, mimeType: media.mimeType, name: media.name },
       }));
-      alertModal.success("Success", "Government ID uploaded successfully.");
     } catch (error: any) {
       console.error("KYC document submit error", error);
       alertModal.error(
@@ -147,142 +129,24 @@ export default function UploadIdScreen() {
         error?.message ||
           "We could not submit your ID document. Please try again.",
       );
-    }
-  };
-
-  const captureFromCamera = async (key: KycDocumentKey) => {
-    setUploadingKey(key);
-    try {
-      const { status } = await ImagePicker.requestCameraPermissionsAsync();
-      if (status !== "granted") {
-        alertModal.warning(
-          "Camera permission required",
-          "Please allow camera access to take a photo of your ID.",
-        );
-        return;
-      }
-
-      const result = await ImagePicker.launchCameraAsync({
-        allowsEditing: true,
-        quality: 1,
-      });
-
-      if (result.canceled || !result.assets[0]?.uri) {
-        return;
-      }
-
-      const asset = result.assets[0];
-      await applyAsset(
-        key,
-        asset.uri,
-        asset.mimeType || "image/jpeg",
-        asset.fileName || `${key} photo`,
-      );
-    } catch (error) {
-      console.error("KYC ID camera error", error);
-      alertModal.error(
-        "Upload failed",
-        "We could not capture that photo. Please try again.",
-      );
     } finally {
-      setUploadingKey(null);
+      setPending(null);
     }
   };
 
-  const pickFromGallery = async (key: KycDocumentKey) => {
-    setUploadingKey(key);
-    try {
-      const { status } =
-        await ImagePicker.requestMediaLibraryPermissionsAsync();
-      if (status !== "granted") {
-        alertModal.warning(
-          "Photo access required",
-          "Please allow photo access to upload your ID.",
-        );
-        return;
-      }
-
-      const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
-        allowsEditing: true,
-        quality: 1,
-      });
-
-      if (result.canceled || !result.assets[0]?.uri) {
-        return;
-      }
-
-      const asset = result.assets[0];
-      await applyAsset(
-        key,
-        asset.uri,
-        asset.mimeType || "image/jpeg",
-        asset.fileName || `${key} image`,
-      );
-    } catch (error) {
-      console.error("KYC ID gallery error", error);
-      alertModal.error(
-        "Upload failed",
-        "We could not process that file. Please try again.",
-      );
-    } finally {
-      setUploadingKey(null);
-    }
-  };
-
-  const pickFromFiles = async (key: KycDocumentKey) => {
-    setUploadingKey(key);
-    try {
-      const result = await DocumentPicker.getDocumentAsync({
-        type: ["image/*"],
-        copyToCacheDirectory: true,
-      });
-
-      if (result.canceled) {
-        return;
-      }
-
-      const document = result.assets[0];
-      if (!document?.uri) {
-        return;
-      }
-
-      await applyAsset(
-        key,
-        document.uri,
-        document.mimeType || "image/jpeg",
-        document.name || `${key} document`,
-      );
-    } catch (error) {
-      console.error("KYC ID file picker error", error);
-      alertModal.error(
-        "Upload failed",
-        "We could not process that file. Please try again.",
-      );
-    } finally {
-      setUploadingKey(null);
-    }
-  };
-
-  const handleUpload = (key: KycDocumentKey) => {
-    alertModal.info(
-      documentRequirements[key].label,
-      "Choose how you'd like to add this document.",
-      [
-        { text: "Camera", onPress: () => captureFromCamera(key) },
-        { text: "Gallery", onPress: () => pickFromGallery(key) },
-        { text: "Files", onPress: () => pickFromFiles(key) },
-        { text: "Cancel", style: "cancel" },
-      ],
-    );
-  };
+  const handleUpload = (key: KycDocumentKey) =>
+    pick({
+      title: documentRequirements[key].label,
+      message: "Choose how you'd like to add this document.",
+      sources: ["camera", "gallery", "files"],
+      fileTypes: ["image/*"],
+      onPick: (media) => applyAsset(key, media),
+    });
 
   const renderUploadCard = (key: KycDocumentKey) => {
     const requirement = documentRequirements[key];
     const uploaded = documents[key] ?? emptyDocument;
-    const preview = uploaded.uri
-      ? uploaded.name || requirement.label
-      : undefined;
+    const isPending = pending?.key === key;
 
     return (
       <View key={key} className="mb-3">
@@ -290,9 +154,10 @@ export default function UploadIdScreen() {
           label={requirement.label}
           subtitle={`${requirement.description} Accepted: ${requirement.accepts.join(", ")}`}
           required={requirement.required}
-          preview={preview}
+          imageUri={isPending ? pending.uri : uploaded.uri}
+          uploading={isPending}
           onPress={() => handleUpload(key)}
-          disabled={uploadingKey === key}
+          disabled={pending !== null}
         />
       </View>
     );
@@ -333,11 +198,11 @@ export default function UploadIdScreen() {
             fullWidth
             disabled={
               missingRequired.length > 0 ||
-              uploadingKey !== null ||
+              pending !== null ||
               birthDateInvalid !== null ||
               savingBirthDate
             }
-            loading={uploadingKey !== null || savingBirthDate}
+            loading={pending !== null || savingBirthDate}
             onPress={handleContinue}
           />
         </View>

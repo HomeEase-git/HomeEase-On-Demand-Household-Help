@@ -1,5 +1,5 @@
-import React, { useCallback, useEffect, useRef, useState } from "react";
-import { View, Text, Image, ScrollView, Share } from "react-native";
+import React, { useCallback, useEffect, useState } from "react";
+import { View, Text, ScrollView, Share } from "react-native";
 import { RemoteImage } from "../../../../components/ui/RemoteImage";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useFocusEffect, useRouter, useLocalSearchParams } from "expo-router";
@@ -12,13 +12,12 @@ import OutlinedButton from "../../../../components/ui/OutlinedButton";
 import DangerButton from "../../../../components/ui/DangerButton";
 import UploadCard from "../../../../components/ui/UploadCard";
 import StarRating from "../../../../components/ui/StarRating";
-import ImageSourcePickerBottomSheet from "../../../../components/bottom-sheets/ImageSourcePickerBottomSheet";
+import { useMediaPicker } from "../../../../hooks/useMediaPicker";
 import ProofPhotosField from "../../../../components/booking/ProofPhotosField";
 import InvoiceLineModal from "../../../../components/modals/InvoiceLineModal";
 import { InvoiceCard } from "../../../../components/booking-detail/InvoiceCard";
 import { BookingAnswers } from "../../../../components/booking-detail/BookingAnswers";
 import type { ApiInvoice } from "../../../../utils/mapBookingDetail";
-import type { BottomSheetHandle } from "../../../../components/bottom-sheets/BottomSheetWrapper";
 import { Skeleton } from "../../../../components/ui/Skeleton";
 import { API_STATUS_MAP } from "../../../../store/bookingStore";
 import * as api from "../../../../services/api";
@@ -139,7 +138,7 @@ export default function JobDetailScreen() {
     return () => clearInterval(id);
   }, []);
   const [focused, setFocused] = useState(false);
-  const photoSheetRef = useRef<BottomSheetHandle | null>(null);
+  const { pickImage } = useMediaPicker();
   const alertModal = useAlertModal();
 
   // `silent` skips the loading flag so a background poll refresh doesn't
@@ -899,7 +898,7 @@ export default function JobDetailScreen() {
                 ) : (
                   <>
                     <ProofPhotosField
-                      bookingId={job.id}
+                      upload={(uri) => api.uploadJobPhoto(job.id, uri, "image/jpeg")}
                       label="Photo of the job before you start"
                       urls={beforeDraft}
                       onChange={setBeforeDraft}
@@ -930,7 +929,7 @@ export default function JobDetailScreen() {
                   </View>
                 )}
                 <ProofPhotosField
-                  bookingId={job.id}
+                  upload={(uri) => api.uploadJobPhoto(job.id, uri, "image/jpeg")}
                   label="New progress photo"
                   urls={progressDraft}
                   onChange={setProgressDraft}
@@ -996,28 +995,14 @@ export default function JobDetailScreen() {
                   </View>
                 </View>
               </View>
-              {completionPhotoUri ? (
-                <View>
-                  <Image
-                    source={{ uri: completionPhotoUri }}
-                    style={{ width: "100%", height: 180, borderRadius: 16 }}
-                    resizeMode="cover"
-                  />
-                  <PrimaryButton
-                    label={uploadingPhoto ? "Uploading..." : "Change Photo"}
-                    fullWidth
-                    onPress={() => photoSheetRef.current?.expand()}
-                    disabled={uploadingPhoto}
-                  />
-                </View>
-              ) : (
-                <UploadCard
-                  label="Attach photo of completed work"
-                  subtitle="Required before you can mark this job complete"
-                  required
-                  onPress={() => photoSheetRef.current?.expand()}
-                />
-              )}
+              <UploadCard
+                label="Photo of completed work"
+                subtitle="Required before you can mark this job complete"
+                required
+                imageUri={completionPhotoUri}
+                uploading={uploadingPhoto}
+                onPress={() => pickImage("Photo of completed work", handleSelectCompletionPhoto)}
+              />
               <PrimaryButton
                 label="Send Invoice"
                 fullWidth
@@ -1107,10 +1092,6 @@ export default function JobDetailScreen() {
           setLineModalKind(null);
         }}
         onCancel={() => setLineModalKind(null)}
-      />
-      <ImageSourcePickerBottomSheet
-        innerRef={photoSheetRef}
-        onSelect={handleSelectCompletionPhoto}
       />
     </SafeAreaView>
   );

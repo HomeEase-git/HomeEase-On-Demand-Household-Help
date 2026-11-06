@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { View, Text, Pressable, ActivityIndicator } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter, useLocalSearchParams } from "expo-router";
@@ -8,8 +8,7 @@ import ScreenHeader from "../../../../components/ui/ScreenHeader";
 import InputField from "../../../../components/ui/InputField";
 import UploadCard from "../../../../components/ui/UploadCard";
 import PrimaryButton from "../../../../components/ui/PrimaryButton";
-import ImageSourcePickerBottomSheet from "../../../../components/bottom-sheets/ImageSourcePickerBottomSheet";
-import type { BottomSheetHandle } from "../../../../components/bottom-sheets/BottomSheetWrapper";
+import { useMediaPicker } from "../../../../hooks/useMediaPicker";
 import { colors } from "../../../../constants";
 import * as api from "../../../../services/api";
 import type { TaskCatalogEntry } from "../../../../services/api";
@@ -41,8 +40,7 @@ export default function RequestServiceScreen() {
   const router = useRouter();
   const alertModal = useAlertModal();
   const params = useLocalSearchParams<{ serviceTypeId?: string }>();
-  const sheetRef = useRef<BottomSheetHandle | null>(null);
-  const pickingFor = useRef<string | null>(null);
+  const { pickImage } = useMediaPicker();
 
   const [catalog, setCatalog] = useState<TaskCatalogEntry[] | null>(null);
   const [serviceTypeId, setServiceTypeId] = useState<string | null>(params.serviceTypeId ?? null);
@@ -228,12 +226,10 @@ export default function RequestServiceScreen() {
                     />
                     <UploadCard
                       required
-                      label="Tap to add a photo of the document"
-                      onPress={() => {
-                        pickingFor.current = d.key;
-                        sheetRef.current?.expand();
-                      }}
-                      preview={d.uri ? "Photo added ✓ (tap to replace)" : null}
+                      label="Photo of the document"
+                      onPress={() => pickImage("Photo of the document", (uri) => updateDoc(d.key, { uri }))}
+                      imageUri={d.uri}
+                      statusLabel="Added"
                     />
                   </View>
                 ))}
@@ -261,12 +257,6 @@ export default function RequestServiceScreen() {
           </>
         )}
       </KeyboardAwareScrollView>
-      <ImageSourcePickerBottomSheet
-        innerRef={sheetRef}
-        onSelect={(uri) => {
-          if (pickingFor.current) updateDoc(pickingFor.current, { uri });
-        }}
-      />
     </SafeAreaView>
   );
 }

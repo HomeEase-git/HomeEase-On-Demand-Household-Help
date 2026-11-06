@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from "react";
+import React, { useState, useEffect } from "react";
 import { View, Text, FlatList, Pressable } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
@@ -6,10 +6,9 @@ import SearchBar from "../../../components/ui/SearchBar";
 import WorkerCard from "../../../components/cards/WorkerCard";
 import EmptyState from "../../../components/feedback/EmptyState";
 import { searchWorkers } from "../../../services/api";
-import FilterSortBottomSheet, {
+import FilterSortModal, {
   SearchFilters,
-} from "../../../components/bottom-sheets/FilterSortBottomSheet";
-import type { BottomSheetHandle } from "../../../components/bottom-sheets/BottomSheetWrapper";
+} from "../../../components/modals/FilterSortModal";
 import LoadingSkeleton from "../../../components/feedback/LoadingSkeleton";
 import { useSearchStore } from "../../../store/searchStore";
 import { useAlertModal } from "../../../contexts/AlertModalContext";
@@ -26,7 +25,7 @@ export default function SearchScreen() {
   const [searching, setSearching] = useState(false);
   const [results, setResults] = useState<any[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const filterRef = useRef<BottomSheetHandle | null>(null);
+  const [filterOpen, setFilterOpen] = useState(false);
   const recentSearches = useSearchStore((s) => s.recentSearches);
   const addSearch = useSearchStore((s) => s.addSearch);
   const clearSearches = useSearchStore((s) => s.clearSearches);
@@ -116,7 +115,7 @@ export default function SearchScreen() {
             placeholder="Search services or workers..."
             value={query}
             onChangeText={handleChangeQuery}
-            onFilterPress={() => filterRef.current?.expand()}
+            onFilterPress={() => setFilterOpen(true)}
             filterActive={hasActiveFilters}
           />
         </View>
@@ -176,8 +175,9 @@ export default function SearchScreen() {
         )
       ) : null}
 
-      <FilterSortBottomSheet
-        innerRef={filterRef}
+      <FilterSortModal
+        visible={filterOpen}
+        onClose={() => setFilterOpen(false)}
         value={filters}
         onApply={handleApplyFilters}
       />

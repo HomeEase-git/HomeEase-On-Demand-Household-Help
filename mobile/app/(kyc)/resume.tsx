@@ -2,7 +2,6 @@ import React, { useEffect, useState } from "react";
 import { View, Text, ScrollView } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
-import * as DocumentPicker from "expo-document-picker";
 import ScreenHeader from "../../components/ui/ScreenHeader";
 import StepperHorizontal from "../../components/steppers/StepperHorizontal";
 import { KYC_STEPS } from "../../constants";
@@ -17,6 +16,7 @@ import {
   uploadKycFile,
 } from "../../services/api";
 import { useAlertModal } from "../../contexts/AlertModalContext";
+import { useMediaPicker } from "../../hooks/useMediaPicker";
 
 // Worker-only screen — clients never reach this (selfie.tsx sends
 // them straight to the contract), but guard against direct navigation.
@@ -32,7 +32,7 @@ export default function ResumeScreen() {
     uri: null,
     name: null,
   });
-  const [uploading, setUploading] = useState(false);
+  const { pick } = useMediaPicker();
   const [submitting, setSubmitting] = useState(false);
   // Years of experience decide which expertise tiers the worker can reach;
   // the admin checks it against the resume at approval.
@@ -64,56 +64,28 @@ export default function ResumeScreen() {
     return null;
   }
 
-  const handleUploadResume = async () => {
-    if (uploading) {
-      return;
-    }
-
-    setUploading(true);
-    try {
-      const result = await DocumentPicker.getDocumentAsync({
-        type: ["application/pdf"],
-        copyToCacheDirectory: true,
-      });
-
-      if (result.canceled) {
-        return;
-      }
-
-      const document = result.assets?.[0];
-      if (!document?.uri) {
-        alertModal.error("Upload failed", "We could not access the selected file.");
-        return;
-      }
-
-      try {
+  const handleUploadResume = () =>
+    pick({
+      title: "Upload Resume",
+      sources: ["files"],
+      fileTypes: ["application/pdf"],
+      onPick: async (media) => {
         setSubmitting(true);
-        const { url } = await uploadKycFile("resume", document.uri, document.mimeType);
-        await submitKycDocument("resume", url);
-        setResumeFile({
-          uri: document.uri,
-          name: document.name || "resume.pdf",
-        });
-        alertModal.success("Success", "Resume uploaded successfully.");
-      } catch (error) {
-        console.error("KYC resume submit error", error);
-        alertModal.error(
-          "Upload failed",
-          "We could not submit your resume. Please try again.",
-        );
-      } finally {
-        setSubmitting(false);
-      }
-    } catch (error) {
-      console.error("Resume upload error", error);
-      alertModal.error(
-        "Upload failed",
-        "We could not upload your resume. Please try again.",
-      );
-    } finally {
-      setUploading(false);
-    }
-  };
+        try {
+          const { url } = await uploadKycFile("resume", media.uri, media.mimeType);
+          await submitKycDocument("resume", url);
+          setResumeFile({ uri: media.uri, name: media.name || "resume.pdf" });
+        } catch (error) {
+          console.error("KYC resume submit error", error);
+          alertModal.error(
+            "Upload failed",
+            "We could not submit your resume. Please try again.",
+          );
+        } finally {
+          setSubmitting(false);
+        }
+      },
+    });
 
   const handleContinue = async () => {
     setSavingYears(true);
@@ -156,11 +128,14 @@ export default function ResumeScreen() {
           <UploadCard
             label="Upload Resume"
             subtitle="Select a PDF file from your device."
+            hint="Tap to choose a PDF"
+            required
             preview={
               resumeFile.uri ? resumeFile.name || "Resume uploaded" : undefined
             }
+            uploading={submitting}
             onPress={handleUploadResume}
-            disabled={uploading || submitting}
+            disabled={submitting}
           />
         </View>
 
@@ -180,7 +155,7 @@ export default function ResumeScreen() {
           <PrimaryButton
             label="Continue"
             fullWidth
-            disabled={!resumeFile.uri || !yearsValid || uploading || submitting || savingYears}
+            disabled={!resumeFile.uri || !yearsValid || submitting || savingYears}
             loading={savingYears}
             onPress={handleContinue}
           />

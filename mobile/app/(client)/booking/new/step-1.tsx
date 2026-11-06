@@ -1,6 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { View, Text, ActivityIndicator, Pressable, Switch } from "react-native";
-import { RemoteImage } from "../../../../components/ui/RemoteImage";
+import { View, Text, Switch } from "react-native";
 import { KeyboardAwareScrollView } from "../../../../components/ui/KeyboardAwareScrollView";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
@@ -20,9 +19,7 @@ import {
 import PricingRangePreview from "../../../../components/booking4step/PricingRangePreview";
 import PackageSelector from "../../../../components/booking4step/PackageSelector";
 import { BookingFooterBar } from "../../../../components/booking4step/BookingFooterBar";
-import { ImageSourcePickerBottomSheet } from "../../../../components/bottom-sheets/ImageSourcePickerBottomSheet";
-import type { BottomSheetHandle } from "../../../../components/bottom-sheets/BottomSheetWrapper";
-import { AppIcon as Ionicons } from "../../../../components/icons/AppIcon";
+import ProofPhotosField from "../../../../components/booking/ProofPhotosField";
 import { colors } from "../../../../constants";
 import { useBookingStore } from "../../../../store/bookingStore";
 import { getServiceTypes, uploadIssuePhoto } from "../../../../services/api";
@@ -58,8 +55,6 @@ export default function BookingStep1Screen() {
   const [hasPets, setHasPets] = useState<boolean>(
     (draft.priorities ?? []).includes(PET_FRIENDLY_PRIORITY),
   );
-  const [uploadingPhoto, setUploadingPhoto] = useState(false);
-  const photoSheetRef = useRef<BottomSheetHandle | null>(null);
   const initialDraft = useRef(draft);
 
   const loadCategories = useCallback(() => {
@@ -207,26 +202,6 @@ export default function BookingStep1Screen() {
   const handleTaskSelect = (task: ServiceTaskOption) => {
     setSelectedTask(task);
     setQuantityText("");
-  };
-
-  const handlePickIssuePhoto = async (uri: string) => {
-    if (issuePhotos.length >= MAX_ISSUE_PHOTOS) return;
-    setUploadingPhoto(true);
-    try {
-      const { url } = await uploadIssuePhoto(uri);
-      setIssuePhotos((prev) => [...prev, url]);
-    } catch {
-      alertModal.error(
-        "Upload failed",
-        "Could not upload that photo. Please try again.",
-      );
-    } finally {
-      setUploadingPhoto(false);
-    }
-  };
-
-  const handleRemoveIssuePhoto = (url: string) => {
-    setIssuePhotos((prev) => prev.filter((u) => u !== url));
   };
 
   const handleNext = () => {
@@ -425,47 +400,14 @@ export default function BookingStep1Screen() {
           multiline
         />
 
-        <View className="flex-row flex-wrap gap-2 mt-3">
-          {issuePhotos.map((url) => (
-            <View key={url} className="relative">
-              <RemoteImage
-                source={{ uri: url }}
-                className="w-20 h-20 rounded-xl"
-              />
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel="Remove photo"
-                hitSlop={8}
-                className="absolute -top-1.5 -right-1.5 bg-black/70 rounded-full w-5 h-5 items-center justify-center"
-                onPress={() => handleRemoveIssuePhoto(url)}
-              >
-                <Ionicons name="close" size={12} color="#fff" />
-              </Pressable>
-            </View>
-          ))}
-          {issuePhotos.length < MAX_ISSUE_PHOTOS && (
-            <Pressable
-              className="w-20 h-20 rounded-xl border border-dashed items-center justify-center"
-              style={{ borderColor: colors.divider }}
-              onPress={() => photoSheetRef.current?.expand()}
-              disabled={uploadingPhoto}
-            >
-              {uploadingPhoto ? (
-                <ActivityIndicator size="small" />
-              ) : (
-                <>
-                  <Ionicons
-                    name="camera-outline"
-                    size={20}
-                    color={colors.text.muted}
-                  />
-                  <Text className="text-text-secondary text-xs mt-1">
-                    Add photo
-                  </Text>
-                </>
-              )}
-            </Pressable>
-          )}
+        <View className="mt-3">
+          <ProofPhotosField
+            label="Photos (optional)"
+            urls={issuePhotos}
+            onChange={setIssuePhotos}
+            upload={(uri) => uploadIssuePhoto(uri)}
+            max={MAX_ISSUE_PHOTOS}
+          />
         </View>
       </KeyboardAwareScrollView>
       <BookingFooterBar
@@ -473,10 +415,6 @@ export default function BookingStep1Screen() {
         buttonLabel="Next"
         disabled={loadingCategories}
         onPress={handleNext}
-      />
-      <ImageSourcePickerBottomSheet
-        innerRef={photoSheetRef}
-        onSelect={handlePickIssuePhoto}
       />
     </SafeAreaView>
   );

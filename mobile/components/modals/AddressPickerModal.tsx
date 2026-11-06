@@ -1,7 +1,7 @@
 import React from "react";
 import { View, Text, Pressable, ScrollView, ActivityIndicator } from "react-native";
 import { AppIcon as Ionicons } from "../icons/AppIcon";
-import BottomSheetWrapper, { BottomSheetHandle } from "./BottomSheetWrapper";
+import ModalWrapper from "./ModalWrapper";
 import { colors, cardShadow } from "../../constants";
 import { displayAddress } from "../../utils/geo";
 
@@ -25,7 +25,8 @@ export type SavedAddress = {
 };
 
 type Props = {
-  innerRef: React.RefObject<BottomSheetHandle | null>;
+  visible: boolean;
+  onClose: () => void;
   addresses: SavedAddress[];
   loading: boolean;
   selectedAddressId: string | null;
@@ -34,8 +35,9 @@ type Props = {
   onAddNew: () => void;
 };
 
-export const AddressPickerBottomSheet: React.FC<Props> = ({
-  innerRef,
+export const AddressPickerModal: React.FC<Props> = ({
+  visible,
+  onClose,
   addresses,
   loading,
   selectedAddressId,
@@ -44,7 +46,7 @@ export const AddressPickerBottomSheet: React.FC<Props> = ({
   onAddNew,
 }) => {
   return (
-    <BottomSheetWrapper innerRef={innerRef} snapPoints={["60%"]} title="Select address">
+    <ModalWrapper visible={visible} onClose={onClose} title="Select address">
       {loading ? (
         <View className="py-8 items-center">
           <ActivityIndicator color={colors.brand.DEFAULT} />
@@ -101,8 +103,8 @@ export const AddressPickerBottomSheet: React.FC<Props> = ({
         <Ionicons name="add" size={18} color={colors.accent.DEFAULT} />
         <Text className="text-accent font-semibold ml-1.5">Add new address</Text>
       </Pressable>
-    </BottomSheetWrapper>
+    </ModalWrapper>
   );
 };
 
-export default AddressPickerBottomSheet;
+export default AddressPickerModal;
