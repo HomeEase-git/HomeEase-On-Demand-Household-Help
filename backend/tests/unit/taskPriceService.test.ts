@@ -37,7 +37,6 @@ describe('taskBasePrice', () => {
     expect(taskBasePrice({ ...perUnit, minQuantity: 0 }, 0.5).ok).toBe(false);
   });
 
-  // Custom quotes are retired: a leftover row is never priced at ₱0.
   it('charges a retired custom-quote task its flat price', () => {
     expect(taskBasePrice({ basePrice: 999, pricingModel: 'CUSTOM_QUOTE' }, undefined)).toEqual({ ok: true, basePrice: 999 });
   });

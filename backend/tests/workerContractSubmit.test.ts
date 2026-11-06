@@ -4,11 +4,6 @@ import prisma from '@config/database';
 import { TIER_1_REQUIRED_DOCUMENT_TYPES } from '../src/constants/kycRequirements';
 import { createTestUser, deleteTestUser } from './helpers';
 
-// Accepting the Worker Service Agreement is what submits a worker's
-// application. It used to skip every completeness check when the worker had no
-// open verification request (nothing uploaded), so an empty application
-// reached the "waiting for review" state.
-
 const PATH = '/api/users/me/contract-acceptance';
 
 describe('POST /api/users/me/contract-acceptance (worker submission)', () => {
@@ -94,7 +89,6 @@ describe('POST /api/users/me/contract-acceptance (worker submission)', () => {
   });
 
   it('does not treat a worker merely marked SUBMITTED as exempt from the checks', async () => {
-    // The old upload endpoint used to set SUBMITTED after a single file.
     const { userId, token } = await newWorker('contract-legacy-submitted');
     const legacy = await prisma.verificationRequest.create({
       data: { userId, type: 'WORKER_ONBOARDING', status: 'PENDING' },

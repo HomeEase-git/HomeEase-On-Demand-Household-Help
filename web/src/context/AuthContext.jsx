@@ -11,15 +11,12 @@ import {
 
 const AuthContext = createContext(null);
 
-// Why the last session ended, for the login page to explain ('idle' or
-// 'expired'). Per tab, and read once.
 const SIGN_OUT_REASON_KEY = 'homeease_signout_reason';
 
 const setSignOutReason = (reason) => {
   try {
     sessionStorage.setItem(SIGN_OUT_REASON_KEY, reason);
   } catch {
-    // Storage unavailable — the login page just won't say why.
   }
 };
 
@@ -83,8 +80,6 @@ export function AuthProvider({ children }) {
     };
   }, []);
 
-  // The API client fires this when a refresh is refused (session revoked or
-  // expired) — drop to the login screen instead of failing every request.
   useEffect(() => {
     const onSessionExpired = () => {
       setSignOutReason('expired');
@@ -95,9 +90,6 @@ export function AuthProvider({ children }) {
     return () => window.removeEventListener('homeease:session-expired', onSessionExpired);
   }, []);
 
-  // The server refuses admin routes until MFA is set up (ADMIN_MFA_REQUIRED)
-  // — e.g. a session that skipped the setup screen. HashRouter, so a hash
-  // change is a client-side navigation.
   useEffect(() => {
     const onMfaRequired = () => {
       if (window.location.hash !== '#/mfa-setup') window.location.hash = '#/mfa-setup';
@@ -109,9 +101,6 @@ export function AuthProvider({ children }) {
   const login = async (email, password) => {
     const data = await loginRequest(email, password);
 
-    // MFA-enabled admin — no session yet. Return the challenge info as-is
-    // so the caller (Login.jsx) can render the code-entry step; user/token
-    // stay unset until completeMfaChallenge succeeds.
     if (data.mfaRequired) {
       return data;
     }
@@ -128,8 +117,6 @@ export function AuthProvider({ children }) {
     return data;
   };
 
-  // Second step of admin MFA login — exchanges login's challengeToken plus
-  // a TOTP/backup code for the real session.
   const completeMfaChallenge = async (challengeToken, code) => {
     const data = await completeMfaChallengeRequest(challengeToken, code);
     setUser({

@@ -5,12 +5,7 @@ import Constants from "expo-constants";
 import type { LatLng } from "../../utils/geo";
 import MapUnavailable from "./MapUnavailable";
 
-// Native Google map (Maps SDK for Android, via react-native-maps). The web
-// build gets GoogleMap.web.tsx instead — react-native-maps has no web support.
-
 export type GoogleMapHandle = {
-  // Moves (or creates, on first call) the worker marker in place — used for
-  // live tracking, where a fresh position arrives every few seconds.
   updateWorkerLocation: (position: LatLng) => void;
 };
 
@@ -26,10 +21,6 @@ type Props = {
   style?: StyleProp<ViewStyle>;
 };
 
-// Whether this build was made with a Maps SDK for Android key (set by
-// app.config.ts from GOOGLE_MAPS_ANDROID_API_KEY). The key itself lives in the
-// AndroidManifest, not in JS; without it the native SDK would crash the app,
-// so the map shows a placeholder instead.
 function buildHasMapsKey(): boolean {
   return Constants.expoConfig?.extra?.hasGoogleMapsKey === true;
 }
@@ -66,11 +57,6 @@ function Dot({ color, size, halo }: { color: string; size: number; halo?: boolea
   );
 }
 
-// Custom-view markers are rasterized by the native map; tracking view changes
-// forever costs a redraw every frame, but turning it off before the first
-// draw can leave the marker blank on Android. Each marker tracks briefly
-// after IT mounts (a worker marker can appear long after the map), then
-// freezes. Moving the coordinate doesn't need view tracking.
 function DotMarker({ dot, ...markerProps }: Omit<MapMarkerProps, "tracksViewChanges" | "anchor"> & { dot: React.ReactNode }) {
   const [tracksViewChanges, setTracksViewChanges] = useState(true);
   useEffect(() => {
@@ -90,8 +76,6 @@ export const GoogleMap = forwardRef<GoogleMapHandle, Props>(function GoogleMap(
 ) {
   const mapRef = useRef<MapView>(null);
   const destinationMarkerRef = useRef<MapMarker>(null);
-  // Seeded from the prop once; after that, live positions arrive through the
-  // imperative handle so the caller doesn't re-render on every push.
   const [worker, setWorker] = useState<LatLng | null>(workerLocation ?? null);
   const workerSeenRef = useRef(!!workerLocation);
   const mapReadyRef = useRef(false);
@@ -107,8 +91,6 @@ export const GoogleMap = forwardRef<GoogleMapHandle, Props>(function GoogleMap(
     ref,
     () => ({
       updateWorkerLocation: (position: LatLng) => {
-        // First sighting of the worker: zoom out to show them and the
-        // destination together. Later moves just slide the marker.
         if (!workerSeenRef.current && mapReadyRef.current) fitTo([destination, position]);
         workerSeenRef.current = true;
         setWorker(position);
@@ -118,8 +100,6 @@ export const GoogleMap = forwardRef<GoogleMapHandle, Props>(function GoogleMap(
     [destination.lat, destination.lng],
   );
 
-  // Each new route (throttled by the caller) reframes the worker, the
-  // destination and the line between them; plain moves just slide the marker.
   useEffect(() => {
     if (!route || !mapReadyRef.current) return;
     fitTo([destination, ...(worker ? [worker] : []), ...route]);

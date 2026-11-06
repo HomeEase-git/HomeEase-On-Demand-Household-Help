@@ -3,8 +3,6 @@ import app from '@/app';
 import prisma from '@config/database';
 import { createTestUser, deleteTestUser } from './helpers';
 
-// The job order editor saves a whole category — details and jobs — in one
-// request, with new jobs referenced by temporary keys until they have ids.
 describe('Admin service catalog save', () => {
   const createdUserIds: string[] = [];
   const createdServiceTypeIds: string[] = [];

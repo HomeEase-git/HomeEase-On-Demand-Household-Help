@@ -161,7 +161,6 @@ export const OnboardingTrustIllustration: React.FC<IllustrationProps> = ({
   </Svg>
 );
 
-// Role selection: client (homeowner requesting a service)
 export const ClientRoleIllustration: React.FC<IllustrationProps> = ({
   size = 160,
 }) => (
@@ -185,7 +184,6 @@ export const ClientRoleIllustration: React.FC<IllustrationProps> = ({
   </Svg>
 );
 
-// Role selection: worker (service provider with toolbox)
 export const WorkerRoleIllustration: React.FC<IllustrationProps> = ({
   size = 160,
 }) => (

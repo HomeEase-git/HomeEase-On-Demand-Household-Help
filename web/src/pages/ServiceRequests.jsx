@@ -11,7 +11,6 @@ import { useListQuery } from '../hooks/useListQuery'
 import { fetchServiceRequests, approveServiceRequest, rejectServiceRequest } from '../services/serviceRequests'
 import { useToast } from '../context/ToastContext'
 
-// Same All / Pending / Approved / Rejected tabs as the other admin lists.
 const TAB_STATUS = { All: 'ALL', Pending: 'PENDING_VERIFICATION', Approved: 'VERIFIED', Rejected: 'REJECTED' }
 const STATUS_LABEL = { PENDING_VERIFICATION: 'Pending', VERIFIED: 'Approved', REJECTED: 'Rejected' }
 const STATUS_BADGE_VARIANT = { PENDING_VERIFICATION: 'pending', VERIFIED: 'active', REJECTED: 'suspended' }
@@ -22,11 +21,6 @@ function formatDate(value) {
   return new Date(value).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
 }
 
-/**
- * Workers asking to offer another service. Approving unlocks the service so
- * the worker can pick its tasks (and approves the documents attached to the
- * request); rejecting sends the worker the reason so they can try again.
- */
 export default function ServiceRequests() {
   const { showError, showSuccess } = useToast()
   const [actioningId, setActioningId] = useState(null)
@@ -35,14 +29,12 @@ export default function ServiceRequests() {
   const [submittingReject, setSubmittingReject] = useState(false)
 
   const fetchFn = useCallback((p) => fetchServiceRequests(TAB_STATUS[p.tab] ?? TAB_STATUS.Pending), [])
-  // Tab and search live in the URL like the other admin lists.
   const { data: allRequests, params, loading, error, reload, setData, setSearch, setFilter } = useListQuery(fetchFn, {
     initialParams: { tab: 'Pending' },
   })
   const tab = TAB_STATUS[params.tab] ? params.tab : 'Pending'
   const search = params.search || ''
   const statusFilter = TAB_STATUS[tab]
-  // The list endpoint isn't paged, so search filters what's loaded.
   const q = search.trim().toLowerCase()
   const requests = q
     ? allRequests.filter((r) =>
@@ -50,8 +42,6 @@ export default function ServiceRequests() {
       )
     : allRequests
 
-  // On a status tab the decided request leaves the list; on All it stays
-  // with its new status.
   const settle = (id, status) =>
     setData((prev) => (tab === 'All' ? prev.map((r) => (r.id === id ? { ...r, status } : r)) : prev.filter((r) => r.id !== id)))
 

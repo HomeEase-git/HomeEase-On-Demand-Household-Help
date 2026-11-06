@@ -6,15 +6,8 @@ import { AppIcon as Ionicons } from "../icons/AppIcon";
 import { colors } from "../../constants";
 import { useWorkerSetupStatus } from "../../hooks/useWorkerSetupStatus";
 
-// Height of the bottom tab bar (above the safe-area inset) the reminder sits on.
 const TAB_BAR_HEIGHT = 49;
 
-/**
- * Always-visible bar above the worker tab bar until account setup is
- * complete — the worker is hidden from clients and can't accept requests
- * until then. Not dismissible, by design. Hidden on the checklist screen
- * itself, which already shows the same information in full.
- */
 export default function WorkerSetupReminder() {
   const { status } = useWorkerSetupStatus();
   const router = useRouter();

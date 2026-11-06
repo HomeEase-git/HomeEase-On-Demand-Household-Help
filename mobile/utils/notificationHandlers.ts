@@ -3,24 +3,8 @@ import { notificationService } from '../services/notificationService';
 import { useNotificationStore, notificationCategory, clientNotificationRoute, workerNotificationRoute } from '../store/notificationStore';
 import { useAuthStore } from '../store/authStore';
 
-/**
- * Notification routing utilities
- *
- * Handles:
- * - Parsing remote push payloads (see backend's notify.ts — `data` is always
- *   `{ notificationId, type }`, matching the real `Notification` row; title
- *   and body live on the OS notification content itself, not inside `data`)
- * - Routing to the notification-detail screen, which already knows how to
- *   render/deep-link onward per notification type via `notificationCategory`
- * - Updating notification stores
- * - Sound/haptics feedback
- */
-
 type RemotePushData = { notificationId?: string; type?: string; relatedId?: string };
 
-/**
- * Handle notification received while app in foreground
- */
 export function setupNotificationReceivedHandler(): void {
   notificationService.onNotificationReceived(async (notification) => {
     try {
@@ -49,12 +33,6 @@ export function setupNotificationReceivedHandler(): void {
   });
 }
 
-/**
- * Handle notification interaction (tap) — opens the app's own notification
- * detail screen by id, same destination as tapping it from the in-app inbox
- * list, rather than trying to deep-link straight to a booking/chat/etc. for
- * every notification type.
- */
 export function setupNotificationInteractionHandler(): void {
   notificationService.onNotificationInteraction(async (notification) => {
     try {
@@ -81,10 +59,6 @@ export function setupNotificationInteractionHandler(): void {
   });
 }
 
-/**
- * Play haptic and/or sound feedback for notification, keyed off the same
- * booking/payment/review/message/system category the detail screens use.
- */
 async function playNotificationFeedback(type: string | undefined): Promise<void> {
   try {
     // Import haptics if available
@@ -109,9 +83,6 @@ async function playNotificationFeedback(type: string | undefined): Promise<void>
   }
 }
 
-/**
- * Clear notification badge on app focus
- */
 export async function clearNotificationBadge(): Promise<void> {
   try {
     await notificationService.setNotificationBadgeCount(0);
@@ -120,9 +91,6 @@ export async function clearNotificationBadge(): Promise<void> {
   }
 }
 
-/**
- * Update notification badge count
- */
 export async function updateNotificationBadge(): Promise<void> {
   try {
     const { unreadCount } = useNotificationStore.getState();

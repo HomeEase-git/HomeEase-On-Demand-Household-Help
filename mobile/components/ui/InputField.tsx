@@ -59,8 +59,6 @@ export const InputField = forwardRef<TextInput, Props>(
             className={`flex-1 text-text-primary ${
               multiline ? "min-h-[80px] text-top" : ""
             }`}
-            // A fixed height plus Android's built-in font padding clipped
-            // descenders and made the text scroll; let it size to the font.
             style={
               multiline
                 ? { includeFontPadding: false }
@@ -81,18 +79,11 @@ export const InputField = forwardRef<TextInput, Props>(
             keyboardType={keyboardType}
             autoCapitalize={autoCapitalize}
             returnKeyType={returnKeyType}
-            // "Next" jumps to the following field on screen by default, and
-            // keeps the keyboard up while it does so it doesn't flicker.
             onSubmitEditing={
               onSubmitEditing ??
               (returnKeyType === "next" ? () => KeyboardController.setFocusTo("next") : undefined)
             }
             submitBehavior={returnKeyType === "next" ? "submit" : undefined}
-            // Android's Autofill framework can hold a reference to this
-            // EditText and touch it (e.g. for a "Save password?" prompt)
-            // at the same moment Fabric tears the view down on navigation,
-            // which crashes with "specified child already has a parent".
-            // These forms don't rely on autofill, so just opt out of it.
             importantForAutofill="no"
           />
           {secureTextEntry && (

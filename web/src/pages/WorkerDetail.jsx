@@ -157,8 +157,6 @@ export default function WorkerDetail() {
   }
 
   const isSuspended = worker.accountStatus !== 'active'
-  // The worker took themselves off HomeEase; only they can reactivate (by
-  // signing in), so there's nothing to suspend or reinstate here.
   const isDeactivated = worker.accountStatus === 'deactivated'
 
   const handleToggleStatus = async () => {

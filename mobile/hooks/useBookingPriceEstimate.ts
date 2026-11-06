@@ -12,44 +12,10 @@ export type BookingPriceEstimate =
   | { mode: 'range'; range: PriceRange; unitLabel?: string | null }
   | { mode: 'point'; point: PricePointEstimate; unitLabel?: string | null };
 
-/**
- * Live pricing preview for the booking draft.
- *
- * - `point` mode: once Step 3's `selectWorker` has run, `draft.
- *   workerEstimatedTotal` holds that worker's exact computed price (the
- *   backend's real formula, including their real distance fee) — used
- *   directly as the labor cost so this can never show a different number
- *   than Step 3 did or than `POST /bookings` will actually charge.
- * - PER_UNIT task selected (`draft.selectedTaskPricingModel`): no flat
- *   total exists — `draft.workerUnitPrice` (once a worker's picked) or the
- *   admin's rate bounds (`categoryRange`, before that) is a RATE, not a
- *   total, so it's never fed through `estimatePricePoint`/`estimateRange`
- *   as-is. Multiplied by the draft quantity once both are known
- *   (real point total); shown as a bare rate, `unitLabel` set, otherwise.
- * - `range` mode otherwise: `categoryRange` should already be whichever
- *   spread is right for the current draft — a locked worker's own price
- *   range for the selected category (the worker-profile "Book Now" entry
- *   point resolves this before Step 3 ever runs), or the marketplace-wide
- *   category range for anyone else (plain browsing, or auto-match). Callers
- *   resolve which one that is (see step-1.tsx's `displayCategories`) rather
- *   than this hook, since the same resolved number needs to reach both the
- *   category tiles and this preview.
- *
- * Same-day ("rush") booking: a picked worker's numbers already include the
- * rush fee (the search is date-scoped). Before that, the range is raised by
- * the rush share of the service price.
- *
- * `tipOverride` lets a screen with its own live (not-yet-persisted-to-store)
- * tip state — e.g. step-4's TipSlider, which only writes back to the store
- * on confirm — feed that value in directly so the preview updates as the
- * user drags the slider, instead of showing the stale `draft.tip`.
- */
 export function useBookingPriceEstimate(
   categoryRange: PriceRange,
   addOnsTotal = 0,
   tipOverride?: number,
-  // Step 1's picked per-unit job and its quantity as it's typed, before Next
-  // saves them to the draft.
   perUnitOverride?: { quantity?: number; unitLabel?: string | null }
 ): BookingPriceEstimate {
   const draft = useBookingStore((s) => s.draft);
@@ -58,7 +24,6 @@ export function useBookingPriceEstimate(
   const quantityOverride = perUnitOverride ? (perUnitOverride.quantity ?? NaN) : undefined;
   const unitLabel = perUnitOverride ? perUnitOverride.unitLabel : draft.selectedTaskUnitLabel;
   const quantity = isPerUnit ? Number(quantityOverride ?? draft.quantity ?? NaN) : NaN;
-  // Matches the server: a per-unit job is booked for at least one unit.
   const hasQuantity = Number.isFinite(quantity) && quantity >= 1;
   const rushFactor = isRushDate(draft.date) ? 1 + RUSH_FEE_RATE : 1;
   const effectiveRange = { min: categoryRange.min * rushFactor, max: categoryRange.max * rushFactor };
@@ -84,15 +49,10 @@ export function useBookingPriceEstimate(
           point: estimatePricePoint({ laborCost: rate * quantity, addOnsTotal, tip }),
         };
       }
-      // Uses the worker's own rate once picked, else the admin bounds.
       const rateRange = rate != null ? { min: rate, max: rate } : effectiveRange;
-      // No worker yet (auto-match): the admin rate times the quantity is the
-      // estimate, the same way a fixed job shows its price before a worker.
       if (hasQuantity) {
         return { mode: 'range', range: estimateRange({ min: rateRange.min * quantity, max: rateRange.max * quantity }) };
       }
-      // No quantity entered yet — show the rate itself, labeled, rather than
-      // a misleading total.
       return { mode: 'range', range: estimateRange(rateRange), unitLabel };
     }
 
@@ -112,11 +72,6 @@ export function useBookingPriceEstimate(
   ]);
 }
 
-/**
- * The estimate for the draft as it stands, from the ranges Step 1 saved to
- * the store — the same inputs Step 4 uses — for steps that don't compute
- * their own (Steps 2-3's footer).
- */
 export function useDraftPriceEstimate(): BookingPriceEstimate | null {
   const draft = useBookingStore((s) => s.draft);
   const estimate = useBookingPriceEstimate({

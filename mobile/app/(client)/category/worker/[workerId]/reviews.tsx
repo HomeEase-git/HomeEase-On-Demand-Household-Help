@@ -50,7 +50,6 @@ export default function WorkerReviewsScreen() {
     };
   }, [workerId]);
 
-  // Without a rating param (e.g. a deep link), average the loaded reviews.
   const displayRating = rating
     ? Number(rating)
     : reviews.length

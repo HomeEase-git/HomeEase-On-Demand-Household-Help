@@ -1,7 +1,3 @@
-// Turns a category from prisma/seeds/data/jobOrderMatrix.json into the
-// payload the admin editor's catalog save takes (see
-// adminCatalogController.writeCatalog). Shared by seed-catalog.ts (fresh
-// databases) and scripts/applyJobMatrix.ts (live categories).
 import fs from 'fs';
 import path from 'path';
 import type { ServiceTask } from '@prisma/client';
@@ -13,7 +9,6 @@ export type MatrixJob = {
   pricingModel: 'FIXED' | 'PER_UNIT';
   price: number;
   replaces?: string;
-  // Per-unit only: the fewest/most units a client can book (default 1 / no maximum).
   minQuantity?: number;
   maxQuantity?: number;
 };
@@ -24,19 +19,11 @@ export function loadMatrix(): MatrixCategory[] {
   return (JSON.parse(fs.readFileSync(file, 'utf8')) as { categories: MatrixCategory[] }).categories;
 }
 
-/** Worker price range around the standard price: 80%–150%. */
 export const matrixBounds = (price: number) => ({ minPrice: Math.round(price * 0.8), maxPrice: Math.round(price * 1.5) });
 
-/** The category tile's starting price: its cheapest priced job. */
 export const matrixStartingPrice = (matrix: MatrixCategory) =>
   Math.min(...matrix.jobs.map((j) => j.price));
 
-/**
- * Builds the catalog save for `matrix`. A live job named in a row's
- * `replaces` keeps its id (renamed in place); live jobs with no row are kept
- * but switched off. `jobRef(i)` gives the ref of the i-th matrix job, for
- * looking up its real id in writeCatalog's taskIdByRef afterwards.
- */
 export function buildMatrixPayload(
   matrix: MatrixCategory,
   category: { name: string; description: string | null; icon: string | null; requiresCertification: boolean },
@@ -68,7 +55,6 @@ export function buildMatrixPayload(
     });
   }
 
-  // Live jobs with no row stay (bookings point at them) but are switched off.
   const unmatched = liveTasks.filter((t) => !usedLive.has(t.id));
   for (const live of unmatched) {
     tasks.push({

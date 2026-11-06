@@ -15,13 +15,7 @@ export interface JwtPayload {
   userId: string;
   email: string;
   role: string;
-  // Absent on a normal session token. 'mfa_pending' / 'otp_pending' mark a
-  // short-lived challenge token issued mid-login (authenticator app, or an
-  // email/SMS code — see authController.login) which authMiddleware must
-  // never accept as a real session (see middleware/auth.ts).
   type?: 'mfa_pending' | 'otp_pending';
-  // The signed-in device this token belongs to (AuthToken.sessionId). Absent
-  // on tokens minted before per-device sessions existed.
   sid?: string;
 }
 

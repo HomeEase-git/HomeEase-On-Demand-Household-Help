@@ -24,9 +24,6 @@ import {
 } from "../../utils/kycDocumentConfig";
 import { useAlertModal } from "../../contexts/AlertModalContext";
 
-// This screen only ever collects the government ID (front + back).
-// Selfie, clearances, resume, and certifications each have their own
-// screen further down the flow.
 const ID_KEYS: KycDocumentKey[] = ["governmentIdFront", "governmentIdBack"];
 
 type UploadedDocument = {
@@ -40,8 +37,6 @@ const initialDocuments: Partial<Record<KycDocumentKey, UploadedDocument>> = {
   governmentIdBack: { uri: null, mimeType: null, name: null },
 };
 
-// Given at sign-up; shown here again so the worker can check it matches
-// the ID (the admin compares the two at approval).
 function birthDateError(value: string): string | null {
   return validateWorkerBirthDate(value).error ?? null;
 }
@@ -59,7 +54,6 @@ export default function UploadIdScreen() {
   const isWorker = user?.role === "worker";
   const [documents, setDocuments] = useState(initialDocuments);
   const { pick } = useMediaPicker();
-  // The picked photo while it uploads, so the card can show it straight away.
   const [pending, setPending] = useState<{ key: KycDocumentKey; uri: string } | null>(null);
   const [birthDate, setBirthDate] = useState("");
   const [savingBirthDate, setSavingBirthDate] = useState(false);

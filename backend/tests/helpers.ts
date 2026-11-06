@@ -4,8 +4,6 @@ import prisma from '@config/database';
 import { ownerDb } from './ownerDb';
 import type { BookingStatus, Prisma, Role } from '@prisma/client';
 
-// All test-created accounts share this marker in the local part of the email
-// so a stray failed run is easy to spot and hand-clean in the DB if needed.
 export const TEST_EMAIL_MARKER = 'e2etest';
 
 export function testEmail(label: string): string {
@@ -39,11 +37,6 @@ export async function createTestUser(label: string, options: CreateTestUserOptio
   return { user, plainPassword };
 }
 
-// User has cascading deletes configured for its owned relations (profiles,
-// verification requests, etc.), so removing the user is enough cleanup.
-// Payments, payouts, refunds and dues are onDelete: Restrict (they're BIR
-// records), so a user or booking delete no longer cascades into them. Remove
-// them first, through the owner connection since dues rows are append-only.
 async function deleteMoneyRecords(bookingWhere: Prisma.BookingWhereInput) {
   const payment = { booking: bookingWhere };
   await ownerDb.payout.deleteMany({ where: { payment } });
@@ -56,7 +49,6 @@ export async function deleteTestUser(userId: string) {
   await ownerDb.booking.deleteMany({ where: { OR: [{ clientId: userId }, { workerId: userId }] } });
   await ownerDb.debtLedgerEntry.deleteMany({ where: { workerProfile: { userId } } });
   await prisma.user.delete({ where: { id: userId } }).catch(() => {
-    // Already deleted by the test itself (e.g. via a status-changing flow) — fine.
   });
 }
 
@@ -72,9 +64,6 @@ interface CreateTestBookingOptions {
   clientLng?: number;
 }
 
-// Seeds a Booking directly (bypassing POST /api/bookings, whose auto-match/
-// pricing-rule/worker-capacity setup is unrelated overhead for tests that
-// exercise a specific mid-lifecycle transition, not booking creation).
 export async function createTestBooking(options: CreateTestBookingOptions) {
   return prisma.booking.create({
     data: {
@@ -95,20 +84,11 @@ export async function createTestBooking(options: CreateTestBookingOptions) {
   });
 }
 
-// deleteTestUser cleans bookings up too — this is for tests that want to
-// tear a booking down independently mid-test.
 export async function deleteTestBooking(bookingId: string) {
   await deleteMoneyRecords({ id: bookingId });
   await prisma.booking.delete({ where: { id: bookingId } }).catch(() => {
-    // Already removed (e.g. cascaded from a user delete) — fine.
   });
 }
-// Fills in everything a worker must set up before they can be found,
-// booked or accept a request (see services/workerSetupService.ts): photo,
-// payout method, geocoded address, a weekly schedule and one
-// ticked task under a VERIFIED service. Pass serviceTypeId to register the
-// worker for an existing service; otherwise a throwaway one is created and
-// its id returned so the test can delete it (tasks/selections cascade).
 export async function completeWorkerSetup(
   workerUserId: string,
   options: { serviceTypeId?: string; lat?: number; lng?: number } = {}

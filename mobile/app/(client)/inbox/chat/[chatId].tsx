@@ -31,20 +31,14 @@ export default function ChatScreen() {
   const [sending, setSending] = useState(false);
   const { pickImage } = useMediaPicker();
   const listRef = useRef<FlatList>(null);
-  // Keep the newest message in view: on first load, when a message arrives,
-  // and when the keyboard opening makes the list shorter.
-  // Only while the user is already at the bottom, so reading older pages
-  // isn't yanked back down by an arriving message or a page loading above.
   const atBottomRef = useRef(true);
   const scrollToLatest = () => {
     if (atBottomRef.current) listRef.current?.scrollToEnd({ animated: false });
   };
-  // GET /messages/conversations/:userId pages newest first; page 1 is on screen.
   const [page, setPage] = useState(1);
   const [hasOlder, setHasOlder] = useState(false);
   const [loadingOlder, setLoadingOlder] = useState(false);
 
-  // While this chat is on screen, its incoming messages stay silent.
   const setOpenChatUserId = useMessageStore((s) => s.setOpenChatUserId);
   useFocusEffect(
     useCallback(() => {
@@ -105,9 +99,6 @@ export default function ChatScreen() {
     };
   }, [userId, setMessages]);
 
-  // Name, avatar and phone come from the conversation list. A first chat (from a
-  // booking or profile) isn't in it yet, so load it now and again after the
-  // first message creates it.
   const loadConversation = useCallback(() => {
     api.getConversations().then(setConversations).catch((e) => console.error("Load conversations error:", e));
   }, [setConversations]);
@@ -117,8 +108,6 @@ export default function ChatScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [userId]);
 
-  // Reactively mark the thread read whenever it changes (initial load or a
-  // live message pushed in over the socket while this screen is open).
   useEffect(() => {
     if (!userId) return;
     const hasUnreadIncoming = messages.some(

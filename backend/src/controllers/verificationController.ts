@@ -53,7 +53,6 @@ export const uploadVerificationDocuments = async (req: AuthRequest, res: Respons
       return res.status(400).json(errorResponse(400, 'At least one document file is required'));
     }
 
-    // The declared Content-Type is the client's claim; store what the bytes are.
     const fileTypes = files.map((file) => sniffMimeType(file.buffer));
     if (fileTypes.some((type) => !type || !ALLOWED_MIME_TYPES.has(type))) {
       return res.status(415).json(errorResponse(415, 'Upload a JPG, PNG or WEBP photo, or a PDF.'));
@@ -71,8 +70,6 @@ export const uploadVerificationDocuments = async (req: AuthRequest, res: Respons
 
     const uploadedDocs = await Promise.all(
       files.map(async (file, i) => {
-        // Normalise images (auto-orient + downscale + JPEG); leave PDFs alone.
-        // An UnsupportedImageError bubbles to the handler's catch → 415.
         let body: Buffer = file.buffer;
         let contentType = fileTypes[i]!;
         let extension = contentType.split('/')[1] || 'bin';
@@ -110,13 +107,6 @@ export const uploadVerificationDocuments = async (req: AuthRequest, res: Respons
 
     const requestType = user.role === 'WORKER' ? 'WORKER_ONBOARDING' : 'CLIENT_VERIFICATION';
 
-    // Reuse an existing open request for this user instead of always
-    // creating a new one — a single call can only tag its files with one
-    // documentType, so a full submission (ID front, ID back, selfie, ...)
-    // takes several calls; without this they'd fragment into a separate
-    // admin-reviewable card per call instead of one per applicant. Mirrors
-    // userController.submitKYCDocument's behavior on the worker-onboarding
-    // upload path.
     const openRequest = await prisma.verificationRequest.findFirst({
       where: { userId: user.id, type: requestType, status: { in: ['PENDING', 'SUBMITTED'] } },
       orderBy: { submittedAt: 'desc' },
@@ -139,8 +129,6 @@ export const uploadVerificationDocuments = async (req: AuthRequest, res: Respons
           await tx.kycDocument.createMany({
             data: uploadedDocs.map((doc) => ({ ...doc, verificationRequestId: openRequest.id })),
           });
-          // New evidence just arrived — re-flag for AI review rather than
-          // leaving a stale result from an earlier, incomplete submission.
           return tx.verificationRequest.update({
             where: { id: openRequest.id },
             data: { aiStatus: 'PENDING' },
@@ -158,18 +146,6 @@ export const uploadVerificationDocuments = async (req: AuthRequest, res: Respons
           include: { user: true, documents: true },
         });
 
-    // Best-effort — the VerificationRequest row and its documents (plus the
-    // actual Supabase file uploads above) already exist at this point, so a
-    // Redis hiccup here must not report this submission as failed: the user
-    // would otherwise likely resubmit, creating a duplicate request and
-    // re-uploading the same files. Worst case if this silently fails: the
-    // request sits at aiStatus PENDING until an admin notices and reruns it
-    // (see adminVerificationController.rerunVerification, which queues the
-    // exact same job).
-    //
-    // Reviews the FULL current document set on the request (not just this
-    // call's files) so a review triggered by, say, the third upload call
-    // still sees the first two documents too.
     await verificationQueue
       .add(
         'analyze-verification',
@@ -188,10 +164,6 @@ export const uploadVerificationDocuments = async (req: AuthRequest, res: Respons
       .catch((error) => {
         console.error(`Failed to queue AI review for verification ${verification.id}:`, error);
       });
-
-    // Uploading documents does not submit the application: kycStatus moves to
-    // SUBMITTED only when the worker accepts the Service Agreement and the
-    // completeness checks pass (userController.acceptContract).
 
     return res.status(201).json({
       success: true,

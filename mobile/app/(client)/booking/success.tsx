@@ -39,7 +39,6 @@ export default function BookingSuccessScreen() {
   const [cancelling, setCancelling] = useState(false);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  // Android back would return to an emptied Step 4; go Home instead.
   useEffect(() => {
     const sub = BackHandler.addEventListener("hardwareBackPress", () => {
       router.replace("/(client)/home");
@@ -49,8 +48,6 @@ export default function BookingSuccessScreen() {
   }, [router]);
 
   useEffect(() => {
-    // The check pops in with a little overshoot, then two soft rings ripple
-    // out behind it before the text fades in.
     Animated.spring(scaleAnim, { toValue: 1, friction: 5, tension: 80, useNativeDriver: true }).start();
     Animated.sequence([
       Animated.delay(250),
@@ -61,10 +58,6 @@ export default function BookingSuccessScreen() {
     Animated.timing(opacityAnim, { toValue: 1, duration: 500, delay: 350, useNativeDriver: true }).start();
   }, [scaleAnim, opacityAnim, ringAnim]);
 
-  // Status tracker: poll booking detail every 5s until it reaches a terminal
-  // status. This also resolves the real worker (id + name), which the
-  // creation response doesn't include when the booking was auto-matched.
-  // Focus-scoped so it stops once another screen covers this one.
   const bookingId = selectedBooking?.id;
   useFocusEffect(
     useCallback(() => {
@@ -77,8 +70,6 @@ export default function BookingSuccessScreen() {
         const data = await api.getBookingDetail(bookingId);
         if (cancelled) return;
         setDetail(data);
-        // The server lets a client cancel only while the request is still
-        // PENDING; once a worker accepts, the window is closed.
         setCanCancel(data.status === "PENDING");
         if (TERMINAL_STATUSES.includes(data.status) && pollRef.current) {
           clearInterval(pollRef.current);
@@ -139,10 +130,6 @@ export default function BookingSuccessScreen() {
       alertModal.info("Not scheduled yet", "We'll have your exact date/time once your worker is confirmed.");
       return;
     }
-    // No native calendar module is wired into this app (no expo-calendar
-    // dependency) — opens Google Calendar's web event-creation page instead,
-    // which needs no native permissions/rebuild and works cross-platform.
-    // scheduledDate is the PH day at UTC midnight; the real start is date + time (PH).
     const startTime = detail.scheduledTime ?? selectedBooking?.time;
     const start = startTime
       ? startInstant(detail.scheduledDate.slice(0, 10), startTime)
@@ -183,7 +170,6 @@ export default function BookingSuccessScreen() {
 
         <Animated.View style={{ opacity: opacityAnim, width: "100%" }}>
           <Text className="text-text-primary text-3xl font-bold text-center mb-2">
-            {/* Only "confirmed" once a worker has actually accepted; until then it's a request. */}
             {detail?.status === "ACCEPTED" ? "Booking confirmed!" : "Request sent!"}
           </Text>
           <Text className="text-text-secondary text-center text-base mb-8">

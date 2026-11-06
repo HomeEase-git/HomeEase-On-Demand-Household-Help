@@ -26,10 +26,6 @@ interface AuthRequest extends Request {
   user?: JwtPayload;
 }
 
-/**
- * GET /api/users/me
- * Get current user profile
- */
 export const getUserProfile = async (req: AuthRequest, res: Response) => {
   try {
     if (!req.user) {
@@ -76,23 +72,11 @@ export const getUserProfile = async (req: AuthRequest, res: Response) => {
       message: 'Profile retrieved successfully',
       data: {
         ...userFields,
-        // Used by the mobile app to gate worker access behind admin approval.
         kycStatus,
-        // The admin's actual reason, so a rejected worker isn't shown a
-        // generic canned message regardless of why they were rejected.
         kycRejectionReason: kycStatus === 'REJECTED' ? (verificationRequests[0]?.rejectionReason ?? null) : undefined,
-        // Gates the client-agreement screen — undefined for workers, who
-        // have their own contract flow tied to KYC instead.
         hasAcceptedTerms: user.role === 'CLIENT' ? contractAcceptances.length > 0 : undefined,
-        // Worker decline-limit cooldown — undefined/null unless currently
-        // excluded from auto-match (see matchingService.findAutoMatchWorker).
         declineCooldownUntil:
           user.role === 'WORKER' ? (workerProfile?.declineCooldownUntil ?? null) : undefined,
-        // Drives the mobile app's account-hold banner — undefined for
-        // clients, null for a worker in good standing (see
-        // debtLedgerService.ts for how/why this gets set).
-        // What the worker currently owes HomeEase (platform commission on cash
-        // jobs, penalties) — shown on the earnings page; undefined for clients.
         platformDues: user.role === 'WORKER' ? Math.max(0, workerProfile?.commissionOwed ?? 0) : undefined,
         accountHold:
           user.role === 'WORKER' && workerProfile?.debtHoldAt
@@ -108,10 +92,6 @@ export const getUserProfile = async (req: AuthRequest, res: Response) => {
   }
 };
 
-/**
- * PATCH /api/users/me
- * Update user profile
- */
 export const updateUserProfile = async (req: AuthRequest, res: Response) => {
   try {
     if (!req.user) {
@@ -148,10 +128,6 @@ export const updateUserProfile = async (req: AuthRequest, res: Response) => {
   }
 };
 
-/**
- * POST /api/users/me/change-password
- * Change password
- */
 export const changePassword = async (req: AuthRequest, res: Response) => {
   try {
     if (!req.user) {
@@ -186,11 +162,6 @@ export const changePassword = async (req: AuthRequest, res: Response) => {
       data: { password: hashedPassword },
     });
 
-    // Sign out every other device, in case the change was prompted by a
-    // compromised session. This device stays signed in (with short-lived
-    // access tokens it needs its refresh token to keep working). A token
-    // from before per-device sessions can't tell devices apart, so then
-    // every refresh token goes.
     if (req.user.sid) {
       await revokeOtherSessions(req.user.userId, req.user.sid);
     } else {
@@ -209,11 +180,6 @@ export const changePassword = async (req: AuthRequest, res: Response) => {
   }
 };
 
-/**
- * GET /api/users/me/sessions
- * How many devices are signed in to this account — the app only offers
- * "Log out other devices" when there's more than one.
- */
 export const getSessions = async (req: AuthRequest, res: Response) => {
   try {
     if (!req.user) {
@@ -227,14 +193,6 @@ export const getSessions = async (req: AuthRequest, res: Response) => {
   }
 };
 
-/**
- * POST /api/users/me/logout-all
- * Signs out every OTHER device: their refresh tokens are deleted and their
- * current access tokens stop working right away (see sessionService). This
- * device stays signed in. An access token from before per-device sessions
- * can't tell which device it is, so then every device (this one included)
- * is signed out.
- */
 export const logoutOtherSessions = async (req: AuthRequest, res: Response) => {
   try {
     if (!req.user) {
@@ -273,8 +231,6 @@ export const logoutOtherSessions = async (req: AuthRequest, res: Response) => {
   }
 };
 
-// Bookings that still need the worker — they can't deactivate until these
-// are finished, cancelled or declined.
 const DEACTIVATION_BLOCKING_STATUSES = [
   'PENDING',
   'ACCEPTED',
@@ -286,13 +242,6 @@ const DEACTIVATION_BLOCKING_STATUSES = [
   'AWAITING_PAYMENT',
 ] as const;
 
-/**
- * POST /api/users/me/deactivate
- * Body: { password, reason? } — a worker takes a break from HomeEase without
- * deleting anything: they disappear from search, can't be booked, and are
- * signed out everywhere. Signing in again offers to reactivate
- * (authController.reactivateAccount). Not allowed while a job is still open.
- */
 export const deactivateAccount = async (req: AuthRequest, res: Response) => {
   try {
     if (!req.user || req.user.role !== 'WORKER') {
@@ -350,14 +299,8 @@ export const deactivateAccount = async (req: AuthRequest, res: Response) => {
   }
 };
 
-// Typed by the user as the final confirmation of a deletion.
 const DELETE_CONFIRMATION_TEXT = 'DELETE MY ACCOUNT';
 
-/**
- * POST /api/users/me/delete-code
- * Step 2 of deleting the account: checks nothing blocks it, then emails a
- * one-time code the final DELETE /users/me needs.
- */
 export const sendDeletionCode = async (req: AuthRequest, res: Response) => {
   try {
     if (!req.user) {
@@ -382,9 +325,6 @@ export const sendDeletionCode = async (req: AuthRequest, res: Response) => {
   }
 };
 
-/**
- * GET /api/users/me/addresses
- */
 export const getAddresses = async (req: AuthRequest, res: Response) => {
   try {
     if (!req.user) {
@@ -416,8 +356,6 @@ type AddressParts = {
   zipCode?: string | null;
 };
 
-// For older app versions that send only the split fields — builds the same
-// one-line address the backfill migration produced, so every row has one.
 const composeFullAddress = (parts: AddressParts): string | null => {
   const clean = (v?: string | null) => (v && v.trim() ? v.trim() : null);
   const line = [
@@ -431,9 +369,6 @@ const composeFullAddress = (parts: AddressParts): string | null => {
   return line || null;
 };
 
-/**
- * POST /api/users/me/addresses
- */
 export const createAddress = async (req: AuthRequest, res: Response) => {
   try {
     if (!req.user) {
@@ -475,9 +410,6 @@ export const createAddress = async (req: AuthRequest, res: Response) => {
   }
 };
 
-/**
- * PATCH /api/users/me/addresses/:addressId
- */
 export const updateAddress = async (req: AuthRequest, res: Response) => {
   try {
     if (!req.user) {
@@ -507,7 +439,6 @@ export const updateAddress = async (req: AuthRequest, res: Response) => {
     if (typeof fullAddress === 'string') {
       updateData.fullAddress = fullAddress.trim();
     } else if ([street, city, state, zipCode, houseNumber, barangay].some((v) => v !== undefined)) {
-      // An older app edited the split fields — keep the one-line address in step.
       updateData.fullAddress = composeFullAddress({
         houseNumber: houseNumber !== undefined ? houseNumber : address.houseNumber,
         street: street !== undefined ? street : address.street,
@@ -540,9 +471,6 @@ export const updateAddress = async (req: AuthRequest, res: Response) => {
   }
 };
 
-/**
- * DELETE /api/users/me/addresses/:addressId
- */
 export const deleteAddress = async (req: AuthRequest, res: Response) => {
   try {
     if (!req.user) {
@@ -573,9 +501,6 @@ export const deleteAddress = async (req: AuthRequest, res: Response) => {
   }
 };
 
-/**
- * PATCH /api/users/me/addresses/:addressId/set-default
- */
 export const setDefaultAddress = async (req: AuthRequest, res: Response) => {
   try {
     if (!req.user) {
@@ -612,9 +537,6 @@ export const setDefaultAddress = async (req: AuthRequest, res: Response) => {
   }
 };
 
-/**
- * GET /api/users/me/payment-methods
- */
 export const getPaymentMethods = async (req: AuthRequest, res: Response) => {
   try {
     if (!req.user) {
@@ -644,9 +566,6 @@ export const getPaymentMethods = async (req: AuthRequest, res: Response) => {
   }
 };
 
-/**
- * POST /api/users/me/payment-methods
- */
 export const addPaymentMethod = async (req: AuthRequest, res: Response) => {
   try {
     if (!req.user) {
@@ -687,9 +606,6 @@ export const addPaymentMethod = async (req: AuthRequest, res: Response) => {
   }
 };
 
-/**
- * PATCH /api/users/me/payment-methods/:methodId
- */
 export const updatePaymentMethod = async (req: AuthRequest, res: Response) => {
   try {
     if (!req.user) {
@@ -724,9 +640,6 @@ export const updatePaymentMethod = async (req: AuthRequest, res: Response) => {
   }
 };
 
-/**
- * PATCH /api/users/me/payment-methods/:methodId/set-default
- */
 export const setDefaultPaymentMethod = async (req: AuthRequest, res: Response) => {
   try {
     if (!req.user) {
@@ -765,9 +678,6 @@ export const setDefaultPaymentMethod = async (req: AuthRequest, res: Response) =
   }
 };
 
-/**
- * DELETE /api/users/me/payment-methods/:methodId
- */
 export const deletePaymentMethod = async (req: AuthRequest, res: Response) => {
   try {
     if (!req.user) {
@@ -798,9 +708,6 @@ export const deletePaymentMethod = async (req: AuthRequest, res: Response) => {
   }
 };
 
-/**
- * PATCH /api/users/me/notification-preferences
- */
 export const updateNotificationPreferences = async (req: AuthRequest, res: Response) => {
   try {
     if (!req.user) {
@@ -845,16 +752,12 @@ export const updateNotificationPreferences = async (req: AuthRequest, res: Respo
 };
 
 
-/**
- * GET /api/users/me/kyc-documents
- */
 export const getKYCDocuments = async (req: AuthRequest, res: Response) => {
   try {
     if (!req.user) {
       return res.status(401).json(errorResponse(401, 'Not authenticated'));
     }
     
-    // KycDocument has no userId field — it hangs off VerificationRequest
     const documents = await prisma.kycDocument.findMany({
       where: { verificationRequest: { userId: req.user.userId } },
       orderBy: { createdAt: 'desc' },
@@ -871,17 +774,12 @@ export const getKYCDocuments = async (req: AuthRequest, res: Response) => {
   }
 };
 
-/**
- * POST /api/users/me/kyc-documents
- */
 export const submitKYCDocument = async (req: AuthRequest, res: Response) => {
   try {
     if (!req.user) {
       return res.status(401).json(errorResponse(401, 'Not authenticated'));
     }
     
-    // validateSubmitKYCDocument has already checked documentType is one of
-    // KYC_DOCUMENT_TYPES and documentUrl is a non-empty string.
     const { documentType, originalName, fileSize } = req.body as {
       documentType: KycDocumentType;
       documentUrl: string;
@@ -893,8 +791,6 @@ export const submitKYCDocument = async (req: AuthRequest, res: Response) => {
       return res.status(400).json(errorResponse(400, 'That file does not belong to your account. Please upload it again.'));
     }
 
-    // KycDocument has no userId field — it must belong to a VerificationRequest.
-    // Reuse the user's open request if one exists, otherwise start a new one.
     let verificationRequest = await prisma.verificationRequest.findFirst({
       where: {
         userId: req.user.userId,
@@ -923,10 +819,6 @@ export const submitKYCDocument = async (req: AuthRequest, res: Response) => {
       });
     }
 
-    // The upload step (POST .../kyc-documents/upload) discards the mime type;
-    // re-derive it from the Supabase URL's extension so the AI review
-    // (verificationAiService) can actually see this document and the admin UI
-    // can render a preview. Client-supplied values are not trusted here.
     const document = await prisma.kycDocument.create({
       data: {
         verificationRequestId: verificationRequest.id,
@@ -940,10 +832,6 @@ export const submitKYCDocument = async (req: AuthRequest, res: Response) => {
       },
     });
 
-    // Kick off (or re-run) the automated review over the request's FULL current
-    // document set — mirrors verificationController.uploadVerificationDocuments.
-    // Best-effort: the row already exists, so a Redis hiccup must not fail the
-    // submission; an admin can re-run from adminVerificationController.
     const withDocuments = await prisma.verificationRequest.update({
       where: { id: verificationRequest.id },
       data: { aiStatus: 'PENDING' },
@@ -980,9 +868,6 @@ export const submitKYCDocument = async (req: AuthRequest, res: Response) => {
   }
 };
 
-/**
- * POST /api/users/me/contract-acceptance
- */
 export const acceptContract = async (req: AuthRequest, res: Response) => {
   try {
     if (!req.user) {
@@ -991,8 +876,6 @@ export const acceptContract = async (req: AuthRequest, res: Response) => {
     
     const { contractType, contractVersion } = req.body as { contractType: ContractType; contractVersion?: string };
 
-    // Workers accept the Service Agreement and the KYC consent; clients the
-    // User Agreement. Either may acknowledge the Privacy Notice.
     const allowedForRole: Record<string, ContractType[]> = {
       CLIENT: ['CLIENT_USER_AGREEMENT', 'PRIVACY_NOTICE'],
       WORKER: ['WORKER_SERVICE_AGREEMENT', 'KYC_CONSENT', 'PRIVACY_NOTICE'],
@@ -1001,14 +884,6 @@ export const acceptContract = async (req: AuthRequest, res: Response) => {
       return res.status(400).json(errorResponse(400, `${contractType} does not apply to this account`));
     }
 
-    // Accepting the Service Agreement is what submits a worker's application,
-    // so the application has to be complete BEFORE the acceptance is recorded.
-    // A worker with no open request at all (nothing uploaded yet) is treated
-    // as missing everything — the checks must not depend on a request existing.
-    // Only an already-approved worker is just re-accepting. A worker who is
-    // merely marked SUBMITTED is not exempt: the old upload endpoint used to set
-    // that after a single file, so it can't be taken as proof of a complete
-    // application — the documents themselves are checked.
     let submittingRequest: { id: string; needsFlip: boolean } | null = null;
     if (req.user.role === 'WORKER' && contractType === 'WORKER_SERVICE_AGREEMENT') {
       const profile = await prisma.workerProfile.findUnique({
@@ -1045,8 +920,6 @@ export const acceptContract = async (req: AuthRequest, res: Response) => {
           return res.status(400).json(errorResponse(400, 'Please enter your years of experience on the resume step before submitting.'));
         }
 
-        // missingTypes was empty, so a request exists. Re-accepting while
-        // already submitted changes nothing (and keeps kycSubmittedAt).
         if (verificationRequest) {
           submittingRequest = {
             id: verificationRequest.id,
@@ -1056,9 +929,6 @@ export const acceptContract = async (req: AuthRequest, res: Response) => {
       }
     }
 
-    // Evidence of acceptance (E-Commerce Act, RA 8792): the server's own
-    // timestamp, the exact document version shown, and where it came from.
-    // Requires TRUST_PROXY behind Render so req.ip is the client, not the proxy.
     const acceptance = await prisma.contractAcceptance.create({
       data: {
         userId: req.user.userId,
@@ -1070,11 +940,6 @@ export const acceptContract = async (req: AuthRequest, res: Response) => {
       },
     });
 
-    // Contract acceptance is the last step of worker onboarding — flip the
-    // open verification request (and the denormalized WorkerProfile status)
-    // to SUBMITTED so it surfaces for admin review and the app can gate the
-    // worker into the waiting screen instead of the tabs. The application was
-    // validated as complete above.
     if (submittingRequest?.needsFlip) {
       await prisma.$transaction([
         prisma.verificationRequest.update({
@@ -1099,18 +964,12 @@ export const acceptContract = async (req: AuthRequest, res: Response) => {
   }
 };
 
-/**
- * DELETE /api/users/me
- */
 export const deleteAccount = async (req: AuthRequest, res: Response) => {
   try {
     if (!req.user) {
       return res.status(401).json(errorResponse(401, 'Not authenticated'));
     }
 
-    // Final step of a deliberately slow flow (see the app's delete screen):
-    // the password, the emailed code from POST /me/delete-code, and the
-    // confirmation phrase typed out in full.
     const { password, code, confirmText, reason } = req.body as {
       password?: string;
       code?: string;
@@ -1161,8 +1020,6 @@ export const deleteAccount = async (req: AuthRequest, res: Response) => {
       message: `User deleted their account${reason?.trim() ? `: ${reason.trim().slice(0, 500)}` : ''}`,
     });
 
-    // Anonymizes the account and removes personal data and files; keeps
-    // bookings, payments and tax records (see accountDeletionService).
     await eraseAccount(req.user.userId, JWT_EXPIRY);
 
     return res.status(200).json({
@@ -1176,10 +1033,6 @@ export const deleteAccount = async (req: AuthRequest, res: Response) => {
   }
 };
 
-/**
- * GET /api/users/me/reviews
- * Get reviews the current client has written
- */
 export const getMyReviews = async (req: AuthRequest, res: Response) => {
   try {
     if (!req.user) {

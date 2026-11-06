@@ -29,8 +29,6 @@ export async function toggleServiceTypeActive(id, isActive) {
   return response.data;
 }
 
-// Whole-category save from the job order editor (details + jobs + each job's
-// questions). id = null creates a new category.
 export async function saveServiceCatalog(id, payload) {
   const response = await apiRequest(id ? `/admin/service-types/${id}/catalog` : '/admin/service-types/catalog', {
     method: id ? 'PUT' : 'POST',
@@ -39,7 +37,6 @@ export async function saveServiceCatalog(id, payload) {
   return response.data;
 }
 
-// Background photo for a service (shown blurred in the app). Returns its public URL.
 export async function uploadServiceBackground(file) {
   const body = new FormData();
   body.append('image', file);

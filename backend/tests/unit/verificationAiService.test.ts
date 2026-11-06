@@ -1,12 +1,8 @@
-// Unit test for the AI-review document selection / block-building logic.
-// Prisma and the network are mocked — no DB, no real Anthropic call.
-
 const mockUpdate = jest.fn().mockResolvedValue({});
 jest.mock('@config/database', () => ({
   __esModule: true,
   default: {
     verificationRequest: { update: mockUpdate },
-    // jestSetupAfterEnv.ts (this file's context too) calls this in afterAll.
     $disconnect: jest.fn().mockResolvedValue(undefined),
   },
 }));
@@ -33,7 +29,6 @@ function doc(overrides: Partial<VerificationJobDocument> = {}): VerificationJobD
   };
 }
 
-/** fetch stub: doc URLs return bytes, the Anthropic URL returns a canned review. */
 function stubFetch(reviewText = 'Documents look legitimate. No concerns.\nCONFIDENCE: 0.90') {
   return jest.fn(async (url: string) => {
     if (url === ANTHROPIC_URL) {
@@ -144,7 +139,6 @@ describe('verificationAiService.analyzeVerificationDocuments', () => {
     expect(result.aiError).toMatch(/not sent for AI review/i);
 
     const content = lastAnthropicBody(fetchMock).messages[0].content;
-    // 1 text block + 12 document blocks (MAX_DOCS_REVIEWED)
     expect(content.length).toBe(13);
   });
 

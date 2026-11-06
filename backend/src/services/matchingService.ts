@@ -4,19 +4,12 @@ import { offersTaskFilter } from '@services/taskPriceService';
 import { workerSetupCompleteWhere } from '@services/workerSetupService';
 import { availableOnDateWhere } from '@services/workerAvailabilityService';
 
-// Fallback when a worker hasn't set WorkerProfile.serviceAreaRadius (it has
-// a DB default, but stay defensive for any row created before that default
-// existed).
 const DEFAULT_SERVICE_AREA_RADIUS_KM = 30;
 
 export interface MatchCandidate {
   workerId: string;
   rating: number;
   completedJobs: number;
-  // Count of this worker's recent late cancellations (see B6 /
-  // Cancellation.cancelledWithinHours) within LATE_CANCEL_LOOKBACK_DAYS.
-  // Optional — omitted/0 for callers (and existing tests) that don't track
-  // it, in which case it applies no penalty.
   lateCancelCount?: number;
 }
 
@@ -24,40 +17,19 @@ export interface ScoredCandidate extends MatchCandidate {
   score: number;
 }
 
-// 60% rating, 30% completed jobs, 10% randomness — per the "surprise-me"
-// auto-match spec. Distance isn't a scoring factor (rating stays the
-// dominant signal among in-range candidates), but it IS a hard eligibility
-// filter — see findAutoMatchWorker's serviceAreaRadius check below, which
-// uses WorkerProfile.addressLat/addressLng (the worker's fixed service
-// base, already used for the booking distanceFee) rather than the earlier,
-// since-removed currentLat/currentLng approach, which was live-location
-// data no client ever actually populated. All scoring factors are
-// normalized to [0, 1] before weighting so none of them can dominate purely
-// from having a wider natural range (e.g. completedJobs is unbounded,
-// rating is capped at 5).
 export const MATCH_WEIGHTS = {
   rating: 0.6,
   completedJobs: 0.3,
   randomness: 0.1,
 } as const;
 
-// A cancellation counts as "late" (see cancelBooking's cancelledWithinHours)
-// under this many hours of notice.
 export const LATE_CANCEL_THRESHOLD_HOURS = 24;
-// Only recent history counts — an old rough patch shouldn't permanently
-// suppress a worker's ranking.
 export const LATE_CANCEL_LOOKBACK_DAYS = 90;
-// Subtracted from the weighted score (not part of the 100% above — this is
-// a penalty, not a positive signal), scaled up to this many incidents.
 export const LATE_CANCEL_PENALTY_WEIGHT = 0.15;
 export const LATE_CANCEL_PENALTY_CAP = 3;
 
 const clamp01 = (n: number): number => Math.min(1, Math.max(0, n));
 
-/**
- * Pure scoring function — no I/O, so it's directly unit-testable and the
- * randomness source is injectable for deterministic tests.
- */
 export function scoreCandidates(
   candidates: MatchCandidate[],
   random: () => number = Math.random
@@ -82,11 +54,6 @@ export function scoreCandidates(
   });
 }
 
-/**
- * Picks the highest-scoring candidate. Ties resolve to whichever candidate
- * was scored first (stable — callers can pre-sort candidates by a secondary
- * key, e.g. workerId, for deterministic tie-breaking).
- */
 export function selectBestCandidate(
   candidates: MatchCandidate[],
   random: () => number = Math.random
@@ -103,11 +70,6 @@ export interface AutoMatchParams {
   date: Date;
   hasPets?: boolean;
   excludeWorkerIds?: string[];
-  // Booking address — when given (and a candidate has WorkerProfile.
-  // addressLat/addressLng on file), candidates farther than that worker's
-  // own serviceAreaRadius are dropped before scoring. Optional so a caller
-  // without coordinates gets the old unfiltered-by-distance behavior rather
-  // than an error.
   clientLat?: number | null;
   clientLng?: number | null;
 }
@@ -118,16 +80,6 @@ export interface AutoMatchResult {
   score: number;
 }
 
-/**
- * DB-backed candidate lookup + selection for "surprise me" bookings (no
- * workerId supplied by the client). A worker is only a candidate if:
- *  - KYC approved and currently marked available
- *  - offers the requested serviceType
- *  - available on the date (weekly schedule + date overrides, see
- *    workerAvailabilityService.availableOnDateWhere)
- *  - accepts pets if the booking involves pets
- *  - not in excludeWorkerIds (declined workers on a re-match attempt)
- */
 export async function findAutoMatchWorker(params: AutoMatchParams): Promise<AutoMatchResult | null> {
   const {
     serviceType,
@@ -139,21 +91,13 @@ export async function findAutoMatchWorker(params: AutoMatchParams): Promise<Auto
     clientLng,
   } = params;
 
-  // A specific task is only bookable through a worker who has ticked it as
-  // one they do (WorkerTaskSelection). Prices are admin-set, so there's
-  // nothing per-worker to check beyond that.
   const workers = await prisma.workerProfile.findMany({
     where: {
       kycStatus: 'APPROVED',
       isAvailable: true,
       debtHoldAt: null,
       userId: excludeWorkerIds.length > 0 ? { notIn: excludeWorkerIds } : undefined,
-      // Excludes workers currently serving a decline-limit cooldown (see
-      // bookingController.declineBooking) from auto-match candidates.
       OR: [{ declineCooldownUntil: null }, { declineCooldownUntil: { lte: new Date() } }],
-      // Only a VERIFIED category connection counts — a 2nd+ category still
-      // PENDING_VERIFICATION (see WorkerServiceCategory's docblock) must
-      // never surface in auto-match.
       serviceCategories: { some: { status: 'VERIFIED', serviceType: { name: { equals: serviceType, mode: 'insensitive' } } } },
       ...(hasPets ? { acceptsPets: true } : {}),
       ...(serviceTaskId ? offersTaskFilter(serviceTaskId) : {}),
@@ -169,13 +113,6 @@ export async function findAutoMatchWorker(params: AutoMatchParams): Promise<Auto
     },
   });
 
-  // Hard eligibility cutoff — a worker outside their own configured service
-  // radius (default 30km) from the booking address never becomes a
-  // candidate, so a far-flung worker can't out-rank a nearby one purely on
-  // rating (see matchingService docblock above). Only applied where both
-  // sides of the distance are actually known; a worker with no address on
-  // file yet is left in the pool unfiltered, same as the distanceFee
-  // calculation already treats that case.
   const inRangeWorkers =
     clientLat != null && clientLng != null
       ? workers.filter((w) => {
@@ -197,12 +134,6 @@ export async function findAutoMatchWorker(params: AutoMatchParams): Promise<Auto
   });
   const completedByWorkerId = new Map(completedCounts.map((c) => [c.workerId as string, c._count._all]));
 
-  // penalizedWorkerId is resolved once at cancellation time (see
-  // Cancellation's schema comment) — covers both a worker self-reporting
-  // fault on a late cancel (the old cancelledBy='WORKER' condition this
-  // replaces) AND a client cancelling because THIS worker never showed up
-  // at all, which the old query could never attribute to the worker since
-  // cancelledById would be the client's id in that case.
   const lateCancelSince = new Date(Date.now() - LATE_CANCEL_LOOKBACK_DAYS * 24 * 60 * 60 * 1000);
   const lateCancelCounts = await prisma.cancellation.groupBy({
     by: ['penalizedWorkerId'],

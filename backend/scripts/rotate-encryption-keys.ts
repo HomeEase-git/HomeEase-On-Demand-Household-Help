@@ -1,29 +1,3 @@
-// Finishes an encryption-key rotation: re-encrypts every value still under the
-// previous key with the current one.
-// See docs/SECRETS.md for the full procedure. Idempotent — values already under
-// the current key are skipped, so it's safe to re-run.
-//
-// Covers DATA_ENCRYPTION_KEY: WorkerProfile.payoutAccountNumber,
-// Payout.accountNumber; and
-// MFA_ENCRYPTION_KEY: MfaSecret.secretEncrypted.
-//
-// Usage (from backend/), with the SAME env values the deployed backend now has:
-//   DATA_ENCRYPTION_KEY=<new> DATA_ENCRYPTION_KEY_PREVIOUS=<old> \
-//     npx tsx scripts/rotate-encryption-keys.ts --dry    # report only
-//   ...same...  npx tsx scripts/rotate-encryption-keys.ts  # apply
-//   (MFA_ENCRYPTION_KEY / MFA_ENCRYPTION_KEY_PREVIOUS the same way.)
-//   add --user <id>  (repeatable) to touch only those users' rows, e.g. to
-//     re-run one account, or to run against a shared dev database.
-//   add --neon-websocket  to connect through Neon's WebSocket proxy (port 443)
-//     when the network blocks raw Postgres connections to Neon; needs
-//     `npm i --no-save @prisma/adapter-neon @neondatabase/serverless ws`.
-//
-// Safety:
-// - Everything is planned first; if any value decrypts with neither key, the
-//   script lists them and writes nothing.
-// - Each write only applies if the row still holds the value that was read,
-//   so a worker saving new details mid-run is never overwritten (that row is
-//   reported; re-run to pick it up).
 import 'dotenv/config';
 import { PrismaClient } from '@prisma/client';
 import { PrismaPg } from '@prisma/adapter-pg';
@@ -33,7 +7,6 @@ import { decryptField, encryptField, isEncryptedField, isUnderPreviousDataKey } 
 
 const DRY_RUN = process.argv.includes('--dry');
 const NEON_WEBSOCKET = process.argv.includes('--neon-websocket');
-// --user <id>, repeatable: only these users' rows (all rows when absent).
 const USER_IDS: string[] = [];
 process.argv.forEach((arg, i) => {
   if (arg !== '--user') return;
@@ -78,7 +51,6 @@ interface PlannedUpdate {
   table: Table;
   id: string;
   label: string;
-  /** Column values the row must still hold for the write to apply. */
   expect: Record<string, string | null>;
   data: Record<string, string>;
 }
@@ -86,7 +58,6 @@ interface PlannedUpdate {
 const unreadable: string[] = [];
 const planned: PlannedUpdate[] = [];
 
-/** New ciphertext if `stored` is under the previous data key; undefined if it needs nothing. */
 function reencryptField(stored: string | null, label: string): string | undefined {
   if (!stored || !isEncryptedField(stored)) return undefined;
   try {
@@ -149,10 +120,8 @@ async function planMfaKey() {
   }
 }
 
-/** Writes one planned update if the row is unchanged; returns what happened. */
 async function apply(update: PlannedUpdate): Promise<'updated' | 'changed'> {
   const where = { id: update.id, ...update.expect };
-  // Dynamic model access: every Table has id + the string columns used here.
   const delegate = (prisma as unknown as Record<Table, { updateMany: (args: object) => Promise<{ count: number }> }>)[update.table];
   const { count } = await delegate.updateMany({ where, data: update.data });
   return count === 1 ? 'updated' : 'changed';

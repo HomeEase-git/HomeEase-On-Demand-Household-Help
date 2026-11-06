@@ -1,7 +1,6 @@
 import { useMemo, useState } from 'react'
 import { SERVICE_ICON_GROUPS, msIconFor } from '../../constants/serviceIcons'
 
-/** Trigger button showing the current selection — opens the grid picker modal on click. */
 export default function IconPicker({ value, onChange }) {
   const [open, setOpen] = useState(false)
   const [search, setSearch] = useState('')

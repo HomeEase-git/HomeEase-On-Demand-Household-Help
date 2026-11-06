@@ -7,9 +7,6 @@ import {
   googleSearchAddresses,
 } from '@services/googlePlacesService';
 
-// Every Google call is a plain global fetch — stub it per test and assert on
-// both the request we send (endpoint, headers, body) and how the response is
-// mapped, without touching the network.
 const fetchMock = jest.fn();
 const originalFetch = global.fetch;
 const originalKey = process.env.GOOGLE_MAPS_API_KEY;
@@ -95,7 +92,6 @@ describe('Routes API — computeRouteMatrix (googleDistanceService)', () => {
 
 describe('Routes API — computeRoutes (googleDirectionsService)', () => {
   it('decodes the polyline and converts distance/duration', async () => {
-    // Google's documented sample polyline: (38.5,-120.2) (40.7,-120.95) (43.252,-126.453)
     respond({
       routes: [{ distanceMeters: 5400, duration: '900s', polyline: { encodedPolyline: '_p~iF~ps|U_ulLnnqC_mqNvxq`@' } }],
     });

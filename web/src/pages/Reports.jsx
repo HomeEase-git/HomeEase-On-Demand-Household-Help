@@ -43,8 +43,6 @@ const EXPORT_FETCHERS = {
   Reviews: fetchReviews,
 }
 
-// API rows can carry nested objects/arrays, which print as "[object Object]" in
-// a CSV and break a PDF table. Keep one readable value per column.
 function flattenRow(row) {
   const out = {}
   for (const [key, value] of Object.entries(row ?? {})) {
@@ -60,10 +58,6 @@ export default function Reports() {
   const { user } = useAuth()
   const { pathname } = useLocation()
   const path = pathname.replace(/^\//, '') || 'reports'
-  // Each of the 4 report views is its own <Route> entry pointing at this same
-  // component (see App.jsx) — navigating between them remounts Reports, so
-  // `view` is stable for the lifetime of any one mount and it's safe to
-  // branch a single unconditional useListQuery call on it below.
   const view = path.includes('export') ? 'export' : path.includes('activity') ? 'activity' : path.includes('service') ? 'service' : 'logs'
   const [title, subtitle] = TITLES[view] || TITLES.logs
 
@@ -77,7 +71,7 @@ export default function Reports() {
       if (view === 'logs') return fetchAuditLogs({ category: params.filterTab, page: params.page, limit: 10 })
       if (view === 'service') return fetchServiceReport()
       if (view === 'activity') return fetchActivityReport()
-      return Promise.resolve([]) // 'export' view has no list data to cache — it's an action, not a report
+      return Promise.resolve([])
     },
     [view]
   )

@@ -3,11 +3,6 @@ import { postCancellationFee } from '@services/ledgerService';
 import { creditCompensationTx } from '@services/debtLedgerService';
 import { formatDisplayId } from '@utils/formatters';
 
-/**
- * Decides an on-site cancellation claim still waiting for review, stamping
- * reviewedAt. Status-guarded so two reviewers (or a reviewer and the
- * auto-approve) can't both decide it: returns false if it was already decided.
- */
 export async function claimCompensationReviewTx(
   tx: Prisma.TransactionClient,
   bookingId: string,
@@ -20,12 +15,6 @@ export async function claimCompensationReviewTx(
   return count > 0;
 }
 
-/**
- * A confirmed client-fault cancellation: the client owes the fee (account on
- * hold until it's settled) and the worker is compensated (against their dues
- * first, the rest on their next payout). Status-guarded so two reviewers
- * can't both decide it — returns false if the claim was already reviewed.
- */
 export async function applyClientFaultCompensationTx(
   tx: Prisma.TransactionClient,
   input: {

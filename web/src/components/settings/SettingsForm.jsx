@@ -7,10 +7,6 @@ import { fetchSettings, updateSettings } from '../../services/settings'
 import { useDetailQuery } from '../../hooks/useListQuery'
 import { useToast } from '../../context/ToastContext'
 
-// Shared by every page that edits a slice of the AppSettings singleton
-// (Settings, Price Adjustments, Service Fee & Debt). Each page only ever sends its own
-// fields, so saving one page can never overwrite a value another page owns.
-
 export function AdornedNumberField({ id, label, hint, value, onChange, min, max, step, error, prefix, suffix }) {
   const modifier = prefix ? 'input-adornment--prefix' : suffix ? 'input-adornment--suffix' : ''
   return (
@@ -59,9 +55,6 @@ export function SettingsSection({ icon, title, description, children }) {
   )
 }
 
-// `raw` is the string straight from the input — checked for '' first since
-// `Number('')` is 0, not NaN, which would otherwise let a cleared field pass
-// range validation as if the admin had typed 0.
 function fieldValidationError(raw, min, max) {
   if (raw === '' || raw === null || raw === undefined) return 'Required.'
   const value = Number(raw)
@@ -80,20 +73,10 @@ function pickFields(record, fields) {
   return Object.fromEntries(fields.map((f) => [f, record[f]]))
 }
 
-// Rates are stored as fractions (0.1) but edited as percents (10).
 export function toPercentDisplay(value) {
   return value === '' ? '' : Math.round(value * 1000) / 10
 }
 
-/**
- * Draft/validate/save state for one settings page.
- *
- * - `fields`: every AppSettings key this page owns — the only keys compared
- *   for dirtiness and the only keys sent on save.
- * - `numberBounds`: required numeric fields, `{ field: [min, max] }`.
- * - `percentFields`: required fraction fields edited as 0–100 percents.
- * - `nullableBounds`: numeric fields where blank means "off" (null).
- */
 export function useSettingsForm({ fields, numberBounds = {}, percentFields = [], nullableBounds = {} }) {
   const { data: loaded, loading, error: loadError, reload } = useDetailQuery(fetchSettings, 'singleton')
   const [settings, setSettings] = useState(null)
@@ -102,10 +85,6 @@ export function useSettingsForm({ fields, numberBounds = {}, percentFields = [],
   const [saving, setSaving] = useState(false)
   const { showSuccess, showError } = useToast()
 
-  // Draft state mirrors the loaded record so edits don't mutate the shared
-  // cache until Save actually succeeds; re-syncs whenever a fresh fetch
-  // lands (first load, or after reload() following a save resets settings
-  // back to null below).
   const current = settings ?? loaded
   useEffect(() => {
     if (loaded && settings === null) {
@@ -120,8 +99,6 @@ export function useSettingsForm({ fields, numberBounds = {}, percentFields = [],
     [loaded, settings, fields]
   )
 
-  // Browser warning on reload/close with unsaved edits. In-app navigation
-  // isn't blocked: useBlocker needs a data router and this app uses HashRouter.
   useEffect(() => {
     if (!isDirty) return undefined
     const warn = (e) => e.preventDefault()
@@ -144,7 +121,6 @@ export function useSettingsForm({ fields, numberBounds = {}, percentFields = [],
     setFieldErrors((prev) => ({ ...prev, [field]: fieldValidationError(raw, 0, 100) }))
   }
 
-  // Blank clears the field back to null (off) rather than failing validation.
   const updateNullableNumberField = (field) => (e) => {
     const raw = e.target.value
     setSettings((prev) => ({ ...prev, [field]: raw === '' ? null : Number(raw) }))
@@ -214,9 +190,6 @@ export function useSettingsForm({ fields, numberBounds = {}, percentFields = [],
   }
 }
 
-// Renders the loading/error states until the record is available, then the
-// page's sections inside a form with the sticky save bar. `nav` (e.g. a
-// SubNav tab strip) sits under the header in every state.
 export function SettingsFormPage({ title, subtitle, form, nav = null, children }) {
   const { current, loading, loadError, reload, error, saving, isDirty, handleSubmit, discardChanges } = form
 

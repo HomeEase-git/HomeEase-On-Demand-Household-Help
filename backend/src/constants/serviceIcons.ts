@@ -1,7 +1,3 @@
-// Curated Ionicons outline names admins can assign to a ServiceType, shown
-// picker-side in web/src/constants/serviceIcons.js (keep both lists in sync —
-// this one is the source of truth for validation). Values match exactly what
-// mobile's <Ionicons name={icon} /> expects (@expo/vector-icons Ionicons5).
 export const VALID_SERVICE_ICONS = [
   'sparkles-outline',
   'water-outline',

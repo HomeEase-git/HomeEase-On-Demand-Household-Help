@@ -34,10 +34,6 @@ export default function WorkerEditProfileScreen() {
   const [serviceArea, setServiceArea] = useState("");
   const [licenseNumber, setLicenseNumber] = useState("");
 
-  // Service address — geocoded on save so the backend can compute the
-  // distance-based pricing fee between this fixed address and a client's
-  // booking location (bookings are scheduled in advance, not dispatched to
-  // wherever the worker currently is).
   const [address, setAddress] = useState("");
   const [city, setCity] = useState("");
   const [addressState, setAddressState] = useState("");
@@ -46,11 +42,6 @@ export default function WorkerEditProfileScreen() {
     lat: number;
     lng: number;
   } | null>(null);
-  // True once the address/city/state/zip text has been edited since the
-  // last resolved coordinate pair — distinguishes "never touched this
-  // session" (fine to leave addressLat/Lng untouched on save) from
-  // "changed but re-geocode never resolved" (must clear the now-stale
-  // addressLat/Lng rather than silently keep pricing pinned to the old spot).
   const [addressDirty, setAddressDirty] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
@@ -119,8 +110,6 @@ export default function WorkerEditProfileScreen() {
     }
   };
 
-  // Re-geocode whenever the address text changes so a stale coordinate pair
-  // never gets sent alongside edited text.
   const addressChanged = (updater: () => void) => {
     updater();
     setAddressCoords(null);
@@ -175,14 +164,6 @@ export default function WorkerEditProfileScreen() {
         }
       }
 
-      // addressDirty means the text changed since the last resolved coords
-      // (or was cleared) and re-geocoding above didn't produce a fresh pair.
-      // Sending `undefined` here would leave the *previous* address's
-      // addressLat/addressLng in place, so future bookings would silently
-      // keep computing the distance fee against the old location instead of
-      // the one just saved. Send an explicit null instead so the backend
-      // clears it (treated the same as "no address on file yet" — no
-      // distance fee — rather than a wrong one).
       const addressLat = coords ? coords.lat : addressDirty ? null : undefined;
       const addressLng = coords ? coords.lng : addressDirty ? null : undefined;
 
@@ -267,7 +248,6 @@ export default function WorkerEditProfileScreen() {
             radius.
           </Text>
 
-          {/* Interactive Map with Service Radius Circle & Locate Button */}
           <View className="mb-4">
             <LocationPickerMap
               ref={pickerMapRef}

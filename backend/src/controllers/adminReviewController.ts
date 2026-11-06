@@ -120,11 +120,6 @@ export const getReviewById = async (req: Request, res: Response) => {
   }
 };
 
-// Both the rating value and the VISIBLE/HIDDEN/WARNED status can change from
-// here, and WorkerProfile.rating/totalReviews were previously only ever
-// recomputed at review-submission time — hiding a fake 5-star review (or a
-// rating edit) left the worker's public rating permanently wrong until their
-// next real review happened to trigger a recompute.
 async function recomputeWorkerRating(workerId: string) {
   const ratingStats = await prisma.review.aggregate({
     where: { workerId, status: 'VISIBLE' },
@@ -144,14 +139,6 @@ const MAX_WARNINGS = 3;
 
 class AlreadyWarnedError extends Error {}
 
-/**
- * POST /api/admin/reviews/:id/warn  { reason, target }
- * Warns whoever wrote `target`: 'REVIEW' (the client's comment) or
- * 'RESPONSE' (the worker's reply). The admin UI sends the part it showed,
- * not whatever Review.flagTarget says now, since a newer report can change
- * that while the modal is open. Strike 1 is a warning, 2 a final warning,
- * 3 suspends the account. Each part can earn one strike only.
- */
 export const warnReviewAuthor = async (req: AuthRequest, res: Response) => {
   try {
     const id = req.params.id as string;
@@ -175,23 +162,15 @@ export const warnReviewAuthor = async (req: AuthRequest, res: Response) => {
     const targetUserId = isResponse ? review.worker.user.id : review.clientId;
     const what = isResponse ? 'your reply to a review' : 'your review';
 
-    // Claiming the part, adding the strike and suspending all commit together:
-    // a repeated or retried request gets a 409 instead of a second strike, and
-    // a 3rd strike can't be saved without the suspension.
     let strike: number;
     let fullName: string;
     try {
       ({ strike, fullName } = await prisma.$transaction(async (tx) => {
         const claimed = await tx.review.updateMany({
-          // A warned review drops off the worker's public profile (and
-          // rating); a warned reply stays, already profanity-masked.
           where: isResponse ? { id, responseWarnedAt: null } : { id, status: { not: 'WARNED' } },
           data: isResponse ? { responseWarnedAt: new Date() } : { status: 'WARNED' },
         });
         if (claimed.count === 0) throw new AlreadyWarnedError();
-        // Close the report only if it is about this part; a pending report
-        // on the other part stays in the queue. A null target (older flags,
-        // admin-set flags) means the review, as everywhere else.
         await tx.review.updateMany({
           where: {
             id,
@@ -219,7 +198,6 @@ export const warnReviewAuthor = async (req: AuthRequest, res: Response) => {
 
     if (!isResponse) await recomputeWorkerRating(review.workerId);
     if (suspend) {
-      // Same immediate-effect logout as adminUserController.setUserStatus.
       await revokeUserSessions(targetUserId, JWT_EXPIRY);
       await revokeAllRefreshTokens(targetUserId);
     }
@@ -235,7 +213,6 @@ export const warnReviewAuthor = async (req: AuthRequest, res: Response) => {
         relatedId: review.bookingId,
       });
     } catch (error) {
-      // The strike is already saved; a lost notification must not fail it.
       console.error('Warn review author: notification failed:', error);
     }
 

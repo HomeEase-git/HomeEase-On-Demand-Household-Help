@@ -50,7 +50,6 @@ describe("buildDigitalIdCard", () => {
     expect(card.statusLabel).toBe("Pending review");
     expect(card.kycApprovedLabel).toBe("Pending review");
     expect(card.memberSinceLabel).toBe("—");
-    // Falls back to the badge id when the user id is unavailable.
     expect(card.verificationUrl).toBe(
       "https://homeease.app/verify/worker/HE-EFGH5678",
     );

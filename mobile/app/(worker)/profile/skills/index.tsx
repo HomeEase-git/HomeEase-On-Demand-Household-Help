@@ -33,11 +33,8 @@ export default function SkillsScreen() {
   const [catalog, setCatalog] = useState<TaskCatalogEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [withdrawingId, setWithdrawingId] = useState<string | null>(null);
-  // Tasks with a save in flight — a second tap waits for the first to land.
   const inFlight = useRef<Set<string>>(new Set());
 
-  // Only the first load shows a spinner; returning to the screen (e.g. from
-  // the request form) refreshes quietly in place.
   const load = useCallback(async () => {
     try {
       setCatalog(await api.getMyTaskCatalog());
@@ -84,8 +81,6 @@ export default function SkillsScreen() {
     );
   };
 
-  // Updates the checkbox immediately and saves in the background; the page
-  // never reloads. Rolls back (with a message) only if the save fails.
   const handleToggleTask = async (taskEntry: TaskCatalogEntry["tasks"][number]) => {
     const taskId = taskEntry.task.id;
     if (inFlight.current.has(taskId)) return;

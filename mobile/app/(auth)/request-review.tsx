@@ -9,8 +9,6 @@ import PrimaryButton from "../../components/ui/PrimaryButton";
 import { useAlertModal } from "../../contexts/AlertModalContext";
 import { requestSuspensionReview } from "../../services/api";
 
-// Reached from sign-in when the account is suspended or banned. The user
-// can't log in, so they confirm it's their account with their password.
 export default function RequestReviewScreen() {
   const router = useRouter();
   const alertModal = useAlertModal();

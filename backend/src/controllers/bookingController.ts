@@ -43,8 +43,6 @@ import {
 import { openBookingDispute, openOrJoinDisputeTx, escalateCancelRequest } from '@services/bookingProblemService';
 import { cancelAsWorkerNoShow } from '@workers/bookingWorker';
 
-// The booking's status changed between our read and our write (another
-// request or a sweep job won the race) — tell the caller to refresh.
 const bookingConflict = (res: Response) =>
   res.status(409).json(errorResponse(409, 'This booking was just updated. Refresh and try again.'));
 import {
@@ -74,41 +72,14 @@ interface AuthRequest extends Request {
   user?: JwtPayload;
 }
 
-// Local alias — see backend/src/utils/money.ts for the shared money-rounding helper.
 const round2 = roundToCentavo;
 
 async function resolveServiceTypeConfig(name: string) {
   return prisma.serviceType.findFirst({ where: { name: { equals: name, mode: 'insensitive' } } });
 }
 
-// A follow-up job can be requested once the inspection/diagnosis job's work
-// is done (the client may still be paying for it).
 const FOLLOW_UP_PARENT_STATUSES: BookingStatus[] = ['PENDING_COMPLETION', 'AWAITING_PAYMENT', 'COMPLETED'];
 
-/**
- * POST /api/bookings
- * Create a new booking (client only).
- *
- * If workerId is omitted, runs the "surprise me" auto-match algorithm
- * (see matchingService.findAutoMatchWorker) to pick a worker instead of
- * requiring the client to choose one. Price is always computed server-side:
- * the admin-set service price, plus the worker's expertise-tier fee, the
- * distance fee, and the rush fee for a same-day booking (see utils/pricing.
- * computeJobPricing), plus priced packages — logged via PricingLog.
- *
- * Scheduling is a date plus an exact start time. Workers can take any
- * number of jobs a day; the only availability rule is the worker's weekly
- * schedule and date overrides (see workerAvailabilityService).
- *
- * parentBookingId makes this a follow-up job (e.g. the repair after an
- * inspection): same worker as the finished inspection/diagnosis job, which
- * the worker still has to accept.
- *
- * No Payment row is created here — the client pays the worker's invoice after
- * the job (see completeBooking). An expiry job is queued so
- * an unanswered PENDING booking auto-cancels (see queues/bookingQueue +
- * workers/bookingWorker).
- */
 export const createBooking = async (req: AuthRequest, res: Response) => {
   try {
     if (!req.user || req.user.role !== 'CLIENT') {
@@ -116,18 +87,10 @@ export const createBooking = async (req: AuthRequest, res: Response) => {
     }
     const clientId = req.user.userId;
 
-    // Payment hold — mirrors WorkerProfile.debtHoldAt's "blocks new activity
-    // until cleared" pattern, applied to the client side of the same
-    // problem. Set when this client left a booking unpaid (see
-    // adminDisputeController.resolveDispute's RESOLVE_FOR_WORKER) or owes a
-    // cancellation fee (see adminCancellationController) — without this they
-    // could go straight on to book and strand another worker the same way.
     const holdingClientProfile = await prisma.clientProfile.findUnique({
       where: { userId: clientId },
       select: { paymentHoldAt: true, paymentHoldNote: true },
     });
-    // 402, not 403 — the mobile app's API client signs the user out on any
-    // 403 (see acceptBooking's ACCOUNT_ON_HOLD for the same reason).
     if (holdingClientProfile?.paymentHoldAt) {
       return res.status(402).json(
         errorResponse(
@@ -185,19 +148,11 @@ export const createBooking = async (req: AuthRequest, res: Response) => {
       idempotencyKey?: string;
     };
 
-    // Refuse a blocked pair before any other validation, so the answer never
-    // depends on how the rest of the request happens to look.
     const blockedIds = await blockedUserIds(clientId);
     if (requestedWorkerId && blockedIds.includes(requestedWorkerId)) {
       return res.status(403).json(errorResponse(403, "You can't book this worker."));
     }
 
-    // Idempotent replay — a retried POST (app backgrounded mid-request,
-    // network timeout + user taps Submit again) with the same client-
-    // generated key returns the booking already created for it instead of
-    // creating a duplicate. Scoped to (clientId, idempotencyKey) — see the
-    // @@unique on Booking. Only short-circuits when a key is actually sent;
-    // omitting it behaves exactly as before.
     const hasIdempotencyKey = typeof idempotencyKey === 'string' && idempotencyKey.trim().length > 0;
     if (hasIdempotencyKey) {
       const existing = await prisma.booking.findUnique({
@@ -246,17 +201,12 @@ export const createBooking = async (req: AuthRequest, res: Response) => {
 
     const appSettings = await getAppSettings();
 
-    // Date + start time: not in the past, and a same-day ("rush") booking
-    // needs enough lead time for the worker to accept and travel.
     const startCheck = checkBookingStart(date, time, appSettings.rushMinLeadHours);
     if (!startCheck.ok) {
       return res.status(400).json(errorResponse(400, startCheck.message));
     }
     const isRush = startCheck.isRush;
 
-    // Urgency was removed as a platform concept (2026-09-14, see
-    // utils/pricing.ts) — every new booking is STANDARD. Kept as a named
-    // constant so the PricingLog breakdown JSON stays self-describing.
     const effectiveUrgencyLevel = 'STANDARD' as const;
 
     const scheduledDate = toDayStart(date);
@@ -273,13 +223,10 @@ export const createBooking = async (req: AuthRequest, res: Response) => {
     if (serviceTaskId && !serviceTask) {
       return res.status(404).json(errorResponse(404, 'Service task not found'));
     }
-    // A switched-off job (e.g. a former custom-quote job not priced yet) can't be booked.
     if (serviceTask && (!serviceTask.isActive || !(serviceTask.basePrice > 0))) {
       return res.status(409).json(errorResponse(409, "This job isn't available right now. Please pick another one."));
     }
 
-    // Follow-up job: only after an inspection/diagnosis job, only with the
-    // same worker, only once that job is done.
     let followUpWorkerId: string | null = null;
     if (parentBookingId) {
       const parent = await prisma.booking.findUnique({
@@ -307,24 +254,18 @@ export const createBooking = async (req: AuthRequest, res: Response) => {
     }
 
     const resolvedServiceTypeName = serviceTask?.serviceType.name ?? serviceType;
-    // Category config (for its flat basePrice) is only needed when the client
-    // booked straight off a ServiceType rather than a specific ServiceTask.
     const serviceTypeConfig = serviceTask ? null : await resolveServiceTypeConfig(resolvedServiceTypeName);
 
     if (!serviceTask && !serviceTypeConfig) {
       return res.status(404).json(errorResponse(404, 'Service type not found'));
     }
 
-    // A per-unit job is priced from the client's quantity; checked once here,
-    // before any worker is matched.
     const taskPrice = serviceTask ? taskBasePrice(serviceTask, quantity) : null;
     if (taskPrice && !taskPrice.ok) {
       return res.status(400).json(errorResponse(400, taskPrice.message));
     }
     const bookedQuantity = taskPrice?.ok ? (taskPrice.quantity ?? null) : null;
 
-    // Condition is no longer a platform-wide concept — new bookings don't
-    // collect it. The Booking.condition column is kept only for historical rows.
     const effectiveCondition: ConditionType | null = null;
     const effectiveIssuePhotoUrls = Array.isArray(issuePhotoUrls)
       ? issuePhotoUrls.filter((url): url is string => typeof url === 'string' && url.length > 0)
@@ -335,10 +276,6 @@ export const createBooking = async (req: AuthRequest, res: Response) => {
     let resolvedWorkerId = followUpWorkerId ?? requestedWorkerId ?? null;
     let isAutoMatched = false;
 
-    // DeclinedWorker is scoped to one Booking row, so it never protected a
-    // client across separate booking ATTEMPTS — look up this client's recent
-    // declines across ALL their bookings and exclude them from this brand-new
-    // booking's very first match too.
     const RECENT_DECLINE_COOLDOWN_HOURS = 48;
     const recentDeclineCutoff = new Date(Date.now() - RECENT_DECLINE_COOLDOWN_HOURS * 60 * 60 * 1000);
     const recentDeclines = await prisma.declinedWorker.findMany({
@@ -346,8 +283,6 @@ export const createBooking = async (req: AuthRequest, res: Response) => {
       select: { workerId: true },
       distinct: ['workerId'],
     });
-    // A UserBlock either way keeps the pair apart: no booking a blocked
-    // worker directly, and auto-match skips them like a recent decline.
     if (resolvedWorkerId && blockedIds.includes(resolvedWorkerId)) {
       return res.status(403).json(errorResponse(403, "You can't book this worker."));
     }
@@ -373,17 +308,12 @@ export const createBooking = async (req: AuthRequest, res: Response) => {
       isAutoMatched = true;
     }
 
-    // Bounded so a pathological run of auto-match failures can't loop
-    // forever. Only an auto-matched booking retries; a client who explicitly
-    // picked this worker gets the failure straight away.
     const MAX_AUTO_MATCH_RETRIES = 2;
     const triedWorkerIds: string[] = [
       ...recentlyDeclinedWorkerIds,
       ...(isAutoMatched && resolvedWorkerId ? [resolvedWorkerId] : []),
     ];
 
-    // Fetched once outside the retry loop — a client's own phone doesn't
-    // change across auto-match retries within the same request.
     const requestingClient = await prisma.user.findUnique({ where: { id: clientId }, select: { phone: true } });
 
     for (let attempt = 0; ; attempt++) {
@@ -399,15 +329,10 @@ export const createBooking = async (req: AuthRequest, res: Response) => {
         return res.status(404).json(errorResponse(404, 'Worker not found'));
       }
 
-      // Client booking themselves (or a shared family line) — see the
-      // resolved policy on Booking.selfDealingFlag's schema comment:
-      // non-blocking, just a signal for admin review.
       const selfDealingFlag = Boolean(
         requestingClient?.phone && workerProfile.user.phone && requestingClient.phone === workerProfile.user.phone
       );
 
-      // Shared by every retryable failure below so the "exclude this worker,
-      // try the next-best auto-match candidate" logic exists in one place.
       const tryNextAutoMatchCandidate = async (): Promise<boolean> => {
         if (!isAutoMatched || attempt >= MAX_AUTO_MATCH_RETRIES) return false;
         const nextMatch = await findAutoMatchWorker({ ...autoMatchParams, excludeWorkerIds: triedWorkerIds });
@@ -417,9 +342,6 @@ export const createBooking = async (req: AuthRequest, res: Response) => {
         return true;
       };
 
-      // A client picking a specific worker (not auto-match) is re-checked
-      // server-side, so a stale/tampered request can't book a worker whose
-      // category is still PENDING_VERIFICATION.
       if (!isAutoMatched) {
         const bookedCategory = workerProfile.serviceCategories.find(
           (c) => c.serviceType.name.toLowerCase() === resolvedServiceTypeName.toLowerCase()
@@ -438,26 +360,16 @@ export const createBooking = async (req: AuthRequest, res: Response) => {
         return res.status(409).json(errorResponse(409, 'Worker is not currently available'));
       }
 
-      // A worker who hasn't finished account setup can't take requests (see
-      // workerSetupService). Auto-match already filters them out.
       if (!(await getWorkerSetupStatus(workerProfile.userId))?.complete) {
         if (await tryNextAutoMatchCandidate()) continue;
         return res.status(409).json(errorResponse(409, "This worker isn't taking bookings yet"));
       }
 
-      // Weekly schedule + date overrides. Not re-checked for a follow-up job:
-      // the client and worker are already working together, and the worker
-      // can still decline.
       if (!followUpWorkerId && !(await isWorkerAvailableOn(prisma, workerProfile, scheduledDate))) {
         if (await tryNextAutoMatchCandidate()) continue;
         return res.status(409).json(errorResponse(409, "This worker isn't working on that date"));
       }
 
-      // Every task is priced by the admin (see taskPriceService), so the only
-      // per-worker question is whether this worker offers the task at all.
-      // CUSTOM_QUOTE has no upfront price; the client is never shown one until
-      // the worker submits a quote, so basePrice is 0 and the VAT snapshot
-      // below is deliberately deferred to that moment instead of now.
       let basePrice: number;
       if (serviceTask) {
         const selection = await prisma.workerTaskSelection.findUnique({
@@ -474,21 +386,14 @@ export const createBooking = async (req: AuthRequest, res: Response) => {
         basePrice = serviceTypeConfig!.basePrice;
       }
 
-      // Workers file their own taxes, so HomeEase adds no VAT to a new
-      // booking. The snapshot columns stay for bookings priced before that
-      // (settlement still honours their frozen vatApplicable/vatRate).
       const vatApplicable = false;
       const vatRate = null;
 
-      // Distance fee is based on the worker's fixed service address, not a
-      // live position (see WorkerProfile.addressLat/addressLng comment).
-      // Real driving-route distance when configured, straight-line otherwise.
       const workerDistanceKm =
         workerProfile.addressLat != null && workerProfile.addressLng != null
           ? await resolveDrivingDistanceKm(clientLocation, { lat: workerProfile.addressLat, lng: workerProfile.addressLng })
           : null;
 
-      // Expertise tier — computed live (see utils/workerTier.ts), not stored.
       const workerCompletedJobs = await prisma.booking.count({
         where: { workerId: resolvedWorkerId, status: 'COMPLETED' },
       });
@@ -497,10 +402,6 @@ export const createBooking = async (req: AuthRequest, res: Response) => {
         appSettings
       );
 
-      // Free job-preference toggles carry no price of their own — clamp
-      // server-side so a tampered client can't slip a nonzero price through
-      // this array (only resolvedPackages below, priced from the worker's own
-      // approved WorkerPackage rows, are a trustworthy priced-add-on source).
       const preferenceAddOns = (Array.isArray(addOns) ? addOns : []).map((a) => ({
         kind: 'PREFERENCE' as const,
         name: a.name || a.id || 'Add-on',
@@ -528,16 +429,11 @@ export const createBooking = async (req: AuthRequest, res: Response) => {
         freeDistanceKm: appSettings.freeDistanceKm,
         perKmFee: appSettings.perKmFee,
       });
-      // Kept in the response/log shape for compatibility with existing
-      // clients/receipts — always 0 now that condition carries no platform fee.
       const conditionFee = 0;
       const finalEstimate = round2(estimatedPrice + addOnsTotal);
 
       try {
         const booking = await prisma.$transaction(async (tx) => {
-          // Re-check KYC inside the transaction to close the race between the
-          // checks above and this insert (e.g. an admin rejecting the worker
-          // in that window).
           const workerTx = await tx.workerProfile.findUnique({ where: { userId: resolvedWorkerId! } });
           if (!workerTx) throw new Error('WORKER_NOT_FOUND');
           if (workerTx.kycStatus !== 'APPROVED') throw new Error('WORKER_NOT_APPROVED');
@@ -589,10 +485,6 @@ export const createBooking = async (req: AuthRequest, res: Response) => {
           });
 
           if (addOnsList.length > 0) {
-            // These are what the client chose at checkout (packages and job
-            // preferences), so choosing them is the consent: they start
-            // approved and count toward the bill. Parts and extra work are
-            // added later, on the worker's invoice (completeBooking).
             const chosenAt = new Date();
             await tx.bookingAddOn.createMany({
               data: addOnsList.map((a) => ({
@@ -631,7 +523,6 @@ export const createBooking = async (req: AuthRequest, res: Response) => {
                 rushFeeRate: isRush ? appSettings.rushFeeRate : 0,
                 workerTier,
                 distanceKm: workerDistanceKm,
-                // Rates in force at booking time, for describeDistanceFee.
                 freeDistanceKm: appSettings.freeDistanceKm,
                 perKmFee: appSettings.perKmFee,
                 isAutoMatched,
@@ -639,14 +530,9 @@ export const createBooking = async (req: AuthRequest, res: Response) => {
             },
           });
 
-          // No Payment row is created here — the client pays the worker's
-          // invoice after the job (see completeBooking).
           return created;
         });
 
-        // Best-effort — the booking is already committed at this point, so a
-        // Redis hiccup here must not turn a real success into an apparent
-        // failure (the client would retry into the idempotency path above).
         await schedulePendingExpiry(booking.id).catch((error) => {
           console.error(`Failed to schedule pending-expiry for booking ${booking.id}:`, error);
         });
@@ -689,7 +575,6 @@ export const createBooking = async (req: AuthRequest, res: Response) => {
               finalEstimate,
               addOns: addOnsList,
             },
-            // Payment is collected after completion — none exists yet.
             payment: null,
           },
         });
@@ -701,8 +586,6 @@ export const createBooking = async (req: AuthRequest, res: Response) => {
           return res.status(403).json(errorResponse(403, 'Worker is not verified yet'));
         }
         if (txErr.code === 'P2002') {
-          // Two near-simultaneous requests carrying the same idempotencyKey
-          // both passed the upfront lookup above before either committed.
           return res.status(409).json(
             errorResponse(409, 'This booking request is already being processed — check your bookings list.')
           );
@@ -716,10 +599,6 @@ export const createBooking = async (req: AuthRequest, res: Response) => {
   }
 };
 
-/**
- * GET /api/bookings
- * List bookings (role-filtered: clients see their own, workers see assigned to them)
- */
 export const listBookings = async (req: AuthRequest, res: Response) => {
   try {
     if (!req.user) {
@@ -761,13 +640,7 @@ export const listBookings = async (req: AuthRequest, res: Response) => {
           serviceTask: { select: { id: true, name: true, serviceType: { select: { name: true } } } },
           review: { select: { rating: true } },
           payment: { select: { capturedAt: true } },
-          // Approved add-ons (chosen packages) are part of the job's price, so
-          // the worker's payout estimate has to include them.
           addOns: { where: { clientApprovedAt: { not: null } }, select: { price: true } },
-          // Multi-day upfront booking (see createMultiDayBooking) — lets the
-          // list show "Day 2 of 3" instead of three unrelated-looking jobs.
-          // Ordered by date (not insertion order) so dayIndex below always
-          // reflects calendar position even if rows were created out of order.
           group: { include: { bookings: { select: { id: true }, orderBy: { scheduledDate: 'asc' } } } },
           visits: {
             where: { status: 'SCHEDULED' },
@@ -782,15 +655,8 @@ export const listBookings = async (req: AuthRequest, res: Response) => {
       prisma.booking.count({ where: whereClause }),
     ]);
 
-    // workerPayoutEstimate below uses the live AppSettings rates (not the
-    // COMMISSION_RATE/WITHHOLDING_TAX_RATE env-var defaults) so this estimate
-    // doesn't silently drift once an admin changes the platform's commission
-    // rate — the real payout is still only settled from the Payment row.
     const { commissionRate, withholdingTaxRate } = await getAppSettings();
 
-    // Worker-facing list needs enough of the job scope to size up a request
-    // (rooms, condition, distance, payout) without a second round-trip to
-    // getBookingDetail per row.
     const formattedBookings = bookings.map((b: any) => ({
       id: b.id,
       clientName: b.client.fullName,
@@ -812,7 +678,6 @@ export const listBookings = async (req: AuthRequest, res: Response) => {
       parentBookingId: b.parentBookingId ?? null,
       quoteStatus: b.quoteStatus ?? null,
       workerArrivedAt: b.workerArrivedAt ?? null,
-      // Follow-up visits still to come (see scheduleVisit).
       upcomingVisits: b.visits,
       urgencyLevel: b.urgencyLevel,
       rooms: b.rooms,
@@ -823,12 +688,7 @@ export const listBookings = async (req: AuthRequest, res: Response) => {
       distanceMeters: b.distanceMeters,
       estimatedPrice: b.estimatedPrice,
       finalPrice: b.finalPrice,
-      // Broken out separately (not just folded into workerPayoutEstimate) so
-      // the request list can call out "includes a ₱X tip" as a deliberate
-      // acceptance incentive rather than burying it in one blended number.
       tip: b.tip ?? 0,
-      // Estimate only — the authoritative payout is on the Payment row,
-      // settled at capture time (see paymentLifecycleService).
       workerPayoutEstimate: calculateWorkerPayout(
         b.finalPrice ?? round2(b.estimatedPrice + (b.addOns ?? []).reduce((sum: number, a: { price: number }) => sum + a.price, 0)),
         b.tip ?? 0,
@@ -836,7 +696,6 @@ export const listBookings = async (req: AuthRequest, res: Response) => {
         withholdingTaxRate
       ),
       rating: b.review?.rating ?? null,
-      // When the job was settled — the worker's "Earned Today" counts this, not the scheduled date.
       completedAt: b.status === 'COMPLETED' ? (b.payment?.capturedAt ?? b.updatedAt) : null,
       groupId: b.groupId ?? null,
       groupTotalDays: b.group?.totalDays ?? null,
@@ -862,10 +721,6 @@ export const listBookings = async (req: AuthRequest, res: Response) => {
   }
 };
 
-/**
- * GET /api/bookings/:id
- * Get booking detail with ownership check
- */
 export const getBookingDetail = async (req: AuthRequest, res: Response) => {
   try {
     if (!req.user) {
@@ -899,16 +754,12 @@ export const getBookingDetail = async (req: AuthRequest, res: Response) => {
         },
         visits: { orderBy: [{ scheduledDate: 'asc' }, { scheduledTime: 'asc' }] },
         addOns: { orderBy: { createdAt: 'asc' } },
-        // Bookings quoted before invoices replaced quotes (see invoiceLines).
         quoteItems: { orderBy: { createdAt: 'asc' } },
         review: true,
         pricingLogs: { orderBy: { createdAt: 'asc' } },
         disputes: { orderBy: { createdAt: 'desc' } },
         arrivalVerification: true,
         cancellation: true,
-        // Multi-day upfront booking (see createMultiDayBooking) — lets the
-        // detail screen show "Day 2 of 3" and offer a "Cancel entire job"
-        // convenience action over the sibling bookings.
         group: { include: { bookings: { orderBy: { scheduledDate: 'asc' } } } },
       },
     });
@@ -917,15 +768,12 @@ export const getBookingDetail = async (req: AuthRequest, res: Response) => {
       return res.status(404).json(errorResponse(404, 'Booking not found'));
     }
 
-    // Check ownership (client, assigned worker, or any admin)
     const isOwner = booking.clientId === req.user.userId || booking.workerId === req.user.userId;
     if (!isOwner && req.user.role !== 'ADMIN') {
       return res.status(403).json(errorResponse(403, 'You do not have permission to view this booking'));
     }
     const settings = await getAppSettings();
 
-    // Why the worker turned the request down (REJECTED only), so the client
-    // can see it — transparency over a bare "declined".
     const declineRecord =
       booking.status === 'REJECTED' && booking.workerId
         ? await prisma.declinedWorker.findUnique({
@@ -934,10 +782,6 @@ export const getBookingDetail = async (req: AuthRequest, res: Response) => {
           })
         : null;
 
-    // addOns use `price` field (not `cost`) per schema. Only approved
-    // add-ons count toward the displayed total — the full list (including
-    // any still-pending ones) is still returned below (`addOns:
-    // booking.addOns`) so the client/worker UI can show and act on them.
     const addonsCost = (booking.addOns || [])
       .filter((addon: any) => addon.clientApprovedAt != null)
       .reduce((sum: number, addon: any) => sum + addon.price, 0);
@@ -946,21 +790,10 @@ export const getBookingDetail = async (req: AuthRequest, res: Response) => {
       ? (booking.laborCost ?? 0) + (booking.materialsCost ?? 0) + addonsCost
       : booking.estimatedPrice + addonsCost;
 
-    // Client-facing itemized breakdown — assembled from data already fetched
-    // above rather than a fresh query. basePrice/distanceFee/tierFee come
-    // from the most recent PricingLog row (append-only, one per pricing
-    // computation); vatAmount prefers the settled Payment row (Booking.vatAmount
-    // is only filled in at settlement, see schema) over the pre-settlement 0.
     const breakdownTip = booking.payment?.tip ?? booking.tip ?? 0;
-    // Before the payment row exists (it's created at completion), project the
-    // VAT the same way settlement will (see computeBookingFinalTotal) so the
-    // client's price breakdown and total include it instead of showing the
-    // pre-VAT amount and then jumping at payment time.
     const breakdownVat =
       booking.payment?.vatAmount ??
       (booking.vatApplicable ? round2(finalPrice * (booking.vatRate ?? VAT_RATE)) : (booking.vatAmount ?? 0));
-    // The first (booking-time) log carries the fee split; later logs are
-    // quote stages on older bookings.
     const bookingPricingLog = booking.pricingLogs[0] ?? null;
     const priceBreakdown = {
       ...itemizeBookingPrice(bookingPricingLog, booking),
@@ -976,17 +809,12 @@ export const getBookingDetail = async (req: AuthRequest, res: Response) => {
       total: booking.payment?.totalAmount ?? round2(finalPrice + breakdownVat + breakdownTip),
     };
 
-    // Heads-up for the worker before accepting (or while planning the day):
-    // their other jobs starting close to this one.
     const isAssignedWorker = booking.workerId === req.user.userId;
     const nearbyJobs =
       isAssignedWorker && (booking.status === 'PENDING' || booking.status === 'ACCEPTED')
         ? await findNearbyJobs(prisma, booking.workerId!, booking.scheduledDate, bookingStartTime(booking), booking.id)
         : [];
 
-    // The assigned worker's own take-home, itemised on one basis. Once a payment
-    // exists these are its settled values; before that they are estimated the
-    // way settlement will compute them (rates frozen at accept, live before).
     let earnings: {
       isEstimate: boolean;
       subtotal: number;
@@ -1031,7 +859,6 @@ export const getBookingDetail = async (req: AuthRequest, res: Response) => {
       data: {
         id: booking.id,
         earnings,
-        // Follow-up jobs (see createBooking's parentBookingId).
         parentBooking: booking.parentBooking
           ? {
               id: booking.parentBooking.id,
@@ -1049,10 +876,6 @@ export const getBookingDetail = async (req: AuthRequest, res: Response) => {
         serviceTaskPricingModel: booking.serviceTask?.pricingModel ?? null,
         visits: booking.visits,
         nearbyJobs,
-        // Multi-day upfront booking (see createMultiDayBooking) — null for
-        // the overwhelming majority of ordinary single-day bookings. Sibling
-        // list is date-ordered so the client can compute "Day X of N" and
-        // offer a "Cancel entire job" action over the other bookingIds.
         groupId: booking.groupId,
         group: booking.group
           ? {
@@ -1073,13 +896,6 @@ export const getBookingDetail = async (req: AuthRequest, res: Response) => {
               phone: booking.worker.phone,
               avatar: booking.worker.avatar,
               verified: booking.worker.workerProfile?.kycStatus === 'APPROVED',
-              // Last known live position while en route (see
-              // updateWorkerLiveLocation) — only meaningful for an ACCEPTED
-              // booking; gives the client's tracking map a starting marker
-              // before the first live socket push arrives.
-              // WorkerProfile holds ONE position for the worker, whichever
-              // job they're heading to — so only reveal it on the booking
-              // they're currently travelling to, never to a past client.
               ...(booking.status === 'ACCEPTED' && !booking.workerArrivedAt
                 ? {
                     currentLat: booking.worker.workerProfile?.currentLat ?? null,
@@ -1095,9 +911,6 @@ export const getBookingDetail = async (req: AuthRequest, res: Response) => {
         description: booking.description,
         location: booking.location,
         city: booking.city,
-        // Booking address coordinates — client-side re-offer flow (a declined
-        // booking's "Find Another Worker") needs these to prefill a new draft
-        // without asking the client to re-pick their address.
         clientLat: booking.clientLat,
         clientLng: booking.clientLng,
         scheduledDate: booking.scheduledDate,
@@ -1105,19 +918,12 @@ export const getBookingDetail = async (req: AuthRequest, res: Response) => {
         timeSlot: booking.timeSlot,
         isRush: booking.isRush,
         urgencyLevel: booking.urgencyLevel,
-        // Reschedule-on-conflict (see extendBooking) — rescheduleAcknowledgedAt
-        // null means this is still an open episode awaiting the client's
-        // explicit keep-the-date response (or the 24h auto-confirm sweep).
         rescheduledAt: booking.rescheduledAt,
         previousScheduledDate: booking.previousScheduledDate,
         previousTimeSlot: booking.previousTimeSlot,
-        // The true original date/slot, surviving multiple reschedule hops —
-        // see Booking.originalScheduledDate's schema comment.
         originalScheduledDate: booking.originalScheduledDate,
         originalTimeSlot: booking.originalTimeSlot,
         rescheduleAcknowledgedAt: booking.rescheduleAcknowledgedAt,
-        // Reschedule-on-REQUEST (see requestReschedule) — rescheduleRequestRespondedAt
-        // null means still awaiting the worker's accept/decline.
         rescheduleRequestedAt: booking.rescheduleRequestedAt,
         rescheduleRequestedBy: booking.rescheduleRequestedBy ?? (booking.rescheduleRequestedAt ? 'CLIENT' : null),
         requestedScheduledDate: booking.requestedScheduledDate,
@@ -1128,18 +934,12 @@ export const getBookingDetail = async (req: AuthRequest, res: Response) => {
         requestedTimeSlot: booking.requestedTimeSlot,
         rescheduleRequestRespondedAt: booking.rescheduleRequestRespondedAt,
         rescheduleRequestAccepted: booking.rescheduleRequestAccepted,
-        // Set by bookingWorker.flagWorkerNoShows — non-null means the
-        // client can cancel penalty-free even though the booking is past
-        // PENDING (see cancelBooking's hasWorkerNoShow carve-out).
         workerNoShowFlaggedAt: booking.workerNoShowFlaggedAt,
-        // "Client not here" no-show (worker side) and cancel-after-start request.
         clientNotHereAt: booking.clientNotHereAt,
         clientNoShowCancelAt: booking.clientNotHereAt
           ? ((await clientNoShowCancelAt(booking, settings.noShowGraceMinutes))?.toISOString() ?? null)
           : null,
-        // Admin no-show fee in pesos (0 = none), so the worker's confirm copy is honest.
         clientFaultFeeAmount: settings.clientFaultCompensationAmount,
-        // Minutes after the booked start before an un-checked-in worker is late.
         noShowGraceMinutes: settings.noShowGraceMinutes,
         cancelRequestedAt: booking.cancelRequestedAt,
         cancelRequestReason: booking.cancelRequestReason,
@@ -1147,7 +947,6 @@ export const getBookingDetail = async (req: AuthRequest, res: Response) => {
         hasOpenDispute: booking.disputes.some((d) => d.status === 'OPEN' || d.status === 'UNDER_REVIEW'),
         rooms: booking.rooms,
         condition: booking.condition,
-        // Old bookings only: answers to the retired booking questions.
         scopeAnswers: booking.scopeAnswers,
         quantity: booking.quantity,
         quantityUnit: booking.serviceTask?.unitLabel ?? null,
@@ -1155,14 +954,9 @@ export const getBookingDetail = async (req: AuthRequest, res: Response) => {
         isAutoMatched: booking.isAutoMatched,
         estimatedPrice: booking.estimatedPrice,
         finalPrice,
-        // VAT snapshot — see Booking.vatApplicable/vatRate schema comment.
-        // vatAmount itself lives inside priceBreakdown below (settlement-time).
         vatApplicable: booking.vatApplicable,
         vatRate: booking.vatRate,
         priceBreakdown,
-        // Raw tip the client committed at booking time — exposed at top level
-        // (not just inside `payment`) so the worker can see it before a
-        // Payment row exists (pre-completion: Pending/Accepted/InProgress).
         tip: booking.tip,
         completionPhotoUrl: booking.completionPhotoUrl,
         beforePhotoUrls: booking.beforePhotoUrls,
@@ -1170,8 +964,6 @@ export const getBookingDetail = async (req: AuthRequest, res: Response) => {
         estimatedDurationHours: booking.estimatedDurationHours,
         inspectionFeeCharged: booking.inspectionFeeCharged,
         inspectionFeeAmount: booking.inspectionFeeAmount,
-        // Settled at booking time — used to auto-process payment after
-        // completion is confirmed, without asking the client again.
         paymentMethodType: booking.paymentMethodType,
         paymentAccountIdentifier: booking.paymentAccountIdentifier,
         payment: booking.payment
@@ -1194,9 +986,6 @@ export const getBookingDetail = async (req: AuthRequest, res: Response) => {
               workerPayout: booking.payment.workerPayout,
             }
           : null,
-        // The bill the worker sends at the end of the job (completeBooking):
-        // the job itself, then packages, parts and extra work. Before it's
-        // sent, the lines show what the client booked.
         invoice: {
           status: invoiceStatus(booking.status, booking.workerCompletedAt),
           sentAt: booking.workerCompletedAt,
@@ -1212,11 +1001,6 @@ export const getBookingDetail = async (req: AuthRequest, res: Response) => {
         // Chronological milestones for a status-progress UI.
         timeline: {
           createdAt: booking.createdAt,
-          // Real column, stamped once in acceptBooking — not derived from
-          // updatedAt, which moves on every later write (quote, add-on,
-          // photo) and would misreport "accepted" as whenever the row was
-          // last touched. Null for bookings accepted before this column
-          // existed (display-only field, no backfill).
           acceptedAt: booking.acceptedAt,
           workerArrivedAt: booking.workerArrivedAt,
           workerStartedAt: booking.workerStartedAt,
@@ -1239,10 +1023,6 @@ export const getBookingDetail = async (req: AuthRequest, res: Response) => {
   }
 };
 
-/**
- * PATCH /api/bookings/:id/accept
- * Worker accepts booking (transaction-wrapped capacity check)
- */
 export const acceptBooking = async (req: AuthRequest, res: Response) => {
   try {
     if (!req.user || req.user.role !== 'WORKER') {
@@ -1269,8 +1049,6 @@ export const acceptBooking = async (req: AuthRequest, res: Response) => {
 
     const currentUserId = req.user.userId;
 
-    // Follow-up jobs need an explicit second confirmation from the worker —
-    // the app asks twice before sending this.
     if (booking.parentBookingId && req.body?.confirmFollowUp !== true) {
       return res.status(400).json({
         ...errorResponse(400, 'Confirm that you will do this follow-up job'),
@@ -1278,7 +1056,6 @@ export const acceptBooking = async (req: AuthRequest, res: Response) => {
       });
     }
 
-    // Setup must be complete to accept a request (see workerSetupService).
     if (!(await getWorkerSetupStatus(currentUserId))?.complete) {
       return res.status(403).json({ ...errorResponse(403, WORKER_SETUP_INCOMPLETE_MESSAGE), code: 'WORKER_SETUP_INCOMPLETE' });
     }
@@ -1286,8 +1063,6 @@ export const acceptBooking = async (req: AuthRequest, res: Response) => {
     // Wrap in transaction to prevent double-counting
     try {
       const result = await prisma.$transaction(async (tx) => {
-        // Serialise this worker's accepts: two jobs accepted at the same moment
-        // must not both pass the same-start-time check below.
         await tx.$queryRaw`SELECT "id" FROM "WorkerProfile" WHERE "userId" = ${currentUserId} FOR UPDATE`;
 
         // Check current capacity
@@ -1299,16 +1074,10 @@ export const acceptBooking = async (req: AuthRequest, res: Response) => {
           throw new Error('Worker profile not found');
         }
 
-        // Outstanding-dues gate — blocks acceptance while the worker's
-        // account is on hold (see debtLedgerService.ts). Already-accepted
-        // bookings are never affected by this.
         if (workerProfile.debtHoldAt) {
           throw new Error('ACCOUNT_ON_HOLD');
         }
 
-        // A worker can take several jobs a day, but not two that start at the
-        // same time. Bookings carry a start time only (no duration), so an
-        // identical start is the one clash that is certain.
         const sameDayJobs = await tx.booking.findMany({
           where: {
             workerId: currentUserId,
@@ -1323,18 +1092,8 @@ export const acceptBooking = async (req: AuthRequest, res: Response) => {
           throw new Error('START_TIME_CLASH');
         }
 
-        // Pin the platform's current commission/withholding-tax rate onto
-        // the booking now — mirrors how vatApplicable/vatRate are already
-        // pinned early — so a later admin rate change can't retroactively
-        // alter what this worker agreed to for this job (see schema comment).
         const { commissionRate, withholdingTaxRate, workerDebtHoldLimit } = await getAppSettings();
 
-        // CASH debt accrual is reactive (see debtLedgerService.accrueDebtTx)
-        // — a worker only finds out they've crossed the hold limit after
-        // completing the job that tips them over it. This is a heads-up,
-        // not a gate: the job may still be worth doing even if it risks a
-        // hold, so it's surfaced as a warning in the response, never
-        // blocking acceptance.
         let debtWarning: string | null = null;
         if (booking.paymentMethodType === 'CASH' && workerDebtHoldLimit > 0) {
           const projectedCommission = calculateCommission(booking.estimatedPrice, commissionRate);
@@ -1348,8 +1107,6 @@ export const acceptBooking = async (req: AuthRequest, res: Response) => {
           }
         }
 
-        // Update booking status — only if still PENDING (the expiry job or a
-        // client cancel may have won the race since the read above).
         await updateBookingIfStatus(tx, id, 'PENDING', {
           status: 'ACCEPTED',
           acceptedAt: new Date(),
@@ -1358,7 +1115,6 @@ export const acceptBooking = async (req: AuthRequest, res: Response) => {
         });
         const updated = await tx.booking.findUniqueOrThrow({ where: { id } });
 
-        // activeJobCount is informational only now — workers aren't capped.
         await tx.workerProfile.update({
           where: { userId: currentUserId },
           data: { activeJobCount: { increment: 1 } },
@@ -1367,12 +1123,6 @@ export const acceptBooking = async (req: AuthRequest, res: Response) => {
         return { booking: updated, debtWarning };
       });
 
-      // The booking is no longer PENDING, so the 1-hour auto-expiry no
-      // longer applies. Best-effort: the accept already committed above, so
-      // a Redis hiccup here must not turn that real success into a false
-      // "failed to accept" for the worker — worst case a stale expiry job
-      // fires later and no-ops (expirePendingBooking re-checks status is
-      // still PENDING before doing anything).
       await cancelPendingExpiryJob(id).catch((error) => {
         console.error('Failed to cancel pending-expiry job for accepted booking %s:', id, error);
       });
@@ -1386,12 +1136,6 @@ export const acceptBooking = async (req: AuthRequest, res: Response) => {
         relatedId: result.booking.id,
       });
 
-      // A worker accepting is the "is my booking actually happening" moment —
-      // SMS it in addition to the in-app/push notification above so it
-      // reaches the client even with the app closed and no push token
-      // registered. Fire-and-forget: never block the response on it, and a
-      // failed/skipped send (no phone on file, PhilSMS error) is swallowed
-      // inside sendSmsToUser.
       void sendSmsToUser({
         userId: result.booking.clientId,
         message: `HomeEase: Your booking (${formatDisplayId(result.booking.id)}) has been accepted by the worker. Open the app for details.`,
@@ -1408,10 +1152,6 @@ export const acceptBooking = async (req: AuthRequest, res: Response) => {
       });
     } catch (txError: any) {
       if (txError.message === 'ACCOUNT_ON_HOLD') {
-        // 402 (not 403) — the mobile app's axios interceptor force-logs-out
-        // on any 401/403, which would be wrong here (this isn't an auth
-        // problem). 402 is a deliberately distinct status so the mobile app
-        // can surface the account-hold messaging instead of a generic toast.
         return res.status(402).json(
           errorResponse(
             402,
@@ -1435,14 +1175,6 @@ export const acceptBooking = async (req: AuthRequest, res: Response) => {
   }
 };
 
-/**
- * PATCH /api/bookings/:id/decline
- * Worker declines a PENDING booking. Records the decline (DeclinedWorker +
- * Booking.declinedWorkerIds), moves the booking to the terminal REJECTED
- * status, voids the payment hold, and returns alternative worker candidates
- * (re-running auto-match excluding every worker who's declined so far) so
- * the client can pick another one without starting the booking from scratch.
- */
 export const declineBooking = async (req: AuthRequest, res: Response) => {
   try {
     if (!req.user || req.user.role !== 'WORKER') {
@@ -1482,9 +1214,6 @@ export const declineBooking = async (req: AuthRequest, res: Response) => {
 
       const workerProfile = await tx.workerProfile.findUnique({ where: { userId: workerId }, select: { id: true } });
 
-      // Decline-limit cooldown — count this worker's declines in the rolling
-      // window; once they hit the threshold, exclude them from auto-match
-      // for a while (see matchingService.findAutoMatchWorker).
       const windowStart = new Date(Date.now() - declineWindowHours * 60 * 60 * 1000);
       const recentDeclineCount = await tx.declinedWorker.count({
         where: { workerId, declinedAt: { gte: windowStart } },
@@ -1503,13 +1232,9 @@ export const declineBooking = async (req: AuthRequest, res: Response) => {
       return tx.booking.findUniqueOrThrow({ where: { id } });
     });
 
-    // Best-effort — the decline already committed above (see the
-    // createBooking/acceptBooking equivalents for why this must not fail
-    // the request).
     await cancelPendingExpiryJob(id).catch((error) => {
       console.error('Failed to cancel pending-expiry job for declined booking %s:', id, error);
     });
-    // A paid booking's refund waits for an admin; an unpaid one is voided.
     await requestRefund({ bookingId: id, reason: 'WORKER_DECLINED', source: 'BOOKING_CANCELLED', requestedById: workerId }).catch(
       (error) => {
         console.error('Failed to void/refund-request payment for declined booking %s:', id, error);
@@ -1526,8 +1251,6 @@ export const declineBooking = async (req: AuthRequest, res: Response) => {
       metadata: { bookingId: id, workerId },
     });
 
-    // Suggest alternatives — best-effort; a client-facing rebooking flow
-    // still goes through POST /api/bookings with workerId omitted.
     const alternatives = await findAutoMatchWorker({
       serviceType: updated.serviceType,
       serviceTaskId: updated.serviceTaskId,
@@ -1537,8 +1260,6 @@ export const declineBooking = async (req: AuthRequest, res: Response) => {
       clientLng: updated.clientLng,
     }).catch(() => null);
 
-    // Notify client — with the worker's name and reason so it's clear who
-    // turned the request down and why (also returned by GET /bookings/:id).
     const declineReason = typeof reason === 'string' ? reason.trim().slice(0, 300) : '';
     const decliner = await prisma.user.findUnique({ where: { id: workerId }, select: { fullName: true } });
     const declinerName = decliner?.fullName || 'The worker';
@@ -1568,18 +1289,8 @@ export const declineBooking = async (req: AuthRequest, res: Response) => {
   }
 };
 
-// Basic sanity bound on a worker's self-reported GPS accuracy radius at
-// check-in — see the comment inside arriveBooking for why 100m.
 const MAX_ARRIVAL_ACCURACY_METERS = 100;
 
-/**
- * PATCH /api/bookings/:id/arrive
- * Worker checks in at the job site. Requires status ACCEPTED and the
- * worker's reported GPS to be within the admin-configured geofence radius
- * (AppSettings.geofenceRadiusMeters) of the client's booking address.
- * Records an ArrivalVerification audit row and stamps
- * Booking.workerArrivedAt — required before /start can fire.
- */
 export const arriveBooking = async (req: AuthRequest, res: Response) => {
   try {
     if (!req.user || req.user.role !== 'WORKER') {
@@ -1594,27 +1305,12 @@ export const arriveBooking = async (req: AuthRequest, res: Response) => {
       mocked?: boolean | null;
     };
 
-    // Android-only (`Location.isFromMockProvider()`), reported by the client
-    // in `mobile/services/location.ts`. Unlike accuracy drift, a device
-    // deliberately running a mock-location provider is never accidental, so
-    // this hard-blocks rather than just flagging — same as it isn't real
-    // device attestation: a rooted device or a patched client can still lie
-    // about this field entirely. It raises the bar; it doesn't close it.
     if (mocked === true) {
       return res.status(409).json(
         errorResponse(409, 'Mock location detected — disable any mock-location app or GPS spoofing tool to check in')
       );
     }
 
-    // Basic sanity bound on reported GPS accuracy — NOT real device
-    // attestation (a spoofed client can still lie about this field, or omit
-    // it entirely, same as it can lie about lat/lng). This only raises the
-    // bar by rejecting check-ins whose own self-reported accuracy radius is
-    // already too coarse to trust against the geofence, mirroring the
-    // precedent set by UserAddress.geocodeAccuracy (also an optional,
-    // self-reported GPS accuracy figure in meters). 100m matches
-    // AppSettings.geofenceRadiusMeters' own default — a fix that imprecise
-    // can't meaningfully confirm presence within a geofence of that size.
     if (accuracy != null && accuracy > MAX_ARRIVAL_ACCURACY_METERS) {
       return res.status(409).json(
         errorResponse(
@@ -1642,7 +1338,6 @@ export const arriveBooking = async (req: AuthRequest, res: Response) => {
       return res.status(409).json(errorResponse(409, 'Booking has no client location on file to verify arrival against'));
     }
 
-    // A repeat tap (or a stale screen) keeps the first check-in.
     if (booking.workerArrivedAt) {
       const arrival = await prisma.arrivalVerification.findUnique({ where: { bookingId: id } });
       return res.status(200).json({
@@ -1666,7 +1361,6 @@ export const arriveBooking = async (req: AuthRequest, res: Response) => {
     const clientLocation = { lat: booking.clientLat, lng: booking.clientLng };
     const workerLocation = { lat, lng };
     const distance = distanceMeters(clientLocation, workerLocation);
-    // 0 = admin turned the distance check off; distance is still recorded.
     const isVerified =
       geofenceRadiusMeters === 0 || isWithinRadiusMeters(clientLocation, workerLocation, geofenceRadiusMeters);
 
@@ -1677,8 +1371,6 @@ export const arriveBooking = async (req: AuthRequest, res: Response) => {
     }
 
     const arrivedAt = new Date();
-    // Flag-only, per C9 — never blocks the check-in itself, just surfaces a
-    // suspicious early/late/wrong-day arrival for admin dispute review.
     const outsideWindow = isOutsideBookedWindow(bookingStartInstant(booking), arrivedAt, noShowGraceMinutes);
 
     const [arrival, updated] = await prisma.$transaction([
@@ -1690,9 +1382,6 @@ export const arriveBooking = async (req: AuthRequest, res: Response) => {
           distanceMeters: distance,
           isVerified: true,
           isOutsideBookedWindow: outsideWindow,
-          // Always false here — a true value already hard-blocked above
-          // before any row could be created; the column just records that
-          // explicitly rather than relying on its schema default.
           mockedLocation: false,
         },
       }),
@@ -1700,7 +1389,6 @@ export const arriveBooking = async (req: AuthRequest, res: Response) => {
         where: { id },
         data: { workerArrivedAt: arrivedAt, workerLat: lat, workerLng: lng },
       }),
-      // Tracking ends at check-in — don't keep the live position around.
       prisma.workerProfile.update({
         where: { userId: req.user.userId },
         data: { currentLat: null, currentLng: null, lastLocationUpdate: null },
@@ -1759,11 +1447,6 @@ export const arriveBooking = async (req: AuthRequest, res: Response) => {
   }
 };
 
-/**
- * When the worker can cancel as a client no-show without proof, or null when
- * that path is closed: no alert yet, or a check-in flagged outside the booked
- * window (then it's the normal proof + admin review cancel).
- */
 async function clientNoShowCancelAt(
   booking: Pick<Booking, 'id' | 'scheduledDate' | 'scheduledTime' | 'timeSlot' | 'clientNotHereAt'>,
   graceMinutes: number
@@ -1778,13 +1461,6 @@ async function clientNoShowCancelAt(
   return clientNoShowDeadline({ ...booking, clientNotHereAt }, graceMinutes);
 }
 
-/**
- * PATCH /api/bookings/:id/client-not-here
- * Worker, checked in but can't reach the client: alerts the client and starts
- * the grace wait. Once AppSettings.noShowGraceMinutes pass, the worker can
- * cancel as a client no-show without photo proof (see cancelBooking).
- * Repeat calls return the first alert time.
- */
 export const reportClientNotHere = async (req: AuthRequest, res: Response) => {
   try {
     if (!req.user) {
@@ -1849,16 +1525,6 @@ export const reportClientNotHere = async (req: AuthRequest, res: Response) => {
   }
 };
 
-/**
- * PATCH /api/bookings/:id/live-location
- * Worker's foreground GPS watch pings this while en route to an ACCEPTED
- * booking. Stores the latest position on WorkerProfile.currentLat/currentLng
- * (nothing per-booking to keep this a cheap, high-frequency write) and pushes
- * it straight to the client's already-open socket connection so the "Track
- * Service" map can move the worker's marker live. Stops mattering once the
- * worker checks in (see arriveBooking) — the mobile app stops sending at
- * that point, and the client screen falls back to the static arrival pin.
- */
 export const updateWorkerLiveLocation = async (req: AuthRequest, res: Response) => {
   try {
     if (!req.user || req.user.role !== 'WORKER') {
@@ -1878,8 +1544,6 @@ export const updateWorkerLiveLocation = async (req: AuthRequest, res: Response) 
       return res.status(403).json(errorResponse(403, 'This booking is not assigned to you'));
     }
 
-    // Only meaningful while the worker is travelling to the job — once
-    // arrived/started there's nothing left to "track" on a map.
     if (booking.status !== 'ACCEPTED') {
       return res.status(409).json(errorResponse(409, `Cannot share live location for booking with status ${booking.status}`));
     }
@@ -1905,14 +1569,6 @@ export const updateWorkerLiveLocation = async (req: AuthRequest, res: Response) 
   }
 };
 
-/**
- * PATCH /api/bookings/:id/start
- * Worker starts the job — requires a prior verified arrival. The before
- * photos come after the start (POST /before-photos) and are required by
- * completeBooking; older app builds still send them here, so they're stored
- * when present. The price is the one the client booked; parts and extra work
- * go on the invoice at the end (completeBooking).
- */
 export const startBooking = async (req: AuthRequest, res: Response) => {
   try {
     if (!req.user || req.user.role !== 'WORKER') {
@@ -1939,7 +1595,6 @@ export const startBooking = async (req: AuthRequest, res: Response) => {
       return res.status(409).json(errorResponse(409, 'You must check in as arrived before starting this job'));
     }
 
-    // Optional here (see above); when sent, up to MAX_PROOF_PHOTOS of the worker's own uploads.
     const beforePhotoUrls = toOwnedBookingPhotoUrls(req.body?.beforePhotoUrls ?? [], req.user.userId);
     if (!beforePhotoUrls) {
       return res.status(400).json(errorResponse(400, 'Upload the before photos again — one of them could not be verified'));
@@ -1980,18 +1635,8 @@ export const startBooking = async (req: AuthRequest, res: Response) => {
   }
 };
 
-// A job's work is under way — the worker can plan another visit for it.
 const VISIT_ALLOWED_STATUSES = ['IN_PROGRESS'];
 
-/**
- * POST /api/bookings/:id/visits
- * "Follow Up Date": the worker schedules another visit when the job needs
- * more than one day. The job stays one booking (and one price); the visit
- * just goes on both calendars and the client is told. Replaces the old
- * "Continue Tomorrow" (extendBooking), which pushed other clients' bookings
- * around — with no per-day job limit there's nothing to push, and the worker
- * sees their own calendar when picking the date.
- */
 export const scheduleVisit = async (req: AuthRequest, res: Response) => {
   try {
     if (!req.user || req.user.role !== 'WORKER') {
@@ -2012,8 +1657,6 @@ export const scheduleVisit = async (req: AuthRequest, res: Response) => {
       return res.status(409).json(errorResponse(409, 'You can schedule a follow-up visit while the job is in progress'));
     }
 
-    // Same date/time rules as a booking, but no lead time (it's the worker's
-    // own plan) and no rush fee (the job is already priced).
     const startCheck = checkBookingStart(date, time, 0);
     if (!startCheck.ok) {
       return res.status(400).json(errorResponse(400, startCheck.message));
@@ -2024,7 +1667,6 @@ export const scheduleVisit = async (req: AuthRequest, res: Response) => {
       data: { bookingId: id, scheduledDate, scheduledTime: time, notes: notes?.trim() || null },
     });
 
-    // Shown to the worker as a heads-up, never blocking — they chose the date.
     const nearbyJobs = await findNearbyJobs(prisma, req.user.userId, scheduledDate, time, id);
 
     const when = `${scheduledDate.toLocaleDateString('en-PH', { month: 'short', day: 'numeric', timeZone: 'UTC' })} at ${formatTime12h(time)}`;
@@ -2056,10 +1698,6 @@ export const scheduleVisit = async (req: AuthRequest, res: Response) => {
   }
 };
 
-/**
- * PATCH /api/bookings/:id/visits/:visitId/cancel
- * Worker removes a follow-up visit they scheduled (the client is told).
- */
 export const cancelVisit = async (req: AuthRequest, res: Response) => {
   try {
     if (!req.user || req.user.role !== 'WORKER') {
@@ -2098,14 +1736,6 @@ export const cancelVisit = async (req: AuthRequest, res: Response) => {
   }
 };
 
-/**
- * PATCH /api/bookings/:id/acknowledge-reschedule
- * Client explicitly keeps the new date for a booking a worker's spillover
- * moved (see extendBooking) — status-preserving, just resolves the
- * reschedule episode. The client's other option is the existing cancel
- * flow, which cancelBooking's hasPendingReschedule carve-out lets through
- * fee-free while this is still unresolved.
- */
 export const acknowledgeReschedule = async (req: AuthRequest, res: Response) => {
   try {
     if (!req.user || req.user.role !== 'CLIENT') {
@@ -2163,14 +1793,6 @@ export const acknowledgeReschedule = async (req: AuthRequest, res: Response) => 
   }
 };
 
-/**
- * PATCH /api/bookings/:id/request-reschedule
- * Either side of an ACCEPTED booking proposes a new date + start time, and
- * the other side accepts or declines (respondToRescheduleRequest). A worker
- * uses this when two of their jobs overlap; if the client declines, the
- * booking stays as it is and the worker has to show up or take the no-show
- * penalty. One pending request at a time.
- */
 export const requestReschedule = async (req: AuthRequest, res: Response) => {
   try {
     if (!req.user || (req.user.role !== 'CLIENT' && req.user.role !== 'WORKER')) {
@@ -2201,8 +1823,6 @@ export const requestReschedule = async (req: AuthRequest, res: Response) => {
       return res.status(409).json(errorResponse(409, 'There is already a pending reschedule request for this booking'));
     }
 
-    // Same date/time rules as a new booking. The price was already agreed,
-    // so moving to today doesn't add a rush fee.
     const { rushMinLeadHours } = await getAppSettings();
     const startCheck = checkBookingStart(date, time, rushMinLeadHours);
     if (!startCheck.ok) {
@@ -2238,8 +1858,6 @@ export const requestReschedule = async (req: AuthRequest, res: Response) => {
       rescheduleRequestRespondedAt: null,
       rescheduleRequestAccepted: null,
     }, {
-      // Closes the check-then-write gap: a request from the other side (or an
-      // arrival) that landed since the read above makes this write a no-op.
       workerArrivedAt: null,
       OR: [{ rescheduleRequestedAt: null }, { rescheduleRequestRespondedAt: { not: null } }],
     });
@@ -2276,17 +1894,10 @@ export const requestReschedule = async (req: AuthRequest, res: Response) => {
   }
 };
 
-/** Who asked for the pending reschedule — a request from before this was tracked came from the client. */
 function rescheduleRequester(booking: { rescheduleRequestedBy: string | null }): 'CLIENT' | 'WORKER' {
   return booking.rescheduleRequestedBy === 'WORKER' ? 'WORKER' : 'CLIENT';
 }
 
-/**
- * PATCH /api/bookings/:id/reschedule-request/withdraw
- * The side that asked backs out of its own still-pending request. Recorded
- * as resolved with rescheduleRequestAccepted left null — distinct from an
- * accept (true) or decline (false).
- */
 export const withdrawRescheduleRequest = async (req: AuthRequest, res: Response) => {
   try {
     if (!req.user) {
@@ -2307,11 +1918,7 @@ export const withdrawRescheduleRequest = async (req: AuthRequest, res: Response)
       return res.status(403).json(errorResponse(403, 'Only the side that asked can withdraw this request'));
     }
 
-    // Only a still-open request can be withdrawn; if the other side answered
-    // (or the sweep declined it) since the read above, leave that outcome alone.
     const { count } = await prisma.booking.updateMany({
-      // Match the request that was read, not just "any open one": a delayed
-      // withdrawal must not close a newer proposal made in the meantime.
       where: { id, rescheduleRequestedAt: booking.rescheduleRequestedAt, rescheduleRequestRespondedAt: null },
       data: { rescheduleRequestRespondedAt: new Date(), rescheduleRequestAccepted: null },
     });
@@ -2337,11 +1944,6 @@ export const withdrawRescheduleRequest = async (req: AuthRequest, res: Response)
   }
 };
 
-/**
- * PATCH /api/bookings/:id/reschedule-request/respond
- * The other side accepts or declines the proposed date/time. Accepting moves
- * the booking; declining leaves it as it was.
- */
 export const respondToRescheduleRequest = async (req: AuthRequest, res: Response) => {
   try {
     if (!req.user) {
@@ -2379,8 +1981,6 @@ export const respondToRescheduleRequest = async (req: AuthRequest, res: Response
       if (booking.workerArrivedAt != null) {
         return res.status(409).json(errorResponse(409, 'The worker has already arrived, so this booking can no longer be moved'));
       }
-      // The proposal may be days old: re-run the start rules and, for a
-      // client's proposal, the worker's availability on the proposed day.
       const { rushMinLeadHours } = await getAppSettings();
       const startCheck = checkBookingStart(isoDay(booking.requestedScheduledDate), newTime, rushMinLeadHours);
       if (!startCheck.ok) {
@@ -2396,9 +1996,6 @@ export const respondToRescheduleRequest = async (req: AuthRequest, res: Response
         }
       }
 
-      // Same rule as acceptBooking: a worker can't hold two jobs with the same
-      // start time. The worker row is locked so this check and the move can't
-      // interleave with another accept or reschedule for the same worker.
       const requestedDate = booking.requestedScheduledDate;
       await prisma.$transaction(async (tx) => {
         if (booking.workerId) {
@@ -2426,16 +2023,12 @@ export const respondToRescheduleRequest = async (req: AuthRequest, res: Response
           rescheduleRequestRespondedAt: new Date(),
           rescheduleRequestAccepted: true,
         }, {
-          // Only move it if the worker still hasn't arrived and this is still the
-          // same open request (not withdrawn or auto-declined since the read).
           workerArrivedAt: null,
           rescheduleRequestedAt: booking.rescheduleRequestedAt,
           rescheduleRequestRespondedAt: null,
         });
       });
     } else {
-      // Close only the request that was read; a newer proposal made since
-      // (after this one was withdrawn or timed out) must stay open.
       const { count } = await prisma.booking.updateMany({
         where: { id, rescheduleRequestedAt: booking.rescheduleRequestedAt, rescheduleRequestRespondedAt: null },
         data: { rescheduleRequestRespondedAt: new Date(), rescheduleRequestAccepted: false },
@@ -2495,8 +2088,6 @@ export const respondToRescheduleRequest = async (req: AuthRequest, res: Response
 const MAX_PROOF_PHOTOS = 5;
 const MAX_PROGRESS_PHOTOS = 20;
 
-// The two kinds of photo a worker posts while the job is IN_PROGRESS. Each
-// needs at least one before completeBooking; the client sees both.
 const JOB_PHOTO_KINDS = {
   before: {
     field: 'beforePhotoUrls',
@@ -2512,16 +2103,8 @@ const JOB_PHOTO_KINDS = {
   },
 } as const;
 
-/**
- * POST /api/bookings/:id/before-photos  { photoUrls }
- * Worker posts photos of the job as found, right after starting it.
- */
 export const addBeforePhotos = (req: AuthRequest, res: Response) => addJobPhotos(req, res, 'before');
 
-/**
- * POST /api/bookings/:id/progress-photos  { photoUrls }
- * Worker posts an "ongoing" update while the job is IN_PROGRESS.
- */
 export const addProgressPhotos = (req: AuthRequest, res: Response) => addJobPhotos(req, res, 'progress');
 
 async function addJobPhotos(req: AuthRequest, res: Response, kind: keyof typeof JOB_PHOTO_KINDS) {
@@ -2540,8 +2123,6 @@ async function addJobPhotos(req: AuthRequest, res: Response, kind: keyof typeof 
       return res.status(400).json(errorResponse(400, `Add 1 to ${MAX_PROOF_PHOTOS} photos`));
     }
 
-    // Status and the photo cap are checked under the booking lock, so two
-    // uploads can't both pass the cap and none can land after completion.
     const result = await prisma.$transaction(async (tx) => {
       const booking = await lockBooking(tx, id);
       if (!booking || booking.workerId !== workerId) return { status: 404, message: 'Booking not found' } as const;
@@ -2565,7 +2146,6 @@ async function addJobPhotos(req: AuthRequest, res: Response, kind: keyof typeof 
 
     await notifyUser({
       userId: clientId,
-      // No dedicated type; same choice as startBooking's "Service Started".
       type: 'BOOKING_ACCEPTED',
       title: 'Job update',
       message: notice,
@@ -2579,18 +2159,6 @@ async function addJobPhotos(req: AuthRequest, res: Response, kind: keyof typeof 
   }
 }
 
-/**
- * PATCH /api/bookings/:id/complete  { completionPhotoUrl, items? }
- * Worker finishes the job and sends the invoice: the completion photo plus
- * any parts (each with a receipt photo) and extra work (each with a photo of
- * the work) on top of the booked price. There's no approval step: the client
- * sees every line, then pays it or reports it (reportInvoice) before any
- * money moves.
- *   CASH        -> PENDING_COMPLETION until the worker taps "Cash received"
- *                  (markCashReceived).
- *   GCASH/MAYA  -> the Xendit invoice is raised in the same request
- *                  (AWAITING_PAYMENT); paying it completes the booking.
- */
 export const completeBooking = async (req: AuthRequest, res: Response) => {
   try {
     if (!req.user || req.user.role !== 'WORKER') {
@@ -2609,7 +2177,6 @@ export const completeBooking = async (req: AuthRequest, res: Response) => {
     if (!parsed.ok) {
       return res.status(400).json(errorResponse(400, parsed.error));
     }
-    // Only photos this worker uploaded (see utils/storageUrls).
     const items: InvoiceItemInput[] = [];
     for (const item of parsed.items) {
       const photoUrls = toOwnedBookingPhotoUrls(item.photoUrls, workerId);
@@ -2633,15 +2200,10 @@ export const completeBooking = async (req: AuthRequest, res: Response) => {
       return res.status(409).json(errorResponse(409, `Cannot complete booking with status ${booking.status}`));
     }
 
-    // An unanswered cancel request would be dropped once the job leaves
-    // IN_PROGRESS (the sweep and respondToCancelRequest skip it), so the
-    // worker answers it first. A decline escalates it to an admin dispute.
     if (booking.cancelRequestedAt && !booking.cancelRequestEscalatedAt) {
       return res.status(409).json(errorResponse(409, "Answer the client's cancel request before finishing the job"));
     }
 
-    // Must be a photo this worker uploaded — otherwise the response layer
-    // would hand back a signed URL to someone else's private file.
     const storedCompletionPhotoUrl = toOwnedBookingPhotoUrls([completionPhotoUrl], workerId)?.[0] ?? null;
     if (storedCompletionPhotoUrl === null) {
       return res.status(400).json(errorResponse(400, 'Upload the completion photo again — it could not be verified'));
@@ -2655,13 +2217,9 @@ export const completeBooking = async (req: AuthRequest, res: Response) => {
     }
 
     const { updated, totalAmount } = await prisma.$transaction(async (tx) => {
-      // Under the booking lock the bill is final: nothing else can add a
-      // line between this read and the total being locked below.
       const locked = await lockBooking(tx, id);
       const addOns = locked?.addOns ?? [];
 
-      // Older bookings may still hold a mid-job extra the client never
-      // answered (that approval step is retired). It can't be billed now.
       const stillPendingAddonIds = addOns
         .filter((addon) => addon.clientApprovedAt == null && addon.clientRejectedAt == null)
         .map((addon) => addon.id);
@@ -2707,7 +2265,6 @@ export const completeBooking = async (req: AuthRequest, res: Response) => {
           workerCompletedAt: sentAt,
           finalPrice: totals.subtotal,
         },
-        // A cancel request that arrived after the read above wins.
         { OR: [{ cancelRequestedAt: null }, { cancelRequestEscalatedAt: { not: null } }] }
       );
       const b = await tx.booking.findUniqueOrThrow({ where: { id } });
@@ -2718,7 +2275,6 @@ export const completeBooking = async (req: AuthRequest, res: Response) => {
         data: { activeJobCount: { decrement: 1 } },
       });
 
-      // Follow-up visits: any still ahead are no longer needed.
       await tx.bookingVisit.updateMany({
         where: { bookingId: id, status: 'SCHEDULED' },
         data: { status: 'DONE' },
@@ -2727,8 +2283,6 @@ export const completeBooking = async (req: AuthRequest, res: Response) => {
       return { updated: b, totalAmount: totals.totalAmount };
     });
 
-    // GCash/Maya: raise the Xendit invoice now. If that fails the booking
-    // stays PENDING_COMPLETION and the client's "Pay now" retries it.
     const method = booking.paymentMethodType ?? 'CASH';
     let status: string = updated.status;
     if (method !== 'CASH') {
@@ -2773,12 +2327,6 @@ export const completeBooking = async (req: AuthRequest, res: Response) => {
   }
 };
 
-/**
- * PATCH /api/bookings/:id/cash-received
- * Worker confirms the client paid the invoice in cash. Settles the booking to
- * COMPLETED and books the service fee onto the worker's dues. Refused while
- * the client has reported the invoice (DISPUTED).
- */
 export const markCashReceived = async (req: AuthRequest, res: Response) => {
   try {
     if (!req.user || req.user.role !== 'WORKER') {
@@ -2808,7 +2356,6 @@ export const markCashReceived = async (req: AuthRequest, res: Response) => {
       );
     }
 
-    // PENDING_COMPLETION only: a report that lands in between wins.
     const payment = await settleCashBooking(id, ['PENDING_COMPLETION']);
 
     await notifyUser({
@@ -2844,11 +2391,6 @@ export const markCashReceived = async (req: AuthRequest, res: Response) => {
   }
 };
 
-/**
- * PATCH /api/bookings/:id/cash-not-paid
- * The worker says the client has not paid the cash invoice. The booking goes
- * to DISPUTED with an open dispute for an admin. Cash only: nothing to void.
- */
 export const reportCashNotPaid = async (req: AuthRequest, res: Response) => {
   try {
     if (!req.user || req.user.role !== 'WORKER') {
@@ -2920,13 +2462,6 @@ export const reportCashNotPaid = async (req: AuthRequest, res: Response) => {
   }
 };
 
-/**
- * PATCH /api/bookings/:id/confirm-completion
- * The client's "Pay now" on a GCash/Maya invoice: raises (or resumes) the
- * Xendit checkout for the invoice total and returns its URL. The invoice-paid
- * webhook (finalizePaidBooking) completes the booking. A cash invoice is paid
- * to the worker in person, who confirms it (markCashReceived).
- */
 export const confirmCompletion = async (req: AuthRequest, res: Response) => {
   try {
     if (!req.user || req.user.role !== 'CLIENT') {
@@ -2949,8 +2484,6 @@ export const confirmCompletion = async (req: AuthRequest, res: Response) => {
       return res.status(409).json(errorResponse(409, 'Pay your worker in cash. They confirm it in their app.'));
     }
 
-    // Allowed once the invoice is sent (PENDING_COMPLETION if raising the
-    // Xendit invoice failed, AWAITING_PAYMENT for a retried checkout).
     if (booking.status !== 'PENDING_COMPLETION' && booking.status !== 'AWAITING_PAYMENT') {
       return res.status(409).json(errorResponse(409, `Cannot pay for a booking with status ${booking.status}`));
     }
@@ -2958,9 +2491,6 @@ export const confirmCompletion = async (req: AuthRequest, res: Response) => {
     const invoice = await createCompletionInvoice(id);
 
     if ('alreadyPaid' in invoice) {
-      // Xendit already shows this PAID (webhook missed/delayed) — createCompletionInvoice
-      // self-healed it via finalizePaidBooking, so report COMPLETED instead of
-      // handing back a checkout that would charge the client again.
       const payment = await prisma.payment.findUnique({ where: { bookingId: id } });
       return res.status(200).json({
         success: true,
@@ -2999,13 +2529,6 @@ export const confirmCompletion = async (req: AuthRequest, res: Response) => {
   }
 };
 
-/**
- * PATCH /api/bookings/:id/invoice/report  { reason, evidenceUrls? }
- * The client says something on the invoice is wrong, before paying. The
- * booking goes to DISPUTED, an unpaid GCash/Maya invoice is voided so it
- * can't be paid mid-review, and an admin keeps the invoice, removes the
- * worker's added lines, or cancels (adminDisputeController.resolveDispute).
- */
 export const reportInvoice = async (req: AuthRequest, res: Response) => {
   try {
     if (!req.user || req.user.role !== 'CLIENT') {
@@ -3017,7 +2540,6 @@ export const reportInvoice = async (req: AuthRequest, res: Response) => {
     if (reason.length < 10 || reason.length > 500) {
       return res.status(400).json(errorResponse(400, 'Tell us what is wrong (10 to 500 characters)'));
     }
-    // Optional, already-uploaded photos (upload-then-attach, see uploadController).
     const evidenceUrls: unknown[] = Array.isArray(req.body?.evidenceUrls)
       ? req.body.evidenceUrls.slice(0, 5)
       : [];
@@ -3099,15 +2621,6 @@ const PROBLEM_LABELS: Record<ProblemReason, string> = {
 };
 const WORKER_PING_COOLDOWN_MS = 15 * 60_000;
 
-/**
- * POST /api/bookings/:id/problem  { reason, note? }
- * The client's way out after the worker accepts, until the invoice is sent:
- *   WORKER_NOT_HERE: before the no-show deadline, pings the worker (once per
- *     15 min); after it, cancels as a worker no-show. Once the worker has
- *     checked in it's reported like WORKER_STOPPED.
- *   NEED_TO_CANCEL: asks the worker to agree (respondToCancelRequest).
- *   WORKER_STOPPED / OTHER: opens a dispute for an admin.
- */
 export const reportBookingProblem = async (req: AuthRequest, res: Response) => {
   try {
     if (!req.user || req.user.role !== 'CLIENT') {
@@ -3230,11 +2743,6 @@ export const reportBookingProblem = async (req: AuthRequest, res: Response) => {
   }
 };
 
-/**
- * PATCH /api/bookings/:id/cancel-request/respond  { accept }
- * The worker answers the client's cancel request: agreeing cancels with no
- * penalty for anyone; declining sends it to an admin (escalateCancelRequest).
- */
 export const respondToCancelRequest = async (req: AuthRequest, res: Response) => {
   try {
     if (!req.user) {
@@ -3266,7 +2774,6 @@ export const respondToCancelRequest = async (req: AuthRequest, res: Response) =>
     }
 
     await prisma.$transaction(async (tx) => {
-      // A decline that escalated since the read above wins.
       const fresh = await lockBooking(tx, id);
       if (!fresh || fresh.cancelRequestEscalatedAt) throw new BookingStatusConflictError(id, [booking.status]);
       await finalizeCancellationTx(tx, booking, 'CLIENT', {
@@ -3294,21 +2801,6 @@ export const respondToCancelRequest = async (req: AuthRequest, res: Response) =>
   }
 };
 
-/**
- * PATCH /api/bookings/:id/cancel
- * Cancel booking (status-gated).
- *
- * Client: only while PENDING (plus the legacy reschedule/no-show carve-outs).
- * Worker, before arriving: any time, with a reason; a late self-reported
- * WORKER_FAULT counts against their auto-match score.
- * Worker, after arriving at the job site: only with photo proof and whose
- * fault it is —
- *   fault WORKER: the no-show penalty (AppSettings.noShowPenaltyAmount) is
- *     charged right away.
- *   fault CLIENT: an admin checks the proof (adminCancellationController);
- *     if approved the client pays AppSettings.clientFaultCompensationAmount
- *     and the worker is compensated, if refused the worker is penalized.
- */
 export const cancelBooking = async (req: AuthRequest, res: Response) => {
   try {
     if (!req.user) {
@@ -3336,17 +2828,9 @@ export const cancelBooking = async (req: AuthRequest, res: Response) => {
       return res.status(403).json(errorResponse(403, 'You do not have permission to cancel this booking'));
     }
 
-    // Legacy carve-outs: a booking moved by the old "Continue Tomorrow"
-    // spillover, or one flagged as a worker no-show before no-shows were
-    // cancelled automatically. The client didn't choose either, so it's a
-    // free cancel.
     const hasPendingReschedule = booking.rescheduledAt != null && booking.rescheduleAcknowledgedAt == null;
     const hasWorkerNoShow = booking.workerNoShowFlaggedAt != null;
 
-    // A client's cancellation window closes the moment a worker accepts —
-    // by then the worker has committed their day to this job. This is a
-    // hard rule, not a fee: there is no "cancel for a charge" path past
-    // PENDING for the client, by design.
     if (req.user.role === 'CLIENT' && booking.status !== 'PENDING' && !hasPendingReschedule && !hasWorkerNoShow) {
       return res.status(409).json(
         errorResponse(
@@ -3356,7 +2840,6 @@ export const cancelBooking = async (req: AuthRequest, res: Response) => {
       );
     }
 
-    // Once the invoice is out the job is done; a worker cancel would void it.
     if (req.user.role === 'WORKER' && ['PENDING_COMPLETION', 'AWAITING_PAYMENT', 'DISPUTED'].includes(booking.status)) {
       return res.status(409).json(errorResponse(409, "The invoice is sent, so this job can't be cancelled here. If something is wrong, contact support."));
     }
@@ -3368,14 +2851,10 @@ export const cancelBooking = async (req: AuthRequest, res: Response) => {
     const cancelledByRole = req.user.role === 'WORKER' ? 'WORKER' : 'CLIENT';
     const settings = await getAppSettings();
 
-    // After arrival the job has started on site — the worker needs proof and
-    // has to say whose fault it is (see the docblock).
     const afterArrival = cancelledByRole === 'WORKER' && booking.workerArrivedAt != null;
     let cancelFault: 'CLIENT' | 'WORKER' | null = null;
     let proofUrls: string[] = [];
 
-    // The worker alerted the client at the door and waited out the grace
-    // period: no photo proof needed, and the fee is approved automatically.
     const noShowCancelAt =
       afterArrival && fault === 'CLIENT' && booking.status === 'ACCEPTED'
         ? await clientNoShowCancelAt(booking, settings.noShowGraceMinutes)
@@ -3402,8 +2881,6 @@ export const cancelBooking = async (req: AuthRequest, res: Response) => {
       cancelFault = fault;
       proofUrls = owned;
     } else if (cancelledByRole === 'WORKER') {
-      // Required so a worker can distinguish "my fault" from "the client
-      // wasn't there" or an unrelated reason.
       const VALID_WORKER_CANCEL_REASONS = ['WORKER_FAULT', 'CLIENT_NO_SHOW', 'OTHER'];
       if (!VALID_WORKER_CANCEL_REASONS.includes(workerCancellationReason ?? '')) {
         return res.status(400).json(
@@ -3412,23 +2889,14 @@ export const cancelBooking = async (req: AuthRequest, res: Response) => {
       }
     }
 
-    // Notice given, in hours — feeds the auto-match penalty for repeated
-    // last-minute cancellations (see matchingService's lateCancelCount).
-    // Clamped at 0 if the job had already started.
     const cancelledWithinHours =
       cancelledByRole === 'WORKER'
         ? Math.max(0, Math.round((bookingStartInstant(booking).getTime() - Date.now()) / (60 * 60 * 1000)))
         : null;
 
     const penaltyAmount = cancelFault === 'WORKER' ? settings.noShowPenaltyAmount : null;
-    // A zero fee (admin setting) means no amount and no fee wording. The
-    // no-proof no-show path then has nothing to approve (NOT_APPLICABLE), but a
-    // proof claim still goes to an admin: it's the only check on a worker
-    // blaming the client to dodge the no-show penalty.
     const compensationAmount =
       cancelFault === 'CLIENT' && settings.clientFaultCompensationAmount > 0 ? settings.clientFaultCompensationAmount : null;
-    // The status the caller ends up with. An approved fee is still written as
-    // PENDING_REVIEW: applyClientFaultCompensationTx claims it from there.
     const compensationStatus =
       cancelFault !== 'CLIENT' || (clientNoShowConfirmed && !compensationAmount)
         ? 'NOT_APPLICABLE'
@@ -3436,9 +2904,6 @@ export const cancelBooking = async (req: AuthRequest, res: Response) => {
           ? 'APPROVED'
           : 'PENDING_REVIEW';
 
-    // Who takes the auto-match scoring penalty for this cancellation — see
-    // Cancellation.penalizedWorkerId's schema comment. A CLIENT-fault claim
-    // isn't decided until an admin reviews it.
     const penalizedWorkerId =
       cancelFault === 'WORKER'
         ? req.user.userId
@@ -3497,7 +2962,6 @@ export const cancelBooking = async (req: AuthRequest, res: Response) => {
         });
       }
 
-      // penaltyAmount is only set for a worker-fault cancel, so workerId is the canceller.
       if (penaltyAmount && workerProfileId) {
         await chargePenaltyTx(tx, workerProfileId, penaltyAmount, {
           bookingId: id,
@@ -3508,10 +2972,8 @@ export const cancelBooking = async (req: AuthRequest, res: Response) => {
       return cancelled;
     });
 
-    // Best-effort — same reasoning as accept/decline above.
     await afterCancellation(id, cancelReason || 'Booking cancelled', req.user.userId);
 
-    // Notify the other party (workerId may be null if booking is unassigned)
     const notificationUserId =
       booking.clientId === req.user.userId ? booking.workerId : booking.clientId;
 
@@ -3612,11 +3074,6 @@ export const cancelBooking = async (req: AuthRequest, res: Response) => {
   }
 };
 
-/**
- * POST /api/bookings/:id/review/report  { reason }
- * The worker reports the client's review; the client reports the worker's
- * reply. Puts the review in the admin Flagged queue (adminReviewController).
- */
 export const reportReview = async (req: AuthRequest, res: Response) => {
   try {
     if (!req.user) {
@@ -3639,11 +3096,6 @@ export const reportReview = async (req: AuthRequest, res: Response) => {
     if (isClient && !review.workerResponse) {
       return res.status(409).json(errorResponse(409, 'There is no reply to report'));
     }
-    // One pending report per review: overwriting the other side's report
-    // would drop it from the admin queue. They can report once it's handled.
-    // The check is part of the write, so two reports sent at the same moment
-    // can't both pass it. A null target (older flags, admin-set flags) means
-    // the review.
     const flagTarget = isWorker ? 'REVIEW' : 'RESPONSE';
     const { count } = await prisma.review.updateMany({
       where: {
@@ -3667,10 +3119,6 @@ export const reportReview = async (req: AuthRequest, res: Response) => {
   }
 };
 
-/**
- * POST /api/bookings/:id/review
- * Submit rating and review after completion
- */
 export const submitReview = async (req: AuthRequest, res: Response) => {
   try {
     if (!req.user || req.user.role !== 'CLIENT') {
@@ -3680,7 +3128,6 @@ export const submitReview = async (req: AuthRequest, res: Response) => {
     const id = req.params.id as string;
     const { rating, comment, photoUrls } = req.body;
 
-    // `worker` on Booking is a User relation — include it directly (no nested `.user`)
     const booking = await prisma.booking.findUnique({
       where: { id },
       include: {
@@ -3702,14 +3149,10 @@ export const submitReview = async (req: AuthRequest, res: Response) => {
       return res.status(409).json(errorResponse(409, 'Can only review completed bookings'));
     }
 
-    // A completed booking must have an assigned worker, but workerId is
-    // nullable on Booking — narrow it before using it as a lookup key.
     if (!booking.workerId) {
       return res.status(409).json(errorResponse(409, 'Booking has no assigned worker'));
     }
 
-    // Review model uses clientId (not reviewerId), and workerId references WorkerProfile.id
-    // First resolve the WorkerProfile id from the worker's userId
     const workerProfile = await prisma.workerProfile.findUnique({
       where: { userId: booking.workerId },
       select: { id: true },
@@ -3730,10 +3173,6 @@ export const submitReview = async (req: AuthRequest, res: Response) => {
       },
     });
 
-    // Update worker's average rating — aggregate in the DB instead of
-    // pulling every review row (comment, photoUrls, etc.) just to reduce it.
-    // status: VISIBLE matches adminReviewController.updateReview's own
-    // recompute, so a HIDDEN review never counts toward the public rating.
     const ratingStats = await prisma.review.aggregate({
       where: { workerId: workerProfile.id, status: 'VISIBLE' },
       _avg: { rating: true },
@@ -3750,12 +3189,11 @@ export const submitReview = async (req: AuthRequest, res: Response) => {
       },
     });
 
-    // Notify worker — use REVIEW_RECEIVED (not NEW_REVIEW)
     await notifyUser({
       userId: booking.workerId,
       type: 'REVIEW_RECEIVED',
       title: 'New Review',
-      message: `You received a ${rating}-star review`, // booking.client not included — avoid referencing it here
+      message: `You received a ${rating}-star review`,
       relatedId: id,
     });
 

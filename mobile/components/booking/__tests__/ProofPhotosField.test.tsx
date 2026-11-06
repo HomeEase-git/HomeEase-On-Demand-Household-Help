@@ -37,7 +37,6 @@ describe("ProofPhotosField", () => {
     expect(getByText("2/5")).toBeTruthy();
 
     await fireEvent.press(getByLabelText("Add a photo: Proof"));
-    // Not awaited: pick() only resolves once the upload below finishes.
     await act(async () => {
       mockInfo.mock.calls[0][2][1].onPress(); // [Camera, Gallery, Cancel]
     });

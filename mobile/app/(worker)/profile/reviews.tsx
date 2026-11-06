@@ -141,7 +141,6 @@ export default function WorkerReviewsScreen() {
         renderItem={({ item }) => (
           <ReviewCard review={item} onRespond={handleRespond} onReport={() => setReportBookingId(item.bookingId)} />
         )}
-        // Keeps a review's reply box above the keyboard while typing.
         renderScrollComponent={(props) => <KeyboardAwareScrollView {...props} />}
       />
       <ReportModal

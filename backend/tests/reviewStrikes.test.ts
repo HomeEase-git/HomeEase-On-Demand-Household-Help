@@ -3,7 +3,6 @@ import app from '@/app';
 import prisma from '@config/database';
 import { createTestUser, deleteTestUser, createTestBooking } from './helpers';
 
-// Report -> warn -> 3rd strike suspends, for both sides of a review.
 describe('Review reports and warning strikes', () => {
   const createdUserIds: string[] = [];
   let clientId: string;
@@ -57,7 +56,6 @@ describe('Review reports and warning strikes', () => {
     expect(byClient.status).toBe(409);
     expect(await prisma.review.findUnique({ where: { id: review.id } })).toMatchObject({ flagged: true, flagTarget: 'REVIEW' });
 
-    // Once the admin has dealt with the worker's report, the client can report the reply.
     await prisma.review.update({ where: { id: review.id }, data: { flagged: false } });
     const again = await request(app)
       .post(`/api/bookings/${review.bookingId}/review/report`)
@@ -69,7 +67,6 @@ describe('Review reports and warning strikes', () => {
 
   it('warns the part the admin saw, once, and keeps the other report', async () => {
     const review = await seedReview('rude reply');
-    // The client's report on the reply arrived after the admin opened the review.
     await prisma.review.update({ where: { id: review.id }, data: { flagged: true, flagTarget: 'RESPONSE' } });
     const warn = () =>
       request(app)
@@ -84,7 +81,6 @@ describe('Review reports and warning strikes', () => {
 
     const worker = await prisma.user.findUniqueOrThrow({ where: { id: workerId } });
     expect(worker.warningCount).toBe(0);
-    // Reset so the strike count test below starts from zero.
     await prisma.user.update({ where: { id: clientId }, data: { warningCount: 0 } });
   });
 

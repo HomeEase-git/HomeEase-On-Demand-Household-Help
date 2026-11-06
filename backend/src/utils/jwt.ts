@@ -1,9 +1,6 @@
 import jwt, { Secret } from 'jsonwebtoken';
 import type { JwtPayload } from '../types';
 
-// Short-lived on purpose: the apps renew silently through POST /auth/refresh
-// (rotating, reuse-detected refresh tokens — see otpService.consumeRefreshToken),
-// so a leaked access token is only useful for minutes, not days.
 const DEFAULT_JWT_EXPIRY_SECONDS = 15 * 60;
 const DEVELOPMENT_JWT_SECRET = 'homeease_development_secret_change_me';
 
@@ -45,9 +42,6 @@ const getJwtExpiry = (): number => {
 };
 
 const JWT_SECRET = getJwtSecret();
-// Exported so tokenRevocation.ts can size a revocation entry's TTL to
-// exactly this — no access token minted before a revocation call can
-// possibly outlive it, so there's no reason to keep the Redis key longer.
 export const JWT_EXPIRY = getJwtExpiry();
 
 export const generateToken = (payload: JwtPayload, expiresInSeconds: number = JWT_EXPIRY): string => {

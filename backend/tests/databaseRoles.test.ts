@@ -2,8 +2,6 @@ import prisma from '@config/database';
 import { checkDatabasePrivileges } from '@config/dbPrivilegeCheck';
 import { ownerDb } from './ownerDb';
 
-// CI runs the suite as homeease_app (scripts/db-roles.ts), the role
-// production's DATABASE_URL should use; the second block only runs then.
 let currentRole = '';
 beforeAll(async () => {
   [{ currentRole }] = await prisma.$queryRaw<[{ currentRole: string }]>`SELECT current_user AS "currentRole"`;

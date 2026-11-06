@@ -10,7 +10,6 @@ import * as api from "../../../services/api";
 import { colors, cardShadow } from "../../../constants";
 import { useAlertModal } from "../../../contexts/AlertModalContext";
 
-// Monday first, the way people think about a work week.
 const WEEK: { day: number; label: string }[] = [
   { day: 1, label: "Monday" },
   { day: 2, label: "Tuesday" },
@@ -27,11 +26,6 @@ const PRESETS: { label: string; days: number[] }[] = [
   { label: "Every day", days: [0, 1, 2, 3, 4, 5, 6] },
 ];
 
-/**
- * The worker's repeating weekly schedule: just the days they work (e.g.
- * Monday to Friday). Every week follows it; single dates are changed on the
- * calendar. Clients book any start time on a working day.
- */
 export default function WeeklyScheduleScreen() {
   const router = useRouter();
   const alertModal = useAlertModal();

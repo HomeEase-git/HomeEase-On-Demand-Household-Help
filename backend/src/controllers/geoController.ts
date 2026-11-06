@@ -9,22 +9,9 @@ import {
 } from '@services/googlePlacesService';
 import { googleDirections, isGoogleDirectionsConfigured } from '@services/googleDirectionsService';
 
-// All endpoints below respond 200 with a "not configured"/"not found"/empty
-// result rather than a 4xx/5xx for "we don't have an answer" — the mobile
-// client treats all of those the same way (surface a manual-entry fallback in
-// the UI), so there's no reason to make it distinguish HTTP status codes for
-// what's the same outcome from its perspective. Backed by Places API (New)
-// and Routes API; GOOGLE_MAPS_API_KEY must be set for any of them to work.
-
-// Places session tokens must be URL/filename-safe base64, max 36 chars
-// (a UUIDv4 fits). Place IDs use the same alphabet, just longer.
 const SESSION_TOKEN_PATTERN = /^[A-Za-z0-9_-]{1,36}$/;
 const PLACE_ID_PATTERN = /^[A-Za-z0-9_-]{1,512}$/;
 
-/**
- * POST /api/geo/geocode
- * body: { address: string }
- */
 export const geocodeAddress = async (req: Request, res: Response) => {
   const { address } = req.body as { address?: string };
   if (!address || typeof address !== 'string' || !address.trim()) {
@@ -44,15 +31,6 @@ export const geocodeAddress = async (req: Request, res: Response) => {
   }
 };
 
-/**
- * POST /api/geo/reverse-geocode
- * body: { lat: number, lng: number }
- *
- * Deprecated: reverse geocoding now runs on-device (Android's native
- * geocoder via expo-location), and the Geocoding API is no longer used.
- * Kept only so app builds that predate that change get the "not found" they
- * already handle (manual address entry) instead of a 404.
- */
 export const reverseGeocode = async (req: Request, res: Response) => {
   const { lat, lng } = req.body as { lat?: number; lng?: number };
   if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
@@ -61,13 +39,6 @@ export const reverseGeocode = async (req: Request, res: Response) => {
   return res.status(200).json({ success: true, message: 'Reverse geocoding moved on-device', data: null });
 };
 
-/**
- * POST /api/geo/search
- * body: { query: string, limit?: number }
- *
- * Multi-result free-text search. New app builds use /autocomplete +
- * /place-details instead; this stays for older builds.
- */
 export const searchAddresses = async (req: Request, res: Response) => {
   const { query, limit } = req.body as { query?: string; limit?: number };
   if (!query || typeof query !== 'string' || query.trim().length < 3) {
@@ -87,10 +58,6 @@ export const searchAddresses = async (req: Request, res: Response) => {
   }
 };
 
-/**
- * POST /api/geo/autocomplete
- * body: { input: string, sessionToken: string, near?: { lat, lng } }
- */
 export const autocompleteAddresses = async (req: Request, res: Response) => {
   const { input, sessionToken, near } = req.body as {
     input?: string;
@@ -122,10 +89,6 @@ export const autocompleteAddresses = async (req: Request, res: Response) => {
   }
 };
 
-/**
- * POST /api/geo/place-details
- * body: { placeId: string, sessionToken?: string }
- */
 export const getPlaceDetails = async (req: Request, res: Response) => {
   const { placeId, sessionToken } = req.body as { placeId?: string; sessionToken?: string };
   if (typeof placeId !== 'string' || !PLACE_ID_PATTERN.test(placeId)) {
@@ -148,10 +111,6 @@ export const getPlaceDetails = async (req: Request, res: Response) => {
   }
 };
 
-/**
- * POST /api/geo/directions
- * body: { origin: { lat, lng }, destination: { lat, lng } }
- */
 export const getDirections = async (req: Request, res: Response) => {
   const { origin, destination } = req.body as {
     origin?: { lat?: number; lng?: number };

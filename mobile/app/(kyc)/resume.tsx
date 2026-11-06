@@ -18,8 +18,6 @@ import {
 import { useAlertModal } from "../../contexts/AlertModalContext";
 import { useMediaPicker } from "../../hooks/useMediaPicker";
 
-// Worker-only screen — clients never reach this (selfie.tsx sends
-// them straight to the contract), but guard against direct navigation.
 export default function ResumeScreen() {
   const router = useRouter();
   const alertModal = useAlertModal();
@@ -34,8 +32,6 @@ export default function ResumeScreen() {
   });
   const { pick } = useMediaPicker();
   const [submitting, setSubmitting] = useState(false);
-  // Years of experience decide which expertise tiers the worker can reach;
-  // the admin checks it against the resume at approval.
   const [years, setYears] = useState("");
   const [savingYears, setSavingYears] = useState(false);
   const yearsNumber = /^\d{1,2}$/.test(years.trim()) ? Number(years.trim()) : NaN;

@@ -15,8 +15,6 @@ type ServiceTypeOption = { id: string; name: string; requiresCertification?: boo
 
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 
-// Auto-inserts dashes as the user types digits, so "YYYY-MM-DD" doesn't have
-// to be typed by hand and malformed input (e.g. "01/15/2024") can't happen.
 function maskDateInput(raw: string): string {
   const digits = raw.replace(/\D/g, "").slice(0, 8);
   if (digits.length <= 4) return digits;

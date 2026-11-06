@@ -10,5 +10,4 @@ const parseRate = (value: string | undefined, fallback: number): number => {
 };
 
 export const COMMISSION_RATE = parseRate(process.env.COMMISSION_RATE, 0.1);
-// Workers file their own taxes; HomeEase withholds nothing (see appSettingsService FIXED_TAX).
 export const WITHHOLDING_TAX_RATE = 0;

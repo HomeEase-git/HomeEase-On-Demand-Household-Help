@@ -8,11 +8,6 @@ import {
   VALID_PAYMENT_METHOD_TYPES,
 } from '../constants/bookingEnums';
 
-/**
- * Validates that required fields are present and returns 400 if missing.
- * Used across all routes to short-circuit Prisma calls before they happen.
- */
-
 // Worker validators
 export const validateUpdateAvailability = (
   req: Request,
@@ -85,10 +80,6 @@ export const validateUpdateWorkerProfile = (
     return res.status(400).json(errorResponse(400, 'zipCode must be a string'));
   }
 
-  // Geocoded client-side (see mobile utils/geo.ts geocodeAddress) when
-  // address/city/state/zipCode change — sent together, but each is optional
-  // independently in case a future caller wants to clear the address without
-  // re-geocoding.
   if (addressLat !== undefined && addressLat !== null && typeof addressLat !== 'number') {
     return res.status(400).json(errorResponse(400, 'addressLat must be a number'));
   }
@@ -325,8 +316,6 @@ export const validateUpdatePayoutMethod = (
     return res.status(400).json(errorResponse(400, 'payoutAccountNumber must be a string'));
   }
 
-  // Re-auth requirement — a payout-destination change is exactly the kind
-  // of account takeover a phished/compromised session would use.
   if (typeof password !== 'string' || !password) {
     return res.status(400).json(errorResponse(400, 'Current password is required to change payout details'));
   }
@@ -334,22 +323,9 @@ export const validateUpdatePayoutMethod = (
   return next();
 };
 
-// Booking validators
-// Rough Philippines bounding box (the only market this platform serves) —
-// rejects wildly wrong/spoofed coordinates before they ever reach a
-// distanceFee calculation or a "which city" pricing-rule lookup. Generous on
-// purpose (includes surrounding EEZ waters) rather than tightly hugging the
-// coastline, since a false rejection is worse than a slightly loose bound.
 const PH_BOUNDS = { minLat: 4, maxLat: 21.5, minLng: 116, maxLng: 127 };
 
 
-/**
- * Booking creation takes no client-supplied price — it's computed server-side
- * (see bookingController.createBooking). Scheduling is a date plus an exact
- * start time "HH:00"; whether that date/time is still bookable (not past,
- * same-day lead time) is checked in the controller against AppSettings.
- * workerId is optional: omitting it triggers auto-match.
- */
 export const validateCreateBooking = (
   req: Request,
   res: Response,
@@ -397,17 +373,10 @@ export const validateCreateBooking = (
     return res.status(400).json(errorResponse(400, 'address is required and must be a string'));
   }
 
-  // The client always has this (see mobile step-2's address picker, which
-  // sets it from the geocoded result).
   if (!city || typeof city !== 'string' || !city.trim()) {
     return res.status(400).json(errorResponse(400, 'city is required and must be a non-empty string'));
   }
 
-  // Number.isFinite (not typeof + a plain comparison) rejects NaN/Infinity
-  // too — `typeof NaN === 'number'` is true, and every comparison against
-  // NaN is false, so the PH_BOUNDS range check below would silently let a
-  // NaN lat/lng through rather than reject it, corrupting the distanceFee
-  // (and therefore estimatedPrice) computed from it downstream.
   if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
     return res.status(400).json(errorResponse(400, 'lat and lng are required and must be numbers'));
   }
@@ -469,7 +438,6 @@ export const validateCreateBooking = (
     return res.status(400).json(errorResponse(400, 'paymentAccountIdentifier must be a string'));
   }
 
-  // Per-unit jobs only; the job's own limits are checked in createBooking.
   if (quantity !== undefined && quantity !== null && (typeof quantity !== 'number' || !Number.isFinite(quantity))) {
     return res.status(400).json(errorResponse(400, 'quantity must be a number'));
   }
@@ -495,17 +463,10 @@ export const validateArriveBooking = (
 ) => {
   const { lat, lng, accuracy } = req.body;
 
-  // Number.isFinite rejects NaN/Infinity too (see the same fix in
-  // validateCreateBooking) — a NaN here would otherwise make every
-  // isWithinRadiusMeters comparison silently false, always failing the
-  // check-in with a "you are NaNm away" message instead of a clear 400.
   if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
     return res.status(400).json(errorResponse(400, 'lat and lng are required and must be numbers'));
   }
 
-  // Structural check only (mirrors validateLiveLocation) — the actual sanity
-  // bound on how *bad* an accuracy radius is still acceptable is a business
-  // rule enforced in bookingController.arriveBooking, not here.
   if (accuracy !== undefined && accuracy !== null && (!Number.isFinite(accuracy) || accuracy < 0)) {
     return res.status(400).json(errorResponse(400, 'accuracy must be a non-negative number'));
   }
@@ -538,7 +499,6 @@ export const validateLiveLocation = (
   return next();
 };
 
-/** A date + start time, used by reschedule requests and follow-up visits. */
 export const validateDateAndTime = (req: Request, res: Response, next: NextFunction) => {
   const { date, time, notes } = req.body;
   if (typeof date !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(date) || isNaN(new Date(date).getTime())) {
@@ -720,11 +680,6 @@ const checkFullAddress = (fullAddress: unknown): string | null => {
   return null;
 };
 
-// Shared by both address validators — lat/lng are optional (an address saved
-// before geocoding resolves, or one Google couldn't resolve at all, still
-// has to save), but when present must be real Philippine coordinates so a bad
-// geocode/GPS glitch can't corrupt the distance-fee or arrival-geofence math
-// that reads UserAddress.lat/lng downstream.
 const validateOptionalAddressCoords = (
   req: Request,
   res: Response,
@@ -764,8 +719,6 @@ export const validateAddAddress = (
   }
 
   if (fullAddress !== undefined) {
-    // Current app: one free-text address line + the map pin. The pin is what
-    // locates the address (the text is never geocoded), so it's required.
     const fullAddressError = checkFullAddress(fullAddress);
     if (fullAddressError) return res.status(400).json(errorResponse(400, fullAddressError));
 
@@ -773,14 +726,12 @@ export const validateAddAddress = (
       return res.status(400).json(errorResponse(400, 'lat and lng are required — pin the address on the map'));
     }
 
-    // Structured parts come from Google for the pinned spot and may be blank.
     for (const [field, value] of [['street', street], ['city', city], ['state', state], ['zipCode', zipCode]] as const) {
       if (value !== undefined && value !== null && typeof value !== 'string') {
         return res.status(400).json(errorResponse(400, `${field} must be a string`));
       }
     }
   } else {
-    // Older app versions still send the split fields only.
     if (!street || typeof street !== 'string') {
       return res.status(400).json(errorResponse(400, 'street is required and must be a string'));
     }
@@ -902,7 +853,6 @@ export const validateSubmitKYCDocument = (
     return res.status(400).json(errorResponse(400, 'documentUrl is required and must be a string'));
   }
 
-  // Optional cosmetic hints from the upload step (admin UI display only).
   if (originalName !== undefined && typeof originalName !== 'string') {
     return res.status(400).json(errorResponse(400, 'originalName must be a string'));
   }
@@ -930,8 +880,6 @@ export const validateSubmitContractAcceptance = (
     return res.status(400).json(errorResponse(400, 'contractVersion must be a short version string'));
   }
 
-  // acceptedAt from the client is deliberately ignored — the server's clock
-  // is the only trustworthy record of when the user accepted.
   return next();
 };
 

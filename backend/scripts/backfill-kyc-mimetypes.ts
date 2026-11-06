@@ -1,18 +1,3 @@
-// One-off backfill: KYC documents submitted through the mobile two-call flow
-// (POST /users/me/kyc-documents/upload then POST /users/me/kyc-documents) were
-// persisted with `mimeType = null`, which made verificationAiService filter them
-// out ("No image documents were included") and the admin UI show no preview.
-// The controller now derives the mime type from the Supabase URL extension on
-// write; this script does the same for rows created before that fix and re-flags
-// their (non-approved) verification requests so an admin can re-run the AI
-// review.
-//
-// Usage (from backend/):
-//   npx tsx scripts/backfill-kyc-mimetypes.ts --dry     # report only, no writes
-//   npx tsx scripts/backfill-kyc-mimetypes.ts           # apply
-//
-// Respects backend/.env DATABASE_URL — point it at the target DB the same way
-// the Prisma CLI does. Run against dev first.
 import 'dotenv/config';
 import { PrismaClient } from '@prisma/client';
 import { PrismaPg } from '@prisma/adapter-pg';
@@ -57,8 +42,6 @@ async function main() {
     affectedRequestIds.add(row.verificationRequestId);
   }
 
-  // Re-flag the touched requests (unless already approved) so the admin queue
-  // shows them as pending and "Re-run AI Review" produces a real assessment.
   const requeue = await prisma.verificationRequest.findMany({
     where: { id: { in: [...affectedRequestIds] }, status: { not: 'APPROVED' } },
     select: { id: true },

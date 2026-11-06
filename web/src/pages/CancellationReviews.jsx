@@ -56,11 +56,6 @@ function formatPeso(amount) {
   return !amount ? 'No fee' : `₱${Number(amount).toLocaleString('en-PH', { minimumFractionDigits: 2 })}`
 }
 
-/**
- * On-site cancellations: a worker who cancels after checking in must attach
- * photo proof and say whose fault it was. When they blame the client, an
- * admin decides here (adminCancellationController.reviewCancellation).
- */
 export default function CancellationReviews() {
   const [selectedId, setSelectedId] = useState(null)
   const [decision, setDecision] = useState(null) // 'APPROVE' | 'REJECT' | null
@@ -90,9 +85,6 @@ export default function CancellationReviews() {
 
   const selected = useMemo(() => rows.find((r) => r.bookingId === selectedId) || null, [rows, selectedId])
 
-  // `fetchCancellationReviews` isn't paginated — `rows` already holds every
-  // on-site cancellation for the current status tab, so the export just
-  // writes what's already loaded instead of re-fetching page by page.
   const mapCancellationRow = (r) => ({
     'Booking ID': r.displayId,
     Service: r.service,

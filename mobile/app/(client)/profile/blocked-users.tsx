@@ -9,7 +9,6 @@ import { SkeletonList, TransactionItemSkeleton } from "../../../components/ui/Sk
 import { useAlertModal } from "../../../contexts/AlertModalContext";
 import { getBlockedUsers, unblockUser, type BlockedUser } from "../../../services/api";
 
-// Also mounted by the worker app (app/(worker)/profile/blocked-users.tsx).
 export default function BlockedUsersScreen() {
   const alertModal = useAlertModal();
   const [users, setUsers] = useState<BlockedUser[]>([]);

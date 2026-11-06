@@ -2,26 +2,16 @@ import crypto from 'crypto';
 import { promisify } from 'util';
 import { decryptWithKeyring, deriveKey, deriveKeyring, encryptWithKey } from '@utils/encryption';
 
-// Field-level encryption for worker payout account numbers
-// (WorkerProfile.payoutAccountNumber, Payout.accountNumber). Encrypted values carry an `enc:v1:` prefix, so
-// rows written before encryption existed (plaintext) still read correctly
-// until scripts/encrypt-sensitive-fields.ts has backfilled them.
-//
-// Losing DATA_ENCRYPTION_KEY makes every encrypted value unrecoverable —
-// keep it in a password manager, not only in the hosting dashboard.
-
 const PREFIX = 'enc:v1:';
 const DEVELOPMENT_KEY = 'homeease_development_data_key_change_me';
 
 const getKey = (): Buffer => deriveKey('DATA_ENCRYPTION_KEY', DEVELOPMENT_KEY);
-// Current key first, then DATA_ENCRYPTION_KEY_PREVIOUS during a rotation.
 const getKeyring = (): Buffer[] => deriveKeyring('DATA_ENCRYPTION_KEY', DEVELOPMENT_KEY);
 
 export function isEncryptedField(value: unknown): value is string {
   return typeof value === 'string' && value.startsWith(PREFIX);
 }
 
-/** Encrypts a value for storage. Already-encrypted input is returned as-is. */
 export function encryptField(plaintext: string): string {
   if (isEncryptedField(plaintext)) return plaintext;
   return PREFIX + encryptWithKey(plaintext, getKey());
@@ -31,13 +21,11 @@ export function encryptOptionalField(plaintext: string | null | undefined): stri
   return plaintext ? encryptField(plaintext) : plaintext;
 }
 
-/** Decrypts a stored value; legacy plaintext is returned unchanged. */
 export function decryptField(stored: string): string {
   if (!isEncryptedField(stored)) return stored;
   return decryptWithKeyring(stored.slice(PREFIX.length), getKeyring()).plaintext;
 }
 
-/** True if an encrypted value only decrypts with DATA_ENCRYPTION_KEY_PREVIOUS. */
 export function isUnderPreviousDataKey(stored: string): boolean {
   if (!isEncryptedField(stored)) return false;
   return decryptWithKeyring(stored.slice(PREFIX.length), getKeyring()).keyIndex > 0;
@@ -47,15 +35,6 @@ export function decryptOptionalField(stored: string | null | undefined): string 
   return stored ? decryptField(stored) : stored;
 }
 
-/** "••••1234" — the last four digits/characters only. */
-/**
- * Keyed hash for short secrets stored for lookup (one-time codes): without
- * DATA_ENCRYPTION_KEY a database copy can't brute-force them. Candidates
- * cover a key rotation in progress.
- */
-// Memory-hard so a stolen key plus DB copy still costs real work per guess.
-// Async on purpose: scryptSync held the shared event loop (~40ms per call,
-// workers and sockets included); crypto.scrypt runs on libuv's threadpool.
 const scryptAsync = promisify(crypto.scrypt) as (
   password: string,
   salt: Buffer,
@@ -112,12 +91,6 @@ function maskDeep(value: unknown, depth: number): unknown {
   return value;
 }
 
-/**
- * Replaces every encrypted field value in `value` with its masked form, so
- * an endpoint returning a full WorkerProfile/Payout row never
- * leaks either ciphertext or the full number. Endpoints that legitimately
- * need the full number (the worker's own payout settings) decrypt explicitly.
- */
 export function maskEncryptedFieldsDeep<T>(value: T): T {
   return containsEncrypted(value, 0) ? (maskDeep(value, 0) as T) : value;
 }

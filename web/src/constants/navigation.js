@@ -1,5 +1,3 @@
-// Standalone links render directly; grouped links collapse related pages
-// behind a single dropdown so the sidebar doesn't list every page at once.
 export const NAV_STRUCTURE = [
   { type: 'link', to: '/dashboard', page: 'dashboard', icon: 'fa-th-large', label: 'Dashboard' },
   {
@@ -26,9 +24,6 @@ export const NAV_STRUCTURE = [
       { to: '/worker-packages', page: 'worker-packages', icon: 'fa-box', label: 'Worker Packages' },
     ],
   },
-  // Bookings and Payments already expose their sub-pages (Disputes, Payouts,
-  // Refunds, Service Fee & Debt) via an in-page SubNav tab strip, so they stay single links here
-  // instead of duplicating that navigation as a sidebar dropdown too.
   { type: 'link', to: '/bookings', page: 'bookings', icon: 'fa-calendar-check', label: 'Bookings' },
   { type: 'link', to: '/payments', page: 'payments', icon: 'fa-credit-card', label: 'Payments' },
   { type: 'link', to: '/reviews', page: 'reviews', icon: 'fa-star', label: 'Reviews' },
@@ -37,8 +32,6 @@ export const NAV_STRUCTURE = [
   { type: 'link', to: '/settings', page: 'settings', icon: 'fa-cog', label: 'Settings' },
 ]
 
-// Every page in the sidebar as a flat list (group children carry their
-// group's name), for the Ctrl/Cmd+K command palette.
 export const NAV_PAGES = NAV_STRUCTURE.flatMap((item) =>
   item.type === 'link'
     ? [{ to: item.to, icon: item.icon, label: item.label, group: null }]

@@ -9,12 +9,6 @@ import PrimaryButton from "../../../../components/ui/PrimaryButton";
 import * as api from "../../../../services/api";
 import { useAlertModal } from "../../../../contexts/AlertModalContext";
 
-// Bank Transfer isn't offered here — GCash/Maya are the only payout
-// channels HomeEase currently supports, by deliberate product scope, not a
-// gateway limitation (Xendit's Payouts API does support bank channels).
-// Expanding to bank transfer is a separate, explicit future decision. (A
-// worker with a legacy Bank Transfer payout method on file will have it
-// overwritten the next time they save here.)
 const METHODS: { id: "GCASH" | "MAYA"; label: string; icon: string }[] = [
   { id: "GCASH", label: "GCash", icon: "G" },
   { id: "MAYA", label: "Maya", icon: "M" },
@@ -36,9 +30,6 @@ export default function PayoutEditScreen() {
       try {
         const current = await api.getPayoutMethod();
         if (!active) return;
-        // A legacy Bank Transfer method on file isn't offered as a choice
-        // anymore — fall back to GCash rather than selecting an option that
-        // isn't in the list.
         if (current.payoutMethod === "GCASH" || current.payoutMethod === "MAYA") {
           setSelected(current.payoutMethod);
         }

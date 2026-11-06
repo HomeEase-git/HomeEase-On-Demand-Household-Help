@@ -6,12 +6,6 @@ import {
   useSettingsForm,
 } from '../components/settings/SettingsForm'
 
-// Price changes (same-day fee and notice, distance fee, expertise tiers,
-// no-show penalty, client-fault compensation) live on Price Adjustments,
-// the service fee and worker debt on Payments → Service Fee & Debt, and
-// booking/decline rules on Bookings → Booking Rules. HomeEase withholds no
-// tax (workers file their own). This page keeps site identity, admin account/alert settings, and
-// trust & safety.
 const NUMBER_FIELD_BOUNDS = {
   noShowGraceMinutes: [15, 480],
   workerMinAge: [18, 100],
@@ -19,8 +13,6 @@ const NUMBER_FIELD_BOUNDS = {
   disputeEscalationHours: [1, 720],
 }
 
-// These are OFF (null) unless the admin sets them, so an empty field is valid
-// here (not "Required.", unlike every other numeric setting above).
 const NULLABLE_NUMBER_FIELD_BOUNDS = {
   autoSuspendRatingThreshold: [0, 5],
   autoSuspendDisputeCountThreshold: [1, 1000],

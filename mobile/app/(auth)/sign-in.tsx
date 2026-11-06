@@ -21,17 +21,10 @@ export default function SignInScreen() {
   const [emailError, setEmailError] = useState("");
   const [passwordError, setPasswordError] = useState("");
 
-  // Set once the backend responds with `mfaRequired: true` — while this is
-  // set, the form below renders the code-entry step instead of email/password.
   const [challengeToken, setChallengeToken] = useState<string | null>(null);
-  // Set when login is refused because the account is suspended/banned —
-  // offers the way to ask for a human review.
   const [accountBlocked, setAccountBlocked] = useState(false);
-  // Set when a worker who deactivated their account tries to sign in.
   const [accountDeactivated, setAccountDeactivated] = useState(false);
   const [reactivating, setReactivating] = useState(false);
-  // Email/SMS two-step sign-in: where the code went. Unset for an
-  // authenticator-app challenge.
   const [codeSentTo, setCodeSentTo] = useState<{ method: "EMAIL" | "SMS"; destination: string } | null>(null);
   const [resending, setResending] = useState(false);
   const [mfaCode, setMfaCode] = useState("");
@@ -72,23 +65,12 @@ export default function SignInScreen() {
       } else if (kycStatus === "REJECTED") {
         destination = "/(kyc)/rejected";
       } else if (kycStatus === "SUBMITTED") {
-        // Docs already submitted — waiting on the admin to review.
         destination = "/(kyc)/pending";
       } else {
         // Never submitted KYC docs yet.
         destination = "/(kyc)/landing";
       }
     }
-    // The password (or MFA code) field is still focused (native keyboard +
-    // IME connection attached) at this point — replacing the entire (auth)
-    // navigator for (client)/(worker) while it holds focus caused a
-    // reproducible Fabric crash (`addViewAt: ... View already has a
-    // parent`, confirmed via adb logcat) where the still-mounting
-    // ReactEditText raced the stack swap. Keyboard.dismiss() itself is
-    // fire-and-forget on the native side, so a short delay before
-    // navigating gives its view teardown a real frame to finish rather
-    // than racing it — dismissing and replacing in the same tick wasn't
-    // reliably enough on live-device retest.
     Keyboard.dismiss();
     setTimeout(() => router.replace(destination), 100);
   };
@@ -128,10 +110,6 @@ export default function SignInScreen() {
 
       routeAfterLogin(result.data);
     } catch (err: any) {
-      // The backend intentionally returns the same 401 for "no account with
-      // this email" and "wrong password" (prevents attackers from using this
-      // form to discover which emails are registered), so show one combined,
-      // human message here rather than whatever reason it gives.
       if (err?.code === "EMAIL_NOT_VERIFIED") {
         toast.info(err.message);
         router.push({

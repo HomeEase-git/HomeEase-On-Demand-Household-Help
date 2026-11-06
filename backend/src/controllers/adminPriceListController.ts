@@ -10,11 +10,6 @@ interface AuthRequest extends Request {
   user?: JwtPayload;
 }
 
-// Price List: every category's starting price and every job's price on one
-// screen, saved together. Only prices change here — names, pricing models,
-// questions and everything else still go through the job order editor
-// (adminCatalogController), which stays the one place a job is defined.
-
 type PriceChange = { id?: unknown; basePrice?: unknown };
 type PriceListBody = {
   tasks?: PriceChange[];
@@ -22,8 +17,6 @@ type PriceListBody = {
   overrideReason?: string;
 };
 
-// One bulk "+10% on everything" over the whole matrix is ~150 rows; this
-// leaves headroom without letting one request rewrite unbounded rows.
 const MAX_CHANGES = 1000;
 
 export const getPriceList = async (_req: Request, res: Response) => {
@@ -106,8 +99,6 @@ export const updatePriceList = async (req: AuthRequest, res: Response) => {
       return res.status(404).json(errorResponse(404, 'Some of these jobs or categories no longer exist. Reload the Price List.'));
     }
 
-    // Same minimum-wage guardrail as the job order editor. One reason covers
-    // every below-floor job in the save, since a bulk change is one decision.
     const dole = getHighestDoleWageReference();
     const belowFloor: string[] = [];
     for (const change of taskChanges) {

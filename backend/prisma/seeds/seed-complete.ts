@@ -1,17 +1,3 @@
-// prisma/seeds/seed-complete.ts
-//
-// The "everything" seed — every model in schema.prisma gets rows, and every
-// nullable/optional column gets a real value on at least one row (soft
-// deletes, disputes, refunds, payouts, worker packages,
-// pricing rules, audit logs, the works). seed-full.ts covers the common
-// screen states; this one exists to exercise admin tooling and reports that
-// read from tables seed-full.ts never touches (Payout, PricingRule,
-// AuditLog, WorkerAvailability, Skill, WorkerPackage, ServiceScopeField,
-// DeclinedWorker, ArrivalVerification, Cancellation, PricingLog, Dispute).
-//
-// Run with: npx tsx prisma/seeds/seed-complete.ts   (from the backend folder)
-// Requires: @faker-js/faker, bcryptjs, @prisma/adapter-pg, pg
-
 import "dotenv/config";
 import {
   PrismaClient,
@@ -189,7 +175,6 @@ function maskedAccountIdentifier(type: PaymentMethodType) {
   }
 }
 
-// Rough bounding box covering Metro Manila / Bulacan / Pampanga, matching CITIES.
 function randomLatLng() {
   return {
     lat: faker.number.float({ min: 14.4, max: 15.2, fractionDigits: 6 }),
@@ -253,7 +238,6 @@ async function createServiceTypes() {
     });
     created.push(serviceType);
   }
-  // One inactive service type, to exercise isActive=false on both models.
   const inactive = await prisma.serviceType.create({
     data: {
       name: "Landscaping (Retired)",
@@ -311,8 +295,6 @@ async function createClient(index: number) {
   const password = await hashPassword(DEFAULT_PASSWORD);
   const city = faker.helpers.arrayElement(CITIES);
 
-  // Sprinkle in every UserStatus / soft-delete combination so admin screens
-  // and "excluded from active queries" logic have real rows to hit.
   let status: UserStatus = UserStatus.ACTIVE;
   let isDeleted = false;
   let deletedAt: Date | null = null;
@@ -364,7 +346,6 @@ async function createClient(index: number) {
             state: "Philippines",
             zipCode: faker.location.zipCode("####"),
             isDefault: false,
-            // one soft-deleted address to exercise UserAddress soft-delete
             isDeleted: index === 5,
             deletedAt: index === 5 ? faker.date.recent({ days: 10 }) : null,
           },
@@ -382,8 +363,6 @@ async function createClient(index: number) {
     include: { clientProfile: true },
   });
 
-  // Saved payment methods — cover every PaymentMethodType at least once
-  // across the client base.
   const methodType = faker.helpers.arrayElement(Object.values(PaymentMethodType));
   await prisma.savedPaymentMethod.create({
     data: {
@@ -497,11 +476,6 @@ async function createWorker(
     data: {
       userId: user.id,
       type: "WORKER_ONBOARDING",
-      // Distinct from WorkerProfile.kycStatus — the real app only ever
-      // writes PENDING/APPROVED/REJECTED here (never SUBMITTED), since a
-      // VerificationRequest starts PENDING and only leaves that state via
-      // admin decision. See verificationController.uploadVerificationDocuments
-      // and adminVerificationController.approve/rejectVerification.
       status: isApproved ? KYCStatus.APPROVED : isRejected ? KYCStatus.REJECTED : KYCStatus.PENDING,
       rejectionReason: isRejected ? "Government ID photo was blurry and unreadable." : null,
       adminOverrideReason: fullDocSet ? "Manually approved after in-person verification." : null,
@@ -564,7 +538,6 @@ async function createWorker(
     },
   });
 
-  // Skills — a couple of named, priced skills per worker.
   const skillNames = faker.helpers.arrayElements(SKILL_POOL, { min: 2, max: 3 });
   for (const name of skillNames) {
     await prisma.skill.create({
@@ -577,7 +550,6 @@ async function createWorker(
     });
   }
 
-  // Availability — a mix of open, blocked, and booked slots over the next few days.
   const slotCycle: TimeSlot[] = [TimeSlot.MORNING, TimeSlot.AFTERNOON, TimeSlot.EVENING];
   for (let d = 1; d <= 5; d++) {
     const date = new Date();
@@ -599,7 +571,6 @@ async function createWorker(
 
 async function createAuthTokens(users: { id: string }[]) {
   const tokenTypes = Object.values(TokenType);
-  // Guarantee every TokenType appears, then pad with random ones.
   const assignments = users.slice(0, tokenTypes.length).map((user, i) => ({
     user,
     type: tokenTypes[i],
@@ -778,9 +749,6 @@ async function createBookingsAndPayments(
     isAutoMatched?: boolean;
     disputeStatus?: "OPEN" | "UNDER_REVIEW" | "RESOLVED" | "REJECTED";
     payoutStatus?: PayoutStatus;
-    // Simulates a payout that got as far as receiving a Xendit disbursement
-    // id before the payout webhook reported it FAILED (vs. a failure that
-    // never reached Xendit at all, e.g. an unsupported channel).
     disbursementFailedWithId?: boolean;
     paymentStatusOverride?: PaymentStatus;
     cancelledBy?: Role;
@@ -929,13 +897,11 @@ async function createBookingsAndPayments(
         },
       });
     } catch {
-      // Skip rare worker/date/time collisions (worker_slot_unique constraint)
       continue;
     }
 
     bookingIds.push(booking.id);
 
-    // DeclinedWorker audit rows to back declinedWorkerIds.
     for (const declinedId of declinedIds) {
       await prisma.declinedWorker.create({
         data: {
@@ -950,7 +916,6 @@ async function createBookingsAndPayments(
       });
     }
 
-    // Add-ons on roughly a third of bookings, snapshotted onto the booking too.
     let addOnsSnapshot: Array<{ name: string; price: number }> | null = null;
     if (faker.datatype.boolean() && faker.datatype.boolean()) {
       const addOnCount = faker.number.int({ min: 1, max: 2 });
@@ -967,7 +932,6 @@ async function createBookingsAndPayments(
       });
     }
 
-    // Arrival verification for any booking where the worker has checked in.
     if (hasArrived && distanceMeters !== null) {
       await prisma.arrivalVerification.create({
         data: {
@@ -980,7 +944,6 @@ async function createBookingsAndPayments(
       });
     }
 
-    // Pricing log — itemized snapshot of how the estimate was computed.
     const conditionFee = condition === ConditionType.HEAVY ? 150 : condition === ConditionType.NORMAL ? 50 : 0;
     const distanceFee = distanceMeters ? Math.round((distanceMeters / 1000) * 5) : 0;
     const addOnsTotal = addOnsSnapshot ? addOnsSnapshot.reduce((sum, a) => sum + a.price, 0) : 0;
@@ -1019,7 +982,6 @@ async function createBookingsAndPayments(
       });
     }
 
-    // Dispute record (separate from the summary fields already on Booking).
     if (isDisputed && scenario.disputeStatus) {
       const raisedById = faker.helpers.arrayElement([client.id, worker!.id]);
       const resolved = scenario.disputeStatus === "RESOLVED" || scenario.disputeStatus === "REJECTED";
@@ -1041,7 +1003,6 @@ async function createBookingsAndPayments(
       });
     }
 
-    // Payment — authorized at booking time for any live booking, captured on completion.
     if (worker && paymentEligibleStatuses.has(status)) {
       const subtotal = estimatedPrice;
       const tip = booking.tip ?? 0;
@@ -1098,7 +1059,6 @@ async function createBookingsAndPayments(
         },
       });
 
-      // Payout — only once escrow has actually been released to the worker.
       if (escrowStatus === EscrowStatus.RELEASED && scenario.payoutStatus) {
         const wp = worker.workerProfile!;
         const payoutStatus = scenario.payoutStatus;
@@ -1164,8 +1124,6 @@ async function createBookingsAndPayments(
   return bookingIds;
 }
 
-// Clients verify identity only (no trade credentials), so this is a lighter
-// version of the worker verification block — just the 3 identity docs.
 async function createClientVerification(
   client: Awaited<ReturnType<typeof createClient>>,
   status: typeof KYCStatus.PENDING | typeof KYCStatus.APPROVED | typeof KYCStatus.REJECTED
@@ -1229,9 +1187,6 @@ async function main() {
   }
 
   console.log("Creating client identity verification requests...");
-  // Indices 6-9 are plain active/verified clients (0-2 have status variety,
-  // 4 is the intentionally-unverified one) — safe picks for a status mix so
-  // the admin Verification Management "Clients" tab has real states to review.
   await createClientVerification(clients[6], KYCStatus.PENDING);
   await createClientVerification(clients[7], KYCStatus.PENDING);
   await createClientVerification(clients[8], KYCStatus.APPROVED);
@@ -1248,7 +1203,6 @@ async function main() {
       const fullDocSet = workerIndex === 0; // first worker gets every KycDocumentType
       const worker = await createWorker(category, kycOverride, fullDocSet, workerIndex);
 
-      // Worker packages — priced bundles under the worker's own category.
       const packageCount = workerIndex % 3 === 0 ? 1 : 2;
       for (let p = 0; p < packageCount; p++) {
         await prisma.workerPackage.create({

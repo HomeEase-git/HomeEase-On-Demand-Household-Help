@@ -5,7 +5,6 @@ import { useAlertModal } from "../contexts/AlertModalContext";
 
 const REPORT_REASONS = ["Spam", "Harassment", "Inappropriate content", "Scam or fraud", "Other"];
 
-// Report-a-message and block/unblock for a chat screen (client and worker).
 export function useChatSafety(userId: string | undefined, name: string | undefined) {
   const alertModal = useAlertModal();
   const [blockedByMe, setBlockedByMe] = useState(false);

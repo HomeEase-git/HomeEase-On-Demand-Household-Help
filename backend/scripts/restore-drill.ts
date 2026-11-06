@@ -1,26 +1,3 @@
-// Restore drill (docs/DATA-RESILIENCE.md): proves the production database can
-// really be restored to an earlier point in time, and times it.
-//   1. Creates a Neon branch of the default branch as it was N minutes ago
-//      (Neon's point-in-time restore). The branch is set to expire after 6
-//      hours, so it's cleaned up even if this script dies.
-//   2. Checks the restored copy: migration history, that it really is the
-//      earlier point in time, row counts, ledger balance, constraints and
-//      indexes, and (when the keys are set) that encrypted fields decrypt.
-//   3. Deletes the branch.
-// Prints counts and pass/fail only, never row contents.
-//
-// Usage (from backend/):
-//   NEON_API_KEY=... npx tsx scripts/restore-drill.ts --project-id <id> [--minutes-ago 60] [--role <owner>] [--keep]
-//   npx tsx scripts/restore-drill.ts --verify-only <connection string> [--as-of <ISO time>]
-//     checks a database that's already restored (e.g. before switching the
-//     app to it in an incident) without creating anything
-//   add --neon-websocket  to connect through Neon's WebSocket proxy (port 443)
-//     when the network blocks raw Postgres connections to Neon; needs
-//     `npm i --no-save @prisma/adapter-neon @neondatabase/serverless ws`.
-// Set DATA_ENCRYPTION_KEY / MFA_ENCRYPTION_KEY (production values) to also
-// check encrypted fields; without them those checks are skipped.
-//
-// Runs every quarter in GitHub Actions (.github/workflows/restore-drill.yml).
 import 'dotenv/config';
 import { execFileSync } from 'node:child_process';
 import { appendFileSync, readdirSync, statSync } from 'node:fs';
@@ -33,11 +10,8 @@ import { decryptField } from '../src/utils/fieldEncryption';
 
 const NEONCTL = 'neonctl@6.3.0'; // pinned: this tool handles production credentials
 const DATABASE_NAME = 'neondb';
-// Neon's default owner login. Named explicitly: once scripts/db-roles.ts has
-// run, the project has several.
 const DEFAULT_ROLE = 'neondb_owner';
 const BRANCH_LIFETIME_MS = 6 * 60 * 60 * 1000;
-// Clock difference allowed between Neon's restore point and row timestamps.
 const CLOCK_SKEW_MS = 2 * 60 * 1000;
 const ENCRYPTED_SAMPLE = 25;
 
@@ -62,13 +36,10 @@ const add = (label: string, status: Status, detail: string) => checks.push({ lab
 
 function neon(neonArgs: string[]): string {
   if (!process.env.NEON_API_KEY) throw new Error('NEON_API_KEY is not set.');
-  // The key reaches neonctl through the environment, not argv.
   return execFileSync('npx', ['-y', NEONCTL, ...neonArgs], {
     encoding: 'utf8',
     env: process.env,
     stdio: ['ignore', 'pipe', 'inherit'],
-    // Windows needs a shell to find npx.cmd; every argument here is a fixed
-    // string, a generated branch name, a timestamp or the project id.
     shell: process.platform === 'win32',
   });
 }
@@ -88,7 +59,6 @@ function connect(connectionString: string): { prisma: PrismaClient; close: () =>
   return { prisma, close: async () => { await prisma.$disconnect(); await pool.end(); } };
 }
 
-/** A new branch's compute starts on first connection; allow it a minute. */
 async function waitForDatabase(prisma: PrismaClient): Promise<void> {
   const deadline = Date.now() + 60_000;
   for (;;) {
@@ -109,7 +79,6 @@ async function verify(prisma: PrismaClient, asOf: Date | undefined): Promise<voi
     SELECT tablename::text AS tablename FROM pg_tables WHERE schemaname = 'public' ORDER BY tablename`).map((t) => t.tablename);
   const has = (table: string) => tables.includes(table);
 
-  // Migration history: nothing half-applied, and in step with this checkout.
   if (!has('_prisma_migrations')) {
     add('Migration history', 'FAIL', 'No _prisma_migrations table: this is not a HomeEase database.');
     return;
@@ -128,17 +97,10 @@ async function verify(prisma: PrismaClient, asOf: Date | undefined): Promise<voi
   } else if (unknown.length > 0) {
     add('Migration history', 'WARN', `${applied.size} applied, including ${unknown.length} this checkout doesn't have: ${unknown.join(', ')}.`);
   } else {
-    // Not applied: merged after the restore point, or not deployed yet.
     const note = notApplied.length ? ` Not in this copy yet: ${notApplied.join(', ')}.` : '';
     add('Migration history', 'PASS', `${applied.size} applied, none failed.${note}`);
   }
 
-  // Point in time: no row in the copy may have been created or updated after
-  // the restore point. Every table's createdAt and updatedAt columns are
-  // checked (updatedAt catches changes to existing rows). A change that
-  // touches neither column is invisible here; for that we rely on Neon.
-  // Epochs are computed in SQL: the columns are UTC timestamps without a
-  // time zone, which the driver would read as local time.
   const stampColumns = await prisma.$queryRaw<{ tableName: string; columnName: string }[]>`
     SELECT table_name::text AS "tableName", column_name::text AS "columnName" FROM information_schema.columns
     WHERE table_schema = 'public' AND column_name IN ('createdAt', 'updatedAt') AND data_type LIKE 'timestamp%'`;
@@ -162,7 +124,6 @@ async function verify(prisma: PrismaClient, asOf: Date | undefined): Promise<voi
     add('Point in time', 'PASS', `Newest change ${new Date(newest[0].epoch * 1000).toISOString()} (${newest[0].source}), ${gapMin} min before the restore point; ${scope} checked.`);
   }
 
-  // Row counts (exact). Data present at all is the minimum bar.
   for (const table of tables.filter((t) => t !== '_prisma_migrations')) {
     const [row] = await prisma.$queryRawUnsafe<{ n: bigint }[]>(`SELECT count(*) AS n FROM ${quoteIdent(table)}`);
     counts.push([table, Number(row.n)]);
@@ -181,7 +142,6 @@ async function verify(prisma: PrismaClient, asOf: Date | undefined): Promise<voi
   add('Constraints and indexes', bad === 0 ? 'PASS' : 'FAIL',
     bad === 0 ? 'All valid.' : `${invalid.constraints} constraint(s) and ${invalid.indexes} index(es) not valid.`);
 
-  // Double-entry ledger: every transaction still balances.
   if (has('LedgerLine')) {
     const [row] = await prisma.$queryRaw<[{ n: bigint }]>`
       SELECT count(*) AS n FROM (
@@ -191,7 +151,6 @@ async function verify(prisma: PrismaClient, asOf: Date | undefined): Promise<voi
     add('Ledger balances', n === 0 ? 'PASS' : 'FAIL', n === 0 ? 'Every transaction balances.' : `${n} transaction(s) don't balance.`);
   }
 
-  // Encrypted fields: a restore is only useful if the keys still open it.
   if (process.env.DATA_ENCRYPTION_KEY?.trim()) {
     const values = await prisma.$queryRawUnsafe<{ v: string }[]>(`
       SELECT v FROM (
@@ -281,7 +240,6 @@ async function runDrill() {
   try {
     const connectionString = neon(['connection-string', branch, '--project-id', projectId,
       '--database-name', DATABASE_NAME, '--role-name', option('--role') ?? DEFAULT_ROLE]).trim();
-    // Holds the password: only ever passed to the driver, never printed.
     const db = connect(connectionString);
     try {
       await waitForDatabase(db.prisma);

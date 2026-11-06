@@ -22,9 +22,6 @@ export function notificationCategory(type: string): NotificationCategory {
   return 'system';
 }
 
-// Where a client's push tap goes: straight to the booking when the
-// notification names one, else the notification screen. relatedId is a
-// booking id for booking/payment types only (disputes etc. use other ids).
 export function clientNotificationRoute(type: string, relatedId: string | null | undefined, notificationId: string): string {
   const category = notificationCategory(type);
   if (relatedId && (category === "booking" || category === "payment")) {
@@ -33,8 +30,6 @@ export function clientNotificationRoute(type: string, relatedId: string | null |
   return `/(client)/inbox/notification/${notificationId}`;
 }
 
-// Worker push taps: new requests open Accept/Decline, finished bookings open
-// the record, everything else the live job screen (which also handles reschedules).
 const WORKER_RECORD_TYPES = ["BOOKING_COMPLETED", "BOOKING_AUTO_COMPLETED", "BOOKING_CANCELLED", "PAYMENT_RECEIVED", "PAYMENT_CAPTURED"];
 export function workerNotificationRoute(type: string, relatedId: string | null | undefined, notificationId: string): string {
   const category = notificationCategory(type);
@@ -68,8 +63,6 @@ export const useNotificationStore = create<NotificationState>((set, get) => ({
   hasMore: false,
   loadingMore: false,
 
-  // Page 1 only; older pages come in through loadMore. The badge count comes
-  // from the server, since unread items can sit on pages not loaded yet.
   fetchNotifications: async () => {
     set({ loading: true });
     try {
@@ -91,7 +84,6 @@ export const useNotificationStore = create<NotificationState>((set, get) => ({
     set({ loadingMore: true });
     try {
       const { notifications, pagination } = await api.getNotifications(page + 1);
-      // A refresh landed while this was in flight; its page 1 wins.
       if (get().page !== page) return;
       set((state) => ({
         notifications: [...state.notifications, ...uniqueNew(notifications as Notification[], state.notifications)],
@@ -134,8 +126,6 @@ export const useNotificationStore = create<NotificationState>((set, get) => ({
     }
   },
 
-  // The same notification can arrive twice (foreground push + socket event);
-  // the push copy has no relatedId, so keep whichever one knows its booking.
   receiveNotification: (notification: Notification) =>
     set((state) => {
       const existing = state.notifications.find((n) => n.id === notification.id);

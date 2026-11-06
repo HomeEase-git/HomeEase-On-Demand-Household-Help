@@ -14,7 +14,6 @@ import * as api from "../../../../services/api";
 import type { TaskCatalogEntry } from "../../../../services/api";
 import { useAlertModal } from "../../../../contexts/AlertModalContext";
 
-// Matches the backend's MAX_REQUEST_DOCUMENTS (workerController.runCategoryGate).
 const MAX_DOCUMENTS = 5;
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -23,7 +22,6 @@ type DocDraft = { key: string; title: string; issuer: string; issueDate: string;
 let seq = 0;
 const emptyDoc = (): DocDraft => ({ key: `doc-${++seq}`, title: "", issuer: "", issueDate: "", expiryDate: "", uri: null });
 
-// Auto-inserts dashes as the user types digits (YYYY-MM-DD).
 function maskDateInput(raw: string): string {
   const digits = raw.replace(/\D/g, "").slice(0, 8);
   if (digits.length <= 4) return digits;
@@ -31,11 +29,6 @@ function maskDateInput(raw: string): string {
   return `${digits.slice(0, 4)}-${digits.slice(4, 6)}-${digits.slice(6)}`;
 }
 
-/**
- * Request to offer a new service: pick it, attach the certifications or
- * documents that prove the skill, submit for admin review. Once approved,
- * the worker picks the service's tasks on the Skills & Services screen.
- */
 export default function RequestServiceScreen() {
   const router = useRouter();
   const alertModal = useAlertModal();
@@ -57,7 +50,6 @@ export default function RequestServiceScreen() {
       });
   }, []);
 
-  // Services the worker isn't registered for (or was declined for).
   const available = useMemo(
     () => (catalog ?? []).filter((c) => c.categoryStatus == null || c.categoryStatus === "REJECTED"),
     [catalog],
@@ -67,8 +59,6 @@ export default function RequestServiceScreen() {
     [catalog],
   );
   const selected = available.find((c) => c.serviceType.id === serviceTypeId) ?? null;
-  // A worker's very first service is approved straight away unless the
-  // admin requires a certification for it (backend runCategoryGate).
   const needsDocuments = !!selected && (hasAnyService || !!selected.serviceType.requiresCertification);
 
   const updateDoc = (key: string, patch: Partial<DocDraft>) =>

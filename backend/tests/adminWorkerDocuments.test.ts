@@ -58,8 +58,6 @@ describe('Admin worker documents', () => {
       where: { userId: worker.id },
       data: { resumeUrl: kycUrl(worker.id, 'resume.pdf') },
     });
-    // The KYC certificate copied into Certifications (same file) plus one
-    // uploaded separately later.
     await prisma.certification.createMany({
       data: [
         { workerProfileId: profile.id, title: 'TESDA NC II', issuer: 'TESDA', issueDate: new Date('2025-01-01'), documentUrl: certUrl },

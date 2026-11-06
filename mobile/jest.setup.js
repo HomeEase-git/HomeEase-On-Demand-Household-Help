@@ -1,7 +1,3 @@
-// Jest setup file
-// Configure testing environment
-
-// Suppress console errors/warnings in tests (optional)
 global.console = {
   ...console,
   error: jest.fn(),
@@ -40,7 +36,6 @@ jest.mock("@react-native-community/netinfo", () => ({
   addEventListener: jest.fn(() => jest.fn()),
 }));
 
-// Mock Expo modules with error handling for optional modules
 try {
   jest.mock("expo-font", () => ({
     loadAsync: jest.fn(() => Promise.resolve()),
@@ -140,7 +135,6 @@ if (__DEV__) {
   jest.spyOn(console, "warn").mockImplementation(() => null);
 }
 
-// Error monitoring is native code and off without a DSN; keep it out of tests.
 jest.mock('@sentry/react-native', () => ({
   init: jest.fn(),
   wrap: (component) => component,

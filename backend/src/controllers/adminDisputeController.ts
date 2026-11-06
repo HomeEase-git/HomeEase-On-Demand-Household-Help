@@ -17,24 +17,11 @@ interface AuthRequest extends Request {
 }
 
 const RESOLVE_ACTIONS = [
-  // A reported invoice (bookingController.reportInvoice): keep it as sent,
-  // or take off the parts and extra work the worker added. Either way the
-  // client is asked to pay again.
   'KEEP_INVOICE',
   'REMOVE_INVOICE_EXTRAS',
   'CANCEL_BOOKING',
-  // Post-completion non-payment (the 72h auto-escalation case: the worker
-  // did the job, the client never paid). Neither fits the fixed
-  // RESOLVED_STATUS_BY_ACTION lookup below — their outcome depends on what
-  // actually happens (self-heal vs. genuinely unpaid) — so they're handled
-  // in a separate branch of resolveDispute.
   'RESOLVE_FOR_WORKER',
   'PAY_WORKER_FROM_PLATFORM',
-  // Closes a dispute the booking has already moved past (e.g. a stale
-  // dispute whose booking later left DISPUTED some other way, or a
-  // reschedule escalation support handled by hand) without touching the
-  // booking or any money. Not allowed while the booking is still DISPUTED —
-  // that booking is frozen and needs a real outcome.
   'DISMISS',
 ] as const;
 type ResolveAction = (typeof RESOLVE_ACTIONS)[number];
@@ -68,22 +55,13 @@ export function formatDispute(record: DisputeRecord) {
     id: record.id,
     bookingId: booking.id,
     displayId: formatDisplayId(booking.id),
-    // Lets the admin UI show RESOLVE_FOR_WORKER / PAY_WORKER_FROM_PLATFORM
-    // only for a completed-but-unpaid job (AWAITING_PAYMENT) — those two
-    // actions are rejected server-side for any other booking status anyway,
-    // this just keeps the buttons from being offered when they'd just 409.
     bookingStatus: booking.status,
-    // The worker sent an invoice, so KEEP_INVOICE / REMOVE_INVOICE_EXTRAS apply.
     hasInvoice: booking.workerCompletedAt != null,
     client: booking.client?.fullName ?? '—',
     clientId: booking.client?.id ?? null,
     worker: booking.worker?.fullName ?? '—',
     workerId: booking.worker?.id ?? null,
     raisedById: record.raisedById,
-    // Which side of the booking filed this — 'raisedById' is only a soft
-    // reference (see schema), so this is derived by comparison rather than
-    // a relation. Lets the admin UI show/filter by who it came from without
-    // guessing from `reason` text.
     raisedByRole:
       record.raisedById === booking.client?.id
         ? 'CLIENT'
@@ -99,10 +77,6 @@ export function formatDispute(record: DisputeRecord) {
     resolvedAt: record.resolvedAt,
     refundStatus: record.refundStatus,
     refundFailureReason: record.refundFailureReason,
-    // The worker's GPS check-in record for this booking, if one exists —
-    // lets an admin cross-reference a fraud claim ("worker never showed up")
-    // against the same arrival data the geofence check itself already
-    // enforced, instead of taking either party's word for it.
     arrival: booking.arrivalVerification
       ? {
           distanceMeters: Math.round(booking.arrivalVerification.distanceMeters),
@@ -112,10 +86,6 @@ export function formatDispute(record: DisputeRecord) {
           checkedInAt: booking.arrivalVerification.createdAt,
         }
       : null,
-    // Raw hours open — lets the admin UI surface "been open 3 days" style
-    // urgency instead of just a date, especially useful once sorted
-    // oldest-first (see listDisputes). Still meaningful for a resolved
-    // dispute (how long it took), so always computed, not just for OPEN.
     ageHours: Math.round((Date.now() - record.createdAt.getTime()) / (60 * 60 * 1000)),
     createdAt: record.createdAt.toLocaleDateString('en-US', {
       month: 'short',
@@ -128,18 +98,9 @@ export function formatDispute(record: DisputeRecord) {
 function buildDisputeWhere(search: string, status: string): Prisma.DisputeWhereInput {
   const where: Prisma.DisputeWhereInput = {};
 
-  // Pseudo-status, not a real Dispute.status value — the admin dispute list's
-  // dedicated queue for resolved-but-unrefunded cases (see resolveDispute's
-  // refundStatus tracking). Kept out of the normal status filter so it reads
-  // the same way from the query string without a separate endpoint.
   if (status === 'NEEDS_REFUND_REVIEW') {
     where.refundStatus = 'FAILED';
   } else if (status === 'OPEN') {
-    // The admin "Open" queue means "not yet resolved", which now spans two
-    // real statuses: OPEN (nobody's looked at it) and UNDER_REVIEW (an admin
-    // opened it via getDisputeById but hasn't resolved it yet). Without this
-    // a dispute would silently vanish from the queue the moment an admin
-    // viewed it, well before anyone actually resolved anything.
     where.status = { in: ['OPEN', 'UNDER_REVIEW'] };
   } else if (status === 'RESOLVED') {
     // Every RESOLVED_* outcome.
@@ -160,9 +121,6 @@ function buildDisputeWhere(search: string, status: string): Prisma.DisputeWhereI
   return where;
 }
 
-/**
- * GET /api/admin/disputes?status=OPEN|UNDER_REVIEW|RESOLVED_*|REJECTED|all
- */
 export const listDisputes = async (req: Request, res: Response) => {
   try {
     const { page, limit, skip } = getPaginationParams(req.query);
@@ -171,11 +129,7 @@ export const listDisputes = async (req: Request, res: Response) => {
 
     const where = buildDisputeWhere(search, status);
 
-    // raisedById is a soft reference, so "who filed it" is a column-to-column
-    // compare against the booking that Prisma can't express — resolved to ids
-    // here so the filter (and the page total) stays server-side.
     // ponytail: loads every matching id; fine at this dispute volume, move to a
-    // stored raisedByRole column if the table grows large.
     const raisedBy = req.query.raisedBy;
     if (raisedBy === 'CLIENT' || raisedBy === 'WORKER') {
       const rows =
@@ -187,11 +141,6 @@ export const listDisputes = async (req: Request, res: Response) => {
       where.id = { in: rows.map((r) => r.id) };
     }
 
-    // The OPEN queue is a worklist, not a browsing history — oldest-first
-    // so an admin naturally clears the longest-waiting dispute first
-    // instead of it silently sinking behind newer ones (see also
-    // bookingWorker.escalateStaleDisputes' SLA reminders). Every other view
-    // (Resolved, Refund Failed, all) stays newest-first.
     const orderBy = status === 'OPEN' ? ({ createdAt: 'asc' } as const) : ({ createdAt: 'desc' } as const);
 
     const [total, records] = await Promise.all([
@@ -218,14 +167,6 @@ export const listDisputes = async (req: Request, res: Response) => {
 
 const DISPUTE_HISTORY_WINDOW_DAYS = 90;
 
-/**
- * GET /api/admin/disputes/history/:userId
- * Fraud-review signal: how often this user (as either the client or the
- * worker on the underlying booking) has been party to a dispute — repeat
- * appearances are the actual fraud pattern to watch for, more than any
- * single dispute's evidence on its own. `raisedByThisUser` on each recent
- * entry distinguishes "filed it" from "was disputed against".
- */
 export const getDisputeHistoryForUser = async (req: Request, res: Response) => {
   try {
     const userId = req.params.userId as string;
@@ -269,11 +210,6 @@ export const getDisputeById = async (req: Request, res: Response) => {
       return res.status(404).json(errorResponse(404, 'Dispute not found'));
     }
 
-    // An admin opening a specific dispute is what "starts" the review —
-    // flips it out of the raw, untouched OPEN queue into UNDER_REVIEW so the
-    // dispute list can distinguish "nobody has looked at this yet" from
-    // "someone's actively working it". Only fires once, from OPEN; already
-    // UNDER_REVIEW / resolved / rejected disputes are left alone.
     if (record.status === 'OPEN') {
       record = await prisma.dispute.update({
         where: { id },
@@ -289,14 +225,6 @@ export const getDisputeById = async (req: Request, res: Response) => {
   }
 };
 
-/**
- * Handles RESOLVE_FOR_WORKER and PAY_WORKER_FROM_PLATFORM — split out of
- * resolveDispute because both call into paymentLifecycleService functions
- * that manage their own transactions (nesting them inside resolveDispute's
- * existing $transaction block isn't workable), and because their resulting
- * Dispute.status depends on what actually happens rather than a fixed
- * action->status lookup.
- */
 async function resolveNonPaymentDispute(
   req: AuthRequest,
   res: Response,
@@ -335,18 +263,10 @@ async function resolveNonPaymentDispute(
       const result = await createCompletionInvoice(booking.id);
 
       if ('alreadyPaid' in result) {
-        // Xendit already showed the invoice PAID — a missed webhook, not a
-        // real non-payment. createCompletionInvoice's own self-heal path
-        // already finalized the booking and settled the worker.
         disputeStatus = 'RESOLVED_PAID';
         disputeResolutionNote = resolution?.trim() || 'Payment had already been received (missed webhook) — settled normally.';
         notifyWorkerMessage = `Booking ${formatDisplayId(booking.id)}: the client's payment had already gone through — it just hadn't been recorded yet.`;
       } else {
-        // Still genuinely unpaid — hold the client's account so they can't
-        // strand another worker while this stays outstanding, and give them
-        // one more explicit chance via the (possibly freshly re-minted)
-        // checkout link. The existing invoice-paid webhook path clears the
-        // hold automatically the moment they do pay (finalizePaidBooking).
         await prisma.clientProfile.updateMany({
           where: { userId: booking.clientId },
           data: {
@@ -409,29 +329,6 @@ async function resolveNonPaymentDispute(
   }
 }
 
-/**
- * PATCH /api/admin/disputes/:id/resolve
- * Body: { action: ResolveAction, resolution?: string }
- *
- *  - KEEP_INVOICE: the reported invoice stands. The booking goes back to
- *    PENDING_COMPLETION (cash: the worker collects and taps Cash received)
- *    or, for GCash/Maya, a fresh Xendit invoice is raised (AWAITING_PAYMENT).
- *  - REMOVE_INVOICE_EXTRAS: the parts and extra work the worker added are
- *    taken off (clientRejectedAt), the total is recomputed, and the client is
- *    asked to pay the rest the same way as KEEP_INVOICE.
- *  - CANCEL_BOOKING: cancels the booking, writes a Cancellation record, and
- *    releases/refunds the held escrow.
- *  - RESOLVE_FOR_WORKER: for a completed job the client never paid for
- *    (booking stuck AWAITING_PAYMENT). Confirms the worker's claim, makes
- *    one more collection attempt (re-surfacing or re-minting the Xendit
- *    checkout link — self-heals if Xendit shows it already paid, e.g. a
- *    missed webhook), and if still unpaid puts the client's account on hold
- *    via ClientProfile.paymentHoldAt until they pay or an admin releases it.
- *  - PAY_WORKER_FROM_PLATFORM: explicit override for when collection is a
- *    lost cause — the platform settles the worker's earnings out of its own
- *    funds. Requires RESOLVE_FOR_WORKER to have run first (so a Payment row
- *    exists) and a substantive reason; always audit-logged at WARN.
- */
 export const resolveDispute = async (req: AuthRequest, res: Response) => {
   try {
     const id = req.params.id as string;
@@ -485,11 +382,6 @@ export const resolveDispute = async (req: AuthRequest, res: Response) => {
 
     const isPaymentAction = action === 'RESOLVE_FOR_WORKER' || action === 'PAY_WORKER_FROM_PLATFORM';
 
-    // Invoice actions only make sense on a reported invoice; CANCEL_BOOKING can also
-    // resolve a payment-overdue or refund-request dispute (booking still in
-    // PENDING_COMPLETION / AWAITING_PAYMENT / COMPLETED) or a client problem
-    // report before the invoice (ACCEPTED / IN_PROGRESS); the payment actions
-    // only make sense on a completed-but-unpaid job.
     if (isPaymentAction) {
       if (booking.status !== 'AWAITING_PAYMENT') {
         return res.status(409).json(
@@ -517,7 +409,6 @@ export const resolveDispute = async (req: AuthRequest, res: Response) => {
     }
 
     const resolvedStatus = RESOLVED_STATUS_BY_ACTION[action as keyof typeof RESOLVED_STATUS_BY_ACTION];
-    // A COMPLETED booking stays COMPLETED — we refund without un-completing it.
     const cancelKeepsStatus = action === 'CANCEL_BOOKING' && booking.status === 'COMPLETED';
 
     await prisma.$transaction(async (tx) => {
@@ -533,7 +424,6 @@ export const resolveDispute = async (req: AuthRequest, res: Response) => {
           select: { price: true },
         });
         const { subtotal } = computeBookingFinalTotal({ ...booking, addOns: billed });
-        // Back to "invoice sent"; a GCash/Maya invoice is raised again below.
         await updateBookingIfStatus(tx, booking.id, 'DISPUTED', {
           status: 'PENDING_COMPLETION',
           finalPrice: subtotal,
@@ -541,10 +431,6 @@ export const resolveDispute = async (req: AuthRequest, res: Response) => {
           disputeResolvedAt: new Date(),
         });
       } else {
-        // A dispute raised pre-completion (QUOTE_SUBMITTED -> DISPUTED) still
-        // counts as one of the worker's active jobs — completeBooking never
-        // ran for it. One raised post-completion (AWAITING_PAYMENT ->
-        // DISPUTED) was already counted down there (workerCompletedAt is set).
         if (!cancelKeepsStatus && booking.workerId && !booking.workerCompletedAt) {
           await tx.workerProfile.update({
             where: { userId: booking.workerId },
@@ -558,8 +444,6 @@ export const resolveDispute = async (req: AuthRequest, res: Response) => {
           });
         }
 
-        // Status-guarded first so a payment webhook or another admin acting
-        // since the read above makes this whole resolution roll back.
         await updateBookingIfStatus(tx, booking.id, booking.status, {
           ...(cancelKeepsStatus ? {} : { status: 'CANCELLED' as const }),
           disputeResolvedById: adminId,
@@ -590,26 +474,12 @@ export const resolveDispute = async (req: AuthRequest, res: Response) => {
       if (claimed.count === 0) throw new BookingStatusConflictError(booking.id, [booking.status]);
     });
 
-    // The client pays the kept or adjusted invoice: cash to the worker, or a
-    // fresh Xendit invoice. If raising it fails, the client's Pay now retries.
     if (isInvoiceAction(action) && (booking.paymentMethodType ?? 'CASH') !== 'CASH') {
       await createCompletionInvoice(booking.id).catch((error) => {
         console.error('Raising the payment invoice failed after resolving dispute %s:', id, error);
       });
     }
 
-    // Refund/void outcome, tracked separately from the dispute's own
-    // resolution — the booking-cancel transaction above already committed
-    // regardless of what happens here, since a downstream payment-gateway
-    // failure shouldn't block the booking itself from being cancelled. What
-    // must never happen again is this failing silently: previously a thrown
-    // error here (Xendit refund rejected, or "payout already sent, needs a
-    // manual clawback") was caught and only console.error'd, while the API
-    // still reported success and nothing else in the system ever surfaced
-    // that the client's money never actually moved.
-    // A paid booking's refund isn't sent here: it becomes a refund request
-    // (refundStatus PENDING_APPROVAL) that an admin approves on the Refunds
-    // page, which then updates this dispute's refundStatus.
     let refundStatus: 'NOT_APPLICABLE' | 'SUCCEEDED' | 'FAILED' | 'PENDING_APPROVAL' = 'NOT_APPLICABLE';
     let refundFailureReason: string | null = null;
     let refundAmount: number | null = null;

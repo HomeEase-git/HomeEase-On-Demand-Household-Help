@@ -18,12 +18,8 @@ export type BookingStatus =
   | 'AwaitingPayment'
   | 'Completed'
   | 'Cancelled'
-  // A worker turned the request down (backend REJECTED). Only the client's
-  // list maps to this — see mapApiBooking; the worker store keeps REJECTED as
-  // 'Cancelled' in its own Cancelled tab.
   | 'Declined';
 
-// Backend BookingStatus enum -> store's friendly status values
 export const API_STATUS_MAP: Record<string, BookingStatus> = {
   PENDING: 'Pending',
   ACCEPTED: 'Accepted',
@@ -63,26 +59,14 @@ export type Booking = {
   workerVerified?: boolean;
   completionPhotoUrl?: string | null;
   category?: string;
-  // Reschedule-on-conflict (from the retired "Continue Tomorrow") — set when
-  // a DIFFERENT worker job's spillover moved this booking to a new date. rescheduleAcknowledgedAt null = still awaiting the client's
-  // response (keep the date, or cancel via the existing free-cancel path).
   rescheduledAt?: string | null;
   previousScheduledDate?: string | null;
   previousTimeSlot?: string | null;
-  // The true original date, surviving multiple reschedule hops — differs
-  // from previousScheduledDate only after a second+ hop (see backend
-  // Booking.originalScheduledDate).
   originalScheduledDate?: string | null;
   rescheduleAcknowledgedAt?: string | null;
-  // Set when the worker never checked in (see backend
-  // bookingWorker.cancelWorkerNoShows, which also cancels the booking).
   workerNoShowFlaggedAt?: string | null;
   // Same-day booking with the rush fee.
   isRush?: boolean;
-  // Itemized breakdown for the receipt-style price display — set right after
-  // creation (see step-4.tsx) from POST /bookings' `pricing` block, or
-  // refreshed from GET /bookings/:id's `priceBreakdown` (see
-  // booking/[bookingId]/index.tsx). Absent for older cached bookings.
   priceBreakdown?: {
     basePrice: number | null;
     distanceFee: number;
@@ -96,8 +80,6 @@ export type Booking = {
     tip: number;
     total: number;
   } | null;
-  // Multi-day upfront booking (retired; kept for old bookings) — groupDayIndex
-  // is 1-based ("Day 2 of 3" = groupDayIndex 2, groupTotalDays 3).
   groupId?: string | null;
   groupTotalDays?: number | null;
   groupDayIndex?: number | null;
@@ -113,10 +95,6 @@ export type DraftBooking = {
   notes?: string;
   workerId: string | null;
   paymentMethod: string | null;
-  // GCash/Maya mobile number entered in Step 4 — kept in the draft (like the
-  // rest of Step 4's fields) so it survives navigating back to an earlier
-  // step and forward again, which remounts Step 4 and would otherwise reset
-  // its local state.
   paymentAccountIdentifier?: string | null;
   tip?: number;
   taxRate?: number;
@@ -125,76 +103,41 @@ export type DraftBooking = {
   entrySource?: 'worker_profile' | 'new_booking' | 'book_again' | 're_offer' | null;
   workerLocked?: boolean;
   workerName?: string | null;
-  // Every ServiceType the locked worker actually offers (id + name) — set
-  // when entering via the worker profile's "Book Now". Step 1 uses this to
-  // restrict the category picker to services this worker can perform, and
-  // to resolve the matching serviceTypeId for whichever one is picked.
-  // priceRangeMin/Max (when present) are THIS worker's own price spread for
-  // that category — used instead of the marketplace-wide range so a locked
-  // worker's category tiles/preview reflect what they specifically charge.
   workerServiceTypes?: { id: string; name: string; priceRangeMin?: number; priceRangeMax?: number }[] | null;
   lat?: number;
   lng?: number;
   lastInvalidationReason?: string | null;
 
-  // ===== 4-step booking flow (Scope/Schedule/Who/Confirm) additions =====
-  serviceType?: string | null; // ServiceType.name — sent to the backend as `serviceType`
-  serviceTypeId?: string | null; // ServiceType.id — captured from the selected worker's card in Step 3, used to fetch that worker's packages for the selected category
-  categoryBasePrice?: number | null; // ServiceType.basePrice — legacy single-number fallback, kept for old drafts
-  categoryPriceRangeMin?: number | null; // ServiceType-derived marketplace-wide price range for Steps 1-2's preview
+  serviceType?: string | null;
+  serviceTypeId?: string | null;
+  categoryBasePrice?: number | null;
+  categoryPriceRangeMin?: number | null;
   categoryPriceRangeMax?: number | null;
-  // The specific job within the category (e.g. "Toilet Repair" under
-  // "Plumbing Repair"), priced by the admin — see ServiceTask. Null when the category has no tasks defined yet (falls
-  // back to today's flat category-price booking). Metadata alongside it is
-  // needed downstream (PER_UNIT's live price preview, quantity lookup) without
-  // re-fetching the category's task list at every step.
   serviceTaskId?: string | null;
   selectedTaskName?: string | null;
   selectedTaskPricingModel?: 'FIXED' | 'PER_UNIT' | 'TIERED' | null;
   selectedTaskUnitLabel?: string | null;
-  // The task's own admin-set bound — tighter/more accurate than the
-  // category-wide range once a specific task is picked. Null for
-  // CUSTOM_QUOTE (no upfront range at all).
   selectedTaskPriceRangeMin?: number | null;
   selectedTaskPriceRangeMax?: number | null;
-  // A per-unit task's own limits on the quantity (null = 1 / no maximum).
   selectedTaskMinQuantity?: number | null;
   selectedTaskMaxQuantity?: number | null;
-  selectedPackageIds: string[]; // WorkerPackage ids picked with the worker (Step 1 for a locked worker, else the worker picker) — resolved to priced add-ons server-side
-  selectedPackagesTotal?: number; // price of selectedPackageIds, for the review screen's estimate
+  selectedPackageIds: string[];
+  selectedPackagesTotal?: number;
   quantity?: number | null; // how many units, for a per-unit task (Step 1)
-  issuePhotoUrls?: string[]; // photos of the issue the client attached in Step 1, uploaded via POST /bookings/issue-photo/upload
-  time: string | null; // exact start time "HH:00" (PH), see utils/bookingTime.ts
-  // Set when this is a follow-up job after an inspection (same worker).
+  issuePhotoUrls?: string[];
+  time: string | null;
   parentBookingId?: string | null;
-  priorities: string[]; // ['Pet-friendly'] when Step 1's "I have pets" toggle is on; empty otherwise
+  priorities: string[];
 
-  addOnToggles: string[]; // Retired "job preferences" toggles; always [] now, kept for old saved drafts
-  // Worker selected via Step 3 (WHO) — separate from workerId/workerName above,
-  // which pre-date this flow and are still used by the "book from profile" /
-  // "book again" entry points that lock a worker before Step 1.
+  addOnToggles: string[];
   workerTier?: WorkerTier | null;
   workerEstimatedTotal?: number | null;
-  // Itemized version of workerEstimatedTotal — lets the live pricing preview
-  // show Base rate / Distance fee / Tier surcharge as separate lines.
   workerPriceBreakdown?: { basePrice: number; distanceFee: number; tierFee: number; rushFee?: number } | null;
-  // Only set when the selected task is PER_UNIT — this worker's tier-adjusted
-  // rate, for the live rate x quantity preview (see useBookingPriceEstimate).
   workerUnitPrice?: number | null;
   workerAvatar?: string | null;
   workerRating?: number | null;
   isAutoMatched?: boolean;
-  // Client-side-only "hold" countdown started the moment a worker is picked
-  // in Step 3 — a UX affordance, not a real server-side reservation (the
-  // backend has no pre-booking hold concept, only the 1-hour PENDING expiry
-  // that starts once the booking is actually created).
   holdStartedAt?: number | null;
-  // Generated once (see utils/idempotencyKey.ts) the first time this draft
-  // is submitted, and persisted with the rest of the draft — so a retried
-  // submission (including after the app was backgrounded/killed and
-  // relaunched, since the draft is restored from storage) reuses the same
-  // key instead of letting the backend create a duplicate booking. Cleared
-  // whenever the draft resets (successful create, or a fresh "New Booking").
   idempotencyKey?: string | null;
 };
 
@@ -220,8 +163,6 @@ export type ApiBookingListItem = {
   groupDayIndex?: number | null;
 };
 
-// Maps the API's booking-list shape into the store's friendly `Booking` shape.
-// Shared by any screen that hydrates `bookings` from GET /bookings.
 export function mapApiBooking(b: ApiBookingListItem): Booking {
   return {
     id: b.id,
@@ -244,12 +185,6 @@ export function mapApiBooking(b: ApiBookingListItem): Booking {
   };
 }
 
-// Shape of GET /bookings/:id (services/api.ts getBookingDetail()) this store
-// needs to rebuild a full draft from — see prefillFromDeclinedBooking. A
-// deliberately partial view of the real response (only what's carried
-// forward), typed here rather than imported from the screen that owns the
-// full ApiBookingDetail shape, to avoid a screen -> store -> screen import
-// cycle.
 export type DeclinedBookingDetail = {
   category?: string | null;
   description?: string | null;
@@ -272,13 +207,10 @@ export type BookingState = {
   clearInvalidationReason: () => void;
   validateDraftForSubmit: () => { ok: boolean; errors: string[] };
   setBookings: (bookings: Booking[]) => void;
-  // GET /bookings is paginated; the list holds pages 1..bookingsPage.
   bookingsPage: number;
   bookingsHasMore: boolean;
   bookingsLoadingMore: boolean;
-  /** Reloads page 1. Throws, so a screen can show its own error. */
   loadBookings: () => Promise<void>;
-  /** loadBookings for background callers: logs instead of throwing. */
   refreshBookings: () => Promise<void>;
   loadMoreBookings: () => Promise<void>;
   setSelectedBooking: (booking: Booking | null) => void;
@@ -291,8 +223,6 @@ export type BookingState = {
   restoreDraft: () => Promise<void>;
   prefillFromBooking: (booking: Booking) => void;
   prefillFromDeclinedBooking: (detail: DeclinedBookingDetail) => void;
-  // Client keeps the new date for a booking the old "Continue Tomorrow"
-  // spillover moved — status-preserving.
   acknowledgeReschedule: (bookingId: string) => void;
 };
 
@@ -374,14 +304,6 @@ export const useBookingStore: UseBoundStore<StoreApi<BookingState>> = create<Boo
 
   setBookings: (bookings) => set({ bookings }),
 
-  // Full refetch of the client's booking list from the server — shared by
-  // the socket "connect" handler and the AppState foreground listener in
-  // app/_layout.tsx, so the list self-heals after a dropped/restored
-  // socket connection or the app being backgrounded, instead of relying
-  // solely on "notification:new" socket events (which can be missed
-  // entirely while disconnected) or their push-notification fallback
-  // (unreliable on Android). Mirrors workerStore.refreshJobs on the worker
-  // side.
   loadBookings: async () => {
     const { bookings, pagination } = await getBookingsPage(1);
     set({
@@ -405,7 +327,6 @@ export const useBookingStore: UseBoundStore<StoreApi<BookingState>> = create<Boo
     set({ bookingsLoadingMore: true });
     try {
       const { bookings, pagination } = await getBookingsPage(page + 1);
-      // A refresh reset the list while this was in flight; its page 1 wins.
       if (get().bookingsPage !== page) return;
       const next = (bookings as ApiBookingListItem[]).map(mapApiBooking);
       set((s) => ({
@@ -427,9 +348,6 @@ export const useBookingStore: UseBoundStore<StoreApi<BookingState>> = create<Boo
       const prev = s.draft;
       const updatedDraft = { ...s.draft, ...draft } as DraftBooking;
 
-      // If service/category or address/city changed and downstream fields exist,
-      // invalidate schedule and set a user-visible reason. Do not clear a newly
-      // supplied date/time in the same update payload.
       const categoryChanged = draft.category && draft.category !== prev.category;
       const addressChanged = draft.address && draft.address !== prev.address;
       const cityChanged = draft.city && draft.city !== prev.city;
@@ -454,15 +372,8 @@ export const useBookingStore: UseBoundStore<StoreApi<BookingState>> = create<Boo
         updatedDraft.lastInvalidationReason = 'Your service or address changed, so we cleared your date/time.';
       }
 
-      // Changing the date after a specific worker was picked (Step 3)
-      // invalidates that pick — the worker's availability was matched
-      // against the previous date. A new start time on the same day keeps
-      // them (availability is per day), but a same-day/other-day switch
-      // changes the rush fee, so the date alone decides.
       const dateChanged = draft.date !== undefined && draft.date !== prev.date;
       const slotChanged = draft.time !== undefined && draft.time !== prev.time;
-      // A different task or quantity re-prices the job too: the picked
-      // worker's estimate and unit price were computed for the old scope.
       const scopeChanged =
         (draft.serviceTaskId !== undefined && draft.serviceTaskId !== prev.serviceTaskId) ||
         (draft.quantity !== undefined && draft.quantity !== prev.quantity);
@@ -485,17 +396,6 @@ export const useBookingStore: UseBoundStore<StoreApi<BookingState>> = create<Boo
           : "Your job details changed, so please pick your worker again.";
       }
 
-      // idempotencyKey exists so a retried submit (bad wifi, app backgrounded
-      // mid-request) returns the already-created booking instead of a
-      // duplicate — but it was never cleared on anything short of a full
-      // draft reset. Edit the date/service/address after a hung submit and
-      // resubmit, and the backend's idempotency short-circuit would silently
-      // return the ORIGINAL (unedited) booking, discarding the edit with no
-      // error. Only clear on a change this exact call didn't just make
-      // (draft.X === undefined), matching the same convention
-      // clearingSchedule/clearingWorkerForNewSlot already use above.
-      // The backend replays the ORIGINAL booking for a known key without
-      // comparing payloads, so any field that goes into the request counts.
       const payloadChanged = SUBMITTED_FIELDS.some(
         (f) => f in draft && JSON.stringify(draft[f]) !== JSON.stringify(prev[f]),
       );
@@ -542,8 +442,6 @@ export const useBookingStore: UseBoundStore<StoreApi<BookingState>> = create<Boo
 
   setCurrentBooking: (booking) => set({ selectedBooking: booking }),
 
-  // Used when a booking is created directly via the backend API (e.g. step-3.tsx),
-  // rather than through the local processPayment simulation.
   setBookingCreated: (booking) =>
     set((state) => {
       const nextBookings = [...state.bookings, booking];
@@ -617,14 +515,6 @@ export const useBookingStore: UseBoundStore<StoreApi<BookingState>> = create<Boo
       return { draft: updatedDraft };
     }),
 
-  // A worker declining leaves the booking terminally REJECTED — there's no
-  // reviving it, so this builds a fresh draft from its scope+schedule and
-  // routes back through Step 1 (see the booking-detail screen's "Find
-  // Another Worker"), rather than making the client re-enter everything.
-  // Deliberately does NOT resolve serviceTypeId/categoryBasePrice/tasks
-  // here — Step 1's own category loader already does that name-match
-  // lookup against the live catalog for a restored draft, so duplicating it
-  // here would just be a second, driftable copy of the same logic.
   prefillFromDeclinedBooking: (detail) =>
     set(() => {
       const updatedDraft: DraftBooking = {
@@ -636,9 +526,6 @@ export const useBookingStore: UseBoundStore<StoreApi<BookingState>> = create<Boo
         city: detail.city ?? '',
         lat: detail.clientLat ?? undefined,
         lng: detail.clientLng ?? undefined,
-        // scheduledDate is a full ISO datetime truncated to UTC midnight
-        // server-side (see backend toDayStart) — the leading 10 chars are
-        // its YYYY-MM-DD, matching what DateGridPicker/step-2 expect.
         date: detail.scheduledDate ? detail.scheduledDate.slice(0, 10) : null,
         time: bookingStartTime(detail),
         quantity: detail.quantity ?? null,

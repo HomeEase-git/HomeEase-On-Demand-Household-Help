@@ -7,8 +7,6 @@ jest.mock('nodemailer', () => ({
   createTransport: mockCreateTransport,
 }));
 
-// emailService resolves SMTP_HOST to an A record itself (SMTP_FAMILY=4) — keep
-// that off the real network.
 jest.mock('node:dns', () => {
   const actual = jest.requireActual('node:dns');
   return {
@@ -17,15 +15,8 @@ jest.mock('node:dns', () => {
   };
 });
 
-// emailService.ts reads env into module-level consts at import time and
-// caches its SMTP transporter in a module-level variable, so each test needs
-// a fresh module instance (via jest.isolateModules) to see a given env
-// combination and to reliably assert on transporter-creation call counts.
 function loadEmailService(env: Record<string, string | undefined>): typeof EmailService {
   const originalEnv = { ...process.env };
-  // Node stringifies assigned process.env values, so `= undefined` would
-  // become the literal (truthy) string "undefined" instead of unsetting the
-  // var — delete is required to actually simulate a missing credential.
   for (const [key, value] of Object.entries(env)) {
     if (value === undefined) {
       delete process.env[key];

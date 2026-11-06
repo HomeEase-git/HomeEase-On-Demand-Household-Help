@@ -1,5 +1,3 @@
-// A release bundle built without EXPO_PUBLIC_API_URL must still reach the
-// real API, never the emulator address (Android blocks cleartext http).
 describe('config.API_URL', () => {
   const originalUrl = process.env.EXPO_PUBLIC_API_URL;
   const originalDev = (globalThis as any).__DEV__;

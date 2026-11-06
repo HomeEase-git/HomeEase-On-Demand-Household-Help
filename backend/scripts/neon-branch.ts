@@ -1,25 +1,9 @@
-// Creates (or switches to) an isolated Neon branch and points this
-// machine's backend/.env at it — the fix for the shared-dev-DB collision
-// risk documented in project memory (multiple sessions/agents hitting the
-// same "production" branch directly). Each branch is a cheap,
-// copy-on-write snapshot of the parent, so this is near-instant and free
-// to create liberally: one per dev session/feature, thrown away when done.
-//
-// Usage (from backend/):
-//   npx tsx scripts/neon-branch.ts create [name]   # new branch off production, switches .env to it
-//   npx tsx scripts/neon-branch.ts switch <name>    # point .env at an EXISTING branch (no create)
-//   npx tsx scripts/neon-branch.ts list             # list all branches
-//   npx tsx scripts/neon-branch.ts delete <name>    # delete a branch (never "production")
-//
-// Requires NEON_API_KEY in backend/.env (console.neon.tech -> Account/Org
-// Settings -> API Keys). Shells out to `npx neonctl` — no extra
-// devDependency, ~5s slower on first run per machine while npx fetches it.
 import 'dotenv/config';
 import { execFileSync } from 'child_process';
 import { readFileSync, writeFileSync, existsSync } from 'fs';
 import path from 'path';
 
-const PROJECT_ID = 'floral-lake-80894687'; // Neon project "HomeEase" — not sensitive, just an id
+const PROJECT_ID = 'floral-lake-80894687';
 const PARENT_BRANCH = 'production'; // the one shared branch this project has today
 const DATABASE_NAME = 'neondb';
 const ENV_PATH = path.resolve(__dirname, '..', '.env');
@@ -29,17 +13,9 @@ function neon(args: string[]): string {
     console.error('NEON_API_KEY is not set — add it to backend/.env (console.neon.tech -> API Keys).');
     process.exit(1);
   }
-  // The API key rides in via env (neonctl reads NEON_API_KEY itself), not
-  // as a --api-key argument — keeps it out of the shell-joined argv below
-  // and out of `ps`/process-list output.
   return execFileSync('npx', ['neonctl', ...args], {
     encoding: 'utf8',
     env: process.env,
-    // Windows needs shell:true to resolve npx.cmd; harmless here since
-    // every argument is either a fixed constant or a branch name we control.
-    // Node prints a DEP0190 warning regardless (shell:true + an args array
-    // is deprecated in general, even with nothing unsafe in it) — cosmetic,
-    // not a real risk given the argument contents above.
     shell: true,
   });
 }
@@ -60,9 +36,6 @@ function connectionStrings(branchName: string): { database: string; direct: stri
   return { database, direct };
 }
 
-// Replaces DATABASE_URL=/DIRECT_URL= in .env with the given values.
-// Aborts instead of guessing if either key doesn't appear EXACTLY once —
-// see the "duplicate DATABASE_URL hazard" this project has hit before.
 function switchEnvTo(branchName: string, urls: { database: string; direct: string }) {
   const original = readFileSync(ENV_PATH, 'utf8');
 

@@ -11,17 +11,12 @@ export interface PriceBreakdownAddOn {
 
 interface PriceBreakdownCardProps {
   subtotal: number;
-  // When provided, rendered as their own line items ("Base rate" / "Distance
-  // fee" / "Skilled tier surcharge") instead of collapsing everything but add-ons
-  // into one "Service" number. Omit to fall back to the old collapsed view.
   basePrice?: number | null;
   distanceFee?: number | null;
-  // How the distance fee was computed (server-built, see describeDistanceFee).
   distanceFeeNote?: string | null;
   tierFee?: number | null;
   // Same-day booking surcharge.
   rushFee?: number | null;
-  // Materials from a quote on a booking made before invoices (receipt-backed).
   materialsCost?: number | null;
   addOns?: PriceBreakdownAddOn[];
   vatApplicable?: boolean | null;
@@ -29,17 +24,9 @@ interface PriceBreakdownCardProps {
   vatAmount?: number | null;
   tip: number;
   total: number;
-  detailed?: boolean; // If true, show all details; if false, show compact view
+  detailed?: boolean;
 }
 
-/**
- * PriceBreakdownCard Component
- *
- * Renders the booking's real, backend-persisted charge (Payment.subtotal /
- * addOns / tip / totalAmount) — the platform's commission and withholding
- * tax are deducted from the worker's payout, never charged to the client,
- * so they're intentionally not shown here.
- */
 export default function PriceBreakdownCard({
   subtotal,
   basePrice = null,
@@ -83,7 +70,6 @@ export default function PriceBreakdownCard({
         />
       </View>
 
-      {/* Base rate + fees — itemized when known, else one collapsed "Service" line */}
       {basePrice != null ? (
         <>
           <View className="flex-row items-center justify-between mb-2">

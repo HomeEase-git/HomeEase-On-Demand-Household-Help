@@ -6,17 +6,11 @@ import { RemoteImage } from "./RemoteImage";
 import { colors } from "../../constants";
 
 type Props = {
-  /** The image to show, local or remote. Null keeps the viewer closed. */
   uri: string | null;
   title?: string;
   onClose: () => void;
 };
 
-/**
- * Full-screen view of a photo inside a form, so it opens over the form
- * without leaving it. Works for both client and worker screens, and for
- * photos still on the device.
- */
 export function ImageLightbox({ uri, title, onClose }: Props) {
   return (
     <Modal visible={!!uri} animationType="fade" onRequestClose={onClose} statusBarTranslucent>

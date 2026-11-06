@@ -6,14 +6,6 @@ type Props = {
   estimate: BookingPriceEstimate;
 };
 
-/**
- * Dynamic pricing preview shown in Step 1/2 (a low-high range — the
- * marketplace-wide spread for a category, or a locked worker's own spread
- * for it, since no job-specific number is known yet) and Step 3/4 (an exact
- * point estimate once a specific worker's real computed price is known).
- * Client-side estimate for responsive UX — see utils/bookingPriceEstimate.ts
- * for why the authoritative price always comes from the backend instead.
- */
 export default function PricingRangePreview({ estimate }: Props) {
   if (estimate.mode === "range") {
     const { min, max } = estimate.range;

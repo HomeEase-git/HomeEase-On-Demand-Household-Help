@@ -25,8 +25,6 @@ export default function EarningsScreen() {
   const router = useRouter();
   const [transactions, setTransactions] = useState<TransactionListItem[]>([]);
   const [loading, setLoading] = useState(true);
-  // What the worker owes HomeEase — commission on cash jobs (the client pays
-  // the worker directly) plus any penalties. Netted from the next online payout.
   const [platformDues, setPlatformDues] = useState(0);
   const [payVisible, setPayVisible] = useState(false);
   const [payAmount, setPayAmount] = useState("");
@@ -41,7 +39,6 @@ export default function EarningsScreen() {
     } catch (error) {
       console.error("Load earnings error:", error);
     }
-    // Separate so a failure here doesn't blank the transactions.
     try {
       const profile = await api.getUserProfile();
       setPlatformDues(profile.platformDues ?? 0);

@@ -9,8 +9,6 @@ jest.mock("expo-audio", () => ({
   setAudioModeAsync: jest.fn(() => Promise.resolve()),
 }));
 
-// sounds.ts keeps its setting and last-played times in module
-// state, so each test gets a fresh copy.
 function loadSounds(): typeof import("../sounds") {
   let mod!: typeof import("../sounds");
   jest.isolateModules(() => {

@@ -9,11 +9,6 @@ import { PAYOUT_QUEUE_NAME, PAYOUT_JOB_NAMES, type SendPayoutJobData } from '@qu
 import { createPayout, findLivePayoutByReference, xenditChannelCodeFor } from '@services/xenditDisbursementService';
 import { applyXenditPayoutStatus } from '@services/payoutStatusService';
 
-/**
- * Same key for every BullMQ retry of one send; a new one after each admin
- * retry, since replaying the key of a payout Xendit already failed would just
- * return that failure. Generation 0 keeps the bare id (what older rows used).
- */
 export function payoutIdempotencyKey(payout: { id: string; retryGeneration: number }): string {
   return payout.retryGeneration > 0 ? `${payout.id}-retry-${payout.retryGeneration}` : payout.id;
 }
@@ -22,9 +17,6 @@ export async function processSendPayout(job: Job, data: SendPayoutJobData): Prom
   const payout = await prisma.payout.findUnique({ where: { id: data.payoutId } });
   if (!payout) return; // deleted/invalid — nothing to do
 
-  // Only a PENDING payout is sendable. PAID/PROCESSING are already handled,
-  // FAILED waits for an admin retry, and CANCELLED means the payment was
-  // refunded — sending it would pay the worker for money the client got back.
   if (payout.status !== 'PENDING') return;
 
   const channelCode = xenditChannelCodeFor(payout.channel);
@@ -37,11 +29,9 @@ export async function processSendPayout(job: Job, data: SendPayoutJobData): Prom
         failedAt: new Date(),
       },
     });
-    return; // not retryable — don't throw, this will never succeed
+    return;
   }
 
-  // Atomic claim: a refund cancelling this payout (or a duplicate job) racing
-  // us between the read above and here wins, and nothing is sent.
   const claim = await prisma.payout.updateMany({
     where: { id: payout.id, status: 'PENDING' },
     data: { status: 'PROCESSING', processingAt: new Date(), attempts: { increment: 1 } },
@@ -49,9 +39,6 @@ export async function processSendPayout(job: Job, data: SendPayoutJobData): Prom
   if (claim.count === 0) return;
 
   try {
-    // An earlier attempt may have reached Xendit without its id being saved
-    // (timeout, crash between the call and the write below). Adopt that
-    // payout instead of sending the money a second time.
     const earlierAttempt = payout.attempts > 0 || payout.retryGeneration > 0;
     const existing = earlierAttempt ? await findLivePayoutByReference(payout.id) : null;
 
@@ -65,10 +52,6 @@ export async function processSendPayout(job: Job, data: SendPayoutJobData): Prom
       description: `HomeEase payout for booking ${payout.bookingId}`,
     });
 
-    // ACCEPTED is the usual synchronous answer and leaves the payout
-    // PROCESSING; the payout webhook (or the reconciliation sweep) reports
-    // the final state later. Record the Xendit id either way so a refund can
-    // cancel it while it's still in flight.
     await prisma.payout.update({
       where: { id: payout.id },
       data: { xenditDisbursementId: xenditPayout.id, xenditStatus: xenditPayout.status },
@@ -134,8 +117,6 @@ export async function startPayoutWorker() {
     console.error(`Payout queue job ${job?.name}#${job?.id} failed`, err);
   });
 
-  // Mandatory per BullMQ's own docs — see the identical note in
-  // bookingQueue.ts.
   worker.on('error', (err) => {
     console.error('payoutWorker Redis connection error:', err.message);
   });

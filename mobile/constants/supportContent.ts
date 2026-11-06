@@ -1,11 +1,3 @@
-/**
- * Help & Support, Contact Us and About content, shared by the client and
- * worker screens (components/support/*).
- *
- * FAQ answers are plain-language summaries of the User Agreement / Service
- * Agreement in constants/legalDocuments.ts. When a rule changes there (fees,
- * timeouts, penalties), update the matching answer here too.
- */
 import type { Ionicons } from "@expo/vector-icons";
 import { COMPANY } from "./legalDocuments";
 
@@ -16,8 +8,6 @@ export type SupportRole = "client" | "worker";
 export type FaqItem = { q: string; a: string };
 export type FaqCategory = { title: string; icon: IconName; items: FaqItem[] };
 
-// Optional contact channels. Leave null until there is a real, staffed number
-// or page — the Contact Us screen hides a row whose value is null.
 export const SUPPORT_CHANNELS = {
   email: COMPANY.supportEmail,
   privacyEmail: COMPANY.privacyEmail,

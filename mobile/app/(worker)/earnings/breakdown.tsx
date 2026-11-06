@@ -43,9 +43,6 @@ export default function EarningsBreakdownScreen() {
   }, []);
 
   useEffect(() => {
-    // Standard fetch-on-filter-change pattern — the linter's static trace
-    // flags the setState calls inside `load` (even the ones after an
-    // `await`) as "synchronous within an effect", which isn't actually true.
     // eslint-disable-next-line react-hooks/set-state-in-effect
     load(FILTERS[filterIndex].value);
   }, [filterIndex, load]);

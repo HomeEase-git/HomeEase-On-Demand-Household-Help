@@ -19,8 +19,6 @@ interface AuthRequest extends Request {
 }
 
 function buildClientSearchWhere(search: string, status?: string): Prisma.UserWhereInput {
-  // isDeleted marks only accounts the user deleted themselves; suspension
-  // and bans are carried by `status` alone.
   const where: Prisma.UserWhereInput = { role: 'CLIENT', isDeleted: false };
 
   if (status?.toLowerCase() === 'active') {
@@ -50,12 +48,6 @@ type ClientRow = {
   createdAt: Date;
 };
 
-/**
- * Formats a page of clients, fetching every client's bookings in ONE query
- * (grouped in JS by clientId) instead of one `booking.findMany` per client —
- * that per-row query was the biggest N+1 in the admin API, firing on every
- * page load of the Users table.
- */
 async function formatClientsBatch(users: ClientRow[]) {
   const bookingsByClient = new Map<
     string,
@@ -86,8 +78,6 @@ async function formatClientsBatch(users: ClientRow[]) {
       name: user.fullName,
       email: user.email,
       phone: user.phone ?? '—',
-      // Real 3-state account status (ACTIVE/SUSPENDED/BANNED) — lowercased for
-      // the frontend's existing badge-variant convention.
       status: user.status.toLowerCase(),
       bookings: bookings.length,
       spent: formatPeso(totalSpent),
@@ -103,7 +93,6 @@ async function formatClientsBatch(users: ClientRow[]) {
 export const listClients = async (req: Request, res: Response) => {
   try {
     const { page, limit, skip } = getPaginationParams(req.query);
-    // Server-side so the order covers every page, not just the visible one.
     const { orderBy } = parseListSort<Prisma.UserOrderByWithRelationInput>(
       req.query,
       {
@@ -204,7 +193,6 @@ function buildWorkerSearchWhere(search: string, status?: string): Prisma.UserWhe
   } else if (status === 'pending') {
     where.workerProfile = { kycStatus: 'PENDING' };
   } else if (status === 'deactivated') {
-    // Took themselves off the platform (userController.deactivateAccount).
     where.status = 'DEACTIVATED';
   }
 
@@ -238,11 +226,6 @@ type WorkerRow = {
   } | null;
 };
 
-/**
- * Formats a page of workers, fetching every worker's completed bookings in
- * ONE query (grouped in JS by workerId) instead of one `booking.findMany`
- * per worker — mirrors the same N+1 fix as formatClientsBatch above.
- */
 async function formatWorkersBatch(users: WorkerRow[]) {
   const bookingsByWorker = new Map<string, Array<{ finalPrice: number | null; estimatedPrice: number | null }>>();
 
@@ -252,15 +235,13 @@ async function formatWorkersBatch(users: WorkerRow[]) {
       select: { workerId: true, finalPrice: true, estimatedPrice: true },
     });
     for (const b of completedBookings) {
-      if (!b.workerId) continue; // where-filtered to non-null, but the field is nullable in the schema
+      if (!b.workerId) continue;
       const list = bookingsByWorker.get(b.workerId);
       if (list) list.push(b);
       else bookingsByWorker.set(b.workerId, [b]);
     }
   }
 
-  // Settings are cached in-memory (60s TTL) so one call up front is enough —
-  // no need to re-fetch per worker.
   const tierSettings = await getAppSettings();
 
   return users.map((user) => {
@@ -291,9 +272,6 @@ async function formatWorkersBatch(users: WorkerRow[]) {
       displayId: formatDisplayId(user.id),
       name: user.fullName,
       email: user.email,
-      // Only VERIFIED categories are joined into the display string — a
-      // still-PENDING_VERIFICATION 2nd+ category isn't live yet, and showing
-      // it plainly here would imply otherwise. Counted separately instead.
       services: (() => {
         const verified = user.workerProfile?.serviceCategories?.filter((c) => c.status === 'VERIFIED') ?? [];
         const pendingCount = user.workerProfile?.serviceCategories?.filter((c) => c.status === 'PENDING_VERIFICATION').length ?? 0;
@@ -303,12 +281,9 @@ async function formatWorkersBatch(users: WorkerRow[]) {
       rating: user.workerProfile?.rating.toFixed(1) ?? '0.0',
       reviews: user.workerProfile?.totalReviews ?? 0,
       tier,
-      // Confirmed by the admin at KYC approval — one of the tier requirements.
       yearsExperience: user.workerProfile?.yearsExperience ?? null,
       status: statusLabel,
       verification: statusLabel,
-      // Real account status (ACTIVE/SUSPENDED/BANNED/DEACTIVATED) — distinct from the KYC
-      // verification label above, which `status`/`verification` both carry.
       accountStatus: user.status.toLowerCase(),
       declineCooldownUntil: user.workerProfile?.declineCooldownUntil ?? null,
       debtHoldAt: user.workerProfile?.debtHoldAt ?? null,
@@ -325,7 +300,6 @@ async function formatWorkersBatch(users: WorkerRow[]) {
 export const listWorkers = async (req: Request, res: Response) => {
   try {
     const { page, limit, skip } = getPaginationParams(req.query);
-    // Server-side so the order covers every page, not just the visible one.
     const { orderBy } = parseListSort<Prisma.UserOrderByWithRelationInput>(
       req.query,
       {
@@ -409,10 +383,6 @@ export const getWorkerById = async (req: Request, res: Response) => {
             include: { serviceType: { select: { id: true, name: true } } },
             orderBy: { createdAt: 'desc' },
           }),
-          // Which PENDING category(ies) a certification is gating — surfaced
-          // on the admin's certification review row so approving/rejecting a
-          // PENDING doc there is understood as "this unlocks/declines a whole
-          // service category," not just a document's own status.
           prisma.workerServiceCategory.findMany({
             where: { workerProfileId: workerProfileForCerts.id, status: 'PENDING_VERIFICATION' },
             select: { gatingCertificationId: true, serviceType: { select: { name: true } } },
@@ -456,8 +426,6 @@ export const getWorkerById = async (req: Request, res: Response) => {
                 day: 'numeric',
                 year: 'numeric',
               }),
-          // The worker's actual take (after commission/withholding) once paid;
-          // before that only the job price is known, so it's flagged as an estimate.
           earnings:
             b.payment?.status === 'COMPLETED'
               ? formatPeso(b.payment.workerPayout)
@@ -474,15 +442,6 @@ export const getWorkerById = async (req: Request, res: Response) => {
   }
 };
 
-/**
- * GET /api/admin/users/workers/:id/documents — every file a worker has
- * uploaded, in one place: all KYC documents across every verification
- * submission (newest first, each linking back to its review), the resume
- * and certificates. Separate from getWorkerById so ID documents are only
- * fetched (and their short-lived signed links minted — see
- * protectResponseData) when an admin asks to see them, and every viewing is
- * audit-logged (Data Privacy Act: access to sensitive personal information).
- */
 export const getWorkerDocuments = async (req: AuthRequest, res: Response) => {
   try {
     const id = req.params.id as string;
@@ -525,9 +484,6 @@ export const getWorkerDocuments = async (req: AuthRequest, res: Response) => {
       }))
     );
 
-    // A certificate uploaded during KYC is also copied into Certifications,
-    // and the resume can be both a KYC document and the profile resume —
-    // list each file once.
     const seen = new Set(documents.map((d) => d.url));
     const certifications = (user.workerProfile?.certifications ?? [])
       .filter((c) => c.documentUrl && !seen.has(c.documentUrl))
@@ -579,28 +535,15 @@ async function setUserStatus(
   if (!user) {
     return res.status(404).json(errorResponse(404, 'User not found'));
   }
-  // A self-deleted account has been anonymized — there's nothing left to
-  // suspend or reinstate.
   if (user.status === 'DELETED') {
     return res.status(409).json(errorResponse(409, 'This account was deleted by its owner and cannot be changed'));
   }
 
   const updatedUser = await prisma.user.update({
     where: { id },
-    // Suspension/ban is `status` only — isDeleted/deletedAt mean "deleted by
-    // the user" (userController.deleteAccount). Cleared here too so rows
-    // suspended under the old behaviour are fixed on their next change.
     data: { status: targetStatus, isDeleted: false, deletedAt: null },
   });
 
-  // A banned/suspended user previously kept full API access on their
-  // existing access token for up to JWT_EXPIRY (7 days by default in
-  // production) and could silently renew it forever via /auth/refresh — the
-  // status change alone never touched their live session. Revoking every
-  // access token (Redis, checked by authMiddleware) and deleting their
-  // refresh tokens (blocks /auth/refresh outright) makes this take effect
-  // immediately. Reinstating clears the revocation so a wrongly-suspended
-  // user isn't still locked out after being cleared.
   if (targetStatus === 'ACTIVE') {
     await clearUserSessionRevocation(id);
   } else {
@@ -643,10 +586,6 @@ export const updateUserStatus = async (req: AuthRequest, res: Response) => {
   }
 };
 
-/**
- * PATCH /api/admin/workers/:id/suspend (also usable for clients)
- * Thin convenience wrapper around updateUserStatus's SUSPENDED path.
- */
 export const suspendUser = async (req: AuthRequest, res: Response) => {
   try {
     const { reason, notes } = req.body as { reason?: string; notes?: string };
@@ -657,7 +596,6 @@ export const suspendUser = async (req: AuthRequest, res: Response) => {
   }
 };
 
-/** PATCH /api/admin/workers/:id/reinstate — clears a suspension/ban. */
 export const reinstateUser = async (req: AuthRequest, res: Response) => {
   try {
     const { reason, notes } = req.body as { reason?: string; notes?: string };

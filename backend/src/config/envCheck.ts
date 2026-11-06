@@ -1,21 +1,8 @@
-/**
- * Startup check of the production configuration.
- *
- * Without the first group the app can't run at all, so it refuses to start
- * (Render then keeps the previous deploy serving). Everything else is
- * reported loudly — logged, and sent to Sentry as a warning — but doesn't stop
- * the app, since each one only breaks the feature that uses it.
- */
-
-// DATA_/MFA_ENCRYPTION_KEY: without them payout details, TINs and admin
-// two-step sign-in fail on first use — better to not start at all.
 const REQUIRED = ['DATABASE_URL', 'JWT_SECRET', 'DATA_ENCRYPTION_KEY', 'MFA_ENCRYPTION_KEY'];
 
-// Secrets that must be long random values in production.
 const SECRETS = ['JWT_SECRET', 'DATA_ENCRYPTION_KEY', 'MFA_ENCRYPTION_KEY', 'CRON_SECRET', 'XENDIT_WEBHOOK_TOKEN'];
 const MIN_SECRET_LENGTH = 32;
 
-// Values copied from .env.example, CI or the development fallbacks.
 const PLACEHOLDER = /change[_-]?me|replace[_-]?me|placeholder|homeease_development|^ci-test|^(secret|password|test|dev|changeme)$/i;
 
 const RECOMMENDED: Array<[string, string]> = [

@@ -2,11 +2,6 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useLocation, useSearchParams } from 'react-router-dom';
 import { usePolling } from './usePolling';
 
-// Module-level, in-memory, cleared on a full page reload. Keyed by route +
-// params so navigating away and back shows the last-known data instantly
-// instead of a blank spinner, while a fresh fetch quietly runs behind it
-// (stale-while-revalidate) — every `load()` still hits the network, this
-// only changes whether the UI blocks on that round-trip.
 const listCache = new Map();
 const detailCache = new Map();
 
@@ -18,18 +13,12 @@ export function useListQuery(
 ) {
   const { pathname } = useLocation();
   const [searchParams, setSearchParams] = useSearchParams();
-  // Lists with filters/paging keep them in the URL, so a refresh, Back from a
-  // detail page, or a shared link lands on the same view. Only values that
-  // differ from initialParams are written, to keep URLs short. Lists without
-  // initialParams stay out of the URL (a page with two lists on one
-  // route; only the paged one owns the query string).
   const syncUrl = Object.keys(initialParams).length > 0;
   const search = syncUrl ? searchParams.toString() : '';
   const params = useMemo(() => {
     const fromUrl = Object.fromEntries(new URLSearchParams(search));
     if (fromUrl.page) fromUrl.page = Number(fromUrl.page) || 1;
     return { ...initialParams, ...fromUrl };
-    // initialParams is an inline literal at every call site; only the URL changes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [search]);
   const setParams = (updater) => {
@@ -47,9 +36,6 @@ export function useListQuery(
   const [loading, setLoading] = useState(!cachedEntry);
   const [error, setError] = useState(null);
 
-  // `silent` skips the loading flag so a background poll refresh doesn't
-  // flash the loading state over an already-rendered table. Cached data (if
-  // any, for the current cacheKey) shows immediately either way.
   const load = useCallback(async (silent = false) => {
     const cached = listCache.get(cacheKey);
     if (cached) {
@@ -81,22 +67,12 @@ export function useListQuery(
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [load, ...deps]);
 
-  // `pausePolling` lets a consumer suspend the background refresh for a
-  // reason of its own (e.g. an admin has a detail modal open and a refetch
-  // mid-review would yank the record out from under them) without having to
-  // roll its own polling loop.
   usePolling(() => load(true), pollIntervalMs || 0, { paused: !pollIntervalMs || pausePolling });
 
   const setSearch = (search) => setParams((prev) => ({ ...prev, search, page: 1 }));
-  // Takes one key/value, or an object to set several at once (each call
-  // rewrites the URL from the current params, so two calls in a row would
-  // drop the first).
   const setFilter = (key, value) =>
     setParams((prev) => ({ ...prev, ...(typeof key === 'object' ? key : { [key]: value }), page: 1 }));
   const goToPage = (page) => setParams((prev) => ({ ...prev, page }));
-  // Clicking a column sorts by it; clicking the same column again flips the
-  // direction. Dates/amounts usually read best newest/largest first, so
-  // callers can pass that as the first direction.
   const setSort = (sortBy, firstDir = 'asc') =>
     setParams((prev) => ({
       ...prev,
@@ -105,13 +81,6 @@ export function useListQuery(
       page: 1,
     }));
 
-  // Optimistic escape hatch — patches both the rendered `data` and the
-  // shared cache entry for the current cacheKey without a network round
-  // -trip, for a mutation whose API response already has everything needed
-  // to update the list locally (create/update/delete/toggle). Prefer this
-  // over `reload()` after a mutation: reload() re-fetches the full list,
-  // which is a second sequential round-trip the user waits through on
-  // every save.
   const setData = useCallback(
     (updater) => {
       setDataState((prev) => {

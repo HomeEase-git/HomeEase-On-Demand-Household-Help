@@ -18,11 +18,6 @@ interface AuthRequest extends Request {
 
 const STATUSES: RefundRequestStatus[] = ['PENDING', 'APPROVED', 'FAILED', 'REJECTED', 'REFUNDED_MANUALLY'];
 
-/**
- * GET /api/admin/payments/refund-requests?status=PENDING,FAILED
- * The refund approval queue. `status` takes one or more comma-separated
- * RefundRequestStatus values; omitted = all.
- */
 export const listRefundRequests = async (req: Request, res: Response) => {
   try {
     const { page, limit, skip } = getPaginationParams(req.query);
@@ -106,9 +101,6 @@ function decide(action: 'approve' | 'reject' | 'manual') {
   };
 }
 
-/** POST /api/admin/payments/refund-requests/:id/approve — sends the refund. */
 export const approveRefund = decide('approve');
-/** POST /api/admin/payments/refund-requests/:id/reject — note required. */
 export const rejectRefund = decide('reject');
-/** POST /api/admin/payments/refund-requests/:id/manual — settled outside the app; note required. */
 export const markRefundManual = decide('manual');

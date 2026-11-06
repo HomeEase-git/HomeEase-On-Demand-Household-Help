@@ -3,8 +3,6 @@ import { StyleProp, Text, View, ViewStyle } from "react-native";
 import { colors } from "../../constants";
 import { AppIcon as Ionicons } from "../icons/AppIcon";
 
-// Shown in place of the map when this build has no Maps SDK key, and on web
-// (react-native-maps is native-only).
 export default function MapUnavailable({ style }: { style?: StyleProp<ViewStyle> }) {
   return (
     <View style={style ?? { flex: 1 }} className="bg-card-dark items-center justify-center px-4">

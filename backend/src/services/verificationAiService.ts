@@ -9,22 +9,10 @@ export interface VerificationReviewResult {
   aiError: string | null;
 }
 
-// Claude can review images (JPG/PNG/WEBP) and PDFs. Anything else (or a row
-// with no mimeType) is not sent.
 const MAX_DOCS_REVIEWED = 12;
-// ~14 MB of base64 across all attached documents. The concurrency below can
-// overshoot this by up to (REVIEW_FETCH_CONCURRENCY - 1) files before it trips,
-// so the ceiling leaves headroom to stay under Anthropic's 32 MB request cap
-// even with a few large PDFs (PDFs, unlike images, aren't downscaled on upload).
 const REVIEW_BASE64_BUDGET = 14 * 1024 * 1024;
-// Fetch document bytes a few at a time rather than all at once, so a submission
-// with many large files can't spike the worker's memory.
 const REVIEW_FETCH_CONCURRENCY = 4;
 
-// Data minimization (Data Privacy Act §11): only documents that actually bear
-// on identity/background verification go to the external AI reviewer. A
-// resume (parsed separately, on the worker's own request) and a VAT
-// registration (reviewed on its own admin screen) add nothing here.
 const NOT_SENT_FOR_REVIEW = new Set(['RESUME', 'VAT_REGISTRATION']);
 
 function isReviewable(doc: VerificationJobDocument): boolean {
@@ -33,14 +21,6 @@ function isReviewable(doc: VerificationJobDocument): boolean {
   return mime.startsWith('image/') || mime === 'application/pdf';
 }
 
-// Called by the BullMQ processor. Deliberately does NOT catch Claude/fetch
-// failures here — letting them throw all the way out to BullMQ is what
-// makes `VERIFICATION_JOB_OPTIONS`'s attempts/backoff actually retry the
-// whole job. Only once retries are exhausted does the worker's `failed`
-// handler (see verificationWorker.ts) call recordExhaustedRetriesFallback
-// to degrade to the heuristic. A non-retryable case (no API key, no
-// reviewable documents) resolves immediately below with no throw, since
-// retrying can't fix those.
 export async function analyzeVerificationDocuments(
   verificationId: string,
   requestType: string,
@@ -62,9 +42,6 @@ export async function analyzeVerificationDocuments(
   return aiResult;
 }
 
-// Called from verificationWorker's `failed` handler once BullMQ has
-// exhausted all retry attempts for a job — records a heuristic fallback so
-// the request doesn't sit stuck at aiStatus: 'PENDING' forever.
 export async function recordExhaustedRetriesFallback(
   verificationId: string,
   requestType: string,
@@ -90,13 +67,6 @@ export async function recordExhaustedRetriesFallback(
   });
 }
 
-// `AI_REVIEWED` is reserved for a genuine Claude-backed review — anything
-// that falls back to the heuristic (no API key, no reviewable documents, or
-// retries exhausted after Claude/fetch kept failing) is tagged
-// `HEURISTIC_REVIEWED` instead, and always carries a non-null `aiError`
-// explaining why, so the admin UI's existing error banner
-// (VerificationDetail.jsx) surfaces the caveat instead of a heuristic
-// file-listing looking identical to a real automated review.
 async function generateAiReview(
   requestType: string,
   documents: VerificationJobDocument[]
@@ -114,9 +84,6 @@ async function generateAiReview(
     );
   }
 
-  // Let transient failures (rate limits, 5xx, a document URL that didn't
-  // fetch this time) throw straight through — see the comment on
-  // analyzeVerificationDocuments above for why.
   return runClaudeReview(requestType, reviewableDocs);
 }
 
@@ -125,11 +92,6 @@ type FetchedDoc =
   | { status: 'failed'; doc: VerificationJobDocument }
   | { status: 'skipped'; doc: VerificationJobDocument };
 
-// Fetches up to `candidates.length` document bodies, at most
-// REVIEW_FETCH_CONCURRENCY in flight, and stops committing once
-// REVIEW_BASE64_BUDGET is reached (the first document is always attempted, even
-// if oversized, so a single big file still gets a review). Results are written
-// back in the original candidate order.
 async function fetchReviewableDocs(candidates: VerificationJobDocument[]): Promise<FetchedDoc[]> {
   const out: FetchedDoc[] = new Array(candidates.length);
   let committedBase64Length = 0;
@@ -137,7 +99,6 @@ async function fetchReviewableDocs(candidates: VerificationJobDocument[]): Promi
   let nextIndex = 0;
 
   async function worker(): Promise<void> {
-    // `nextIndex++` is atomic between awaits on JS's single thread.
     for (let i = nextIndex++; i < candidates.length; i = nextIndex++) {
       const doc = candidates[i]!;
 
@@ -147,8 +108,6 @@ async function fetchReviewableDocs(candidates: VerificationJobDocument[]): Promi
       }
 
       try {
-        // Service-key download: the KYC bucket is private, so the stored
-        // object URL isn't directly fetchable.
         const buffer = await downloadStorageObject(doc.fileUrl);
         const base64 = buffer.toString('base64');
 
@@ -162,7 +121,6 @@ async function fetchReviewableDocs(candidates: VerificationJobDocument[]): Promi
         committedBase64Length += base64.length;
         out[i] = { status: 'ok', doc, base64 };
       } catch {
-        // One bad document URL shouldn't sink the ones that fetched fine.
         out[i] = { status: 'failed', doc };
       }
     }
@@ -209,11 +167,6 @@ async function runClaudeReview(
     .join(', ');
   const hasSelfie = okDocs.some((r) => r.doc.documentType === 'SELFIE');
   const hasIdFront = okDocs.some((r) => r.doc.documentType === 'GOVERNMENT_ID_FRONT');
-  // Previously nothing ever checked the selfie actually matches the person
-  // on the ID — an admin skimming the summary had no signal either way. This
-  // stays advisory-only, same as every other AI verdict in this file: the
-  // instruction below only fires when both documents are actually present,
-  // and the result still just informs the admin's own approve/reject call.
   const faceMatchInstruction =
     hasSelfie && hasIdFront
       ? ' The submission includes both a SELFIE and a GOVERNMENT_ID_FRONT — explicitly compare the face in the selfie against the photo on the ID and state in your summary whether they appear to be the same person, noting your certainty.'
@@ -239,9 +192,6 @@ async function runClaudeReview(
     }),
   });
 
-  // if (!response.ok) {
-  //   throw new Error(`Anthropic request failed with status ${response.status}`);
-  // }
   if (!response.ok) {
     const body = await response.text();
     throw new Error(`Anthropic request failed with status ${response.status}: ${body.slice(0, 500)}`);
@@ -260,9 +210,6 @@ async function runClaudeReview(
     throw new Error('Anthropic returned no usable content');
   }
 
-  // Pull Claude's own reported confidence off the last line rather than
-  // fabricating a fixed number — if it didn't follow the format, we don't
-  // pretend to know how confident it was.
   const confidenceMatch = contentText.match(/CONFIDENCE:\s*([01](?:\.\d+)?)\s*$/i);
   const aiConfidence = confidenceMatch ? Math.min(1, Math.max(0, parseFloat(confidenceMatch[1]!))) : null;
   const summaryText = confidenceMatch ? contentText.slice(0, confidenceMatch.index).trim() : contentText;

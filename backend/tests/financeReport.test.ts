@@ -7,7 +7,6 @@ import {
 } from '@services/financeReportService';
 import { createTestUser, deleteTestUser, createTestBooking, deleteTestBooking } from './helpers';
 
-// Every row lives in 2030 so these windows only ever see this file's data.
 const d = (iso: string) => new Date(`${iso}T04:00:00.000Z`);
 const JAN = { gte: d('2030-01-01'), lt: d('2030-02-01') };
 const FEB = { gte: d('2030-02-01'), lt: d('2030-03-01') };
@@ -52,7 +51,6 @@ describe('Finance report definitions', () => {
 
     const online = await payment({ methodType: 'GCASH', status: 'COMPLETED', capturedAt: d('2030-01-05') });
     await payment({ methodType: 'CASH', status: 'COMPLETED', capturedAt: d('2030-01-06') });
-    // Invoice created in December, paid in January: counts in January.
     await payment({ methodType: 'GCASH', status: 'COMPLETED', createdAt: d('2029-12-30'), capturedAt: d('2030-01-02') });
     // Earned in January, refunded in February.
     await payment({ methodType: 'GCASH', status: 'REFUNDED', capturedAt: d('2030-01-03'), refundedAt: d('2030-02-10') });
@@ -74,7 +72,6 @@ describe('Finance report definitions', () => {
 
   it('counts commission (not what clients paid) in the month the money was captured', async () => {
     const jan = await platformRevenue(JAN);
-    // online 100 + cash 100 + paid-in-January 100 + later-refunded 100; not the platform-funded one.
     expect(jan.commissionEarned).toBe(400);
     expect(jan.fromCashJobs).toBe(100);
     expect(jan.fromOnlineJobs).toBe(300);
@@ -102,14 +99,12 @@ describe('Finance report definitions', () => {
 
   it('splits what clients paid into worker, platform, BIR and tips', async () => {
     const b = await paymentBreakdown({ bookingId: { in: bookingIds } });
-    // Three completed client-funded payments (refunded, unpaid and platform-funded excluded).
     expect(b.clientPaid).toBe(3150);
     expect(b.workerEarnings).toBe(2796);
     expect(b.platformCommission).toBe(300);
     expect(b.withholdingTax).toBe(54);
     expect(b.tips).toBe(150);
     expect(b.commissionRatePercent).toBe(10);
-    // Every peso is accounted for: worker + platform + withholding tax (+ VAT, 0 here).
     expect(b.workerEarnings + b.platformCommission + b.withholdingTax + b.vatCollected).toBe(b.clientPaid);
   });
 });

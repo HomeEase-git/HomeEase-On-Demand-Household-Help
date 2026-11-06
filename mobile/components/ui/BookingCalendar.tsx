@@ -31,7 +31,6 @@ const LEAD_TIME_DAYS = 2;
 const MAX_RANGE_DAYS = 90;
 const BADGE_SIZE = 36;
 
-// Fixed color scheme per date state (background + text pairing).
 const DATE_COLORS = {
   available: { bg: colors.neutral[200], text: colors.neutral[700] },
   selected: { bg: colors.success, text: colors.white },
@@ -235,7 +234,6 @@ export default function BookingCalendar({
         ))}
       </View>
 
-      {/* Day grid — each date is its own rounded-square badge, not a table cell */}
       {weeks.map((week, rowIndex) => (
         <View
           key={rowIndex}

@@ -82,8 +82,6 @@ export default function ClientHomeScreen() {
   const router = useRouter();
   const clearDraft = useBookingStore((s) => s.clearDraft);
   const setDraft = useBookingStore((s) => s.setDraft);
-  // A service tile starts a booking straight away (the best available worker
-  // is matched); browsing workers stays on the Category tab.
   const startBooking = async (serviceName: string) => {
     await clearDraft();
     setDraft({ category: serviceName, serviceType: serviceName, entrySource: "new_booking" });
@@ -106,28 +104,20 @@ export default function ClientHomeScreen() {
 
   const firstName = user?.name?.split(" ")[0] ?? "there";
 
-  // No setLoading(true) here: this also runs on every tab focus (so newly
-  // approved workers show up), and a spinner flash each visit is worse than a
-  // quiet refresh. `loading` starts true for the first load.
   const loadHomeData = useCallback(async () => {
     setError(null);
     try {
       const [serviceTypes, workersResponse, promoBanners, bookings] = await Promise.all([
         getServiceTypes(),
-        // Only the top 3 are shown below — a small fetchLimit avoids
-        // downloading a full 50-worker page just for this preview.
         searchWorkers({
           sortBy: filters.sort,
           availableOnly: filters.availableOnly,
           fetchLimit: 6,
         }),
-        // Extras: if either fails, its section is just hidden rather than
-        // failing the whole home screen.
         getPromoBanners().catch(() => [] as PromoBannerItem[]),
         getBookings().catch(() => [] as ApiBookingListItem[]),
       ]);
 
-      // Category screens are addressed by a slug of the name; banners link by id.
       const slugById = new Map<string, string>(
         serviceTypes.map((st: any) => [st.id, st.name.toLowerCase().replace(/\s+/g, "-")]),
       );

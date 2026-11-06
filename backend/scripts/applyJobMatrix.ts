@@ -1,25 +1,3 @@
-// Applies the job order matrix (prisma/seeds/data/jobOrderMatrix.json) to one
-// live service category, or restores a category from a backup this script
-// wrote. Every change runs in one transaction; without --apply it is rolled
-// back at the end, so a dry run exercises the real validation and writes.
-//
-// Usage (from backend/, DATABASE_URL pointing at the target database):
-//   npx tsx scripts/applyJobMatrix.ts --category "Home Appliance & Aircon Repair"            # dry run
-//   npx tsx scripts/applyJobMatrix.ts --category "Home Appliance & Aircon Repair" --apply    # writes; saves a backup first
-//   npx tsx scripts/applyJobMatrix.ts --restore <backup.json> [--apply]                      # puts a category back
-//   Optional: --backup-dir <dir> (default: ./job-matrix-backups)
-//             --neon-websocket  connect through Neon's WebSocket proxy on port 443,
-//               for networks that block the Postgres protocol. Needs
-//               `npm i --no-save @prisma/adapter-neon @neondatabase/serverless ws`.
-//
-// What --category does, per the rollout decisions (2026-09-25):
-//   - Writes the category's jobs through the same code as the
-//     admin editor (adminCatalogController.writeCatalog). A live job listed as
-//     a row's "replaces" is renamed in place, so worker selections and past
-//     bookings stay attached; live jobs with no row are deactivated.
-//   - Every worker offering a renamed job keeps offering it; every VERIFIED
-//     worker in the category is signed up for the new jobs.
-//   - Booking questions are retired: old question rows are left as they are.
 import 'dotenv/config';
 import fs from 'fs';
 import path from 'path';
@@ -44,7 +22,6 @@ const TX_OPTIONS = { timeout: 300_000, maxWait: 20_000 };
 
 function makeClient(): PrismaClient {
   if (!flag('--neon-websocket')) return defaultPrisma;
-  // Optional dependencies, installed only where this flag is needed.
   /* eslint-disable @typescript-eslint/no-require-imports */
   const { PrismaNeon } = require('@prisma/adapter-neon');
   const { neonConfig } = require('@neondatabase/serverless');
@@ -84,7 +61,6 @@ async function applyCategory(tx: Prisma.TransactionClient, matrix: MatrixCategor
   const { category } = before;
   const liveByName = new Map(category.tasks.map((t) => [t.name, t]));
 
-  // --- build the same payload the admin editor would send ---------------------
   const { body, warnings, unmatched, jobRef } = buildMatrixPayload(matrix, category, category.tasks);
   const { tasks } = body as Required<typeof body>;
   const usedLive = new Set(category.tasks.filter((t) => !unmatched.includes(t)).map((t) => t.id));
@@ -102,7 +78,6 @@ async function applyCategory(tx: Prisma.TransactionClient, matrix: MatrixCategor
     if (dole.blocked) throw new Error(`Job "${t.name}": ${dole.message}`);
   }
 
-  // --- write jobs ---------------------------------------------------
   const { taskIdByRef } = await writeCatalog(
     tx,
     { id: category.id, tasks: category.tasks.map((t) => ({ id: t.id, pricingModel: t.pricingModel })) },
@@ -119,7 +94,6 @@ async function applyCategory(tx: Prisma.TransactionClient, matrix: MatrixCategor
   for (const live of category.tasks.filter((t) => !usedLive.has(t.id))) {
     report.push(`    –  ${live.name} — deactivated (no matching row)`);
   }
-  // --- sign workers up: keep renamed jobs' workers; verified workers get new jobs ----
   const verifiedWorkers = before.workerCategories.filter((w) => w.status === 'VERIFIED').map((w) => w.workerProfileId);
   let signedUp = 0;
   for (const [i, job] of matrix.jobs.entries()) {
@@ -155,7 +129,6 @@ async function restoreCategory(tx: Prisma.TransactionClient, backup: Snapshot, r
     data: { name: old.name, description: old.description, basePrice: old.basePrice, icon: old.icon, requiresCertification: old.requiresCertification },
   });
 
-  // Jobs the apply created can't be deleted if a booking used them: switch them off.
   const created = current.tasks.filter((t) => !oldTaskIds.has(t.id));
   if (created.length) {
     await tx.serviceTask.updateMany({ where: { id: { in: created.map((t) => t.id) } }, data: { isActive: false } });
@@ -176,7 +149,6 @@ async function restoreCategory(tx: Prisma.TransactionClient, backup: Snapshot, r
         minPrice: t.minPrice,
         maxPrice: t.maxPrice,
         unitLabel: t.unitLabel,
-        // Backups from before Booking.quantity have no limits; leave those as they are.
         ...(t.minQuantity !== undefined ? { minQuantity: t.minQuantity } : {}),
         ...(t.maxQuantity !== undefined ? { maxQuantity: t.maxQuantity } : {}),
         durationHours: t.durationHours,
@@ -186,7 +158,6 @@ async function restoreCategory(tx: Prisma.TransactionClient, backup: Snapshot, r
     });
   }
 
-  // Worker selections for the old jobs, exactly as they were.
   await tx.workerTaskSelection.deleteMany({ where: { serviceTaskId: { in: [...oldTaskIds] } } });
   const selections = backup.workerTaskSelections.filter((r) => workerIds.has(r.workerProfileId));
   if (selections.length) await tx.workerTaskSelection.createMany({ data: selections });
@@ -215,7 +186,6 @@ async function main() {
     if (!matrix) throw new Error(`jobOrderMatrix.json has no category "${categoryName}".`);
 
     if (APPLY) {
-      // Backup is read and written before anything changes.
       const snapshot = await prisma.$transaction((tx) => loadCategory(tx, categoryName), TX_OPTIONS);
       fs.mkdirSync(BACKUP_DIR, { recursive: true });
       const stamp = new Date().toISOString().replace(/[:.]/g, '-');

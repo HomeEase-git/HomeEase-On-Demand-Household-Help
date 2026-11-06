@@ -5,7 +5,6 @@ import type { DayEarnings } from "../../utils/workerHome";
 const BAR_MAX_HEIGHT = 96;
 const peso = (n: number) => `₱${Math.round(n).toLocaleString("en-PH")}`;
 
-/** Seven bars, one per day ending today, scaled to the best day. */
 export const WeeklyEarningsChart: React.FC<{ days: DayEarnings[] }> = ({ days }) => {
   const max = Math.max(...days.map((d) => d.total), 0);
   const weekTotal = days.reduce((sum, d) => sum + d.total, 0);

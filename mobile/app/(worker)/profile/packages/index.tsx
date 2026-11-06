@@ -35,8 +35,6 @@ export default function PackagesScreen() {
           api.getMyServiceTypes(),
         ]);
         setPackages(pkgs);
-        // Only VERIFIED categories — a worker shouldn't create a client-facing
-        // package for a category still pending admin review.
         setMyServiceTypes(categories.filter((c) => c.status === "VERIFIED").map((c) => c.serviceType));
       } catch (error) {
         console.error("Load packages error:", error);
@@ -169,7 +167,6 @@ export default function PackagesScreen() {
         )}
       />
       <Pressable accessibilityRole="button" accessibilityLabel="Add package"
-        // Sits above the setup reminder bar when that's showing.
         className="absolute bottom-16 right-6 w-14 h-14 bg-accent rounded-full items-center justify-center"
         style={cardShadow}
         onPress={openCreateModal}

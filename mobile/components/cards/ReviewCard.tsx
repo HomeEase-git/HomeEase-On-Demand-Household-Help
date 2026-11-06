@@ -13,11 +13,9 @@ type Review = {
   comment: string;
   date: string;
   workerResponse?: string | null;
-  // The client's proof photos, shown on the review itself.
   photoUrls?: string[];
 };
 
-// API dates arrive as ISO strings ("2026-10-13T11:11:20.852Z").
 function formatReviewDate(date: string): string {
   const d = new Date(date);
   return Number.isNaN(d.getTime())
@@ -27,8 +25,6 @@ function formatReviewDate(date: string): string {
 
 type Props = {
   review: Review;
-  // Worker-only: lets the worker post a one-time public reply. Omitted
-  // entirely on the client-facing worker-profile reviews list.
   onRespond?: (reviewId: string, response: string) => Promise<void>;
   // Worker-only: report the review to an admin.
   onReport?: () => void;

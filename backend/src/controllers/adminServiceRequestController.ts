@@ -10,21 +10,8 @@ interface AuthRequest extends Request {
   user?: JwtPayload;
 }
 
-// A worker asking to offer another service (WorkerServiceCategory,
-// PENDING_VERIFICATION) with the certifications/documents they attached
-// (Certification rows tagged to that ServiceType — see
-// workerController.runCategoryGate). The admin decides on the request as a
-// whole here; approving/rejecting one document from the worker's detail
-// page (adminCertificationController) still works too.
-
 const VALID_STATUSES: WorkerServiceCategoryStatus[] = ['PENDING_VERIFICATION', 'VERIFIED', 'REJECTED'];
 
-/**
- * GET /api/admin/service-requests?status=PENDING_VERIFICATION
- * Defaults to the review queue. status=ALL lists every status — the union
- * of the Pending / Approved / Rejected tabs. (It used to require a gating
- * document, which hid approved requests filed without one.)
- */
 export const listServiceRequests = async (req: Request, res: Response) => {
   try {
     const raw = typeof req.query.status === 'string' ? req.query.status.toUpperCase() : 'PENDING_VERIFICATION';
@@ -55,7 +42,6 @@ export const listServiceRequests = async (req: Request, res: Response) => {
       take: 200,
     });
 
-    // Every document the worker attached for that service, newest first.
     const docs = requests.length
       ? await prisma.certification.findMany({
           where: {
@@ -112,11 +98,6 @@ async function findPendingRequest(id: string) {
   });
 }
 
-/**
- * PATCH /api/admin/service-requests/:id/approve
- * Approves the request and every still-pending document attached to it; the
- * worker can then pick tasks in that service.
- */
 export const approveServiceRequest = async (req: AuthRequest, res: Response) => {
   try {
     const id = req.params.id as string;
@@ -169,11 +150,6 @@ export const approveServiceRequest = async (req: AuthRequest, res: Response) => 
   }
 };
 
-/**
- * PATCH /api/admin/service-requests/:id/reject  { rejectionReason }
- * Declines the request and its still-pending documents. The worker can
- * request the service again with new documents.
- */
 export const rejectServiceRequest = async (req: AuthRequest, res: Response) => {
   try {
     const id = req.params.id as string;

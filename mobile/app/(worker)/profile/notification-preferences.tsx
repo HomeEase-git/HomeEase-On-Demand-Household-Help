@@ -20,8 +20,6 @@ export default function WorkerNotificationPreferencesScreen() {
   const [saving, setSaving] = useState(false);
   const [sounds, setSounds] = useState(areSoundsEnabled());
 
-  // Stored on this phone and applied right away (not part of Save below,
-  // which updates the account's notification settings on the server).
   const toggleSounds = (value: boolean) => {
     setSounds(value);
     setSoundsEnabled(value);

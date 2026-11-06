@@ -13,26 +13,8 @@ interface AuthRequest extends Request {
   user?: JwtPayload;
 }
 
-// A worker who cancels a job AFTER arriving must upload proof and say whose
-// fault it was (bookingController.cancelBooking). A worker-fault cancel is
-// penalized on the spot; a client-fault claim waits here for an admin to
-// check the proof:
-//   APPROVE — the client owes the cancellation fee (their account is put on
-//             hold until it's settled, same as an unpaid booking) and the
-//             worker is compensated (against their dues first, the rest on
-//             their next payout — see debtLedgerService.creditCompensationTx).
-//             With no fee on the claim (the fee was 0 when it was filed) the
-//             claim is only marked APPROVED: no hold, no ledger, no credit.
-//   REJECT  — the proof doesn't hold up, so it's treated as the worker's
-//             fault: the no-show penalty applies.
-
 const REVIEW_STATUSES = ['PENDING_REVIEW', 'APPROVED', 'REJECTED'] as const;
 
-/**
- * GET /api/admin/cancellations?status=PENDING_REVIEW
- * On-site cancellations with the worker's proof. status=ALL lists every
- * cancellation that went through review.
- */
 export const listCancellationReviews = async (req: Request, res: Response) => {
   try {
     const raw = typeof req.query.status === 'string' ? req.query.status.toUpperCase() : 'PENDING_REVIEW';
@@ -88,10 +70,6 @@ export const listCancellationReviews = async (req: Request, res: Response) => {
   }
 };
 
-/**
- * PATCH /api/admin/cancellations/:bookingId/review
- * Body: { decision: 'APPROVE' | 'REJECT', note } — see the header comment.
- */
 export const reviewCancellation = async (req: AuthRequest, res: Response) => {
   try {
     const bookingId = req.params.bookingId as string;
@@ -121,7 +99,6 @@ export const reviewCancellation = async (req: AuthRequest, res: Response) => {
     }
 
     const settings = await getAppSettings();
-    // The fee in force when the claim was filed; a later change doesn't apply.
     const amount = cancellation.compensationAmount ?? 0;
     const penalty = settings.noShowPenaltyAmount;
     const displayId = formatDisplayId(bookingId);

@@ -10,13 +10,8 @@ interface AuthRequest extends Request {
   user?: JwtPayload;
 }
 
-// Worker-proposed packages (WorkerPackage) only reach clients once an admin
-// approves them. The admin can approve at the worker's price or set their
-// own — the approved price is what clients are charged.
-
 const VALID_STATUSES: KycDocumentStatus[] = ['PENDING', 'APPROVED', 'REJECTED'];
 
-/** GET /api/admin/packages?status=PENDING (default) | APPROVED | REJECTED | ALL */
 export const listPackages = async (req: Request, res: Response) => {
   try {
     const raw = typeof req.query.status === 'string' ? req.query.status.toUpperCase() : 'PENDING';
@@ -111,7 +106,6 @@ export const approvePackage = async (req: AuthRequest, res: Response) => {
   }
 };
 
-/** PATCH /api/admin/packages/:id/reject  { rejectionReason } */
 export const rejectPackage = async (req: AuthRequest, res: Response) => {
   try {
     const id = req.params.id as string;

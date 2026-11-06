@@ -14,7 +14,6 @@ import { usePullToRefresh } from "../../../hooks/usePullToRefresh";
 type RecordTab = "Active" | "Completed" | "Cancelled";
 const TABS: RecordTab[] = ["Active", "Completed", "Cancelled"];
 
-// New (PENDING) requests stay on the Requests tab until accepted.
 function tabForJob(job: WorkerJob): RecordTab | null {
   if (job.status === "Pending") return null;
   if (job.status === "Completed") return "Completed";
@@ -24,7 +23,6 @@ function tabForJob(job: WorkerJob): RecordTab | null {
 
 export default function RecordsScreen() {
   const router = useRouter();
-  // Opens on the jobs not finished yet — that's what a worker comes here for.
   const [tab, setTab] = useState<RecordTab>("Active");
   const [jobs, setJobs] = useState<WorkerJob[]>([]);
   const [loading, setLoading] = useState(true);
@@ -52,8 +50,6 @@ export default function RecordsScreen() {
 
   const filtered = jobs.filter((j) => tabForJob(j) === tab);
 
-  // An active job opens straight into the live job screen (arrive, start,
-  // send the invoice, cash received); a finished one opens its record.
   const handleRecordPress = useCallback(
     (job: WorkerJob) => {
       router.push(tabForJob(job) === "Active" ? `/(worker)/records/job/${job.id}` : `/(worker)/records/${job.id}`);

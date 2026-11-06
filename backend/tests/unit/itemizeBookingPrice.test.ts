@@ -13,7 +13,6 @@ describe('itemizeBookingPrice', () => {
     const lines = itemizeBookingPrice(log, { estimatedPrice: 1150, laborCost: 1150, materialsCost: 300 });
     expect(lines.basePrice).toBe(1000); // not the 1150 labor figure
     expect(lines.materialsCost).toBe(300);
-    // the lines add up to what the client is billed: labor (the estimate) + materials
     expect(lines.basePrice! + lines.distanceFee + lines.tierFee + lines.rushFee + lines.materialsCost).toBe(1150 + 300);
   });
 

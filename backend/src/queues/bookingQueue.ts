@@ -18,8 +18,6 @@ export const JOB_NAMES = {
   DATA_RETENTION_SWEEP: 'data-retention-sweep',
 } as const;
 
-// Stable jobIds for the repeatable ticks so re-registering them on every
-// boot (see index.ts) upserts the schedule instead of piling up duplicates.
 export const REPEATABLE_JOB_IDS = {
   AUTO_SETTLE_COMPLETED: 'auto-settle-completed-bookings-hourly',
   NO_SHOW_SWEEP: 'worker-no-show-sweep-hourly',
@@ -39,21 +37,10 @@ export interface ExpirePendingBookingJobData {
 
 export const bookingQueue = new Queue(BOOKING_QUEUE_NAME, { connection });
 
-// Mandatory per BullMQ's own docs — Queue re-emits its Redis connection's
-// errors as an 'error' event, and an EventEmitter with no 'error' listener
-// crashes the whole process on the first one (e.g. Redis unreachable at
-// boot). Log-and-continue: the bounded retries in queueConnection already
-// decide when this queue gives up trying to reconnect.
 bookingQueue.on('error', (err) => {
   console.error('bookingQueue Redis connection error:', err.message);
 });
 
-/**
- * Schedules the PENDING→CANCELLED expiry check for a newly-created booking,
- * after AppSettings.pendingExpiryMinutes (admin-configurable, defaults to
- * 60). jobId = bookingId so accepting/rejecting/cancelling the booking
- * before it fires can remove this exact job (see cancelPendingExpiryJob).
- */
 export async function schedulePendingExpiry(bookingId: string): Promise<void> {
   const { pendingExpiryMinutes } = await getAppSettings();
   const minutes = Math.max(1, Math.round(pendingExpiryMinutes));
@@ -62,8 +49,6 @@ export async function schedulePendingExpiry(bookingId: string): Promise<void> {
     JOB_NAMES.EXPIRE_PENDING,
     { bookingId } satisfies ExpirePendingBookingJobData,
     {
-      // BullMQ rejects ':' in custom jobIds (reserved for its own Redis key
-      // namespacing) — '-' instead, kept in sync with cancelPendingExpiryJob.
       jobId: `${JOB_NAMES.EXPIRE_PENDING}-${bookingId}`,
       delay: minutes * 60 * 1000,
       removeOnComplete: true,
@@ -72,35 +57,14 @@ export async function schedulePendingExpiry(bookingId: string): Promise<void> {
   );
 }
 
-/**
- * Cancels a scheduled expiry check — call this whenever a booking leaves
- * PENDING through any path other than the expiry job itself (accept,
- * decline, client cancel), so a stale job doesn't fire against a booking
- * that already moved on.
- */
 export async function cancelPendingExpiryJob(bookingId: string): Promise<void> {
   const job = await bookingQueue.getJob(`${JOB_NAMES.EXPIRE_PENDING}-${bookingId}`);
   if (job) {
     await job.remove().catch(() => {
-      // Already picked up by the worker or removed — safe to ignore.
     });
   }
 }
 
-/**
- * Registers the repeatable ticks (hourly settle, the
- * 10-minute no-show sweep, ...) via BullMQ v6's Job Scheduler API. Idempotent —
- * upsertJobScheduler upserts by jobSchedulerId (REPEATABLE_JOB_IDS.*), so
- * calling this on every server boot is safe and keeps the schedule in sync
- * with the pattern defined here.
- *
- * This replaces the pre-v6 `queue.add(name, data, { repeat, jobId })` form —
- * `repeat` is no longer a valid JobsOptions field; repeatable/scheduled jobs
- * now go through this dedicated scheduler API instead.
- */
-// Schedulers for sweeps that no longer exist (time slots, then quotes and
-// mid-job extra approvals, were removed) — deleted on boot so an old
-// deployment's registrations don't keep firing.
 const RETIRED_JOB_SCHEDULER_IDS = [
   'reset-expired-availability-slots-daily',
   'materialize-availability-templates-daily',
@@ -125,8 +89,6 @@ export async function registerRepeatableBookingJobs(): Promise<void> {
 
   await bookingQueue.upsertJobScheduler(
     REPEATABLE_JOB_IDS.NO_SHOW_SWEEP,
-    // Every 10 minutes — a no-show is cancelled AppSettings.noShowGraceMinutes
-    // after the start time, so an hourly tick could be up to an hour late.
     { pattern: '*/10 * * * *' },
     {
       name: JOB_NAMES.NO_SHOW_SWEEP,

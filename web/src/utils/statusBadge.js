@@ -1,7 +1,3 @@
-// Maps backend status enums (raw "COMPLETED" or admin-API title-cased
-// "In_progress") to the Badge component's color variants, so every page
-// shows the same status in the same color instead of a two-color guess.
-
 function normalize(status) {
   return String(status || '').toUpperCase().replace(/[\s-]+/g, '_')
 }

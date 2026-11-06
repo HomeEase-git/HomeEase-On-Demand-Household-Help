@@ -9,7 +9,6 @@ type Props = {
   onChange: (amount: number) => void;
 };
 
-/** Tip preset buttons ($0/$10/$15/$20) + custom input (Step 4: CONFIRM). */
 export default function TipSlider({ value, onChange }: Props) {
   const isPreset = PRESETS.includes(value);
   const [showCustom, setShowCustom] = useState(!isPreset && value > 0);

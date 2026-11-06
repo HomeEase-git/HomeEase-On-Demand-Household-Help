@@ -8,8 +8,6 @@ jest.mock('expo-image-manipulator', () => ({
   SaveFormat: { JPEG: 'jpeg' },
 }));
 
-// Mock expo-file-system's File class — no native module in the Jest
-// environment, so getFileSizeFromUri needs a stand-in `size` per URI.
 const MOCK_FILE_SIZES: Record<string, number> = {
   'file:///image.jpg': 2048,
   'file:///original-image.jpg': 2 * 1024 * 1024,

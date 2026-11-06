@@ -31,7 +31,6 @@ export function getTransactionById(id) {
   return TRANSACTIONS.find((t) => t.id === id) || null
 }
 
-// Money always shows centavos: ₱6,779.60, not ₱6,779.6.
 export function formatPeso(amount) {
   return `₱${Number(amount ?? 0).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
 }

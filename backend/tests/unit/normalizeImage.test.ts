@@ -21,7 +21,6 @@ describe('utils/normalizeImage', () => {
     const meta = await sharp(result.buffer).metadata();
     expect(meta.format).toBe('jpeg');
     expect(Math.max(meta.width ?? 0, meta.height ?? 0)).toBeLessThanOrEqual(1600);
-    // 4000x3000 -> long edge clamped to 1600, aspect ratio kept
     expect(meta.width).toBe(1600);
     expect(meta.height).toBe(1200);
     expect(result.byteLength).toBeLessThan(input.length);

@@ -1,5 +1,4 @@
 import 'dotenv/config';
-// Before anything else, so error monitoring can hook into what loads next.
 import { flushSentry } from './instrument';
 import * as Sentry from '@sentry/node';
 import { checkEnvironment } from '@config/envCheck';
@@ -21,36 +20,11 @@ import { verificationQueue } from '@queues/verificationQueue';
 import { ensureStorageBuckets } from '@utils/ensureStorageBuckets';
 import { redisHost, redisPort } from '@config/redis';
 
-// Some hosts (Render confirmed) don't reliably route outbound IPv6, but
-// Neon's connection hostnames publish AAAA records alongside A records.
-// Node's default dual-stack lookup can hand out an IPv6 address first, and
-// since node-postgres/ioredis just open a plain socket to whatever
-// dns.lookup() returns, that connection then hangs on a dead route until
-// TCP gives up (~4s) instead of ever trying the reachable IPv4 address —
-// this is also settable via NODE_OPTIONS=--dns-result-order=ipv4first, but
-// baking it in here means it doesn't depend on that env var being set.
 dns.setDefaultResultOrder('ipv4first');
 
 const PORT = process.env.PORT || 3000;
-// How long to let in-flight requests / jobs finish on shutdown before the
-// process is killed regardless. Keep it under the platform's own kill grace
-// period (Kubernetes terminationGracePeriodSeconds, etc.).
 const SHUTDOWN_TIMEOUT_MS = Number(process.env.SHUTDOWN_TIMEOUT_MS || 15_000);
 
-// Defense-in-depth on top of the .on('error', ...) listeners already
-// attached to every Queue/Worker we construct ourselves (bookingQueue.ts,
-// payoutQueue.ts, verificationQueue.ts, and each start*Worker()) — BullMQ
-// still has at least one more internal connection (confirmed via a live
-// repro on 2026-09-03: killing local Redis crashed the process with an
-// unhandled 'error' event even with all six of those listeners in place,
-// recurring on a fixed interval independent of any request/shutdown
-// signal — never fully traced to its exact source in BullMQ's internals).
-// Only swallows errors that are specifically this app's configured Redis
-// connection failing — anything else still crashes the process as normal,
-// since resuming after a truly unknown uncaught exception risks running
-// with corrupted state. A Redis outage should degrade background job
-// scheduling, not take down the HTTP server serving unrelated
-// Postgres-backed requests.
 const REDIS_HOST = redisHost;
 const REDIS_PORT = redisPort;
 process.on('uncaughtException', (error: NodeJS.ErrnoException & { address?: string; port?: number }) => {
@@ -129,9 +103,6 @@ const startServer = async () => {
   }
 };
 
-// Orchestrators (Docker, Kubernetes, Render, Railway, Fly…) send SIGTERM on
-// deploy/scale-down and SIGINT on Ctrl+C. Both should drain rather than
-// drop connections mid-request.
 const shutdown = async (signal: string) => {
   if (shuttingDown) return;
   shuttingDown = true;
@@ -144,19 +115,15 @@ const shutdown = async (signal: string) => {
   forceExit.unref();
 
   try {
-    // 1. Stop taking new HTTP connections; close idle keep-alive sockets
-    //    right away, let in-flight requests finish.
     if (server) {
       server.closeIdleConnections();
       await new Promise<void>((resolve) => server!.close(() => resolve()));
     }
     // 2. Drop websockets.
     if (io) await io.close();
-    // 3. Stop pulling new jobs and finish the ones running now.
     await Promise.allSettled(workers.map((w) => w.close()));
     // 4. Close the queue producer connections.
     await Promise.allSettled([bookingQueue.close(), payoutQueue.close(), verificationQueue.close()]);
-    // 5. Let queued security-alert emails go out (they look up admins).
     await waitForSecurityAlerts();
     // 6. Release the DB pool.
     await prisma.$disconnect();

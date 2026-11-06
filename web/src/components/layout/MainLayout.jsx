@@ -8,7 +8,6 @@ export default function MainLayout() {
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const { pathname } = useLocation()
 
-  // Close the mobile drawer whenever the route changes.
   useEffect(() => {
     setSidebarOpen(false)
   }, [pathname])

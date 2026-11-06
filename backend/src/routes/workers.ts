@@ -57,10 +57,6 @@ router.get('/:workerId', getWorkerDetail);
 router.get('/:workerId/reviews', getWorkerReviews);
 router.get('/:workerId/availability', getWorkerAvailability);
 router.get('/:workerId/blocked-dates', getWorkerBlockedDates);
-// NOTE: this wildcard route is registered further down, AFTER '/me/packages'
-// — otherwise a request to GET /workers/me/packages would match here first
-// with workerId="me" instead of reaching the authenticated "my own
-// packages" handler. See the '/me/packages' block below.
 
 // Protected routes (auth + worker only)
 router.patch(
@@ -106,8 +102,6 @@ router.patch('/me/packages/:packageId', authMiddleware, restrictTo('WORKER'), va
 router.delete('/me/packages/:packageId', authMiddleware, restrictTo('WORKER'), deletePackage);
 
 
-// Registered after '/me/packages' above — see the note near the top of the
-// public-routes block.
 router.get('/:workerId/packages', getWorkerPackages);
 
 router.post('/me/reviews/:reviewId/response', authMiddleware, restrictTo('WORKER'), respondToReview);
@@ -147,8 +141,6 @@ router.patch(
 );
 
 
-// Availability calendar: weekly schedule + per-date overrides, with the
-// worker's accepted jobs and follow-up visits on each day.
 router.get('/me/calendar', authMiddleware, restrictTo('WORKER'), getMyCalendar);
 router.put('/me/weekly-schedule', authMiddleware, restrictTo('WORKER'), updateWeeklySchedule);
 router.put('/me/date-overrides', authMiddleware, restrictTo('WORKER'), updateDateOverrides);

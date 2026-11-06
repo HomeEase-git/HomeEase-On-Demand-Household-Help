@@ -15,11 +15,6 @@ import ProofPhotosField from "../../../../components/booking/ProofPhotosField";
 import { colors } from "../../../../constants";
 import { useAlertModal } from "../../../../contexts/AlertModalContext";
 
-// category feeds the backend's required workerCancellationReason — only
-// WORKER_FAULT dents the worker's auto-match score (see
-// matchingService/cancelBooking). Letting a worker honestly pick "the
-// client wasn't there" instead of it always counting against them the same
-// as a genuine no-show on their part is the whole point of this field.
 const REASONS: Array<{ label: string; category: "WORKER_FAULT" | "CLIENT_NO_SHOW" | "OTHER" }> = [
   { label: "Can no longer make the schedule", category: "WORKER_FAULT" },
   { label: "Outside my service area", category: "WORKER_FAULT" },
@@ -29,9 +24,6 @@ const REASONS: Array<{ label: string; category: "WORKER_FAULT" | "CLIENT_NO_SHOW
   { label: "Other", category: "OTHER" },
 ];
 
-// After arriving, the worker says whose fault it is and shows proof (see
-// backend cancelBooking). Mirrors AppSettings.noShowPenaltyAmount /
-// clientFaultCompensationAmount defaults, for the explanation only.
 const PENALTY = 200;
 const COMPENSATION = 200;
 const ON_SITE_REASONS: Array<{ label: string; fault: "CLIENT" | "WORKER" }> = [
@@ -51,7 +43,6 @@ export default function WorkerCancelJobScreen() {
   const [otherText, setOtherText] = useState("");
   const [confirmVisible, setConfirmVisible] = useState(false);
   const [loading, setLoading] = useState(false);
-  // Whether the worker already checked in at the job site.
   const [arrived, setArrived] = useState<boolean | null>(null);
   const [onSiteReason, setOnSiteReason] = useState<string | null>(null);
   const [details, setDetails] = useState("");

@@ -1,7 +1,3 @@
-/**
- * Typography Constants - Font sizes and weights used throughout the application
- */
-
 // Font sizes for different text levels
 export const fontSizes = {
   xs: 12,     // Small labels, captions, hints

@@ -23,12 +23,6 @@ type Props = {
   as: "client" | "worker";
 };
 
-/**
- * Propose a new date + start time for an accepted booking. A client can only
- * pick days the worker works; a worker (e.g. two jobs overlap) sees their own
- * jobs that day. The booking keeps its current time until the other side
- * accepts.
- */
 export default function RescheduleRequestForm({ bookingId, as }: Props) {
   const router = useRouter();
   const alertModal = useAlertModal();
@@ -66,7 +60,6 @@ export default function RescheduleRequestForm({ bookingId, as }: Props) {
     };
   }, [bookingId, as]);
 
-  // Jobs already on the picked day: the worker's (for a client) or my own (for a worker).
   useEffect(() => {
     if (!date) return;
     let active = true;

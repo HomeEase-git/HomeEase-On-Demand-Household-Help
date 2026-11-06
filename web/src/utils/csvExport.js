@@ -6,7 +6,6 @@ function escapeCsvValue(value) {
   return str
 }
 
-// The BOM makes Excel read the file as UTF-8 (otherwise ₱ and — turn into "â±" and "â€”").
 export function downloadCsv(filename, rows) {
   if (!rows || rows.length === 0) return
 

@@ -1,7 +1,3 @@
-/**
- * Pricing utilities for commission, tax, and payout calculations
- * This mirrors the logic in mobile/utils/pricing.ts to ensure both sides agree
- */
 import { COMMISSION_RATE, WITHHOLDING_TAX_RATE } from '@config/pricing';
 import { roundToCentavo } from '@utils/money';
 
@@ -18,28 +14,14 @@ export interface PriceBreakdown {
   platformProfit: number;
 }
 
-/**
- * Platform commission percentage (takes a cut of each transaction)
- */
 const COMMISSION_PERCENTAGE = COMMISSION_RATE * 100; // Convert to percentage
 
-/**
- * Withholding tax percentage for workers (tax compliance)
- */
 const WITHHOLDING_TAX_PERCENTAGE = WITHHOLDING_TAX_RATE * 100; // Convert to percentage
 
-/**
- * Calculate the commission amount
- * Commission is calculated on the subtotal (labor + materials)
- */
 export const calculateCommission = (subtotal: number, commissionRate: number = COMMISSION_RATE): number => {
   return roundToCentavo(subtotal * commissionRate);
 };
 
-/**
- * Calculate withholding tax amount
- * Tax is calculated on the subtotal after commission is deducted
- */
 export const calculateWithholdingTax = (
   subtotal: number,
   commissionRate: number = COMMISSION_RATE,
@@ -49,10 +31,6 @@ export const calculateWithholdingTax = (
   return roundToCentavo(afterCommission * withholdingTaxRate);
 };
 
-/**
- * Calculate worker payout
- * Worker receives: subtotal - commission - tax + tip
- */
 export const calculateWorkerPayout = (
   subtotal: number,
   tip: number = 0,
@@ -65,12 +43,6 @@ export const calculateWorkerPayout = (
   return roundToCentavo(payout);
 };
 
-/**
- * What a worker takes home, itemised — the same arithmetic settlement uses
- * (paymentLifecycleService.priceBooking), so an estimate shown before payment
- * lines up with the payment that is later created. VAT, when the booking
- * carries it, is passed through to the worker and never commissioned or taxed.
- */
 export const computeWorkerEarnings = (input: {
   subtotal: number;
   tip?: number;
@@ -97,20 +69,11 @@ export const computeWorkerEarnings = (input: {
   };
 };
 
-/**
- * Calculate platform profit
- * Platform keeps: commission + (tax goes to government, but we collect it)
- */
 export const calculatePlatformProfit = (subtotal: number, _tip: number = 0): number => {
   const commission = calculateCommission(subtotal);
-  // Note: Withholding tax is collected but remitted to government — not platform profit
   return roundToCentavo(commission);
 };
 
-/**
- * Get complete price breakdown
- * Used in responses to show transparent pricing to client and worker
- */
 export const getPriceBreakdown = (
   subtotal: number,
   tip: number = 0,
@@ -136,31 +99,8 @@ export const getPriceBreakdown = (
   };
 };
 
-// Statutory rate, not a business policy knob like commissionRate — kept as a
-// code constant rather than an AppSettings field. Applied to `subtotal` only
-// (service price + add-ons + mandatory fees, all already rolled into
-// estimatedPrice/laborCost+materialsCost by the time it reaches this
-// function) — a voluntary tip is explicitly NOT part of the VAT base, per
-// NIRC's gross-receipts definition, and is added on afterward instead.
 export const VAT_RATE = 0.12;
 
-/**
- * Single source of truth for a booking's final billable total, used at the
- * pay-after-completion step (bookingController.completeBooking locks it in,
- * confirmCompletion / the invoice webhook / auto-settle all read it).
- *
- * subtotal = (approved quote: labor + materials) OR (no quote: the estimate)
- *            + priced add-ons
- * vatAmount = subtotal × vatRate, only when vatApplicable (worker is
- *             VAT-registered) — read from the booking's own frozen snapshot
- *             (see Booking.vatApplicable/vatRate), never re-derived from the
- *             worker's live status, so a mid-job VAT-registration change
- *             can't shift a price the client already agreed to.
- * totalAmount = subtotal + vatAmount + tip — tip stays outside the VAT base.
- *
- * Add-ons are frozen once a booking reaches PENDING_COMPLETION (see
- * bookingController.addAddon), so this is stable from that point on.
- */
 export interface BookingFinalTotalInput {
   estimatedPrice: number;
   laborCost?: number | null;
@@ -191,10 +131,6 @@ export const computeBookingFinalTotal = (
   return { subtotal, tip, vatAmount, totalAmount };
 };
 
-/**
- * Validate price breakdown integrity
- * Ensures: subtotal + tip + platformFee = total AND workerPayout + commission + tax = subtotal
- */
 export const validatePriceBreakdown = (breakdown: PriceBreakdown): boolean => {
   const totalCheck = breakdown.subtotal + breakdown.tip + breakdown.platformFee;
   const payoutCheck = breakdown.workerPayout + breakdown.commissionAmount + breakdown.withholdingTaxAmount;
@@ -207,38 +143,10 @@ export const validatePriceBreakdown = (breakdown: PriceBreakdown): boolean => {
   );
 };
 
-/**
- * Format currency for display (Philippine Peso)
- */
 export const formatPrice = (amount: number): string => {
   return `₱${roundToCentavo(amount).toFixed(2)}`;
 };
 
-/**
- * Single source of truth for turning a category/task base price into an
- * estimate — used by both bookingController.createBooking (the
- * authoritative price at booking time) and workerController.searchWorkers
- * (the per-worker preview shown in Step 3, before a booking exists). These
- * two used to be different formulas (this one vs. an hourly-rate × duration
- * guess); keeping the math in one place means a worker's Step 3 price can
- * never drift from what they're actually charged for the same job.
- *
- * Condition is deliberately not a factor here — it's no longer a booking
- * input.
- *
- * Urgency (STANDARD/URGENT/EMERGENCY) used to add a surcharge here too, but
- * was removed as a platform concept (2026-09-14); `urgencyFee` stays (always
- * 0) in the result/log shape for old receipts, same as conditionFee.
- *
- * rushFee is the same-day booking surcharge: AppSettings.rushFeeRate of the
- * service price, charged only when the job is booked for today (see
- * workerAvailabilityService.isRushDate). Like the tier fee it's on the base
- * service price, never on the distance fee or add-ons.
- */
-// Fallback only — the live, admin-tunable values are AppSettings.freeDistanceKm
-// / perKmFee (see appSettingsService), passed in by every real caller.
-// Kept here so a caller that doesn't have an AppSettings row handy (tests,
-// scripts) still gets sane defaults instead of a free/zero distance fee.
 const DEFAULT_FREE_DISTANCE_KM = 5;
 const DEFAULT_PER_KM_FEE = 10;
 
@@ -273,12 +181,6 @@ export const computeJobPricing = (input: JobPricingInput): JobPricingResult => {
   const estimatedPrice = roundToCentavo(input.basePrice + distanceFee + urgencyFee + rushFee + tierFee);
   return { basePrice: input.basePrice, distanceFee, urgencyFee, rushFee, tierFee, estimatedPrice };
 };
-/**
- * "8.2 km from the worker; first 5 km free, then ₱10/km" — explains a booking's
- * distance fee from its booking-time PricingLog. The free radius and per-km
- * rate are stored in the log since 2026-10-14; older logs fall back to the
- * live settings, which only differ if an admin changed them since.
- */
 export function describeDistanceFee(
   log: { distanceFee?: number | null; breakdown?: unknown } | null,
   live: { freeDistanceKm: number; perKmFee: number }
@@ -289,18 +191,6 @@ export function describeDistanceFee(
   return `${km}first ${b.freeDistanceKm ?? live.freeDistanceKm} km free, then ₱${b.perKmFee ?? live.perKmFee}/km`;
 }
 
-/**
- * The itemized lines of a booking's price, so base rate + fees + materials
- * (+ add-ons) add up to the subtotal the client is billed.
- *
- * `firstLog` must be the booking-time PricingLog, never a later quote-stage
- * one: a quote's own log stores laborCost (the WHOLE agreed estimate, fees
- * included) in `basePrice`, which made the base rate show the subtotal and
- * count the distance fee twice. After a quote, the bill is the estimate plus
- * materials, so materials get their own line. A CUSTOM_QUOTE job has no
- * upfront estimate: the worker's labor price is its base rate and the
- * estimate's fee lines don't apply.
- */
 export function itemizeBookingPrice(
   firstLog: { basePrice: number; distanceFee?: number | null; tierFee?: number | null; rushFee?: number | null } | null,
   booking: { estimatedPrice: number; laborCost?: number | null; materialsCost?: number | null }

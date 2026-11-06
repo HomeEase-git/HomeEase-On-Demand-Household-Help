@@ -21,19 +21,11 @@ import {
 } from '../components/serviceCatalog/catalogModel'
 import '../components/serviceCatalog/serviceCatalogEditor.css'
 
-// A job's price applies platform-wide (no city), so it's checked
-// against the single highest regional DOLE floor, same as the backend.
 const DOLE_REF = getHighestDoleWageReference()
 
 const clone = (v) => JSON.parse(JSON.stringify(v))
 const snapshotOf = (draft) => JSON.stringify(draft)
 
-/**
- * Service Catalog → Add/Edit service: the category's details and its job
- * order matrix, saved together in one request
- * (PUT /admin/service-types/:id/catalog). The phone on the right shows what a
- * client sees after picking a job.
- */
 export default function ServiceCatalogEditor() {
   const { id } = useParams()
   const isNew = !id
@@ -96,10 +88,6 @@ export default function ServiceCatalogEditor() {
 
   useEffect(() => () => clearTimeout(undoTimer.current), [])
 
-  // --- draft updates ------------------------------------------------------
-  // Edits come from discrete clicks, so applying them to the current draft
-  // (not a functional updater) is safe, and keeps newKey() calls out of an
-  // updater React may run twice.
   const change = (fn) => {
     setSaveError('')
     const next = clone(draft)
@@ -148,7 +136,6 @@ export default function ServiceCatalogEditor() {
       ;[d.jobs[i], d.jobs[k]] = [d.jobs[k], d.jobs[i]]
     })
 
-  // --- save -----------------------------------------------------------------
   const onSave = async () => {
     const problem = validateDraft(draft, DOLE_REF.hourlyWage)
     if (problem) {
@@ -182,7 +169,6 @@ export default function ServiceCatalogEditor() {
     if (dirty && !window.confirm('Leave without saving? Your changes to this service will be lost.')) e.preventDefault()
   }
 
-  // --- render helpers ---------------------------------------------------------
   if (loading) return <LoadingState variant="detail" message="Loading service..." />
   if (loadError) return <ErrorState message={loadError} onRetry={load} />
 
@@ -272,7 +258,6 @@ export default function ServiceCatalogEditor() {
     )
   }
 
-  // --- modal wiring -------------------------------------------------------------
   let modalEl = null
   if (modal?.kind === 'job') {
     const job = modal.jobRef ? jobIn(draft, modal.jobRef) : null

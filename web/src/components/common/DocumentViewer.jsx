@@ -12,20 +12,9 @@ export default function DocumentViewer({ documents = [], onApproveDocument, onRe
   const [rejectingId, setRejectingId] = useState(null)
   const [rejectReason, setRejectReason] = useState('')
   const [busyId, setBusyId] = useState(null)
-  // Per-document "has an admin actually opened this" gate — an admin
-  // shouldn't be able to approve/reject a KYC document sight-unseen just
-  // because it uploaded fine. Deliberately client-side/session-only (not
-  // persisted): a page refresh re-hiding everything is the conservative
-  // failure mode, forcing a fresh look rather than silently trusting a
-  // stale "already viewed" flag from a different review session.
   const [viewedIds, setViewedIds] = useState(() => new Set())
-  // Which single document is expanded inline. Separate from viewedIds: that
-  // is the approve/reject gate (stays set once seen), this is just the
-  // preview, which is collapsed by default, toggled per document and never
-  // more than one at a time.
   const [previewKey, setPreviewKey] = useState(null)
 
-  // Unique per document; never undefined, so one doc can't alias the rest.
   const keyOf = (doc) => doc.id ?? doc.url ?? doc.name
 
   const togglePreview = (doc) => {

@@ -16,12 +16,7 @@ type User = {
   phone?: string;
   avatar?: string;
   role: Role;
-  // Only meaningful for workers — gates access to the worker tabs until an
-  // admin approves the account. Undefined for clients.
   kycStatus?: KycStatus;
-  // Only meaningful for clients — gates access to the client tabs until the
-  // user agreement is accepted. Undefined for workers (they have their own
-  // contract flow tied to KYC instead).
   hasAcceptedTerms?: boolean;
 } | null;
 
@@ -36,8 +31,6 @@ type AuthState = {
   setUser: (user: User) => void;
   setKycStatus: (kycStatus: KycStatus) => void;
   setHasAcceptedTerms: (hasAcceptedTerms: boolean) => void;
-  // refreshToken comes with every sign-in; omitted when only the access
-  // token changes (e.g. after email verification).
   setToken: (token: string, refreshToken?: string) => void;
   setLoading: (loading: boolean) => void;
   setError: (error: string | null) => void;
@@ -95,16 +88,12 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     set({ error }),
   
   logout: async () => {
-    // Best-effort, and must run before clearing auth state below — it needs
-    // the still-valid session to authenticate the DELETE request.
     try {
       await notificationService.clearTokenFromBackend();
     } catch (error) {
       console.error('Error clearing push token on logout:', error);
     }
 
-    // End the session server-side too, so the stored refresh token can't be
-    // used again. Dynamic import: api.ts imports this store lazily as well.
     try {
       const { postLogout } = await import('../services/api');
       await postLogout();
@@ -121,8 +110,6 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     // Clear from storage
     await authStorage.clearAuth();
 
-    // Per-account data, incl. the persisted booking draft (address, GCash
-    // number), must not outlive the session on a shared device.
     useBookingStore.setState({ bookings: [], selectedBooking: null });
     await useBookingStore.getState().clearDraft();
     useMessageStore.setState({ conversations: [], messagesByUser: {}, openChatUserId: null });

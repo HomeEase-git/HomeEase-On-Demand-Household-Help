@@ -14,18 +14,6 @@ interface AuthRequest extends Request {
   user?: JwtPayload;
 }
 
-/**
- * The admin's job-order editor saves a whole category in one request: its
- * details and every job (ServiceTask). New jobs don't have ids yet, so the
- * client gives each one a temporary `key` ('ref'). Everything is written in
- * one transaction, so a failed save never leaves a half-built category behind.
- *
- * Jobs are never deleted here (past bookings point at them) — the editor
- * deactivates them instead. A job left out of the payload is left alone.
- * Booking questions are retired; a category's old question rows are left
- * untouched.
- */
-
 type CatalogTaskInput = TaskInputBody & {
   id?: string;
   key?: string;
@@ -85,7 +73,6 @@ function taskData(task: CatalogTaskInput, sortOrder: number) {
     sortOrder,
     basePrice: task.basePrice!,
     pricingModel: task.pricingModel as TaskPricingModel,
-    // Retired worker price range — see ServiceTask.minPrice.
     minPrice: null,
     maxPrice: null,
     // Display-only for FIXED (the matrix's "per visit").
@@ -93,17 +80,10 @@ function taskData(task: CatalogTaskInput, sortOrder: number) {
     minQuantity: task.pricingModel === 'PER_UNIT' ? (task.minQuantity ?? null) : null,
     maxQuantity: task.pricingModel === 'PER_UNIT' ? (task.maxQuantity ?? null) : null,
     durationHours: task.durationHours ?? null,
-    // Omitted by the job-matrix script, which mustn't reset it.
     ...(task.allowsFollowUp !== undefined ? { allowsFollowUp: task.allowsFollowUp } : {}),
   };
 }
 
-/**
- * Writes a validated catalog save inside the caller's transaction and returns
- * the category id plus the real id of every job (by ref). Shared
- * by the admin endpoint and scripts/applyJobMatrix.ts, so a scripted rollout
- * writes exactly what the editor would.
- */
 export async function writeCatalog(
   tx: Prisma.TransactionClient,
   existing: { id: string; tasks: { id: string; pricingModel: TaskPricingModel }[] } | null,
@@ -115,7 +95,6 @@ export async function writeCatalog(
     description: body.description?.trim() || null,
     basePrice: body.basePrice!,
     icon: body.icon || null,
-    // Undefined (scripts/seeds) leaves it unchanged; null clears it.
     ...(body.backgroundImageUrl !== undefined ? { backgroundImageUrl: body.backgroundImageUrl || null } : {}),
     requiresCertification: body.requiresCertification ?? false,
   };
@@ -163,7 +142,6 @@ async function saveCatalog(req: AuthRequest, res: Response, serviceTypeId: strin
 
   const tasks = body.tasks!;
 
-  // Same minimum-wage guardrail as the single-job save (adminServiceTaskController).
   const doleNotes: string[] = [];
   for (const task of tasks) {
     if (task.isActive === false) continue;
@@ -179,8 +157,6 @@ async function saveCatalog(req: AuthRequest, res: Response, serviceTypeId: strin
       const { categoryId } = await writeCatalog(tx, existing, body);
       return tx.serviceType.findUniqueOrThrow({ where: { id: categoryId }, include: serviceTypeInclude });
     },
-    // A full category is a few hundred small writes; the 5s default is too
-    // tight for a remote database.
     { timeout: 60_000, maxWait: 10_000 }
   );
 

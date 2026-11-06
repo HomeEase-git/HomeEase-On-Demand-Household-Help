@@ -48,9 +48,6 @@ import { getAppSettings } from '@services/appSettingsService';
 import { issueSession, revokeSession, revokeAllSessions, SessionExpiredError } from '@services/sessionService';
 import type { JwtPayload } from '../types';
 
-// Short-lived challenge token issued mid-login to an MFA-enabled user (see
-// login/mfaChallenge below) — long enough to type a 6-digit code, short
-// enough that a leaked one is worthless within minutes.
 const MFA_CHALLENGE_TOKEN_TTL_SECONDS = 5 * 60;
 
 type SignupRole = 'CLIENT' | 'WORKER';
@@ -67,15 +64,8 @@ const normalizeEmail = (value: unknown): string => {
   return getTrimmedString(value).toLowerCase();
 };
 
-// Compared against when the email has no account, so "no such user" takes
-// as long as "wrong password" and response timing can't enumerate accounts.
 let dummyPasswordHash: Promise<string> | null = null;
 
-/**
- * Counts a failed password check. The failure that locks the account raises
- * a security alert — high for an admin account; for everyone else one email
- * per 15 minutes carries the count, which is what shows password spraying.
- */
 const failPasswordCheck = async (
   email: string,
   user: { id: string; email: string; role: string; fullName: string } | null,
@@ -92,7 +82,6 @@ const failPasswordCheck = async (
   });
 };
 
-/** bcrypt check that costs the same whether or not `user` exists. */
 const passwordMatches = async (user: { password: string } | null, password: string): Promise<boolean> => {
   if (!user) {
     dummyPasswordHash ??= hashPassword('homeease-timing-equaliser');
@@ -107,10 +96,6 @@ const normalizeSignupRole = (value: unknown): SignupRole | null => {
   if (role === 'CLIENT' || role === 'WORKER') return role;
   return null;
 };
-
-// ============================================================================
-// SIGNUP
-// ============================================================================
 
 export const signup = async (req: Request, res: Response) => {
   try {
@@ -141,9 +126,6 @@ export const signup = async (req: Request, res: Response) => {
       return res.status(400).json(errorResponse(400, 'Invalid phone number'));
     }
 
-    // Workers give their date of birth up front: the platform only accepts
-    // workers within AppSettings.workerMinAge..workerMaxAge. The admin
-    // checks it against the ID at KYC approval.
     let workerBirthDate: Date | null = null;
     if (role === 'WORKER') {
       const parsed = parseWorkerBirthDate(req.body.birthDate, await getAppSettings());
@@ -159,15 +141,6 @@ export const signup = async (req: Request, res: Response) => {
       return res.status(409).json(errorResponse(409, 'Email already registered'));
     }
 
-    // Ban evasion via re-registration — previously a banned user could just
-    // sign up again with a new email and pick up exactly where they left
-    // off, with nothing anywhere connecting the two accounts. This is the
-    // lightweight, proportionate version: flag (don't block) a signup whose
-    // phone matches a BANNED user's, surfaced to admins via the audit log —
-    // a shared household phone line is a plausible false positive, so this
-    // stops short of blocking. Full identity dedup (government ID number
-    // extraction + cross-account matching) is a bigger project, intentionally
-    // out of scope here.
     const bannedPhoneMatch = await prisma.user.findFirst({
       where: { phone, status: 'BANNED' },
       select: { id: true, fullName: true },
@@ -195,8 +168,6 @@ export const signup = async (req: Request, res: Response) => {
         await tx.clientProfile.create({ data: { userId: createdUser.id } });
       }
 
-      // Sign-up's separate "I have read the Privacy Policy" checkbox. Optional
-      // so older app builds (which don't send it) can still sign up.
       const privacyNoticeVersion = getTrimmedString(req.body.privacyNoticeVersion);
       if (privacyNoticeVersion && /^[\w.-]{1,32}$/.test(privacyNoticeVersion)) {
         await tx.contractAcceptance.create({
@@ -213,8 +184,6 @@ export const signup = async (req: Request, res: Response) => {
       return createdUser;
     });
 
-    // Generate and send OTP — the account is already created at this point,
-    // so a failed email send shouldn't turn a successful signup into a 500.
     const otp = generateOtp();
     await storeOtp(user.id, otp);
     try {
@@ -235,11 +204,7 @@ export const signup = async (req: Request, res: Response) => {
         phone: user.phone,
         role: user.role,
         isVerified: user.isVerified,
-        // New worker accounts always start unverified — surfaced so the
-        // mobile app can route into the KYC flow instead of the worker tabs.
         kycStatus: user.role === 'WORKER' ? 'PENDING' : undefined,
-        // Gates the client-agreement screen — a brand-new account can't have
-        // accepted anything yet.
         hasAcceptedTerms: user.role === 'CLIENT' ? false : undefined,
         token,
         refreshToken,
@@ -250,10 +215,6 @@ export const signup = async (req: Request, res: Response) => {
     return res.status(500).json(errorResponse(500, 'Internal server error'));
   }
 };
-
-// ============================================================================
-// LOGIN
-// ============================================================================
 
 export const login = async (req: Request, res: Response) => {
   try {
@@ -303,8 +264,6 @@ export const login = async (req: Request, res: Response) => {
 
     await clearFailedLogins(email);
 
-    // A worker who deactivated their own account can turn it back on (see
-    // reactivateAccount) — `code` lets the app offer that.
     if (user.status === 'DEACTIVATED') {
       return res.status(403).json({
         ...errorResponse(403, 'This account is deactivated. Reactivate it to sign in.'),
@@ -319,16 +278,10 @@ export const login = async (req: Request, res: Response) => {
           : user.status === 'BANNED'
             ? 'This account has been banned.'
             : 'This account no longer exists.';
-      // `code` lets the app offer "Request a review" (see
-      // requestSuspensionReview) without parsing the message text.
       const code = user.status === 'SUSPENDED' || user.status === 'BANNED' ? `ACCOUNT_${user.status}` : undefined;
       return res.status(403).json({ ...errorResponse(403, message), ...(code ? { code } : {}) });
     }
 
-    // Signup issues a session before the email OTP is entered, but sign-in
-    // must not — an unverified client/worker gets a fresh code and is sent
-    // back to the verification step. Admins are provisioned out of band and
-    // gated by MFA instead.
     if (user.role !== 'ADMIN' && !user.isVerified) {
       const otp = generateOtp();
       await storeOtp(user.id, otp);
@@ -343,13 +296,6 @@ export const login = async (req: Request, res: Response) => {
       });
     }
 
-    // MFA — mandatory for admins (closes the "no MFA on admin accounts"
-    // security-audit finding), opt-in for clients/workers (see
-    // mfaSetupRequired below, which only force-nudges admins). Either way,
-    // a password match alone is never enough once MFA is enabled: no
-    // session token is issued here, only a short-lived challenge token that
-    // POST /auth/mfa/challenge can exchange for one after a correct
-    // TOTP/backup code.
     if (user.mfaEnabled) {
       const challengeToken = generateToken(
         { userId: user.id, email: user.email, role: user.role, type: 'mfa_pending' },
@@ -363,8 +309,6 @@ export const login = async (req: Request, res: Response) => {
       });
     }
 
-    // Two-step sign-in (email/SMS code) for clients and workers who turned
-    // it on — no session until the code is entered (see verifyLoginCode).
     if (user.role !== 'ADMIN' && user.twoFactorMethod) {
       const sent = await deliverCode(user, user.twoFactorMethod, TokenType.LOGIN_2FA);
       const challengeToken = generateToken(
@@ -395,14 +339,6 @@ export const login = async (req: Request, res: Response) => {
   }
 };
 
-// ============================================================================
-// MFA (TOTP, RFC 6238) — mandatory for ADMIN, opt-in for CLIENT/WORKER
-// ============================================================================
-
-// POST /api/auth/mfa/setup — already-authenticated user starts (or
-// restarts) enrollment. Generates a secret and stores it encrypted with
-// pending=true; nothing about the account changes (mfaEnabled stays false)
-// until verify-setup confirms the user actually captured a working code.
 export const mfaSetup = async (req: Request, res: Response) => {
   try {
     if (!req.user) {
@@ -440,9 +376,6 @@ export const mfaSetup = async (req: Request, res: Response) => {
   }
 };
 
-// POST /api/auth/mfa/verify-setup — confirms the pending secret with a real
-// code from the authenticator app, only then flips mfaEnabled and mints the
-// one-time backup codes (shown once here, stored only as bcrypt hashes).
 export const mfaVerifySetup = async (req: Request, res: Response) => {
   try {
     if (!req.user) {
@@ -473,7 +406,6 @@ export const mfaVerifySetup = async (req: Request, res: Response) => {
 
     const secret = decryptMfaSecret(pendingSecret.secretEncrypted);
 
-    // Recorded as used, so the code typed here can't sign in a second time.
     const step = totpStep(secret, code);
     if (step === null) {
       return res.status(400).json(errorResponse(400, 'Invalid code. Please try again.'));
@@ -487,9 +419,6 @@ export const mfaVerifySetup = async (req: Request, res: Response) => {
         where: { userId: user.id },
         data: { pending: false, confirmedAt: new Date(), lastTotpStep: step },
       });
-      // Clears any leftover codes from a prior setup attempt that was
-      // abandoned mid-way and restarted — verify-setup always mints a
-      // fresh set of 10.
       await tx.mfaBackupCode.deleteMany({ where: { userId: user.id } });
       await tx.mfaBackupCode.createMany({
         data: hashedCodes.map((codeHash) => ({ userId: user.id, codeHash })),
@@ -517,10 +446,6 @@ export const mfaVerifySetup = async (req: Request, res: Response) => {
   }
 };
 
-// POST /api/auth/mfa/challenge — exchanges a login-issued challenge token
-// plus a correct TOTP/backup code for a real session. Unauthenticated by
-// design (the user isn't logged in yet) — authLimiter is the brute-force
-// guard here, backed up by verifyMfaCode's own per-account lockout.
 export const mfaChallenge = async (req: Request, res: Response) => {
   try {
     const challengeToken = getTrimmedString(req.body.challengeToken);
@@ -594,10 +519,6 @@ export const mfaChallenge = async (req: Request, res: Response) => {
   }
 };
 
-// POST /api/auth/mfa/disable — an already-logged-in user turning MFA off.
-// Requires the current password AND a valid TOTP/backup code — being
-// logged in alone is not enough for a change this sensitive (a hijacked
-// session shouldn't be able to strip MFA protection by itself).
 export const mfaDisable = async (req: Request, res: Response) => {
   try {
     if (!req.user) {
@@ -683,10 +604,6 @@ export const mfaDisable = async (req: Request, res: Response) => {
   }
 };
 
-// ============================================================================
-// GET /api/auth/me
-// ============================================================================
-
 export const getMe = async (req: Request, res: Response) => {
   try {
     if (!req.user) {
@@ -712,10 +629,7 @@ export const getMe = async (req: Request, res: Response) => {
         role: user.role,
         isVerified: user.isVerified,
         kycStatus: user.role === 'WORKER' ? (user.workerProfile?.kycStatus ?? 'PENDING') : undefined,
-        // Admin authenticator-app MFA (also set on a few older client/worker
-        // accounts, which can still turn it off).
         mfaEnabled: user.mfaEnabled,
-        // Client/worker two-step sign-in by email or SMS code (null = off).
         twoFactorMethod: user.twoFactorMethod,
       },
     });
@@ -724,10 +638,6 @@ export const getMe = async (req: Request, res: Response) => {
     return res.status(500).json(errorResponse(500, 'Internal server error'));
   }
 };
-
-// ============================================================================
-// OTP
-// ============================================================================
 
 export const sendOtp = async (req: Request, res: Response) => {
   try {
@@ -793,15 +703,12 @@ export const verifyOtpHandler = async (req: Request, res: Response) => {
       data: { isVerified: true },
     });
 
-    // Verification already succeeded — a failed welcome email shouldn't undo that.
     try {
       await sendWelcomeEmail(email, user.fullName);
     } catch (emailError) {
       console.error('Failed to send welcome email after OTP verification:', emailError);
     }
 
-    // The app already signed in at signup; keep this token on that device's
-    // session so "log out other devices" can still tell devices apart.
     const latestSession = await prisma.authToken.findFirst({
       where: { userId: user.id, type: TokenType.REFRESH, sessionId: { not: null } },
       orderBy: { createdAt: 'desc' },
@@ -856,10 +763,6 @@ export const resendOtp = async (req: Request, res: Response) => {
   }
 };
 
-// ============================================================================
-// PASSWORD RESET
-// ============================================================================
-
 export const forgotPassword = async (req: Request, res: Response) => {
   try {
     const email = normalizeEmail(req.body.email);
@@ -870,7 +773,6 @@ export const forgotPassword = async (req: Request, res: Response) => {
 
     const user = await prisma.user.findUnique({ where: { email } });
 
-    // Always return success for security — do not reveal if email exists
     if (!user) {
       return res.json({
         success: true,
@@ -881,8 +783,6 @@ export const forgotPassword = async (req: Request, res: Response) => {
     const otp = generateOtp();
     await storeOtp(user.id, otp, TokenType.PASSWORD_RESET);
 
-    // Must not let a failed send produce a different response than the
-    // "email not registered" path above — that would leak account existence.
     try {
       await sendPasswordResetEmail(email, otp);
     } catch (emailError) {
@@ -894,8 +794,6 @@ export const forgotPassword = async (req: Request, res: Response) => {
       message: 'If that email is registered, a reset code has been sent',
     });
   } catch (error) {
-    // Same reply as an unknown email, so the response never hints whether the
-    // account exists (a locked account is one that does).
     if (error instanceof OtpLockedError) {
       return res.json({ success: true, message: 'If that email is registered, a reset code has been sent' });
     }
@@ -929,9 +827,6 @@ export const resetPassword = async (req: Request, res: Response) => {
       return res.status(400).json(errorResponse(400, 'Invalid or expired OTP'));
     }
 
-    // Prove the code first without using it up. Only the real owner gets past
-    // this, so only they can learn the password contained their own details —
-    // and a rejected password leaves the code valid for another try.
     const codeIsValid = await verifyOtp(user.id, otp, TokenType.PASSWORD_RESET, { consume: false });
 
     if (!codeIsValid) {
@@ -955,9 +850,6 @@ export const resetPassword = async (req: Request, res: Response) => {
       data: { password: hashedPassword },
     });
 
-    // Sign out every device (refresh tokens and live access tokens) — the
-    // reset may be because someone else got in. The new password also
-    // lifts any sign-in lockout.
     await revokeAllSessions(user.id);
     await clearFailedLogins(email);
     await recordPasswordChange(user, 'reset');
@@ -970,10 +862,6 @@ export const resetPassword = async (req: Request, res: Response) => {
   }
 };
 
-// ============================================================================
-// REFRESH TOKEN
-// ============================================================================
-
 export const refreshToken = async (req: Request, res: Response) => {
   try {
     const token = getTrimmedString(req.body.refreshToken);
@@ -984,9 +872,6 @@ export const refreshToken = async (req: Request, res: Response) => {
 
     const existing = await consumeRefreshToken(token);
 
-    // An already-rotated token coming back means a copy of it is in someone
-    // else's hands (OAuth 2.0 Security BCP, refresh token rotation): end that
-    // whole session so neither copy works, and the real user signs in again.
     if (existing.status === 'reused') {
       if (existing.sessionId) {
         await revokeSession(existing.sessionId);
@@ -1015,9 +900,6 @@ export const refreshToken = async (req: Request, res: Response) => {
       return res.status(401).json(errorResponse(401, 'Invalid or expired refresh token'));
     }
 
-    // Another request (e.g. a second browser tab sharing the token) just
-    // rotated it. `code` tells the client to pick up that result instead of
-    // signing out.
     if (existing.status === 'race') {
       return res.status(401).json({ ...errorResponse(401, 'Refresh token already used'), code: 'REFRESH_RACE' });
     }
@@ -1032,23 +914,15 @@ export const refreshToken = async (req: Request, res: Response) => {
       return res.status(401).json(errorResponse(401, 'User not found'));
     }
 
-    // Defense-in-depth: adminUserController.setUserStatus deletes every
-    // AuthToken (including this refresh token) on ban/suspend, which
-    // already makes this unreachable in practice — this is a second,
-    // independent check in case some future path ever creates a refresh
-    // token without going through that ban-aware flow.
     if (user.status !== 'ACTIVE') {
       return res.status(401).json(errorResponse(401, 'Account is not active'));
     }
 
-    // Rotate (the old token was marked used above), keeping this device's
-    // session id (a sign-in from before session ids gets one now).
     let renewed;
     try {
       renewed = await issueSession(user, existing.sessionId ?? undefined);
     } catch (error) {
       if (!(error instanceof SessionExpiredError)) throw error;
-      // Admin session past its maximum length: end it for good.
       if (existing.sessionId) await revokeSession(existing.sessionId);
       return res
         .status(401)
@@ -1070,21 +944,8 @@ export const refreshToken = async (req: Request, res: Response) => {
   }
 };
 
-// ============================================================================
-// LOGOUT
-// ============================================================================
-
 const SUSPENSION_REVIEW_COOLDOWN_MS = 24 * 60 * 60 * 1000;
 
-/**
- * POST /api/auth/suspension-review
- * Lets a suspended or banned user ask for a human review. They can't log
- * in, so this is unauthenticated and proves identity with the account's
- * email + password instead. Admins are notified and it's audit-logged; an
- * admin reinstates through the normal status change. One request per 24h.
- * (Due process before/after deactivation; Data Privacy Act §16 right to
- * contest automated decisions such as auto-suspension.)
- */
 export const requestSuspensionReview = async (req: Request, res: Response) => {
   try {
     const email = normalizeEmail(req.body.email);
@@ -1166,10 +1027,6 @@ export const logout = async (req: Request, res: Response) => {
       return res.status(401).json(errorResponse(401, 'Unauthorized'));
     }
 
-    // Sign out this device: its refresh tokens, and its current access
-    // token too so it can't be used for the rest of its lifetime. The
-    // access token's `sid` identifies the device even if the app didn't
-    // send its refresh token.
     const refreshSessionId = token ? await revokeRefreshToken(token) : null;
     const sessionIds = new Set([refreshSessionId, req.user?.sid].filter((s): s is string => !!s));
     for (const sessionId of sessionIds) {
@@ -1183,12 +1040,6 @@ export const logout = async (req: Request, res: Response) => {
   }
 };
 
-// ============================================================================
-// TWO-STEP SIGN-IN (email / SMS code) — clients and workers
-// ============================================================================
-
-// Short-lived challenge token for the email/SMS login code — the same idea
-// as the admin TOTP challenge above.
 const OTP_CHALLENGE_TOKEN_TTL_SECONDS = 10 * 60;
 
 const maskEmail = (email: string): string => {
@@ -1198,11 +1049,6 @@ const maskEmail = (email: string): string => {
 
 const maskPhone = (phone: string): string => `•••• ${phone.replace(/\D/g, '').slice(-4)}`;
 
-/**
- * Sends a one-time code to the user by email or SMS. SMS falls back to email
- * when there's no phone on file or the SMS gateway fails, so a user is never
- * locked out by an SMS outage. Returns where it actually went.
- */
 async function deliverCode(
   user: { id: string; email: string; phone: string | null },
   method: TwoFactorMethod,
@@ -1222,7 +1068,6 @@ async function deliverCode(
   return { method: 'EMAIL', destination: maskEmail(user.email) };
 }
 
-/** The login response every successful sign-in path returns. */
 async function loginPayload(user: {
   id: string;
   fullName: string;
@@ -1235,8 +1080,6 @@ async function loginPayload(user: {
   workerProfile?: { kycStatus: string } | null;
 }) {
   const session = await issueSession(user);
-  // Gates the client-agreement screen — undefined for workers, who have
-  // their own contract flow tied to KYC instead.
   const hasAcceptedTerms =
     user.role === 'CLIENT'
       ? Boolean(
@@ -1251,17 +1094,11 @@ async function loginPayload(user: {
     name: user.fullName,
     email: user.email,
     phone: user.phone,
-    // Without this the app's Profile tab showed no photo after every fresh
-    // login, though other screens (read from the DB) still showed it.
     avatar: user.avatar ?? null,
     role: user.role,
     isVerified: user.isVerified,
     kycStatus: user.role === 'WORKER' ? (user.workerProfile?.kycStatus ?? 'PENDING') : undefined,
     hasAcceptedTerms,
-    // An admin who hasn't set up MFA yet still gets a normal session (hard-
-    // blocking login until setup was rejected as a first-admin lockout
-    // risk) but the flag tells the admin web app to force-route into the
-    // setup screen once, immediately after login.
     mfaSetupRequired: user.role === 'ADMIN' && !user.mfaEnabled ? true : undefined,
     token: session.token,
     refreshToken: session.refreshToken,
@@ -1277,8 +1114,6 @@ function readChallenge(token: string): JwtPayload | null {
   }
 }
 
-// POST /api/auth/2fa/verify — exchanges the login challenge token plus the
-// emailed/texted code for a real session.
 export const verifyLoginCode = async (req: Request, res: Response) => {
   try {
     const payload = readChallenge(getTrimmedString(req.body.challengeToken));
@@ -1328,7 +1163,6 @@ export const verifyLoginCode = async (req: Request, res: Response) => {
   }
 };
 
-// POST /api/auth/2fa/resend — sends a fresh login code for a live challenge.
 export const resendLoginCode = async (req: Request, res: Response) => {
   try {
     const payload = readChallenge(getTrimmedString(req.body.challengeToken));
@@ -1348,9 +1182,6 @@ export const resendLoginCode = async (req: Request, res: Response) => {
   }
 };
 
-// POST /api/auth/2fa/code — (signed in) sends a confirmation code: to the
-// chosen channel when turning two-step sign-in on (proving the phone/email
-// works), or to the current channel when turning it off.
 export const sendTwoFactorCode = async (req: Request, res: Response) => {
   try {
     if (!req.user) {
@@ -1384,7 +1215,6 @@ export const sendTwoFactorCode = async (req: Request, res: Response) => {
   }
 };
 
-// POST /api/auth/2fa/enable — { method, code } from sendTwoFactorCode.
 export const enableTwoFactor = async (req: Request, res: Response) => {
   try {
     if (!req.user) {
@@ -1418,8 +1248,6 @@ export const enableTwoFactor = async (req: Request, res: Response) => {
   }
 };
 
-// POST /api/auth/2fa/disable — { password, code }: both, so a stolen
-// unlocked phone alone can't switch it off.
 export const disableTwoFactor = async (req: Request, res: Response) => {
   try {
     if (!req.user) {
@@ -1455,12 +1283,6 @@ export const disableTwoFactor = async (req: Request, res: Response) => {
   }
 };
 
-// ============================================================================
-// REACTIVATION (worker self-deactivation — see userController.deactivateAccount)
-// ============================================================================
-
-// POST /api/auth/reactivate — { email, password }. A deactivated worker
-// turns their account back on; they then sign in as usual.
 export const reactivateAccount = async (req: Request, res: Response) => {
   try {
     const email = normalizeEmail(req.body.email);

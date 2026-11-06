@@ -1,9 +1,6 @@
 import { checkDoleFloor } from '@services/pricingRuleService';
 import { getDoleWageReference, getHighestDoleWageReference } from '@/constants/doleWageReference';
 
-// checkDoleFloor takes an already-resolved DoleWageReference (or null) —
-// see pricingRuleService.ts's comment — so callers resolve the city
-// themselves via getDoleWageReference first.
 function checkDoleFloorForCity(city: string, minPrice: number, overrideReason: string | undefined) {
   return checkDoleFloor(getDoleWageReference(city), minPrice, overrideReason);
 }
@@ -45,9 +42,6 @@ describe('pricingRuleService — DOLE wage floor check (pure, soft guardrail)', 
 
 describe('pricingRuleService — checkDoleFloor with a city-agnostic reference', () => {
   it('blocks/allows using getHighestDoleWageReference the same way a city-resolved one would', () => {
-    // ServiceTask.minPrice has no city, so adminServiceTaskController checks
-    // against the single highest regional floor instead — same function,
-    // just handed an already-resolved reference instead of a city lookup.
     const highest = getHighestDoleWageReference();
     expect(checkDoleFloor(highest, highest.hourlyWage, undefined)).toEqual({ blocked: false, note: null });
     expect(checkDoleFloor(highest, highest.hourlyWage - 1, undefined).blocked).toBe(true);

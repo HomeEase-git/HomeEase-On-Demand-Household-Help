@@ -102,8 +102,6 @@ describe('Worker dues ledger', () => {
   it('keeps every concurrent charge and recovery (no lost updates)', async () => {
     await setDues(1000);
 
-    // They queue on the row lock, so give them longer than the default 2s
-    // to get a pooled connection.
     const txOpts = { maxWait: 30_000, timeout: 30_000 };
     await Promise.all([
       ...Array.from({ length: 5 }, () =>
@@ -121,7 +119,6 @@ describe('Worker dues ledger', () => {
   });
 
   it('turns a cash-job reversal beyond what is owed into payout credit instead of dropping it', async () => {
-    // The cash job's ₱118 dues were already recovered from an online payout.
     await setDues(0);
     const { booking } = await seedPayment('CASH');
 
@@ -174,7 +171,6 @@ describe('Worker dues ledger', () => {
     await refundOrVoidPayment(booking.id, 'Worker never arrived');
 
     expect((await prisma.payout.findUniqueOrThrow({ where: { id: payout.id } })).status).toBe('CANCELLED');
-    // ₱300 of dues back on the tab, less the ₱50 credit put back against them.
     const after = await dues();
     expect(after.commissionOwed).toBeCloseTo(250, 2);
     expect(after.compensationCredit).toBe(0);
@@ -189,7 +185,6 @@ describe('Worker dues ledger', () => {
     const { booking, payment } = await seedPayment('GCASH');
     await settleWorkerEarnings(payment.id);
 
-    // Xendit accepts the refund as PENDING, then it fails; the sweep reopens the payment.
     (createRefund as jest.Mock).mockResolvedValueOnce({ id: 'refund_first', status: 'PENDING' });
     await refundOrVoidPayment(booking.id, 'Worker never arrived');
     (retrieveRefund as jest.Mock).mockResolvedValueOnce({ id: 'refund_first', status: 'FAILED' });

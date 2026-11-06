@@ -1,6 +1,5 @@
 import { randomUUID } from 'crypto';
 
-// Point both modules at a port nothing listens on: this is a Redis outage.
 process.env.REDIS_URL = 'redis://127.0.0.1:1';
 
 import {
@@ -31,7 +30,6 @@ describe('with Redis down', () => {
 
   it('locks for 10 minutes counted from the 5th wrong code', async () => {
     const userId = randomUUID();
-    // A short window for the guesses themselves must not shorten the lockout.
     for (let i = 1; i <= MAX_OTP_ATTEMPTS; i++) await recordFailedOtpAttempt(userId, 'EMAIL_VERIFICATION', 30);
 
     expect(OTP_LOCKOUT_SECONDS).toBe(600);

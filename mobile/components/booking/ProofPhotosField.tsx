@@ -12,24 +12,16 @@ type Props = {
   hint?: string;
   urls: string[];
   onChange: (urls: string[]) => void;
-  /** Sends one compressed JPEG and returns its stored URL. */
   upload: (uri: string) => Promise<{ url: string }>;
   max?: number;
   required?: boolean;
 };
 
-/**
- * A row of uploaded photos: job evidence (invoice receipts, extra work,
- * proof for a cancellation), booking issue photos and review photos. Each
- * photo uploads straight away; the parent gets the stored URLs. Camera or
- * gallery is chosen through useMediaPicker.
- */
 export default function ProofPhotosField({ label, hint, urls, onChange, upload, max = 5, required }: Props) {
   const alertModal = useAlertModal();
   const { pickImage } = useMediaPicker();
   const [pendingUri, setPendingUri] = useState<string | null>(null);
   const [viewingIndex, setViewingIndex] = useState<number | null>(null);
-  // A photo can be removed while another uploads; append to the current list.
   const latestUrls = useRef(urls);
   useEffect(() => {
     latestUrls.current = urls;

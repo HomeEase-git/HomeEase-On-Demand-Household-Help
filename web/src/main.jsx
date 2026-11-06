@@ -14,7 +14,6 @@ import '@fontsource/plus-jakarta-sans/700.css'
 import '@fortawesome/fontawesome-free/css/all.min.css'
 import './styles/index.css'
 
-// Shown instead of a blank page if a screen crashes; the error is reported.
 function CrashScreen() {
   return (
     <div style={{ padding: '3rem', maxWidth: 520, margin: '0 auto', textAlign: 'center' }}>

@@ -13,15 +13,7 @@ const originOf = (value) => {
   }
 }
 
-// Content Security Policy for the built admin site: the browser runs only the
-// site's own scripts and talks only to the API, Supabase storage (documents
-// and photos), Google Fonts and Sentry — so an injected script can neither
-// run nor send data anywhere. Built from VITE_API_URL / VITE_SENTRY_DSN, so a
-// new API host needs no edit here. Added as a <meta> tag at build time only
-// (the dev server's hot reload needs inline scripts); frame-ancestors can't
-// go in a meta tag, so vercel.json and nginx send that as a header.
 export function contentSecurityPolicy(env) {
-  // DSN: https://<key>@<host>/<project> — Sentry posts to <host>.
   const sentry = env.VITE_SENTRY_DSN ? originOf(env.VITE_SENTRY_DSN.replace(/\/\/[^@/]+@/, '//')) : null
   const connect = ["'self'", originOf(env.VITE_API_URL ?? ''), sentry].filter(Boolean)
   return [

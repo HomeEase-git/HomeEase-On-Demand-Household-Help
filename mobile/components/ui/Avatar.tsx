@@ -32,8 +32,6 @@ export const Avatar: React.FC<Props> = ({ uri, size = "md", showBadge }) => {
           source={{ uri }}
           style={{ width: pixelSize, height: pixelSize }}
           contentFit="cover"
-          // Disk-cached across app restarts — avatars don't need to be
-          // re-downloaded/re-decoded every time this list scrolls back into view.
           cachePolicy="disk"
         />
       ) : (

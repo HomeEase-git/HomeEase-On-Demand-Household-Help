@@ -39,7 +39,6 @@ type Props = {
   initialLocation?: LatLng | null;
   onLocationSelected?: (location: LatLng, place: PlaceResult | null) => void;
   onLocatingChange?: (locating: boolean) => void;
-  /** permissionDenied: true when GPS failed for lack of permission (offer Settings). */
   onError?: (message: string, permissionDenied?: boolean) => void;
   serviceRadiusKm?: number;
   height?: number;
@@ -48,7 +47,6 @@ type Props = {
   testID?: string;
 };
 
-// Check if Maps SDK key is configured (avoids crashes on unconfigured environments)
 function buildHasMapsKey(): boolean {
   return Constants.expoConfig?.extra?.hasGoogleMapsKey === true;
 }
@@ -88,11 +86,8 @@ export const LocationPickerMap = React.forwardRef<
     },
   );
 
-  // Each pin move gets a number; a geocode reply for an older move is dropped,
-  // so a slow reply can't pull the pin back after a newer drag.
   const pinRequestRef = useRef(0);
 
-  // Subtle lift animation for the center pin when dragging
   const pinElevation = useRef(new Animated.Value(0)).current;
 
   const liftPin = useCallback(() => {
@@ -191,10 +186,6 @@ export const LocationPickerMap = React.forwardRef<
     setIsDragging(false);
     dropPin();
 
-    // Only a user's own drag re-pins the location. The map also fires this for
-    // its first render and for animateTo (loading a saved pin, picking a
-    // search result) — reverse-geocoding those would overwrite the address
-    // the caller just set, or silently pin the default Manila region.
     if (details?.isGesture === false) return;
 
     const nextCoords: LatLng = { lat: region.latitude, lng: region.longitude };
@@ -326,7 +317,6 @@ const styles = StyleSheet.create({
     right: 0,
     alignItems: "center",
     justifyContent: "center",
-    // Offset slightly so the pin tip points to true center
     marginTop: -20,
   },
   pinShadow: {

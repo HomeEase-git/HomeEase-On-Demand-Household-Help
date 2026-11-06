@@ -1,17 +1,3 @@
-// One-off backfill: adminVerificationController.approveVerification now
-// auto-creates a placeholder Certification (visible in Profile > My
-// Certifications) from any submitted CERTIFICATION KYC document at the
-// moment the verification is approved. That only fires going forward —
-// workers whose verification was already APPROVED before this fix shipped
-// submitted a certification that's still sitting invisible in the
-// admin-only KYC review. This script applies the same backfill to them.
-//
-// Usage (from backend/):
-//   npx tsx scripts/backfill-certifications-from-kyc.ts --dry     # report only, no writes
-//   npx tsx scripts/backfill-certifications-from-kyc.ts           # apply
-//
-// Respects backend/.env DATABASE_URL — point it at the target DB the same
-// way the Prisma CLI does. Run against dev first.
 import 'dotenv/config';
 import { PrismaClient } from '@prisma/client';
 import { PrismaPg } from '@prisma/adapter-pg';

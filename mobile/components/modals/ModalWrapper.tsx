@@ -24,8 +24,6 @@ export const ModalWrapper: React.FC<Props> = ({
       animationType="fade"
       onRequestClose={onClose}
     >
-      {/* Lifts the dialog clear of the keyboard when it holds a text field
-          (e.g. DeclineReasonModal); a no-op for dialogs without one. */}
       <KeyboardAvoidingView behavior="padding" style={{ flex: 1 }}>
         <Pressable
           className="flex-1 bg-black/60 justify-center items-center px-4"

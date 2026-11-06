@@ -14,13 +14,8 @@ type Period = "AM" | "PM";
 
 type Props = {
   value: string | null;
-  // "HH:mm" (24h) when the entry is a complete, allowed time; null otherwise.
   onChange: (time: string | null) => void;
-  // Earliest allowed "HH:mm" (e.g. later for a same-day booking); null when
-  // no time is left on that day. Defaults to FIRST_START_TIME.
   minTime?: string | null;
-  // Start times already taken on that day (e.g. the worker's other jobs) —
-  // still pickable, just listed as a heads-up.
   busyTimes?: string[];
 };
 
@@ -39,27 +34,19 @@ function to24h(hourText: string, minuteText: string, period: Period): string | n
   return minutesToTime(((hour % 12) + (period === "PM" ? 12 : 0)) * 60 + minute);
 }
 
-// Service hours run 7 AM – 6 PM, so a typed 7–11 means morning and 12, 1–6 afternoon.
 function likelyPeriod(hourText: string): Period {
   const hour = Number(hourText);
   return hour >= 7 && hour <= 11 ? "AM" : "PM";
 }
 
-/**
- * 12-hour start-time entry: type or step the hour and minutes, then pick
- * AM/PM. Only emits a time inside [minTime, LAST_START_TIME]
- * (see utils/bookingTime.ts); anything else shows why and emits null.
- */
 export default function StartTimePicker({ value, onChange, minTime = FIRST_START_TIME, busyTimes = [] }: Props) {
   const initial = value ? parts(value) : null;
   const [hour, setHour] = useState(initial?.hour ?? "");
   const [minute, setMinute] = useState(initial?.minute ?? "");
   const [period, setPeriod] = useState<Period>(initial?.period ?? "AM");
-  // Until the user taps AM/PM, guess it from the hour they enter.
   const periodChosen = useRef(!!initial);
   const lastEmitted = useRef<string | null>(value);
 
-  // Take on a time set from outside (e.g. a restored draft).
   useEffect(() => {
     if (value && value !== lastEmitted.current) {
       const p = parts(value);
@@ -76,7 +63,6 @@ export default function StartTimePicker({ value, onChange, minTime = FIRST_START
   const tooLate = !!entered && timeToMinutes(entered) > timeToMinutes(LAST_START_TIME);
   const valid = !!entered && !!minTime && !tooEarly && !tooLate ? entered : null;
 
-  // Report the (re)validated time — also when minTime moves, e.g. a new date.
   useEffect(() => {
     if (valid !== lastEmitted.current) {
       lastEmitted.current = valid;
@@ -102,7 +88,6 @@ export default function StartTimePicker({ value, onChange, minTime = FIRST_START
 
   const stepMinute = (delta: number) => {
     const current = Number(minute);
-    // Snap to the next/previous multiple of MINUTE_STEP, wrapping within the hour.
     const snapped = delta > 0 ? Math.floor(current / MINUTE_STEP) * MINUTE_STEP : Math.ceil(current / MINUTE_STEP) * MINUTE_STEP;
     const next = minute === "" || current > 59 ? 0 : (snapped + delta + 60) % 60;
     setMinute(String(next).padStart(2, "0"));

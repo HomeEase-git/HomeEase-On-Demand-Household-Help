@@ -1,33 +1,18 @@
-/**
- * Scrubs secrets and personal data out of anything headed for logs or error
- * reports. Two passes: values under sensitive-looking keys are replaced
- * wholesale, and every string is searched for credential shapes (tokens,
- * keys, passwords inside connection URLs, encrypted fields). Deliberately
- * over-eager — a masked value in a log costs nothing; a leaked one can't be
- * taken back.
- */
-
 const REDACTED = '[REDACTED]';
 
-// Key names whose values are never logged. `code` is deliberately absent —
-// error codes (P2002, ECONNREFUSED) are what make logs useful.
 const SENSITIVE_KEY =
   /password|passwd|token|secret|authorization|cookie|api_?key|^otp$|mfacode|backupcodes?|^tin$|workertin|accountnumber|x-callback-token|x-cron-secret/i;
 
 const STRING_PATTERNS: Array<[RegExp, string]> = [
-  // JSON Web Tokens (access, challenge, anything signed).
   [/eyJ[\w-]{5,}\.eyJ[\w-]{5,}\.[\w-]{5,}/g, '[JWT]'],
   [/(Bearer\s+)[\w.~+/-]+=*/gi, `$1${REDACTED}`],
-  // Passwords inside connection URLs: postgres://user:PASSWORD@host
   [/(\b[a-z][a-z0-9+.-]*:\/\/[^:\s/@]+:)[^@\s]+@/gi, `$1${REDACTED}@`],
   // Provider keys.
   [/xnd_(?:production|development|public)_[\w]+/g, '[XENDIT_KEY]'],
   [/sk-ant-[\w-]{10,}/g, '[ANTHROPIC_KEY]'],
   [/xkeysib-[\w-]{10,}/g, '[BREVO_KEY]'],
   [/AIza[\w-]{35}/g, '[GOOGLE_KEY]'],
-  // Field-encrypted values (payout numbers, TINs) — useless in a log anyway.
   [/enc:v\d+:[0-9a-f:]+/gi, '[ENCRYPTED]'],
-  // Long hex runs: refresh tokens (80 hex), token hashes.
   [/\b[0-9a-f]{48,}\b/gi, '[HEX]'],
 ];
 
@@ -41,11 +26,6 @@ const MAX_DEPTH = 6;
 const MAX_STRING = 4000;
 const MAX_KEYS = 50;
 
-/**
- * A JSON-safe, redacted copy of `value`: sensitive keys masked, strings
- * scrubbed and truncated, Errors flattened to name/message/code/stack,
- * circular references and deep nesting cut off.
- */
 export function redactValue(value: unknown, depth = 0, seen: WeakSet<object> = new WeakSet()): unknown {
   if (value === null || value === undefined) return value;
   if (typeof value === 'string') {

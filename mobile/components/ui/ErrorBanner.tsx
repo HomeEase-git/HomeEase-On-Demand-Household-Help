@@ -8,15 +8,6 @@ type Props = {
   onDismiss?: () => void;
 };
 
-/**
- * ErrorBanner
- *
- * Displays an inline error message below form inputs or above
- * action buttons. Pass the error string from useLoadingError.
- *
- * Usage:
- *   <ErrorBanner message={error} onDismiss={clearError} />
- */
 export const ErrorBanner: React.FC<Props> = ({ message, onDismiss }) => {
   if (!message) return null;
 

@@ -1,14 +1,5 @@
-/**
- * Memory Leak Prevention & Resource Cleanup
- * 
- * Utilities to prevent common memory leaks in React Native
- */
-
 import { useEffect, useRef, useCallback, useState } from 'react';
 
-/**
- * Hook to safely manage subscriptions and cleanup
- */
 export function useSubscription<T>(
   subscribe: (listener: (value: T) => void) => () => void
 ): T | undefined {
@@ -27,9 +18,6 @@ export function useSubscription<T>(
   return state;
 }
 
-/**
- * Hook to prevent memory leaks from async operations
- */
 export function useAsync<T>(
   asyncFn: () => Promise<T>,
   onSuccess?: (data: T) => void
@@ -70,9 +58,6 @@ export function useAsync<T>(
   return state;
 }
 
-/**
- * Hook to safely manage timers
- */
 export function useTimeout(callback: () => void, delay: number | null) {
   const savedCallback = useRef(callback);
 
@@ -91,9 +76,6 @@ export function useTimeout(callback: () => void, delay: number | null) {
   }, [delay]);
 }
 
-/**
- * Hook to safely manage intervals
- */
 export function useInterval(callback: () => void, delay: number | null) {
   const savedCallback = useRef(callback);
 
@@ -112,9 +94,6 @@ export function useInterval(callback: () => void, delay: number | null) {
   }, [delay]);
 }
 
-/**
- * Hook to manage event listeners safely
- */
 export function useEventListener<K extends keyof any>(
   eventName: K,
   handler: (event: any) => void,
@@ -139,9 +118,6 @@ export function useEventListener<K extends keyof any>(
   }, [eventName, element]);
 }
 
-/**
- * Resource cleanup manager
- */
 export class ResourceCleanupManager {
   private cleanupFns: (() => void)[] = [];
 
@@ -166,9 +142,6 @@ export class ResourceCleanupManager {
   }
 }
 
-/**
- * Hook for resource cleanup
- */
 export function useCleanup() {
   const [manager] = useState(() => new ResourceCleanupManager());
 
@@ -181,9 +154,6 @@ export function useCleanup() {
   return manager;
 }
 
-/**
- * Prevent memory leaks from callbacks
- */
 export function useSafeCallback<T extends (...args: any[]) => any>(
   callback: T
 ): T {
@@ -208,9 +178,6 @@ export function useSafeCallback<T extends (...args: any[]) => any>(
   ) as T;
 }
 
-/**
- * Prevent memory leaks from subscriptions
- */
 export class SafeSubscription<T> {
   private listeners: Set<(value: T) => void> = new Set();
   private unsubscribes: Set<() => void> = new Set();

@@ -14,15 +14,11 @@ import { usePullToRefresh } from "../../../hooks/usePullToRefresh";
 
 const TABS = ["Pending", "Active", "Completed", "Cancelled", "Declined"] as const;
 
-// Buckets the granular status into one of the tabs shown on this screen
 const TAB_STATUS_MAP: Record<(typeof TABS)[number], BookingStatus[]> = {
   Pending: ["Pending", "QuoteSubmitted"],
-  // Disputed is a live job under review, not a cancelled one.
   Active: ["Accepted", "InProgress", "QuoteApproved", "PendingCompletion", "AwaitingPayment", "Disputed"],
   Completed: ["Completed"],
   Cancelled: ["Cancelled"],
-  // The worker turned the request down — kept apart from Cancelled so it's
-  // not mistaken for something the client (or an admin) cancelled.
   Declined: ["Declined"],
 };
 
@@ -73,10 +69,6 @@ export default function MyBookingsScreen() {
 
   const filtered = bookings.filter((b) => tabForStatus(b.status) === activeTab);
 
-  // Tabs filter on the device, so a tab's bookings can sit on pages not
-  // loaded yet. Keep paging until the tab has a screenful or pages run out.
-  // Keyed on bookings.length (not loadingMore) so a failed page doesn't retry
-  // in a loop while offline; pull-to-refresh starts over.
   const tabShort = filtered.length < 10;
   React.useEffect(() => {
     if (!loading && hasMore && tabShort) loadMoreBookings();
@@ -109,7 +101,6 @@ export default function MyBookingsScreen() {
         </ScrollView>
       </View>
 
-      {/* Skeleton only on the first load; a refresh keeps the list (and its spinner). */}
       {(loading && bookings.length === 0) || (filtered.length === 0 && hasMore) ? (
         <LoadingSkeleton type="booking" count={4} />
       ) : filtered.length === 0 ? (

@@ -10,8 +10,6 @@ export const errorHandler = (
   _next: NextFunction
 ): void => {
   if (error instanceof ApiError) {
-    // A 4xx is the client's mistake, not a bug — logged quietly so it isn't
-    // sent to error monitoring (which reports console.error).
     if (error.statusCode >= 500) console.error('Error:', error);
     else console.warn('Request error:', error.statusCode, error.message);
     res.status(error.statusCode).json({
@@ -22,8 +20,6 @@ export const errorHandler = (
     return;
   }
 
-  // Errors from Express's own middleware (malformed JSON, body too large)
-  // carry a 4xx status: the client's mistake, answered as such.
   const status = (error as { status?: unknown }).status;
   if (typeof status === 'number' && status >= 400 && status < 500) {
     console.warn('Request error:', status, error.message);

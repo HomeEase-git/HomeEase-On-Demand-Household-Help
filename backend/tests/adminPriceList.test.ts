@@ -5,8 +5,6 @@ import { getHighestDoleWageReference } from '@/constants/doleWageReference';
 import { createTestUser, deleteTestUser } from './helpers';
 import { ownerDb } from './ownerDb';
 
-// The Price List edits only prices — every job's and every category's
-// starting price — in one all-or-nothing save.
 describe('Admin price list', () => {
   const createdUserIds: string[] = [];
   let adminToken: string;
@@ -33,7 +31,6 @@ describe('Admin price list', () => {
           create: [
             { name: 'Flat job', basePrice: 800, pricingModel: 'FIXED', sortOrder: 0 },
             { name: 'Per-unit job', basePrice: 300, pricingModel: 'PER_UNIT', unitLabel: 'unit', sortOrder: 1 },
-            // A former custom-quote job: switched off, no price yet.
             { name: 'Unpriced job', basePrice: 0, pricingModel: 'FIXED', isActive: false, sortOrder: 2 },
           ],
         },

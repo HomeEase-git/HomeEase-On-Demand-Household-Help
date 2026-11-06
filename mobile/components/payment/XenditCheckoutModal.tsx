@@ -4,12 +4,6 @@ import { WebView, WebViewNavigation } from "react-native-webview";
 import { Ionicons } from "@expo/vector-icons";
 import { colors } from "../../constants";
 
-// Must match XENDIT_REDIRECT_BASE_URL in the backend's .env plus the paths
-// paymentController.ts's createXenditCheckout appends. Xendit requires a
-// real http(s) URL for Invoice redirects (custom app schemes are rejected as
-// invalid format), so this placeholder domain never needs to actually
-// resolve — we intercept navigation to it below and cancel the load before
-// the WebView ever tries to reach it.
 const REDIRECT_SUCCESS_PREFIX = "https://homeease.app/payment-redirect/success";
 const REDIRECT_FAILED_PREFIX = "https://homeease.app/payment-redirect/failed";
 
@@ -28,10 +22,8 @@ export default function XenditCheckoutModal({
   onFailed,
   onCancel,
 }: Props) {
-  // Offline or a dead page leaves a blank sheet; show a retry instead.
   const [failed, setFailed] = useState(false);
   const [attempt, setAttempt] = useState(0);
-  // A new checkout (reopened, or another booking's URL) starts clean.
   const [shownFor, setShownFor] = useState({ visible, checkoutUrl });
   if (shownFor.visible !== visible || shownFor.checkoutUrl !== checkoutUrl) {
     setShownFor({ visible, checkoutUrl });
@@ -47,9 +39,6 @@ export default function XenditCheckoutModal({
       onFailed();
       return false;
     }
-    // Payment pages only ever need secure web pages. Refuse anything else a
-    // compromised or spoofed page might send the WebView to — plain http://,
-    // file://, javascript:, data:, content:// or intent:// links.
     return request.url.startsWith("https://") || request.url === "about:blank";
   };
 

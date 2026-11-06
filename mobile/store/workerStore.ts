@@ -17,12 +17,9 @@ export type WorkerJob = {
   finalPrice: number | null;
   rating: number | null;
   completedAt?: string | null;
-  // Exact start time "HH:mm" (older bookings: their old slot's start).
   time: string | null;
   isRush: boolean;
-  // Set on a follow-up job after this worker's own inspection.
   parentBookingId: string | null;
-  // Scheduled follow-up visits still to come ("Follow Up Date").
   upcomingVisits: { id: string; scheduledDate: string; scheduledTime: string }[];
   rooms: RoomType[];
   condition: ConditionType | null;
@@ -36,7 +33,6 @@ export type WorkerJob = {
   groupDayIndex: number | null;
 };
 
-// Shape returned by GET /bookings (services/api.ts getBookings()) for a worker
 export type ApiWorkerBooking = {
   id: string;
   clientName: string;
@@ -112,9 +108,6 @@ export const useWorkerStore = create<WorkerState>((set) => ({
     set((state) => ({
       jobs: state.jobs.map((j) => (j.id === id ? { ...j, status } : j)),
     })),
-  // Shared with the socket "notification:new" listener (app/_layout.tsx) so
-  // a BOOKING_REQUEST push updates the jobs list even when the Requests
-  // screen isn't the focused/polling screen (e.g. worker sitting on Home).
   refreshJobs: async () => {
     try {
       const bookings = await getBookings();

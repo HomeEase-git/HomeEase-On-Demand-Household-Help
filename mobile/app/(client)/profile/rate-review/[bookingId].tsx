@@ -19,9 +19,6 @@ import { useAlertModal } from "../../../../contexts/AlertModalContext";
 
 const MAX_REVIEW_PHOTOS = 5;
 
-// Matches the shape of GET /bookings/:id, the same endpoint
-// [bookingId]/index.tsx uses — this screen also needs to hydrate the store
-// when opened directly (e.g. deep link) without that screen loading first.
 function mapDetailToBooking(d: any): Booking {
   return {
     id: d.id,
@@ -118,8 +115,6 @@ export default function RateBookingScreen() {
     }
 
     prefillFromBooking(booking);
-    // Booking lives in another tab; pop this one back to its root first so
-    // returning to Profile after booking doesn't land back on this screen.
     router.dismissAll();
     router.push("/(client)/booking/new/step-1");
   };
@@ -142,7 +137,6 @@ export default function RateBookingScreen() {
     );
   }
 
-  // One review per booking: an existing one is shown read-only.
   const alreadyRated = !!booking.rating;
 
   return (

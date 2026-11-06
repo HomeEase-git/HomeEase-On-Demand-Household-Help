@@ -7,12 +7,6 @@ import { postPenalty, postAdminAdjustment, postDebtPayment } from '@services/led
 
 type TxClient = Prisma.TransactionClient;
 
-/**
- * Row-locks the worker's dues for the rest of the transaction and returns the
- * current values. Every read-then-write of commissionOwed/compensationCredit
- * goes through this, so two money movements for the same worker (a payout
- * netting dues while a penalty or refund lands) can't overwrite each other.
- */
 export async function lockDuesTx(client: TxClient, workerProfileId: string) {
   const rows = await client.$queryRaw<Array<{ commissionOwed: number; compensationCredit: number }>>`
     SELECT "commissionOwed", "compensationCredit" FROM "WorkerProfile" WHERE "id" = ${workerProfileId} FOR UPDATE`;
@@ -20,18 +14,8 @@ export async function lockDuesTx(client: TxClient, workerProfileId: string) {
   return rows[0];
 }
 
-/** Thrown when an admin tries to waive more than the worker actually owes. */
 export class DuesAdjustmentError extends Error {}
 
-/**
- * Accrues `amount` of platform commission + withholding tax onto a worker's
- * running tab — the ONLY path that increases `commissionOwed`. Used when the
- * platform's cut can't be collected through a gateway because the client
- * paid the worker in person (CASH jobs). If this pushes the worker's owed
- * total past AppSettings.workerDebtHoldLimit, the account is placed on hold
- * (blocks new job acceptance/matching — see bookingController, matchingService)
- * until an admin explicitly releases it via releaseDebtHold.
- */
 export async function accrueDebtTx(
   client: TxClient,
   workerProfileId: string,
@@ -39,8 +23,6 @@ export async function accrueDebtTx(
   opts: { bookingId?: string; note?: string; type?: 'COMMISSION_DEBIT' | 'PENALTY' | 'RECOVERY_REVERSED' | 'ADMIN_ADJUSTMENT' } = {}
 ) {
   const abs = roundToCentavo(Math.abs(amount));
-  // Payout credit the platform already owes the worker covers new dues
-  // first, so a worker who only takes cash jobs still gets their credit.
   const current = await lockDuesTx(client, workerProfileId);
   const covered = roundToCentavo(Math.min(Math.max(0, current.compensationCredit), abs));
   const added = roundToCentavo(abs - covered);
@@ -81,11 +63,6 @@ export async function accrueDebtTx(
           `limit. You can't accept new jobs until you contact support to resolve this.`,
       });
 
-      // Previously only the worker heard about this — a hold is a
-      // dead end until an admin proactively goes looking for it
-      // (releaseDebtHold requires an admin to act), so nothing ever
-      // surfaced a newly-tripped hold to the people who can actually
-      // clear it.
       const admins = await prisma.user.findMany({ where: { role: 'ADMIN', isDeleted: false }, select: { id: true } });
       await Promise.all(
         admins.map((admin) =>
@@ -104,12 +81,6 @@ export async function accrueDebtTx(
   return { workerProfile: updated, entry, coveredByCredit: covered };
 }
 
-/**
- * Lowers what the worker owes by up to `amount`. What's beyond the current
- * balance is either added to compensationCredit (paid with their next online
- * payout — e.g. a refunded cash job whose dues were already recovered) or,
- * with `overflow: 'reject'`, refused. It used to be silently dropped.
- */
 async function creditDebtTx(
   client: TxClient,
   workerProfileId: string,
@@ -151,12 +122,6 @@ async function creditDebtTx(
   return { workerProfile: updated, entry, applied, credited: excess };
 }
 
-/**
- * Pays down commissionOwed out of an online job's payout, before the
- * remainder is disbursed. Deliberately does NOT clear debtHoldAt — a hold
- * requires an explicit admin action (releaseDebtHold), even if this recovery
- * brings the balance back to 0.
- */
 export async function recoverDebtTx(
   client: TxClient,
   workerProfileId: string,
@@ -170,13 +135,6 @@ export async function recoverDebtTx(
   return take;
 }
 
-/**
- * Undoes a refunded online payment's settlement: dues that were recovered
- * from its payout go back on the worker's tab (the client got that money
- * back, so the dues weren't really paid), and compensation credit that rode
- * along goes back to compensationCredit. Only call once the payout is known
- * to be stopped.
- */
 export async function restoreSettlementTx(
   client: TxClient,
   workerProfileId: string,
@@ -198,11 +156,6 @@ export async function restoreSettlementTx(
   }
 }
 
-/**
- * Reverses a previously-accrued COMMISSION_DEBIT because the underlying cash
- * payment was refunded/voided. If those dues were already paid down, the
- * excess becomes payout credit rather than vanishing.
- */
 export async function reverseDebtTx(
   client: TxClient,
   workerProfileId: string,
@@ -212,11 +165,6 @@ export async function reverseDebtTx(
   return creditDebtTx(client, workerProfileId, amount, 'REVERSAL', { ...opts, overflow: 'credit' });
 }
 
-/**
- * Worker no-show / worker-fault cancellation penalty — added to what the
- * worker owes, recovered from their next payouts like cash-job dues (and it
- * can trip the same account hold).
- */
 export async function chargePenaltyTx(
   client: TxClient,
   workerProfileId: string,
@@ -228,12 +176,6 @@ export async function chargePenaltyTx(
   return result;
 }
 
-/**
- * Admin-approved client-fault cancellation compensation. Pays down what the
- * worker owes the platform first; anything left over is held as
- * WorkerProfile.compensationCredit and added to their next online payout
- * (see paymentLifecycleService.settleWorkerEarnings).
- */
 export async function creditCompensationTx(
   client: TxClient,
   workerProfileId: string,
@@ -247,13 +189,6 @@ export async function creditCompensationTx(
   return { againstDebt: applied, credited };
 }
 
-/**
- * A worker paid down their dues through a Xendit invoice. Applies up to what
- * they still owe — a payout may have netted the debt while they were checking
- * out, in which case the rest becomes payout credit rather than being lost —
- * and books the cash. The hold is lifted only once the balance is back to 0:
- * a partial payment alone shouldn't restore access.
- */
 export async function applyDebtPaymentTx(
   client: TxClient,
   workerProfileId: string,
@@ -278,7 +213,6 @@ export async function applyDebtPaymentTx(
   return { ...result, holdReleased };
 }
 
-/** Admin manual correction — always requires a reason, logged either direction. */
 export async function adminAdjustDebt(
   workerProfileId: string,
   amount: number,
@@ -291,15 +225,12 @@ export async function adminAdjustDebt(
       await postAdminAdjustment(tx, result.workerProfile.userId, -amount, result.entry.id, note);
       return result;
     }
-    // A waiver can't go below zero — paying a worker extra is a separate
-    // decision, not a dues correction.
     const result = await creditDebtTx(tx, workerProfileId, amount, 'ADMIN_ADJUSTMENT', { note, overflow: 'reject' });
     await postAdminAdjustment(tx, result.workerProfile.userId, -amount, result.entry.id, note);
     return result;
   });
 }
 
-/** Clears an account hold. Requires an admin to have actually looked at it. */
 export async function releaseDebtHold(workerProfileId: string, note?: string) {
   const updated = await prisma.workerProfile.update({
     where: { id: workerProfileId },

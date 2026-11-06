@@ -16,11 +16,6 @@ function taskPriceLabel(task: ServiceTaskOption): string {
     : `₱${task.minPrice} – ₱${task.maxPrice}${suffix}`;
 }
 
-/**
- * Dropdown task picker shown once a category is selected (Step 1) —
- * lets the client pick the specific job (e.g. "Toilet Repair" under
- * "Plumbing Repair"), each with its own admin-set price.
- */
 export default function TaskSelector({ tasks, selectedId, onSelect }: Props) {
   return (
     <SelectDropdown

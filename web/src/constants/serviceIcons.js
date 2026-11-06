@@ -1,8 +1,3 @@
-// Curated Ionicons outline names an admin can assign to a service category.
-// Keep in sync with backend/src/constants/serviceIcons.ts (the validation
-// source of truth) — `ion` is the value actually stored and sent to mobile's
-// <Ionicons name={icon} />; `ms` is only a Material Symbols ligature used to
-// render a visual preview here, since the web admin can't load Ionicons.
 export const SERVICE_ICON_GROUPS = [
   {
     group: 'Core Trades',

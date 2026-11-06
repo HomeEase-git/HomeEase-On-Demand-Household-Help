@@ -207,8 +207,6 @@ export default function OnboardingScreen() {
 
       <View className="flex-row justify-between items-center px-6 pt-4">
         <View className="flex-row items-center">
-          {/* For someone who tapped "Get Started" by mistake (e.g. they already
-              have an account) — back to the landing screen. */}
           <Pressable
             className="w-10 h-10 rounded-full items-center justify-center mr-2 bg-card-light"
             onPress={() => (router.canGoBack() ? router.back() : router.replace("/landing"))}

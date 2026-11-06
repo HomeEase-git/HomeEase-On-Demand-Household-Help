@@ -46,7 +46,6 @@ const STATUS_BADGE_VARIANT = {
   RESOLVED_DISMISSED: 'approved',
 }
 
-// The client reported the worker's invoice before paying.
 const INVOICE_DISPUTE_ACTIONS = [
   {
     action: 'KEEP_INVOICE',
@@ -69,9 +68,6 @@ const CANCEL_ACTION = {
   description: 'Cancels the booking and releases/refunds the held payment back to the client.',
 }
 
-// Only valid for a completed job stuck AWAITING_PAYMENT (the 72h
-// non-payment auto-escalation case) — the backend rejects these for any
-// other booking status, so they're only offered here when that applies.
 const NON_PAYMENT_ACTIONS = [
   {
     action: 'RESOLVE_FOR_WORKER',
@@ -89,10 +85,6 @@ const NON_PAYMENT_ACTIONS = [
   },
 ]
 
-// For a dispute the booking has already moved past — e.g. a dispute
-// whose booking left DISPUTED some other way, or a reschedule escalation
-// support already sorted out. Closes the dispute without touching the
-// booking or any money.
 const DISMISS_ACTION = {
   action: 'DISMISS',
   label: 'Dismiss',
@@ -100,16 +92,11 @@ const DISMISS_ACTION = {
   description: 'Closes this dispute without changing the booking or any payment. Use when the booking has already moved on.',
 }
 
-// Mirrors adminDisputeController.resolveDispute's guards so only actions
-// that can actually succeed are offered — invoice actions need the booking
-// still DISPUTED with an invoice sent, CANCEL_BOOKING needs one of the
-// statuses below.
 const CANCELLABLE_BOOKING_STATUSES = ['ACCEPTED', 'IN_PROGRESS', 'DISPUTED', 'PENDING_COMPLETION', 'AWAITING_PAYMENT', 'COMPLETED']
 
 function getActionsForDispute(dispute) {
   if (!dispute) return []
   if (dispute.bookingStatus === 'DISPUTED') {
-    // A dispute on an older quote (no invoice yet) can only be cancelled.
     return dispute.hasInvoice ? [...INVOICE_DISPUTE_ACTIONS, CANCEL_ACTION] : [CANCEL_ACTION]
   }
   const actions = dispute.bookingStatus === 'AWAITING_PAYMENT' ? [...NON_PAYMENT_ACTIONS] : []
@@ -118,16 +105,10 @@ function getActionsForDispute(dispute) {
   return actions
 }
 
-// A dispute can still be acted on while OPEN (nobody's looked at it yet) or
-// UNDER_REVIEW (an admin opened it via GET /admin/disputes/:id but hasn't
-// resolved it yet) — only a RESOLVED_*/REJECTED status is final.
 function isDisputeActionable(status) {
   return status === 'OPEN' || status === 'UNDER_REVIEW'
 }
 
-// Compact repeat-filer signal shown next to a party's name in the review
-// modal — the single highest-leverage fraud indicator here is simply how
-// often this person keeps turning up in disputes, as either side.
 function DisputeHistoryNote({ history }) {
   if (!history || history.totalDisputes === 0) return null
   return (
@@ -143,24 +124,10 @@ export default function BookingDispute() {
   const [pendingAction, setPendingAction] = useState(null) // { action, label, description } | null
   const [note, setNote] = useState('')
   const [submitting, setSubmitting] = useState(false)
-  // Per-user dispute-history counts for whichever client/worker is on the
-  // open dispute — keyed by userId so both parties' panels can render at
-  // once. Reset on close so a stale history never carries into the next
-  // dispute reviewed.
   const [history, setHistory] = useState({})
   const { showSuccess, showError } = useToast()
   const { user } = useAuth()
 
-  // The backend filters on an exact status match; "Resolved" spans 3
-  // several RESOLVED_* values (RESOLVED_INVOICE_KEPT/RESOLVED_INVOICE_ADJUSTED/
-  // RESOLVED_CANCELLED, ...), so that tab fetches 'all' and filters client-side.
-  // "Refund Failed" is a dedicated backend pseudo-status (NEEDS_REFUND_REVIEW,
-  // matched on Dispute.refundStatus rather than Dispute.status) — the queue
-  // for a CANCEL_BOOKING resolution whose refund/void to Xendit failed and
-  // needs a manual clawback; these disputes are otherwise already RESOLVED
-  // and would be easy to lose track of buried in that tab.
-  // Shared by the table loader and the CSV export so an export always
-  // matches what's on screen for the current status/raised-by/search filters.
   const fetchFilteredDisputes = useCallback(async ({ search, statusTab, raisedByTab, page, limit }) => {
     const statusParam =
       statusTab === 'Open'
@@ -170,7 +137,6 @@ export default function BookingDispute() {
           : statusTab === 'Resolved'
             ? 'RESOLVED'
             : 'all'
-    // Both filters run server-side, so meta.total matches the rows shown.
     return fetchDisputes({
       search: search || '',
       page,
@@ -196,9 +162,6 @@ export default function BookingDispute() {
   } = useListQuery(fetchFn, {
     initialParams: { search: '', statusTab: 'Open', raisedByTab: 'All', page: 1 },
     pollIntervalMs: POLL_INTERVAL_MS,
-    // Keep the queue current for other admins working disputes concurrently —
-    // paused while a dispute is open so a background refresh can't disrupt an
-    // in-progress review/resolution.
     pausePolling: !!selectedId,
   })
 
@@ -250,11 +213,6 @@ export default function BookingDispute() {
     setPendingAction(actionDef)
   }
 
-  // Opening a dispute for review fetches the single-dispute detail (rather
-  // than reusing the cached list row) so the backend's OPEN -> UNDER_REVIEW
-  // transition (see adminDisputeController.getDisputeById) actually fires,
-  // and so evidenceUrls/resolution are current. The fetched row is merged
-  // back into the list so the table's status badge stays in sync too.
   const openDispute = async (id) => {
     setSelectedId(id)
     try {

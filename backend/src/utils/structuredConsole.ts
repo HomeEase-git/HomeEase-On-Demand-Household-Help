@@ -2,23 +2,8 @@ import { format } from 'node:util';
 import { redactString, redactValue } from './logRedaction';
 import type { RequestContext } from './requestContext';
 
-/**
- * Production logging: every console.* call becomes one JSON line carrying the
- * request id and signed-in user, with secrets scrubbed (utils/logRedaction).
- * Render's log search can then filter on requestId, level or userId, and a
- * token or password that ends up in a log call never reaches the log store.
- *
- * Installed in instrument.ts BEFORE Sentry.init, so Sentry's console capture
- * wraps this: Sentry still receives the original Error objects (and scrubs
- * them itself), and the terminal output is the JSON line.
- *
- * Local development keeps normal console output unless LOG_FORMAT=json.
- */
-
 export type LogLevel = 'debug' | 'info' | 'warn' | 'error';
 
-// Set by requestContext.ts once it loads — a direct import would be circular
-// (requestContext writes access-log lines through here).
 let contextProvider: () => RequestContext | undefined = () => undefined;
 
 export function setLogContextProvider(provider: () => RequestContext | undefined): void {
@@ -29,7 +14,6 @@ let enabled = false;
 
 export const structuredLoggingEnabled = (): boolean => enabled;
 
-/** Writes one JSON log line directly (no console, so no Sentry capture). */
 export function writeLogLine(level: LogLevel, msg: string, fields: Record<string, unknown> = {}): void {
   if (!enabled) return;
   const context = contextProvider();
@@ -50,7 +34,6 @@ export function writeLogLine(level: LogLevel, msg: string, fields: Record<string
   (level === 'error' || level === 'warn' ? process.stderr : process.stdout).write(`${json}\n`);
 }
 
-/** Folds console.* arguments into a message plus structured fields. */
 function toLine(args: unknown[]): { msg: string; fields: Record<string, unknown> } {
   const parts: string[] = [];
   const data: unknown[] = [];
@@ -67,7 +50,6 @@ function toLine(args: unknown[]): { msg: string; fields: Record<string, unknown>
   if (err !== undefined) fields.err = err;
   if (data.length === 1) fields.data = data[0];
   else if (data.length > 1) fields.data = data;
-  // format() fills `%s` placeholders like console does and joins the rest with spaces.
   return { msg: format(...parts), fields };
 }
 
@@ -91,6 +73,5 @@ export function installStructuredConsole(): void {
   }
 }
 
-/** Whether this process should log JSON: production, or LOG_FORMAT=json. */
 export const wantsStructuredLogging = (): boolean =>
   process.env.LOG_FORMAT === 'json' || (process.env.NODE_ENV === 'production' && process.env.LOG_FORMAT !== 'pretty');

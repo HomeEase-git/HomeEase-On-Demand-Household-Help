@@ -22,11 +22,7 @@ import Svg, { Defs, LinearGradient, Rect, Stop } from "react-native-svg";
 import { colors } from "../../constants/colors";
 import { cardShadow } from "../../constants/shadows";
 
-// One clock drives every bar on screen, so all placeholders shimmer as a
-// single wave instead of each pulsing out of step on its own JS timer. It runs
-// on the UI thread and only while at least one bar is mounted.
 const SHIMMER_MS = 1600;
-// The sweep uses the first part of each cycle; the rest is a short pause.
 const SWEEP_END = 0.7;
 const shimmerClock = makeMutable(0);
 let mountedBars = 0;
@@ -48,9 +44,6 @@ function useShimmerClock(enabled: boolean) {
   }, [enabled]);
 }
 
-// Soft white highlight that travels across the screen, left to right. Each bar
-// shifts its band by its own on-screen x, so the highlight reaches a bar's
-// right-hand pill after its left-hand text: one wave, not many.
 const ShimmerBand: React.FC<{ offsetX: number }> = ({ offsetX }) => {
   const { width: screenWidth } = useWindowDimensions();
   const bandWidth = Math.round(screenWidth * 0.45);
@@ -100,7 +93,6 @@ export const Skeleton: React.FC<SkeletonProps> = ({
   marginBottom = 8,
   style,
 }) => {
-  // Respect the OS "reduce motion" setting: plain grey bars, no sweep.
   const reduceMotion = useReducedMotion();
   useShimmerClock(!reduceMotion);
   const ref = useRef<View>(null);
@@ -129,10 +121,6 @@ export const SkeletonCircle: React.FC<{ size: number; marginBottom?: number }> =
   <Skeleton width={size} height={size} borderRadius={size / 2} marginBottom={marginBottom} />
 );
 
-/**
- * Wraps a set of placeholders: announces "Loading" once to screen readers and
- * fades in after a short delay, so a fast response never flashes grey bars.
- */
 export const SkeletonGroup: React.FC<{
   children: React.ReactNode;
   className?: string;
@@ -150,9 +138,6 @@ export const SkeletonGroup: React.FC<{
   </Animated.View>
 );
 
-// The card placeholders below mirror the real cards in components/cards
-// (bg-card, rounded-2xl, p-4, md avatar) so nothing shifts when data lands.
-
 // Worker Card Skeleton - matches WorkerCard
 export const WorkerCardSkeleton: React.FC = () => (
   <View style={[styles.card, styles.row, cardShadow]}>
@@ -169,7 +154,6 @@ export const WorkerCardSkeleton: React.FC = () => (
   </View>
 );
 
-// Booking Card Skeleton - matches BookingCard / RecordCard
 export const BookingCardSkeleton: React.FC = () => (
   <View style={[styles.card, styles.row, cardShadow]}>
     <SkeletonCircle size={40} />
@@ -185,7 +169,6 @@ export const BookingCardSkeleton: React.FC = () => (
   </View>
 );
 
-// Request Card Skeleton - matches RequestCard (worker's incoming requests)
 export const RequestCardSkeleton: React.FC = () => (
   <View style={[styles.card, cardShadow]}>
     <View style={styles.row}>

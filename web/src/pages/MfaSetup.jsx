@@ -8,11 +8,6 @@ import { fetchCurrentUser } from '../services/auth'
 import { startMfaSetup, confirmMfaSetup, disableMfa } from '../services/mfa'
 import { useToast } from '../context/ToastContext'
 
-// Reachable from Settings, and auto-shown right after login when the
-// backend flags `mfaSetupRequired: true` (an admin who hasn't enrolled
-// yet) — see Login.jsx's routeAfterLogin. Also doubles as the
-// disable-MFA screen once enrollment is confirmed, since both need the
-// same "what's my current MFA state" fetch on mount.
 export default function MfaSetup() {
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState('')
@@ -128,9 +123,6 @@ export default function MfaSetup() {
     )
   }
 
-  // Backup codes are shown exactly once, right after a successful
-  // verify-setup — nothing lets you retrieve them again after leaving
-  // this screen.
   if (backupCodes) {
     return (
       <>

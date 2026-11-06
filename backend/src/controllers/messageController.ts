@@ -11,10 +11,6 @@ interface AuthRequest extends Request {
   user?: JwtPayload;
 }
 
-/**
- * GET /api/messages/conversations
- * Get derived conversation list (latest message from each unique sender/receiver pair)
- */
 export const getConversations = async (req: AuthRequest, res: Response) => {
   try {
     if (!req.user) {
@@ -27,13 +23,8 @@ export const getConversations = async (req: AuthRequest, res: Response) => {
     const limitNum = Math.min(100, Math.max(1, parseInt(limit as string) || 10));
     const skip = (pageNum - 1) * limitNum;
 
-    // Capture userId to avoid repeated req.user narrowing issues inside callbacks
     const currentUserId = req.user.userId;
 
-    // Latest message per conversation partner, computed and paginated in the
-    // DB via a window function — the previous version pulled every message
-    // this user has ever sent/received into memory to group and paginate in
-    // JS, which grows unbounded with the user's whole message history.
     const [latestMessages, totalRow] = await Promise.all([
       prisma.$queryRaw<
         Array<{
@@ -76,7 +67,6 @@ export const getConversations = async (req: AuthRequest, res: Response) => {
 
     const total = Number(totalRow[0]?.count ?? 0);
 
-    // Only look up user details for the conversation partners on THIS page.
     const otherUserIds = latestMessages.map((m) => m.otherUserId);
     const otherUsers = otherUserIds.length
       ? await prisma.user.findMany({
@@ -118,10 +108,6 @@ export const getConversations = async (req: AuthRequest, res: Response) => {
   }
 };
 
-/**
- * GET /api/messages/conversations/:userId
- * Get message thread with one specific user
- */
 export const getConversationThread = async (req: AuthRequest, res: Response) => {
   try {
     if (!req.user) {
@@ -200,10 +186,6 @@ export const getConversationThread = async (req: AuthRequest, res: Response) => 
   }
 };
 
-/**
- * POST /api/messages
- * Send a message (also creates MESSAGE_RECEIVED Notification)
- */
 export const sendMessage = async (req: AuthRequest, res: Response) => {
   try {
     if (!req.user) {
@@ -229,10 +211,6 @@ export const sendMessage = async (req: AuthRequest, res: Response) => {
       return res.status(404).json(errorResponse(404, 'Receiver not found'));
     }
 
-    // Relationship gate — messaging only makes sense between a client and a
-    // worker who actually have a booking together (any status, so a
-    // completed/cancelled job's conversation still works). Without this,
-    // any authenticated user could message any other user in the system.
     const sharedBooking = await prisma.booking.findFirst({
       where: {
         OR: [
@@ -249,8 +227,6 @@ export const sendMessage = async (req: AuthRequest, res: Response) => {
         .json(errorResponse(403, 'You can only message someone you have a booking with'));
     }
 
-    // Either side blocking stops the chat. Same wording both ways, so the
-    // blocked user isn't told who blocked whom.
     if (await isBlockedPair(currentUserId, receiverId)) {
       return res.status(403).json(errorResponse(403, "You can't message this user."));
     }
@@ -282,11 +258,9 @@ export const sendMessage = async (req: AuthRequest, res: Response) => {
       relatedId: message.id,
     });
 
-    // Push the new message live to the receiver, if connected
     try {
       getIO().to(receiverId).emit('message:new', await signStorageUrlsDeep(message));
     } catch {
-      // Socket.IO may not be initialized (e.g. scripts/tests) — safe to ignore
     }
 
     return res.status(201).json({
@@ -300,10 +274,6 @@ export const sendMessage = async (req: AuthRequest, res: Response) => {
   }
 };
 
-/**
- * PATCH /api/messages/conversations/:userId/read
- * Mark entire conversation with a user as read
- */
 export const markConversationRead = async (req: AuthRequest, res: Response) => {
   try {
     if (!req.user) {
@@ -338,10 +308,6 @@ export const markConversationRead = async (req: AuthRequest, res: Response) => {
   }
 };
 
-/**
- * GET /api/messages/unread-count
- * Get total unread message count for the badge
- */
 export const getUnreadCount = async (req: AuthRequest, res: Response) => {
   try {
     if (!req.user) {
@@ -368,14 +334,6 @@ export const getUnreadCount = async (req: AuthRequest, res: Response) => {
   }
 };
 
-/**
- * POST /api/messages/:id/report
- * Minimal report-and-flag-for-admin moderation — not a block-list feature.
- * Only the message's recipient can report it (not the sender, not a third
- * party). Stamps Message.reportedAt/reportReason and notifies every admin,
- * the same "notify every admin" pattern used for KYC submissions and
- * dispute review queues elsewhere in this codebase.
- */
 export const reportMessage = async (req: AuthRequest, res: Response) => {
   try {
     if (!req.user) {

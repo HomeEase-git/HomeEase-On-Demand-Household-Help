@@ -17,7 +17,6 @@ const TITLE_MAX = 60
 const SUBTITLE_MAX = 120
 const EMPTY_FORM = { title: '', subtitle: '', imageUrl: '', linkServiceTypeId: '', textColor: '', fontFamily: '', startsAt: '', endsAt: '', isActive: true }
 
-// Mirrors BANNER_FONTS in the backend; the app maps these to Android system fonts.
 const FONT_OPTIONS = [
   { value: '', label: 'Default', css: 'inherit' },
   { value: 'SERIF', label: 'Serif', css: 'serif' },
@@ -35,7 +34,6 @@ function bannerStatus(banner, now = new Date()) {
   return { key: 'live', label: 'Live' }
 }
 
-// <input type="datetime-local"> works in local time without a zone.
 function toLocalInput(iso) {
   if (!iso) return ''
   const d = new Date(iso)
@@ -48,7 +46,6 @@ function formatWhen(iso) {
   return new Date(iso).toLocaleString('en-PH', { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' })
 }
 
-/** How the banner will look on the client home screen (same text-over-image style). */
 function BannerPreview({ imageUrl, title, subtitle, textColor, fontFamily }) {
   const textStyle = {
     color: textColor || DEFAULT_TEXT_COLOR,

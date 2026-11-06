@@ -3,30 +3,17 @@ import prisma from '@config/database';
 import { raiseSecurityAlert } from '@services/securityAlertService';
 import { errorResponse } from '../utils/errorResponse';
 
-// Only the jest suite may switch this off (tests/setupEnv.ts): its admin
-// fixtures sign in with a password alone. Any other NODE_ENV ignores the flag.
 function adminMfaEnforced(): boolean {
   return !(process.env.NODE_ENV === 'test' && process.env.ADMIN_MFA_ENFORCEMENT === 'off');
 }
 
-/**
- * An admin without MFA still gets a session (so they can reach the setup
- * screen — hard-blocking login was rejected as a first-admin lockout risk),
- * but that session must not open admin-only routes: mfaSetupRequired in the
- * login response is only a hint the client can ignore.
- */
 async function adminHasMfa(userId: string): Promise<boolean> {
   const user = await prisma.user.findUnique({ where: { id: userId }, select: { mfaEnabled: true } });
   return user?.mfaEnabled === true;
 }
 
-/**
- * Restrict endpoint access to specific roles.
- * Usage: router.patch('/me/availability', restrictTo('WORKER'), updateAvailability);
- */
 export const restrictTo = (...allowedRoles: string[]) => roleGuard(allowedRoles, true);
 
-/** Admin-only, but open to an admin who hasn't set up MFA yet — for the MFA setup routes themselves. */
 export const restrictToAdminSettingUpMfa = () => roleGuard(['ADMIN'], false);
 
 function roleGuard(allowedRoles: string[], requireAdminMfa: boolean) {
@@ -36,8 +23,6 @@ function roleGuard(allowedRoles: string[], requireAdminMfa: boolean) {
     }
 
     if (!allowedRoles.includes(req.user.role)) {
-      // Neither app ever calls an admin-only route as a client or worker, so
-      // this is someone exploring the API with a real account's token.
       if (allowedRoles.length === 1 && allowedRoles[0] === 'ADMIN') {
         void raiseSecurityAlert({
           type: 'ADMIN_ROUTE_DENIED',

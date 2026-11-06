@@ -1,15 +1,3 @@
-/**
- * Translates Xendit's raw failure/status codes (invoice payment failures,
- * worker payout failures) into short, actionable messages for the mobile
- * app.
- *
- * BEST-EFFORT / UNCONFIRMED: Xendit's exact failure-code vocabulary could
- * not be verified against live docs when this was built (network-blocked).
- * This list is drawn from Xendit's commonly-documented Invoice and Payout
- * failure/status codes and matched by substring the same defensive way the
- * old PayMongo version was — replace/extend once real failed webhook
- * payloads are observed in the Xendit dashboard.
- */
 const FAILURE_REASON_PATTERNS: Array<{ match: RegExp; message: string }> = [
   {
     match: /insufficient[_ ]?balance/i,

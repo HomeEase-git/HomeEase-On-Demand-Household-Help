@@ -8,7 +8,6 @@ type Props = {
   disabled?: boolean;
 };
 
-/** Prominent "auto-assign the top-ranked available worker" CTA (Step 3: WHO). */
 export default function SurpriseMeButton({ onPress, loading, disabled }: Props) {
   return (
     <Pressable

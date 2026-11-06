@@ -1,10 +1,3 @@
-// Separate from jest.config.js on purpose: the default suite's
-// moduleNameMapper mocks @queues/bookingQueue and @queues/verificationQueue
-// entirely (no local Redis in that context), which is exactly what this
-// suite needs to NOT do — it exists to exercise the real BullMQ queues
-// against a real (ephemeral, redis-memory-server-backed) Redis, the only
-// thing that would have caught the "BullMQ rejects ':' in custom jobIds"
-// bug found via the Xendit-sandbox E2E run.
 /** @type {import('jest').Config} */
 module.exports = {
   testEnvironment: 'node',

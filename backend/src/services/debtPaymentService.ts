@@ -5,25 +5,17 @@ import { applyDebtPaymentTx } from '@services/debtLedgerService';
 import { notifyUser } from '@utils/notify';
 import { roundToCentavo } from '@utils/money';
 
-/** Thrown for a request the worker can fix (bad amount, nothing owed). */
 export class DebtPaymentError extends Error {}
 
-/** Xendit's smallest invoice. Unverified against Xendit's docs, so it's overridable. */
 function xenditMinPesos(): number {
   const configured = Number(process.env.XENDIT_MIN_INVOICE_PESOS);
   return Number.isFinite(configured) && configured > 0 ? configured : 20;
 }
 
-/**
- * The smallest payment allowed: at least half of what's owed, and never below
- * Xendit's minimum invoice. A debt smaller than that minimum can only be paid
- * in full.
- */
 export function minPaymentPesos(owed: number): number {
   return Math.min(owed, Math.max(roundToCentavo(owed / 2), xenditMinPesos()));
 }
 
-/** The amount to invoice: omitted means the full balance. */
 export function resolveAmount(requested: number | undefined, owed: number): number {
   if (owed <= 0) throw new DebtPaymentError("You don't owe HomeEase anything right now.");
   if (requested === undefined) return owed;
@@ -37,25 +29,10 @@ export function resolveAmount(requested: number | undefined, owed: number): numb
   return amount;
 }
 
-/**
- * A PENDING row with no invoice id is either mid-creation (another request is
- * still talking to Xendit) or was abandoned (the server stopped before saving
- * the id). Only after this long is it treated as abandoned.
- */
 const UNFINISHED_AFTER_MS = 5 * 60 * 1000;
 
 type DebtPaymentRow = NonNullable<Awaited<ReturnType<typeof prisma.debtPayment.findFirst>>>;
 
-/**
- * Recovers an abandoned PENDING row that has no invoice id. Xendit may already
- * have created the invoice (rows are invoiced with their own id as external_id),
- * and retiring the row while that invoice is still payable would take money
- * that never gets credited — so Xendit is asked first:
- *  - an invoice exists  -> it is attached to the row and the row is returned;
- *  - none exists        -> the row is retired (FAILED) and null is returned;
- *  - the lookup fails   -> the error propagates and the row is left untouched.
- * A row younger than UNFINISHED_AFTER_MS is left alone (it may be in flight).
- */
 async function recoverUnfinishedDebtPayment(row: DebtPaymentRow): Promise<DebtPaymentRow | null> {
   if (Date.now() - row.createdAt.getTime() < UNFINISHED_AFTER_MS) {
     throw new DebtPaymentError('A payment is already being set up. Try again in a moment.');
@@ -68,7 +45,6 @@ async function recoverUnfinishedDebtPayment(row: DebtPaymentRow): Promise<DebtPa
       data: { xenditInvoiceId: invoice.id, checkoutUrl: invoice.invoice_url ?? null },
     });
     if (count === 1) return prisma.debtPayment.findUnique({ where: { id: row.id } });
-    // Someone else finished it first — start over from whatever is there now.
     const current = await prisma.debtPayment.findUnique({ where: { id: row.id } });
     return current?.status === 'PENDING' ? current : null;
   }
@@ -82,12 +58,6 @@ async function recoverUnfinishedDebtPayment(row: DebtPaymentRow): Promise<DebtPa
 
 type DebtCheckout = { checkoutUrl: string; debtPaymentId: string; amount: number } | { alreadyPaid: true };
 
-/**
- * Starts (or resumes) a Xendit invoice for the worker's dues. One open invoice
- * per worker: if a PENDING one is still live its URL is returned instead of
- * minting a second — and if Xendit already shows it PAID (webhook missed), it
- * is settled right here.
- */
 export async function createDebtPaymentInvoice(userId: string, requested?: number): Promise<DebtCheckout> {
   const profile = await prisma.workerProfile.findUnique({
     where: { userId },
@@ -96,7 +66,6 @@ export async function createDebtPaymentInvoice(userId: string, requested?: numbe
   if (!profile) throw new DebtPaymentError('Worker profile not found.');
 
   let existing = await prisma.debtPayment.findFirst({ where: { workerProfileId: profile.id, status: 'PENDING' } });
-  // An abandoned row (no invoice id) would otherwise block every retry.
   if (existing && !existing.xenditInvoiceId) existing = await recoverUnfinishedDebtPayment(existing);
   if (existing?.xenditInvoiceId) {
     try {
@@ -109,13 +78,11 @@ export async function createDebtPaymentInvoice(userId: string, requested?: numbe
       if (status === 'PENDING' && inv?.invoice_url) {
         return { checkoutUrl: inv.invoice_url, debtPaymentId: existing.id, amount: existing.amount };
       }
-      // Expired/failed on Xendit's side — retire it so a fresh one can be made.
       await prisma.debtPayment.updateMany({
         where: { id: existing.id, status: 'PENDING' },
         data: { status: status === 'EXPIRED' ? 'EXPIRED' : 'FAILED', failureReason: status ?? 'UNKNOWN' },
       });
     } catch (error) {
-      // Can't confirm the old invoice: don't risk a second live one.
       if (existing.checkoutUrl) {
         return { checkoutUrl: existing.checkoutUrl, debtPaymentId: existing.id, amount: existing.amount };
       }
@@ -130,7 +97,6 @@ export async function createDebtPaymentInvoice(userId: string, requested?: numbe
   try {
     debtPayment = await prisma.debtPayment.create({ data: { workerProfileId: profile.id, amount } });
   } catch (error) {
-    // A concurrent request opened an invoice first (one-PENDING-per-worker index).
     if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
       const open = await prisma.debtPayment.findFirst({ where: { workerProfileId: profile.id, status: 'PENDING' } });
       if (open?.checkoutUrl) return { checkoutUrl: open.checkoutUrl, debtPaymentId: open.id, amount: open.amount };
@@ -155,7 +121,6 @@ export async function createDebtPaymentInvoice(userId: string, requested?: numbe
     });
     return { checkoutUrl: invoice.invoiceUrl, debtPaymentId: debtPayment.id, amount };
   } catch (error) {
-    // Never leave a PENDING row without an invoice — it would block retries.
     await prisma.debtPayment.update({
       where: { id: debtPayment.id },
       data: { status: 'FAILED', failureReason: 'Invoice could not be created' },
@@ -164,11 +129,6 @@ export async function createDebtPaymentInvoice(userId: string, requested?: numbe
   }
 }
 
-/**
- * Settles a paid DebtPayment: claims it (so a replayed webhook is a no-op),
- * lowers commissionOwed, and books the cash — all in one transaction.
- * Returns false if it was already settled.
- */
 export async function finalizeDebtPayment(
   debtPaymentId: string,
   paidAmount: number | null,
@@ -200,12 +160,6 @@ export async function finalizeDebtPayment(
   return true;
 }
 
-/**
- * Reconciliation helper (bookingWorker sweep): for a dues payment still PENDING,
- * pull the real invoice state from Xendit and self-heal a missed webhook. A row
- * that never got an invoice id is first recovered (see
- * recoverUnfinishedDebtPayment). Returns what happened.
- */
 export async function reconcilePendingDebtPayment(debtPaymentId: string): Promise<'paid' | 'failed' | 'pending'> {
   let row = await prisma.debtPayment.findUnique({ where: { id: debtPaymentId } });
   if (!row || row.status !== 'PENDING') return 'pending';
@@ -231,11 +185,6 @@ export async function reconcilePendingDebtPayment(debtPaymentId: string): Promis
   return 'pending';
 }
 
-/**
- * Reconciles every dues payment that has been PENDING since before `cutoff`.
- * One bad row never stops the rest. Returns what changed (rows still pending
- * are left out) so the caller can log it.
- */
 export async function reconcileStalePendingDebtPayments(
   cutoff: Date
 ): Promise<{ debtPaymentId: string; result: 'paid' | 'failed' }[]> {
@@ -255,7 +204,6 @@ export async function reconcileStalePendingDebtPayments(
   return changed;
 }
 
-/** Marks an expired/failed invoice so the worker can start a new one. */
 export async function failDebtPayment(xenditInvoiceId: string, reason: string): Promise<void> {
   await prisma.debtPayment.updateMany({
     where: { xenditInvoiceId, status: 'PENDING' },

@@ -6,7 +6,6 @@ import type { BookingPriceEstimate } from "../../hooks/useBookingPriceEstimate";
 
 const peso = (n: number) => `₱${Math.round(n).toLocaleString("en-PH")}`;
 
-/** Short "₱350 – ₱600" / "₱1,240" text for an estimate, or null when there's nothing to show yet. */
 export function formatEstimate(estimate: BookingPriceEstimate): { amount: string; label: string } | null {
   if (estimate.mode === "point") {
     return { amount: peso(estimate.point.total), label: "Estimated total" };
@@ -21,11 +20,8 @@ export function formatEstimate(estimate: BookingPriceEstimate): { amount: string
 }
 
 type Props = {
-  /** The same estimate the step already computes; null when there's no upfront price. */
   estimate: BookingPriceEstimate | null;
-  /** Shown instead of a price when estimate is null (e.g. "Priced after inspection"). */
   noPriceText?: string;
-  /** Overrides the small label above the price (e.g. "Per day × 3 days"). */
   label?: string;
   buttonLabel: string;
   onPress: () => void;
@@ -33,11 +29,6 @@ type Props = {
   loading?: boolean;
 };
 
-/**
- * Bar pinned to the bottom of each booking step: the current price estimate
- * on the left, the step's Next/Submit button on the right, so both stay in
- * view however long the step's form is.
- */
 export const BookingFooterBar: React.FC<Props> = ({
   estimate,
   noPriceText = "Price shown once you choose a service",

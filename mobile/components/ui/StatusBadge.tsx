@@ -20,12 +20,9 @@ export type StatusType =
 
 type Props = {
   status: StatusType;
-  // A booking's status reads in four plain words (see BOOKING_LABEL); the
-  // same badge also shows payment and document statuses, which keep theirs.
   variant?: "booking";
 };
 
-// What clients and workers see for a booking, whatever the backend status.
 const BOOKING_LABEL: Partial<Record<StatusType, string>> = {
   Pending: "Waiting",
   Accepted: "Confirmed",

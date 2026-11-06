@@ -24,16 +24,6 @@ interface AuthRequest extends Request {
   user?: JwtPayload;
 }
 
-// NOTE: `createPayment` (POST /api/payments/:bookingId) and `releaseEscrow`
-// (POST /api/payments/:id/release) were removed with the move to
-// pay-after-completion. Payment rows are now created by
-// paymentLifecycleService.settleCashBooking / createCompletionInvoice, driven
-// from bookingController.confirmCompletion.
-
-/**
- * GET /api/payments/:bookingId
- * Get payment detail/receipt data
- */
 export const getPaymentDetail = async (req: AuthRequest, res: Response) => {
   try {
     if (!req.user) {
@@ -43,7 +33,6 @@ export const getPaymentDetail = async (req: AuthRequest, res: Response) => {
     const bookingId = req.params.bookingId as string;
     const currentUserId = req.user.userId;
 
-    // Payment.bookingId is @unique so findUnique is correct
     const payment = await prisma.payment.findUnique({
       where: { bookingId },
       include: {
@@ -63,7 +52,6 @@ export const getPaymentDetail = async (req: AuthRequest, res: Response) => {
       return res.status(404).json(errorResponse(404, 'Payment not found'));
     }
 
-    // Ownership check via booking (Payment has no clientId/workerId directly)
     if (
       payment.booking.clientId !== currentUserId &&
       payment.booking.workerId !== currentUserId
@@ -71,14 +59,6 @@ export const getPaymentDetail = async (req: AuthRequest, res: Response) => {
       return res.status(403).json(errorResponse(403, 'You do not have permission to view this payment'));
     }
 
-    // Built from the payment's own stored fields (not recomputed from live
-    // config) so the breakdown always reflects the rate actually charged,
-    // even after an admin changes the platform commission/tax rate later.
-    // commissionAmount/withholdingTaxAmount/workerPayout/platformProfit are
-    // the platform's cut, deducted from the worker's payout, never charged
-    // to the client — kept here only because the worker-earnings screen
-    // (mobile/app/(worker)/earnings) reuses this same response shape.
-    // The booking-time log (oldest first) — later logs are quote stages.
     const bookingPricingLog = payment.booking.pricingLogs[0] ?? null;
     const breakdown = {
       subtotal: payment.subtotal,
@@ -93,7 +73,6 @@ export const getPaymentDetail = async (req: AuthRequest, res: Response) => {
       commissionPercentage: payment.commissionRate * 100,
       withholdingTaxAmount: payment.withholdingTaxAmount,
       withholdingTaxPercentage: payment.withholdingTaxRate * 100,
-      // Which BIR quarter this withholding is reported in (2307 / remittance).
       withholdingTaxQuarter: manilaQuarterLabel(payment.capturedAt ?? payment.createdAt),
       platformFee: 0,
       tip: payment.tip,
@@ -117,10 +96,8 @@ export const getPaymentDetail = async (req: AuthRequest, res: Response) => {
         priceBreakdown: breakdown,
         createdAt: payment.createdAt,
         updatedAt: payment.updatedAt,
-        // When the client's money was captured (createdAt for unpaid ones).
         receivedAt: payment.capturedAt ?? payment.createdAt,
         releasedAt: payment.releasedAt,
-        // schema has xenditPaymentId, not paymentMethodReference
         transactionId: payment.xenditPaymentId ?? null,
         ...(payment.status === 'FAILED'
           ? { failureReason: payment.failureReason, failureMessage: translateXenditFailureReason(payment.failureReason) }
@@ -133,12 +110,6 @@ export const getPaymentDetail = async (req: AuthRequest, res: Response) => {
   }
 };
 
-/**
- * GET /api/payments/me
- * List payments (client: payments made, worker: payouts)
- *
- * Payment has no clientId/workerId — filter via booking relation.
- */
 export const listMyPayments = async (req: AuthRequest, res: Response) => {
   try {
     if (!req.user) {
@@ -153,7 +124,6 @@ export const listMyPayments = async (req: AuthRequest, res: Response) => {
     const limitNum = Math.min(100, Math.max(1, parseInt(limit as string) || 10));
     const skip = (pageNum - 1) * limitNum;
 
-    // Filter through booking since Payment has no direct clientId/workerId
     const bookingFilter =
       currentRole === 'CLIENT'
         ? { clientId: currentUserId }
@@ -200,9 +170,6 @@ export const listMyPayments = async (req: AuthRequest, res: Response) => {
       escrowStatus: p.escrowStatus,
       methodType: p.methodType,
       createdAt: p.createdAt,
-      // Only meaningful for workers — tracks the actual Xendit payout to
-      // their account, separate from `status` (which only reflects the
-      // client's payment/escrow, not whether the worker has been paid).
       ...(currentRole === 'WORKER'
         ? {
             payoutStatus: p.payout?.status ?? null,
@@ -244,15 +211,6 @@ export const listMyPayments = async (req: AuthRequest, res: Response) => {
   }
 };
 
-/**
- * POST /api/payments/:id/refund
- * Client-initiated refund request.
- *
- *  - Payment still PENDING (unpaid GCash/Maya) -> void it directly.
- *  - Payment COMPLETED -> money has already moved, so this opens a Dispute for
- *    an admin to review; resolving it with Cancel & Refund files a refund
- *    request that an admin then approves (refundRequestService).
- */
 export const refundPayment = async (req: AuthRequest, res: Response) => {
   try {
     if (!req.user || req.user.role !== 'CLIENT') {
@@ -264,9 +222,6 @@ export const refundPayment = async (req: AuthRequest, res: Response) => {
     const { reason, evidenceUrls } = req.body;
     const trimmedReason =
       typeof reason === 'string' && reason.trim() ? reason.trim() : 'Refund requested by client';
-    // Optional — already-uploaded image URLs (see uploadController's
-    // upload-then-attach pattern). Never required to file a legitimate
-    // refund/dispute.
     const cleanEvidenceUrls = toOwnedBookingPhotoUrls(evidenceUrls ?? [], currentUserId);
     if (!cleanEvidenceUrls) {
       return res.status(400).json(errorResponse(400, 'Upload the photos again — one of them could not be verified'));
@@ -298,7 +253,6 @@ export const refundPayment = async (req: AuthRequest, res: Response) => {
       });
     }
 
-    // COMPLETED -> route through a Dispute for admin review.
     const existingOpen = await prisma.dispute.findFirst({
       where: { bookingId: payment.bookingId, status: { in: ['OPEN', 'UNDER_REVIEW'] } },
     });
@@ -341,12 +295,6 @@ export const refundPayment = async (req: AuthRequest, res: Response) => {
   }
 };
 
-/**
- * POST /api/payments/dues  { amount? }
- * A worker pays down the platform dues they owe through a Xendit invoice.
- * `amount` omitted means the full balance. Returns the hosted checkout URL
- * (an already-open invoice is reused, not duplicated).
- */
 export const createDuesCheckout = async (req: AuthRequest, res: Response) => {
   try {
     if (!req.user || req.user.role !== 'WORKER') {
@@ -382,13 +330,6 @@ export const createDuesCheckout = async (req: AuthRequest, res: Response) => {
   }
 };
 
-/**
- * POST /api/payments/:bookingId/xendit/checkout
- * Resume payment for a GCash/Maya booking that is AWAITING_PAYMENT (the client
- * abandoned or failed an earlier checkout). Returns the live hosted invoice
- * URL, or mints a fresh invoice if the previous one expired/failed. Delegates
- * to createCompletionInvoice, which owns the reuse-vs-recreate logic.
- */
 export const createXenditCheckout = async (req: AuthRequest, res: Response) => {
   try {
     if (!req.user || req.user.role !== 'CLIENT') {
@@ -452,39 +393,17 @@ export const createXenditCheckout = async (req: AuthRequest, res: Response) => {
   }
 };
 
-/**
- * Compares the `x-callback-token` header Xendit sends on every webhook
- * against the configured secret (the static token set in the Xendit
- * dashboard's Webhooks settings). Unlike PayMongo there is no HMAC/timestamp
- * — it's a plain shared-secret header — but crypto.timingSafeEqual is still
- * used for the comparison to avoid a timing side-channel on the token value.
- */
 function verifyXenditCallbackToken(headerToken: string | string[] | undefined, secret: string): boolean {
   if (typeof headerToken !== 'string' || !headerToken) return false;
 
   const headerBuffer = Buffer.from(headerToken, 'utf8');
   const secretBuffer = Buffer.from(secret, 'utf8');
 
-  // timingSafeEqual requires equal-length buffers; a length mismatch is
-  // itself proof of an invalid token, safe to short-circuit on.
   if (headerBuffer.length !== secretBuffer.length) return false;
 
   return crypto.timingSafeEqual(headerBuffer, secretBuffer);
 }
 
-/**
- * Handles a paid Xendit invoice for a booking completion payment: hands off to
- * paymentLifecycleService.finalizePaidBooking, which marks the Payment
- * COMPLETED, finalizes the booking, nets any outstanding worker commission dues
- * and schedules the payout.
- *
- * `invoice` is the raw Xendit invoice payload from the webhook body — shape
- * UNCONFIRMED against a real payload (docs domains were network-blocked
- * when this was built); this reads the fields the hand-validated
- * GET /v2/invoices/{id} response returned (`id`, `status`, `payment_id`,
- * `paid_amount`, `paid_at`) and defensively no-ops if any are missing rather
- * than throwing.
- */
 async function handleInvoicePaid(invoice: any) {
   const invoiceId = invoice?.id as string | undefined;
   if (!invoiceId) return;
@@ -495,7 +414,6 @@ async function handleInvoicePaid(invoice: any) {
   });
 
   if (!payment) {
-    // Not a booking payment — it may be a worker paying their platform dues.
     const debtPayment = await prisma.debtPayment.findUnique({ where: { xenditInvoiceId: invoiceId } });
     if (!debtPayment || debtPayment.status !== 'PENDING') return;
     const remote = await retrieveInvoice(invoiceId);
@@ -505,9 +423,6 @@ async function handleInvoicePaid(invoice: any) {
     return;
   }
   if (payment.status === 'FAILED') {
-    // Money that landed on a voided invoice (the checkout couldn't be
-    // expired in time). Not auto-settled: the booking was cancelled or is
-    // under review, so an admin refunds or applies it.
     const remote = await retrieveInvoice(invoiceId);
     const remoteStatus = (remote?.status as string | undefined)?.toUpperCase();
     if (remoteStatus !== 'PAID' && remoteStatus !== 'SETTLED') return;
@@ -522,10 +437,6 @@ async function handleInvoicePaid(invoice: any) {
   }
   if (payment.status !== 'PENDING') return;
 
-  // The callback token is one static shared secret, so the body only tells
-  // us which invoice to look at — what was actually paid comes from Xendit
-  // itself. A failed lookup throws: the webhook answers 500 and Xendit (or
-  // the hourly reconcile sweep) tries again.
   const remote = await retrieveInvoice(invoiceId);
   const remoteStatus = (remote?.status as string | undefined)?.toUpperCase();
   if (remoteStatus !== 'PAID' && remoteStatus !== 'SETTLED') {
@@ -539,8 +450,6 @@ async function handleInvoicePaid(invoice: any) {
     return;
   }
 
-  // finalizePaidBooking marks the Payment COMPLETED, finalizes the booking,
-  // nets any outstanding worker commission dues and schedules the payout.
   const finalized = await finalizePaidBooking(
     payment.id,
     remote.payment_id ?? null,
@@ -568,8 +477,6 @@ async function handleInvoiceFailed(invoice: any) {
     return;
   }
 
-  // The booking stays in AWAITING_PAYMENT — the client can retry, which mints
-  // a fresh invoice (createCompletionInvoice / resumeCompletionPayment).
   await prisma.payment.update({
     where: { id: payment.id },
     data: { status: 'FAILED', failureReason: invoice?.status ?? 'EXPIRED' },
@@ -584,16 +491,6 @@ async function handleInvoiceFailed(invoice: any) {
   });
 }
 
-/**
- * POST /api/payments/xendit/invoice-webhook
- * Handles Xendit's invoice status webhook (token-verified via
- * x-callback-token). Dispatches on the invoice's `status` field —
- * UNCONFIRMED whether Xendit wraps the invoice in an envelope (e.g.
- * { event, data }) or posts it flat; this defensively unwraps `body.data` if
- * present, else treats the body itself as the invoice. Confirm the real
- * shape against the Xendit dashboard's webhook logs/test tool or a live
- * payment and simplify this once verified.
- */
 export const handleXenditInvoiceWebhook = async (req: Request, res: Response) => {
   try {
     const webhookToken = process.env.XENDIT_WEBHOOK_TOKEN;
@@ -648,16 +545,6 @@ export const handleXenditInvoiceWebhook = async (req: Request, res: Response) =>
   }
 };
 
-/**
- * POST /api/payments/xendit/payout-webhook
- * Handles Xendit Payout status callbacks (token-verified via
- * x-callback-token). Looks up the Payout by Xendit's payout id, falling back
- * to reference_id (== Payout.id) in case the callback beats our own write of
- * xenditDisbursementId after createPayout() returns. Status vocabulary
- * UNCONFIRMED beyond ACCEPTED (the synchronous response, hand-validated) —
- * COMPLETED/FAILED assumed as the terminal webhook states; confirm against a
- * real payout webhook payload and adjust the branches below if it differs.
- */
 export const handleXenditPayoutWebhook = async (req: Request, res: Response) => {
   try {
     const webhookToken = process.env.XENDIT_WEBHOOK_TOKEN;
@@ -692,8 +579,6 @@ export const handleXenditPayoutWebhook = async (req: Request, res: Response) => 
       return res.status(200).json({ success: true, message: 'No matching payout' });
     }
 
-    // Guarded transition: duplicates are no-ops, and a payout cancelled by a
-    // refund is never flipped to PAID (see payoutStatusService).
     await applyXenditPayoutStatus(resolved, status, {
       xenditDisbursementId: payoutId ?? null,
       failureReason: failureReason ?? null,

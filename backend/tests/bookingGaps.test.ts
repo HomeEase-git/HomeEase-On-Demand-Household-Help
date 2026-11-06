@@ -19,7 +19,6 @@ jest.mock('@utils/smsService', () => ({
 const CLIENT_LOCATION = { lat: 14.5995, lng: 120.9842 };
 const NEARBY_WORKER_LOCATION = { lat: 14.5995 + 0.0005, lng: 120.9842 };
 
-/** A booking photo URL "uploaded" by this user (see utils/storageUrls). */
 function photoUrl(userId: string, name: string) {
   return `${process.env.SUPABASE_URL}/storage/v1/object/public/${BOOKING_PHOTO_BUCKET}/${userId}/${name}.jpg`;
 }
@@ -52,8 +51,6 @@ describe('Booking gaps — notifications and detail fields', () => {
   });
 
   afterAll(async () => {
-    // Real dev-DB admins get the admin alerts too: remove what these tests sent,
-    // keyed by the test bookings and the disputes opened on them.
     const disputes = await prisma.dispute.findMany({ where: { bookingId: { in: createdBookingIds } }, select: { id: true } });
     await prisma.notification.deleteMany({
       where: { relatedId: { in: [...createdBookingIds, ...disputes.map((d) => d.id)] } },
@@ -63,10 +60,6 @@ describe('Booking gaps — notifications and detail fields', () => {
     await prisma.$disconnect();
   });
 
-  /**
-   * The controller's next booking read returns the row as it is now, then the
-   * row is changed underneath it: the request acts on a stale status.
-   */
   let staleSpy: jest.SpyInstance | null = null;
   afterEach(() => {
     staleSpy?.mockRestore();
@@ -75,7 +68,7 @@ describe('Booking gaps — notifications and detail fields', () => {
   function staleRead(bookingId: string, change: Prisma.BookingUncheckedUpdateInput) {
     const real = prisma.booking.findUnique.bind(prisma.booking);
     const spy = jest.spyOn(prisma.booking, 'findUnique');
-    staleSpy = spy; // restored in afterEach if the request never reads the booking
+    staleSpy = spy;
     spy.mockImplementation((async (args: Prisma.BookingFindUniqueArgs) => {
       const row = await real(args);
       if (args.where.id === bookingId) {
@@ -113,7 +106,6 @@ describe('Booking gaps — notifications and detail fields', () => {
 
     const first = await arrive(NEARBY_WORKER_LOCATION);
     expect(first.status).toBe(200);
-    // A stale screen far from the site: still 200, nothing rewritten.
     const again = await arrive({ lat: 15, lng: 121 });
     expect(again.status).toBe(200);
     expect(again.body.data.workerArrivedAt).toBe(first.body.data.workerArrivedAt);
@@ -190,7 +182,6 @@ describe('Booking gaps — notifications and detail fields', () => {
     const notHere = (id: string) =>
       request(app).patch(`/api/bookings/${id}/client-not-here`).set('Authorization', `Bearer ${workerToken}`);
 
-    // Booked yesterday, so the start is long past and the wait counts from the alert.
     const pastStart = () => addDays(phTodayStart(), -1);
 
     it('alerts the client and gives the worker a cancel time', async () => {
@@ -320,7 +311,6 @@ describe('Booking gaps — notifications and detail fields', () => {
 
     it('counts the wait from the booked start after an early check-in', async () => {
       const { noShowGraceMinutes } = await getAppSettings();
-      // Booked tomorrow: the worker checked in early, and the alert's own wait is over.
       const booking = await createTestBooking({ clientId, workerId, status: 'ACCEPTED', workerArrivedAt: new Date() });
       createdBookingIds.push(booking.id);
       await prisma.arrivalVerification.create({
@@ -376,7 +366,6 @@ describe('Booking gaps — notifications and detail fields', () => {
 
     it('needs proof when the worker checked in after the grace period', async () => {
       const { noShowGraceMinutes } = await getAppSettings();
-      // Booked start an hour past the grace period ago: the worker is late.
       const start = new Date(Math.floor((Date.now() - (noShowGraceMinutes + 60) * 60_000) / 60_000) * 60_000);
       const ph = new Date(start.getTime() + 8 * 3_600_000);
       const booking = await createTestBooking({
@@ -419,7 +408,6 @@ describe('Booking gaps — notifications and detail fields', () => {
       expect(clientAfter.paymentHoldAt).toEqual(clientBefore.paymentHoldAt);
     });
 
-    /** Runs `fn` with the client-fault fee set to 0, then restores it. */
     async function withZeroFee(fn: () => Promise<void>) {
       const settings = await prisma.appSettings.upsert({ where: { id: 'singleton' }, update: {}, create: { id: 'singleton' } });
       await prisma.appSettings.update({ where: { id: 'singleton' }, data: { clientFaultCompensationAmount: 0 } });
@@ -435,7 +423,6 @@ describe('Booking gaps — notifications and detail fields', () => {
       }
     }
 
-    /** A proof cancel blaming the client, filed while the fee is 0. */
     async function zeroFeeProofCancel() {
       const booking = await createTestBooking({ clientId, workerId, status: 'ACCEPTED', workerArrivedAt: new Date() });
       createdBookingIds.push(booking.id);
@@ -476,7 +463,6 @@ describe('Booking gaps — notifications and detail fields', () => {
       const clientBefore = await prisma.clientProfile.findUniqueOrThrow({ where: { userId: clientId } });
       const workerBefore = await prisma.workerProfile.findUniqueOrThrow({ where: { userId: workerId } });
 
-      // The fee is back to its real value now; the old claim must not pick it up.
       const res = await review(booking.id, 'APPROVE');
       expect(res.status).toBe(200);
       expect(res.body.message).toBe('Claim approved');
@@ -567,8 +553,6 @@ describe('Booking gaps — notifications and detail fields', () => {
   });
 
   it("rejects refund evidence that isn't the client's own upload", async () => {
-    // A payment id that doesn't exist: the evidence check runs first, so an
-    // own photo gets the normal 404 and someone else's is 400.
     const refund = (evidenceUrls: string[]) =>
       request(app)
         .post(`/api/payments/${crypto.randomUUID()}/refund`)
@@ -763,7 +747,6 @@ describe('Booking gaps — notifications and detail fields', () => {
       const booking = await seed('ACCEPTED');
       expect((await problem(booking.id, { reason: 'NEED_TO_CANCEL' })).status).toBe(200);
 
-      // Make the dispute insert inside the escalation transaction fail.
       const realTransaction = prisma.$transaction.bind(prisma);
       const spy = jest.spyOn(prisma, '$transaction').mockImplementationOnce(((fn: (tx: unknown) => Promise<unknown>) =>
         realTransaction((tx) =>
@@ -850,12 +833,6 @@ describe('Booking gaps — notifications and detail fields', () => {
     });
   });
 
-  /**
-   * These tests run the real sweep on purpose (its queries are what's under
-   * test), but the dev DB is a copy of real data, so its top-level scans are
-   * narrowed to this file's bookings: genuinely overdue real rows are left
-   * alone. Test-only spies; production code has no test filter.
-   */
   function scopeSweepToTestRows() {
     type FindMany = { findMany: (args?: { where?: object }) => Promise<unknown> };
     const narrow = (delegate: FindMany, where: () => object) => {
@@ -873,7 +850,6 @@ describe('Booking gaps — notifications and detail fields', () => {
   }
 
   describe('stuck-booking sweep', () => {
-    // Real clock with timestamps backdated rather than a fake future "now".
     let unscope: () => void;
     beforeEach(() => (unscope = scopeSweepToTestRows()));
     afterEach(() => unscope());
@@ -990,7 +966,6 @@ describe('Booking gaps — notifications and detail fields', () => {
 
   describe('cash invoices', () => {
     const HOUR = 60 * 60_000;
-    // Real clock, backdated invoices; the sweep is scoped to this file's rows.
     let unscope: () => void;
     beforeEach(() => (unscope = scopeSweepToTestRows()));
     afterEach(() => unscope());

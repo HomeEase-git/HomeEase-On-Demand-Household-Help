@@ -18,7 +18,6 @@ const ACTIVE_BOOKING_STATUSES = [
 
 const PAYMENT_OVERDUE_HOURS = 72;
 
-// Ranges the dashboard's period picker offers; anything else falls back to 7.
 const ALLOWED_RANGE_DAYS = [7, 30, 90] as const;
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -29,12 +28,8 @@ function parseRangeDays(raw: unknown): number {
 
 type PeriodTrend = { current: number; previous: number };
 
-// Must match tests/helpers.ts TEST_EMAIL_MARKER: e2e accounts stay off the leaderboard.
 const TEST_EMAIL_MARKER = 'e2etest';
 
-// Audit messages are written for the log, not for people: some carry a raw
-// booking cuid or an action code like CANCEL_BOOKING. Show the booking's
-// display ID and plain words instead.
 function activityText(message: string, bookingId: string | undefined): string {
   const withDisplayId = bookingId ? message.split(bookingId).join(formatDisplayId(bookingId)) : message;
   return withDisplayId.replace(/\b[A-Z]+(?:_[A-Z]+)+\b/g, (code) => code.toLowerCase().replace(/_/g, ' '));
@@ -47,11 +42,6 @@ const CATEGORY_LABEL: Record<string, string> = {
   STATUS_CHANGE: 'Status Changes',
 };
 
-/**
- * GET /api/admin/dashboard/charts?month=YYYY-MM
- * The dashboard's charts for one calendar month (Manila time): bookings per
- * day, and bookings per service category.
- */
 export const getDashboardCharts = async (req: Request, res: Response) => {
   try {
     const range = monthRange(req.query.month);
@@ -71,8 +61,6 @@ export const getDashboardCharts = async (req: Request, res: Response) => {
 
 export const getDashboardStats = async (req: Request, res: Response) => {
   try {
-    // "This period" is the last N days; "previous" is the N days before that,
-    // so the stat cards can say e.g. "+12 in the last 7 days, up 20%".
     const days = parseRangeDays(req.query.days);
     const now = Date.now();
     const periodStart = new Date(now - days * DAY_MS);
@@ -102,8 +90,6 @@ export const getDashboardStats = async (req: Request, res: Response) => {
       prisma.verificationRequest.count({ where: { status: 'PENDING' } }),
       prisma.booking.count({ where: { status: { in: [...ACTIVE_BOOKING_STATUSES] } } }),
       prisma.dispute.count({ where: { status: 'OPEN' } }),
-      // Revenue = platform commission; payouts = money actually sent to
-      // workers. See financeReportService for the exact definitions.
       platformRevenue(),
       workerPayoutsPaid(),
       prisma.auditLog.findMany({ orderBy: { createdAt: 'desc' }, take: 5 }),
@@ -118,13 +104,11 @@ export const getDashboardStats = async (req: Request, res: Response) => {
         },
       }),
       getBookingsOverTime(days),
-      // Total commission/tax owed by workers from cash jobs.
       prisma.workerProfile.aggregate({
         where: { commissionOwed: { gt: 0 } },
         _sum: { commissionOwed: true },
       }),
       prisma.workerProfile.count({ where: { debtHoldAt: { not: null } } }),
-      // GCash/Maya jobs finished but unpaid past the escalation threshold.
       prisma.booking.count({
         where: {
           status: { in: ['PENDING_COMPLETION', 'AWAITING_PAYMENT'] },
@@ -202,7 +186,6 @@ export const getDashboardStats = async (req: Request, res: Response) => {
           };
         }),
         topWorkers: topWorkerRecords.map((worker) => ({
-          // User id: the admin worker detail page is keyed by it.
           id: worker.userId,
           name: worker.user.fullName,
           services: worker.serviceCategories.map((c) => c.serviceType.name).join(', ') || '—',

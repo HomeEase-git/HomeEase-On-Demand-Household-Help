@@ -15,8 +15,6 @@ export default function KycLayout() {
         headerShadowVisible: false,
       }}
     >
-      {/* Waiting screen for unverified workers — no swipe-back, since it
-          must not offer any way out until an admin makes a decision. */}
       <Stack.Screen name="pending" options={{ gestureEnabled: false }} />
     </Stack>
   );

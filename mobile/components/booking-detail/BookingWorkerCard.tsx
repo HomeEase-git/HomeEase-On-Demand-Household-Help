@@ -12,7 +12,6 @@ type Props = {
   onCall: () => void;
 };
 
-/** The assigned worker, with Message and Call right on the card. */
 export const BookingWorkerCard: React.FC<Props> = ({ name, avatarUrl, verified, onMessage, onCall }) => {
   return (
     <View className="bg-card rounded-2xl p-4 mb-3">

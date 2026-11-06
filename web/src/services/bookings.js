@@ -20,7 +20,6 @@ export async function fetchBookingById(id) {
   return response.data;
 }
 
-/** PATCH /admin/bookings/:id/archive — hides (or restores) a finished booking. */
 export async function setBookingArchived(id, archived) {
   const response = await apiRequest(`/admin/bookings/${id}/archive`, {
     method: 'PATCH',
@@ -29,7 +28,6 @@ export async function setBookingArchived(id, archived) {
   return response.data;
 }
 
-/** PATCH /admin/bookings/:id/cancel — force-cancels a booking in any non-terminal state. */
 export async function cancelBookingAdmin(id, reason) {
   const response = await apiRequest(`/admin/bookings/${id}/cancel`, {
     method: 'PATCH',

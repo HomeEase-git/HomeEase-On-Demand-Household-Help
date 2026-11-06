@@ -1,8 +1,5 @@
 import { useLocation, useNavigate } from 'react-router-dom'
 
-// backTo: the list this page belongs to. "Back" returns to wherever the admin
-// came from (keeping that list's filters, which live in the URL); on a page
-// opened directly (new tab, shared link) there's no history, so it goes to backTo.
 export default function PageHeader({ title, subtitle, actions, backTo }) {
   const navigate = useNavigate()
   const location = useLocation()

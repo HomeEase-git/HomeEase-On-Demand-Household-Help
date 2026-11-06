@@ -1,16 +1,3 @@
-/**
- * Reference DOLE regional daily minimum wage figures, used only to catch
- * likely pricing mistakes in adminPricingRuleController (a minPrice that
- * wouldn't cover even one hour at the region's DOLE-equivalent wage). This
- * is NOT a legal wage-compliance mechanism — workers here are independent
- * contractors, not employees, so DOLE minimum wage doesn't apply to them by
- * law. It's a self-imposed sanity check an admin can override with a reason.
- *
- * Mirrors web/src/constants/doleWageReference.js — keep both in sync.
- * Source: DOLE Regional Tripartite Wages and Productivity Boards. Update
- * the two entries below whenever a new wage order is issued for a region
- * this app operates in (NCR or Region III / Central Luzon).
- */
 export interface DoleWageReference {
   region: 'NCR' | 'REGION_III';
   label: string;
@@ -35,8 +22,6 @@ const WAGE_REGIONS: Record<'NCR' | 'REGION_III', Omit<DoleWageReference, 'region
   },
 };
 
-// Normalized (lowercase, trimmed) city name -> wage region. Covers the
-// cities this app currently prices for (see prisma/seeds/seed-catalog.ts).
 const CITY_TO_REGION: Record<string, 'NCR' | 'REGION_III'> = {
   'quezon city': 'NCR',
   manila: 'NCR',
@@ -58,8 +43,6 @@ function buildReference(region: 'NCR' | 'REGION_III'): DoleWageReference {
   return { ...info, region, hourlyWage };
 }
 
-// Returns the DOLE wage reference for a city, or null if the city isn't
-// recognized — unrecognized cities have no floor to check against.
 export function getDoleWageReference(cityInput: string | undefined | null): DoleWageReference | null {
   const key = (cityInput ?? '').trim().toLowerCase();
   const region = CITY_TO_REGION[key];
@@ -67,15 +50,6 @@ export function getDoleWageReference(cityInput: string | undefined | null): Dole
   return buildReference(region);
 }
 
-/**
- * The highest wage floor across every region this app operates in —
- * computed rather than hardcoded to NCR so it stays correct if a future
- * wage order ever pushes another region above it. Used for city-agnostic
- * bounds like ServiceTask.minPrice/maxPrice, which apply to a task platform-wide with no per-city variant: checking against
- * the single highest floor is the only check that can't be dodged by
- * pricing for a cheaper-labor region while a worker in the priciest one
- * ends up underpaid.
- */
 export function getHighestDoleWageReference(): DoleWageReference {
   const [first, ...rest] = Object.keys(WAGE_REGIONS) as Array<'NCR' | 'REGION_III'>;
   return rest.reduce(

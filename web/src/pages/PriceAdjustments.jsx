@@ -7,10 +7,6 @@ import {
   useSettingsForm,
 } from '../components/settings/SettingsForm'
 
-// Everything that can move a booking's price away from its Price List price.
-// Commission and worker debt aren't here on purpose: they come off the
-// worker's side and never change what the client pays (Payments → Commission
-// & Debt).
 const NUMBER_FIELD_BOUNDS = {
   rushMinLeadHours: [0, 24],
   freeDistanceKm: [0, 50],

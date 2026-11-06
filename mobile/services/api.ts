@@ -30,14 +30,6 @@ type NormalizedWorkerListItem = {
   maxConcurrentJobs: number | null;
 };
 
-// ============================================================================
-// API CLIENT SETUP
-// ============================================================================
-
-// The response interceptor below unwraps `response.data.data` (or `response.data`),
-// so every call actually resolves with the unwrapped payload (T), not an
-// AxiosResponse<T>. This interface reflects that real runtime behavior so
-// callers get correct typing instead of "Property X does not exist on AxiosResponse".
 interface ApiClient {
   get<T = any>(url: string, config?: AxiosRequestConfig): Promise<T>;
   post<T = any>(url: string, data?: any, config?: AxiosRequestConfig): Promise<T>;
@@ -46,12 +38,6 @@ interface ApiClient {
   delete<T = any>(url: string, config?: AxiosRequestConfig): Promise<T>;
 }
 
-// Access tokens last minutes (server JWT_EXPIRY); this swaps the stored
-// refresh token for a fresh pair. Concurrent callers share one request —
-// the server treats a second use of the same refresh token as theft and
-// ends the session. Resolves the new access token, or null when the server
-// refused (session over). Throws when the server couldn't be reached, so
-// callers can keep the session instead of logging out on a network blip.
 let refreshInFlight: Promise<string | null> | null = null;
 
 export function refreshSession(): Promise<string | null> {
@@ -69,15 +55,12 @@ export function refreshSession(): Promise<string | null> {
         if (!next?.token || !next?.refreshToken) return null;
         await authStorage.saveRefreshToken(next.refreshToken);
         await authStorage.saveToken(next.token);
-        // Dynamic import: see the note in the 401 handler below.
         const { useAuthStore } = await import('../store/authStore');
         if (useAuthStore.getState().isAuthenticated) {
           useAuthStore.setState({ token: next.token });
         }
         return next.token as string;
       } catch (error) {
-        // REFRESH_RACE: the token was rotated a moment ago by another
-        // request — transient, so keep the session like a network error.
         if (isAxiosError(error) && error.response && error.response.data?.code !== 'REFRESH_RACE') return null;
         throw error;
       }
@@ -117,10 +100,6 @@ const createApiClient = (): ApiClient => {
     return response.data?.data ?? response.data;
   });
 
-  // Global response error handler: a 401 clears local auth. A 403 does not —
-  // the backend only sends 401 for a dead session (bad/expired/revoked token)
-  // and uses 403 for ordinary business rules (WORKER_SETUP_INCOMPLETE, not
-  // your booking, wrong role), which the calling screen shows as an error.
   client.interceptors.response.use(
     undefined,
     async (error) => {
@@ -134,15 +113,10 @@ const createApiClient = (): ApiClient => {
         console.log('[API ←] ERROR response data:', JSON.stringify(error.response?.data));
       }
 
-      // Expired access token: refresh once and replay the request. Only for
-      // requests that carried a session — a 401 from a wrong password on
-      // the login screen has nothing to refresh.
       let keepSession = false;
       const original = isAxiosError(error)
         ? (error.config as (typeof error.config & { _retried?: boolean; _refreshed?: boolean }) | undefined)
         : undefined;
-      // A 401 on the replay (fresh token) is a business rule, e.g. a wrong
-      // password on change-password or delete-account, not a dead session.
       if (original?._refreshed) keepSession = true;
       if (
         isAxiosError(error) &&
@@ -160,8 +134,6 @@ const createApiClient = (): ApiClient => {
             return client.request(original);
           }
         } catch {
-          // Couldn't reach the server to refresh — don't sign the user out
-          // over a network blip; the original error is reported below.
           keepSession = true;
         }
       }
@@ -170,43 +142,21 @@ const createApiClient = (): ApiClient => {
         if (isAxiosError(error)) {
           const status = error.response?.status;
           if (status === 401 && !keepSession) {
-            // Dynamic import to avoid a circular dependency at module-load
-            // time (authStore -> notificationService -> this file). Safe
-            // here since it's only ever touched inside this async handler,
-            // long after the whole module graph has finished loading.
             const { useAuthStore } = await import('../store/authStore');
             const wasAuthenticated = useAuthStore.getState().isAuthenticated;
 
-            // Clear stored auth (token + user) so app reacts to unauthorized state
             try {
               await authStorage.clearAuth();
             } catch (e) {
               console.error('Error clearing auth on 401:', e);
             }
 
-            // authStorage.clearAuth() only wipes AsyncStorage — without also
-            // clearing the live zustand state, every screen keeps reading
-            // the old (now-stale) user/token from memory and behaves as if
-            // still logged in, while the *next* request has nothing to
-            // send and fails with a confusing "No token provided" instead
-            // of the real reason (a previous request's token got rejected
-            // and the session was silently torn down underneath the UI).
-            // Only do this — and only redirect — for a session that was
-            // actually logged in; a 401 from a plain failed login attempt
-            // has no session to tear down and its own screen already shows
-            // the right error.
             if (wasAuthenticated) {
               useAuthStore.setState({ user: null, token: null, isAuthenticated: false });
               router.replace('/landing');
             }
           }
 
-          // Screens read `error.message` directly to show the user what went
-          // wrong. Left alone, that's Axios's own generic text ("Request
-          // failed with status code 401") instead of the backend's actual
-          // reason. Rewrite it here, once, so every caller gets a message a
-          // user can act on without each screen having to reach into
-          // response.data itself.
           const backendMessage = error.response?.data?.message || error.response?.data?.error;
           if (typeof backendMessage === 'string' && backendMessage.trim()) {
             error.message = backendMessage;
@@ -222,7 +172,6 @@ const createApiClient = (): ApiClient => {
           }
         }
       } catch (e) {
-        // swallow any error from the handler to avoid masking original error
         console.error('Error in response interceptor:', e);
       }
 
@@ -230,21 +179,17 @@ const createApiClient = (): ApiClient => {
     }
   );
 
-  // Cast to ApiClient since the interceptor changes the real return type.
   return client as unknown as ApiClient;
 };
 
 const api = createApiClient();
 
-// Re-export AbortableRequest class for callers to create abort controllers
 export { AbortableRequest };
 
-// Convenience factory for creating an AbortableRequest instance
 export function createAbortableRequest() {
   return new AbortableRequest();
 }
 
-// Returns an ApiClient-like wrapper that attaches the provided AbortSignal to requests
 export function clientWithSignal(signal?: AbortSignal): ApiClient {
   return {
     get: (url, cfg) => api.get(url, { ...(cfg || {}), signal }),
@@ -255,17 +200,12 @@ export function clientWithSignal(signal?: AbortSignal): ApiClient {
   } as ApiClient;
 }
 
-// ============================================================================
-// AUTH ENDPOINTS
-// ============================================================================
-
 export async function postSignUp(userData: {
   fullName: string;
   email: string;
   phone: string;
   password: string;
   role: 'client' | 'worker';
-  // YYYY-MM-DD, workers only — the backend checks the accepted age range.
   birthDate?: string;
 }) {
   try {
@@ -276,7 +216,6 @@ export async function postSignUp(userData: {
       password: userData.password,
       role: userData.role.toUpperCase(),
       birthDate: userData.birthDate,
-      // Sign-up can't be submitted without the Privacy Policy checkbox.
       privacyNoticeVersion: LEGAL_VERSIONS.PRIVACY_NOTICE,
     });
     return {
@@ -297,9 +236,6 @@ export async function postSignUp(userData: {
   }
 }
 
-// POST /auth/logout — ends this device's session on the server (refresh
-// token and current access token). Best-effort; the caller clears local
-// state regardless.
 export async function postLogout(): Promise<void> {
   const refreshToken = await authStorage.getRefreshToken();
   await api.post('/auth/logout', refreshToken ? { refreshToken } : {});
@@ -312,14 +248,10 @@ export async function postLogin(email: string, password: string) {
       password,
     });
 
-    // MFA-enabled account — no session yet. The caller renders a code-entry
-    // step and exchanges this challengeToken via postMfaChallenge below.
     if (response.mfaRequired) {
       return { mfaRequired: true as const, challengeToken: response.challengeToken as string };
     }
 
-    // Two-step sign-in by email/SMS code — same idea: exchange the
-    // challengeToken via postLoginCode below.
     if (response.twoFactorRequired) {
       return {
         twoFactorRequired: true as const,
@@ -347,9 +279,6 @@ export async function postLogin(email: string, password: string) {
   }
 }
 
-// POST /auth/mfa/challenge — exchanges postLogin's mfaRequired challengeToken
-// plus a correct TOTP/backup code for a real session. Same response shape
-// as postLogin's success path so callers can route identically either way.
 export async function postMfaChallenge(challengeToken: string, code: string) {
   try {
     const response = await api.post('/auth/mfa/challenge', { challengeToken, code });
@@ -371,8 +300,6 @@ export async function postMfaChallenge(challengeToken: string, code: string) {
   }
 }
 
-// POST /auth/2fa/verify — exchanges postLogin's twoFactorRequired
-// challengeToken plus the emailed/texted code for a real session.
 export async function postLoginCode(challengeToken: string, code: string) {
   const response = await api.post('/auth/2fa/verify', { challengeToken, code });
   return {
@@ -393,16 +320,8 @@ export async function resendLoginCode(challengeToken: string): Promise<{ method:
   return api.post('/auth/2fa/resend', { challengeToken });
 }
 
-// ============================================================================
-// TWO-STEP SIGN-IN (email/SMS code) — opt-in for client/worker accounts from
-// Profile > Two-Step Sign-In. Admins use an authenticator app on the web
-// panel instead. A few older accounts still have an authenticator set up;
-// they can sign in with it (postMfaChallenge) and turn it off (disableMfa).
-// ============================================================================
-
 export type TwoFactorMethod = 'EMAIL' | 'SMS';
 
-/** Sends a confirmation code: to `method` when turning it on, to the current channel when turning it off. */
 export async function sendTwoFactorCode(method?: TwoFactorMethod): Promise<{ method: TwoFactorMethod; destination: string }> {
   return api.post('/auth/2fa/code', method ? { method } : {});
 }
@@ -419,15 +338,10 @@ export async function disableMfa(password: string, code: string): Promise<{ succ
   return api.post('/auth/mfa/disable', { password, code });
 }
 
-// POST /auth/reactivate — a deactivated worker turns their account back on,
-// then signs in as usual.
 export async function reactivateAccount(email: string, password: string): Promise<{ message?: string }> {
   return api.post('/auth/reactivate', { email, password });
 }
 
-// GET /auth/me — lighter than getUserProfile()'s /users/me (no
-// notification prefs, addresses, etc.), used where only the sign-in
-// security settings matter.
 export async function fetchCurrentUser(): Promise<{
   id: string;
   role: string;
@@ -524,10 +438,6 @@ export async function validateEmail(email: string) {
   }
 }
 
-// ============================================================================
-// BOOKING ENDPOINTS - CLIENT
-// ============================================================================
-
 export async function getBookings(status?: string) {
   try {
     const response = await api.get('/bookings', {
@@ -540,7 +450,6 @@ export async function getBookings(status?: string) {
   }
 }
 
-// One page of the caller's bookings (newest first) plus the paging metadata.
 export async function getBookingsPage(page: number): Promise<{ bookings: any[]; pagination: Pagination | null }> {
   try {
     const response = await api.get('/bookings', { params: { page, limit: 20 } });
@@ -611,11 +520,6 @@ export async function updateBookingStatus(bookingId: string, status: string) {
   }
 }
 
-// workerCancellationReason is required by the backend when the caller is a
-// worker who hasn't arrived yet (one of 'WORKER_FAULT' | 'CLIENT_NO_SHOW' |
-// 'OTHER') — omit it entirely for a client's own cancellation. After
-// arriving, a worker instead sends `fault` ('CLIENT' | 'WORKER') plus 1-5
-// proof photos (uploadJobPhoto).
 export async function cancelBooking(
   bookingId: string,
   reason?: string,
@@ -634,10 +538,6 @@ export async function cancelBooking(
     throw error;
   }
 }
-
-// ============================================================================
-// WORKER DISCOVERY & PROFILES - CLIENT
-// ============================================================================
 
 export async function getWorkers(filters?: {
   category?: string;
@@ -679,8 +579,6 @@ export interface DiscoverWorkersFilters {
   serviceTaskId?: string;
   lat?: number;
   lng?: number;
-  // Scopes results to a single worker — used to check whether a specific
-  // (e.g. profile-locked) worker works on a date rather than discovering a list.
   workerId?: string;
   page?: number;
   limit?: number;
@@ -691,13 +589,6 @@ export interface DiscoverWorkersResult {
   pagination: { page: number; limit: number; total: number; pages: number };
 }
 
-/**
- * GET /workers with the Phase 2 discovery contract (scope + date filters,
- * server-side KYC/availability filtering, sorted rating desc). Used by
- * Step 2 (live worker count for the date) and Step 3 (full worker card list)
- * — unlike the legacy `getWorkers`/`searchWorkers` above, filtering/
- * sorting/pagination all happen server-side here.
- */
 export async function discoverWorkers(filters: DiscoverWorkersFilters): Promise<DiscoverWorkersResult> {
   try {
     const params: Record<string, string | number> = {};
@@ -723,21 +614,11 @@ export async function discoverWorkers(filters: DiscoverWorkersFilters): Promise<
   }
 }
 
-/**
- * GET /workers/:id/blocked-dates — dates in the booking window this worker
- * doesn't work (weekly schedule + days they closed). The booking calendar
- * greys them out for a profile-picked worker.
- */
 export async function getWorkerUnavailableDates(workerId: string): Promise<string[]> {
   const response = await api.get(`/workers/${workerId}/blocked-dates`);
   return Array.isArray(response?.dates) ? response.dates : [];
 }
 
-/**
- * GET /workers/:id/availability?date= — whether the worker works that day
- * and the start times of the jobs they already have on it (a hint only —
- * workers can take several jobs a day).
- */
 export async function getWorkerDayAvailability(workerId: string, date: string): Promise<{ available: boolean; occupied: string[] }> {
   const response = await api.get(`/workers/${workerId}/availability`, { params: { date } });
   return { available: Boolean(response?.available), occupied: Array.isArray(response?.occupied) ? response.occupied : [] };
@@ -838,11 +719,6 @@ export async function getMyDigitalId(): Promise<WorkerDigitalId> {
   }
 }
 
-/**
- * Runs (or, with force=true, re-runs) AI resume parsing against the
- * worker's already-uploaded resume and returns the extracted result.
- * Returns a cached result without re-calling the AI unless force is set.
- */
 export async function parseMyResume(force = false): Promise<ParsedResume> {
   try {
     const response = await api.post('/workers/me/resume/parse', { force });
@@ -860,11 +736,6 @@ export async function searchWorkers(filters: {
   availableOnly?: boolean;
   sortBy?: "rating" | "priceLow" | "priceHigh";
   page?: number;
-  // How many raw candidates to fetch from the server before client-side
-  // filter/sort/paginate. Defaults to 50 for the full discovery/search
-  // screens; callers that only show a short preview (e.g. the home screen's
-  // "Available Workers" section) can pass a much smaller number instead of
-  // downloading 50 full worker records just to display 3.
   fetchLimit?: number;
 }) {
   try {
@@ -932,8 +803,6 @@ export async function getWorkerReviews(workerId: string, limit = 50) {
       photoUrls: Array.isArray(r.photoUrls) ? (r.photoUrls as string[]) : [],
     }));
 
-    // Star distribution isn't provided by the backend — approximated from
-    // the fetched page of reviews, not an exact server-side aggregate.
     const counts = [0, 0, 0, 0, 0]; // counts[0] = 1-star ... counts[4] = 5-star
     reviews.forEach((r: { rating: number }) => {
       const idx = Math.min(5, Math.max(1, Math.round(r.rating))) - 1;
@@ -968,7 +837,6 @@ export async function respondToReview(reviewId: string, response: string) {
   }
 }
 
-/** Worker reports the client's review; client reports the worker's reply. */
 export async function reportReview(bookingId: string, reason: string) {
   try {
     return await api.post(`/bookings/${bookingId}/review/report`, { reason });
@@ -977,10 +845,6 @@ export async function reportReview(bookingId: string, reason: string) {
     throw error;
   }
 }
-
-// ============================================================================
-// PAYMENT METHODS - CLIENT
-// ============================================================================
 
 export const paymentMethodTypeMap: Record<string, string> = {
   gcash: 'GCASH',
@@ -1055,10 +919,6 @@ export async function setDefaultPaymentMethod(methodId: string) {
   }
 }
 
-// ============================================================================
-// ADDRESSES - CLIENT
-// ============================================================================
-
 export type GoogleGeocodeResult = {
   formattedAddress: string;
   lat: number;
@@ -1075,12 +935,6 @@ export type GoogleGeocodeResult = {
   };
 };
 
-// Backend-proxied Google Places API (New) — the server-side API key never
-// ships to the mobile bundle. Resolves to `null`/`[]` (never throws) whenever
-// Google isn't configured server-side, the address genuinely doesn't resolve,
-// or the request fails — callers (utils/geo.ts) treat all three the same way.
-// Reverse geocoding ("use my current location") is NOT proxied: it runs
-// on-device via expo-location, see utils/geo.ts reverseGeocodeDetailed.
 export async function geocodeAddressGoogle(address: string): Promise<GoogleGeocodeResult | null> {
   try {
     return await api.post('/geo/geocode', { address });
@@ -1149,8 +1003,6 @@ export async function getAddresses() {
 
 export async function addAddress(data: {
   label: string;
-  // One free-text line shown to client and worker; the pin (lat/lng) is the
-  // location. The split fields below are Google's parts for the pin, if any.
   fullAddress: string;
   lat: number;
   lng: number;
@@ -1222,10 +1074,6 @@ export async function setDefaultAddress(addressId: string) {
   }
 }
 
-// ============================================================================
-// TRANSACTIONS - CLIENT
-// ============================================================================
-
 function titleCaseStatus(status: string) {
   return status.charAt(0).toUpperCase() + status.slice(1).toLowerCase();
 }
@@ -1245,8 +1093,6 @@ export async function getTransactions(page?: number, status?: 'PENDING' | 'COMPL
         method: p.methodType,
         status: titleCaseStatus(p.status ?? "Pending"),
         date: p.createdAt,
-        // Worker-only — the actual Xendit payout status, separate from
-        // `status` above (which only reflects the client's payment/escrow).
         payoutStatus: p.payoutStatus ?? null,
         payoutFailureReason: p.payoutFailureReason ?? null,
       })),
@@ -1285,14 +1131,9 @@ export async function getTransactionDetail(bookingId: string) {
   }
 }
 
-// Resume the Xendit checkout for a GCash/Maya booking that is AWAITING_PAYMENT
-// (client abandoned or failed an earlier attempt). Returns the live hosted
-// invoice URL, minting a fresh one server-side if the previous invoice expired.
 export async function createXenditCheckout(bookingId: string) {
   try {
     const response = await api.post(`/payments/${bookingId}/xendit/checkout`);
-    // alreadyPaid: true means the server found this already PAID on Xendit's
-    // side (webhook was missed/delayed) and self-healed it — no checkout to open.
     return response as
       | { checkoutUrl: string; invoiceId: string; amount: number; alreadyPaid?: undefined }
       | { alreadyPaid: true; checkoutUrl?: undefined };
@@ -1302,18 +1143,12 @@ export async function createXenditCheckout(bookingId: string) {
   }
 }
 
-// A worker paying down the platform dues they owe. `amount` omitted = the full
-// balance. Opens the same hosted Xendit checkout as a booking payment.
 export async function payPlatformDues(amount?: number) {
   const response = await api.post("/payments/dues", amount === undefined ? {} : { amount });
   return response as
     | { checkoutUrl: string; debtPaymentId: string; amount: number; alreadyPaid?: undefined }
     | { alreadyPaid: true; checkoutUrl?: undefined };
 }
-
-// ============================================================================
-// REVIEWS - CLIENT
-// ============================================================================
 
 export async function submitReview(
   bookingId: string,
@@ -1360,10 +1195,6 @@ export async function getMyReviews(page?: number) {
     throw error;
   }
 }
-
-// ============================================================================
-// MESSAGING
-// ============================================================================
 
 export async function getConversations() {
   try {
@@ -1483,10 +1314,6 @@ export async function unblockUser(userId: string) {
   }
 }
 
-// ============================================================================
-// NOTIFICATIONS
-// ============================================================================
-
 export async function getNotifications(page?: number) {
   try {
     const response = await api.get('/notifications', {
@@ -1549,12 +1376,6 @@ export async function removePushToken() {
   }
 }
 
-// ============================================================================
-// WORKER ENDPOINTS
-// ============================================================================
-
-// confirmFollowUp: a follow-up job (after the worker's own inspection) needs
-// the worker's explicit second confirmation — see the request screen.
 export async function acceptBooking(bookingId: string, options?: { confirmFollowUp?: boolean }) {
   try {
     const response = await api.patch(`/bookings/${bookingId}/accept`, options ?? {});
@@ -1585,12 +1406,10 @@ export async function startBooking(bookingId: string) {
   }
 }
 
-// Worker's photos of the job as found, posted right after starting.
 export async function addBeforePhotos(bookingId: string, photoUrls: string[]) {
   return api.post(`/bookings/${bookingId}/before-photos`, { photoUrls });
 }
 
-// Worker's "ongoing" proof photos while the job is IN_PROGRESS.
 export async function addProgressPhotos(bookingId: string, photoUrls: string[]) {
   return api.post(`/bookings/${bookingId}/progress-photos`, { photoUrls });
 }
@@ -1603,11 +1422,6 @@ export interface BookingVisit {
   status: 'SCHEDULED' | 'DONE' | 'CANCELLED';
 }
 
-/**
- * POST /bookings/:id/visits — "Follow Up Date": the worker schedules another
- * visit when the job needs more than one day. nearbyJobs lists their other
- * jobs starting close to it (a heads-up, never a block).
- */
 export async function scheduleFollowUpVisit(
   bookingId: string,
   date: string,
@@ -1621,7 +1435,6 @@ export async function cancelFollowUpVisit(bookingId: string, visitId: string): P
   return api.patch(`/bookings/${bookingId}/visits/${visitId}/cancel`);
 }
 
-/** PATCH /bookings/:id/acknowledge-reschedule — client keeps the new date. */
 export async function acknowledgeReschedule(bookingId: string) {
   try {
     const response = await api.patch(`/bookings/${bookingId}/acknowledge-reschedule`);
@@ -1632,11 +1445,6 @@ export async function acknowledgeReschedule(bookingId: string) {
   }
 }
 
-/**
- * PATCH /bookings/:id/request-reschedule — the client OR the worker proposes
- * a new date + start time for an ACCEPTED booking; the other side accepts or
- * declines (respondToRescheduleRequest).
- */
 export async function requestReschedule(bookingId: string, date: string, time: string) {
   try {
     const response = await api.patch(`/bookings/${bookingId}/request-reschedule`, { date, time });
@@ -1647,7 +1455,6 @@ export async function requestReschedule(bookingId: string, date: string, time: s
   }
 }
 
-/** PATCH /bookings/:id/reschedule-request/withdraw — the side that asked backs out of its own pending request. */
 export async function withdrawRescheduleRequest(bookingId: string) {
   try {
     const response = await api.patch(`/bookings/${bookingId}/reschedule-request/withdraw`);
@@ -1658,7 +1465,6 @@ export async function withdrawRescheduleRequest(bookingId: string) {
   }
 }
 
-/** PATCH /bookings/:id/reschedule-request/respond — the other side accepts or declines the proposed date. */
 export async function respondToRescheduleRequest(bookingId: string, accept: boolean) {
   try {
     const response = await api.patch(`/bookings/${bookingId}/reschedule-request/respond`, { accept });
@@ -1680,12 +1486,6 @@ export interface ArrivalVerificationResult {
   };
 }
 
-/**
- * PATCH /bookings/:id/arrive — worker checks in at the job site. The
- * backend enforces the <=100m geofence server-side (against the client's
- * booked lat/lng) and rejects with a 409 if the worker is too far; this
- * wrapper just forwards the device's current GPS reading.
- */
 export async function arriveBooking(
   bookingId: string,
   lat: number,
@@ -1702,9 +1502,6 @@ export async function arriveBooking(
   }
 }
 
-// Fire-and-forget-ish: called every few seconds by the worker's foreground
-// GPS watch while en route. Callers should swallow failures (a dropped ping
-// isn't worth surfacing an error to the worker) rather than retry-storm.
 export async function updateWorkerLiveLocation(bookingId: string, lat: number, lng: number, accuracy?: number | null) {
   const response = await api.patch(`/bookings/${bookingId}/live-location`, { lat, lng, accuracy });
   return response;
@@ -1736,8 +1533,6 @@ export async function uploadBookingCompletionPhoto(
   }
 }
 
-// The worker's other job photos — invoice receipts, extra work, proof for a
-// cancellation after arriving. Same storage as the completion photo.
 export async function uploadJobPhoto(bookingId: string, uri: string, mimeType?: string | null): Promise<{ url: string }> {
   const filename = uri.split('/').pop() ?? `job-${Date.now()}.jpg`;
   const formData = new FormData();
@@ -1795,7 +1590,6 @@ export async function uploadReviewPhoto(
   }
 }
 
-/** A line the worker adds to the invoice: a part (receipt photo) or extra work (photo of the work). */
 export type InvoiceItemPayload = {
   kind: 'PART' | 'EXTRA_WORK';
   name: string;
@@ -1803,10 +1597,6 @@ export type InvoiceItemPayload = {
   photoUrls: string[];
 };
 
-// Sends the invoice. A CASH job resolves 'PENDING_COMPLETION' (the worker then
-// taps Cash received); a GCash/Maya job resolves 'AWAITING_PAYMENT' once its
-// Xendit invoice is raised, or stays 'PENDING_COMPLETION' if that failed (the
-// client's Pay now retries).
 export async function completeBooking(bookingId: string, completionPhotoUrl: string, items: InvoiceItemPayload[] = []) {
   try {
     const response = await api.patch(`/bookings/${bookingId}/complete`, { completionPhotoUrl, items });
@@ -1844,7 +1634,6 @@ export async function reportCashNotPaid(bookingId: string) {
   }
 }
 
-/** Worker confirms the client paid a cash invoice; the booking is done. */
 export async function markCashReceived(bookingId: string) {
   try {
     return await api.patch(`/bookings/${bookingId}/cash-received`);
@@ -1854,7 +1643,6 @@ export async function markCashReceived(bookingId: string) {
   }
 }
 
-/** Client reports the invoice before paying; an admin reviews it. */
 export async function reportInvoice(bookingId: string, reason: string, evidenceUrls?: string[]) {
   try {
     return await api.patch(`/bookings/${bookingId}/invoice/report`, { reason, evidenceUrls });
@@ -1866,7 +1654,6 @@ export async function reportInvoice(bookingId: string, reason: string, evidenceU
 
 export type ProblemReason = 'WORKER_NOT_HERE' | 'WORKER_STOPPED' | 'NEED_TO_CANCEL' | 'OTHER';
 
-/** Client reports a problem with an accepted or ongoing booking; the server picks the outcome. */
 export async function reportBookingProblem(bookingId: string, reason: ProblemReason, note?: string) {
   try {
     const response = await api.post(`/bookings/${bookingId}/problem`, { reason, note });
@@ -1884,9 +1671,6 @@ export type ConfirmCompletionResult =
   | { status: 'COMPLETED'; finalPrice?: number; completedAt?: string; payment?: unknown }
   | { status: 'AWAITING_PAYMENT'; checkoutUrl: string; invoiceId: string; amount: number };
 
-// Pay now on a GCash/Maya invoice: resolves { status: 'AWAITING_PAYMENT',
-// checkoutUrl, ... }; open the checkout URL and poll the transaction detail
-// for the final outcome. Refused for cash (the worker confirms it).
 export async function confirmBookingCompletion(bookingId: string) {
   try {
     const response = await api.patch(`/bookings/${bookingId}/confirm-completion`);
@@ -1921,7 +1705,6 @@ export interface CalendarJob {
 export interface CalendarDay {
   date: string; // YYYY-MM-DD
   available: boolean;
-  // true when the worker changed this date from their weekly schedule
   overridden: boolean;
   jobCount: number;
   jobs: CalendarJob[];
@@ -1934,21 +1717,14 @@ export interface WorkerCalendar {
   days: CalendarDay[];
 }
 
-/** GET /workers/me/calendar — availability plus accepted jobs/visits per day (inclusive range). */
 export async function getMyCalendar(from: string, to: string): Promise<WorkerCalendar> {
   return api.get('/workers/me/calendar', { params: { from, to } });
 }
 
-/** PUT /workers/me/weekly-schedule — the weekdays the worker normally works. */
 export async function updateWeeklySchedule(availableDays: number[]): Promise<{ availableDays: number[] }> {
   return api.put('/workers/me/weekly-schedule', { availableDays });
 }
 
-/**
- * PUT /workers/me/date-overrides — open (true) or close (false) specific
- * dates; null puts them back on the weekly schedule. Rejected (409) when a
- * date being closed has an accepted job.
- */
 export async function updateDateOverrides(dates: string[], isAvailable: boolean | null): Promise<void> {
   await api.put('/workers/me/date-overrides', { dates, isAvailable });
 }
@@ -1967,8 +1743,6 @@ export interface MyWorkerProfileDetails {
   digitalIdServiceArea: string | null;
   licenseNumber: string | null;
   birthDate: string | null;
-  // Years in the trade (incl. outside HomeEase) — set during KYC, confirmed
-  // by the admin, then locked. One of the expertise-tier requirements.
   yearsExperience: number | null;
   availableDays: number[];
   kycStatus: string;
@@ -1976,9 +1750,6 @@ export interface MyWorkerProfileDetails {
   kycApprovedAt: string | null;
 }
 
-// Self-service read, distinct from getWorkerDetail(workerId) (the public
-// profile view) — this is the only place addressLat/addressLng (precise
-// home/service coordinates) are exposed, since that endpoint is public.
 export async function getMyWorkerProfileDetails(): Promise<MyWorkerProfileDetails> {
   try {
     const response = await api.get('/workers/me/profile');
@@ -1990,7 +1761,6 @@ export async function getMyWorkerProfileDetails(): Promise<MyWorkerProfileDetail
 }
 
 export async function updateWorkerProfileDetails(data: {
-  // YYYY-MM-DD; the backend checks the accepted age range. Locked after KYC approval.
   birthDate?: string;
   // Locked after KYC approval, like birthDate.
   yearsExperience?: number;
@@ -2000,10 +1770,6 @@ export async function updateWorkerProfileDetails(data: {
   city?: string;
   state?: string;
   zipCode?: string;
-  // null (not just omitted) is a valid, meaningful value here — it tells the
-  // backend to clear a now-stale addressLat/Lng (e.g. the address text
-  // changed but re-geocoding it failed), as opposed to omitting the field
-  // entirely to leave whatever's already stored untouched.
   addressLat?: number | null;
   addressLng?: number | null;
   resumeUrl?: string;
@@ -2041,7 +1807,6 @@ export type WorkerServiceCategory = {
   rejectedAt: string | null;
 };
 
-/** Every category the worker has any connection to — including ones still PENDING_VERIFICATION or REJECTED. */
 export async function getMyServiceTypes(): Promise<WorkerServiceCategory[]> {
   try {
     const response = await api.get('/workers/me/service-types');
@@ -2060,11 +1825,6 @@ export type CertificationGateInput = {
   documentUrl: string;
 };
 
-/**
- * Request a service. The documents are what the admin reviews; the request
- * usually comes back PENDING_VERIFICATION (a worker's very first service is
- * approved straight away unless it requires a certification).
- */
 export async function addServiceCategory(
   serviceTypeId: string,
   gate?: { certificationId?: string; certifications?: CertificationGateInput[] }
@@ -2102,7 +1862,6 @@ export type TaskCatalogEntry = {
       name: string;
       description?: string | null;
       pricingModel: TaskPricingModel;
-      // The admin's price (read-only for workers); null for a job with no price yet.
       price: number | null;
       unitLabel: string | null;
     };
@@ -2110,10 +1869,6 @@ export type TaskCatalogEntry = {
   }>;
 };
 
-/**
- * One consolidated read for the "Skills & Services" screen: every service
- * with the worker's registration status and ticked tasks.
- */
 export async function getMyTaskCatalog(): Promise<TaskCatalogEntry[]> {
   try {
     const response = await api.get('/workers/me/task-catalog');
@@ -2124,7 +1879,6 @@ export async function getMyTaskCatalog(): Promise<TaskCatalogEntry[]> {
   }
 }
 
-/** "I do this task" — only under a service the worker is approved for. */
 export async function selectTask(
   serviceTaskId: string
 ): Promise<{ taskSelection: WorkerTaskSelection; category: WorkerServiceCategory }> {
@@ -2157,7 +1911,6 @@ export type WorkerPackage = {
   description?: string | null;
   price: number;
   isActive: boolean;
-  // Clients only see APPROVED packages. Editing one sends it back to PENDING.
   status: PackageReviewStatus;
   rejectionReason?: string | null;
 };
@@ -2170,7 +1923,6 @@ export type WorkerSetupStatus = {
   missing: WorkerSetupItemKey[];
 };
 
-/** Until complete, the worker is hidden from clients and can't accept requests. */
 export async function getMySetupStatus(): Promise<WorkerSetupStatus> {
   try {
     const response = await api.get('/workers/me/setup-status');
@@ -2229,7 +1981,6 @@ export async function deletePackage(packageId: string) {
   }
 }
 
-/** Public — a client viewing/booking a worker fetches that worker's active, admin-approved packages, optionally scoped to a service type. */
 export async function getWorkerPackages(workerId: string, serviceTypeId?: string): Promise<WorkerPackage[]> {
   try {
     const query = serviceTypeId ? `?serviceTypeId=${encodeURIComponent(serviceTypeId)}` : '';
@@ -2322,10 +2073,6 @@ export async function updateCertification(
   }
 }
 
-// Dedicated toggle, kept separate from updateCertification — flipping this
-// is a display preference, not an edit to the underlying claim, so it must
-// NOT reset the certification's verificationStatus back to PENDING the way
-// a full edit does.
 export async function updateCertificationVisibility(
   certId: string,
   visibleToClients: boolean,
@@ -2380,10 +2127,6 @@ export async function updatePayoutMethod(data: {
   }
 }
 
-// ============================================================================
-// PROFILE ENDPOINTS
-// ============================================================================
-
 export async function updateUserProfile(data: {
   fullName?: string;
   phone?: string;
@@ -2409,7 +2152,6 @@ export async function updateUserProfile(data: {
       email: response.email,
       phone: response.phone,
       avatar: response.avatar,
-      // PATCH /users/me doesn't return role; callers spread this over the store user.
       ...(response.role && { role: response.role.toLowerCase() }),
       bio: response.bio,
       yearsOfExperience: response.yearsOfExperience,
@@ -2509,8 +2251,6 @@ export async function getKycDocuments(): Promise<KycDocumentRecord[]> {
 
 export async function acceptContract(contractType: LegalDocumentType) {
   try {
-    // The server records its own timestamp, IP and device; the app only
-    // says which document and which version was shown.
     const response = await api.post('/users/me/contract-acceptance', {
       contractType,
       contractVersion: LEGAL_VERSIONS[contractType],
@@ -2522,8 +2262,6 @@ export async function acceptContract(contractType: LegalDocumentType) {
   }
 }
 
-// Unauthenticated: a suspended/banned user can't log in, so they prove it's
-// their account with email + password instead (see authController).
 export async function requestSuspensionReview(email: string, password: string, message: string) {
   return api.post('/auth/suspension-review', { email, password, message });
 }
@@ -2544,15 +2282,11 @@ export async function changePassword(currentPassword: string, newPassword: strin
   }
 }
 
-/** How many devices are signed in — "Log out other devices" only shows when there's more than one. */
 export async function getActiveSessionCount(): Promise<number> {
   const response = await api.get('/users/me/sessions');
   return response.activeSessions ?? 1;
 }
 
-// Signs out every OTHER device (this one stays signed in). signedOutCurrent
-// is true only for a session from before per-device sessions existed, in
-// which case this device was signed out too.
 export async function logoutAllSessions(): Promise<{ success: true; message: string; signedOutCurrent: boolean }> {
   try {
     const response = await api.post('/users/me/logout-all', {});
@@ -2567,8 +2301,6 @@ export async function logoutAllSessions(): Promise<{ success: true; message: str
   }
 }
 
-// Worker only — takes them off HomeEase without deleting anything; signing
-// in again offers to reactivate.
 export async function deactivateAccount(password: string, reason?: string): Promise<{ message?: string }> {
   return api.post('/users/me/deactivate', { password, reason });
 }
@@ -2587,10 +2319,7 @@ export async function getUserProfile() {
       kycRejectionReason: response.kycRejectionReason,
       hasAcceptedTerms: response.hasAcceptedTerms,
       declineCooldownUntil: response.declineCooldownUntil,
-      // Set (non-null) only for a worker whose account is on hold for
-      // outstanding platform dues — see debtLedgerService.ts on the backend.
       accountHold: response.accountHold as { since: string; amountOwed: number } | null | undefined,
-      // Worker only: outstanding platform dues (commission on cash jobs, penalties).
       platformDues: response.platformDues as number | undefined,
       bio: response.bio,
       yearsOfExperience: response.yearsOfExperience,
@@ -2622,13 +2351,10 @@ export async function updateNotificationPreferences(preferences: {
   }
 }
 
-// Step 2 of deleting the account: rejected (409, with `blockers`) while
-// something still ties the account down; otherwise emails a code.
 export async function requestAccountDeletionCode(): Promise<void> {
   await api.post('/users/me/delete-code', {});
 }
 
-// Final step: password, the emailed code and the typed confirmation phrase.
 export async function deleteAccount(data: { password: string; code: string; confirmText: string; reason?: string }) {
   try {
     const response = await api.delete('/users/me', { data });
@@ -2642,23 +2368,10 @@ export async function deleteAccount(data: { password: string; code: string; conf
   }
 }
 
-// ============================================================================
-// UTILITY FUNCTION
-// ============================================================================
-
 function delay(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-// Service catalog is admin-managed (name/price/icon/etc. can change at any
-// time from the web admin), but was being independently re-fetched with its
-// own loading spinner in 5 different screens/components. Cache it in memory
-// for a short TTL rather than the whole app session — long enough to still
-// dedupe the repeat fetches those screens were doing, short enough that an
-// admin edit (e.g. changing a category's icon) shows up on next navigation
-// instead of only after a full app restart. `servicesPromise` also dedupes
-// concurrent calls if two screens mount at once on first load, so they share
-// one in-flight request instead of firing two.
 const SERVICE_TYPES_TTL_MS = 5 * 60 * 1000; // 5 minutes
 let cachedServiceTypes: any[] | null = null;
 let cachedServiceTypesAt = 0;
@@ -2691,15 +2404,12 @@ export type PromoBannerItem = {
   title: string;
   subtitle: string | null;
   imageUrl: string;
-  /** Service category to open when tapped, or null for display-only. */
   linkServiceTypeId: string | null;
   /** Hex like "#FFFFFF"; null = white. */
   textColor?: string | null;
-  /** SERIF | MONOSPACE | CONDENSED | CASUAL; null = app default. */
   fontFamily?: string | null;
 };
 
-/** Live home-screen banners, managed by admins (Catalog & Pricing → Promo Banners). */
 export async function getPromoBanners(): Promise<PromoBannerItem[]> {
   const response = await api.get('/promo-banners');
   return Array.isArray(response) ? (response as PromoBannerItem[]) : [];

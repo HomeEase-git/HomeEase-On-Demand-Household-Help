@@ -21,7 +21,6 @@ export default function RoleSelectionScreen() {
   return (
     <SafeAreaView className="flex-1 bg-white" edges={["top", "bottom"]}>
       <View className="flex-1 px-6 pt-6 pb-6">
-        {/* Back to the landing screen, where "I already have an account" is. */}
         <View className="flex-row items-center mb-6">
           <Pressable
             className="w-10 h-10 rounded-full items-center justify-center bg-card-light"

@@ -94,8 +94,6 @@ export const AlertModalProvider: React.FC<{ children: React.ReactNode }> = ({
 
   const confirm = useCallback(
     (title: string, message?: string, opts?: ConfirmOptions) => {
-      // Destructive questions (cancel, decline, delete) get a warning buzz;
-      // ordinary confirmations stay silent.
       if (opts?.destructive) feedback.warning();
       showAlert({
         variant: opts?.destructive ? "error" : "warning",

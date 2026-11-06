@@ -18,12 +18,9 @@ export default function NotificationPreferencesScreen() {
   const [promos, setPromos] = useState(false);
   const [system, setSystem] = useState(true);
   const [saving, setSaving] = useState(false);
-  // Save stays off until the server values are in, or it would overwrite them with defaults.
   const [loaded, setLoaded] = useState(false);
   const [sounds, setSounds] = useState(areSoundsEnabled());
 
-  // Stored on this phone and applied right away (not part of Save below,
-  // which updates the account's notification settings on the server).
   const toggleSounds = (value: boolean) => {
     setSounds(value);
     setSoundsEnabled(value);

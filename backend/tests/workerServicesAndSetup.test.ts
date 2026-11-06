@@ -3,8 +3,6 @@ import app from '@/app';
 import prisma from '@config/database';
 import { createTestUser, deleteTestUser, completeWorkerSetup } from './helpers';
 
-// Admin-fixed prices, requesting a new service with documents, worker
-// packages needing admin approval, and the account-setup gate.
 describe('Worker services, packages and setup', () => {
   const createdUserIds: string[] = [];
   const createdServiceTypeIds: string[] = [];
@@ -95,7 +93,6 @@ describe('Worker services, packages and setup', () => {
         .set('Authorization', `Bearer ${workerToken}`)
         .send({ serviceTypeId: laundry.id });
       expect(res.status).toBe(201);
-      // Still reviewed by an admin, just with no documents.
       expect(res.body.data.serviceCategory.status).toBe('PENDING_VERIFICATION');
       expect(res.body.data.serviceCategory.gatingCertificationId).toBeNull();
     });
@@ -286,7 +283,6 @@ describe('Worker services, packages and setup', () => {
         });
       expect(res.status).toBe(201);
       const booking = await prisma.booking.findFirstOrThrow({ where: { workerId, serviceTaskId } });
-      // New worker (no completed jobs) = STANDARD tier, 0 km = no distance fee.
       expect(booking.estimatedPrice).toBe(900);
     });
   });

@@ -16,8 +16,6 @@ type Request = {
   date: string;
   amount: number;
   status: string;
-  // Optional richer detail for the worker-facing Job Requests Stream —
-  // omitted callers (e.g. the home-screen preview) just don't render this row.
   roomsSummary?: string;
   distanceKm?: number | null;
   payoutEstimate?: number | null;

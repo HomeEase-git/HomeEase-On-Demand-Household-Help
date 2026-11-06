@@ -7,20 +7,6 @@ type LoadingErrorState = {
   clearError: () => void;
 };
 
-/**
- * useLoadingError
- *
- * A lightweight hook that wraps async operations with consistent
- * loading and error state. Use it on any screen that makes API calls.
- *
- * Usage:
- *   const { loading, error, run, clearError } = useLoadingError();
- *
- *   const handleSubmit = () => run(async () => {
- *     const result = await someApiCall();
- *     router.push("/next-screen");
- *   });
- */
 export function useLoadingError(): LoadingErrorState {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);

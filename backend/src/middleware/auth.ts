@@ -30,10 +30,6 @@ export const authMiddleware = async (
 
     const decoded = verifyToken(token);
 
-    // A challenge token minted mid-login for an MFA-enabled admin (see
-    // authController.login/mfaChallenge) is not a session — it exists only
-    // to be handed to POST /auth/mfa/challenge. Reject it here so a leaked
-    // challenge token can't be replayed against any protected route.
     if (decoded.type === 'mfa_pending' || decoded.type === 'otp_pending') {
       res.status(401).json({
         success: false,
@@ -42,13 +38,6 @@ export const authMiddleware = async (
       return;
     }
 
-    // Banned/suspended users otherwise keep a valid-looking access token
-    // for up to JWT_EXPIRY (7 days by default) — this is what makes a ban
-    // actually take effect immediately. See
-    // adminUserController.setUserStatus / utils/tokenRevocation.ts. Fails
-    // open (never blocks a request) if Redis itself is unreachable.
-    // "Log out other devices" revokes individual sessions (see
-    // userController.logoutOtherSessions).
     if ((await isUserSessionRevoked(decoded.userId)) || (decoded.sid && (await isSessionRevoked(decoded.sid)))) {
       res.status(401).json({
         success: false,

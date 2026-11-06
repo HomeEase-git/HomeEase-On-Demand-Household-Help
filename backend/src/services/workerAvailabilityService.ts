@@ -1,31 +1,17 @@
 import type { Prisma, TimeSlot } from '@prisma/client';
 import prisma from '@config/database';
 
-/**
- * Scheduling and worker availability.
- *
- * A booking is a PH calendar date (stored as UTC midnight, see toDayStart)
- * plus an exact PH-local start time "HH:mm". Workers aren't limited to a
- * number of jobs per day. A worker is available on a date when its weekday
- * is in WorkerProfile.availableDays, unless a WorkerDateOverride for that
- * date says otherwise.
- */
-
 type DbClient = typeof prisma | Prisma.TransactionClient;
 
-/** Normalizes any Date/date-like value to UTC midnight, matching how booking dates are stored. */
 export function toDayStart(date: Date | string): Date {
   const d = new Date(date);
   d.setUTCHours(0, 0, 0, 0);
   return d;
 }
 
-// The Philippines doesn't observe DST, so a fixed offset is always correct
-// for converting a UTC instant to PH local wall-clock time.
 export const PH_UTC_OFFSET_MS = 8 * 60 * 60 * 1000;
 const HOUR_MS = 60 * 60 * 1000;
 
-/** Today's PH calendar date, as UTC midnight (same form as Booking.scheduledDate). */
 export function phTodayStart(now: Date = new Date()): Date {
   return toDayStart(new Date(now.getTime() + PH_UTC_OFFSET_MS));
 }
@@ -42,14 +28,11 @@ export function isoDay(day: Date): string {
   return day.toISOString().slice(0, 10);
 }
 
-// Clients pick a start time (any minute) from FIRST_START_HOUR:00 to
-// LAST_START_HOUR:00 (PH local). Mirrored on mobile in utils/bookingTime.ts.
 export const FIRST_START_HOUR = 7;
 export const LAST_START_HOUR = 18;
 // How far ahead a client can book.
 export const MAX_BOOKING_DAYS_AHEAD = 60;
 
-/** "HH:mm" between FIRST_START_HOUR:00 and LAST_START_HOUR:00. */
 export function isValidStartTime(value: unknown): value is string {
   if (typeof value !== 'string' || !/^\d{2}:[0-5]\d$/.test(value)) return false;
   const [hour, minute] = value.split(':').map(Number);
@@ -65,22 +48,18 @@ export function formatTime12h(time: string): string {
   return `${hour}:${String(m).padStart(2, '0')} ${suffix}`;
 }
 
-// Start of the old MORNING/AFTERNOON/EVENING slots, for bookings made
-// before exact times existed.
 const LEGACY_SLOT_START: Record<TimeSlot, string> = {
   MORNING: '08:00',
   AFTERNOON: '12:00',
   EVENING: '16:00',
 };
 
-/** The PH-local "HH:mm" a booking starts at (falls back to its legacy slot, then 08:00). */
 export function bookingStartTime(booking: { scheduledTime?: string | null; timeSlot?: TimeSlot | null }): string {
   if (booking.scheduledTime && /^\d{2}:\d{2}$/.test(booking.scheduledTime)) return booking.scheduledTime;
   if (booking.timeSlot) return LEGACY_SLOT_START[booking.timeSlot];
   return '08:00';
 }
 
-/** The real UTC instant a PH date + "HH:mm" start time happens. */
 export function startInstant(scheduledDate: Date, time: string): Date {
   const [h, m] = time.split(':').map(Number);
   return new Date(toDayStart(scheduledDate).getTime() + (h * 60 + m) * 60 * 1000 - PH_UTC_OFFSET_MS);
@@ -95,11 +74,6 @@ export function bookingStartInstant(booking: {
   return startInstant(booking.scheduledDate, bookingStartTime(booking));
 }
 
-/**
- * When a worker who alerted an absent client can cancel as a client no-show:
- * the grace period counts from the alert, but never from before the booked
- * start, so an early check-in can't charge the client before their own time.
- */
 export function clientNoShowDeadline(
   booking: { scheduledDate: Date; scheduledTime?: string | null; timeSlot?: TimeSlot | null; clientNotHereAt: Date },
   graceMinutes: number
@@ -108,18 +82,12 @@ export function clientNoShowDeadline(
   return new Date(from + graceMinutes * 60 * 1000);
 }
 
-/** Whether a PH date is today (a same-day, "rush" booking). */
 export function isRushDate(date: Date | string, now: Date = new Date()): boolean {
   return toDayStart(date).getTime() === phTodayStart(now).getTime();
 }
 
 export type StartCheck = { ok: true; isRush: boolean } | { ok: false; message: string };
 
-/**
- * Whether a client may book (or reschedule to) this date + start time: not
- * in the past, within MAX_BOOKING_DAYS_AHEAD, and for a same-day booking at
- * least rushMinLeadHours from now so the worker can accept and travel.
- */
 export function checkBookingStart(
   date: Date | string,
   time: string,
@@ -150,11 +118,6 @@ export function checkBookingStart(
   return { ok: true, isRush };
 }
 
-/**
- * Flag-only arrival check: whether a check-in is on a different day, more
- * than 2 hours early, or after the no-show grace period. Never blocks the
- * check-in itself; it's surfaced for admin review.
- */
 export function isOutsideBookedWindow(start: Date, at: Date, graceMinutes: number): boolean {
   const phAtDay = toDayStart(new Date(at.getTime() + PH_UTC_OFFSET_MS));
   const phStartDay = toDayStart(new Date(start.getTime() + PH_UTC_OFFSET_MS));
@@ -162,15 +125,10 @@ export function isOutsideBookedWindow(start: Date, at: Date, graceMinutes: numbe
   return at.getTime() < start.getTime() - 2 * HOUR_MS || at.getTime() > start.getTime() + graceMinutes * 60 * 1000;
 }
 
-/** 0 = Sunday ... 6 = Saturday for a UTC-midnight PH date. */
 export function weekdayOf(date: Date | string): number {
   return toDayStart(date).getUTCDay();
 }
 
-/**
- * Prisma filter: workers available on this date — the weekday is on their
- * weekly schedule and not closed by an override, or an override opens it.
- */
 export function availableOnDateWhere(date: Date | string): Prisma.WorkerProfileWhereInput {
   const day = toDayStart(date);
   return {
@@ -184,7 +142,6 @@ export function availableOnDateWhere(date: Date | string): Prisma.WorkerProfileW
   };
 }
 
-/** Whether one worker is available on a date (see availableOnDateWhere). */
 export async function isWorkerAvailableOn(
   db: DbClient,
   worker: { id: string; availableDays: number[] },
@@ -208,22 +165,16 @@ export const LIVE_BOOKING_STATUSES = [
   'DISPUTED',
 ] as const;
 
-// Bookings the worker has committed to (shown as jobs on their calendar).
 const COMMITTED_BOOKING_STATUSES = ['ACCEPTED', 'IN_PROGRESS', 'QUOTE_SUBMITTED', 'QUOTE_APPROVED', 'DISPUTED'] as const;
 
 export type CalendarDay = {
   date: string;
   available: boolean;
-  // true when the worker changed this date from their weekly schedule
   overridden: boolean;
   jobCount: number;
   jobs: { bookingId: string; time: string; service: string; kind: 'JOB' | 'VISIT'; status: string }[];
 };
 
-/**
- * One worker's calendar between two dates (inclusive): availability plus the
- * accepted jobs and follow-up visits on each day.
- */
 export async function getWorkerCalendar(
   db: DbClient,
   worker: { id: string; userId: string; availableDays: number[] },
@@ -306,10 +257,6 @@ export async function getWorkerCalendar(
   return days;
 }
 
-/**
- * The worker's other committed jobs on a date whose start time is within
- * `windowHours` of `time` — shown as an overlap warning before they accept.
- */
 export async function findNearbyJobs(
   db: DbClient,
   workerUserId: string,

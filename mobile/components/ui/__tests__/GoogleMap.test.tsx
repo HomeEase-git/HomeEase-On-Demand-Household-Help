@@ -6,8 +6,6 @@ import GoogleMap, { type GoogleMapHandle } from "../GoogleMap";
 const mockFitToCoordinates = jest.fn();
 const mockShowCallout = jest.fn();
 
-// react-native-maps is a native module — stand in with plain host views that
-// record their props, and expose the two imperative methods the map uses.
 jest.mock("react-native-maps", () => {
   const React = require("react");
   const { View } = require("react-native");

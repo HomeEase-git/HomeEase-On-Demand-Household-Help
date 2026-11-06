@@ -1,9 +1,3 @@
-/**
- * Color Palette - Light Theme
- * Single source of truth lives in `tailwind.config.js` (NativeWind needs it as
- * plain CommonJS); this file just re-exports that same object, typed, so JS/TS
- * code (icon colors, StyleSheet, etc.) and Tailwind classNames can never drift.
- */
 import tailwindConfig from "../tailwind.config.js";
 
 export interface AppColors {

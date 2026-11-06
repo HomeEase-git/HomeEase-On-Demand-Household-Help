@@ -27,8 +27,6 @@ export default function SelfieScreen() {
   const [submitting, setSubmitting] = useState(false);
   const isWorker = user?.role === "worker";
 
-  // Clients only need ID + selfie; workers continue on to
-  // clearances/certifications, resume, then the contract.
   const stepperSteps = isWorker ? KYC_STEPS.worker : KYC_STEPS.client;
 
   useEffect(() => {

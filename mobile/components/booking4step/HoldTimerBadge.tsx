@@ -9,11 +9,6 @@ type Props = {
   workerName?: string | null;
 };
 
-/**
- * 10-minute countdown shown after a worker is selected. Client-side UX
- * affordance only — see hooks/useBookingHoldTimer.ts for why nothing is
- * actually reserved server-side.
- */
 export default function HoldTimerBadge({ holdStartedAt, workerName }: Props) {
   const timer = useBookingHoldTimer(holdStartedAt);
 

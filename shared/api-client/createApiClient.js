@@ -5,10 +5,6 @@ export function createApiClient({ getBaseUrl, storage }) {
   const clearAuthSession = () => storage.clearSession();
   const baseUrl = () => getBaseUrl().replace(/\/$/, '');
 
-  // Access tokens last minutes; this trades the stored refresh token for a
-  // new pair. One request at a time per tab: the server treats a second use
-  // of the same refresh token as theft and ends the session. Resolves the
-  // new access token, or null if the session is over.
   let refreshInFlight = null;
   const RACE_WAIT_MS = 5000;
 
@@ -23,8 +19,6 @@ export function createApiClient({ getBaseUrl, storage }) {
           body: JSON.stringify({ refreshToken }),
         });
         if (!response.ok) {
-          // Another tab rotated the shared token a moment ago — wait for it
-          // to store the new pair and use that, rather than signing out.
           const body = await response.json().catch(() => ({}));
           if (body.code !== 'REFRESH_RACE') return null;
           for (let waited = 0; waited < RACE_WAIT_MS; waited += 100) {
@@ -43,8 +37,6 @@ export function createApiClient({ getBaseUrl, storage }) {
     return refreshInFlight;
   }
 
-  // Authenticated fetch that returns the raw Response (for downloads) —
-  // refreshes an expired access token once and replays the request.
   async function apiFetch(path, options = {}, isRetry = false) {
     const token = getStoredToken();
     const headers = { ...options.headers };
@@ -57,28 +49,20 @@ export function createApiClient({ getBaseUrl, storage }) {
       headers,
     });
 
-    // Only for requests that carried a session (a wrong password at login is
-    // also a 401).
     if (response.status === 401 && token && !isRetry) {
       let newToken;
       try {
         newToken = await refreshSession();
       } catch {
-        // Couldn't reach the server to refresh — keep the session and report
-        // the original error.
         return response;
       }
       if (newToken) return apiFetch(path, options, true);
-      // Refused: the session is over, unless another tab has signed in again
-      // in the meantime.
       if (getStoredToken() === token) {
         clearAuthSession();
         if (typeof window !== 'undefined') window.dispatchEvent(new Event('homeease:session-expired'));
       }
     }
 
-    // An admin without MFA has a session but is refused admin routes until
-    // setup is done — let the app route them to the setup screen.
     if (response.status === 403 && typeof window !== 'undefined') {
       const body = await response.clone().json().catch(() => ({}));
       if (body.code === 'ADMIN_MFA_REQUIRED') window.dispatchEvent(new Event('homeease:mfa-required'));
@@ -123,10 +107,6 @@ export function createApiClient({ getBaseUrl, storage }) {
 
     const user = response.data;
 
-    // MFA-enabled admin: the backend deliberately withholds a real session
-    // here (only { mfaRequired: true, challengeToken }) — there's no token
-    // to store yet, so return as-is and let the caller drive the challenge
-    // step (see mfaChallenge below) before any session exists.
     if (user && user.mfaRequired) {
       return user;
     }
@@ -142,8 +122,6 @@ export function createApiClient({ getBaseUrl, storage }) {
     return user;
   }
 
-  // Exchanges a login-issued challengeToken + TOTP/backup code for a real
-  // session — the second step of admin MFA login (see `login` above).
   async function mfaChallenge(challengeToken, code) {
     const response = await apiRequest('/auth/mfa/challenge', {
       method: 'POST',
@@ -185,8 +163,6 @@ export function createApiClient({ getBaseUrl, storage }) {
     return response.data;
   }
 
-  // Ends the session server-side (refresh token + current access token),
-  // then locally. Local state is cleared even if the server call fails.
   async function logout() {
     const token = getStoredToken();
     const refreshToken = storage.getRefreshToken();

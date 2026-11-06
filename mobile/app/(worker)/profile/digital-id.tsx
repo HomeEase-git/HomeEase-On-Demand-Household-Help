@@ -13,7 +13,6 @@ import * as api from "../../../services/api";
 import type { WorkerDigitalId } from "../../../types/api.types";
 import { colors, cardShadow, config } from "../../../constants";
 
-/** Uppercase micro-label above each value on the card. */
 function FieldLabel({
   children,
   hint,
@@ -40,7 +39,6 @@ function FieldLabel({
   );
 }
 
-/** Two-tone diagonal stripe bar that caps the back of the card. */
 function StripeBar({ width }: { width: number }) {
   const H = 14;
   const step = 15;

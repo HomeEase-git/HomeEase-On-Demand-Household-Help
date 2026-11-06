@@ -17,9 +17,6 @@ export type SavedAddress = {
   state: string;
   zipCode: string;
   isDefault?: boolean;
-  // Persisted server-side once an address has been geocoded (see
-  // backend UserAddress.lat/lng) — the authoritative coordinate source when
-  // present, ahead of the on-device cache and a live re-geocode.
   lat?: number | null;
   lng?: number | null;
 };

@@ -1,7 +1,3 @@
-/**
- * Error Handling Integration Tests
- */
-
 import {
   normalizeError,
   NetworkError,

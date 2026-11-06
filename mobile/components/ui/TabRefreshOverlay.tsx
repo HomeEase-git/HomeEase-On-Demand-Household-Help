@@ -3,8 +3,6 @@ import { View, ActivityIndicator, StyleSheet } from "react-native";
 import { useTabRefreshStore } from "../../store/tabRefreshStore";
 import { colors } from "../../constants";
 
-// How long the overlay stays up after a tab-repress. Just long enough to read
-// as an intentional "refreshing" beat, not a stall.
 const VISIBLE_MS = 450;
 
 export function TabRefreshOverlay() {

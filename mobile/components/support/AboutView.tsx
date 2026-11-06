@@ -25,7 +25,6 @@ export function AboutView({ role }: Props) {
   const base = role === "client" ? "/(client)/profile" : "/(worker)/profile";
 
   const version = Constants.expoConfig?.version ?? "1.0.0";
-  // Short OTA update id, so support can tell which JS bundle a user is on.
   const updateTag = Updates.updateId ? ` · update ${Updates.updateId.slice(0, 8)}` : "";
 
   const links: { label: string; icon: IconName; onPress: () => void }[] = [
@@ -75,7 +74,6 @@ export function AboutView({ role }: Props) {
       <ScreenHeader title="About HomeEase" showBack />
       <ScrollView contentContainerStyle={{ padding: 24, paddingBottom: 40 }}>
         <View className="items-center">
-          {/* The logo includes the "HomeEase" wordmark, so no separate title. */}
           <Image
             source={require("../../assets/images/logo/home_ease-logo.png")}
             style={{ width: 160, height: 152 }}

@@ -1,9 +1,5 @@
-/**
- * Spacing Constants - Standardized spacing scale for consistent layout
- * All values in pixels
- */
 export const spacing = {
-  xs: 4,    // Extra small - minimal gaps, tight spacing (badge padding)
+  xs: 4,
   sm: 8,    // Small - buttons, input padding
   md: 16,   // Medium - standard spacing between elements
   lg: 24,   // Large - section spacing, card margins

@@ -15,7 +15,6 @@ const router = Router();
 // All notification routes require auth
 router.use(authMiddleware);
 
-// Get unread count (put before other routes to avoid route conflict)
 router.get('/unread-count', getUnreadNotificationCount);
 
 // Register/clear this device's Expo push token

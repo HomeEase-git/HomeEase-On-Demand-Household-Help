@@ -20,10 +20,6 @@ export const SearchBar: React.FC<Props> = ({
   onFilterPress,
   filterActive = false,
 }) => {
-  // Only treat this as a controlled input when a parent actually passes
-  // `value`. Otherwise, defaulting `value` to "" would pin the TextInput to
-  // an empty string forever and every keystroke would be reverted on the
-  // next render.
   const isControlled = value !== undefined;
   const [internalValue, setInternalValue] = useState("");
   const inputValue = isControlled ? value : internalValue;

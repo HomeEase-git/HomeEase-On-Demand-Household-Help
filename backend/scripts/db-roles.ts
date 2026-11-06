@@ -1,35 +1,3 @@
-// Sets up the least-privilege database logins (docs/DATA-RESILIENCE.md,
-// "Database roles"):
-//   homeease_app       the server's DATABASE_URL. Reads and writes rows; no
-//                      schema changes; audit log and ledger are insert-only;
-//                      can't touch the migration history.
-//   homeease_readonly  SELECT only, read-only sessions: reports, exports,
-//                      one-off investigations.
-// Migrations keep using the owner login (DIRECT_URL).
-//
-// Run AFTER `prisma migrate deploy`, connected as the owner. Idempotent:
-// re-running re-applies every grant and never changes an existing password
-// unless asked. Every table needs an explicit decision: it goes in either
-// APPEND_ONLY or READ_WRITE below, and the report fails (so CI fails) for a
-// table in neither. A table a migration adds still gets read/write rights
-// automatically (default privileges), so production keeps working if this
-// script isn't re-run straight after a deploy; re-run it after a migration
-// that adds an APPEND_ONLY table.
-//
-// Usage (from backend/), with DIRECT_URL = the owner connection:
-//   APP_DB_PASSWORD=... READONLY_DB_PASSWORD=... npx tsx scripts/db-roles.ts
-//                                        # create missing roles, apply grants, report
-//   npx tsx scripts/db-roles.ts --check  # report only, change nothing
-//   APP_DB_PASSWORD=<new> npx tsx scripts/db-roles.ts --rotate homeease_app
-//                                        # change that role's password
-//   add --neon-websocket  to connect through Neon's WebSocket proxy (port 443)
-//     when the network blocks raw Postgres connections to Neon; needs
-//     `npm i --no-save @prisma/adapter-neon @neondatabase/serverless ws`.
-// Passwords come from you, never from the script: generate each one in the
-// password manager (or `openssl rand -hex 24`) and pass it in the variable.
-// The script never prints or stores a password; it prints the connection
-// strings with a placeholder where the password goes. A role that already
-// exists keeps its password unless its variable is set.
 import 'dotenv/config';
 import { PrismaClient } from '@prisma/client';
 import { PrismaPg } from '@prisma/adapter-pg';
@@ -45,14 +13,7 @@ const READONLY_ROLE = 'homeease_readonly';
 const ROLES = { [APP_ROLE]: 'APP_DB_PASSWORD', [READONLY_ROLE]: 'READONLY_DB_PASSWORD' } as const;
 type Role = keyof typeof ROLES;
 
-// The app only ever inserts into these (no UPDATE/DELETE anywhere in src/).
-// Keeping it that way at the database means a bug or an injection can't
-// rewrite who did what, what was paid, what a worker owed or how a price was
-// worked out. Old sign-in audit entries are removed through
-// purge_expired_login_audit() instead. (Cascading deletes from a parent row
-// still work: Postgres runs those with the table owner's rights.)
 const APPEND_ONLY = ['AuditLog', 'LedgerTransaction', 'LedgerLine', 'DebtLedgerEntry', 'PricingLog'];
-// Everything else the app reads and writes. A new table goes here or above.
 const READ_WRITE = [
   'AppSettings', 'ArrivalVerification', 'DebtPayment', 'AuthToken', 'Booking', 'BookingAddOn', 'BookingGroup', 'BookingQuoteItem', 'BookingVisit',
   'Cancellation', 'Certification', 'ClientProfile', 'ContractAcceptance', 'DeclinedWorker', 'Dispute', 'KycDocument',
@@ -65,8 +26,6 @@ const READ_WRITE = [
 ];
 const MIGRATIONS_TABLE = '_prisma_migrations';
 
-// Postgres ends a statement, or a transaction left open, after this long.
-// The app's own interactive transactions time out at 15s (config/database.ts).
 const APP_TIMEOUT = '60s';
 
 const connectionString = process.env.DIRECT_URL || process.env.DATABASE_URL;
@@ -107,12 +66,10 @@ function passwordFor(role: Role): string {
 
 const LOGIN_PLACEHOLDER = 'PASSWORD';
 
-/** The connection string for `role`, password left as a placeholder, on the owner's host and database. */
 function connectionStringFor(role: Role, pooled: boolean): string {
   const url = new URL(connectionString!);
   url.username = role;
   url.password = LOGIN_PLACEHOLDER;
-  // Neon: the pooled endpoint is the same host with "-pooler" after the endpoint id.
   if (pooled && url.hostname.endsWith('.neon.tech') && !url.hostname.split('.')[0].endsWith('-pooler')) {
     const [endpoint, ...rest] = url.hostname.split('.');
     url.hostname = [`${endpoint}-pooler`, ...rest].join('.');
@@ -137,7 +94,6 @@ async function setUp(): Promise<Role[]> {
     throw new Error('No application tables here. Run `npx prisma migrate deploy` first.');
   }
 
-  // Check every password needed before changing anything.
   const plan = new Map<Role, { exists: boolean; password: string | null }>();
   for (const role of Object.keys(ROLES) as Role[]) {
     const exists = await roleExists(role);
@@ -209,7 +165,6 @@ async function report(): Promise<Check[]> {
         EXISTS (SELECT 1 FROM pg_tables WHERE schemaname = 'public' AND tableowner = ${role}) AS ddl`;
     checks.push({ label: `${role} can't create, alter or drop tables`, ok: !can.create && !can.ddl });
   }
-  // The per-table checks below need both roles to exist.
   if (checks.some((c) => !c.ok && c.label.endsWith(' exists'))) return checks;
 
   const table = (name: string) => `public.${quoteIdent(name)}`;

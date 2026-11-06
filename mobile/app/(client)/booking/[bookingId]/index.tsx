@@ -59,10 +59,6 @@ export default function BookingDetailScreen() {
   const [cancellingGroup, setCancellingGroup] = useState(false);
   const [answeringReschedule, setAnsweringReschedule] = useState(false);
   const booking = bookings.find((b) => b.id === bookingId);
-  // The shared store's Booking type only keeps payment.totalAmount (used by
-  // many other screens) — the real subtotal/addOns/tip breakdown is kept
-  // separately here so the price breakdown card can render the actual
-  // backend-persisted charge instead of recomputing an invented one.
   const [rawDetail, setRawDetail] = useState<ApiBookingDetail | null>(null);
   const [reportVisible, setReportVisible] = useState(false);
   const [invoiceReportVisible, setInvoiceReportVisible] = useState(false);
@@ -108,9 +104,6 @@ export default function BookingDetailScreen() {
     }, [refreshBookingDetail]),
   );
 
-  // Picks up the worker's arrival and invoice without a manual
-  // refresh. Paused while the client is mid-action so a refresh can't
-  // disturb the payment or confirmation flow.
   usePolling(() => refreshBookingDetail().catch(() => {}), 10000, {
     paused: !focused || confirmingCompletion || processingPayment || checkoutVisible,
   });
@@ -142,18 +135,12 @@ export default function BookingDetailScreen() {
     );
   }
 
-  // Prefer the server-assembled breakdown (basePrice/distanceFee/tierFee
-  // from the booking's PricingLog, VAT from settlement) — falls back to a
-  // collapsed subtotal/addOns/tip/total for bookings fetched before that
-  // field existed on the backend response.
   const priceBreakdown = rawDetail?.priceBreakdown ?? {
     basePrice: null,
     distanceFee: 0,
     tierFee: 0,
     rushFee: 0,
     subtotal: rawDetail?.payment?.subtotal ?? booking.amount,
-    // Only approved add-ons count toward the total — a still-pending one
-    // shown here would look like it's already been billed.
     addOns: rawDetail?.addOns?.filter((a) => a.clientApprovedAt).map((a) => ({ name: a.name, price: a.price })) ?? [],
     vatApplicable: false,
     vatRate: null,
@@ -162,36 +149,27 @@ export default function BookingDetailScreen() {
     total: booking.payment?.totalAmount ?? booking.amount,
   };
 
-  // A worker no-show cancels the booking automatically now; an older
-  // booking flagged before that can still be cancelled free (the client
-  // didn't choose this, same as a forced reschedule below).
   const hasWorkerNoShow = !!booking.workerNoShowFlaggedAt;
   const canCancel = booking.status === "Pending" || (hasWorkerNoShow && booking.status !== "Cancelled");
   const canTrack =
     booking.status === "Accepted" || booking.status === "InProgress";
-  // Reschedule requests — only on an ACCEPTED booking (before the worker
-  // arrives/starts), one live request at a time, from either side.
   const hasOpenRescheduleRequest =
     !!rawDetail?.rescheduleRequestedAt && !rawDetail?.rescheduleRequestRespondedAt;
   const workerAskedToReschedule = hasOpenRescheduleRequest && rawDetail?.rescheduleRequestedBy === "WORKER";
   const hasPendingRescheduleRequest = hasOpenRescheduleRequest && !workerAskedToReschedule;
   const workerHasArrived = !!rawDetail?.timeline?.workerArrivedAt;
   const isOpenJob = rawDetail?.status === "ACCEPTED" || rawDetail?.status === "IN_PROGRESS";
-  // An agreed request stays on the row after the cancel, so only open jobs wait on one.
   const waitingOnCancelRequest = isOpenJob && !!rawDetail?.cancelRequestedAt && !rawDetail?.cancelRequestEscalatedAt;
   const canReportProblem =
     isOpenJob &&
     !rawDetail?.hasOpenDispute &&
-    // Hidden only while the worker is still answering a cancel request.
     !waitingOnCancelRequest;
   const canRequestReschedule = rawDetail?.status === "ACCEPTED" && !workerHasArrived && !hasOpenRescheduleRequest;
-  // Follow-up job after an inspection/diagnosis (same worker), once its work is done.
   const canRequestFollowUp =
     !!rawDetail?.allowsFollowUp &&
     !!booking.workerId &&
     ["PENDING_COMPLETION", "AWAITING_PAYMENT", "COMPLETED"].includes(rawDetail?.status ?? "");
   const upcomingVisits = (rawDetail?.visits ?? []).filter((v) => v.status === "SCHEDULED");
-  // The worker's invoice, once sent (NOT_SENT shows the booked price instead).
   const invoice = rawDetail?.invoice;
   const invoiceSent = !!invoice && invoice.status !== "NOT_SENT" && invoice.status !== "CANCELLED";
   const invoiceDue = invoice?.status === "DUE";
@@ -204,14 +182,8 @@ export default function BookingDetailScreen() {
   const isCompleted = booking.status === "Completed";
   const isPendingCompletion = booking.status === "PendingCompletion";
   const isAwaitingPayment = booking.status === "AwaitingPayment";
-  // Distinct from a client-initiated cancel: a worker declining is its own
-  // "Declined" status, and only then do we offer "Find Another Worker". The raw
-  // status covers the moment before the list status has refreshed.
   const isDeclined = booking.status === "Declined" || rawDetail?.status === "REJECTED";
 
-  // A different job's spillover (see backend extendBooking) moved this
-  // booking to a new date — resolved once the client explicitly keeps it,
-  // or the 24h auto-confirm sweep does it for them.
   const hasPendingReschedule = !!booking.rescheduledAt && !booking.rescheduleAcknowledgedAt;
 
   const handleKeepNewDate = () => {
@@ -284,7 +256,6 @@ export default function BookingDetailScreen() {
     );
   };
 
-  // Two confirmations: this one, then Step 4's own before the request is sent.
   const handleRequestFollowUp = () => {
     if (!rawDetail || !booking.workerId) return;
     alertModal.confirm(
@@ -314,14 +285,6 @@ export default function BookingDetailScreen() {
     router.push("/(client)/booking/new/step-1");
   };
 
-  // Convenience action for a multi-day upfront booking (see backend
-  // createMultiDayBooking) — purely client-side: iterates every sibling day
-  // still in a cancellable state and calls the SAME single-booking cancel
-  // endpoint used everywhere else, one at a time. Each day cancels/frees its
-  // own slot completely independently (this booking's status flow is
-  // unmodified per day, same as a normal single-day booking) — a day
-  // already ACCEPTED or further along is simply skipped, not force-cancelled,
-  // same as the single "Cancel Booking" action would refuse it on its own.
   const handleCancelEntireJob = () => {
     const siblings = rawDetail?.group?.bookings ?? [];
     const cancellableIds = siblings.filter((b) => b.status === "PENDING").map((b) => b.id);
@@ -361,8 +324,6 @@ export default function BookingDetailScreen() {
     );
   };
 
-  // Payment is taken after completion and is locked to the method the client
-  // chose at booking time — no picker at the pay step.
   const bookingMethod = (
     rawDetail?.paymentMethodType ??
     booking.payment?.methodType ??
@@ -375,9 +336,6 @@ export default function BookingDetailScreen() {
     booking.payment?.totalAmount ??
     booking.amount;
 
-  // Polls the payment detail until the Xendit webhook has resolved it to
-  // COMPLETED/FAILED (it processes within a second or two of the redirect in
-  // test mode), or gives up after ~15s so the UI doesn't hang forever.
   const waitForPaymentOutcome = async (targetBookingId: string) => {
     for (let attempt = 0; attempt < 10; attempt++) {
       const detail = await getTransactionDetail(targetBookingId);
@@ -394,16 +352,12 @@ export default function BookingDetailScreen() {
     setCheckoutVisible(true);
   };
 
-  // "Resume Payment" on an AWAITING_PAYMENT booking — re-opens the hosted
-  // Xendit invoice (server reuses the live one or mints a fresh one).
   const handleResumePayment = async () => {
     if (processingPayment) return;
     setProcessingPayment(true);
     try {
       const result = await createXenditCheckout(booking.id);
       if (result.alreadyPaid) {
-        // Server found this already PAID on Xendit's side (webhook was
-        // missed/delayed) and self-healed it — no checkout to open.
         await refreshBookingDetail();
         setProcessingPayment(false);
         alertModal.success(
@@ -484,13 +438,9 @@ export default function BookingDetailScreen() {
     setCheckoutVisible(false);
     setCheckoutUrl(null);
     setProcessingPayment(false);
-    // The client may have paid and closed the sheet before the redirect fired.
     refreshBookingDetail().catch(() => {});
   };
 
-  // "Pay now" on a GCash/Maya invoice whose checkout wasn't raised when the
-  // worker sent it. Returns a Xendit checkout URL to open; a cash invoice is
-  // paid to the worker, who confirms it.
   const handleConfirmCompletion = async () => {
     if (confirmingCompletion) return;
     setConfirmingCompletion(true);
@@ -508,7 +458,6 @@ export default function BookingDetailScreen() {
           "Thanks! This job is now complete.",
         );
       } else {
-        // AWAITING_PAYMENT — open the hosted Xendit checkout.
         useBookingStore.setState((s) => ({
           bookings: s.bookings.map((b) =>
             b.id === booking.id
@@ -567,7 +516,6 @@ export default function BookingDetailScreen() {
           })}
         />
 
-        {/* Reschedule banner — placed first, most time-sensitive */}
         {hasPendingReschedule && (
           <View className="bg-warning/10 border border-warning/30 rounded-2xl p-4 mb-4">
             <View className="flex-row items-center">
@@ -587,8 +535,6 @@ export default function BookingDetailScreen() {
                 : "a new date"}
               . Keep it, or cancel free of charge.
             </Text>
-            {/* Only shown once a second+ hop has happened — otherwise this
-                is identical to "Moved from" above and would be redundant. */}
             {booking.originalScheduledDate &&
               booking.previousScheduledDate &&
               booking.originalScheduledDate !== booking.previousScheduledDate && (
@@ -618,7 +564,6 @@ export default function BookingDetailScreen() {
           </View>
         )}
 
-        {/* The worker asked to move this booking — the client answers */}
         {workerAskedToReschedule && (
           <View className="bg-warning/10 border border-warning/30 rounded-2xl p-4 mb-4">
             <View className="flex-row items-center">
@@ -689,7 +634,6 @@ export default function BookingDetailScreen() {
           </View>
         )}
 
-        {/* Cancelled on site, blaming the client — pending admin review */}
         {rawDetail?.cancellation?.fault === "CLIENT" && (
           <View className="bg-warning/10 border border-warning/30 rounded-2xl p-4 mb-4">
             <Text className="text-warning font-bold text-sm">Cancelled on site</Text>
@@ -705,7 +649,6 @@ export default function BookingDetailScreen() {
           </View>
         )}
 
-        {/* Worker cancelled — show their reason (the on-site CLIENT-fault case has its own banner above) */}
         {rawDetail?.cancellation?.cancelledBy === "WORKER" &&
           rawDetail.cancellation.fault !== "CLIENT" &&
           !!rawDetail.cancellation.reason &&
@@ -803,7 +746,6 @@ export default function BookingDetailScreen() {
           </View>
         )}
 
-        {/* Worker — Message/Call right on the card, high on the screen */}
         <BookingWorkerCard
           name={workerName}
           avatarUrl={booking.workerAvatar}
@@ -882,7 +824,6 @@ export default function BookingDetailScreen() {
           )}
         </View>
 
-        {/* The worker's invoice once sent; the booked price before that */}
         {invoiceSent && invoice ? (
           <InvoiceCard
             invoice={invoice}

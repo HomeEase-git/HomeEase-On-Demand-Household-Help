@@ -16,13 +16,6 @@ const REQUEST_STATUS_VARIANT = {
 const formatDate = (iso) =>
   new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
 
-/**
- * Every file a worker has uploaded, grouped by verification submission, plus
- * their resume and certificates. Read-only: approving or rejecting still
- * happens on the verification review (linked from each group). Loaded only
- * on request — viewing is audit-logged on the server, and the file links it
- * returns expire after an hour.
- */
 export default function WorkerDocuments({ workerId }) {
   const [documents, setDocuments] = useState(null)
   const [loading, setLoading] = useState(false)
@@ -55,8 +48,6 @@ export default function WorkerDocuments({ workerId }) {
     )
   }
 
-  // KYC documents grouped by the submission they came in with (newest
-  // first, as the server returns them); resume and certificates after.
   const submissions = []
   const bySubmission = new Map()
   const other = []

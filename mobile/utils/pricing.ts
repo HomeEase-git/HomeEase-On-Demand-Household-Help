@@ -1,16 +1,3 @@
-/**
- * Pricing Utility
- * Formatting and estimate helpers for booking prices. The authoritative
- * charge (subtotal/tip/total) always comes from the backend's Payment
- * record — nothing here invents a tax or commission figure to charge the
- * client; commission/withholding tax are deducted from the worker's payout
- * only (see backend/src/utils/pricing.ts).
- */
-
-/**
- * Service rate per hour for different categories
- * Used as base hourly rate
- */
 export const SERVICE_BASE_RATES: Record<string, number> = {
   plumbing: 250,
   electrical: 300,
@@ -22,16 +9,10 @@ export const SERVICE_BASE_RATES: Record<string, number> = {
   appliance: 240,
 };
 
-/**
- * Format currency for display
- */
 export function formatPrice(amount: number): string {
   return `₱${amount.toFixed(2)}`;
 }
 
-/**
- * Calculate tip suggestions based on subtotal
- */
 export function getTipSuggestions(subtotal: number): number[] {
   const percentage10 = Math.round(subtotal * 0.1);
   const percentage15 = Math.round(subtotal * 0.15);
@@ -40,27 +21,15 @@ export function getTipSuggestions(subtotal: number): number[] {
   return [percentage10, percentage15, percentage20];
 }
 
-/**
- * Get service base rate
- */
 export function getServiceBaseRate(category: string): number {
   const normalized = category.toLowerCase();
   return SERVICE_BASE_RATES[normalized] || 250;
 }
 
-/**
- * Validate if custom tip is reasonable (max 50% of subtotal)
- */
 export function isValidTipAmount(tip: number, subtotal: number): boolean {
   return tip >= 0 && tip <= subtotal * 0.5;
 }
 
-/**
- * Fallback commission rate used only when neither a settled payout nor a
- * server-computed estimate is available. The live rate is admin-configurable
- * on the backend (AppSettings.commissionRate) — this is a display-only
- * approximation, never used to actually charge or pay anyone.
- */
 export const DEFAULT_COMMISSION_RATE = 0.1;
 
 type WorkerPayoutSource = {
@@ -70,12 +39,6 @@ type WorkerPayoutSource = {
   payment?: { workerPayout?: number | null } | null;
 };
 
-/**
- * A worker's take-home amount for a job, so every screen agrees with the
- * Earnings tab instead of each computing its own (in)consistent number.
- * Prefers the settled Payment row's workerPayout, then the backend's live
- * workerPayoutEstimate, then a local fallback using DEFAULT_COMMISSION_RATE.
- */
 export function getWorkerNetAmount(job: WorkerPayoutSource): number {
   const gross = job.finalPrice ?? job.estimatedPrice ?? 0;
   return (
@@ -85,15 +48,10 @@ export function getWorkerNetAmount(job: WorkerPayoutSource): number {
   );
 }
 
-/**
- * A per-unit job's unit in the plural ("item" → "items"). Only plain words
- * get an "s"; abbreviations like "sq.m." are left as they are.
- */
 export function pluralUnit(unit: string): string {
   return /^[a-z]+$/i.test(unit) && !/s$/i.test(unit) ? `${unit}s` : unit;
 }
 
-/** "1 item", "3 items" — the booked quantity with its unit. */
 export function formatQuantity(quantity: number, unit: string | null | undefined): string {
   const u = unit || "unit";
   return `${quantity} ${quantity === 1 ? u : pluralUnit(u)}`;

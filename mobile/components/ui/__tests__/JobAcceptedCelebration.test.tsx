@@ -4,8 +4,6 @@ import JobAcceptedCelebration from "../JobAcceptedCelebration";
 
 jest.mock("@expo/vector-icons", () => ({ Ionicons: () => null }));
 
-// Reanimated's native runtime isn't available under Jest, and this test is about
-// the component's timing, not its motion: stand in values that apply instantly.
 jest.mock("react-native-reanimated", () => {
   const { View } = require("react-native");
   return {
@@ -21,7 +19,6 @@ jest.mock("react-native-reanimated", () => {
   };
 });
 
-// The first test pays for loading react-native's modules, which can exceed the 5s default.
 jest.setTimeout(60000);
 
 describe("JobAcceptedCelebration", () => {

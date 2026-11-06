@@ -7,10 +7,6 @@ interface AuthRequest extends Request {
   user?: JwtPayload;
 }
 
-/**
- * GET /api/notifications
- * Get paginated notifications for the current user
- */
 export const getNotifications = async (req: AuthRequest, res: Response) => {
   try {
     if (!req.user) {
@@ -51,10 +47,6 @@ export const getNotifications = async (req: AuthRequest, res: Response) => {
   }
 };
 
-/**
- * PATCH /api/notifications/:id/read
- * Mark a single notification as read
- */
 export const markNotificationRead = async (req: AuthRequest, res: Response) => {
   try {
     if (!req.user) {
@@ -85,10 +77,6 @@ export const markNotificationRead = async (req: AuthRequest, res: Response) => {
   }
 };
 
-/**
- * PATCH /api/notifications/read-all
- * Mark all of the current user's notifications as read
- */
 export const markAllNotificationsRead = async (req: AuthRequest, res: Response) => {
   try {
     if (!req.user) {
@@ -111,11 +99,6 @@ export const markAllNotificationsRead = async (req: AuthRequest, res: Response) 
   }
 };
 
-/**
- * POST /api/notifications/push-token
- * Register (or overwrite) the Expo push token for the current user's device.
- * Single-device by design — a new login on another device replaces it.
- */
 export const registerPushToken = async (req: AuthRequest, res: Response) => {
   try {
     if (!req.user) {
@@ -139,11 +122,6 @@ export const registerPushToken = async (req: AuthRequest, res: Response) => {
   }
 };
 
-/**
- * DELETE /api/notifications/push-token
- * Clear the current user's push token (called on logout) so a signed-out
- * device stops receiving pushes meant for whoever logs in next.
- */
 export const removePushToken = async (req: AuthRequest, res: Response) => {
   try {
     if (!req.user) {
@@ -165,10 +143,6 @@ export const removePushToken = async (req: AuthRequest, res: Response) => {
   }
 };
 
-/**
- * GET /api/notifications/unread-count
- * Get total unread notification count for the badge
- */
 export const getUnreadNotificationCount = async (req: AuthRequest, res: Response) => {
   try {
     if (!req.user) {

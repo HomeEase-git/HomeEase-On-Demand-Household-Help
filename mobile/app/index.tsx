@@ -13,10 +13,6 @@ export default function SplashScreen() {
   const user = useAuthStore((s) => s.user);
 
   useEffect(() => {
-    // Wait for the persisted session to be restored before deciding where to
-    // go — a returning, still-logged-in user should land straight on their
-    // home screen (the (client)/(worker) layouts re-gate on terms/KYC as
-    // needed) instead of being routed back through Landing/Role Selection.
     if (isInitializing) return;
 
     const timer = setTimeout(() => {
@@ -38,10 +34,6 @@ export default function SplashScreen() {
             style={{ width: 200, height: 200, resizeMode: "contain" }}
           />
         </View>
-        {/* <Text className="text-text-primary text-3xl font-bold mt-6">HomeEase</Text>
-        <Text className="text-text-secondary text-sm mt-1">
-          On-Demand Household Help
-        </Text> */}
       </View>
     </SafeAreaView>
   );

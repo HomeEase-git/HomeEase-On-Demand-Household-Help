@@ -33,11 +33,6 @@ export type PlaceResult = {
     location: LatLng;
   };
   components?: AddressComponents;
-  // Set when the result came from a broadened fallback query (see
-  // geocodeAddressWithFallback) rather than the exact address — e.g. a rural
-  // barangay Google has no exact-street record of resolves to its
-  // city/province centroid instead. Callers should surface this so the user
-  // knows the pin isn't exact, rather than treating it as a normal match.
   approximate?: boolean;
 };
 
@@ -56,7 +51,6 @@ export type RouteResult = {
 
 const EARTH_RADIUS_KM = 6371;
 
-// Same box the backend enforces on address saves (validation.ts PH_BOUNDS).
 const PH_BOUNDS = { minLat: 4, maxLat: 21.5, minLng: 116, maxLng: 127 };
 
 export function isInPhilippines(p: LatLng): boolean {
@@ -77,10 +71,6 @@ export function haversineDistanceKm(a: LatLng, b: LatLng): number {
   return 2 * EARTH_RADIUS_KM * Math.asin(Math.sqrt(h));
 }
 
-// Google's geometry.location_type: ROOFTOP (exact building) and
-// RANGE_INTERPOLATED (interpolated between two known points on a road) are
-// both precise enough to treat as an exact match; GEOMETRIC_CENTER (center of
-// a broader area — a road, a neighborhood) and APPROXIMATE are not.
 const PRECISE_GOOGLE_LOCATION_TYPES = new Set(["ROOFTOP", "RANGE_INTERPOLATED"]);
 
 function toPlaceResult(result: GoogleGeocodeResult): PlaceResult {
@@ -92,11 +82,6 @@ function toPlaceResult(result: GoogleGeocodeResult): PlaceResult {
   };
 }
 
-// Free-text address → coordinates via Google Places Text Search (New),
-// proxied through the backend, which holds the API key. Returns null whenever
-// Google isn't configured server-side, the address genuinely doesn't resolve,
-// or the request fails; geocodeAddressGoogle never throws, so this never
-// needs its own try/catch.
 export async function geocodeAddress(address: string): Promise<PlaceResult | null> {
   const normalized = address.trim();
   if (!normalized) return null;
@@ -105,10 +90,6 @@ export async function geocodeAddress(address: string): Promise<PlaceResult | nul
   return result ? toPlaceResult(result) : null;
 }
 
-// Builds one well-ordered query string (most-specific first) from the
-// individual address fields instead of one free-text blob — house number and
-// barangay are exactly the detail Google needs to resolve a PH address down
-// to the actual lot rather than just the street or city centroid.
 export function formatStructuredAddress(parts: StructuredAddress): string {
   const streetLine = [parts.houseNumber, parts.street].filter((p) => p?.trim()).join(' ');
   return [
@@ -122,9 +103,6 @@ export function formatStructuredAddress(parts: StructuredAddress): string {
     .join(', ');
 }
 
-// The one-line address to show for a saved address. `fullAddress` is what the
-// client confirmed on the address screen; older rows without one fall back to
-// joining the structured parts.
 export function displayAddress(address: {
   fullAddress?: string | null;
   houseNumber?: string | null;
@@ -145,20 +123,10 @@ export function displayAddress(address: {
   }).replace(/, Philippines$/, '');
 }
 
-// Google's formatted addresses end in ", Philippines" — noise for an app that
-// only serves the Philippines.
 export function stripCountry(formattedAddress: string): string {
   return formattedAddress.replace(/,?\s*Philippines$/i, '').trim();
 }
 
-// Even Google occasionally has no exact match for a specific rural barangay/
-// subdivision, even though the surrounding city/province resolves fine.
-// Rather than a hard failure that blocks booking entirely, this tries the
-// full address first and, if that comes back empty, progressively drops the
-// most specific component (house/street, then barangay) until something
-// resolves — landing on a city-level pin is still far more useful than
-// nothing, as long as the caller knows to treat it as approximate (see
-// PlaceResult.approximate).
 export async function geocodeAddressWithFallback(parts: StructuredAddress): Promise<PlaceResult | null> {
   const exact = await geocodeAddress(formatStructuredAddress(parts));
   if (exact) return exact;
@@ -178,12 +146,6 @@ export async function geocodeAddressWithFallback(parts: StructuredAddress): Prom
   return null;
 }
 
-// Places Autocomplete bills a whole "session" (every keystroke plus the one
-// Place Details call that ends it) as a single lookup, as long as all of those
-// calls share one token. Start a token when the user starts typing, pass it
-// to both autocompleteAddresses and getPlaceDetails, then throw it away. The
-// token only needs to be unique, not secret, so Math.random is fine here
-// (Hermes has no crypto.randomUUID).
 export function newPlacesSessionToken(): string {
   return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
     const r = (Math.random() * 16) | 0;
@@ -191,11 +153,6 @@ export function newPlacesSessionToken(): string {
   });
 }
 
-/**
- * As-you-type address suggestions (Places Autocomplete (New)). These carry
- * no coordinates — resolve the one the user picks with getPlaceDetails,
- * using the same session token.
- */
 export async function autocompleteAddresses(
   input: string,
   sessionToken: string,
@@ -206,18 +163,11 @@ export async function autocompleteAddresses(
   return autocompleteAddressesGoogle(normalized, sessionToken, near);
 }
 
-/** Resolves a picked suggestion to coordinates + address parts; ends the session. */
 export async function getPlaceDetails(placeId: string, sessionToken?: string): Promise<PlaceResult | null> {
   const result = await getPlaceDetailsGoogle(placeId, sessionToken);
   return result ? toPlaceResult(result) : null;
 }
 
-// Android's native geocoder reports the PH region (e.g. "Central Luzon",
-// "Calabarzon") in `region` and usually the province in `subregion` — but not
-// always. A region name must never land in the Province field (same bug the
-// server-side parser guards against), so it's dropped and the user fills the
-// province in. The capital region is the one exception: it has no province,
-// so "Metro Manila" is the right value there.
 const PH_REGION_NAME = /\b(region|calabarzon|mimaropa|soccsksargen|caraga|bangsamoro|barmm|cordillera|luzon|visayas|mindanao)\b/i;
 const CAPITAL_REGION = /national capital region|metro manila|\bncr\b/i;
 
@@ -237,12 +187,6 @@ function cleanPart(value?: string | null): string | undefined {
   return trimmed;
 }
 
-/**
- * "What address is at this GPS fix?" — answered on-device by Android's
- * native geocoder (expo-location), with no Google API call or backend round
- * trip. Returns null when the device has no geocoder (no Play services) or
- * finds nothing, in which case the caller asks the user to fill the fields in.
- */
 export async function reverseGeocodeDetailed(lat: number, lng: number): Promise<PlaceResult | null> {
   let results: Location.LocationGeocodedAddress[];
   try {
@@ -269,8 +213,6 @@ export async function reverseGeocodeDetailed(lat: number, lng: number): Promise<
     formatted_address:
       cleanPart(top.formattedAddress) ??
       formatStructuredAddress({ ...components, street: components.street ?? "", city: components.city ?? "" }),
-    // Keep the caller's own GPS fix — this is "what address is at this
-    // point?", not "give me a new point."
     geometry: { location: { lat, lng } },
     components,
   };

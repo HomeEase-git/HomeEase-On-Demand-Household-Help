@@ -20,8 +20,6 @@ const pesoFormatter = new Intl.NumberFormat('en-PH', {
   maximumFractionDigits: 0,
 })
 
-// The last 12 calendar months (this one first), as "2026-10" values, for the
-// charts' month picker. Manila time, like the rest of the admin's dates.
 function recentMonths(count = 12) {
   const manilaNow = new Date(Date.now() + 8 * 60 * 60 * 1000)
   let year = manilaNow.getUTCFullYear()
@@ -45,7 +43,6 @@ const MONTH_OPTIONS = recentMonths()
 
 const formatCount = (n) => (n == null ? '—' : Number(n).toLocaleString('en-PH'))
 
-// Keyed by the category label the API sends with each activity row.
 const ACTIVITY_ICON = {
   'Admin Actions': 'fa-user-shield',
   'Login History': 'fa-right-to-bracket',
@@ -63,14 +60,9 @@ function getGreeting() {
 const todayLabel = () =>
   new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })
 
-// "+12 in 7 days" plus a % change against the previous period of the same
-// length. Only used on running totals — a % on a live queue (pending
-// approvals, open disputes) wouldn't mean anything.
 function describeTrend(trend, days, format = String, { compareOnly = false } = {}) {
   if (!trend) return null
   const { current, previous } = trend
-  // compareOnly: the card's big number already is this period's count, so
-  // show the previous period instead of repeating it.
   const detail = compareOnly
     ? `vs ${format(previous)} the ${days} days before`
     : `${current > 0 ? '+' : ''}${format(current)} in ${days} days`
@@ -87,26 +79,19 @@ function describeTrend(trend, days, format = String, { compareOnly = false } = {
 
 export default function Dashboard() {
   const [days, setDays] = useState(7)
-  // '' = charts follow the range above; otherwise one calendar month (YYYY-MM).
   const [chartMonth, setChartMonth] = useState('')
-  // One cache slot per range, so switching back to a range is instant.
   const { data, loading, error, reload } = useDetailQuery(fetchDashboardStats, String(days))
   const { items: attentionItems, loading: attentionLoading } = useAdminNotifications()
-  // All-time completion rate, rating and category mix (what the old Analytics page showed).
   const { data: analytics } = useDetailQuery(fetchAnalytics, 'snapshot')
-  // Only fetched once a month is picked; the hook ignores an empty key.
   const { data: monthCharts, error: monthError } = useDetailQuery(fetchDashboardCharts, chartMonth)
   const { user } = useAuth()
   const firstName = user?.name?.split(' ')[0] || 'Admin'
 
-  // useDetailQuery keeps the previous range's data while a new range loads,
-  // so the page stays put (dimmed) instead of flashing back to placeholders.
   const refreshing = loading && !!data
 
   if (!data && loading) return <LoadingState variant="dashboard" message="Loading dashboard..." />
   if (!data && error) return <ErrorState message={error} onRetry={reload} />
 
-  // The hook keeps the previous month's data while a new one loads; don't show it under the new title.
   const monthData = monthCharts?.month === chartMonth ? monthCharts : null
   const monthLabel = MONTH_OPTIONS.find((m) => m.value === chartMonth)?.label ?? chartMonth
 
@@ -117,17 +102,12 @@ export default function Dashboard() {
     { label: 'Total Workers', value: formatCount(stats.totalWorkers), icon: 'fa-user-cog', color: 'purple', to: '/workers', trend: describeTrend(trends?.workers, rangeDays, formatCount) },
     { label: 'Bookings', value: formatCount(trends?.bookings?.current), sublabel: `Last ${rangeDays} days`, icon: 'fa-calendar-plus', color: 'blue', to: '/bookings', trend: describeTrend(trends?.bookings, rangeDays, formatCount, { compareOnly: true }) },
     { label: 'Active Bookings', value: formatCount(stats.activeBookings), icon: 'fa-calendar-check', color: 'blue' },
-    // Pending approvals and open disputes live in the "Needs attention" strip above.
     { label: 'Completion Rate', sublabel: 'All bookings', value: analytics ? `${Math.round(analytics.completionRate * 100)}%` : '—', icon: 'fa-chart-line', color: 'green' },
     { label: 'Avg. Rating', sublabel: 'All reviews', value: analytics ? analytics.avgRating.toFixed(1) : '—', icon: 'fa-star', color: 'purple', to: '/reviews' },
-    // Revenue is the platform's commission (not what clients paid); payouts
-    // are money actually sent to workers.
     { label: 'Platform Revenue', sublabel: stats.revenueFromCashJobs && stats.revenueFromCashJobs !== '₱0.00' ? `Service fees · ${stats.revenueFromCashJobs} owed from cash jobs` : 'Service fees earned', value: stats.totalRevenue, icon: 'fa-peso-sign', color: 'green', to: '/payments', trend: describeTrend(trends?.revenue, rangeDays, (n) => pesoFormatter.format(n)) },
     { label: 'Paid to Workers', sublabel: 'GCash/Maya payouts sent', value: stats.totalPayouts, icon: 'fa-money-bill-transfer', color: 'green', to: '/payments/payouts', trend: describeTrend(trends?.payouts, rangeDays, (n) => pesoFormatter.format(n)) },
   ]
 
-  // Everything waiting on an admin, in one place: the header bell's queues
-  // plus the money problems the dashboard already counts.
   const attention = [
     ...attentionItems,
     stats.overduePayments > 0 && {

@@ -7,11 +7,9 @@ type Props = {
   isAvailable: boolean | null;
   saving: boolean;
   onChange: (value: boolean) => void;
-  /** Account setup isn't finished, so requests can't reach them even when online. */
   setupIncomplete?: boolean;
 };
 
-/** The worker's Online/Offline switch — whether new job requests can reach them. */
 export const AvailabilityToggle: React.FC<Props> = ({ isAvailable, saving, onChange, setupIncomplete }) => {
   const online = isAvailable === true;
   const reachable = online && !setupIncomplete;

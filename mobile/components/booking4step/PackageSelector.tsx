@@ -12,12 +12,6 @@ type Props = {
   onSelectedTotalChange?: (total: number) => void;
 };
 
-/**
- * Worker-defined priced packages for the selected worker/category. Offered
- * with the worker: under the chosen card in the worker picker, or in Step 1
- * when the worker was picked from their profile. Auto-matched bookings have
- * no worker yet, so packages aren't offered there.
- */
 export default function PackageSelector({
   workerId,
   serviceTypeId,

@@ -2,8 +2,6 @@ import prisma from '@config/database';
 import { isLedgerOpen, postXenditFee } from '@services/ledgerService';
 import { listXenditTransactions, feeCentavos } from '@services/xenditTransactionsService';
 
-// Xendit transactions can appear a little after the event; re-read this far
-// back each run (posting is idempotent per transaction, so overlap is safe).
 const OVERLAP_MS = 24 * 60 * 60 * 1000;
 
 const LABEL: Record<string, string> = {
@@ -12,13 +10,6 @@ const LABEL: Record<string, string> = {
   REFUND: 'refund',
 };
 
-/**
- * Books the fee Xendit charged on each of our payments, payouts and refunds
- * (Xendit takes it straight off the balance). Only transactions that match
- * one of our Payment/Payout ids are booked; anything else — test transfers,
- * Xendit's own batch fee deductions — is left for the monthly reconciliation
- * to list. Hourly via the cron sweep; safe to re-run.
- */
 export async function syncXenditFees(): Promise<{ posted: number; unmatched: number; skipped?: string }> {
   if (!(await isLedgerOpen())) return { posted: 0, unmatched: 0, skipped: 'ledger not open' };
   if (!process.env.XENDIT_SECRET_KEY) return { posted: 0, unmatched: 0, skipped: 'Xendit not configured' };

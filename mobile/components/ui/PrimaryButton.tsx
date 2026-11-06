@@ -35,10 +35,6 @@ export const PrimaryButton: React.FC<Props> = ({
               elevation: 5,
             }
       }
-      // Guard in the handler instead of passing `disabled` to Pressable: a
-      // Pressable that mounts disabled and is later enabled (e.g. while a
-      // screen loads) stops receiving touches on its own surface on Android,
-      // leaving only the label tappable.
       onPress={() => {
         if (!(disabled || loading)) onPress();
       }}

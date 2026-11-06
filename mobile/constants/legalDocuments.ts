@@ -1,17 +1,3 @@
-// Single source for every legal document the app shows: the client User
-// Agreement, the worker Service Agreement and the Privacy Policy. Sign-up,
-// the acceptance screens and the profile screens all render from here, so
-// the text a user accepted is exactly the text they can re-read later.
-//
-// Rules for editing:
-// - Describe what the app ACTUALLY does. If a feature changes (fees,
-//   timeouts, cancellation), change the text in the same PR.
-// - Bump the document's version in LEGAL_VERSIONS whenever its meaning
-//   changes; the version is recorded with every acceptance.
-// - Sections marked "[pending counsel review]" in a comment are the legal
-//   positions (liability, contractor status, venue) kept from the previous
-//   terms until a Philippine lawyer reviews them. Don't reword them casually.
-
 export const LEGAL_VERSIONS = {
   CLIENT_USER_AGREEMENT: "2026-10-26",
   WORKER_SERVICE_AGREEMENT: "2026-10-26",
@@ -21,9 +7,6 @@ export const LEGAL_VERSIONS = {
 
 export type LegalDocumentType = keyof typeof LEGAL_VERSIONS;
 
-// TODO(before public launch): add the registered business name and address
-// once DTI/SEC registration is done — the Internet Transactions Act requires
-// online marketplaces to disclose them. `address: null` hides the line.
 export const COMPANY = {
   name: "HomeEase",
   address: null as string | null,

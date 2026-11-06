@@ -2,15 +2,6 @@ import prisma from '@config/database';
 import { postLedger, toCentavos, resetLedgerOpenCache, type LedgerLineInput } from '@services/ledgerService';
 import { getXenditBalanceCentavos } from '@services/xenditTransactionsService';
 
-/**
- * What the platform owes each worker right now according to the operational
- * records, in centavos (negative = the worker owes the platform). This is the
- * figure the ledger's WORKER_BALANCE should agree with:
- *   payouts not yet sent (queued, in flight or failed)
- * + payouts stopped for a refund that hasn't completed yet
- * + paid jobs whose earnings haven't been settled into a payout yet
- * + payout credit − dues owed.
- */
 export async function expectedWorkerBalances(): Promise<Map<string, number>> {
   const [openPayouts, stoppedPayouts, unsettled, profiles] = await Promise.all([
     prisma.payout.groupBy({
@@ -44,7 +35,6 @@ export async function expectedWorkerBalances(): Promise<Map<string, number>> {
   return owed;
 }
 
-/** Withholding tax captured but not yet recorded as remitted to BIR, in centavos. */
 async function unremittedWithholdingCentavos(): Promise<number> {
   const [withheld, remitted] = await Promise.all([
     prisma.payment.aggregate({ where: { status: 'COMPLETED' }, _sum: { withholdingTaxAmount: true } }),
@@ -55,13 +45,6 @@ async function unremittedWithholdingCentavos(): Promise<number> {
 
 export class LedgerAlreadyOpenError extends Error {}
 
-/**
- * Starts the ledger: records, as one OPENING transaction, the balances the
- * platform already had — what each worker is owed or owes, withholding tax
- * not yet remitted, and the Xendit balance (read live; recorded as ₱0 with a
- * warning if Xendit can't be reached). The difference goes to
- * OPENING_BALANCE. Everything after this is posted as it happens.
- */
 export async function openLedger(adminId: string) {
   let xenditCentavos = 0;
   let xenditWarning: string | null = null;

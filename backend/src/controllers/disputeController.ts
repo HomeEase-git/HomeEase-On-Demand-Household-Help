@@ -8,19 +8,6 @@ interface AuthRequest extends Request {
   user?: JwtPayload;
 }
 
-/**
- * GET /api/disputes/:id
- * Non-admin read path for a single Dispute — lets a client or worker check
- * on a dispute they're actually involved in. Until now Dispute could only be
- * read via the admin-only /api/admin/disputes/:id, so there was no way for
- * either party to see a dispute's status or an admin's resolution note.
- *
- * Authorization is checked against the caller's own userId (never a
- * client-supplied id): allowed only if they raised the dispute themselves,
- * or they're the client/worker on its associated booking. Everyone else
- * (including an unrelated client/worker) gets 403 — this is intentionally
- * not open to any authenticated user the way admin routes are.
- */
 export const getDisputeForParty = async (req: AuthRequest, res: Response) => {
   try {
     if (!req.user) {

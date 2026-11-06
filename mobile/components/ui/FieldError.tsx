@@ -7,17 +7,6 @@ type Props = {
   message?: string | null;
 };
 
-/**
- * FieldError
- *
- * Inline validation message shown directly below a form field
- * (e.g. "Invalid email", "Incorrect password"). For page-level or
- * request-level errors, use ErrorBanner instead.
- *
- * Usage:
- *   <InputField ... error={emailError} />   // preferred, built in
- *   <FieldError message={emailError} />     // manual placement
- */
 export const FieldError: React.FC<Props> = ({ message }) => {
   if (!message) return null;
 

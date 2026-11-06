@@ -34,8 +34,6 @@ const COPY = {
   },
 } as const;
 
-// A line the worker adds to the invoice before sending it. Extra work offers
-// the worker's own services as quick picks at their Price List price.
 export const InvoiceLineModal: React.FC<Props> = ({ visible, bookingId, kind, onConfirm, onCancel }) => {
   const [options, setOptions] = useState<Option[]>([]);
   const [name, setName] = useState("");
@@ -43,7 +41,6 @@ export const InvoiceLineModal: React.FC<Props> = ({ visible, bookingId, kind, on
   const [photoUrls, setPhotoUrls] = useState<string[]>([]);
   const copy = COPY[kind];
 
-  // The parent remounts this per line (key), so the form starts empty.
   useEffect(() => {
     if (!visible || kind !== "EXTRA_WORK") return;
     getMyTaskCatalog()

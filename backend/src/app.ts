@@ -49,20 +49,10 @@ const allowedOrigins = (process.env.ALLOWED_ORIGINS || 'http://localhost:3000')
   .map((origin) => origin.trim())
   .filter(Boolean);
 
-// Behind a load balancer / reverse proxy (Render, Railway, Fly, nginx, an
-// ALB…) Express needs to trust X-Forwarded-* to see the real client IP and
-// protocol — the rate limiter keys on IP, so getting this wrong either
-// lets everyone share one bucket or lets clients spoof it. TRUST_PROXY is
-// the number of proxy hops in front of the app (default 0 = direct).
 app.set('trust proxy', Number(process.env.TRUST_PROXY || 0));
 
-// First, so every log line, error report and security alert for this request
-// carries its request id (see utils/requestContext.ts).
 app.use(requestContext);
 
-// Security headers. This is a JSON API (no first-party HTML), so CSP and
-// the COEP/CORP embedding controls don't apply; the rest of helmet's
-// defaults (HSTS, nosniff, frameguard, referrer-policy, …) do.
 app.use(
   helmet({
     contentSecurityPolicy: false,
@@ -81,27 +71,16 @@ app.use(
   })
 );
 
-// Liveness: is the process up? Cheap, no dependencies — this is what a
-// container orchestrator / load balancer should poll.
 app.get('/health', (_req, res) => {
   res.json({ status: 'OK' });
 });
 
-// Best-effort Redis reachability check via one of the existing BullMQ
-// queues' own connection (no extra client/connection to manage). Bounded by
-// a manual timeout on top of queueConnection's own bounded retries
-// (@config/redis.ts) so this can never hang the health check indefinitely.
 async function checkRedis(): Promise<boolean> {
   try {
     const client = await Promise.race([
-      // Queue.client was removed in BullMQ v6 — the raw Redis client now
-      // lives on the queue's backend (getBackend().client), still the same
-      // adapter-agnostic IRedisClient as before.
       bookingQueue.getBackend().client,
       new Promise<never>((_, reject) => setTimeout(() => reject(new Error('redis check timed out')), 3000)),
     ]);
-    // BullMQ's IRedisClient is adapter-agnostic (ioredis/node-redis/Bun) and
-    // doesn't expose ping() — info() forces the same kind of live round-trip.
     await client.info();
     return true;
   } catch {
@@ -109,38 +88,22 @@ async function checkRedis(): Promise<boolean> {
   }
 }
 
-// Readiness: can the process actually serve traffic (DB reachable)?
-// Returns 503 when not, so a rollout can wait for it and a broken pod is
-// pulled from rotation. Redis is reported alongside but deliberately doesn't
-// affect the status/HTTP code — per index.ts's uncaughtException guard, a
-// Redis outage should degrade background job scheduling, not availability.
 app.get('/health/ready', async (_req, res) => {
   const redisConnected = await checkRedis();
   try {
     await prisma.$queryRaw`SELECT 1`;
     res.json({ status: 'ready', redis: redisConnected ? 'connected' : 'unreachable' });
   } catch (error) {
-    // Logged (not just swallowed) so the actual driver/DB error — auth,
-    // TLS, DNS, timeout — shows up in the platform's log stream instead of
-    // this endpoint's deliberately generic client-facing message.
     console.error('[health/ready] database check failed:', error);
     res.status(503).json({ status: 'not ready', reason: 'database unreachable', redis: redisConnected ? 'connected' : 'unreachable' });
   }
 });
 
-// Server-to-server sweep trigger for hosts that sleep on idle (see
-// internalCron.ts) — deliberately outside /api so it's exempt from the
-// broad API limiter and CORS allow-list; it has its own auth (CRON_SECRET)
-// and its own limiter.
 app.use('/internal/cron', internalCronRoutes);
 app.use('/internal/diag', internalDiagRoutes);
 
-// Broad rate limit across the whole API surface (credential endpoints get a
-// second, stricter limiter inside routes/auth.ts).
 app.use('/api', apiLimiter);
 
-// Sign private-bucket file URLs (KYC, resumes, chat images) and mask
-// encrypted payout/TIN values in every API response.
 app.use('/api', protectResponseData);
 
 // Routes

@@ -1,9 +1,5 @@
 import { Router } from 'express';
 
-// Regression guard: /auth/refresh must not sit behind the strict per-IP
-// credential limiter. Routine 401s there (rotated token, expiry, app
-// relaunch) used to spend the shared budget and 429 /auth/login — for every
-// account on that IP, which is what "Too many attempts on any account" was.
 jest.mock('@middleware/rateLimit', () => ({
   authLimiter: Object.assign((_req: unknown, _res: unknown, next: () => void) => next(), {
     __isAuthLimiter: true,

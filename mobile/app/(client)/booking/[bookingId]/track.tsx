@@ -56,8 +56,6 @@ export default function TrackBookingScreen() {
           if (detail?.clientLat != null && detail?.clientLng != null) {
             setDestination({ lat: detail.clientLat, lng: detail.clientLng });
           }
-          // Only a recent stored position counts as live; an old one is a
-          // leftover from an earlier job, so wait for a real update instead.
           if (
             detail?.worker?.currentLat != null &&
             detail?.worker?.currentLng != null &&
@@ -69,7 +67,6 @@ export default function TrackBookingScreen() {
             setHasWorkerLocation(true);
             setLastUpdatedAt(detail.worker.lastLocationUpdate);
           }
-          // Opened from a deep link: the store may not know this booking yet.
           if (!useBookingStore.getState().bookings.some((b) => b.id === bookingId)) {
             const mapped = mapApiBookingDetail(detail);
             useBookingStore.setState((s) => ({ bookings: [...s.bookings, mapped] }));
@@ -84,16 +81,12 @@ export default function TrackBookingScreen() {
     }, [bookingId]),
   );
 
-  // Live worker position while en route (booking still "Accepted") — pushed
-  // over the same app-wide socket connection used for chat/notifications
-  // (see app/_layout.tsx), so no extra connection to manage here.
   const isLiveTrackable = booking?.status === "Accepted" && !!destination;
   const { route, routeFailed, isOnline, onWorkerPosition } = useTrackingRoute(isLiveTrackable ? destination : null);
   useEffect(() => {
     if (initialWorkerLocation) onWorkerPosition(initialWorkerLocation);
   }, [initialWorkerLocation, onWorkerPosition]);
 
-  // Re-checks freshness and counts the ETA down between socket events.
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     if (!isLiveTrackable) return;
@@ -134,11 +127,6 @@ export default function TrackBookingScreen() {
     );
   }
 
-  // Mirrors the real BookingStatus lifecycle (store/bookingStore.ts) rather
-  // than the old "Pending/Active/Completed, else = cancelled" shortcut —
-  // that fallback was silently mislabeling every other real status
-  // (InProgress, QuoteSubmitted, QuoteApproved, PendingCompletion, Disputed)
-  // as "Booking cancelled".
   const steps = TIMELINE_STEPS;
 
   const currentStepIndex = (() => {
@@ -190,8 +178,6 @@ export default function TrackBookingScreen() {
     }
   })();
 
-  // ETA line under the live map. A stale position hides the ETA (it would be
-  // a guess); no route falls back to straight-line distance.
   const trackingText = (() => {
     if (!hasWorkerLocation) return "Waiting for the worker to start sharing their location...";
     const updated = lastUpdatedAt ? new Date(lastUpdatedAt).toLocaleTimeString() : null;

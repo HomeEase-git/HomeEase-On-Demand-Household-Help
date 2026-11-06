@@ -21,7 +21,6 @@ export function HelpSupportView({ role }: Props) {
   const categories = role === "client" ? CLIENT_FAQ : WORKER_FAQ;
   const [query, setQuery] = useState("");
   const [activeCategory, setActiveCategory] = useState<string | null>(null);
-  // Keyed by question text so an open answer stays open while filtering.
   const [expanded, setExpanded] = useState<string | null>(null);
 
   const visible = useMemo(() => {

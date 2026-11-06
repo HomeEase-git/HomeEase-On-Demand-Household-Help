@@ -28,8 +28,6 @@ const STATUS_MAP = {
   Failed: 'failed',
 }
 
-// The filters and sort behind the table, shared by the table and the CSV export
-// so an export always matches what's on screen.
 function toApiParams(params) {
   return {
     sortBy: params.sortBy || '',
@@ -61,8 +59,6 @@ export default function Payments() {
     pollIntervalMs: 25000,
   })
 
-  // Backend-aggregated across every Completed payment matching the current
-  // search (not just the current page) — see listPayments' completedWhere.
   const totals = useMemo(() => {
     return {
       gross: meta.completedGrossVolume ?? 0,
@@ -70,8 +66,6 @@ export default function Payments() {
       platform: meta.completedPlatformCommission ?? 0,
       withholding: meta.completedWithholdingTax ?? 0,
       vat: meta.completedVatCollected ?? 0,
-      // Commission as a share of the service price, from the real totals — so
-      // it reflects whatever rate was actually charged.
       ratePercent: meta.commissionRatePercent ?? null,
     }
   }, [meta])
@@ -158,7 +152,6 @@ export default function Payments() {
               )}
             </div>
           </div>
-          {/* Only payments from before HomeEase stopped withholding tax and adding VAT carry these. */}
           {totals.withholding > 0 && (
             <div className="detail-block">
               <label>Withholding Tax Held (for BIR)</label>
