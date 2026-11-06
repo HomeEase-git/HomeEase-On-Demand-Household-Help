@@ -1819,7 +1819,7 @@ body {
   border-radius: 8px;
 }
 
-/* ── Loading skeletons (LoadingState) ── */
+/* Visually hidden but focusable (file input inside a label button) */
 .sr-only {
   position: absolute;
   width: 1px;
@@ -1832,6 +1832,12 @@ body {
   border: 0;
 }
 
+label.btn:focus-within {
+  outline: 2px solid currentColor;
+  outline-offset: 2px;
+}
+
+/* ── Loading skeletons (LoadingState) ── */
 .skeleton {
   display: block;
   border-radius: 6px;

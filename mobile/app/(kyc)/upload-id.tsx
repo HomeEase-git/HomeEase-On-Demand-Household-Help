@@ -157,6 +157,7 @@ export default function UploadIdScreen() {
           imageUri={isPending ? pending.uri : uploaded.uri}
           uploading={isPending}
           onPress={() => handleUpload(key)}
+          disabled={pending !== null}
         />
       </View>
     );

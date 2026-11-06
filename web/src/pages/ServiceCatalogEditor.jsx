@@ -348,7 +348,7 @@ export default function ServiceCatalogEditor() {
                     <input
                       type="file"
                       accept="image/jpeg,image/png,image/webp"
-                      hidden
+                      className="sr-only"
                       disabled={uploadingBg}
                       onChange={async (e) => {
                         const file = e.target.files?.[0]

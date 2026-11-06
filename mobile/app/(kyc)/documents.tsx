@@ -125,6 +125,7 @@ export default function DocumentsScreen() {
           hint="Tap to choose a photo or PDF"
           uploading={isPending}
           onPress={() => handleUpload(key)}
+          disabled={pending !== null}
         />
       </View>
     );
