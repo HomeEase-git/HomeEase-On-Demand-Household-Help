@@ -328,28 +328,44 @@ export default function ServiceCatalogEditor() {
               <div className="sce-field sce-span">
                 <span>Background photo (optional)</span>
                 {d.backgroundImageUrl && (
-                  <img src={d.backgroundImageUrl} alt="Service background" style={{ width: 240, height: 120, objectFit: 'cover', borderRadius: 8, filter: 'blur(2px)' }} />
+                  <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
+                    <figure style={{ margin: 0 }}>
+                      <img src={d.backgroundImageUrl} alt="Service background" style={{ display: 'block', width: 240, height: 120, objectFit: 'cover', borderRadius: 8 }} />
+                      <figcaption style={{ color: 'var(--text-muted)', fontSize: '0.75rem', marginTop: 4 }}>Your photo</figcaption>
+                    </figure>
+                    <figure style={{ margin: 0 }}>
+                      <div style={{ width: 240, height: 120, overflow: 'hidden', borderRadius: 8 }}>
+                        <img src={d.backgroundImageUrl} alt="" style={{ display: 'block', width: 240, height: 120, objectFit: 'cover', filter: 'blur(2px)' }} />
+                      </div>
+                      <figcaption style={{ color: 'var(--text-muted)', fontSize: '0.75rem', marginTop: 4 }}>In the app</figcaption>
+                    </figure>
+                  </div>
                 )}
                 <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-                  <input
-                    type="file"
-                    accept="image/jpeg,image/png,image/webp"
-                    disabled={uploadingBg}
-                    onChange={async (e) => {
-                      const file = e.target.files?.[0]
-                      e.target.value = ''
-                      if (!file) return
-                      setUploadingBg(true)
-                      try {
-                        const url = await uploadServiceBackground(file)
-                        change((x) => { x.details.backgroundImageUrl = url })
-                      } catch (err) {
-                        showError(err.message || 'Upload failed')
-                      } finally {
-                        setUploadingBg(false)
-                      }
-                    }}
-                  />
+                  <label className="btn btn-outline" style={{ cursor: uploadingBg ? 'default' : 'pointer' }}>
+                    <i className={`fas ${uploadingBg ? 'fa-spinner fa-spin' : 'fa-upload'}`} />
+                    {uploadingBg ? 'Uploading…' : d.backgroundImageUrl ? 'Replace photo' : 'Upload photo'}
+                    <input
+                      type="file"
+                      accept="image/jpeg,image/png,image/webp"
+                      hidden
+                      disabled={uploadingBg}
+                      onChange={async (e) => {
+                        const file = e.target.files?.[0]
+                        e.target.value = ''
+                        if (!file) return
+                        setUploadingBg(true)
+                        try {
+                          const url = await uploadServiceBackground(file)
+                          change((x) => { x.details.backgroundImageUrl = url })
+                        } catch (err) {
+                          showError(err.message || 'Upload failed')
+                        } finally {
+                          setUploadingBg(false)
+                        }
+                      }}
+                    />
+                  </label>
                   {d.backgroundImageUrl && (
                     <button type="button" className="btn btn-outline" onClick={() => change((x) => { x.details.backgroundImageUrl = null })}>
                       Remove
@@ -357,7 +373,7 @@ export default function ServiceCatalogEditor() {
                   )}
                 </div>
                 <small style={{ color: 'var(--text-muted)', fontSize: '0.75rem' }}>
-                  {uploadingBg ? 'Uploading...' : 'A photo related to this service. The app shows it slightly blurred behind the list of workers. Saved when you save the service.'}
+                  A photo related to this service. The app shows it slightly blurred behind the list of workers. Saved when you save the service.
                 </small>
               </div>
               <label className="sce-check sce-span">
