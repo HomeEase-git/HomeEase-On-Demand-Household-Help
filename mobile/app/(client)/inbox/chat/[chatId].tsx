@@ -7,8 +7,7 @@ import { useRouter, useLocalSearchParams, useFocusEffect } from "expo-router";
 import ChatBubbleSent from "../../../../components/chat/ChatBubbleSent";
 import ChatBubbleReceived from "../../../../components/chat/ChatBubbleReceived";
 import Avatar from "../../../../components/ui/Avatar";
-import ImageSourcePickerBottomSheet from "../../../../components/bottom-sheets/ImageSourcePickerBottomSheet";
-import type { BottomSheetHandle } from "../../../../components/bottom-sheets/BottomSheetWrapper";
+import { useMediaPicker } from "../../../../hooks/useMediaPicker";
 import { useMessageStore } from "../../../../store/messageStore";
 import { useAuthStore } from "../../../../store/authStore";
 import * as api from "../../../../services/api";
@@ -30,7 +29,7 @@ export default function ChatScreen() {
   const { chatId: userId } = useLocalSearchParams<{ chatId: string }>();
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
-  const imageSheetRef = useRef<BottomSheetHandle | null>(null);
+  const { pickImage } = useMediaPicker();
   const listRef = useRef<FlatList>(null);
   // Keep the newest message in view: on first load, when a message arrives,
   // and when the keyboard opening makes the list shorter.
@@ -263,7 +262,7 @@ export default function ChatScreen() {
           <View className="flex-row items-center p-3 border-t border-divider">
             <Pressable accessibilityRole="button" accessibilityLabel="Attach a photo"
               className="p-2 mr-2"
-              onPress={() => imageSheetRef.current?.expand()}
+              onPress={() => pickImage("Send a photo", sendImage)}
             >
               <Ionicons name="attach-outline" size={24} color={colors.text.muted} />
             </Pressable>
@@ -286,10 +285,6 @@ export default function ChatScreen() {
           </View>
         )}
       </KeyboardAvoidingView>
-      <ImageSourcePickerBottomSheet
-        innerRef={imageSheetRef}
-        onSelect={sendImage}
-      />
     </SafeAreaView>
   );
 }

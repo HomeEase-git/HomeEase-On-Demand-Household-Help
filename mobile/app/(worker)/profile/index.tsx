@@ -1,4 +1,4 @@
-import React, { useCallback, useRef, useState } from "react";
+import React, { useCallback, useState } from "react";
 import { View, Text, ScrollView, Pressable, ActivityIndicator } from "react-native";
 import { RemoteImage } from "../../../components/ui/RemoteImage";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -6,8 +6,7 @@ import { AppIcon as Ionicons } from "../../../components/icons/AppIcon";
 import { useRouter, useFocusEffect } from "expo-router";
 import StarRating from "../../../components/ui/StarRating";
 import LogoutConfirmationModal from "../../../components/modals/LogoutConfirmationModal";
-import ImageSourcePickerBottomSheet from "../../../components/bottom-sheets/ImageSourcePickerBottomSheet";
-import type { BottomSheetHandle } from "../../../components/bottom-sheets/BottomSheetWrapper";
+import { useMediaPicker } from "../../../hooks/useMediaPicker";
 import { useAuthStore } from "../../../store/authStore";
 import * as api from "../../../services/api";
 import type { WorkerDetail } from "../../../types/api.types";
@@ -64,7 +63,7 @@ const MENU_GROUPS = [
 export default function WorkerProfileScreen() {
   const router = useRouter();
   const alertModal = useAlertModal();
-  const imageSheetRef = useRef<BottomSheetHandle | null>(null);
+  const { pickImage } = useMediaPicker();
   const user = useAuthStore((s) => s.user);
   const setUser = useAuthStore((s) => s.setUser);
   const logout = useAuthStore((s) => s.logout);
@@ -152,7 +151,7 @@ export default function WorkerProfileScreen() {
             </View>
             <Pressable accessibilityRole="button" accessibilityLabel="Change profile photo"
               className="absolute bottom-0 right-0 w-6 h-6 bg-brand rounded-full items-center justify-center"
-              onPress={() => imageSheetRef.current?.expand()}
+              onPress={() => pickImage("Profile photo", handleAvatarSelected)}
               disabled={uploadingAvatar}
             >
               <Ionicons name="camera" size={12} color={colors.white} />
@@ -279,10 +278,6 @@ export default function WorkerProfileScreen() {
           </Pressable>
         </View>
       </ScrollView>
-      <ImageSourcePickerBottomSheet
-        innerRef={imageSheetRef}
-        onSelect={handleAvatarSelected}
-      />
       <LogoutConfirmationModal
         visible={logoutVisible}
         onConfirm={() => {

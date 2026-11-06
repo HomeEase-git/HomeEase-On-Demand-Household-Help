@@ -1,6 +1,5 @@
-import React, { useEffect, useRef, useState } from "react";
-import { View, Text, ActivityIndicator, Pressable } from "react-native";
-import { RemoteImage } from "../../../../components/ui/RemoteImage";
+import React, { useEffect, useState } from "react";
+import { View, Text } from "react-native";
 import { KeyboardAwareScrollView } from "../../../../components/ui/KeyboardAwareScrollView";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter, useLocalSearchParams } from "expo-router";
@@ -12,10 +11,8 @@ import InputField from "../../../../components/ui/InputField";
 import GenericSuccessModal from "../../../../components/modals/GenericSuccessModal";
 import { ScreenSkeleton } from "../../../../components/feedback/ScreenSkeleton";
 import { EmptyState } from "../../../../components/feedback/EmptyState";
-import ImageSourcePickerBottomSheet from "../../../../components/bottom-sheets/ImageSourcePickerBottomSheet";
-import type { BottomSheetHandle } from "../../../../components/bottom-sheets/BottomSheetWrapper";
-import { AppIcon as Ionicons } from "../../../../components/icons/AppIcon";
-import { colors, cardShadow } from "../../../../constants";
+import ProofPhotosField from "../../../../components/booking/ProofPhotosField";
+import { cardShadow } from "../../../../constants";
 import { useBookingStore, API_STATUS_MAP, type Booking } from "../../../../store/bookingStore";
 import { submitReview as apiSubmitReview, getBookingDetail, uploadReviewPhoto } from "../../../../services/api";
 import { useAlertModal } from "../../../../contexts/AlertModalContext";
@@ -59,8 +56,6 @@ export default function RateBookingScreen() {
   const [rating, setRating] = useState(booking?.rating ?? 0);
   const [review, setReview] = useState(booking?.reviewText ?? "");
   const [photos, setPhotos] = useState<string[]>([]);
-  const [uploadingPhoto, setUploadingPhoto] = useState(false);
-  const photoSheetRef = useRef<BottomSheetHandle | null>(null);
   const [successVisible, setSuccessVisible] = useState(false);
   const [loading, setLoading] = useState(false);
   const [checkingBooking, setCheckingBooking] = useState(!booking);
@@ -93,23 +88,6 @@ export default function RateBookingScreen() {
   }, [bookingId]);
 
   const labels = ["Terrible", "Bad", "Okay", "Good", "Excellent"];
-
-  const handlePickPhoto = async (uri: string) => {
-    if (!booking || photos.length >= MAX_REVIEW_PHOTOS) return;
-    setUploadingPhoto(true);
-    try {
-      const { url } = await uploadReviewPhoto(booking.id, uri);
-      setPhotos((prev) => [...prev, url]);
-    } catch {
-      alertModal.error("Upload failed", "Could not upload that photo. Please try again.");
-    } finally {
-      setUploadingPhoto(false);
-    }
-  };
-
-  const handleRemovePhoto = (url: string) => {
-    setPhotos((prev) => prev.filter((u) => u !== url));
-  };
 
   const handleSubmit = async () => {
     if (!booking) {
@@ -212,36 +190,17 @@ export default function RateBookingScreen() {
           <Text className="text-text-muted text-sm mt-2">You&apos;ve already reviewed this job.</Text>
         )}
 
-        <View className="flex-row flex-wrap gap-2 mt-3">
-          {photos.map((url) => (
-            <View key={url} className="relative">
-              <RemoteImage source={{ uri: url }} className="w-20 h-20 rounded-xl" />
-              <Pressable accessibilityRole="button" accessibilityLabel="Remove photo" hitSlop={8}
-                className="absolute -top-1.5 -right-1.5 bg-black/70 rounded-full w-5 h-5 items-center justify-center"
-                onPress={() => handleRemovePhoto(url)}
-              >
-                <Ionicons name="close" size={12} color="#fff" />
-              </Pressable>
-            </View>
-          ))}
-          {!alreadyRated && photos.length < MAX_REVIEW_PHOTOS && (
-            <Pressable
-              className="w-20 h-20 rounded-xl border border-dashed items-center justify-center"
-              style={{ borderColor: colors.divider }}
-              onPress={() => photoSheetRef.current?.expand()}
-              disabled={uploadingPhoto}
-            >
-              {uploadingPhoto ? (
-                <ActivityIndicator size="small" />
-              ) : (
-                <>
-                  <Ionicons name="camera-outline" size={20} color={colors.text.muted} />
-                  <Text className="text-text-secondary text-xs mt-1">Add photo</Text>
-                </>
-              )}
-            </Pressable>
-          )}
-        </View>
+        {!alreadyRated && (
+          <View className="mt-3">
+            <ProofPhotosField
+              label="Photos (optional)"
+              urls={photos}
+              onChange={setPhotos}
+              upload={(uri) => uploadReviewPhoto(booking.id, uri)}
+              max={MAX_REVIEW_PHOTOS}
+            />
+          </View>
+        )}
 
         <View className="mt-6 gap-3">
           {!alreadyRated && (
@@ -255,7 +214,6 @@ export default function RateBookingScreen() {
           <OutlinedButton label="Book Again" onPress={handleBookAgain} />
         </View>
       </KeyboardAwareScrollView>
-      <ImageSourcePickerBottomSheet innerRef={photoSheetRef} onSelect={handlePickPhoto} />
       <GenericSuccessModal
         visible={successVisible}
         title="Review submitted!"

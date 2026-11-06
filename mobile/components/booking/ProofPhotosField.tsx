@@ -1,118 +1,118 @@
-import React, { useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { View, Text, Pressable, ActivityIndicator } from "react-native";
-import * as ImagePicker from "expo-image-picker";
 import { RemoteImage } from "../ui/RemoteImage";
+import { ImageLightbox } from "../ui/ImageLightbox";
 import { AppIcon as Ionicons } from "../icons/AppIcon";
-import { uploadJobPhoto } from "../../services/api";
 import { useAlertModal } from "../../contexts/AlertModalContext";
-import { compressImage } from "../../utils/imageCompressor";
+import { useMediaPicker } from "../../hooks/useMediaPicker";
 import { colors } from "../../constants";
 
 type Props = {
-  bookingId: string;
   label: string;
   hint?: string;
   urls: string[];
   onChange: (urls: string[]) => void;
+  /** Sends one compressed JPEG and returns its stored URL. */
+  upload: (uri: string) => Promise<{ url: string }>;
   max?: number;
   required?: boolean;
 };
 
 /**
- * A row of uploaded evidence photos for a job (invoice receipts, extra work,
- * proof for a cancellation). Each photo uploads straight away; the
- * parent gets the stored URLs. Camera or gallery is chosen in the alert
- * modal (not a bottom sheet) so several of these can sit in one form.
+ * A row of uploaded photos: job evidence (invoice receipts, extra work,
+ * proof for a cancellation), booking issue photos and review photos. Each
+ * photo uploads straight away; the parent gets the stored URLs. Camera or
+ * gallery is chosen through useMediaPicker.
  */
-export default function ProofPhotosField({ bookingId, label, hint, urls, onChange, max = 5, required }: Props) {
+export default function ProofPhotosField({ label, hint, urls, onChange, upload, max = 5, required }: Props) {
   const alertModal = useAlertModal();
-  const [uploading, setUploading] = useState(false);
+  const { pickImage } = useMediaPicker();
+  const [pendingUri, setPendingUri] = useState<string | null>(null);
+  const [viewingIndex, setViewingIndex] = useState<number | null>(null);
+  // A photo can be removed while another uploads; append to the current list.
+  const latestUrls = useRef(urls);
+  useEffect(() => {
+    latestUrls.current = urls;
+  }, [urls]);
 
-  const upload = async (asset: ImagePicker.ImagePickerAsset) => {
-    setUploading(true);
+  const send = async (uri: string) => {
+    setPendingUri(uri);
     try {
-      let uploadUri = asset.uri;
-      try {
-        uploadUri = (await compressImage(asset.uri, 1600, 0.7, asset)).uri;
-      } catch {
-        // Upload the original if compression fails.
-      }
-      const { url } = await uploadJobPhoto(bookingId, uploadUri, "image/jpeg");
-      onChange([...urls, url]);
+      const { url } = await upload(uri);
+      onChange([...latestUrls.current, url]);
     } catch (error) {
-      console.error("Upload proof photo error:", error);
+      console.error("Upload photo error:", error);
       alertModal.error("Upload failed", "We couldn't upload that photo. Please try again.");
     } finally {
-      setUploading(false);
+      setPendingUri(null);
     }
   };
 
-  const pick = async (source: "camera" | "gallery") => {
-    try {
-      if (source === "camera") {
-        const { status } = await ImagePicker.requestCameraPermissionsAsync();
-        if (status !== "granted") {
-          alertModal.warning("Permission required", "Camera access is needed to take a photo.");
-          return;
-        }
-      }
-      const options: ImagePicker.ImagePickerOptions = { mediaTypes: ImagePicker.MediaTypeOptions.Images, quality: 0.8 };
-      const result =
-        source === "camera" ? await ImagePicker.launchCameraAsync(options) : await ImagePicker.launchImageLibraryAsync(options);
-      if (!result.canceled && result.assets[0]) await upload(result.assets[0]);
-    } catch {
-      alertModal.error("Error", "Something went wrong while opening the camera or gallery. Please try again.");
-    }
-  };
+  const choose = () => pickImage(label, send);
 
-  const choose = () =>
-    alertModal.showAlert({
-      variant: "info",
-      title: "Add a photo",
-      message: label,
-      buttons: [
-        { text: "Gallery", onPress: () => pick("gallery") },
-        { text: "Camera", onPress: () => pick("camera") },
-      ],
-    });
+  const count = urls.length + (pendingUri ? 1 : 0);
 
   return (
     <View className="mb-4">
-      <Text className="text-text-primary font-semibold text-sm">
-        {label}
-        {required ? <Text className="text-error"> *</Text> : null}
-      </Text>
-      {hint ? <Text className="text-text-muted text-xs mt-0.5">{hint}</Text> : null}
-      <View className="flex-row flex-wrap gap-2 mt-2">
+      <View className="flex-row items-baseline justify-between">
+        <Text className="text-text-primary font-semibold text-sm flex-1">
+          {label}
+          {required ? <Text className="text-error"> *</Text> : null}
+        </Text>
+        <Text className="text-text-secondary text-xs font-semibold ml-2">
+          {urls.length}/{max}
+        </Text>
+      </View>
+      {hint ? <Text className="text-text-secondary text-xs mt-0.5">{hint}</Text> : null}
+      <View className="flex-row flex-wrap gap-3 mt-3">
         {urls.map((url, index) => (
           <View key={url} className="relative">
-            <RemoteImage source={{ uri: url }} style={{ width: 72, height: 72, borderRadius: 12 }} resizeMode="cover" />
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={`View photo ${index + 1} full size`}
+              onPress={() => setViewingIndex(index)}
+            >
+              <RemoteImage source={{ uri: url }} style={{ width: 72, height: 72, borderRadius: 12 }} resizeMode="cover" />
+            </Pressable>
             <Pressable
               accessibilityRole="button"
               accessibilityLabel={`Remove photo ${index + 1}`}
+              hitSlop={10}
               onPress={() => onChange(urls.filter((u) => u !== url))}
-              className="absolute -top-1.5 -right-1.5 w-6 h-6 rounded-full bg-error items-center justify-center"
+              className="absolute -top-2 -right-2 w-7 h-7 rounded-full bg-black/80 border border-white items-center justify-center"
             >
               <Ionicons name="close" size={14} color={colors.white} />
             </Pressable>
           </View>
         ))}
-        {urls.length < max && (
+        {pendingUri && (
+          <View accessibilityLabel="Uploading photo" className="w-[72px] h-[72px] rounded-xl overflow-hidden bg-card-dark items-center justify-center">
+            <RemoteImage
+              source={{ uri: pendingUri }}
+              style={{ position: "absolute", width: 72, height: 72, opacity: 0.35 }}
+              resizeMode="cover"
+            />
+            <ActivityIndicator size="small" color={colors.brand.dark} />
+          </View>
+        )}
+        {count < max && (
           <Pressable
             accessibilityRole="button"
             accessibilityLabel={`Add a photo: ${label}`}
-            disabled={uploading}
+            disabled={!!pendingUri}
             onPress={choose}
-            className="w-[72px] h-[72px] rounded-xl border-2 border-dashed border-divider items-center justify-center"
+            className={`w-[72px] h-[72px] rounded-xl border-2 border-dashed border-neutral-400 bg-card-light items-center justify-center ${pendingUri ? "opacity-60" : ""}`}
           >
-            {uploading ? (
-              <ActivityIndicator size="small" />
-            ) : (
-              <Ionicons name="camera-outline" size={24} color={colors.text.muted} />
-            )}
+            <Ionicons name="camera-outline" size={22} color={colors.text.secondary} />
+            <Text className="text-text-secondary text-xs mt-0.5">Add photo</Text>
           </Pressable>
         )}
       </View>
+      <ImageLightbox
+        uri={viewingIndex === null ? null : (urls[viewingIndex] ?? null)}
+        title={viewingIndex === null ? undefined : `Photo ${viewingIndex + 1} of ${urls.length}`}
+        onClose={() => setViewingIndex(null)}
+      />
     </View>
   );
 }

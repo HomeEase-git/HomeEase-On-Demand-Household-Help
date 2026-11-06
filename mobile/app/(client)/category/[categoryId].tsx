@@ -1,4 +1,4 @@
-import React, { useRef, useState, useEffect } from "react";
+import React, { useState, useEffect } from "react";
 import { View, Text, FlatList, ActivityIndicator, StyleSheet } from "react-native";
 import { Image } from "expo-image";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -7,10 +7,9 @@ import ScreenHeader from "../../../components/ui/ScreenHeader";
 import WorkerCard from "../../../components/cards/WorkerCard";
 import EmptyState from "../../../components/feedback/EmptyState";
 import { getServiceTypes, searchWorkers } from "../../../services/api";
-import FilterSortBottomSheet, {
+import FilterSortModal, {
   SearchFilters,
-} from "../../../components/bottom-sheets/FilterSortBottomSheet";
-import type { BottomSheetHandle } from "../../../components/bottom-sheets/BottomSheetWrapper";
+} from "../../../components/modals/FilterSortModal";
 
 const DEFAULT_FILTERS: SearchFilters = { sort: "rating", availableOnly: false };
 
@@ -56,7 +55,7 @@ function normalizeWorkers(workers: any[]): WorkerListItem[] {
 export default function CategoryDetailScreen() {
   const router = useRouter();
   const { categoryId } = useLocalSearchParams<{ categoryId: string }>();
-  const filterRef = useRef<BottomSheetHandle | null>(null);
+  const [filterOpen, setFilterOpen] = useState(false);
   const [workers, setWorkers] = useState<WorkerListItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -123,7 +122,7 @@ export default function CategoryDetailScreen() {
         showBack
         rightIcon={hasActiveFilters ? "options" : "options-outline"}
         rightLabel="Filter and sort"
-        onRightPress={() => filterRef.current?.expand()}
+        onRightPress={() => setFilterOpen(true)}
       />
       <View className="px-4 pb-2">
         <Text className="text-text-secondary text-sm">
@@ -161,8 +160,9 @@ export default function CategoryDetailScreen() {
           )}
         />
       )}
-      <FilterSortBottomSheet
-        innerRef={filterRef}
+      <FilterSortModal
+        visible={filterOpen}
+        onClose={() => setFilterOpen(false)}
         value={filters}
         onApply={setFilters}
       />

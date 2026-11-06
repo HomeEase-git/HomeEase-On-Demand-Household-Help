@@ -1,4 +1,4 @@
-import React, { useRef, useState, useCallback } from "react";
+import React, { useState, useCallback } from "react";
 import {
   View,
   Text,
@@ -22,11 +22,10 @@ import { Avatar } from "../../../components/ui/Avatar";
 import { useNotificationStore } from "../../../store/notificationStore";
 import { useAuthStore } from "../../../store/authStore";
 import {
-  FilterSortBottomSheet,
+  FilterSortModal,
   type SearchFilters,
-} from "../../../components/bottom-sheets/FilterSortBottomSheet";
+} from "../../../components/modals/FilterSortModal";
 import { Skeleton } from "../../../components/ui/Skeleton";
-import type { BottomSheetHandle } from "../../../components/bottom-sheets/BottomSheetWrapper";
 import { colors } from "../../../constants";
 import { useTabRefresh } from "../../../hooks/useTabRefresh";
 import { usePullToRefresh } from "../../../hooks/usePullToRefresh";
@@ -92,7 +91,7 @@ export default function ClientHomeScreen() {
   };
   usePushNotificationPrompt();
   const unreadCount = useNotificationStore((s) => s.unreadCount);
-  const filterRef = useRef<BottomSheetHandle | null>(null);
+  const [filterOpen, setFilterOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [serviceCategories, setServiceCategories] = useState<ServiceCategory[]>(
     [],
@@ -326,7 +325,7 @@ export default function ClientHomeScreen() {
                 onActionPress={() => router.push("/(client)/category")}
                 rightElement={
                   <Pressable accessibilityRole="button" accessibilityLabel="Filter and sort"
-                    onPress={() => filterRef.current?.expand()}
+                    onPress={() => setFilterOpen(true)}
                     hitSlop={8}
                   >
                     <Ionicons
@@ -355,8 +354,9 @@ export default function ClientHomeScreen() {
           </>
         )}
       </ScrollView>
-      <FilterSortBottomSheet
-        innerRef={filterRef}
+      <FilterSortModal
+        visible={filterOpen}
+        onClose={() => setFilterOpen(false)}
         value={filters}
         onApply={setFilters}
       />

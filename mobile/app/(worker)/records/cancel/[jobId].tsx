@@ -10,7 +10,7 @@ import OutlinedButton from "../../../../components/ui/OutlinedButton";
 import DangerButton from "../../../../components/ui/DangerButton";
 import GenericConfirmationModal from "../../../../components/modals/GenericConfirmationModal";
 import { useWorkerStore } from "../../../../store/workerStore";
-import { cancelBooking, getBookingDetail } from "../../../../services/api";
+import { cancelBooking, getBookingDetail, uploadJobPhoto } from "../../../../services/api";
 import ProofPhotosField from "../../../../components/booking/ProofPhotosField";
 import { colors } from "../../../../constants";
 import { useAlertModal } from "../../../../contexts/AlertModalContext";
@@ -158,7 +158,7 @@ export default function WorkerCancelJobScreen() {
             </View>
 
             <ProofPhotosField
-              bookingId={jobId}
+              upload={(uri) => uploadJobPhoto(jobId, uri, "image/jpeg")}
               label="Photo proof"
               hint="e.g. the locked gate, the site condition, or the part you can't get"
               urls={proofUrls}

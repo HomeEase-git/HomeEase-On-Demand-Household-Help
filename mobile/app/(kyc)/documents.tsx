@@ -2,8 +2,6 @@ import React, { useEffect, useMemo, useState } from "react";
 import { View, Text, ScrollView } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
-import * as DocumentPicker from "expo-document-picker";
-import * as ImagePicker from "expo-image-picker";
 import ScreenHeader from "../../components/ui/ScreenHeader";
 import StepperHorizontal from "../../components/steppers/StepperHorizontal";
 import { KYC_STEPS } from "../../constants";
@@ -11,7 +9,7 @@ import UploadCard from "../../components/ui/UploadCard";
 import PrimaryButton from "../../components/ui/PrimaryButton";
 import { useAuthStore } from "../../store/authStore";
 import { submitKycDocument, uploadKycFile } from "../../services/api";
-import { compressImage } from "../../utils/imageCompressor";
+import { useMediaPicker, type PickedMedia } from "../../hooks/useMediaPicker";
 import {
   documentRequirements,
   isDocumentTypeAllowed,
@@ -57,8 +55,9 @@ export default function DocumentsScreen() {
   const user = useAuthStore((s) => s.user);
   const isWorker = user?.role === "worker";
   const [documents, setDocuments] = useState(initialDocuments);
-  const [uploadingKey, setUploadingKey] = useState<KycDocumentKey | null>(null);
-  const [submitting, setSubmitting] = useState(false);
+  const { pick } = useMediaPicker();
+  // The picked file while it uploads, so the card can show it straight away.
+  const [pending, setPending] = useState<(UploadedDocument & { key: KycDocumentKey }) | null>(null);
 
   useEffect(() => {
     if (!isWorker) {
@@ -74,72 +73,21 @@ export default function DocumentsScreen() {
     [documents],
   );
 
-  const handleUpload = async (key: KycDocumentKey) => {
-    setUploadingKey(key);
-    try {
-      const { status } =
-        await ImagePicker.requestMediaLibraryPermissionsAsync();
-      if (status !== "granted") {
-        alertModal.warning(
-          "File access required",
-          "Please allow photo access to choose a document file.",
-        );
-        return;
-      }
-
-      const result = await DocumentPicker.getDocumentAsync({
-        type: ["application/pdf", "image/*"],
-        copyToCacheDirectory: true,
-      });
-
-      if (result.canceled) {
-        return;
-      }
-
-      const document = result.assets[0];
-      if (!document?.uri) {
-        return;
-      }
-
-      const mimeType = document.mimeType || "application/octet-stream";
-      if (!isDocumentTypeAllowed(key, mimeType)) {
-        alertModal.error(
-          "Invalid file type",
-          `${documentRequirements[key].label} must be uploaded as a PDF or image file.`,
-        );
-        return;
-      }
-
-      setSubmitting(true);
-
-      // Compress image picks (smaller upload, HEIC -> JPEG); PDFs pass through
-      // untouched. Fall back to the original if compression fails.
-      let uploadUri = document.uri;
-      let uploadMime = mimeType;
-      if (mimeType.startsWith("image/")) {
-        try {
-          const compressed = await compressImage(document.uri);
-          uploadUri = compressed.uri;
-          uploadMime = "image/jpeg";
-        } catch (err) {
-          console.error("KYC document compression failed, using original", err);
-        }
-      }
-
-      const { url } = await uploadKycFile(key, uploadUri, uploadMime);
-      await submitKycDocument(key, url);
-      setDocuments((prev) => ({
-        ...prev,
-        [key]: {
-          uri: document.uri,
-          mimeType,
-          name: document.name || `${key} document`,
-        },
-      }));
-      alertModal.success(
-        "Success",
-        `${documentRequirements[key].label} uploaded successfully.`,
+  const applyFile = async (key: KycDocumentKey, media: PickedMedia) => {
+    if (!isDocumentTypeAllowed(key, media.originalMimeType)) {
+      alertModal.error(
+        "Invalid file type",
+        `${documentRequirements[key].label} must be uploaded as a PDF or image file.`,
       );
+      return;
+    }
+
+    const picked = { uri: media.uri, mimeType: media.mimeType, name: media.name };
+    setPending({ key, ...picked });
+    try {
+      const { url } = await uploadKycFile(key, media.uri, media.mimeType);
+      await submitKycDocument(key, url);
+      setDocuments((prev) => ({ ...prev, [key]: picked }));
     } catch (error) {
       console.error("KYC document upload error", error);
       alertModal.error(
@@ -147,17 +95,24 @@ export default function DocumentsScreen() {
         "We could not process that file. Please try again.",
       );
     } finally {
-      setSubmitting(false);
-      setUploadingKey(null);
+      setPending(null);
     }
   };
 
+  const handleUpload = (key: KycDocumentKey) =>
+    pick({
+      title: documentRequirements[key].label,
+      message: "Choose how you'd like to add this document.",
+      sources: ["camera", "gallery", "files"],
+      fileTypes: ["application/pdf", "image/*"],
+      onPick: (media) => applyFile(key, media),
+    });
+
   const renderUploadCard = (key: KycDocumentKey) => {
     const requirement = documentRequirements[key];
-    const uploaded = documents[key] ?? emptyDocument;
-    const preview = uploaded.uri
-      ? uploaded.name || requirement.label
-      : undefined;
+    const isPending = pending?.key === key;
+    const shown = isPending ? pending : (documents[key] ?? emptyDocument);
+    const isImage = !!shown.mimeType?.startsWith("image/");
 
     return (
       <View key={key} className="mb-3">
@@ -165,9 +120,11 @@ export default function DocumentsScreen() {
           label={requirement.label}
           subtitle={`${requirement.description} Accepted: ${requirement.accepts.join(", ")}`}
           required={requirement.required}
-          preview={preview}
+          imageUri={isImage ? shown.uri : null}
+          preview={shown.uri ? shown.name || requirement.label : null}
+          hint="Tap to choose a photo or PDF"
+          uploading={isPending}
           onPress={() => handleUpload(key)}
-          disabled={uploadingKey === key || submitting}
         />
       </View>
     );
@@ -211,9 +168,9 @@ export default function DocumentsScreen() {
             label="Continue"
             fullWidth
             disabled={
-              missingRequired.length > 0 || uploadingKey !== null || submitting
+              missingRequired.length > 0 || pending !== null
             }
-            loading={uploadingKey !== null || submitting}
+            loading={pending !== null}
             onPress={() => router.push("/(kyc)/resume")}
           />
         </View>
